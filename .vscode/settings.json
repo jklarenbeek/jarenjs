@@ -1,0 +1,65 @@
+// Place your settings in this file to overwrite default and user settings.
+{
+	// The number of spaces a tab is equal to.
+	"editor.tabSize": 2,
+	// Insert spaces when pressing Tab.
+	"editor.insertSpaces": true,
+	// When opening a file, `editor.tabSize` and `editor.insertSpaces` will be detected based on the file contents.
+	"editor.detectIndentation": false,
+
+	"editor.formatOnType": true,
+  "editor.codeActionsOnSave":{
+    "source.organizeImports.biome": "explicit"
+  },
+  "files.eol": "\n",
+	"files.associations": {
+		"**/src/**/*.js": "javascriptreact",
+		"**/node_modules/**/*.js": "javascript",
+	},
+	"files.exclude": {
+		".vscode/chrome/**": true,
+    "cache/": true,
+    "**/.turbo": true,
+    "packages/_/**": true
+	},
+	"files.watcherExclude": {
+		".vscode/chrome/**": true,
+    "cache/": true,
+    "**/.turbo": true
+	},
+	"html.format.extraLiners": "!",
+	"html.format.indentInnerHtml": true,
+	"json.schemas": [
+		{
+			"fileMatch": [
+				"/package.json"
+			],
+			"schema": {
+				"type": "object",
+				"properties": {
+					"config": {
+						"properties": {
+							"port": {
+								"type": "number",
+								"description": "The port of the webpack-dev-server",
+								"default": 10001
+							},
+							"host": {
+								"type": "string",
+								"description": "The hostname or ip of the webpack-dev-server",
+								"default": "localhost"
+							}
+						}
+					}
+				}
+			}
+		}
+	],
+	"search.exclude": {
+		"public/**": true
+	},
+  "js/ts.implicitProjectConfig.checkJs": true,
+  "eslint.options": {
+    "overrideConfigFile": "./eslint.config.js" 
+  },
+}

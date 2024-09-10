@@ -1,0 +1,23 @@
+{
+  "name": "@jaren/tools",
+  "private": true,
+  "version": "0.8.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "description": "Jaren has specialized tools",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git",
+    "directory": "packages/tools"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "assert"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./assert": "./src/assert.node.js"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@jaren/numbers",
+  "private": false,
+  "version": "0.8.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "description": "Jaren has specialized math functions for javascript",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git",
+    "directory": "packages/numbers"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "math",
+    "numbers",
+    "float",
+    "vectors",
+    "integers"
+  ],
+  "exports": {
+    "./index": "./src/index.js",
+    "./float": "./src/float.js",
+    "./float64": "./src/float64.js",
+    "./vec2f64": "./src/vec2f64.js",
+    "./vec3f64": "./src/vec3f64.js",
+    "./integer": "./src/integer.js",
+    "./int32": "./src/int32.js",
+    "./vec2i32": "./src/vec2i32.js"
+  },
+  "scripts": {
+    "test": "node --no-warnings=ExperimentalWarning --test test/validate/*.js"
+  }
+}

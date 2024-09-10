@@ -1,0 +1,52 @@
+{
+  "name": "@jaren/monorepo",
+  "private": true,
+  "version": "0.8.0",
+  "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
+  "author": "joham",
+  "license": "MIT",
+  "type": "module",
+  "module": "./dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git"
+  },
+  "files": [
+    "./dist",
+    "./src"
+  ],
+  "workspaces": [
+    "./packages/*"
+  ],
+  "scripts": {
+    "test": "node --no-warnings=ExperimentalWarning --test test/validate/*.js",
+    "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/validate/*.js",
+    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/validate/*.js"
+  },
+  "keywords": [
+    "javascript",
+    "json",
+    "jsonschema",
+    "validation",
+    "expressive",
+    "typechecking"
+  ],
+  "engines": {
+    "node": ">=21.3.0"
+  },
+  "browserslist": [
+    "last 1 chrome version",
+    "last 1 chromeandroid version",
+    "last 1 firefox version"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.9.1",
+    "c8": "^10.1.2",
+    "esbuild": "0.23.1",
+    "eslint": "^9.9.1",
+    "eslint-plugin-json": "^4.0.1",
+    "globals": "^15.9.0",
+    "lefthook": "^1.7.14",
+    "turbo": "^2.1.1"
+  }
+}

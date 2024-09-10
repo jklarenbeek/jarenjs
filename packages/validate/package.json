@@ -1,0 +1,30 @@
+{
+  "name": "@jaren/validate",
+  "private": false,
+  "version": "0.8.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "description": "Jaren core functions",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git",
+    "directory": "packages/validate"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "json",
+    "schema",
+    "validate",
+    "validator"
+  ],
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --no-warnings=ExperimentalWarning --test test/*.js",
+    "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/*.js",
+    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/*.js"
+  }
+}

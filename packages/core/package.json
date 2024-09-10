@@ -1,0 +1,31 @@
+{
+  "name": "@jaren/core",
+  "private": true,
+  "version": "0.8.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "description": "Jaren core functions",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "core"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./array": "./src/array.js",
+    "./bigint": "./src/bigint.js",
+    "./dates": "./src/dates.js",
+    "./float": "./src/float.js",
+    "./function": "./src/function.js",
+    "./integer": "./src/integer.js",
+    "./number": "./src/number.js",
+    "./object": "./src/object.js",
+    "./string": "./src/string.js"
+  }
+}

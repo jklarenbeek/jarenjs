@@ -1,0 +1,23 @@
+{
+  "name": "@jaren/formats",
+  "private": false,
+  "version": "0.8.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "description": "Jaren formats for validation",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git",
+    "directory": "packages/formats"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "json schema",
+    "formats"
+  ],
+  "exports": {
+    ".": "./src/index.js"
+  }
+}

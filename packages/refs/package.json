@@ -1,0 +1,34 @@
+{
+  "name": "@jaren/refs",
+  "version": "0.8.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "description": "Jaren has schema draft 6 & 7 support",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jaren.git",
+    "directory": "packages/refs"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "draft-06",
+    "draft-07",
+    "draft-2019-09",
+    "draft-2020-12",
+    "schema",
+    "refs",
+    "json"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./draft-06": "./src/json-schema-draft-06.json",
+    "./draft-07": "./src/json-schema-draft-07.json",
+    "./draft-2019-09": "./src/json-schema-draft-2019-09/index.js",
+    "./draft-2020-12": "./src/json-schema-draft-2020-12/index.js"
+  },
+  "scripts": {
+    "test": "node --no-warnings=ExperimentalWarning --test test/validate/*.js"
+  }
+}
