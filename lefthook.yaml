@@ -1,8 +1,8 @@
-pre-commit:
+pre-push:
   parallel: true
   commands:
     lint:
-      run: npm run format
+      run: npm run lint
       include: "./src/**/*.{js,jsx,ts,tsx}"
       exclude: "node_modules"
     tests:

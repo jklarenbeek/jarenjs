@@ -49,7 +49,6 @@ import {
 } from '@jaren/strings';
 
 function createStringFormatCompiler(formatName, isFormatTest) {
-  // eslint-disable-next-line no-unused-vars
   return function compileStringFormat(schemaObj, jsonSchema) {
     if (jsonSchema.format !== formatName)
       throw new Error('Format is not equal to jsonSchema (should not happen!)');

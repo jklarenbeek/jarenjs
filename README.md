@@ -1,12 +1,4 @@
-<style>
- note { background-color: darkblue; color: white; border-radius: 10px; padding: 0.1rem; padding-left: 0.4rem; padding-right: 0.4rem; }
- warn { background-color: darkred; color:white; border-radius: 10px; padding: 0.1rem; padding-left: 0.4rem; padding-right: 0.4rem; }
- info { background-color: darkorange; color:white; border-radius: 10px; padding: 0.1rem; padding-left: 0.4rem; padding-right: 0.4rem; }
- new  { background-color: darkgreen; color:white; border-radius: 10px; padding: 0.1rem; padding-left: 0.4rem; padding-right: 0.4rem; }
- logo img { display:block; margin-left:auto; margin-right:auto;}
-</style>
-
-<logo>![Jaren](jaren.png)</logo>
+![Jaren](jaren.png)
 
 # Jaren
 
@@ -33,8 +25,8 @@ One mistake and you have to support it for the rest of your life.
 ### 🔑 JSON data type
 
 - type
-- nullable <note>OpenAPI</note>
-- required <info>as boolean</info> <note>OpenAPI</note>
+- nullable | _(OpenAPI)_
+- required | _as boolean (OpenAPI)_
 
 ### 🔑 Keywords for numbers
 
@@ -56,26 +48,26 @@ One mistake and you have to support it for the rest of your life.
 - maxItems / minItems
 - uniqueItems
 - items
-  - items <info>deprecated in `draft2020`</info>
-  - ❌ items in <new>NEW: `draft2020`</new> <warn>IN PROGRESS</warn>
-- ❌ prefixItems <new>NEW: `draft2020`</new> <warn>IN PROGRESS</warn>
+  - items | _deprecated in `draft2020`_
+  - ❌ items | _new `draft2020` (in-progress)_
+- ❌ prefixItems | _new `draft2020` (in-progress)_
 - additionalItems
 - contains
-- maxContains / minContains <new>NEW: `draft2019`</new>
-- ❌ unevaludatedItems <new>NEW: `draft2019`</new> <warn>IN PROGRESS</warn>
+- maxContains / minContains | _new `draft2019`_
+- ❌ unevaludatedItems | _new `draft2019` (in-progress)_
 
 ### 🔑 Keywords for object
 
 - maxProperties / minProperties
-- required <info>as array</info>
+- required | _as array!_
 - properties
 - patternProperties
 - additionalProperties
-- dependencies <info>deprecated in `draft2019`</info>
-- dependentRequired <new>NEW: `draft2019`</new>
-- dependentSchemas <new>NEW: `draft2019`</new>
+- dependencies | _deprecated in `draft2019`_
+- dependentRequired | _new `draft2019`_
+- dependentSchemas | _new `draft2019`_
 - propertyNames
-- ❌ unevaluatedProperties <new>NEW: `draft2019`</new> <warn>IN PROGRESS</warn>
+- ❌ unevaluatedProperties | _new `draft2019` (in-progress)_
 - ❌ [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md)
 
 ### 🔑 Keywords for all types
@@ -101,26 +93,28 @@ See also:
 - $id
 - $ref
 - $anchor
-- ❌ $recursiveRef <new>NEW: `draft2019`</new> <info>deprecated in `draft2020`</info>
-- ❌ $recursiveAnchor <new>NEW: `draft2019`</new> <info>deprecated in `draft2020`</info>
-- ❌ $dynamicRef <new>NEW: `draft2020`</new>
-- ❌ $dynamicAnchor <new>NEW: `draft2020`</new>
-- ❌ $data <note>Ajv specific</note>
-- ❌ [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) <new>NEW: draft2020</new>
+- ❌ $recursiveRef | _new `draft2019` &amp; deprecated in `draft2020`_
+- ❌ $recursiveAnchor | _new `draft2019` &amp; deprecated in `draft2020`_
+- ❌ $dynamicRef | _new `draft2020`_
+- ❌ $dynamicAnchor | _new `draft2020`_
+- ❌ $data | _(Ajv specific)_
+- ❌ [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) | _new `draft2020`_
 
 ### 🔑 Miscellaneous keywords
 
 - ❌ strict
-- strictFormat | used to enforce a specific format type like numbers and integers <warn>PARTIAL</warn>
+- strictFormat | used to enforce a specific format type like numbers and integers _(in-progress)_
 - ❌ strictTuple
 - ❌ errorMessage
-- definitions | used by initial schema traversal <info>deprecated in `draft2019`</info>
-- $defs | used by initial schema traversal <new>NEW: `draft2019`</new>
-- components <note>OpenAPI</note>
+- definitions | used by initial schema traversal _deprecated in `draft2019`_
+- $defs | used by initial schema traversal _new `draft2019`_
+- components | _(OpenAPI)_
 
 ## JSON Schema Validation Formats
 
 ### ✍ Formats for strings
+
+These format validators are based on the [json-schema.org](https://json-schema.org/understanding-json-schema/reference/string.html#built-in-formats) website.
 
 #### 🗨 Formats for datetime
 
@@ -193,7 +187,7 @@ See also:
 
 ### ✍ Formats for numbers
 
-Formats for numbers validate numbers as strings or number types. If you want to turn of that behaviour you can explicitly set the `strictFormat` keyword to boolean `true` and only allow strict number or integer types.
+Formats for numbers validate both numbers and strings as number types. If you want to strictly only allow number types, you can explicitly set the `strictFormat` keyword to boolean `true` to only allow strict number or integer types.
 
 #### 🗨 Formats integer numbers
 
@@ -333,7 +327,6 @@ Is it true that when computer software is designed, a back door is left for the 
   what shadow arrises
   what hath thou awoken
 ```
-
 
 ## Be excellent to yourself, and each other!
 

@@ -19,6 +19,7 @@
     "./packages/*"
   ],
   "scripts": {
+    "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test test/validate/*.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/validate/*.js",
     "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/validate/*.js"
