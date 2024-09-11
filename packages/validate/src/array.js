@@ -26,41 +26,36 @@ import {
 } from './tools.js';
 
 //#region Primitives
-function compileMinItems(schemaObj, jsonSchema) {
-  const min = getIntishType(jsonSchema.minItems) || 0;
-  if (min < 1) return undefined;
+function createNumericValidator(schemaObj, jsonSchema, key, defaultValue, comparator) {
+  const value = getIntishType(jsonSchema[key]) ?? defaultValue;
+  if (value === defaultValue) return undefined;
 
-  const addError = schemaObj.createErrorHandler(min, 'minItems');
+  const addError = schemaObj.createErrorHandler(value, key);
 
-  return function validateMinItems(len = 0, dataPath) {
-    return len >= min
-      || addError(len, dataPath);
+  return function validateNumericComparator(len = 0, dataPath) {
+    return comparator(len, value) || addError(len, dataPath);
   };
 }
 
-function compileMaxItems(schemaObj, jsonSchema) {
-  const max = getIntishType(jsonSchema.maxItems) || -1;
-  if (max < 0) return undefined;
+const compileMinItems = (schemaObj, jsonSchema) =>
+  createNumericValidator(schemaObj, jsonSchema, 'minItems', 0, (len, min) => len >= min);
 
-  const addError = schemaObj.createErrorHandler(max, 'maxItems');
+const compileMaxItems = (schemaObj, jsonSchema) =>
+  createNumericValidator(schemaObj, jsonSchema, 'maxItems', -1, (len, max) => len <= max);
 
-  return function validateMaxItems(len = 0, dataPath) {
-    return len <= max
-      || addError(len, dataPath);
+function createBooleanValidator(schemaObj, jsonSchema, key, validationFn) {
+  const value = getBoolishType(jsonSchema[key]);
+  if (value !== true) return undefined;
+
+  const addError = schemaObj.createErrorHandler(value, key);
+
+  return function validateBooleanComparator(data, dataPath) {
+    return validationFn(data) || addError(data, dataPath);
   };
 }
 
-function compileUniqueItems(schemaObj, jsonSchema) {
-  const unique = getBoolishType(jsonSchema.uniqueItems);
-  if (unique !== true) return undefined;
-
-  const addError = schemaObj.createErrorHandler(unique, 'uniqueItems');
-
-  return function validateUniqueItems(data, dataPath) {
-    return isUniqueArray(data)
-      || addError(data, dataPath);
-  };
-}
+const compileUniqueItems = (schemaObj, jsonSchema) =>
+  createBooleanValidator(schemaObj, jsonSchema, 'uniqueItems', isUniqueArray);
 //#endregion
 
 //#region Tuple
@@ -75,21 +70,22 @@ function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
     if (item === false) return falseThat;
     return schemaObj.createValidator(item, itemsKey, i);
   });
+  const vlength = validators.length;
 
   const additional = getBoolOrObjectClass(jsonSchema[additionalKey], true);
   if (typeof additional === 'boolean') {
-    return function validateItemBool(data, dataPath, dataRoot, i) {
-      if (i >= validators.length) return additional;
-      return validators[i](data, dataPath, dataRoot);
+    return function validateTupleBool(data, dataPath, dataRoot, i) {
+      return i >= vlength
+        ? additional
+        : validators[i](data, dataPath, dataRoot);
     };
   }
 
   const validateAdditional = schemaObj.createValidator(additional, additionalKey);
-  return function validateItemSchema(data, dataPath, dataRoot, i) {
-    if (i < validators.length) {
-      return validators[i](data, dataPath, dataRoot);
-    }
-    return validateAdditional(data, dataPath, dataRoot);
+  return function validateTupleSchema(data, dataPath, dataRoot, i) {
+    return i < vlength
+      ? validators[i](data, dataPath, dataRoot)
+      : validateAdditional(data, dataPath, dataRoot);
   };
 }
 
@@ -119,9 +115,7 @@ function compileContainsMinMax(schemaObj, jsonSchema) {
   const maxContains = getIntishType(jsonSchema.maxContains);
 
   const addNonError = schemaObj.createErrorHandler(0, 'contains');
-
   const addMinError = schemaObj.createErrorHandler(minContains, 'minContains');
-
   const addMaxError = schemaObj.createErrorHandler(maxContains, 'maxContains');
 
   if (minContains == null && maxContains == null) {
@@ -139,10 +133,9 @@ function compileContainsMinMax(schemaObj, jsonSchema) {
 
   if (minContains == null) {
     return function validateMaxContains(count, dataPath) {
-      if (count === 0)
-        return addNonError(count, dataPath);
-      else
-        return count <= maxContains
+      return count === 0
+        ? addNonError(count, dataPath)
+        : count <= maxContains
           || addMaxError(count, dataPath);
     };
   }
@@ -157,7 +150,6 @@ function compileArrayContainsBoolean(schemaObj, jsonSchema) {
   const contains = getBoolishType(jsonSchema.contains);
   if (contains === true) {
     const addError = schemaObj.createErrorHandler(true, 'contains');
-
     return function validateArrayContainsTrue(data, dataPath) {
       return data.length > 0
         || addError(data, dataPath);
@@ -165,7 +157,6 @@ function compileArrayContainsBoolean(schemaObj, jsonSchema) {
   }
   if (contains === false) {
     const addError = schemaObj.createErrorHandler(false, 'contains');
-
     return function validateArrayContainsFalse(data, dataPath) {
       return addError(data, dataPath);
     };
@@ -181,7 +172,6 @@ function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   if (items !== false) return undefined;
 
   const addError = schemaObj.createErrorHandler(false, 'items');
-
   return function validateArrayItemsFalse(data, dataPath) {
     return data.length === 0
       || addError(data, dataPath);
@@ -193,6 +183,13 @@ function compileArrayItems(schemaObj, jsonSchema) {
   if (items == null) return undefined;
 
   return schemaObj.createValidator(items, 'items');
+}
+
+function compileUnevaluatedItems(schemaObj, jsonSchema) {
+  const unevaluatedItems = getObjectType(jsonSchema.unevaluatedItems);
+  if (unevaluatedItems == null) return undefined;
+
+  return schemaObj.createValidator(unevaluatedItems, 'unevaluatedItems');
 }
 //#endregion
 

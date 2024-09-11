@@ -61,9 +61,5 @@
   "js/ts.implicitProjectConfig.checkJs": true,
   "eslint.options": {
     "overrideConfigFile": "./eslint.config.js" 
-  },
-  "cSpell.words": [
-    "endregion",
-    "jaren"
-  ],
+  }
 }
