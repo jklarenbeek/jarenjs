@@ -180,6 +180,12 @@ class ValidationObject {
     return this._root.options;
   }
 
+/**
+ * Compiles a schema validation error handler
+ * @param {any} expected - anything that is expected by this handler
+ * @param {string | string[]} key - the key or keys that is expected
+ * @returns {function(unknown): boolean} A function that validates data against the compiled schema and returns a boolean.
+ */
   createErrorHandler(expected, key) {
     const self = this;
 

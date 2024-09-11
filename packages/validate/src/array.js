@@ -37,9 +37,11 @@ function createNumericValidator(schemaObj, jsonSchema, key, defaultValue, compar
   };
 }
 
+// TODO: this is a bug!! it doesn't include out of bounds!
 const compileMinItems = (schemaObj, jsonSchema) =>
   createNumericValidator(schemaObj, jsonSchema, 'minItems', 0, (len, min) => len >= min);
 
+// TODO: this is a bug!! it doesn't include out of bounds!
 const compileMaxItems = (schemaObj, jsonSchema) =>
   createNumericValidator(schemaObj, jsonSchema, 'maxItems', -1, (len, max) => len <= max);
 

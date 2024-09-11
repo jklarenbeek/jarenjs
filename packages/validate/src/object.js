@@ -36,7 +36,6 @@ function compileMinProperties(schemaObj, jsonSchema) {
   if (min < 1) return undefined;
 
   const addError = schemaObj.createErrorHandler(min, 'minProperties');
-
   return function validateIsMinProperties(len = 0, dataPath = '') {
     return len >= min || addError(len, dataPath);
   };
@@ -48,7 +47,6 @@ function compileMaxProperties(schemaObj, jsonSchema) {
   if (max < 0 || max < min) return undefined;
 
   const addError = schemaObj.createErrorHandler(max, 'maxProperties');
-
   return function validateIsMaxProperties(len = 0, dataPath = '') {
     return len <= max || addError(len, dataPath);
   };
@@ -58,11 +56,11 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
   const required = getArrayClassMinItems(jsonSchema.required, 1);
   if (required == null) return undefined;
 
+  const rlength = required.length;
   const addError = schemaObj.createErrorHandler(required, 'requiredProperties');
-
   return function validateRequiredProperties(dataKeys = [], dataPath = '') {
     let valid = true;
-    for (let i = 0; i < required.length; ++i) {
+    for (let i = 0; i < rlength; ++i) {
       const key = required[i];
       const idx = dataKeys.indexOf(key);
       if (idx === -1)
