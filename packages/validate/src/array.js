@@ -222,7 +222,8 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     || compileArrayItems(schemaObj, jsonSchema);
 
   const validateContains = compileArrayContains(schemaObj, jsonSchema);
-  if ((validateItem || validateContains) == null)
+  const validateUnevaluated = compileUnevaluatedItems(schemaObj, jsonSchema); // TODO
+  if ((validateItem || validateContains || validateUnevaluated) == null)
     return undefined;
 
   const validateMinMax = compileContainsMinMax(schemaObj, jsonSchema) || trueThat;
