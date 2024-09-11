@@ -49,8 +49,8 @@ One mistake and you have to support it for the rest of your life.
 - uniqueItems
 - items
   - items | as schema or tuple _deprecated in `draft2020`_
-  - ❌ items | as schema only _new `draft2020` (in-progress)_
-- ❌ prefixItems | as tuple_new `draft2020` (in-progress)_
+  - items | as schema only _new `draft2020`_
+- prefixItems | as tuple _new `draft2020`_
 - additionalItems | as schema _deprecated in `draft2020`_
 - contains
 - maxContains / minContains | _new `draft2019`_

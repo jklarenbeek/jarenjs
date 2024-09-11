@@ -65,78 +65,42 @@ function compileUniqueItems(schemaObj, jsonSchema) {
 
 //#region Tuple
 
-function compilePrefixItems(schemaObj, jsonSchema) {
-  const tuple = getArrayClassMinItems(jsonSchema.prefixItems, 1);
+function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
+  const tuple = getArrayClassMinItems(jsonSchema[itemsKey], 1);
   if (tuple == null)
     return undefined;
 
-  const validators = new Array(tuple.length);
-  for (let i = 0; i < tuple.length; ++i) {
-    const item = tuple[i];
-    if (item === true)
-      validators[i] = trueThat;
-    else if (item === false)
-      validators[i] = falseThat;
-    else
-      validators[i] = schemaObj.createValidator(item, 'prefixItems', i);
-  }
+  const validators = tuple.map((item, i) => {
+    if (item === true) return trueThat;
+    if (item === false) return falseThat;
+    return schemaObj.createValidator(item, itemsKey, i);
+  });
 
-  const additional = getBoolOrObjectClass(jsonSchema.items, true);
-  if (additional === true || additional === false) {
-    return function validatePrefixItemBool(data, dataPath, dataRoot, i) {
+  const additional = getBoolOrObjectClass(jsonSchema[additionalKey], true);
+  if (typeof additional === 'boolean') {
+    return function validateItemBool(data, dataPath, dataRoot, i) {
       if (i >= validators.length) return additional;
-
-      const validator = validators[i];
-      return validator(data, dataPath, dataRoot);
+      return validators[i](data, dataPath, dataRoot);
     };
   }
 
-  const validateAdditional = schemaObj.createValidator(additional, 'items');
-  return function validatePrefixItemSchema(data, dataPath, dataRoot, i) {
+  const validateAdditional = schemaObj.createValidator(additional, additionalKey);
+  return function validateItemSchema(data, dataPath, dataRoot, i) {
     if (i < validators.length) {
-      const validator = validators[i];
-      return validator(data, dataPath, dataRoot);
+      return validators[i](data, dataPath, dataRoot);
     }
     return validateAdditional(data, dataPath, dataRoot);
   };
+}
+
+function compilePrefixItems(schemaObj, jsonSchema) {
+  return compileTupleInternal(schemaObj, jsonSchema, 'prefixItems', 'items');
 }
 
 function compileTupleItems(schemaObj, jsonSchema) {
-  const tuple = getArrayClassMinItems(jsonSchema.items, 1);
-  if (tuple == null)
-    return undefined;
-
-  const validators = new Array(tuple.length);
-  for (let i = 0; i < tuple.length; ++i) {
-    const item = tuple[i];
-    if (item === true)
-      validators[i] = trueThat;
-    else if (item === false)
-      validators[i] = falseThat;
-    else
-      validators[i] = schemaObj.createValidator(item, 'items', i);
-  }
-
-  const additional = getBoolOrObjectClass(jsonSchema.additionalItems, true);
-  if (additional === true || additional === false) {
-    return function validateTupleItemBool(data, dataPath, dataRoot, i) {
-      if (i >= validators.length) return additional;
-
-      const validator = validators[i];
-      return validator(data, dataPath, dataRoot);
-    };
-  }
-
-  const validateAdditional = schemaObj.createValidator(additional, 'additionalItems');
-
-  return function validateTupleItemSchema(data, dataPath, dataRoot, i) {
-    if (i < validators.length) {
-      const validator = validators[i];
-      return validator(data, dataPath, dataRoot);
-    }
-    return validateAdditional(data, dataPath, dataRoot);
-  };
+  return compileTupleInternal(schemaObj, jsonSchema, 'items', 'additionalItems');
 }
+
 //#endregion
 
 //#region Contains
