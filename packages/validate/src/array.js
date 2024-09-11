@@ -290,22 +290,21 @@ export function compileArraySchema(schemaObj, jsonSchema) {
   if (isOfSchemaType(jsonSchema, 'set'))
     return undefined;
 
-  const arrayPrimitives = compileArrayPrimitives(schemaObj, jsonSchema);
+  const compiledPrimitives = compileArrayPrimitives(schemaObj, jsonSchema);
+  const compiledItemsBoolean = compileArrayItemsBoolean(schemaObj, jsonSchema);
+  const compiledContainsBoolean = compileArrayContainsBoolean(schemaObj, jsonSchema);
+  const compiledArrayChildren = compileArrayChildren(schemaObj, jsonSchema);
 
-  const itemsBoolean = compileArrayItemsBoolean(schemaObj, jsonSchema);
-  const containsBoolean = compileArrayContainsBoolean(schemaObj, jsonSchema);
-  const arrayChildren = compileArrayChildren(schemaObj, jsonSchema);
-
-  if ((arrayPrimitives
-    || itemsBoolean
-    || containsBoolean
-    || arrayChildren) === undefined)
+  if ((compiledPrimitives
+    || compiledItemsBoolean
+    || compiledContainsBoolean
+    || compiledArrayChildren) === undefined)
     return undefined;
 
-  const validatePrimitives = arrayPrimitives || trueThat;
-  const hasBooleanItems = itemsBoolean || trueThat;
-  const hasBooleanContains = containsBoolean || trueThat;
-  const validateItems = arrayChildren || trueThat;
+  const validatePrimitives = compiledPrimitives || trueThat;
+  const hasBooleanItems = compiledItemsBoolean || trueThat;
+  const hasBooleanContains = compiledContainsBoolean || trueThat;
+  const validateItems = compiledArrayChildren || trueThat;
 
   return function validateArraySchema(data, dataPath, dataRoot) {
     if (isArrayClass(data)) {
