@@ -912,21 +912,57 @@ describe('Schema Array Type', function () {
     });
   });
 
-  describe('#arrayPrefixItems() (not implemented)', function () {
-    // prefixItems is the believe that you can break a spec,
-    // cause you all of the sudden need to separate concerns in
-    // another way. But this is a schema definition and compilers
-    // do not mind, however it does require another keyword; this
-    // can likely break many other user components in the field.
-    // Also can this action indicate that those who define the spec,
-    // are of such schooling that they can break the 'type' keyword
-    // with the same reasoning. Since the engine doesn't mind, we
-    // just add a little plaster on it and call it a day.
-    it.skip('should not allow prefixItems and items to both be arrays.', function () {
+  describe('#arrayPrefixItems()', function () {
+    it.skip('should not allow prefixItems and items to both be arrays (ignore items keyword).', function () {
       // only one of them can be a tuple.
     });
     it.skip('should ignore additionalItems', function () {
       // when prefix is defined as an array, additionalItems should not play a role.
     });
+  
+    it('a schema given for prefixItems', function () {
+      const root = compileSchemaValidator({
+        prefixItems: [
+          { type: 'integer' },
+          { type: 'string' },
+        ]
+      });
+
+      assert.isTrue(root.validate([1, 'foo']), 'tuple of 2 valid');
+      assert.isFalse(root.validate(['foo', 42]), 'wrong types');
+      assert.isTrue(root.validate([1]), 'incomplete array of items');
+      assert.isTrue(root.validate([1, 'foo', true]), 'array with additional items');
+      assert.isTrue(root.validate([]), 'empty array');
+      assert.isTrue(root.validate({ '0': 'invalid', '1': 'valid', length: 2 }), 'Javascript pseudo-array is valid');
+    });
+
+    it('should allow prefixItems with boolean schemas', function () {
+      const root = compileSchemaValidator({
+        prefixItems: [true, false]
+      });
+
+      assert.isTrue(root.validate([1]), 'tuple of 1 is valid');
+      assert.isFalse(root.validate([1, 'foo']), 'tuple with two items is invalid');
+      assert.isTrue(root.validate([]), 'empty tuple is valid');
+    });
+
+    it('should allow additional items by default', function () {
+      const root = compileSchemaValidator({
+        prefixItems: [{ 'type': 'integer' }]
+      });
+
+      assert.isTrue(root.validate([1, 'foo', false]), 'only the first item is valid');
+      assert.isFalse(root.validate(['foo', false]), 'the first item is invalid');
+    });
+
+    it('should allow prefixItems with null instance elements', function () {
+      const root = compileSchemaValidator({
+        prefixItems: [{'type': 'null' }]
+      });
+
+      assert.isTrue(root.validate([null]), 'allow null element');
+      assert.isTrue(root.validate([null, 1]), 'first element is null with additional items');
+      assert.isFalse(root.validate([1, null]), 'second element is null with additional items');
+    })
   });
 });

@@ -64,14 +64,51 @@ function compileUniqueItems(schemaObj, jsonSchema) {
 //#endregion
 
 //#region Tuple
-function compileTupleItems(schemaObj, jsonSchema) {
-  const items = getArrayClassMinItems(jsonSchema.items, 1);
-  if (items == null) return undefined;
 
-  const additional = getBoolOrObjectClass(jsonSchema.additionalItems, true);
-  const validators = new Array(items.length);
-  for (let i = 0; i < items.length; ++i) {
-    const item = items[i];
+function compilePrefixItems(schemaObj, jsonSchema) {
+  const tuple = getArrayClassMinItems(jsonSchema.prefixItems, 1);
+  if (tuple == null)
+    return undefined;
+
+  const validators = new Array(tuple.length);
+  for (let i = 0; i < tuple.length; ++i) {
+    const item = tuple[i];
+    if (item === true)
+      validators[i] = trueThat;
+    else if (item === false)
+      validators[i] = falseThat;
+    else
+      validators[i] = schemaObj.createValidator(item, 'prefixItems', i);
+  }
+
+  const additional = getBoolOrObjectClass(jsonSchema.items, true);
+  if (additional === true || additional === false) {
+    return function validatePrefixItemBool(data, dataPath, dataRoot, i) {
+      if (i >= validators.length) return additional;
+
+      const validator = validators[i];
+      return validator(data, dataPath, dataRoot);
+    };
+  }
+
+  const validateAdditional = schemaObj.createValidator(additional, 'items');
+  return function validatePrefixItemSchema(data, dataPath, dataRoot, i) {
+    if (i < validators.length) {
+      const validator = validators[i];
+      return validator(data, dataPath, dataRoot);
+    }
+    return validateAdditional(data, dataPath, dataRoot);
+  };
+}
+
+function compileTupleItems(schemaObj, jsonSchema) {
+  const tuple = getArrayClassMinItems(jsonSchema.items, 1);
+  if (tuple == null)
+    return undefined;
+
+  const validators = new Array(tuple.length);
+  for (let i = 0; i < tuple.length; ++i) {
+    const item = tuple[i];
     if (item === true)
       validators[i] = trueThat;
     else if (item === false)
@@ -80,6 +117,7 @@ function compileTupleItems(schemaObj, jsonSchema) {
       validators[i] = schemaObj.createValidator(item, 'items', i);
   }
 
+  const additional = getBoolOrObjectClass(jsonSchema.additionalItems, true);
   if (additional === true || additional === false) {
     return function validateTupleItemBool(data, dataPath, dataRoot, i) {
       if (i >= validators.length) return additional;
@@ -218,8 +256,9 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
 }
 
 function compileArrayChildren(schemaObj, jsonSchema) {
-  const validateItem = compileArrayItems(schemaObj, jsonSchema)
-    || compileTupleItems(schemaObj, jsonSchema);
+  const validateItem = compilePrefixItems(schemaObj, jsonSchema)
+    || compileTupleItems(schemaObj, jsonSchema)
+    || compileArrayItems(schemaObj, jsonSchema);
 
   const validateContains = compileArrayContains(schemaObj, jsonSchema);
   if ((validateItem || validateContains) == null)

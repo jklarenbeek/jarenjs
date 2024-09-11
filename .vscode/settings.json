@@ -62,4 +62,8 @@
   "eslint.options": {
     "overrideConfigFile": "./eslint.config.js" 
   },
+  "cSpell.words": [
+    "endregion",
+    "jaren"
+  ],
 }

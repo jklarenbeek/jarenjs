@@ -2,9 +2,9 @@
 
 # Jaren
 
-Jaren is a JSON Schema Validating Compiler Karen written in vanilla Javascript. Jaren has full `draft6`, `draft7` and partialy `draft2019` and `draft2020` support. Jaren is under active development made for speed. It is a complete rewrite of futilsjs and some other utilities, which where my, now obsolete, public github projects.
+Jaren is a JSON Schema Validating Compiler Karen written in vanilla Javascript. Jaren has full `draft6`, `draft7` and partially `draft2019` and `draft2020` support. Jaren is under active development made for speed. It is a complete rewrite of futilsjs and some other utilities, which where my, now obsolete, public github projects.
 
-This library started as a personal merge of some useful javascript alhoritms, functions, modules and classes, I programmed or snippits that i used over the years. Anyway, stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepository as a JSON Schema validating compiler library that anyone can use.
+This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that i used over the years. Anyway, stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
 
 Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSONSchema.pdf) for a more comprehensive guide on how to use JSON Schema (not Jaren!).
 
@@ -48,13 +48,13 @@ One mistake and you have to support it for the rest of your life.
 - maxItems / minItems
 - uniqueItems
 - items
-  - items | _deprecated in `draft2020`_
-  - ❌ items | _new `draft2020` (in-progress)_
-- ❌ prefixItems | _new `draft2020` (in-progress)_
-- additionalItems
+  - items | as schema or tuple _deprecated in `draft2020`_
+  - ❌ items | as schema only _new `draft2020` (in-progress)_
+- ❌ prefixItems | as tuple_new `draft2020` (in-progress)_
+- additionalItems | as schema _deprecated in `draft2020`_
 - contains
 - maxContains / minContains | _new `draft2019`_
-- ❌ unevaludatedItems | _new `draft2019` (in-progress)_
+- ❌ unevaluatedItems | _new `draft2019` (in-progress)_
 
 ### 🔑 Keywords for object
 
@@ -138,7 +138,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `uri-reference--full` | same as `uri-reference`, but more comprehensive
 - `uri-template` | URI template according to [RFC6570](https://datatracker.ietf.org/doc/html/rfc6570)
 - `iri` | full URI with international characters
-- `iri-reference` | full URI reference with with internation characters
+- `iri-reference` | full URI reference with with international characters
 
 - `email` | email address
 - `email--full` | same as email, but more comprehensive
@@ -151,7 +151,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `uuid` | Universally Unique IDentifier according to [RFC4122](https://datatracker.ietf.org/doc/html/rfc4122)
 - `guid` | Globally Unique IDentifier according to Microsoft
 
-- `indentifier` | C-type identifier
+- `identifier` | C-type identifier
 - `html-identifier` | html element `id` attribute identifier according to [RFC7992](https://datatracker.ietf.org/doc/html/rfc7992#section-5.1)
 - `css-identifier` | css class name identifier according to [RFC7993](https://datatracker.ietf.org/doc/html/rfc7993)
 
@@ -171,7 +171,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `alpha` | allow only ASCII alpha characters (a-zA-Z)
 - `numeric` | allow only numeric characters (0-9)
 - `alphanumeric` | allow only ASCII alpha numeric characters
-- `hexadecimal` | allow only hexademical characters (0-9a-fA-F)
+- `hexadecimal` | allow only hexadecimal characters (0-9a-fA-F)
 - `uppercase` | allow only upper case alpha characters
 - `lowercase` | allow only lower case alpha characters
 - `color` | web color hex string (starts with #, must be 3 or 6 hax characters)
@@ -182,8 +182,8 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `isbn10` | International Standard Book Number 10 digit number
 - `isbn13` | International Standard Book Number 13 digit number
 
-- `country2` | Country code by alpha-2 according to ISO3166-1 <info>No tests exists</info>
-- `iban` | International Bank Account Number <info>No tests exists</info>
+- `country2` | Country code by alpha-2 according to ISO3166-1 _!No tests exists!_
+- `iban` | International Bank Account Number _!No tests exists!_
 
 ### ✍ Formats for numbers
 
@@ -238,7 +238,7 @@ See also:
 - [Combining unevaluatedProperties and ref: # #375](https://github.com/orgs/json-schema-org/discussions/375)
 - [additionalProperties](https://json-schema.org/understanding-json-schema/reference/object#additionalproperties)
 
-### 👉 Express array contraints more cleanly
+### 👉 Express array constraints more cleanly
 
 From the [release notes](https://json-schema.org/draft/2020-12/release-notes#contains-and-unevaluateditems) of the 2020-12 draft, there has been proposed a way to handle items that where neither validated by the items or contains keyword of an array schema object. This feature needs to implement the keyword `unevaluatedItems`.
 
@@ -247,16 +247,16 @@ From the [release notes](https://json-schema.org/draft/2020-12/release-notes#con
 From the blog post of the [json-schema.org](https://json-schema.org/blog/posts/dynamicref-and-generics) website. This feature needs to implement the following keywords in order for the proposed schema structure to work: `$dynamicAnchor`, `$dynamicRef`. We might also support `$recursiveAnchor` and `$recursiveRef` to be backwards compatible with `draft2019`
 
 See also:
-- [Understanding lexical dyamic scopes](https://json-schema.org/blog/posts/understanding-lexical-dynamic-scopes)
+- [Understanding lexical dynamic scopes](https://json-schema.org/blog/posts/understanding-lexical-dynamic-scopes)
 - [Improve/simplify "$recursiveAnchor" and "$recursiveRef"](https://github.com/json-schema-org/json-schema-spec/issues/909)
 - [Lexical Scope and Dynamic Scope](https://json-schema.org/draft/2019-09/json-schema-core#rfc.section.7.1)
 - [Keyword for extending a schema](https://github.com/json-schema-org/json-schema-spec/issues/907)
 - [Recursive References with "$recursiveRef" and "$recursiveAnchor"](https://json-schema.org/draft/2019-09/json-schema-core#rfc.section.8.2.4.2)
 - [$dynamicRef and $dynamicAnchor](https://json-schema.org/draft/2020-12/release-notes#dollardynamicref-and-dollardynamicanchor)
 
-### 👉 Runtime schema manipulation of contraints
+### 👉 Runtime schema manipulation of constraints
 
-The Ajv JSON Schema validator has implemented the $data keyword that can extend the otherwise constant schema values with dynamic runtime values for the following keywords: `const`, `enum`, `format`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minProperties`, `maxProperties`, `required`, `minItems`, `maxItems`, `uniqueItems`. This however has seen enough criticism from multiple developers claiming not to follow the json spec intention and or not being comprehensive enough for more radical manipulations. Besides those agains the proposal, many developers and companies use the `$data` keyword, or other implementations like the `data-ref` proposal from json-everything, successfully.
+The Ajv JSON Schema validator has implemented the $data keyword that can extend the otherwise constant schema values with dynamic runtime values for the following keywords: `const`, `enum`, `format`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minProperties`, `maxProperties`, `required`, `minItems`, `maxItems`, `uniqueItems`. This however has seen enough criticism from multiple developers claiming not to follow the json spec intention and or not being comprehensive enough for more radical manipulations. Besides those against the proposal, many developers and companies use the `$data` keyword, or other implementations like the `data-ref` proposal from json-everything, successfully.
 
 See also:
 - [$data](https://github.com/json-schema-org/json-schema-spec/issues/51)
@@ -278,11 +278,11 @@ I tried to open that door before, but it apparently was scheduled for the next r
   - add error reporting tests
 - 1.1
   - Modelling Inheritance with JSON Schema
-  - Express array contraints more cleanly
+  - Express array constraints more cleanly
 - 1.2
   - Using Dynamic References to Support Generic Types
 - 1.3
-  - Runtime schema manipulation of contraints
+  - Runtime schema manipulation of constraints
 - 1.4-1.9
   - Fix bugs and/or add forgotten features for latest draft compliance
 - 2.0 🎉 Stable release for `draft2020`
@@ -290,14 +290,14 @@ I tried to open that door before, but it apparently was scheduled for the next r
 ## Documentation
 
 ```
-Procastrination
+Procrastination
 
 I will look up what that means, later...
 ```
 
 ### 🤓 Javascript Type Extensions
 
-Eventhough es2017 is becoming pretty cool, `jaren` includes an extensive set of additional extensions to common types found in `@jaren/core`. We have added functionality for Number, String, Date, Object and Array classes including a set of test and getters related to the javascript type system.
+Even though es2017 is becoming pretty cool, `jaren` includes an extensive set of additional extensions to common types found in `@jaren/core`. We have added functionality for Number, String, Date, Object and Array classes including a set of test and getters related to the javascript type system.
 
 For object types `@jaren/core` has special functions to manipulate array and objects alike including types like Map. `@jaren/core` also added some additional classes to queue or traverse tree like data structures.
 
@@ -324,7 +324,7 @@ Is it true that when computer software is designed, a back door is left for the 
 ```
   So frequently asked
   but never out spoken
-  what shadow arrises
+  what shadow arises
   what hath thou awoken
 ```
 
