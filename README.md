@@ -380,7 +380,7 @@ We welcome contributions from the community! Here's how you can help:
   what hath thou awoken
 ```
 
-<details open><summary>
+<details><summary>
 
 #### Why!?, Why would you create another json schema validator?
 </summary>
@@ -389,6 +389,14 @@ I am aware of the excellent `Ajv` and `zod` validators, but I really needed to u
 
 </details>
 
+<details><summary>
+
+#### Why would you program it in vanilla javascript and not use typescript?
+</summary>
+
+Good question! I believe that vanilla javascript for a library like this is a little bit more straight forward to understand. And to be honest, I just like javascript. TypeScript is an excellent language but there is also a lot of boilerplate code that might be a bit too much for what we are trying to accomplish here. And I don't want to use a transpiler that might destroy my intentions of how it should be working, since I understand how the JIT compiler is working very well. Also I do use JSDoc to generate the documentation for the code and that should be enough for most of the users and TypeScript libraries when they want to make use of Jaren. Therefor I don't see the need for TypeScript here.
+
+</details>
 
 ## 🙏 Be excellent to yourself, and each other!
 
