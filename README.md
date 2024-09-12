@@ -385,7 +385,7 @@ We welcome contributions from the community! Here's how you can help:
 #### Why!?, Why would you create another json schema validator?
 </summary>
 
-I am aware of the excellent `Ajv` and `zod` validators, but I really needed to understand json schema in the first place an besides that I wanted todo something else. Working a lot with LLM's I believe that in order to work with them in a more natural way, we need to speak JSON, all the way down. I also believe that in order to fully utilize the capabilities of LLM's, we need to speak natural language, all the way up. JSON Schema is a language to describe data, not a language to describe what kind of data we want to process. So I decided to create a JSON Schema validator that is fully compliant with the JSON Schema specification, but that is also easy to understand and to extend.
+I am aware of the excellent `Ajv` and `zod` validators, but I really needed to understand json schema in the first place and I wanted to do something else (see if I could beat its first place in speed). We as programmers work with validation all over the place, especially at the front-end, but also at the back-end and in the middle-ware. Since 2023 I started working a lot with LLM's and I believe that in order to work with them in a more natural way, we need to speak JSON, all the way down. So I decided to create a JSON Schema validator that is fully compliant with the JSON Schema specification and should be fast for the fun of it, but that is also easy to understand and easy to extend. Not by plugins perse, but by simply opening up the code and see what is going on.
 
 </details>
 
