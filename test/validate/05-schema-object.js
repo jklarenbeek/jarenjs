@@ -964,7 +964,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(root.validate({ foo: 42 }), 'with invalid unevaluated number property');
     });
 
-    it.skip('should have no unevaluatedProperties', function () {
+    it('should have no unevaluatedProperties', function () {
       const root = compileSchemaValidator({
         type: 'object',
         unevaluatedProperties: false,
@@ -998,7 +998,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(root.validate({ foo: 'foo', bar: 'bar' }), 'with unevaluated properties');
     });
 
-    it.skip('should validate additionalProperties with no adjacent unevaluatedProperties', function () {
+    it('should validate additionalProperties with no adjacent unevaluatedProperties', function () {
       const root = compileSchemaValidator({
         type: 'object',
         properties: {

@@ -178,13 +178,14 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
 function compileUnevaluatedProperties(schemaObj, jsonSchema) {
   const unevaluatedProperties = getBoolOrObjectClass(jsonSchema.unevaluatedProperties);
   if (unevaluatedProperties == null) return undefined;
-
+  
   if (unevaluatedProperties === false) {
     const addError = schemaObj.createErrorHandler(false, 'unevaluatedProperties');
     return (data, dataPath, dataRoot, dataKey) => addError(dataKey, data);
   }
 
-  return schemaObj.createValidator(unevaluatedProperties, 'unevaluatedProperties');}
+  return schemaObj.createValidator(unevaluatedProperties, 'unevaluatedProperties');
+}
 //#endregion
 
 //#region Dependencies
