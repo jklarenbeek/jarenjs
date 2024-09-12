@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-escape */
 import { describe, it } from 'node:test';
 import * as assert from '@jaren/tools/assert';
 
@@ -9,6 +10,21 @@ import {
 
 describe('Schema Object Type', function () {
   describe('#objectPrimitives()', function () {
+    it.skip('should throw an error when minProperties has a negative value??', function () {
+      assert.throws(() => compileSchemaValidator({
+        type: 'object',
+        minProperties: -1,
+      }));
+    });
+
+    it.skip('should throw an error when maxProperties is smaller then minProperties??', function () {
+      assert.throws(() => compileSchemaValidator({
+        type: 'object',
+        minProperties: 3,
+        maxProperties: 2,
+      }));
+    });
+
     it('should validate the object member size', function () {
       const root = compileSchemaValidator({
         type: 'object',

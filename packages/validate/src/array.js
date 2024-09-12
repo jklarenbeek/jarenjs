@@ -26,24 +26,27 @@ import {
 } from './tools.js';
 
 //#region Primitives
-function createNumericValidator(schemaObj, jsonSchema, key, defaultValue, comparator) {
-  const value = getIntishType(jsonSchema[key]) ?? defaultValue;
-  if (value === defaultValue) return undefined;
+function compileMinItems(schemaObj, jsonSchema) {
+  const min = getIntishType(jsonSchema.minItems) || 0;
+  if (min < 1) return undefined;
 
-  const addError = schemaObj.createErrorHandler(value, key);
-
-  return function validateNumericComparator(len = 0, dataPath) {
-    return comparator(len, value) || addError(len, dataPath);
+  const addError = schemaObj.createErrorHandler(min, 'minItems');
+  return function validateMinItems(len = 0, dataPath = '') {
+    return len >= min || addError(len, dataPath);
   };
 }
 
-// TODO: this is a bug!! it doesn't include out of bounds!
-const compileMinItems = (schemaObj, jsonSchema) =>
-  createNumericValidator(schemaObj, jsonSchema, 'minItems', 0, (len, min) => len >= min);
+function compileMaxItems(schemaObj, jsonSchema) {
+  const max = getIntishType(jsonSchema.maxItems) || -1;
+  if (max < 0) return undefined;
+  const min = getIntishType(jsonSchema.minItems) || 0;
+  if (max < min) throw new Error('maxItems must be greater then minItems');
 
-// TODO: this is a bug!! it doesn't include out of bounds!
-const compileMaxItems = (schemaObj, jsonSchema) =>
-  createNumericValidator(schemaObj, jsonSchema, 'maxItems', -1, (len, max) => len <= max);
+  const addError = schemaObj.createErrorHandler(max, 'maxItems');
+  return function validateMaxItems(len = 0, dataPath = '') {
+    return len <= max || addError(len, dataPath);
+  };
+}
 
 function createBooleanValidator(schemaObj, jsonSchema, key, validationFn) {
   const value = getBoolishType(jsonSchema[key]);

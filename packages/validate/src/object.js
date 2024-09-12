@@ -36,18 +36,19 @@ function compileMinProperties(schemaObj, jsonSchema) {
   if (min < 1) return undefined;
 
   const addError = schemaObj.createErrorHandler(min, 'minProperties');
-  return function validateIsMinProperties(len = 0, dataPath = '') {
+  return function validateMinProperties(len = 0, dataPath = '') {
     return len >= min || addError(len, dataPath);
   };
 }
 
 function compileMaxProperties(schemaObj, jsonSchema) {
-  const min = getIntishType(jsonSchema.minProperties) || 0;
   const max = getIntishType(jsonSchema.maxProperties) || -1;
-  if (max < 0 || max < min) return undefined;
+  if (max < 0) return undefined;
+  const min = getIntishType(jsonSchema.minProperties) || 0;
+  if (max < min) throw new Error('maxProperties must be greater then minProperties');
 
   const addError = schemaObj.createErrorHandler(max, 'maxProperties');
-  return function validateIsMaxProperties(len = 0, dataPath = '') {
+  return function validateMaxProperties(len = 0, dataPath = '') {
     return len <= max || addError(len, dataPath);
   };
 }
@@ -57,6 +58,7 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
   if (required == null) return undefined;
 
   const rlength = required.length;
+  /** @type {function(string, string):boolean} */
   const addError = schemaObj.createErrorHandler(required, 'requiredProperties');
   return function validateRequiredProperties(dataKeys = [], dataPath = '') {
     let valid = true;
@@ -64,7 +66,7 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
       const key = required[i];
       const idx = dataKeys.indexOf(key);
       if (idx === -1)
-        valid = addError(key, dataPath);
+        valid &&= addError(key, dataPath);
     }
     return valid;
   };
@@ -173,10 +175,16 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
   };
 }
 
-// eslint-disable-next-line no-unused-vars
-function compileUnevaluatedProperties(schemaObject, jsonSchema) {
-  return undefined;
-}
+function compileUnevaluatedProperties(schemaObj, jsonSchema) {
+  const unevaluatedProperties = getBoolOrObjectClass(jsonSchema.unevaluatedProperties);
+  if (unevaluatedProperties == null) return undefined;
+
+  if (unevaluatedProperties === false) {
+    const addError = schemaObj.createErrorHandler(false, 'unevaluatedProperties');
+    return (data, dataPath, dataRoot, dataKey) => addError(dataKey, data);
+  }
+
+  return schemaObj.createValidator(unevaluatedProperties, 'unevaluatedProperties');}
 //#endregion
 
 //#region Dependencies

@@ -127,6 +127,13 @@ class ValidationRoot {
 }
 
 class ValidationObject {
+  /**
+   * Compiles a schema validation error handler
+   * @param {ValidationObject} self The validation object that is compiling this validator
+   * @param {string} path The path to this schema object
+   * @param {any} schema The schema object to compile
+   * @returns {function(any, any):boolean} A function that validates data against the compiled schema and returns a boolean.
+   */
   static _compileValidator(self, path, schema) {
     if (!hasSchemaRef(schema))
       return compileSchemaObject(self, schema);
