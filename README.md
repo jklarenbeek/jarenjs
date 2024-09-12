@@ -357,7 +357,8 @@ The vector classes `vec2i32`, `vec2f64` and `vec3f64` contain enough functionali
 ## 🤝 Contributing to Jaren
 
 ```
-Is it true that when computer software is designed, a back door is left for the designer to enter at will?
+Is it true that when computer software is designed,
+a back door is left for the designer to enter at will?
 ```
 
 ![Visual Studio Code](https://img.shields.io/badge/Visual%20Studio%20Code-0078d7.svg?style=for-the-badge&logo=visual-studio-code&logoColor=white)
@@ -378,6 +379,16 @@ We welcome contributions from the community! Here's how you can help:
   what shadow arises
   what hath thou awoken
 ```
+
+<details open><summary>
+
+#### Why!?, Why would you create another json schema validator?
+</summary>
+
+I am aware of the excellent `Ajv` and `zod` validators, but I really needed to understand json schema in the first place an besides that I wanted todo something else. Working a lot with LLM's I believe that in order to work with them in a more natural way, we need to speak JSON, all the way down. I also believe that in order to fully utilize the capabilities of LLM's, we need to speak natural language, all the way up. JSON Schema is a language to describe data, not a language to describe what kind of data we want to process. So I decided to create a JSON Schema validator that is fully compliant with the JSON Schema specification, but that is also easy to understand and to extend.
+
+</details>
+
 
 ## 🙏 Be excellent to yourself, and each other!
 
