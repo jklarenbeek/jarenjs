@@ -17,7 +17,7 @@ describe('Schema Object Type', function () {
       }));
     });
 
-    it.skip('should throw an error when maxProperties is smaller then minProperties??', function () {
+    it('should throw an error when maxProperties is smaller then minProperties', function () {
       assert.throws(() => compileSchemaValidator({
         type: 'object',
         minProperties: 3,

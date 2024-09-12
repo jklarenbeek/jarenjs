@@ -9,6 +9,14 @@ import {
 
 describe('Schema Array Type', function () {
   describe('#arrayBasic()', function () {
+    it('should throw an error when maxItems is smaller then minItems', function () {
+      assert.throws(() => compileSchemaValidator({
+        type: 'array',
+        minItems: 3,
+        maxItems: 2,
+      }));
+    });
+
     it('should not exceed maxItems.', function () {
       const root = compileSchemaValidator({
         type: 'array',
