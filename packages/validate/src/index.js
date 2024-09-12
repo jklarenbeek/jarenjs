@@ -243,5 +243,7 @@ export function compileSchemaValidator(schema, referenceSchemas = [], opts = new
   // create a new schema root
   const root = new ValidationRoot(schemas, schema, origin, opts);
 
-  return root;
+  return {
+    validate: (data) => root.validate(data),
+  };
 }
