@@ -2,25 +2,47 @@
 
 # Jaren
 
-Jaren is a JSON Schema Validating Compiler Karen written in vanilla Javascript. Jaren has full `draft6`, `draft7` and partially `draft2019` and `draft2020` support. Jaren is under active development made for speed. It is a complete rewrite of futilsjs and some other utilities, which where my, now obsolete, public github projects.
+Jaren is a high-performance JSON Schema Validating Compiler written in vanilla JavaScript. It offers full support for `draft6`, `draft7`, and partial support for `draft2019` and `draft2020`. Jaren is designed for speed and is under active development.
 
-This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that i used over the years. Anyway, stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
+This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that I used over the years; stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
 
-Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSONSchema.pdf) for a more comprehensive guide on how to use JSON Schema (not Jaren!).
+Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSONSchema.pdf) for a more comprehensive guide on what JSON Schema is (not Jaren!).
 
-## Getting Started
+## 🚀 Quick Start
 
-At its current state, we recommend you use the `@jaren/validate` package, which is stable and will not change any of its public interfaces. The reason is that the main `jaren` module has not reached version 1.0.0 yet. 
+We recommend you clone this repository and install the dependencies with nodejs by just running the following command in the terminal at the root of the repository.
 
-For format support please install the `@jaren/formats` package with it.
+```bash
+npm install
+```
 
-## JSON Schema Validation Keywords
+At its current state, we recommend you use the `@jaren/validate` package, which is stable and will not change any of its public interfaces. 
+
+For format support please use the `@jaren/formats` package with it.
+
+But for now its recommended you dive into the test folder and try to find your way from there.
+
+## 🔑 JSON Schema Validation Keywords
 
 ```
 Programming is like sex.
 
 One mistake and you have to support it for the rest of your life.
 ```
+
+Jaren supports a wide range of JSON Schema validation keywords. Here's a quick overview:
+
+- JSON data type: `type`, `nullable`, `required`
+- Numbers: `maximum`, `minimum`, `multipleOf`
+- Strings: `maxLength`, `minLength`, `pattern`
+- Arrays: `maxItems`, `minItems`, `uniqueItems`, `items`, `contains`
+- Objects: `maxProperties`, `minProperties`, `required`, `properties`, `patternProperties`
+- All types: `enum`, `const`
+- Compound: `not`, `oneOf`, `anyOf`, `allOf`, `if/then/else`
+- Meta: `$id`, `$ref`, `$anchor`
+
+<details>
+<summary>🔥 For a complete list of supported keywords and their implementation status, click here</summary>
 
 ### 🔑 JSON data type
 
@@ -110,7 +132,21 @@ See also:
 - $defs | used by initial schema traversal _new `draft2019`_
 - components | _(OpenAPI)_
 
-## JSON Schema Validation Formats
+</details>
+
+## ✍ JSON Schema Validation Formats
+
+Jaren supports various format validators for strings and numbers, including:
+
+- Date and Time: `date-time`, `date`, `time`
+- URLs and Emails: `url`, `email`, `hostname`, `ipv4`, `ipv6`
+- Identifiers: `uuid`, `guid`, `identifier`
+- Numbers: `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, `float64`
+
+But we have many more formats that are not listed here!
+
+<details>
+<summary>🔥 For a complete list of supported formats, click here</summary>
 
 ### ✍ Formats for strings
 
@@ -208,7 +244,36 @@ Formats for numbers validate both numbers and strings as number types. If you wa
 - `float` | 32 bit floating point number
 - `double` | 64 bit floating point number
 
-## Todo`s for latest draft validation
+</details>
+
+## 📅 Roadmap
+
+```
+I tried to open that door before, but it apparently was scheduled for the next release.
+```
+- 0.8
+  - current
+- 0.9
+  - Jaren as a drop-in replacement for Ajv
+  - add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
+- 🎉 1.0 Stable release for `draft7`
+  - Fixing JSON Schema output
+  - add error reporting tests
+- 1.1
+  - Modelling Inheritance with JSON Schema
+  - Express array constraints more cleanly
+- 1.2
+  - Using Dynamic References to Support Generic Types
+- 1.3
+  - Runtime schema manipulation of constraints
+- 1.4-1.9
+  - Fix bugs and/or add forgotten features for latest draft compliance
+- 2.0 🎉 Stable release for `draft2020`
+
+<details>
+<summary>🔥 To get the full picture and details about what that roadmap entails, click here</summary>
+
+## 🛠️ Todo`s for latest draft validation
 
 ```
 You can trust that if I say I do something, I will definitely do it unless I don't!
@@ -263,37 +328,17 @@ See also:
 - [Ajv $data spec](https://github.com/ajv-validator/ajv/tree/master/spec/extras/%24data)
 - [data-ref](https://docs.json-everything.net/schema/examples/data-ref/)
 
-## Roadmap
+</details>
 
-```
-I tried to open that door before, but it apparently was scheduled for the next release.
-```
-- 0.8
-  - current
-- 0.9
-  - Jaren as a drop-in replacement for Ajv
-  - add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
-- 🎉 1.0 Stable release for `draft7`
-  - Fixing JSON Schema output
-  - add error reporting tests
-- 1.1
-  - Modelling Inheritance with JSON Schema
-  - Express array constraints more cleanly
-- 1.2
-  - Using Dynamic References to Support Generic Types
-- 1.3
-  - Runtime schema manipulation of constraints
-- 1.4-1.9
-  - Fix bugs and/or add forgotten features for latest draft compliance
-- 2.0 🎉 Stable release for `draft2020`
-
-## Documentation
+## 📚Documentation
 
 ```
 Procrastination
 
 I will look up what that means, later...
 ```
+
+For detailed documentation on using Jaren, including API references and advanced usage examples, visit our official documentation. Which is the code itself. 
 
 ### 🤓 Javascript Type Extensions
 
@@ -309,17 +354,23 @@ The `int32` and `float32` classes are mere helper functions to speed up your inn
 
 The vector classes `vec2i32`, `vec2f64` and `vec3f64` contain enough functionality to quickly do about any operation you want. The primitive pure operators (`add`, `sub`, `mul`, `div`) and impure operators (`iadd`, `isub`, `imul`, `idiv`) are supported for the `vec2i32`, `vec2f64` and `vec2f64` classes. They also contain product operators (`mag2` - magnitude square, `mag` - magnitude, `dot`, `crossABAB`) and other more complex vector operators (`unit`, `iunit`).
 
-## Contributing to Jaren
+## 🤝 Contributing to Jaren
 
 ```
 Is it true that when computer software is designed, a back door is left for the designer to enter at will?
 ```
 
-![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=for-the-badge&logo=bun&logoColor=white)
 ![Visual Studio Code](https://img.shields.io/badge/Visual%20Studio%20Code-0078d7.svg?style=for-the-badge&logo=visual-studio-code&logoColor=white)
 ![JavaScript](https://img.shields.io/badge/javascript-%23323330.svg?style=for-the-badge&logo=javascript&logoColor=%23F7DF1E)
 
-## Frequently Asked Questions
+We welcome contributions from the community! Here's how you can help:
+
+1. Report Issues: Found a bug or have a feature request? Open an issue.
+2. Improve Documentation: Help us make Jaren easier to use by improving our docs.
+3. Add Tests: Increase our test coverage, especially for draft2019 and draft2020 features.
+4. Implement New Features: Pick an item from our roadmap and submit a pull request.
+
+## ❓ Frequently Asked Questions
 
 ```
   So frequently asked
@@ -328,7 +379,7 @@ Is it true that when computer software is designed, a back door is left for the 
   what hath thou awoken
 ```
 
-## Be excellent to yourself, and each other!
+## 🙏 Be excellent to yourself, and each other!
 
 If you find bugs, or want to know what a function is doing, please don't hesitate to ask me by filing an issue. Off topic questions I'd rather not see, but any jaren related question is very welcome.
 
