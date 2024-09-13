@@ -13,7 +13,7 @@ import {
   restoreSchemaRefsInMap,
   resolveRefSchemaDeep,
   encodeJsonPointerPath,
-  SchemaRefOptions,
+  TraverseOptions,
   createJsonPointer,
 } from './traverse.js';
 
@@ -53,8 +53,14 @@ class ValidationError {
   }
 }
 
-class ValidationOptions extends SchemaRefOptions {
-  constructor(origin = 'https://github.com/jklarenbeek/jaren', mergeSchemas = true, anchorsGlobal = true, anchorsAllowed = true, skipErrors = true) {
+class ValidationOptions extends TraverseOptions {
+  constructor(
+    origin = 'https://github.com/jklarenbeek/jaren',
+    mergeSchemas,
+    anchorsGlobal,
+    anchorsAllowed,
+    skipErrors
+  ) {
     super(mergeSchemas, anchorsGlobal, anchorsAllowed, skipErrors);
     this.origin = origin;
   }
@@ -230,7 +236,23 @@ class ValidationObject {
   }
 }
 
-export function compileSchemaValidator(schema, referenceSchemas = [], opts = new ValidationOptions()) {
+export class ValidatorOptions extends ValidationOptions {
+  constructor(
+    formats = {},
+    schemas = [],
+    origin,
+    mergeSchemas,
+    anchorsGlobal,
+    anchorsAllowed,
+    skipErrors
+  ) {
+    super(origin, mergeSchemas, anchorsGlobal, anchorsAllowed, skipErrors);
+    this.formats = formats;
+    this.schemas = schemas;
+  }
+}
+
+export function compileSchemaValidator(schema, referenceSchemas = [], opts = new ValidatorOptions()) {
   // initialize schema map for all ids and refs
   const schemas = new Map();
   const origin = storeSchemaIdsInMap(schemas, opts.origin, schema, opts);

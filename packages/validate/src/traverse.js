@@ -253,14 +253,19 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
   }
 }
 
-export class SchemaRefOptions extends JsonPointerOptions {
-  constructor(mergeSchemas = true, anchorsGlobal = true, anchorsAllowed = true, skipErrors = true) {
+export class TraverseOptions extends JsonPointerOptions {
+  constructor(
+    mergeSchemas = true,
+    anchorsGlobal,
+    anchorsAllowed,
+    skipErrors
+  ) {
     super(anchorsGlobal, anchorsAllowed, skipErrors);
     this.mergeSchemas = mergeSchemas;
   }
 }
 
-export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new SchemaRefOptions()) {
+export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions()) {
   if (!isObjectClass(refschema))
     return { id: baseUri, schema: refschema };
 
