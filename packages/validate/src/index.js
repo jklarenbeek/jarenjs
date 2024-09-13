@@ -28,7 +28,7 @@ export {
 
 const isBrowser = typeof window !== 'undefined';
 
-const performance = isBrowser
+const performance = (() => isBrowser
   // eslint-disable-next-line no-undef
   ? window.performance
   : {
@@ -39,7 +39,7 @@ const performance = isBrowser
       const end = ps.hrtime(start);
       return Math.round((end[0] * 1000) + (end[1] / 1000000));
     },
-  };
+  })();
 
 class ValidationError {
   constructor(obj, key, expected, dataKey, value, rest) {
