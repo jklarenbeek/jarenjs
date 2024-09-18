@@ -4,7 +4,7 @@ import * as assert from '@jaren/tools/assert';
 import {
   storeSchemaIdsInMap,
   resolveRefSchemaShallow
-} from '../src/traverse.js';
+} from '../../packages/validate/src/traverse.js';
 
 describe('Schema Traversal', function () {
   const rootSchema = {

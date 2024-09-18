@@ -25,7 +25,11 @@ export function isArrayish(data) {
  * @param {Array|Set} arr - The input array or Set.
  * @param {Array|undefined} [def=undefined] - The default value to return if the input is neither an array nor a Set.
  * @returns {Array|undefined} A new array with unique elements, or the default value if the input is not an array or Set.
- */export function getUniqueArray(arr, def = undefined) {
+ */
+export function getUniqueArray(arr, def = undefined) {
+  if (arr == null)
+    return def;
+
   return arr.constructor === Array
     ? arr.filter((el, index, a) => index === a.indexOf(el))
     : arr.constructor === Set
@@ -39,8 +43,9 @@ export function isArrayish(data) {
  * @returns {boolean} True if all elements are unique, false otherwise.
  */
 export function isUniqueArray(arr) {
-  const len = arr.length;
-  return getUniqueArray(arr).length === len;
+  const unique = getUniqueArray(arr);
+  return unique != null
+    && unique.length == arr.length;
 }
 
 /**
