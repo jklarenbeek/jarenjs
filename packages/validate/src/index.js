@@ -280,7 +280,8 @@ export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
     schema,
     origin,
     opts.formats,
-    opts.validation);
+    opts.validation,
+    opts.traverse);
 
   return {
     validate: (data) => root.validate(data),
