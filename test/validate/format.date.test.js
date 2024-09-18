@@ -16,31 +16,6 @@ registerFormatCompilers(formats.dateTimeFormats);
 describe('Schema Date Formats', function () {
 
   describe('#formatDateTime()', function () {
-    it('should validate format: \'date\',  a RFC3339 date string', function () {
-      const root = compileSchemaValidator({ format: 'date' });
-
-      assert.isTrue(root.validate(undefined), 'undefined is true');
-      assert.isTrue(root.validate(null), 'null is true');
-      assert.isTrue(root.validate('1963-06-19'), 'a valid date string');
-      assert.isFalse(root.validate('1963-6-19'), 'missing month digit');
-      assert.isFalse(root.validate('06/19/1963'), 'a different valid date string');
-      // assert.isFalse(root.validate('06/19/1963'), 'an invalid date string');
-      assert.isFalse(root.validate('2013-350'), 'only RFC3339 not all of ISO 8601 are valid');
-    });
-    it('should validate format: \'time\', a RFC3339 date string', function () {
-      const root = compileSchemaValidator({ format: 'time' });
-
-      assert.isTrue(root.validate(undefined), 'undefined is true');
-      assert.isTrue(root.validate(null), 'null is true');
-      assert.isTrue(root.validate('08:30:06Z'), 'a valid time string');
-      assert.isTrue(root.validate('08:30:06.283185Z'), 'a valid time string with milliseconds');
-      assert.isTrue(root.validate('08:30:06+01:00'), 'a valid time string with plus offset');
-      assert.isTrue(root.validate('08:30:06.123+01:00'), 'a valid time string with millseconds and plus offset');
-      assert.isTrue(root.validate('08:30:06-01:00'), 'a valid time string with min offset');
-      assert.isFalse(root.validate('08:30:06'), 'an invalid time string without Z');
-      assert.isFalse(root.validate('08:30:06 PST'), 'an invalid time string');
-      assert.isFalse(root.validate('01:01:01,1111'), 'only RFC3339 not all of ISO 8601 are valid');
-    });
     it('should validate format: \'date-time\', a RFC3339 date string', function () {
       const root = compileSchemaValidator({ format: 'date-time' });
 
@@ -142,6 +117,37 @@ describe('Schema Date Formats', function () {
       assert.isFalse(root.validate(new Date(Date.parse('1974-02-12T05:33:24Z'))), 'an invalid datetype under the minimum');
       assert.isFalse(root.validate('1984-03-02T16:15:14Z'), 'an invalid datetime above the maximum');
       assert.isFalse(root.validate(new Date(Date.parse('1984-03-02T16:15:14Z'))), 'an invalid datetype above the maximum');
+    });
+  });
+
+  describe('#formatDate()', function () {
+    it('should validate format: \'date\',  a RFC3339 date string', function () {
+      const root = compileSchemaValidator({ format: 'date' });
+
+      assert.isTrue(root.validate(undefined), 'undefined is true');
+      assert.isTrue(root.validate(null), 'null is true');
+      assert.isTrue(root.validate('1963-06-19'), 'a valid date string');
+      assert.isFalse(root.validate('1963-6-19'), 'missing month digit');
+      assert.isFalse(root.validate('06/19/1963'), 'a different valid date string');
+      // assert.isFalse(root.validate('06/19/1963'), 'an invalid date string');
+      assert.isFalse(root.validate('2013-350'), 'only RFC3339 not all of ISO 8601 are valid');
+    });
+  });
+
+  describe('#formatTime()', function () {
+    it('should validate format: \'time\', a RFC3339 date string', function () {
+      const root = compileSchemaValidator({ format: 'time' });
+
+      assert.isTrue(root.validate(undefined), 'undefined is true');
+      assert.isTrue(root.validate(null), 'null is true');
+      assert.isTrue(root.validate('08:30:06Z'), 'a valid time string');
+      assert.isTrue(root.validate('08:30:06.283185Z'), 'a valid time string with milliseconds');
+      assert.isTrue(root.validate('08:30:06+01:00'), 'a valid time string with plus offset');
+      assert.isTrue(root.validate('08:30:06.123+01:00'), 'a valid time string with millseconds and plus offset');
+      assert.isTrue(root.validate('08:30:06-01:00'), 'a valid time string with min offset');
+      assert.isFalse(root.validate('08:30:06'), 'an invalid time string without Z');
+      assert.isFalse(root.validate('08:30:06 PST'), 'an invalid time string');
+      assert.isFalse(root.validate('01:01:01,1111'), 'only RFC3339 not all of ISO 8601 are valid');
     });
   });
 
