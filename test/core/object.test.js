@@ -1,6 +1,7 @@
-import { equalsDeep } from './object.js';
 import { describe, it } from 'node:test';
 import * as assert from '@jaren/tools/assert';
+
+import { equalsDeep } from '@jaren/core/object';
 
 describe('equalsDeep', () => {
 

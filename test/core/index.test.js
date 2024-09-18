@@ -1,6 +1,7 @@
-import { isFn } from './index.js';
 import { describe, it } from 'node:test';
 import * as assert from '@jaren/tools/assert';
+
+import { isFn } from '@jaren/core';
 
 describe('isFn', () => {
 
