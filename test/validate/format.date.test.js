@@ -4,12 +4,15 @@ import * as assert from '@jaren/tools/assert';
 
 import {
   compileSchemaValidator,
-  registerFormatCompilers
+  registerFormatCompilers,
+  ValidatorOptions
 } from '@jaren/validate';
 
 import * as formats from '@jaren/formats';
 
-registerFormatCompilers(formats.dateTimeFormats);
+const options = new ValidatorOptions(
+  registerFormatCompilers({}, formats.dateTimeFormats)
+);
 
 // https://json-schema.org/understanding-json-schema/reference/string.html
 
@@ -17,7 +20,9 @@ describe('Schema Date Formats', function () {
 
   describe('#formatDateTime()', function () {
     it('should validate format: \'date-time\', a RFC3339 date string', function () {
-      const root = compileSchemaValidator({ format: 'date-time' });
+      const root = compileSchemaValidator({
+        format: 'date-time'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -37,7 +42,10 @@ describe('Schema Date Formats', function () {
       assert.isFalse(root.validate('2013-350T01:01:01'), 'only RFC3339 not all of ISO 8601 are valid');
     });
     it('should validate format: \'date-time\', formatMinimum', function () {
-      const root = compileSchemaValidator({ format: 'date-time', formatMinimum: '1975-01-17T09:30:02Z' });
+      const root = compileSchemaValidator({
+        format: 'date-time',
+        formatMinimum: '1975-01-17T09:30:02Z'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -53,7 +61,10 @@ describe('Schema Date Formats', function () {
       assert.isFalse(root.validate(new Date(Date.parse('1974-02-12T05:33:24Z'))), 'a datetime datetype which is lesser then the minimum');
     });
     it('should validate format: \'date-time\', formatExclusiveMinimum', function () {
-      const root = compileSchemaValidator({ format: 'date-time', formatExclusiveMinimum: '1975-01-17T09:30:02Z' });
+      const root = compileSchemaValidator({
+        format: 'date-time',
+        formatExclusiveMinimum: '1975-01-17T09:30:02Z'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -69,7 +80,10 @@ describe('Schema Date Formats', function () {
       assert.isFalse(root.validate(new Date(Date.parse('1974-02-12T05:33:24Z'))), 'a datetype which is lesser then the minimum');
     });
     it('should validate format: \'date-time\', formatMaximum', function () {
-      const root = compileSchemaValidator({ format: 'date-time', formatMaximum: '1975-01-17T09:30:02Z' });
+      const root = compileSchemaValidator({
+        format: 'date-time',
+        formatMaximum: '1975-01-17T09:30:02Z'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -85,7 +99,10 @@ describe('Schema Date Formats', function () {
       assert.isTrue(root.validate(new Date(Date.parse('1974-02-12T05:33:24Z'))), 'a valid datetype under the maximum');
     });
     it('should validate format: \'date-time\', formatExclusiveMaximum', function () {
-      const root = compileSchemaValidator({ format: 'date-time', formatExclusiveMaximum: '1975-01-17T09:30:02Z' });
+      const root = compileSchemaValidator({
+        format: 'date-time',
+        formatExclusiveMaximum: '1975-01-17T09:30:02Z'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -101,7 +118,11 @@ describe('Schema Date Formats', function () {
       assert.isTrue(root.validate(new Date(Date.parse('1974-02-12T05:33:24Z'))), 'a datetype which is lesser then the maximum');
     });
     it('should validate format: \'date-time\', between minimum and maximum', function () {
-      const root = compileSchemaValidator({ format: 'date-time', formatMinimum: '1975-01-17T09:30:02Z', formatMaximum: '1981-10-01T15:22:45Z' });
+      const root = compileSchemaValidator({
+        format: 'date-time',
+        formatMinimum: '1975-01-17T09:30:02Z',
+        formatMaximum: '1981-10-01T15:22:45Z'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -122,7 +143,9 @@ describe('Schema Date Formats', function () {
 
   describe('#formatDate()', function () {
     it('should validate format: \'date\',  a RFC3339 date string', function () {
-      const root = compileSchemaValidator({ format: 'date' });
+      const root = compileSchemaValidator({
+        format: 'date'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -136,7 +159,9 @@ describe('Schema Date Formats', function () {
 
   describe('#formatTime()', function () {
     it('should validate format: \'time\', a RFC3339 date string', function () {
-      const root = compileSchemaValidator({ format: 'time' });
+      const root = compileSchemaValidator({
+        format: 'time'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -150,5 +175,4 @@ describe('Schema Date Formats', function () {
       assert.isFalse(root.validate('01:01:01,1111'), 'only RFC3339 not all of ISO 8601 are valid');
     });
   });
-
 });

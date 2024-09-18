@@ -25,12 +25,15 @@ import {
 
 import {
   compileSchemaValidator,
-  registerFormatCompilers
+  registerFormatCompilers,
+  ValidatorOptions
 } from '@jaren/validate';
 
 import * as formats from '@jaren/formats';
 
-registerFormatCompilers(formats.numberFormats);
+const options = new ValidatorOptions(
+  registerFormatCompilers({}, formats.numberFormats)
+)
 
 // https://json-schema.org/understanding-json-schema/reference/numeric.html
 
@@ -39,7 +42,9 @@ describe('Schema Numeric Formats', function () {
   describe('#formatInteger()', function () {
 
     it('should validate format: \'int8\'', function () {
-      const root = compileSchemaValidator({ format: 'int8' });
+      const root = compileSchemaValidator({
+        format: 'int8'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is valid');
       assert.isTrue(root.validate(-128), 'valid minimum for int8');
@@ -50,7 +55,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(128), 'an invalid maximum for int8');
     });
     it('should validate format: \'uint8\'', function () {
-      const root = compileSchemaValidator({ format: 'uint8' });
+      const root = compileSchemaValidator({
+        format: 'uint8'
+      }, options);
 
       assert.isTrue(root.validate(0), 'valid minimum for uint8');
       assert.isTrue(root.validate(255), 'a valid maximum for uint8');
@@ -60,7 +67,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(256), 'an invalid maximum for uint8');
     });
     it('should validate format: \'int16\'', function () {
-      const root = compileSchemaValidator({ format: 'int16' });
+      const root = compileSchemaValidator({
+        format: 'int16'
+      }, options);
 
       assert.isTrue(root.validate(-32768), 'valid minimum for int16');
       assert.isTrue(root.validate(32767), 'a valid maximum for int16');
@@ -70,7 +79,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(32768), 'an invalid maximum for int16');
     });
     it('should validate format: \'uint16\'', function () {
-      const root = compileSchemaValidator({ format: 'uint16' });
+      const root = compileSchemaValidator({
+        format: 'uint16'
+      }, options);
 
       assert.isTrue(root.validate(0), 'valid minimum for uint16');
       assert.isTrue(root.validate(65535), 'a valid maximum for uint16');
@@ -80,7 +91,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(65536), 'an invalid maximum for uint16');
     });
     it('should validate format: \'int32\'', function () {
-      const root = compileSchemaValidator({ format: 'int32' });
+      const root = compileSchemaValidator({
+        format: 'int32'
+      }, options);
 
       assert.isTrue(root.validate(-2147483648), 'valid minimum for int32');
       assert.isTrue(root.validate(2147483647), 'a valid maximum for int32');
@@ -91,7 +104,9 @@ describe('Schema Numeric Formats', function () {
 
     });
     it('should validate format: \'uint32\'', function () {
-      const root = compileSchemaValidator({ format: 'uint32' });
+      const root = compileSchemaValidator({
+        format: 'uint32'
+      }, options);
 
       assert.isTrue(root.validate(0), 'valid minimum for uint32');
       assert.isTrue(root.validate(4294967295), 'a valid maximum for uint32');
@@ -102,7 +117,9 @@ describe('Schema Numeric Formats', function () {
 
     });
     it('should validate format: \'int64\'', function () {
-      const root = compileSchemaValidator({ format: 'int64' });
+      const root = compileSchemaValidator({
+        format: 'int64'
+      }, options);
 
       assert.isTrue(root.validate(INT64_MIN), 'valid minimum for int64');
       assert.isTrue(root.validate(INT64_MAX), 'a valid maximum for int64');
@@ -112,7 +129,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(INT64_MAX + 1), 'an invalid maximum for int64');
     });
     it('should validate format: \'uint64\'', function () {
-      const root = compileSchemaValidator({ format: 'uint64' });
+      const root = compileSchemaValidator({
+        format: 'uint64'
+      }, options);
 
       assert.isTrue(root.validate(UINT64_MIN), 'valid minimum for uint64');
       assert.isTrue(root.validate(UINT64_MAX), 'a valid maximum for uint64');
@@ -129,7 +148,9 @@ describe('Schema Numeric Formats', function () {
     const PI = 3.14159265358979323846;
 
     it('should validate format: \'float16\'', function () {
-      const root = compileSchemaValidator({ format: 'float16' });
+      const root = compileSchemaValidator({
+        format: 'float16'
+      }, options);
 
       assert.isTrue(root.validate(-FLOAT16_MAX), 'valid minimum for float16');
       assert.isTrue(root.validate(FLOAT16_MIN), 'valid smalles float16');
@@ -140,7 +161,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(Float16_increment(FLOAT16_MAX)), 'an invalid maximum for float16');
     });
     it('should validate format: \'float\' (float32)', function () {
-      const root = compileSchemaValidator({ format: 'float' });
+      const root = compileSchemaValidator({
+        format: 'float'
+      }, options);
 
       assert.isTrue(root.validate(-FLOAT32_MAX), 'valid minimum for float');
       assert.isTrue(root.validate(FLOAT32_MIN), 'valid smalles float');
@@ -151,7 +174,9 @@ describe('Schema Numeric Formats', function () {
       assert.isFalse(root.validate(Float32_increment(FLOAT32_MAX)), 'an invalid maximum for float');
     });
     it('should validate format: \'double\' (float64)', function () {
-      const root = compileSchemaValidator({ format: 'double' });
+      const root = compileSchemaValidator({
+        format: 'double'
+      }, options);
 
       assert.isTrue(root.validate(-FLOAT64_MAX), 'valid minimum for double');
       assert.isTrue(root.validate(FLOAT64_MIN), 'valid tiny for double');

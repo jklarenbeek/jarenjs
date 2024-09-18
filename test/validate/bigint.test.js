@@ -25,12 +25,7 @@ import {
 
 import {
   compileSchemaValidator,
-  registerFormatCompilers
 } from '@jaren/validate';
-
-import * as formats from '@jaren/formats';
-
-registerFormatCompilers(formats.numberFormats);
 
 // https://json-schema.org/understanding-json-schema/reference/numeric.html
 

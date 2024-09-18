@@ -3,13 +3,15 @@ import * as assert from '@jaren/tools/assert';
 
 import {
   compileSchemaValidator,
-  registerFormatCompilers
+  registerFormatCompilers,
+  ValidatorOptions,
 } from '@jaren/validate';
 
 import * as formats from '@jaren/formats';
 
-registerFormatCompilers(formats.stringFormats);
-registerFormatCompilers(formats.dateTimeFormats);
+const formatValidators = {};
+registerFormatCompilers(formatValidators, formats.stringFormats);
+registerFormatCompilers(formatValidators, formats.dateTimeFormats);
 
 // from: https://json-schema.org/learn/miscellaneous-examples#conditional-validation-with-dependentrequired
 
@@ -292,7 +294,7 @@ describe('Schema Complex Examples', function () {
         },
       };
 
-      const fstabSchema = {
+      const root = compileSchemaValidator({
         $id: 'https://example.com/fstab',
         type: 'object',
         required: ['/'],
@@ -303,9 +305,9 @@ describe('Schema Complex Examples', function () {
           '^(/[^/]+)+$': { $ref: 'https://example.com/entry-schema' },
         },
         additionalProperties: false,
-      };
-
-      const root = compileSchemaValidator(fstabSchema, [entrySchema]);
+      },
+        new ValidatorOptions(formatValidators, [entrySchema])
+      );
 
       assert.isTrue(root.validate({
         '/': {
@@ -477,7 +479,12 @@ describe('Schema Complex Examples', function () {
         required: ['brand', 'model', 'processor', 'ramSize'],
       };
 
-      const root = compileSchemaValidator(deviceSchema, [smartphoneSchema, laptopSchema]);
+      const root = compileSchemaValidator(
+        deviceSchema,
+        new ValidatorOptions(
+          formatValidators,
+          [smartphoneSchema, laptopSchema])
+      );
 
       assert.isTrue(root.validate({
         deviceType: 'smartphone',
@@ -610,7 +617,7 @@ describe('Schema Complex Examples', function () {
             format: 'date',
           },
         },
-      });
+      }, new ValidatorOptions(formatValidators));
 
       assert.isTrue(root.validate({
         title: 'Software Engineer',
@@ -656,7 +663,7 @@ describe('Schema Complex Examples', function () {
             additionalItems: false,
           },
         },
-      });
+      }, new ValidatorOptions(formatValidators));
 
       assert.isTrue(root.validate({
         title: 'Sample Movie',
@@ -703,7 +710,10 @@ describe('Schema Complex Examples', function () {
     };
 
     it('should validate a user profile', function () {
-      const root = compileSchemaValidator(userProfileSchema);
+      const root = compileSchemaValidator(
+        userProfileSchema,
+        new ValidatorOptions(formatValidators),
+      );
 
       assert.isTrue(root.validate({
         username: 'user123',
@@ -742,7 +752,7 @@ describe('Schema Complex Examples', function () {
             },
           },
         },
-      }, [userProfileSchema]);
+      }, new ValidatorOptions(formatValidators, [userProfileSchema]));
 
       assert.isTrue(root.validate({
         title: 'New Blog Post',
@@ -833,7 +843,7 @@ describe('Schema Complex Examples', function () {
             $ref: 'https://example.com/geographical-location.schema.json',
           },
         },
-      }, [geoLocationSchema]);
+      }, new ValidatorOptions(undefined, [geoLocationSchema]));
 
 
       assert.isTrue(root.validate({
@@ -885,7 +895,7 @@ describe('Schema Complex Examples', function () {
             $ref: 'https://example.com/user-profile.schema.json',
           },
         },
-      }, [userProfileSchema]);
+      }, new ValidatorOptions(formatValidators, [userProfileSchema]));
 
       assert.isTrue(root.validate({
         patientName: 'Jane Doe',

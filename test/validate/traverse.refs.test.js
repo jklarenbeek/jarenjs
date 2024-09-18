@@ -3,7 +3,8 @@ import * as assert from '@jaren/tools/assert';
 
 import {
   compileSchemaValidator,
-  registerFormatCompilers
+  registerFormatCompilers,
+  ValidatorOptions
 } from '@jaren/validate';
 
 import {
@@ -12,16 +13,23 @@ import {
 
 import * as formats from '@jaren/formats';
 
-registerFormatCompilers(formats.stringFormats);
+const formatValidators = registerFormatCompilers({}, formats.stringFormats);
 
 const defaultSchema = getSchemaDraftByVersion(7);
+
+const options = new ValidatorOptions(
+  formatValidators,
+  defaultSchema.schema,
+);
 
 describe('Schema References', function () {
   describe('#refIds()', function () {
     it.skip('should show invalid use of fragments in location-independent $id', function () {
       // TODO: not sure what is going wrong here when I added a validation pattern to $id
       // in draft-7. Its not really important!? so we leave it for later.
-      const root = compileSchemaValidator({ $ref: defaultSchema.draft }, defaultSchema.schema);
+      const root = compileSchemaValidator({
+        $ref: defaultSchema.draft
+      }, options);
 
       assert.isFalse(root.validate({
         $ref: '#foo',
@@ -98,7 +106,9 @@ describe('Schema References', function () {
     });
 
     it('should show valid use of empty fragments in location-independent $id', function () {
-      const root = compileSchemaValidator({ $ref: defaultSchema.draft }, defaultSchema.schema);
+      const root = compileSchemaValidator({
+        $ref: defaultSchema.draft
+      }, options);
 
       assert.isTrue(root.validate({
         $ref: 'http://localhost:1234/bar',
@@ -128,7 +138,9 @@ describe('Schema References', function () {
     });
 
     it('should show that unnormalized $ids are allowed but discouraged', function () {
-      const root = compileSchemaValidator({ $ref: defaultSchema.draft }, defaultSchema.schema);
+      const root = compileSchemaValidator({
+        $ref: defaultSchema.draft
+      }, options);
 
       assert.isTrue(root.validate({
         $ref: 'http://localhost:1234/foo/baz',
@@ -514,8 +526,15 @@ describe('Schema References', function () {
       baseUriChangeFolderInSubschema,
     ];
 
+    const includeOptions = new ValidatorOptions(
+      formatValidators,
+      includeSchemas,
+    );
+
     it('should show remote ref, containing refs itself', function () {
-      const root = compileSchemaValidator({ $ref: defaultSchema.draft }, defaultSchema.schema);
+      const root = compileSchemaValidator({
+        $ref: defaultSchema.draft
+      }, options);
 
       assert.isTrue(root.validate({ minLength: 1 }), 'remote ref valid');
       assert.isFalse(root.validate({ minLength: -1 }), 'remote ref invalid');
@@ -523,7 +542,9 @@ describe('Schema References', function () {
     });
 
     it('should validate a remote ref', function () {
-      const root = compileSchemaValidator({ $ref: '/integer.json' }, includeSchemas);
+      const root = compileSchemaValidator({
+        $ref: '/integer.json'
+      }, includeOptions);
 
       assert.isTrue(root.validate(1), 'remote ref valid');
       assert.isFalse(root.validate('a'), 'remote ref invalid');
@@ -531,7 +552,9 @@ describe('Schema References', function () {
     });
 
     it('should validate a fragment within remote ref', function () {
-      const root = compileSchemaValidator({ $ref: '/subSchemas-defs.json#/$defs/integer' }, includeSchemas);
+      const root = compileSchemaValidator({
+        $ref: '/subSchemas-defs.json#/$defs/integer'
+      }, includeOptions);
 
       assert.isTrue(root.validate(1), 'remote fragment valid');
       assert.isFalse(root.validate('a'), 'remote fragment invalid');
@@ -539,7 +562,9 @@ describe('Schema References', function () {
     });
 
     it('should validate a fragment within remote ref to integer', function () {
-      const root = compileSchemaValidator({ $ref: '/subSchemas-defs.json#/$defs/refToInteger' }, includeSchemas);
+      const root = compileSchemaValidator({
+        $ref: '/subSchemas-defs.json#/$defs/refToInteger'
+      }, includeOptions);
 
       assert.isTrue(root.validate(1), 'ref within ref valid');
       assert.isFalse(root.validate('a'), 'ref within ref invalid');
@@ -553,7 +578,7 @@ describe('Schema References', function () {
           $id: 'baseUriChange/',
           items: { $ref: 'folderInteger.json' },
         },
-      }, includeSchemas);
+      }, includeOptions);
 
       assert.isTrue(root.validate([[1]]), 'base URI change ref valid');
       assert.isFalse(root.validate([['a']]), 'base URI change ref invalid');
@@ -572,7 +597,7 @@ describe('Schema References', function () {
             items: { $ref: 'folderInteger.json' },
           },
         },
-      }, includeSchemas);
+      }, includeOptions);
 
       assert.isTrue(root.validate({ list: [1] }), 'number is valid');
       assert.isFalse(root.validate({ list: ['a'] }), 'string is invalid');
@@ -595,7 +620,7 @@ describe('Schema References', function () {
             },
           },
         },
-      }, includeSchemas);
+      }, includeOptions);
 
       assert.isTrue(root.validate({ list: [1] }), 'number is valid');
       assert.isFalse(root.validate({ list: ['a'] }), 'string is invalid');
@@ -609,7 +634,7 @@ describe('Schema References', function () {
         properties: {
           name: { $ref: 'name-defs.json#/$defs/orNull' },
         },
-      }, includeSchemas);
+      }, includeOptions);
 
       assert.isTrue(root.validate({ name: 'foo' }), 'string is valid');
       assert.isTrue(root.validate({ name: null }), 'null is valid');

@@ -80,16 +80,19 @@ class ValidationRoot {
     return obj;
   }
 
-  constructor(schemas, schema, origin, opts = new ValidationOptions()) {
+  constructor(schemas, schema, origin, formats, opts = new ValidationOptions()) {
     this._options = opts;
     this._schemas = schemas;
     this._rootOrigin = origin;
+    this._formats = formats;
     this._objects = new Map();
     this._errors = [];
     this._firstSchema = ValidationRoot._createObject(this, origin, schema);
   }
 
   get options() { return this._options; }
+
+  get formats() { return this._formats; }
 
   createObject(path, schema) {
     return ValidationRoot._createObject(this, path, schema);
@@ -193,6 +196,10 @@ class ValidationObject {
     return this._root.options;
   }
 
+  get formats() {
+    return this._root.formats;
+  }
+  
 /**
  * Compiles a schema validation error handler
  * @param {any} expected - anything that is expected by this handler
@@ -236,34 +243,43 @@ class ValidationObject {
   }
 }
 
-export class ValidatorOptions extends ValidationOptions {
+export class ValidatorOptions {
   constructor(
     formats = {},
     schemas = [],
-    origin,
-    mergeSchemas,
-    anchorsGlobal,
-    anchorsAllowed,
-    skipErrors
+    validation = new ValidationOptions()
   ) {
-    super(origin, mergeSchemas, anchorsGlobal, anchorsAllowed, skipErrors);
     this.formats = formats;
     this.schemas = schemas;
+    this.validation = validation;
   }
 }
 
-export function compileSchemaValidator(schema, referenceSchemas = [], opts = new ValidatorOptions()) {
+export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
   // initialize schema map for all ids and refs
   const schemas = new Map();
-  const origin = storeSchemaIdsInMap(schemas, opts.origin, schema, opts);
+  const origin = storeSchemaIdsInMap(
+    schemas,
+    opts.validation.origin,
+    schema,
+    opts.validation);
 
   // Then add the other reference schemas
-  referenceSchemas.forEach(ref => storeSchemaIdsInMap(schemas, origin, ref, opts));
+  opts.schemas.forEach(ref => storeSchemaIdsInMap(
+    schemas,
+    origin,
+    ref,
+    opts.validation));
 
-  restoreSchemaRefsInMap(schemas, opts);
+  restoreSchemaRefsInMap(schemas, opts.validation);
 
   // create a new schema root
-  const root = new ValidationRoot(schemas, schema, origin, opts);
+  const root = new ValidationRoot(
+    schemas,
+    schema,
+    origin,
+    opts.formats,
+    opts.validation);
 
   return {
     validate: (data) => root.validate(data),

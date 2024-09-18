@@ -4,12 +4,15 @@ import * as assert from '@jaren/tools/assert';
 
 import {
   compileSchemaValidator,
-  registerFormatCompilers
+  registerFormatCompilers,
+  ValidatorOptions
 } from '@jaren/validate';
 
 import * as formats from '@jaren/formats';
 
-registerFormatCompilers(formats.stringFormats);
+const options = new ValidatorOptions(
+  registerFormatCompilers({}, formats.stringFormats)
+);
 
 // https://json-schema.org/understanding-json-schema/reference/string.html
 
@@ -17,11 +20,15 @@ describe('Schema String Formats', function () {
 
   describe('#formatBasic()', function () {
     it('should throw an error when the format is unknown', function () {
-      assert.throws(() => compileSchemaValidator({ format: 'something-invalid' }));
+      assert.throws(() => compileSchemaValidator({
+        format: 'something-invalid'
+      }, options));
     });
 
     it('should validate format: \'alpha\'', function () {
-      const root = compileSchemaValidator({ format: 'alpha' });
+      const root = compileSchemaValidator({
+        format: 'alpha'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'ignore undefined');
       assert.isTrue(root.validate(null), 'ignore null');
@@ -35,7 +42,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('bit-SOCIAL'), 'an invalid mixed string with one symbol');
     });
     it('should validate format: \'alphanumeric\'', function () {
-      const root = compileSchemaValidator({ format: 'alphanumeric' });
+      const root = compileSchemaValidator({
+        format: 'alphanumeric'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -45,7 +54,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('bit-SOCIAL'), 'an invalid mixed string with one symbol');
     });
     it('should validate format: \'identifier\'', function () {
-      const root = compileSchemaValidator({ format: 'identifier' });
+      const root = compileSchemaValidator({ 
+        format: 'identifier'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -59,7 +70,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('bit SOCIAL'), 'an invalid mixed string with one symbol');
     });
     it('should validate format: \'html-identifier\'', function () {
-      const root = compileSchemaValidator({ format: 'html-identifier' });
+      const root = compileSchemaValidator({
+        format: 'html-identifier'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -73,7 +86,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('bit SOCIAL'), 'an invalid mixed string with one symbol');
     });
     it('should validate format: \'css-identifier\'', function () {
-      const root = compileSchemaValidator({ format: 'css-identifier' });
+      const root = compileSchemaValidator({
+        format: 'css-identifier'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -87,7 +102,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('bit SOCIAL'), 'an invalid mixed string with one symbol');
     });
     it('should validate format: \'color\'', function () {
-      const root = compileSchemaValidator({ format: 'color' });
+      const root = compileSchemaValidator({
+        format: 'color'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -99,7 +116,9 @@ describe('Schema String Formats', function () {
 
     });
     it('should validate format: \'hexadecimal\'', function () {
-      const root = compileSchemaValidator({ format: 'hexadecimal' });
+      const root = compileSchemaValidator({
+        format: 'hexadecimal'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -108,7 +127,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('ABGDE'), 'a invalid G in string');
     });
     it('should validate format: \'numeric\'', function () {
-      const root = compileSchemaValidator({ format: 'numeric' });
+      const root = compileSchemaValidator({
+        format: 'numeric'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -118,7 +139,9 @@ describe('Schema String Formats', function () {
       assert.isTrue(root.validate('1234567890'), 'a invalid ABC string');
     });
     it('should validate format: \'uppercase\'', function () {
-      const root = compileSchemaValidator({ format: 'uppercase' });
+      const root = compileSchemaValidator({
+        format: 'uppercase'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -127,7 +150,9 @@ describe('Schema String Formats', function () {
       assert.isTrue(root.validate('123-ABC/12'), 'a valid ABC string with symbols');
     });
     it('should validate format: \'lowercase\'', function () {
-      const root = compileSchemaValidator({ format: 'lowercase' });
+      const root = compileSchemaValidator({
+        format: 'lowercase'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -136,7 +161,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('123-ABC/12'), 'a valid ABC string with symbols');
     });
     it('should validate format: \'regex\'', function () {
-      const root = compileSchemaValidator({ format: 'regex' });
+      const root = compileSchemaValidator({
+        format: 'regex'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -147,7 +174,9 @@ describe('Schema String Formats', function () {
 
   describe('#formatUuid()', function () {
     it('should validate format: \'uuid\'', function () {
-      const root = compileSchemaValidator({ format: 'uuid' });
+      const root = compileSchemaValidator({
+        format: 'uuid'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -155,7 +184,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('G2034ABC-FAFA-4AAA-8ABA-FEDCBA987654'), 'an invalid uuid');
     });
     it('should validate format: \'guid\'', function () {
-      const root = compileSchemaValidator({ format: 'uuid' });
+      const root = compileSchemaValidator({
+        format: 'uuid'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -166,7 +197,9 @@ describe('Schema String Formats', function () {
 
   describe('#formatRef()', function () {
     it('should validate format: \'ipv4\'', function () {
-      const root = compileSchemaValidator({ format: 'ipv4' });
+      const root = compileSchemaValidator({
+        format: 'ipv4'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -178,7 +211,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('0x7f000001'), 'an IP address as an integer');
     });
     it('should validate format: \'ipv6\'', function () {
-      const root = compileSchemaValidator({ format: 'ipv6' });
+      const root = compileSchemaValidator({
+        format: 'ipv6'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -188,7 +223,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('::laptop'), 'an IPv6 address containing illegal characters');
     });
     it('should validate format: \'hostname\'', function () {
-      const root = compileSchemaValidator({ format: 'hostname' });
+      const root = compileSchemaValidator({
+        format: 'hostname'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -199,7 +236,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('a-vvvvvvvvvvvvvvvveeeeeeeeeeeeeeeerrrrrrrrrrrrrrrryyyyyyyyyyyyyyyy-long-host-name-component'), 'a host name with a component too long');
     });
     it('should validate format: \'idn-hostname\'', function () {
-      const root = compileSchemaValidator({ format: 'idn-hostname' });
+      const root = compileSchemaValidator({
+        format: 'idn-hostname'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -213,17 +252,23 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실실례례테스트례례례례례례례례례례례례례례례례례테스트례례례례례례례례례례례례례례례례례례례테스트례례례례례례례례례례례례테스트례례실례.테스트'), 'a host name with a component too long');
     });
     it('should validate format: \'url\'', function () {
-      const root = compileSchemaValidator({ format: 'url' });
+      const root = compileSchemaValidator({
+        format: 'url'
+      }, options);
 
       assert.isTrue(root.validate('http://example.com/'));
     });
     it('should validate format: \'url--full\'', function () {
-      const root = compileSchemaValidator({ format: 'url--full' });
+      const root = compileSchemaValidator({
+        format: 'url--full'
+      }, options);
 
       assert.isTrue(root.validate('http://example.com/'));
     });
     it('should validate format: \'uri\'', function () {
-      const root = compileSchemaValidator({ format: 'uri' });
+      const root = compileSchemaValidator({
+        format: 'uri'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -249,7 +294,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate(':// should fail'), 'an invalid URI with spaces and missing scheme');
     });
     it('should validate format: \'uri--full\'', function () {
-      const root = compileSchemaValidator({ format: 'uri--full' });
+      const root = compileSchemaValidator({
+        format: 'uri--full'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -275,7 +322,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate(':// should fail'), 'an invalid URI with spaces and missing scheme');
     });
     it('should validate format: \'uri-reference\'', function () {
-      const root = compileSchemaValidator({ format: 'uri-reference' });
+      const root = compileSchemaValidator({
+        format: 'uri-reference'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -288,7 +337,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('#frag\\ment'), 'an invalid URI fragment');
     });
     it('should validate format: \'uri-reference--full\'', function () {
-      const root = compileSchemaValidator({ format: 'uri-reference' });
+      const root = compileSchemaValidator({
+        format: 'uri-reference'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -301,7 +352,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('#frag\\ment'), 'an invalid URI fragment');
     });
     it('should validate format: \'uri-template\'', function () {
-      const root = compileSchemaValidator({ format: 'uri-template' });
+      const root = compileSchemaValidator({
+        format: 'uri-template'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -311,7 +364,9 @@ describe('Schema String Formats', function () {
       assert.isTrue(root.validate('dictionary/{term:1}/{term}'), 'a valid relative uri-template');
     });
     it('should validate format: \'iri\'', function () {
-      const root = compileSchemaValidator({ format: 'iri' });
+      const root = compileSchemaValidator({
+        format: 'iri'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -327,7 +382,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('http:// ƒøø.com'), 'an invalid IRI by space in hostname');
     });
     it('should validate format: \'iri-reference\'', function () {
-      const root = compileSchemaValidator({ format: 'iri-reference' });
+      const root = compileSchemaValidator({
+        format: 'iri-reference'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -340,7 +397,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('#ƒräg\\mênt'), 'an invalid IRI fragment');
     });
     it('should validate format: \'email\'', function () {
-      const root = compileSchemaValidator({ format: 'email' });
+      const root = compileSchemaValidator({
+        format: 'email'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -348,7 +407,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('2962'), 'an invalid email address');
     });
     it('should validate format: \'email--full\'', function () {
-      const root = compileSchemaValidator({ format: 'email--full' });
+      const root = compileSchemaValidator({
+        format: 'email--full'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -356,7 +417,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('2962'), 'an invalid email address');
     });
     it('should validate format: \'idn-email\'', function () {
-      const root = compileSchemaValidator({ format: 'idn-email' });
+      const root = compileSchemaValidator({
+        format: 'idn-email'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -368,7 +431,9 @@ describe('Schema String Formats', function () {
 
   describe('#formatPointer()', function () {
     it('should validate format: \'json-pointer\'', function () {
-      const root = compileSchemaValidator({ format: 'json-pointer' });
+      const root = compileSchemaValidator({
+        format: 'json-pointer'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -406,7 +471,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('a/a'), 'not a valid JSON-pointer (isn\'t empty nor starts with /) #3');
     });
     it('should validate format: \'relative-json-pointer\'', function () {
-      const root = compileSchemaValidator({ format: 'relative-json-pointer' });
+      const root = compileSchemaValidator({
+        format: 'relative-json-pointer'
+      }, options);
 
       assert.isTrue(root.validate(undefined), 'undefined is true');
       assert.isTrue(root.validate(null), 'null is true');
@@ -417,7 +484,9 @@ describe('Schema String Formats', function () {
       assert.isFalse(root.validate('/foo/bar'), 'an invalid RJP that is a valid JSON Pointer');
     });
     it('should validate format: \'json-pointer-uri-fragment\'', function () {
-      const root = compileSchemaValidator({ format: 'json-pointer-uri-fragment' });
+      const root = compileSchemaValidator({
+        format: 'json-pointer-uri-fragment'
+      }, options);
       assert.isTrue(root.validate('#/$deps'));
       assert.isFalse(root.validate('#name'));
     });
