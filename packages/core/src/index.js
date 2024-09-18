@@ -59,16 +59,13 @@ export function isBigIntType(data) {
 //#endregion
 
 //#region Scalar Getters
-export function getScalarNormalised(value, defaultValue = undefined, nullable = false) {
-  return value == null
-    ? nullable
-      ? value
-      : defaultValue
-    : isScalarType(value)
-      ? value
-      : defaultValue;
-}
-
+/**
+ * Returns the string type of the input object if it is a string; otherwise, returns the default value.
+ * 
+ * @param {any} obj - The input object to check its type.
+ * @param {string|undefined} [def=undefined] - The default value to return if the input object is not a string.
+ * @returns {string} The string type of the input object or the default value.
+ */
 export function getStringType(obj, def = undefined) {
   return isStringType(obj) ? obj : def;
 }
@@ -117,16 +114,29 @@ export function getBigIntType(obj, def = undefined) {
 //#endregion
 
 //#region Object Tests
+/**
+ * Checks if the input data is null.
+ *
+ * @param {any} data - The data to be checked.
+ * @returns {boolean} - Returns true if the data is null, otherwise false.
+ */
 export function isNullValue(data) {
   return data === null;
 }
 
+/**
+ * Checks if the given data is an object of a specific class.
+ *
+ * @param {any} data - The data to check.
+ * @param {Function} type - The class type to compare against.
+ * @returns {boolean} Returns true if the data is an object of the specified class; otherwise, false.
+ */
 export function isObjectOfClass(data, type) {
   return data != null && data.constructor === type;
 }
 
 /**
- * @brief test if data is object literal
+ * @brief test if data is an object literal
  * @param {*} data the data to test
  * @returns boolean
  */
@@ -134,6 +144,12 @@ export function isObjectClass(data) {
   return isObjectOfClass(data, Object);
 }
 
+/**
+ * Checks if the input data is of type Map.
+ *
+ * @param {any} data - The data to be checked.
+ * @returns {boolean} - Returns true if the data is an instance of the Map class, otherwise false.
+ */
 export function isMapClass(data) {
   return isObjectOfClass(data, Map);
 }
@@ -149,10 +165,22 @@ export function isObjectType(data) {
     && data.constructor !== Array;
 }
 
+/**
+ * Checks if the input data is of type Array.
+ *
+ * @param {any} data - The data to be checked.
+ * @returns {boolean} - Returns true if the data is an instance of the Array class, otherwise false.
+ */
 export function isArrayClass(data) {
   return isObjectOfClass(data, Array);
 }
 
+/**
+ * Checks if the input data is of type Set.
+ *
+ * @param {any} data - The data to be checked.
+ * @returns {boolean} - Returns true if the data is an instance of the Set class, otherwise false.
+ */
 export function isSetClass(data) {
   return isObjectOfClass(data, Set);
 }
@@ -176,6 +204,14 @@ export function getArrayClass(obj, def = undefined) {
 }
 //#endregion
 
+/**
+ * Calculates the inclusive and exclusive bounds based on the provided parameters.
+ * 
+ * @param {function} getType - A function to determine the type of the inclusive and exclusive bounds.
+ * @param {number|string|undefined} inclusive - The inclusive bound value.
+ * @param {number|string|boolean|undefined} exclusive - The exclusive bound value.
+ * @returns {Array} An array containing the inclusive and exclusive bounds.
+ */
 export function getInclusiveExclusiveBounds(getType, inclusive, exclusive) {
   const includes = getType(inclusive);
   const excludes = exclusive === true

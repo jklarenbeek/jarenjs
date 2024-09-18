@@ -43,7 +43,7 @@ export function equalsDeep(target, source) {
     for (const [key, value] of target) {
       if (source.has(key) === false)
         return false;
-      if (!equalsDeep(value, source[key]))
+      if (!equalsDeep(value, source.get(key)))
         return false;
     }
     return true;
