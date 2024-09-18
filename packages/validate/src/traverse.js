@@ -255,12 +255,14 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
 
 export class TraverseOptions extends JsonPointerOptions {
   constructor(
+    origin = 'https://github.com/jklarenbeek/jaren',
     mergeSchemas = true,
     anchorsGlobal,
     anchorsAllowed,
     skipErrors
   ) {
     super(anchorsGlobal, anchorsAllowed, skipErrors);
+    this.origin = origin,
     this.mergeSchemas = mergeSchemas;
   }
 }

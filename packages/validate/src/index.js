@@ -26,6 +26,8 @@ export {
   registerFormatCompilers
 } from './format.js';
 
+export { TraverseOptions };
+  
 const isBrowser = typeof window !== 'undefined';
 
 const performance = (() => isBrowser
@@ -53,16 +55,11 @@ class ValidationError {
   }
 }
 
-class ValidationOptions extends TraverseOptions {
+class ValidationOptions {
   constructor(
-    origin = 'https://github.com/jklarenbeek/jaren',
-    mergeSchemas,
-    anchorsGlobal,
-    anchorsAllowed,
-    skipErrors
+    skipErrors = true
   ) {
-    super(mergeSchemas, anchorsGlobal, anchorsAllowed, skipErrors);
-    this.origin = origin;
+    this.skipErrors = skipErrors
   }
 }
 
@@ -80,8 +77,9 @@ class ValidationRoot {
     return obj;
   }
 
-  constructor(schemas, schema, origin, formats, opts = new ValidationOptions()) {
+  constructor(schemas, schema, origin, formats, opts = new ValidationOptions(), traverse = new TraverseOptions) {
     this._options = opts;
+    this._traverse = traverse;
     this._schemas = schemas;
     this._rootOrigin = origin;
     this._formats = formats;
@@ -118,7 +116,8 @@ class ValidationRoot {
 
     const schemas = this._schemas;
     const opts = this._options;
-    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, opts);
+    const traverse = this._traverse;
+    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
     return ValidationRoot._createObject(this, id, root);
   }
 
@@ -247,11 +246,13 @@ export class ValidatorOptions {
   constructor(
     formats = {},
     schemas = [],
-    validation = new ValidationOptions()
+    validation = new ValidationOptions(),
+    traverse = new TraverseOptions(),
   ) {
     this.formats = formats;
     this.schemas = schemas;
     this.validation = validation;
+    this.traverse = traverse;
   }
 }
 
@@ -260,18 +261,18 @@ export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
   const schemas = new Map();
   const origin = storeSchemaIdsInMap(
     schemas,
-    opts.validation.origin,
+    opts.traverse.origin,
     schema,
-    opts.validation);
+    opts.traverse);
 
   // Then add the other reference schemas
   opts.schemas.forEach(ref => storeSchemaIdsInMap(
     schemas,
     origin,
     ref,
-    opts.validation));
+    opts.traverse));
 
-  restoreSchemaRefsInMap(schemas, opts.validation);
+  restoreSchemaRefsInMap(schemas, opts.traverse);
 
   // create a new schema root
   const root = new ValidationRoot(
