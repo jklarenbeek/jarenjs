@@ -1,5 +1,5 @@
 import { describe, it } from 'node:test';
-import * as assert from '@jaren/tools/assert';
+import * as assert from '@jarenjs/tools/assert';
 
 import {
   FLOAT16_MAX,
@@ -14,22 +14,22 @@ import {
   Float64_increment,
   Float16_decrement,
   Float16_increment,
-} from '@jaren/numbers/float';
+} from '@jarenjs/numbers/float';
 
 import {
   INT64_MAX,
   INT64_MIN,
   UINT64_MAX,
   UINT64_MIN,
-} from '@jaren/numbers/integer';
+} from '@jarenjs/numbers/integer';
 
 import {
   compileSchemaValidator,
   registerFormatCompilers,
   ValidatorOptions
-} from '@jaren/validate';
+} from '@jarenjs/validate';
 
-import * as formats from '@jaren/formats';
+import * as formats from '@jarenjs/formats';
 
 const options = new ValidatorOptions(
   registerFormatCompilers({}, formats.numberFormats)

@@ -3,15 +3,15 @@
 import {
   isNumberType,
   getInclusiveExclusiveBounds,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   getNumbishType,
-} from '@jaren/core/number';
+} from '@jarenjs/core/number';
 
 import {
   trueThat,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 function compileNumberMaximum(schemaObj, jsonSchema) {
   const [max, emax] = getInclusiveExclusiveBounds(

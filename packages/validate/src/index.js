@@ -2,7 +2,7 @@
 
 import {
   isObjectClass,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   compileSchemaObject,

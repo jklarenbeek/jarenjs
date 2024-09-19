@@ -2,12 +2,12 @@
 
 import {
   isFn,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   falseThat,
   trueThat,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 import {
   getBoolOrObjectClass,

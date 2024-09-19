@@ -1,5 +1,5 @@
 import { describe, it } from 'node:test';
-import * as assert from '@jaren/tools/assert';
+import * as assert from '@jarenjs/tools/assert';
 
 import {
   FLOAT16_MAX,
@@ -14,18 +14,18 @@ import {
   Float64_increment,
   Float16_decrement,
   Float16_increment,
-} from '@jaren/numbers/float';
+} from '@jarenjs/numbers/float';
 
 import {
   INT64_MAX,
   INT64_MIN,
   UINT64_MAX,
   UINT64_MIN,
-} from '@jaren/numbers/integer';
+} from '@jarenjs/numbers/integer';
 
 import {
   compileSchemaValidator,
-} from '@jaren/validate';
+} from '@jarenjs/validate';
 
 // https://json-schema.org/understanding-json-schema/reference/numeric.html
 

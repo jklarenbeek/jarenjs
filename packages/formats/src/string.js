@@ -3,13 +3,13 @@
 
 import {
   isStringType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   isStringLowerCase,
   isStringUpperCase,
   isStringRegExp,
-} from '@jaren/core/string';
+} from '@jarenjs/core/string';
 
 import {
   isStringUri,
@@ -46,7 +46,7 @@ import {
   isStringBase64,
   isStringCountryAlpha2,
   isStringIBAN,
-} from '@jaren/strings';
+} from '@jarenjs/strings';
 
 function createStringFormatCompiler(formatName, isFormatTest) {
   return function compileStringFormat(schemaObj, jsonSchema) {

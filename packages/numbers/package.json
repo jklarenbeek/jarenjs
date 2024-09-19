@@ -1,5 +1,5 @@
 {
-  "name": "@jaren/numbers",
+  "name": "@jarenjs/numbers",
   "private": true,
   "version": "0.8.1",
   "type": "module",
@@ -8,7 +8,7 @@
   "author": "joham",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jklarenbeek/jaren.git",
+    "url": "https://github.com/jklarenbeek/jarenjs.git",
     "directory": "packages/numbers"
   },
   "license": "MIT",

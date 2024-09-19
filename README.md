@@ -14,11 +14,13 @@ We recommend you clone this repository and install the dependencies with nodejs 
 
 ```bash
 npm install
+npm run build
+npm run cover
 ```
 
-At its current state, we recommend you use the `@jaren/validate` package, which is stable and will not change any of its public interfaces. 
+At its current state, we recommend you use the `@jarenjs/validate` package, which is stable and will not change any of its public interfaces. 
 
-For format support please use the `@jaren/formats` package with it.
+For format support please use the `@jarenjs/formats` package with it.
 
 But for now its recommended you dive into the test folder and try to find your way from there.
 
@@ -344,17 +346,17 @@ For detailed documentation on using Jaren, including API references and advanced
 
 ### 🤓 Javascript Type Extensions
 
-Even though es2017 is becoming pretty cool, `jaren` includes an extensive set of additional extensions to common types found in `@jaren/core`. We have added functionality for Number, String, Date, Object and Array classes including a set of test and getters related to the javascript type system.
+Even though es2017 is becoming pretty cool, `jaren` includes an extensive set of additional extensions to common types found in `@jarenjs/core`. We have added functionality for Number, String, Date, Object and Array classes including a set of test and getters related to the javascript type system.
 
-For object types `@jaren/core` has special functions to manipulate array and objects alike including types like Map. `@jaren/core` also added some additional classes to queue or traverse tree like data structures.
+For object types `@jarenjs/core` has special functions to manipulate array and objects alike including types like Map. `@jarenjs/core` also added some additional classes to queue or traverse tree like data structures.
 
 ### 🛂 String and Regex Extensions
 
-We've added some additional string and regex functionality to the `@jaren/strings` package to make it more powerful and flexible. You will find a lot of functionality to validate your input with. You can do this without using json schema and its formats. It can be really useful in day to day usage like checking for country codes, zip codes, iban numbers, etc. The `@jaren/formats` package exposes all the validation functions for the `@jaren/validate` package if you want to make use of them in a schema kind of way.
+We've added some additional string and regex functionality to the `@jarenjs/strings` package to make it more powerful and flexible. You will find a lot of functionality to validate your input with. You can do this without using json schema and its formats. It can be really useful in day to day usage like checking for country codes, zip codes, iban numbers, etc. The `@jarenjs/formats` package exposes all the validation functions for the `@jarenjs/validate` package if you want to make use of them in a schema kind of way.
 
 ### 🧐Math and Vector classes
 
-There are 4 extensive math classes defined in `@jaren/numbers`; `int32`, `float64`, `vec2i32`, `vec2f64` and `vec3f64`. The Matrix class is not yet supported. `@jaren/numbers` tries to encapsulate and group math functionality as much as possible. This with the idea to help the Javascript Runtime compiler determine what we are looking at. Each class has two types of operator groups; pure and impure. As the name suggests, pure operators are immutable and return a new structure, impure operators operates on the structure itself. The `@jaren/formats` package exposes some of these functions to make them available for the `@jaren/validate` package.
+There are 4 extensive math classes defined in `@jarenjs/numbers`; `int32`, `float64`, `vec2i32`, `vec2f64` and `vec3f64`. The Matrix class is not yet supported. `@jarenjs/numbers` tries to encapsulate and group math functionality as much as possible. This with the idea to help the Javascript Runtime compiler determine what we are looking at. Each class has two types of operator groups; pure and impure. As the name suggests, pure operators are immutable and return a new structure, impure operators operates on the structure itself. The `@jarenjs/formats` package exposes some of these functions to make them available for the `@jarenjs/validate` package.
 
 The `int32` and `float32` classes are mere helper functions to speed up your inner loops as some [benchmarks](https://jsperf.com/math-hypot-vs-math-sqrt/7) suggests. However, these benchmarks are highly [speculative](https://mrale.ph/blog/2014/02/23/the-black-cat-of-microbenchmarks.html) and the results differ greatly between browser versions. I still implemented them for two reasons; 1) sometimes I like to be explicit. 2) sometimes it helps me to remember how stuff works. The `int32` class also implements some complex operators like `sin`, `cos` and others too.
 

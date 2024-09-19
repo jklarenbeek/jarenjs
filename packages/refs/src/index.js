@@ -1,5 +1,5 @@
 //@ts-check
-import { isStringType } from '@jaren/core';
+import { isStringType } from '@jarenjs/core';
 
 import {
   _draft6,

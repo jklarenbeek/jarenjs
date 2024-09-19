@@ -4,11 +4,11 @@ import {
   isBigIntType,
   getBigIntType,
   getInclusiveExclusiveBounds,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   trueThat,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 function compileBigIntMaximum(schemaObj, jsonSchema) {
   const [max, emax] = getInclusiveExclusiveBounds(

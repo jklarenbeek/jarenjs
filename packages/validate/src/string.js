@@ -2,19 +2,19 @@
 
 import {
   isStringType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   getIntishType,
-} from '@jaren/core/number';
+} from '@jarenjs/core/number';
 
 import {
   createRegExp,
-} from '@jaren/core/string';
+} from '@jarenjs/core/string';
 
 import {
   trueThat,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 function compileMinLength(schemaObj, jsonSchema) {
   const min = getIntishType(jsonSchema.minLength) || 0;

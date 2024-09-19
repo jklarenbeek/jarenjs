@@ -12,16 +12,16 @@ import {
   isMapClass,
   isArrayClass,
   isSetClass,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   isRegExpType,
   isStringWhiteSpace,
-} from '@jaren/core/string';
+} from '@jarenjs/core/string';
 
 import {
   isArrayish,
-} from '@jaren/core/array';
+} from '@jarenjs/core/array';
 
 //#region Object
 export function isBoolOrObjectClass(obj) {

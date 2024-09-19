@@ -1,7 +1,7 @@
 import {
   isStringType,
   isFn,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 export function registerFormatCompiler(registered, name, formatCompiler) {
   if (registered[name] == null) {

@@ -3,21 +3,21 @@
 import {
   isObjectType,
   getStringType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   getUniqueArray,
-} from '@jaren/core/array';
+} from '@jarenjs/core/array';
 
 import {
   getBoolishType,
-} from '@jaren/core/number';
+} from '@jarenjs/core/number';
 
 import {
   falseThat,
   trueThat,
   addFunctionToArray,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 import {
   createIsSchemaTypeHandler,

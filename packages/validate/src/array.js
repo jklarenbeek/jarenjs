@@ -3,21 +3,21 @@
 import {
   isArrayClass,
   getObjectType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   getBoolishType,
   getIntishType,
-} from '@jaren/core/number';
+} from '@jarenjs/core/number';
 
 import {
   trueThat,
   falseThat,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 import {
   isUniqueArray,
-} from '@jaren/core/array';
+} from '@jarenjs/core/array';
 
 import {
   getBoolOrObjectClass,

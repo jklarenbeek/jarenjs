@@ -4,19 +4,19 @@ import {
   isObjectClass,
   isArrayClass,
   getObjectType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   getIntishType,
-} from '@jaren/core/number';
+} from '@jarenjs/core/number';
 
 import {
   createRegExp,
-} from '@jaren/core/string';
+} from '@jarenjs/core/string';
 
 import {
   trueThat,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 import {
   isBoolOrObjectClass,
@@ -28,7 +28,7 @@ import {
 
 import {
   includesAll,
-} from '@jaren/core/array';
+} from '@jarenjs/core/array';
 
 //#region Primitives
 function compileMinProperties(schemaObj, jsonSchema) {

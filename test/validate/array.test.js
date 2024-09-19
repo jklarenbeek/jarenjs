@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test';
-import * as assert from '@jaren/tools/assert';
+import * as assert from '@jarenjs/tools/assert';
 
 import {
   compileSchemaValidator,
-} from '@jaren/validate';
+} from '@jarenjs/validate';
 
 // https://json-schema.org/understanding-json-schema/reference/type.html
 

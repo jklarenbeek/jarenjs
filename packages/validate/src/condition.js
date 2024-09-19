@@ -2,7 +2,7 @@
 
 import {
   fallbackFn,
-} from '@jaren/core/function';
+} from '@jarenjs/core/function';
 
 export function compileConditionSchema(schemaObj, jsonSchema) {
   const validateIf = schemaObj.createValidator(jsonSchema.if, 'if');

@@ -2,7 +2,7 @@
 
 import {
   isIntegerType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 export const INT8_MIN = -128;
 export const INT8_MAX = 127;

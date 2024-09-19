@@ -5,20 +5,20 @@ import {
 
 import {
   isBoolishType,
-} from '@jaren/core/number';
+} from '@jarenjs/core/number';
 
 import {
   isObjectClass,
   isStringType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   isStringWhiteSpace,
-} from '@jaren/core/string';
+} from '@jarenjs/core/string';
 
 import {
   isStringHtmlIdentifier,
-} from '@jaren/strings';
+} from '@jarenjs/strings';
 
 
 function encodeJsonPointerKey(key) {

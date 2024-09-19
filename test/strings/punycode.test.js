@@ -1,7 +1,7 @@
 'use strict';
 
 import { describe, it } from 'node:test';
-import * as assert from '@jaren/tools/assert';
+import * as assert from '@jarenjs/tools/assert';
 
 import * as punycode from '../../packages/strings/src/punycode.js';
 

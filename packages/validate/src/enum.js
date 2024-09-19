@@ -2,11 +2,11 @@
 
 import {
   isScalarType,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   equalsDeep,
-} from '@jaren/core/object';
+} from '@jarenjs/core/object';
 
 import {
   getArrayClassMinItems,

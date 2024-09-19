@@ -3,14 +3,14 @@
 import {
   isStringType,
   getInclusiveExclusiveBounds,
-} from '@jaren/core';
+} from '@jarenjs/core';
 
 import {
   isDateType,
   getDateTypeOfDateTimeRFC3339,
   getDateTypeOfDateOnlyRFC3339,
   getDateTypeOfTimeOnlyRFC3339,
-} from '@jaren/core/dates';
+} from '@jarenjs/core/dates';
 
 //#region generalized
 function compileFormatMinimumByType(parseType, schemaObj, jsonSchema) {

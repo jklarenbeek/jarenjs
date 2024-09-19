@@ -1,14 +1,14 @@
 import { describe, it } from 'node:test';
-import * as assert from '@jaren/tools/assert';
+import * as assert from '@jarenjs/tools/assert';
 
 
 import {
   compileSchemaValidator,
   registerFormatCompilers,
   ValidatorOptions
-} from '@jaren/validate';
+} from '@jarenjs/validate';
 
-import * as formats from '@jaren/formats';
+import * as formats from '@jarenjs/formats';
 
 const options = new ValidatorOptions(
   registerFormatCompilers({}, formats.stringFormats)
