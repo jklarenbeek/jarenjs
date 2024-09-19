@@ -27,8 +27,5 @@
     "./number": "./src/number.js",
     "./object": "./src/object.js",
     "./string": "./src/string.js"
-  },
-  "devDependencies": {
-    "esbuild": "^0.23.1"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@jaren/numbers",
-  "private": false,
+  "private": true,
   "version": "0.8.0",
   "type": "module",
   "main": "./src/index.js",
@@ -29,8 +29,5 @@
     "./integer": "./src/integer.js",
     "./int32": "./src/int32.js",
     "./vec2i32": "./src/vec2i32.js"
-  },
-  "scripts": {
-    "test": "node --no-warnings=ExperimentalWarning --test test/validate/*.js"
   }
 }

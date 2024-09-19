@@ -19,11 +19,12 @@
     "./packages/*"
   ],
   "scripts": {
-    "clean": "rimraf --glob './packages/**/dist/*'",
+    "clean": "rimraf --glob ./packages/**/dist/*.{js,map}",
     "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
-    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.js"
+    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.js",
+    "build": "npm run build --workspaces --if-present"
   },
   "keywords": [
     "javascript",
