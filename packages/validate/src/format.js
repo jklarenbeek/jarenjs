@@ -3,7 +3,6 @@ import {
   isFn,
 } from '@jaren/core';
 
-const registeredSchemaFormatters = {};
 export function registerFormatCompiler(registered, name, formatCompiler) {
   if (registered[name] == null) {
     if (isFn(formatCompiler)) {

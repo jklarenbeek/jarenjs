@@ -30,6 +30,7 @@ export function isStringRegExp(str) {
   try {
     return createRegExp(str) != null;
   }
+  // eslint-disable-next-line no-unused-vars
   catch (e) {
     return false;
   }

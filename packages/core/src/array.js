@@ -1,8 +1,6 @@
 //@ts-check
 
 import {
-  isArrayClass,
-  isSetClass,
   TypedArray,
 } from './index.js';
 

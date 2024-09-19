@@ -115,7 +115,6 @@ class ValidationRoot {
     }
 
     const schemas = this._schemas;
-    const opts = this._options;
     const traverse = this._traverse;
     const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
     return ValidationRoot._createObject(this, id, root);
