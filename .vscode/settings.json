@@ -20,12 +20,12 @@
 		".vscode/chrome/**": true,
     "cache/": true,
     "**/.turbo": true,
-    "packages/_/**": true
+    "packages/_/**": true,
 	},
 	"files.watcherExclude": {
 		".vscode/chrome/**": true,
     "cache/": true,
-    "**/.turbo": true
+    "**/.turbo": true,
 	},
 	"html.format.extraLiners": "!",
 	"html.format.indentInnerHtml": true,
@@ -56,7 +56,8 @@
 		}
 	],
 	"search.exclude": {
-		"public/**": true
+		"public/**": true,
+    "**/dist": true,
 	},
   "js/ts.implicitProjectConfig.checkJs": true,
   "eslint.options": {

@@ -3,8 +3,11 @@
   "private": false,
   "version": "0.8.0",
   "type": "module",
-  "main": "./src/index.js",
-  "description": "Jaren formats for validation",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "description": "Jaren Formats for JSON Schema Validation",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -17,7 +20,10 @@
     "json schema",
     "formats"
   ],
-  "exports": {
-    ".": "./src/index.js"
+  "scripts": {
+    "build": "node esbuild.config.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.1"
   }
 }

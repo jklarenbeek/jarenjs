@@ -19,6 +19,7 @@
     "./packages/*"
   ],
   "scripts": {
+    "clean": "rimraf --glob './packages/**/dist/*'",
     "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
@@ -48,6 +49,7 @@
     "eslint-plugin-json": "^4.0.1",
     "globals": "^15.9.0",
     "lefthook": "^1.7.14",
+    "rimraf": "^6.0.1",
     "turbo": "^2.1.1"
   }
 }

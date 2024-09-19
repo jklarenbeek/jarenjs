@@ -3,8 +3,11 @@
   "private": false,
   "version": "0.8.0",
   "type": "module",
-  "main": "./src/index.js",
-  "description": "Jaren core functions",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "description": "Jaren is a JavaScript JSON Schema Validator",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -19,12 +22,10 @@
     "validate",
     "validator"
   ],
-  "exports": {
-    ".": "./src/index.js"
-  },
   "scripts": {
-    "test": "node --no-warnings=ExperimentalWarning --test test/*.js",
-    "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/*.js",
-    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/*.js"
+    "build": "node esbuild.config.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.1"
   }
 }

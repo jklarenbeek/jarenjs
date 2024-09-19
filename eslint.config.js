@@ -34,6 +34,6 @@ export default [
     }
   },
   {
-    ignores: ['dist', 'build', '**/_*', '**/*.no-lint.*'],
+    ignores: ['**/dist', 'build', '**/_*', '**/*.no-lint.*'],
   },
 ];
