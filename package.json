@@ -23,8 +23,11 @@
     "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
-    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.js",
-    "build": "npm run build --workspaces --if-present"
+    "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
+    "build": "npm run build --workspaces --if-present",
+    "push": "npm version patch && npm version patch --ws && git push && git push --tags",
+    "push-minor": "npm version minor && npm version minor --ws && git push && git push --tags",
+    "push-major": "npm version major && npm version major --ws && git push && git push --tags"
   },
   "keywords": [
     "javascript",

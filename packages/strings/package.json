@@ -1,7 +1,7 @@
 {
   "name": "@jaren/strings",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "type": "module",
   "main": "./src/index.js",
   "description": "Jaren has specialized string functions for javascript",
