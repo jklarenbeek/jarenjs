@@ -1,7 +1,7 @@
 {
   "name": "@jaren/monorepo",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
