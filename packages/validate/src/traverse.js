@@ -17,7 +17,7 @@ import {
 } from '@jarenjs/core/string';
 
 import {
-  isStringHtmlIdentifier,
+  isValidHtmlIdentifier,
 } from '@jarenjs/strings';
 
 
@@ -73,7 +73,7 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
 
   if (!isStringWhiteSpace(fragment)) {
     // this is a sort of $anchor and we are karen about it and thus not use isStringAnchor().
-    if (opts.anchorsAllowed == true && isStringHtmlIdentifier(fragment)) {
+    if (opts.anchorsAllowed == true && isValidHtmlIdentifier(fragment)) {
       return opts.anchorsGlobal == true
         ? new JsonPointer(`#${fragment}`, search, `${leftUri}#`, fragment)
         : new JsonPointer(`${leftUri}#${fragment}`, search, `${leftUri}#`, fragment);
