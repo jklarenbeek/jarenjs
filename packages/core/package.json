@@ -26,6 +26,8 @@
     "./integer": "./src/integer.js",
     "./number": "./src/number.js",
     "./object": "./src/object.js",
-    "./string": "./src/string.js"
+    "./string": "./src/string.js",
+    "./text": "./src/text/index.js",
+    "./calc": "./src/numbers/index.js"
   }
 }

@@ -9,13 +9,13 @@ import {
   isValidUInt16,
   isValidUInt32,
   isValidUInt64,
-} from '@jarenjs/numbers/integer';
+} from '@jarenjs/core/calc';
 
 import {
   isValidFloat16,
   isValidFloat32,
   isValidFloat64,
-} from '@jarenjs/numbers/float';
+} from '@jarenjs/core/calc';
 
 function createNumberFormatCompiler(formatName, isNumberTest, strictFormat = false) {
   return function compileNumberFormat(schemaObj, jsonSchema) {
