@@ -46,7 +46,7 @@ import {
   isValidBase64,
   isValidCountryAlpha2,
   isValidIBAN,
-} from '@jarenjs/strings';
+} from '@jarenjs/text';
 
 function createStringFormatCompiler(formatName, isFormatTest) {
   return function compileStringFormat(schemaObj, jsonSchema) {
