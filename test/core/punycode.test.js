@@ -3,7 +3,7 @@
 import { describe, it } from 'node:test';
 import * as assert from '@jarenjs/tools/assert';
 
-import * as punycode from '../../packages/strings/src/punycode.js';
+import * as punycode from '../../packages/core/src/text/punycode.js';
 
 const testData = {
 	'strings': [
