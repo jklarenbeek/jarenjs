@@ -28,6 +28,6 @@
     "./object": "./src/object.js",
     "./string": "./src/string.js",
     "./text": "./src/text/index.js",
-    "./calc": "./src/numbers/index.js"
+    "./calc": "./src/calc/index.js"
   }
 }

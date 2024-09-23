@@ -2,7 +2,7 @@
 
 import {
   isNumberType,
-} from '@jarenjs/core';
+} from './index.js';
 
 export const FLOAT16_MAX = 65504.0;
 export const FLOAT16_MIN = 0.00006103515625;

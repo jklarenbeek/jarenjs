@@ -2,28 +2,6 @@ import { describe, it } from 'node:test';
 import * as assert from '@jarenjs/tools/assert';
 
 import {
-  FLOAT16_MAX,
-  FLOAT16_MIN,
-  FLOAT32_MAX,
-  FLOAT32_MIN,
-  FLOAT64_MAX,
-  FLOAT64_MIN,
-  Float32_decrement,
-  Float32_increment,
-  Float64_decrement,
-  Float64_increment,
-  Float16_decrement,
-  Float16_increment,
-} from '@jarenjs/numbers/float';
-
-import {
-  INT64_MAX,
-  INT64_MIN,
-  UINT64_MAX,
-  UINT64_MIN,
-} from '@jarenjs/numbers/integer';
-
-import {
   compileSchemaValidator,
 } from '@jarenjs/validate';
 

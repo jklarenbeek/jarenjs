@@ -352,7 +352,7 @@ For object types `@jarenjs/core` has special functions to manipulate array and o
 
 ### 🛂 String and Regex Extensions
 
-We've added some additional string and regex functionality to the `@jarenjs/text` package to make it more powerful and flexible. You will find a lot of functionality to validate your input with. You can do this without using json schema and its formats. It can be really useful in day to day usage like checking for country codes, zip codes, iban numbers, etc. The `@jarenjs/formats` package exposes all the validation functions for the `@jarenjs/validate` package if you want to make use of them in a schema kind of way.
+We've added some additional string and regex functionality to the `@jarenjs/core/text` package to make it more powerful and flexible. You will find a lot of functionality to validate your input with. You can do this without using json schema and its formats. It can be really useful in day to day usage like checking for country codes, zip codes, iban numbers, etc. The `@jarenjs/formats` package exposes all the validation functions for the `@jarenjs/validate` package if you want to make use of them in a schema kind of way.
 
 ### 🧐Math and Vector classes
 

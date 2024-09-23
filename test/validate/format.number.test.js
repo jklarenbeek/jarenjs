@@ -14,14 +14,14 @@ import {
   Float64_increment,
   Float16_decrement,
   Float16_increment,
-} from '@jarenjs/numbers/float';
+} from '@jarenjs/core/float';
 
 import {
   INT64_MAX,
   INT64_MIN,
   UINT64_MAX,
   UINT64_MIN,
-} from '@jarenjs/numbers/integer';
+} from '@jarenjs/core/integer';
 
 import {
   compileSchemaValidator,

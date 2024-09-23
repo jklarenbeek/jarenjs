@@ -18,7 +18,7 @@ import {
 
 import {
   isValidHtmlIdentifier,
-} from '@jarenjs/text';
+} from '@jarenjs/core/text';
 
 
 function encodeJsonPointerKey(key) {
