@@ -285,7 +285,10 @@ You can trust that if I say I do something, I will definitely do it unless I don
 
 ### 👉 Jaren as a drop-in replacement for Ajv
 
-Jaren is a mono-repo with multiple workspaces in the ./packages directory. Because of this, Jaren imports its core, validator, formats and in later versions its reviver (see [JSON.parse]()) and replacer (see [JSON.stringify](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify)) from its workspace packages. This has not been done yet and simply exports the available packages from its workspace imports, without wrapping them into a Jaren class that exposes a similar api as Ajv does. 
+Jaren is a mono-repo with multiple workspaces in the ./packages directory. Because of this, Jaren imports its core, validator, formats and in later versions its reviver (see [JSON.parse]()) and replacer (see [JSON.stringify](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify)) from its workspace packages. This has not been done yet and simply exports the available packages from its workspace imports, without wrapping them into a Jaren class that exposes a similar api as Ajv does.
+
+On a extra note: Ajv compiles or a function or a promise. Jaren will NOT do this, instead it will expose an extra method for async compilers: compileAsync.
+Note also: that Jaren will NOT include a default meta schema, but has to be added separately by the caller.
 
 See also:
 - [Getting Started](https://ajv.js.org/guide/getting-started.html)

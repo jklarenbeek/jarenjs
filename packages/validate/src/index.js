@@ -286,3 +286,75 @@ export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
     validate: (data) => root.validate(data),
   };
 }
+
+export class JarenValidator {
+
+  /**
+   * Add format to validate strings or numbers.
+   * @param {string} name 
+   * @param {Function} formatCompiler 
+   * @returns {JarenValidator}
+   */
+  addFormat(name, formatCompiler) {
+    return this;
+  }
+
+  /**
+   * Add schema(s) to validator instance. 
+   * This method does not compile schemas (but it still validates them). 
+   * Because of that dependencies can be added in any order and 
+   * circular dependencies are supported. 
+   * It also prevents unnecessary compilation of schemas that are 
+   * containers for other schemas but not used as a whole.
+   * @param {boolean | object | object[]} schema 
+   * @param {string | undefined} key
+   * @returns {JarenValidator}
+   */
+  addSchema(schema, key = undefined) {
+
+    return this;
+  }
+
+  /**
+   * Adds meta schema(s) that can be used to validate other schemas.
+   * @param {boolean | object | object[]} schema 
+   * @param {string | undefined} key
+   * @returns {JarenValidator}
+   */
+  addMetaSchema(schema, key = undefined) {
+    return this;
+  }
+
+  /**
+   * Validates schema. This method should be used to validate schemas rather than validate due to the inconsistency of uri format in JSON Schema standard.
+   * By default this method is called automatically when the schema is added, so you rarely need to use it directly.
+   * If schema doesn't have $schema property, it is validated against draft 6 meta-schema (option meta should not be false).
+   * If schema has $schema property, then the schema with this id (that should be previously added) is used to validate passed schema.
+   * Errors will be available at ajv.errors
+   * @param {boolean | object} schema 
+   * @returns {boolean}
+   */
+  validateSchema(schema) {
+    return false;
+  }
+
+  /**
+   * Generate validating function and cache the compiled schema for future use.
+   * Note: This function does NOT return a promise. Use compileAsync instead!
+   * @param {boolean | object} schema
+   * @returns {(data: any) => boolean}
+   */
+  compile(schema) {
+    return (data) => false;
+  }
+
+  /**
+   * Generate validating function and cache the compiled schema for future use.
+   * Note: This function returns a promise.
+   * @param {boolean | object} schema
+   * @returns {Promise<any>}
+   */
+  compileAsync(schema) {
+    return new Promise((resolve) => false);
+  }
+}
