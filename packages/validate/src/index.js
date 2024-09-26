@@ -21,6 +21,7 @@ import {
   isBoolOrObjectClass,
   hasSchemaRef,
 } from './tools.js';
+import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 
 export {
   registerFormatCompilers
@@ -127,7 +128,7 @@ class ValidationRoot {
 
   validate(data /*:unknown*/) {
     // clear all errors
-    this._errors.length = 0;
+    this._errors = [];
     // call compiled validator
     return this._firstSchema.validate(data, data);
   }
@@ -289,6 +290,20 @@ export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
 
 export class JarenValidator {
 
+  #formats = {}
+  #schemas = new Map();
+  #metaSchemas = new Map();
+
+  /**
+   * Create a new JarenValidator instance
+   * @param {ValidatorOptions} [options] - Validator options
+   */
+  constructor(options = new ValidatorOptions()) {
+    this.#formats = options.formats || {};
+    this.#schemas = new Map();
+    this.#metaSchemas = new Map();
+  }
+
   /**
    * Add format to validate strings or numbers.
    * @param {string} name 
@@ -296,9 +311,51 @@ export class JarenValidator {
    * @returns {JarenValidator}
    */
   addFormat(name, formatCompiler) {
+    registerFormatCompiler(
+      this.#formats,
+      name,
+      formatCompiler);
     return this;
   }
 
+  addFormats(formatCompilers) {
+    registerFormatCompilers(
+      this.#formats,
+      formatCompilers);
+    return this;
+  }
+
+  /**
+   * 
+   * @param {boolean | object} schema 
+   * @param {object[]} schemas 
+   * @param {TraverseOptions} opts
+   * @returns {Map}
+   */
+  static #traverseSchema(schema, schemas = undefined, opts = new TraverseOptions()) {
+    // initialize schema map for all ids and refs
+    const schemaMap = new Map();
+    const origin = storeSchemaIdsInMap(
+      schemaMap,
+      opts.origin,
+      schema,
+      opts);
+  
+    // Then add the other reference schemas
+    if (Array.isArray(schemas)) {
+      schemas.forEach(ref => storeSchemaIdsInMap(
+        schemaMap,
+        origin,
+        ref,
+        opts));
+    }
+  
+    // make sure all schemas are connected
+    restoreSchemaRefsInMap(schemaMap, opts);
+  
+    return schemaMap;
+  }
+  
   /**
    * Add schema(s) to validator instance. 
    * This method does not compile schemas (but it still validates them). 
@@ -311,7 +368,15 @@ export class JarenValidator {
    * @returns {JarenValidator}
    */
   addSchema(schema, key = undefined) {
-
+    if (Array.isArray(schema)) {
+      schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
+    }
+    else if (typeof schema === 'object') {
+      const schemaKey = key || schema.$id;
+      if (schemaKey) {
+        this.#schemas.set(schemaKey, schema);
+      }
+    }
     return this;
   }
 
@@ -322,7 +387,25 @@ export class JarenValidator {
    * @returns {JarenValidator}
    */
   addMetaSchema(schema, key = undefined) {
+    if (Array.isArray(schema)) {
+      schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
+    }
+    else if (typeof schema === 'object') {
+      const schemaKey = key || schema.$id;
+      if (schemaKey) {
+        this.#schemas.set(schemaKey, schema);
+      }
+    }
     return this;
+  }
+
+  /**
+   * 
+   * @param {string} key 
+   * @returns {object}
+   */
+  getSchema(key) {
+    return this.#schemas.get(key) || null;
   }
 
   /**
@@ -335,7 +418,14 @@ export class JarenValidator {
    * @returns {boolean}
    */
   validateSchema(schema) {
-    return false;
+    if (typeof schema === 'boolean') return true;
+    const schemaId = schema.$schema || 'http://json-schema.org/draft-06/schema#';
+    const metaSchema = this.#metaSchemas.get(schemaId);
+    if (!metaSchema) return false;
+    
+    // Here you would implement the actual schema validation logic
+    // For simplicity, we're just returning false
+    return true;
   }
 
   /**

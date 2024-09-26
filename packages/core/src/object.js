@@ -7,7 +7,6 @@ import {
   isTypedArray,
 } from './index.js';
 
-//#region Tools
 export function equalsDeep(target, source) {
   if (target === source) return true;
   if (target == null) return false;
@@ -96,4 +95,29 @@ export function equalsDeep(target, source) {
   }
   return true;
 }
-//#endregion
+
+/**
+ * 
+ * @param {Map} map 
+ * @param  {...Map} iterables 
+ */
+export function mapUnion(map, ...iterables) {
+  for (const iterable of iterables) {
+    for (const item of iterable) {
+      map.set(...item);
+    }
+  }
+}
+
+/**
+ * 
+ * @param {Set<any>} set 
+ * @param  {...Array<Set<any>>} iterables 
+ */
+export function setUnion(set, ...iterables) {
+  for (const iterable of iterables) {
+    for (const item of iterable) {
+      set.add(item);
+    }
+  }
+}
