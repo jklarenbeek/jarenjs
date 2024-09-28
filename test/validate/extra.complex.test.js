@@ -2,16 +2,14 @@ import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
 import {
-  compileSchemaValidator,
-  registerFormatCompilers,
-  ValidatorOptions,
+  JarenValidator,
 } from '@jarenjs/validate';
 
 import * as formats from '@jarenjs/formats';
 
-const formatValidators = {};
-registerFormatCompilers(formatValidators, formats.stringFormats);
-registerFormatCompilers(formatValidators, formats.dateTimeFormats);
+const compiler = new JarenValidator();
+compiler.addFormats(formats.stringFormats)
+  .addFormats(formats.dateTimeFormats);
 
 // from: https://json-schema.org/learn/miscellaneous-examples#conditional-validation-with-dependentrequired
 
@@ -19,7 +17,7 @@ describe('Schema Complex Examples', function () {
 
   describe('#complex_basic()', function () {
     it('should validate a complex strings', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         type: 'string',
         required: true,
         minLength: 2,
@@ -29,16 +27,16 @@ describe('Schema Complex Examples', function () {
         ],
       });
 
-      assert.isFalse(root.validate(undefined));
-      assert.isFalse(root.validate(null));
-      assert.isFalse(root.validate('A'), 'A string is too small');
-      assert.isTrue(root.validate('AB'), 'AB string has valid length');
-      assert.isTrue(root.validate('ABC'), 'ABC string has valid length');
-      assert.isFalse(root.validate('ABCDEF'), 'ABCDEF is to long');
+      assert.isFalse(validate(undefined));
+      assert.isFalse(validate(null));
+      assert.isFalse(validate('A'), 'A string is too small');
+      assert.isTrue(validate('AB'), 'AB string has valid length');
+      assert.isTrue(validate('ABC'), 'ABC string has valid length');
+      assert.isFalse(validate('ABCDEF'), 'ABCDEF is to long');
     });
 
     it('should compile a basic complex schema', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/person.schema.json',
         title: 'Person',
         type: 'object',
@@ -60,18 +58,18 @@ describe('Schema Complex Examples', function () {
       });
 
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         firstName: 'John',
         lastName: 'Doe',
         age: 21,
-      }));
+      }), 'John Doe, aged 21 is a valid person entry');
 
     });
   });
 
   describe('#complex_arrays()', function () {
     it('should compile a schema with an reference to an array', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/arrays.schema.json',
         description: 'A representation of a person, company, organization, or place',
         type: 'object',
@@ -106,7 +104,7 @@ describe('Schema Complex Examples', function () {
       });
 
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         fruits: ['apple', 'orange', 'pear'],
         vegetables: [
           {
@@ -124,7 +122,7 @@ describe('Schema Complex Examples', function () {
 
   describe('#complex_enums()', function () {
     it('should handle enum data', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/enumerated-values.schema.json',
         title: 'Enumerated Values',
         type: 'object',
@@ -136,15 +134,15 @@ describe('Schema Complex Examples', function () {
       });
 
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         data: [1, 2, 3],
-      }));
+      }), 'The data of the object has the right value');
     });
   });
 
   describe('#complex_nested()', function () {
     it('should compile a complex schema with nested properties', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/complex-object.schema.json',
         title: 'Complex Object',
         type: 'object',
@@ -186,7 +184,7 @@ describe('Schema Complex Examples', function () {
       });
 
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         name: 'John Doe',
         age: 25,
         address: {
@@ -196,7 +194,7 @@ describe('Schema Complex Examples', function () {
           postalCode: '10001',
         },
         hobbies: ['reading', 'running'],
-      }), 'valid json input');
+      }), 'The complex schema with nested properties is valid');
     });
   });
 
@@ -294,7 +292,7 @@ describe('Schema Complex Examples', function () {
         },
       };
 
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/fstab',
         type: 'object',
         required: ['/'],
@@ -305,11 +303,9 @@ describe('Schema Complex Examples', function () {
           '^(/[^/]+)+$': { $ref: 'https://example.com/entry-schema' },
         },
         additionalProperties: false,
-      },
-        new ValidatorOptions(formatValidators, [entrySchema])
-      );
+      }, [entrySchema]);
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         '/': {
           storage: {
             type: 'disk',
@@ -340,8 +336,8 @@ describe('Schema Complex Examples', function () {
           },
         },
       }), 'a valid fstab json file');
-      assert.isFalse(root.validate(1), 'not an object');
-      assert.isTrue(root.validate({
+      assert.isFalse(validate(1), 'not an object');
+      assert.isTrue(validate({
         '/': {
           storage: {
             type: 'disk',
@@ -351,7 +347,7 @@ describe('Schema Complex Examples', function () {
           readonly: true,
         },
       }), 'root only is valid');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         'no-root/': {
           storage: {
             type: 'disk',
@@ -361,7 +357,7 @@ describe('Schema Complex Examples', function () {
           readonly: true,
         },
       }), 'missing root entry');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         '/': {
           storage: {
             type: 'disk',
@@ -379,13 +375,13 @@ describe('Schema Complex Examples', function () {
           options: ['nosuid'],
         },
       }), 'invalid entry key');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         '/': {
           fstype: 'btrfs',
           readonly: true,
         },
       }), 'missing storage in entry');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         '/': {
           storage: {
             device: '/dev/sda1',
@@ -394,7 +390,7 @@ describe('Schema Complex Examples', function () {
           readonly: true,
         },
       }), 'missing storage type');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         '/': {
           storage: {
             type: null,
@@ -404,7 +400,7 @@ describe('Schema Complex Examples', function () {
           readonly: true,
         },
       }), 'storage type should be a string');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         '/': {
           storage: {
             type: null,
@@ -479,14 +475,12 @@ describe('Schema Complex Examples', function () {
         required: ['brand', 'model', 'processor', 'ramSize'],
       };
 
-      const root = compileSchemaValidator(
+      const validate = compiler.compile(
         deviceSchema,
-        new ValidatorOptions(
-          formatValidators,
-          [smartphoneSchema, laptopSchema])
+        [smartphoneSchema, laptopSchema]
       );
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         deviceType: 'smartphone',
         brand: 'Samsung',
         model: 'Galaxy S21',
@@ -497,7 +491,7 @@ describe('Schema Complex Examples', function () {
 
     it('should validate an address similar to http://microformats.org/wiki/h-card', function () {
       // https://json-schema.org/learn/json-schema-examples
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/address.schema.json',
         description: 'An address similar to http://microformats.org/wiki/h-card',
         type: 'object',
@@ -531,7 +525,7 @@ describe('Schema Complex Examples', function () {
         },
       });
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         postOfficeBox: '123',
         streetAddress: '456 Main St',
         locality: 'Cityville',
@@ -543,7 +537,7 @@ describe('Schema Complex Examples', function () {
     });
 
     it('should validate an ecommerce entry', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/ecommerce.schema.json',
         $defs: {
           product: {
@@ -568,7 +562,7 @@ describe('Schema Complex Examples', function () {
         },
       });
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         order: {
           orderId: 'ORD123',
           items: [
@@ -587,7 +581,7 @@ describe('Schema Complex Examples', function () {
     });
 
     it('should validate a job posting', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/job-posting.schema.json',
         description: 'A representation of a job posting',
         type: 'object',
@@ -617,9 +611,9 @@ describe('Schema Complex Examples', function () {
             format: 'date',
           },
         },
-      }, new ValidatorOptions(formatValidators));
+      });
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         title: 'Software Engineer',
         company: 'Tech Solutions Inc.',
         location: 'Cityville',
@@ -632,7 +626,7 @@ describe('Schema Complex Examples', function () {
     });
 
     it('should validate a movie record', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/movie.schema.json',
         description: 'A representation of a movie',
         type: 'object',
@@ -663,9 +657,9 @@ describe('Schema Complex Examples', function () {
             additionalItems: false,
           },
         },
-      }, new ValidatorOptions(formatValidators));
+      });
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         title: 'Sample Movie',
         director: 'John Director',
         releaseDate: '2023-07-01',
@@ -710,12 +704,9 @@ describe('Schema Complex Examples', function () {
     };
 
     it('should validate a user profile', function () {
-      const root = compileSchemaValidator(
-        userProfileSchema,
-        new ValidatorOptions(formatValidators),
-      );
+      const validate = compiler.compile(userProfileSchema);
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         username: 'user123',
         email: 'user@example.com',
         fullName: 'John Doe',
@@ -726,7 +717,7 @@ describe('Schema Complex Examples', function () {
     });
 
     it('should validate a blog post entry', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/blog-post.schema.json',
         description: 'A representation of a blog post',
         type: 'object',
@@ -752,9 +743,9 @@ describe('Schema Complex Examples', function () {
             },
           },
         },
-      }, new ValidatorOptions(formatValidators, [userProfileSchema]));
+      }, [userProfileSchema]);
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         title: 'New Blog Post',
         content: 'This is the content of the blog post...',
         publishedDate: '2023-08-25T15:00:00Z',
@@ -788,9 +779,9 @@ describe('Schema Complex Examples', function () {
     };
 
     it('should verify a geographical location', function () {
-      const root = compileSchemaValidator(geoLocationSchema);
+      const validate = compiler.compile(geoLocationSchema);
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         latitude: 48.858093,
         longitude: 2.294694,
       }), 'the geolocation is valid');
@@ -798,7 +789,7 @@ describe('Schema Complex Examples', function () {
     });
 
     it('should validate a calendar event', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/calendar.schema.json',
         description: 'A representation of an event',
         type: 'object',
@@ -843,10 +834,10 @@ describe('Schema Complex Examples', function () {
             $ref: 'https://example.com/geographical-location.schema.json',
           },
         },
-      }, new ValidatorOptions(undefined, [geoLocationSchema]));
+      }, [geoLocationSchema]);
 
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         startDate: '2023-08-25T10:00:00Z',
         endDate: '2023-08-25T12:00:00Z',
         summary: 'Conference Presentation',
@@ -857,7 +848,7 @@ describe('Schema Complex Examples', function () {
     });
 
     it('should represent a health record', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/health-record.schema.json',
         description: 'Schema for representing a health record',
         type: 'object',
@@ -895,9 +886,9 @@ describe('Schema Complex Examples', function () {
             $ref: 'https://example.com/user-profile.schema.json',
           },
         },
-      }, new ValidatorOptions(formatValidators, [userProfileSchema]));
+      }, [userProfileSchema]);
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         patientName: 'Jane Doe',
         dateOfBirth: '1985-02-15',
         bloodType: 'A+',

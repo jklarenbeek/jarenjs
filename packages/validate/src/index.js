@@ -22,6 +22,7 @@ import {
   hasSchemaRef,
 } from './tools.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
+import { mapMerge } from '@jarenjs/core/object';
 
 export {
   registerFormatCompilers
@@ -29,6 +30,8 @@ export {
 
 export { TraverseOptions };
   
+export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-06/schema#'
+
 const isBrowser = typeof window !== 'undefined';
 
 const performance = (() => isBrowser
@@ -92,6 +95,8 @@ class ValidationRoot {
   get options() { return this._options; }
 
   get formats() { return this._formats; }
+
+  get errors() { return this._errors; }
 
   createObject(path, schema) {
     return ValidationRoot._createObject(this, path, schema);
@@ -293,6 +298,7 @@ export class JarenValidator {
   #formats = {}
   #schemas = new Map();
   #metaSchemas = new Map();
+  #options = new ValidatorOptions();
 
   /**
    * Create a new JarenValidator instance
@@ -302,6 +308,7 @@ export class JarenValidator {
     this.#formats = options.formats || {};
     this.#schemas = new Map();
     this.#metaSchemas = new Map();
+    this.#options = options;
   }
 
   /**
@@ -328,9 +335,9 @@ export class JarenValidator {
   /**
    * 
    * @param {boolean | object} schema 
-   * @param {object[]} schemas 
+   * @param {object[] | undefined} schemas 
    * @param {TraverseOptions} opts
-   * @returns {Map}
+   * @returns {{origin:string, map: Map}}
    */
   static #traverseSchema(schema, schemas = undefined, opts = new TraverseOptions()) {
     // initialize schema map for all ids and refs
@@ -342,7 +349,7 @@ export class JarenValidator {
       opts);
   
     // Then add the other reference schemas
-    if (Array.isArray(schemas)) {
+    if (Array.isArray(schemas) && schemas.length > 0) {
       schemas.forEach(ref => storeSchemaIdsInMap(
         schemaMap,
         origin,
@@ -353,7 +360,7 @@ export class JarenValidator {
     // make sure all schemas are connected
     restoreSchemaRefsInMap(schemaMap, opts);
   
-    return schemaMap;
+    return { origin: origin, map: schemaMap };
   }
   
   /**
@@ -381,20 +388,57 @@ export class JarenValidator {
   }
 
   /**
+   * 
+   * @param {JarenValidator} self 
+   * @param {string} origin 
+   * @param {Map} schemas 
+   * @returns {(data) => boolean}
+   */
+  static #compileSchema(self, origin, schemas) {
+    const schema = schemas.get(origin);
+    const root = new ValidationRoot(
+      schemas,
+      schema,
+      origin,
+      self.#formats,
+      self.#options.validation,
+      self.#options.traverse);
+  
+    function jarenValidateSchema(data) {
+      return root.validate(data)
+    }
+
+    Object.defineProperty(jarenValidateSchema, "errors", {
+      get: function () { return root._errors }
+    })
+    
+    return jarenValidateSchema;
+  }
+
+  static normalizeUriKey(key) {
+    return key;
+  }
+
+  /**
    * Adds meta schema(s) that can be used to validate other schemas.
    * @param {boolean | object | object[]} schema 
    * @param {string | undefined} key
    * @returns {JarenValidator}
    */
   addMetaSchema(schema, key = undefined) {
+    key = JarenValidator.normalizeUriKey(key)
     if (Array.isArray(schema)) {
-      schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
+      const first = schema.shift();
+      const { origin, map } = JarenValidator.#traverseSchema(first, schema, new TraverseOptions(key));
+      const compiled = JarenValidator.#compileSchema(this, origin, map);
+      this.#metaSchemas.set(origin, compiled);
+      mapMerge(this.#schemas, map);
     }
-    else if (typeof schema === 'object') {
-      const schemaKey = key || schema.$id;
-      if (schemaKey) {
-        this.#schemas.set(schemaKey, schema);
-      }
+    else if (isBoolOrObjectClass(schema)) {
+      const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, new TraverseOptions(key));
+      const compiled = JarenValidator.#compileSchema(this, origin, map);
+      this.#metaSchemas.set(origin, compiled);
+      mapMerge(this.#schemas, map);
     }
     return this;
   }
@@ -405,6 +449,7 @@ export class JarenValidator {
    * @returns {object}
    */
   getSchema(key) {
+    key = JarenValidator.normalizeUriKey(key)
     return this.#schemas.get(key) || null;
   }
 
@@ -418,24 +463,31 @@ export class JarenValidator {
    * @returns {boolean}
    */
   validateSchema(schema) {
-    if (typeof schema === 'boolean') return true;
-    const schemaId = schema.$schema || 'http://json-schema.org/draft-06/schema#';
+    // if no meta schema is present, just return true;
+    if (this.#metaSchemas.size == 0)
+      return true;
+
+    const schemaId = JarenValidator.normalizeUriKey(schema.$schema || DEFAULT_SCHEMA_DRAFT);
     const metaSchema = this.#metaSchemas.get(schemaId);
-    if (!metaSchema) return false;
-    
-    // Here you would implement the actual schema validation logic
-    // For simplicity, we're just returning false
-    return true;
+    // if the metaSchema is not present, we fail the validation
+    if (!metaSchema)
+      return false;
+
+    // otherwise, validate the schema
+    return metaSchema(schema);
   }
 
   /**
    * Generate validating function and cache the compiled schema for future use.
    * Note: This function does NOT return a promise. Use compileAsync instead!
    * @param {boolean | object} schema
+   * @param {object[] | undefined} [schemas=undefined] 
    * @returns {(data: any) => boolean}
    */
-  compile(schema) {
-    return (data) => false;
+  compile(schema, schemas = undefined) {
+    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#options.traverse);
+    mapMerge(map, this.#schemas);
+    return JarenValidator.#compileSchema(this, origin, map);
   }
 
   /**
@@ -445,6 +497,6 @@ export class JarenValidator {
    * @returns {Promise<any>}
    */
   compileAsync(schema) {
-    return new Promise((resolve) => false);
+    throw new Error('compileAsync is not implemented');
   }
 }

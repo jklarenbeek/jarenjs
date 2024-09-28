@@ -257,9 +257,9 @@ export class TraverseOptions extends JsonPointerOptions {
   constructor(
     origin = 'https://github.com/jklarenbeek/jaren',
     mergeSchemas = true,
-    anchorsGlobal,
-    anchorsAllowed,
-    skipErrors
+    anchorsGlobal = true,
+    anchorsAllowed = true,
+    skipErrors = true
   ) {
     super(anchorsGlobal, anchorsAllowed, skipErrors);
     this.origin = origin,

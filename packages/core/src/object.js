@@ -101,7 +101,7 @@ export function equalsDeep(target, source) {
  * @param {Map} map 
  * @param  {...Map} iterables 
  */
-export function mapUnion(map, ...iterables) {
+export function mapMerge(map, ...iterables) {
   for (const iterable of iterables) {
     for (const item of iterable) {
       map.set(...item);
@@ -114,7 +114,7 @@ export function mapUnion(map, ...iterables) {
  * @param {Set<any>} set 
  * @param  {...Array<Set<any>>} iterables 
  */
-export function setUnion(set, ...iterables) {
+export function setMerge(set, ...iterables) {
   for (const iterable of iterables) {
     for (const item of iterable) {
       set.add(item);
