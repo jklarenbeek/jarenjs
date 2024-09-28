@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
@@ -25,9 +25,11 @@
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
     "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
     "build": "npm run build --workspaces --if-present",
-    "push:patch": "npm version patch && npm version patch --ws",
-    "push:minor": "npm version minor && npm version minor --ws",
-    "push:major": "npm version major && npm version major --ws",
+    "version:patch": "npm version patch --no-git-tag-version --ws --include-workspace-root",
+    "version:minor": "npm version minor --no-git-tag-version --ws --include-workspace-root",
+    "version:major": "npm version major --no-git-tag-version --ws --include-workspace-root",
+    "commit:linux": "git commit -am $npm_package_version && git tag $npm_package_version",
+    "commit:win32": "git commit -am %npm_package_version% && git tag %npm_package_version%",
     "push": "git push && git push --tags"
   },
   "keywords": [
