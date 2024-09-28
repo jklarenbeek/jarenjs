@@ -258,11 +258,14 @@ but it apparently was scheduled for the next release.
 - 0.8
   - current
 - 0.9
-  - Jaren as a drop-in replacement for Ajv
-  - add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
+  - [x] Jaren as a drop-in replacement for Ajv
+  - [ ] add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
+  - [ ] Fixing JSON error schema output
+  - [ ] add error reporting tests
 - 🎉 1.0 Stable release for `draft7`
-  - Fixing JSON Schema output
-  - add error reporting tests
+  - add i18n
+  - add development documentation
+  - add examples
 - 1.1
   - Modelling Inheritance with JSON Schema
   - Express array constraints more cleanly
