@@ -342,9 +342,9 @@ export class JarenValidator {
    * @param {TraverseOptions} opts
    * @returns {{origin:string, map: Map}}
    */
-  static #traverseSchema(schema, schemas = undefined, opts = new TraverseOptions()) {
+  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions()) {
     // initialize schema map for all ids and refs
-    const schemaMap = new Map();
+    const schemaMap = new Map(fromMap);
     const origin = storeSchemaIdsInMap(
       schemaMap,
       opts.origin,
@@ -430,13 +430,13 @@ export class JarenValidator {
     key = JarenValidator.normalizeUriKey(key)
     if (Array.isArray(schema)) {
       const first = schema.shift();
-      const { origin, map } = JarenValidator.#traverseSchema(first, schema, new TraverseOptions(key));
+      const { origin, map } = JarenValidator.#traverseSchema(first, schema, undefined, new TraverseOptions(key));
       const compiled = JarenValidator.#compileSchema(this, origin, map);
       this.#metaSchemas.set(origin, compiled);
       mapMerge(this.#schemas, map);
     }
     else if (isBoolOrObjectClass(schema)) {
-      const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, new TraverseOptions(key));
+      const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, undefined, new TraverseOptions(key));
       const compiled = JarenValidator.#compileSchema(this, origin, map);
       this.#metaSchemas.set(origin, compiled);
       mapMerge(this.#schemas, map);
@@ -486,8 +486,7 @@ export class JarenValidator {
    * @returns {(data: any) => boolean}
    */
   compile(schema, schemas = undefined) {
-    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#options.traverse);
-    mapMerge(map, this.#schemas);
+    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#options.traverse);
     return JarenValidator.#compileSchema(this, origin, map);
   }
 
