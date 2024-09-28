@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
 import {
-  compileSchemaValidator,
   JarenValidator,
 } from '@jarenjs/validate';
 
