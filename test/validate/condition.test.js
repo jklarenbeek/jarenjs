@@ -2,70 +2,72 @@ import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
 import {
-  compileSchemaValidator,
+  JarenValidator,
 } from '@jarenjs/validate';
+
+const compiler = new JarenValidator();
 
 describe('Schema Conditionals', function () {
   describe('#if()', function () {
     // https://json-schema.org/understanding-json-schema/reference/conditionals.html
     it('should validate without the if keyword', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         then: { minimum: -10 },
         else: { multipleOf: 2 },
       });
 
-      assert.isTrue(root.validate(-100), 'valid through missing if');
-      assert.isTrue(root.validate(3), 'still valid through missing if');
+      assert.isTrue(validate(-100), 'valid through missing if');
+      assert.isTrue(validate(3), 'still valid through missing if');
     });
 
     it('should validate without the else keyword', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         if: { exclusiveMaximum: 0 },
         then: { minimum: -10 },
       });
 
-      assert.isTrue(root.validate(-1), 'valid through then');
-      assert.isFalse(root.validate(-100), 'invalid through then');
-      assert.isTrue(root.validate(3), 'valid when if test fails');
+      assert.isTrue(validate(-1), 'valid through then');
+      assert.isFalse(validate(-100), 'invalid through then');
+      assert.isTrue(validate(3), 'valid when if test fails');
     });
 
     it('should validate without the then keyword', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         if: { exclusiveMaximum: 0 },
         else: { multipleOf: 2 },
       });
 
-      assert.isTrue(root.validate(-1), 'valid when if test passes');
-      assert.isTrue(root.validate(4), 'valid through else');
-      assert.isFalse(root.validate(3), 'invalid through else');
+      assert.isTrue(validate(-1), 'valid when if test passes');
+      assert.isTrue(validate(4), 'valid through else');
+      assert.isFalse(validate(3), 'invalid through else');
     });
 
     it('should validate without the then and else keyword', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         if: { exclusiveMaximum: 0 },
       });
 
-      assert.isTrue(root.validate(-1), 'valid when if test passes');
-      assert.isTrue(root.validate(4), 'valid through missing then');
-      assert.isTrue(root.validate(3), 'valid through missing else');
+      assert.isTrue(validate(-1), 'valid when if test passes');
+      assert.isTrue(validate(4), 'valid through missing then');
+      assert.isTrue(validate(3), 'valid through missing else');
 
     });
 
     it('should validate against the correct branch', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         if: { exclusiveMaximum: 0 },
         then: { minimum: -10 },
         else: { multipleOf: 2 },
       });
 
-      assert.isTrue(root.validate(-1), 'valid through then');
-      assert.isFalse(root.validate(-100), 'invalid through then');
-      assert.isTrue(root.validate(4), 'valid through else');
-      assert.isFalse(root.validate(3), 'invalid through else');
+      assert.isTrue(validate(-1), 'valid through then');
+      assert.isFalse(validate(-100), 'invalid through then');
+      assert.isTrue(validate(4), 'valid through else');
+      assert.isFalse(validate(3), 'invalid through else');
     });
 
     it('should not be a very scalable postal code', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         type: 'object',
         properties: {
           street_address: {
@@ -86,17 +88,17 @@ describe('Schema Conditionals', function () {
         },
       });
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         street_address: '1600 Pennsylvania Avenue NW',
         country: 'United States of America',
         postal_code: '20500',
       }), 'a valid postal code for the US.');
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         street_address: '24 Sussex Drive',
         country: 'Canada',
         postal_code: 'K1M 1M4',
       }), 'a valid postal code for canada');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         street_address: '24 Sussex Drive',
         country: 'Canada',
         postal_code: '10000',
@@ -104,7 +106,7 @@ describe('Schema Conditionals', function () {
     });
 
     it('should be a better scalable postal code', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         type: 'object',
         properties: {
           street_address: {
@@ -142,22 +144,22 @@ describe('Schema Conditionals', function () {
         ],
       });
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         street_address: '1600 Pennsylvania Avenue NW',
         country: 'United States of America',
         postal_code: '20500',
       }), 'a valid us postal code');
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         street_address: '24 Sussex Drive',
         country: 'Canada',
         postal_code: 'K1M 1M4',
       }), 'a valid canadian postal code');
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         street_address: 'Adriaan Goekooplaan',
         country: 'Netherlands',
         postal_code: '2517 JX',
       }), 'a valid dutch postal code');
-      assert.isFalse(root.validate({
+      assert.isFalse(validate({
         street_address: '24 Sussex Drive',
         country: 'Canada',
         postal_code: '10000',
@@ -168,7 +170,7 @@ describe('Schema Conditionals', function () {
 
   describe('#ifelse()', function () {
     it('should conditionally validate with if-else', function () {
-      const root = compileSchemaValidator({
+      const validate = compiler.compile({
         $id: 'https://example.com/conditional-validation-if-else.schema.json',
         title: 'Conditional Validation with If-Else',
         type: 'object',
@@ -208,12 +210,12 @@ describe('Schema Conditionals', function () {
       });
 
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         isMember: true,
         membershipNumber: '1234567890',
       }), 'ismember is true and membershipNumber has 10 chars');
 
-      assert.isTrue(root.validate({
+      assert.isTrue(validate({
         isMember: false,
         membershipNumber: 'GUEST1234567890',
       }), 'ismember is false and membershipNumber length is gte 15');
