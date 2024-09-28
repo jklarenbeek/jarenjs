@@ -81,14 +81,18 @@ class ValidationRoot {
     return obj;
   }
 
-  constructor(schemas, schema, origin, formats, opts = new ValidationOptions(), traverse = new TraverseOptions) {
+  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions) {
+    const schema = schemas.get(origin);
+    this._rootOrigin = origin;
+    this._schemas = schemas;
+    this._formats = formats;
+
     this._options = opts;
     this._traverse = traverse;
-    this._schemas = schemas;
-    this._rootOrigin = origin;
-    this._formats = formats;
+
     this._objects = new Map();
     this._errors = [];
+
     this._firstSchema = ValidationRoot._createObject(this, origin, schema);
   }
 
@@ -281,9 +285,8 @@ export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
 
   // create a new schema root
   const root = new ValidationRoot(
-    schemas,
-    schema,
     origin,
+    schemas,
     opts.formats,
     opts.validation,
     opts.traverse);
@@ -395,11 +398,9 @@ export class JarenValidator {
    * @returns {(data) => boolean}
    */
   static #compileSchema(self, origin, schemas) {
-    const schema = schemas.get(origin);
     const root = new ValidationRoot(
-      schemas,
-      schema,
       origin,
+      schemas,
       self.#formats,
       self.#options.validation,
       self.#options.traverse);

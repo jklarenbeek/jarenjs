@@ -99,8 +99,9 @@ const TRAVERSE_SCHEMA_MAPS = [
 
 export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions()) {
   if (!isObjectClass(schema)) {
-    schemas.set(baseUri, schema);
-    return null;
+    const { id } = createJsonPointer(baseUri, undefined, opts);
+    schemas.set(id, schema);
+    return id;
   }
 
   const { id: rootUri } = createJsonPointer(schema.$id, baseUri, opts);
