@@ -265,37 +265,6 @@ export class ValidatorOptions {
   }
 }
 
-export function compileSchemaValidator(schema, opts = new ValidatorOptions()) {
-  // initialize schema map for all ids and refs
-  const schemas = new Map();
-  const origin = storeSchemaIdsInMap(
-    schemas,
-    opts.traverse.origin,
-    schema,
-    opts.traverse);
-
-  // Then add the other reference schemas
-  opts.schemas.forEach(ref => storeSchemaIdsInMap(
-    schemas,
-    origin,
-    ref,
-    opts.traverse));
-
-  restoreSchemaRefsInMap(schemas, opts.traverse);
-
-  // create a new schema root
-  const root = new ValidationRoot(
-    origin,
-    schemas,
-    opts.formats,
-    opts.validation,
-    opts.traverse);
-
-  return {
-    validate: (data) => root.validate(data),
-  };
-}
-
 export class JarenValidator {
 
   #formats = {}

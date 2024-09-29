@@ -1,6 +1,6 @@
 {
   "name": "jarenjs",
-  "private": true,
+  "private": false,
   "version": "0.8.4",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",

@@ -203,113 +203,113 @@ export class Float64 {
       && +Float64.intersectsRange(+ay, +(+ay + +ah), +by, +(+by + +bh)) > 0.0));
   }
 
-//#region trigonometry
+  //#region trigonometry
 
-static toRadian(degrees = 0.0) {
-  return +(+degrees * +Math.PI / 180.0);
-}
+  static toRadian(degrees = 0.0) {
+    return +(+degrees * +Math.PI / 180.0);
+  }
 
-static toDegrees(radians = 0.0) {
-  return +(+radians * 180.0 / +Math.PI);
-}
+  static toDegrees(radians = 0.0) {
+    return +(+radians * 180.0 / +Math.PI);
+  }
 
-static wrapRadians(r = 0.0) {
-  r = +r;
-  if (+r > Math.PI) return +(+r - +mathf64_PI2);
-  else if (+r < -Math.PI) return +(+r + +mathf64_PI2);
-  return +r;
-}
+  static wrapRadians(r = 0.0) {
+    r = +r;
+    if (+r > Math.PI) return +(+r - +mathf64_PI2);
+    else if (+r < -Math.PI) return +(+r + +mathf64_PI2);
+    return +r;
+  }
 
-static sinLpEx(r = 0.0) {
-  r = +r;
-  return +((r < 0.0)
-    ? +(+mathf64_PI41 * +r + +mathf64_PI42 * +r * +r)
-    : +(+mathf64_PI41 * +r - +mathf64_PI42 * +r * +r));
-}
+  static sinLpEx(r = 0.0) {
+    r = +r;
+    return +((r < 0.0)
+      ? +(+mathf64_PI41 * +r + +mathf64_PI42 * +r * +r)
+      : +(+mathf64_PI41 * +r - +mathf64_PI42 * +r * +r));
+  }
 
-static sinLp(r = 0.0) {
-  //always wrap input angle between -PI and PI
-  return +Float64.sinLpEx(+Float64.wrapRadians(+r));
-}
+  static sinLp(r = 0.0) {
+    //always wrap input angle between -PI and PI
+    return +Float64.sinLpEx(+Float64.wrapRadians(+r));
+  }
 
-static cosLp(r = 0.0) {
-  //compute cosine: sin(x + PI/2) = cos(x)
-  return +Float64.sinLp(+(+r + +mathf64_PI1H));
-}
+  static cosLp(r = 0.0) {
+    //compute cosine: sin(x + PI/2) = cos(x)
+    return +Float64.sinLp(+(+r + +mathf64_PI1H));
+  }
 
-static cosHp(r = 0.0) {
-  //   template<typename T>
-  // inline T cos(T x) noexcept
-  // {
-  //     constexpr T tp = 1./(2.*M_PI);
-  //     x *= tp;
-  //     x -= T(.25) + std::floor(x + T(.25));
-  //     x *= T(16.) * (std::abs(x) - T(.5));
-  //     #if EXTRA_PRECISION
-  //     x += T(.225) * x * (std::abs(x) - T(1.));
-  //     #endif
-  //     return x;
-  // }
-  throw new Error('float64_cosHp is not implemented! r=' + String(r));
-}
+  static cosHp(r = 0.0) {
+    //   template<typename T>
+    // inline T cos(T x) noexcept
+    // {
+    //     constexpr T tp = 1./(2.*M_PI);
+    //     x *= tp;
+    //     x -= T(.25) + std::floor(x + T(.25));
+    //     x *= T(16.) * (std::abs(x) - T(.5));
+    //     #if EXTRA_PRECISION
+    //     x += T(.225) * x * (std::abs(x) - T(1.));
+    //     #endif
+    //     return x;
+    // }
+    throw new Error('float64_cosHp is not implemented! r=' + String(r));
+  }
 
-static sinMpEx(r = 0.0) {
-  r = +r;
-  const sin = +((r < 0.0)
-    ? +(mathf64_PI41 * r + mathf64_PI42 * r * r)
-    : +(mathf64_PI41 * r - mathf64_PI42 * r * r));
-  return +((sin < 0.0)
-    ? +(0.225 * (sin * -sin - sin) + sin)
-    : +(0.225 * (sin * sin - sin) + sin));
-}
+  static sinMpEx(r = 0.0) {
+    r = +r;
+    const sin = +((r < 0.0)
+      ? +(mathf64_PI41 * r + mathf64_PI42 * r * r)
+      : +(mathf64_PI41 * r - mathf64_PI42 * r * r));
+    return +((sin < 0.0)
+      ? +(0.225 * (sin * -sin - sin) + sin)
+      : +(0.225 * (sin * sin - sin) + sin));
+  }
 
-static sinMp(r = 0.0) {
-  return +Float64.sinMpEx(+Float64.wrapRadians(+r));
-}
-  
-static cosMp(r = 0.0) {
-  //compute cosine: sin(x + PI/2) = cos(x)
-  return +Float64.sinMp(+(+r + +mathf64_PI1H));
-}
+  static sinMp(r = 0.0) {
+    return +Float64.sinMpEx(+Float64.wrapRadians(+r));
+  }
 
-static theta(x = 0.0, y = 0.0) {
-  return +mathf64_atan2(+y, +x);
-  /*
-    // alternative was faster, but not anymore.
-    // error < 0.005
-    y = +y;
-    x = +x;
-    if (x == 0.0) {
-      if (y > 0.0) return +(Math.PI / 2.0);
-      if (y == 0.0) return 0.0;
-      return +(-Math.PI / 2.0);
-    }
+  static cosMp(r = 0.0) {
+    //compute cosine: sin(x + PI/2) = cos(x)
+    return +Float64.sinMp(+(+r + +mathf64_PI1H));
+  }
 
-    const z = +(y / x);
-    var atan = 0.0;
-    if (+Math.abs(z) < 1.0) {
-      atan = +(z / (1.0 + 0.28 * z * z));
-      if (x < 0.0) {
-        if (y < 0.0) return +(atan - Math.PI);
-        return +(atan + Math.PI);
+  static theta(x = 0.0, y = 0.0) {
+    return +mathf64_atan2(+y, +x);
+    /*
+      // alternative was faster, but not anymore.
+      // error < 0.005
+      y = +y;
+      x = +x;
+      if (x == 0.0) {
+        if (y > 0.0) return +(Math.PI / 2.0);
+        if (y == 0.0) return 0.0;
+        return +(-Math.PI / 2.0);
       }
-    }
-    else {
-      atan = +(Math.PI / 2.0 - z / (z * z + 0.28));
-      if (y < 0.0) return +(atan - Math.PI);
-    }
-    return +(atan);
-  */
-}
+  
+      const z = +(y / x);
+      var atan = 0.0;
+      if (+Math.abs(z) < 1.0) {
+        atan = +(z / (1.0 + 0.28 * z * z));
+        if (x < 0.0) {
+          if (y < 0.0) return +(atan - Math.PI);
+          return +(atan + Math.PI);
+        }
+      }
+      else {
+        atan = +(Math.PI / 2.0 - z / (z * z + 0.28));
+        if (y < 0.0) return +(atan - Math.PI);
+      }
+      return +(atan);
+    */
+  }
 
-static angle(x = 0.0, y = 0.0) {
-  return +Float64.theta(x, y);
-}
+  static angle(x = 0.0, y = 0.0) {
+    return +Float64.theta(x, y);
+  }
 
-static phi(y = 0.0, len = 0.0) {
-  return +mathf64_asin(+y / +len);
-}
+  static phi(y = 0.0, len = 0.0) {
+    return +mathf64_asin(+y / +len);
+  }
 
-//#endregion
+  //#endregion
 
 }
