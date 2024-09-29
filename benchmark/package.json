@@ -2,7 +2,8 @@
   "name": "jarenjs-benchmark",
   "version": "0.0.1",
   "description": "a benchmark to test the speed of jarenjs against ajv",
-  "main": "./src/index.js",
+  "type": "module",
+  "main": "./index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
