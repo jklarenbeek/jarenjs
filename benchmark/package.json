@@ -1,0 +1,24 @@
+{
+  "name": "jarenjs-benchmark",
+  "version": "0.0.1",
+  "description": "a benchmark to test the speed of jarenjs against ajv",
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "jarenjs",
+    "JSONSchema",
+    "benchmark"
+  ],
+  "author": "Joham",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "benchmark"
+  },
+  "dependencies": {
+    "glob": "^11.0.0"
+  }
+}
