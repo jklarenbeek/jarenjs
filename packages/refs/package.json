@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./dist/index.js",
   "files": [
-    "dist"
+    "dist/",
+    "src/"
   ],
   "description": "Jaren JSON Schema Draft Specifications",
   "author": "joham",
@@ -34,6 +35,9 @@
   },
   "scripts": {
     "build": "node esbuild.config.js"
+  },
+  "peerDependencies": {
+    "@jarenjs/core": "*"
   },
   "devDependencies": {
     "esbuild": "^0.23.1"

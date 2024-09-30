@@ -4,7 +4,7 @@ import {
 } from "./loader.js";
 
 const jsonRemotes = await loadRemoteJson('draft7');
-console.log(jsonRemotes);
+console.log(Object.entries(jsonRemotes).length);
 
 const jsonTests = await loadTestSuiteJson('draft7');
-console.log(jsonTests);
+console.log(Object.entries(jsonTests).length);

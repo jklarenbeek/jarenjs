@@ -2,6 +2,8 @@ import { glob } from 'glob';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
+const DEFAULT_GLOB_CDW = './benchmark/';
+
 /**
  * 
  * @param {string} basePath 
@@ -23,14 +25,14 @@ export async function loadRemoteJson(draft) {
 
   const getBaseRemoteFiles = async () => await glob(
     'suite/remotes/**/*.json',
-    { cwd: './benchmark/', ignore: '**/draft*/**/*.json' }
+    { cwd: DEFAULT_GLOB_CDW, ignore: '**/draft*/**/*.json' }
   );
   const baseRemotes = (await getBaseRemoteFiles())
     .reduce(resolveJson('suite\\remotes\\', 'http://localhost:1234'), {});
 
   const getDraftRemoteFiles = async (version) => await glob(
     `suite/remotes/${version}/**/*.json`,
-    { cwd: './benchmark/' }
+    { cwd: DEFAULT_GLOB_CDW }
   );
   const draftRemotes = (await getDraftRemoteFiles(draft))
     .reduce(resolveJson(`suite\\remotes\\${draft}`, 'http://localhost:1234'), {});
@@ -41,7 +43,7 @@ export async function loadRemoteJson(draft) {
 export async function loadTestSuiteJson(draft) {
   const getTestSuiteFiles = async (version) => await glob(
     `suite/tests/${version}/**/*.json`,
-    { cwd: './benchmark/' }
+    { cwd: DEFAULT_GLOB_CDW }
   );
 
   const testFiles = (await getTestSuiteFiles(draft))

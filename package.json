@@ -25,18 +25,25 @@
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
     "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
     "build": "npm run build --workspaces --if-present",
+    "build:jaren": "node esbuild.config.js",
     "version:patch": "npm version patch --no-git-tag-version --ws --include-workspace-root",
     "version:minor": "npm version minor --no-git-tag-version --ws --include-workspace-root",
     "version:major": "npm version major --no-git-tag-version --ws --include-workspace-root",
     "commit:linux": "git commit -am v$npm_package_version && git tag v$npm_package_version",
     "commit:win32": "git commit -am v%npm_package_version% && git tag v%npm_package_version%",
-    "push": "git push && git push --tags"
+    "push": "git push && git push --tags",
+    "benchmark": "node ./benchmark/index.js"
   },
   "keywords": [
-    "javascript",
-    "json",
-    "jsonschema",
+    "JSON",
+    "schema",
+    "validator",
     "validation",
+    "jsonschema",
+    "json-schema",
+    "json-schema-validator",
+    "json-schema-validation",
+    "javascript",
     "expressive",
     "typechecking"
   ],
@@ -60,6 +67,10 @@
     "turbo": "^2.1.1"
   },
   "dependencies": {
-    "@types/node": "^22.5.5"
+    "@types/node": "^22.5.5",
+    "@jarenjs/core": "*",
+    "@jarenjs/validate": "*",
+    "@jarenjs/formats": "*",
+    "@jarenjs/refs": "*"
   }
 }
