@@ -9,11 +9,11 @@ import {
 export const name = "Jaren";
 
 export function loader(draft, metaSchemas) {
-  const meta = getSchemaDraftByName(draft);
+  //const meta = getSchemaDraftByName(draft);
 
   const ajv = new Ajv()
   addFormats(ajv);
-  ajv.addSchema(meta.schema, meta.draft);
+  //ajv.addSchema(meta.schema, meta.draft);
   return ajv;
 }
 

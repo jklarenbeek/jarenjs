@@ -3,27 +3,24 @@ import {
   loadTestSuiteJson
 } from "./loader.js";
 
-import * as jarenjs from './adaptors/jaren.js';
+import * as jarenAdaptor from './adaptors/jaren.js';
+import * as ajvAdaptor from './adaptors/ajv.js';
 
-const jsonRemotes = await loadRemoteJson('draft7');
-const jsonTests = await loadTestSuiteJson('draft7');
+import { TestRunner } from './runner.js';
 
-const jaren = jarenjs.loader('draft7', jsonRemotes);
-  
+const DEFAULT_TEST_DRAFT = 'draft7';
+
+TestRunner.initialize(DEFAULT_TEST_DRAFT, jarenAdaptor, ajvAdaptor);
+const remotes = await loadRemoteJson(DEFAULT_TEST_DRAFT);
+TestRunner.load(remotes);
+
+const jsonTests = await loadTestSuiteJson(DEFAULT_TEST_DRAFT);
+
 for (const [key, tests] of Object.entries(jsonTests)) {
   console.log(`## suite ${key}`);
 
   for (let i = 0; i < tests.length; ++i) {
     const test = tests[i];
-    console.log(`### test ${test.description}`);
-
-    const validator = jarenjs.setup(jaren, test.schema);
-
-    const asserts = test.tests;
-    for (let j = 0; j < asserts.length; ++j) {
-      const item = asserts[j];
-      const valid = jarenjs.run(validator, item.data) === item.valid;
-      console.log(`- ${item.description} = ${valid}`);
-    }
+    TestRunner.runTest(test);
   }
 }
