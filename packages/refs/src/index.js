@@ -16,6 +16,11 @@ const schemaDrafts = {
   2020: { draft: 'https://json-schema.org/draft/2020-12/schema', schema: _draft2020 },
 };
 
+/**
+ * 
+ * @param {number} version 
+ * @returns {{draft:string, schema: object[]}}
+ */
 export function getSchemaDraftByVersion(version) {
   if (version in schemaDrafts)
     return schemaDrafts[version];
@@ -29,20 +34,25 @@ export function getSchemaDraftByName(name) {
       return getSchemaDraftByVersion(6);
     case '7': case 'draft7': case 'draft-7': case 'draft07': case 'draft-07':
       return getSchemaDraftByVersion(7);
-    case 'draft2019': case 'draft-2019': case '2019': case '2019-09':
+    case 'draft2019': case 'draft-2019': case 'draft2019-09': case '2019': case '2019-09':
       return getSchemaDraftByVersion(2019);
-    case 'draft2020': case 'draft-2020': case '2020': case '2020-12':
+    case 'draft2020': case 'draft-2020': case 'draft2020-12': case '2020': case '2020-12':
       return getSchemaDraftByVersion(2020);
     default:
       throw new Error(`Unknown reference schema name: '${name}'`);
   }
 }
 
-export function getSchemaDraftById(id) {
+/**
+ * 
+ * @param {string} schemaId
+ * @returns {{draft:string, schema: object[]}}
+ */
+export function getSchemaDraftById(schemaId) {
   if (!isStringType())
     throw new Error('The schema id must be of type string');
 
-  const $id = id.toLowerCase();
+  const $id = schemaId.toLowerCase();
   // eslint-disable-next-line no-unused-vars
   for (const [_, item] of Object.entries(schemaDrafts)) {
     const draft = item.draft;
@@ -50,5 +60,5 @@ export function getSchemaDraftById(id) {
       return item;
   }
 
-  throw new Error(`Schema draft with id '${id}' does not exists`);
+  throw new Error(`Schema draft with id '${schemaId}' does not exists`);
 }
