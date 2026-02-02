@@ -82,8 +82,12 @@ export class TestRunner {
 
     for (let i = 0; i < TestRunner.#validators.length; ++i) {
       const validator = TestRunner.#validators[i];
-      const runner = validator.createTest(test);
-      runner.test();
+      try {
+        const runner = validator.createTest(test);
+        runner.test();
+      } catch (err) {
+        console.log(`- ${validator.#adaptor.name} failed: ${err.message}`);
+      }
     }
   }
 }

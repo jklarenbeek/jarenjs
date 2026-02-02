@@ -28,14 +28,14 @@ export async function loadRemoteJson(draft) {
     { cwd: DEFAULT_GLOB_CDW, ignore: '**/draft*/**/*.json' }
   );
   const baseRemotes = (await getBaseRemoteFiles())
-    .reduce(resolveJson('suite\\remotes\\', 'http://localhost:1234'), {});
+    .reduce(resolveJson('suite/remotes/', 'http://localhost:1234'), {});
 
   const getDraftRemoteFiles = async (version) => await glob(
     `suite/remotes/${version}/**/*.json`,
     { cwd: DEFAULT_GLOB_CDW }
   );
   const draftRemotes = (await getDraftRemoteFiles(draft))
-    .reduce(resolveJson(`suite\\remotes\\${draft}`, 'http://localhost:1234'), {});
+    .reduce(resolveJson(`suite/remotes/${draft}`, 'http://localhost:1234'), {});
 
   return { ...baseRemotes, ...draftRemotes };
 }

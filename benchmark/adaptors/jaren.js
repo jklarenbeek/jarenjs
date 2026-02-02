@@ -17,6 +17,15 @@ export function loader(draft, remoteSchemas) {
     .addFormats(formats.stringFormats)
     .addFormats(formats.dateTimeFormats)
     .addSchema(meta.schema, meta.draft);
+
+  for (const id in remoteSchemas) {
+    let schemaId = id;
+    if (!schemaId.endsWith('#')) {
+      schemaId += '#';
+    }
+    jaren.addSchema(remoteSchemas[id], schemaId);
+  }
+
   return jaren;
 }
 

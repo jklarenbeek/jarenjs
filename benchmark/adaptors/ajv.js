@@ -2,18 +2,21 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 
-import {
-  getSchemaDraftByName,
-} from '@jarenjs/refs';
+export const name = "Ajv";
 
-export const name = "Jaren";
-
-export function loader(draft, metaSchemas) {
-  //const meta = getSchemaDraftByName(draft);
-
-  const ajv = new Ajv()
+export function loader(draft, remoteSchemas) {
+  const ajv = new Ajv({
+    strict: false,
+    keywords: ["$note"],
+    logger: false 
+  });
   addFormats(ajv);
-  //ajv.addSchema(meta.schema, meta.draft);
+  
+  if (remoteSchemas) {
+    for (const id in remoteSchemas) {
+      ajv.addSchema(remoteSchemas[id], id);
+    }
+  }
   return ajv;
 }
 
