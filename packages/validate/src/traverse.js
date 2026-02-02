@@ -128,6 +128,14 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       else
         throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
 
+      // CHECK: Also store under alternate ID (with/without # suffix) for absolute URIs only
+      if (!id.startsWith('#')) {
+        const altId = id.endsWith('#') ? id.slice(0, -1) : id + '#';
+        if (!schemas.has(altId)) {
+          schemas.set(altId, obj);
+        }
+      }
+
       // we reset the baseUri when the $id property is set.
       baseUri = id;
     }

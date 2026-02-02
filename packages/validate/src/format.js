@@ -40,5 +40,5 @@ export function compileFormatBasic(schemaObj, jsonSchema) {
   if (compiler)
     return compiler(schemaObj, jsonSchema);
   else
-    throw new Error(`Unknown format ${jsonSchema.format}`);
+    return undefined;
 }

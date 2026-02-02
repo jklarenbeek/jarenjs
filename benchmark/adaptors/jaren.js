@@ -15,8 +15,10 @@ export function loader(draft, remoteSchemas) {
   const jaren = new JarenValidator()
     .addFormats(formats.numberFormats)
     .addFormats(formats.stringFormats)
-    .addFormats(formats.dateTimeFormats)
-    .addSchema(meta.schema, meta.draft);
+    .addFormats(formats.dateTimeFormats);
+  
+  // Add meta-schema using addMetaSchema which properly processes internal refs
+  jaren.addMetaSchema(meta.schema, meta.draft);
 
   for (const id in remoteSchemas) {
     let schemaId = id;

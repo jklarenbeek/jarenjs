@@ -11,6 +11,9 @@ import * as path from 'path';
 
 const DEFAULT_TEST_DRAFT = 'draft7';
 
+// TODO: We should be able to set an shell argument for this!
+const CONF_SHOW_LOG_RESULT = 'Jaren';
+
 TestRunner.initialize(DEFAULT_TEST_DRAFT, jarenAdaptor, ajvAdaptor);
 const remotes = await loadRemoteJson(DEFAULT_TEST_DRAFT);
 TestRunner.load(remotes);
@@ -23,19 +26,39 @@ const validators = new Set();
 console.log('Running benchmarks...');
 
 for (const [key, tests] of Object.entries(jsonTests)) {
-  // console.log(`## suite ${key}`);
-  process.stdout.write('.');
+  console.log(`## suite ${key}`);
   allResults[key] = [];
 
   for (let i = 0; i < tests.length; ++i) {
     const test = tests[i];
+    // TODO: select adapter
     const results = TestRunner.runTest(test);
-    
+
     // Structure: { description: string, results: [{ validator, failures, total, time, error? }] }
     allResults[key].push({
       description: test.description,
       results: results
     });
+
+    let sums = null;
+    if (CONF_SHOW_LOG_RESULT == null || CONF_SHOW_LOG_RESULT === '') {
+      sums = results.reduce(
+        (acc, { total, failures, time }) => {
+          acc.total += total;
+          acc.failures += failures;
+          acc.time += time;
+          return acc;
+        },
+        { total: 0, failures: 0, time: 0 }
+      );
+    }
+    else {
+      sums = results.find(item =>
+        item.validator.toLowerCase() === CONF_SHOW_LOG_RESULT.toLowerCase()
+      );
+    }
+
+    console.log(`Test run complete: asserts ${sums.total}, failures ${sums.failures}, time ${sums.time.toFixed(3)}`);
 
     results.forEach(r => validators.add(r.validator));
   }
@@ -78,23 +101,23 @@ for (const suiteName in allResults) {
 
     // First pass: find fastest
     for (const res of test.results) {
-        if (!res.error && res.time < fastestTime) {
-            fastestTime = res.time;
-            fastestValidator = res.validator;
-        }
+      if (!res.error && res.time < fastestTime) {
+        fastestTime = res.time;
+        fastestValidator = res.validator;
+      }
     }
-    
+
     // Increment win count
     if (fastestValidator && summary[fastestValidator]) {
-        summary[fastestValidator].wins++;
+      summary[fastestValidator].wins++;
     }
 
     for (const res of test.results) {
-        if (!summary[res.validator]) continue;
-        summary[res.validator].totalTests += res.total;
-        summary[res.validator].failedTests += res.failures;
-        summary[res.validator].totalTime += res.time;
-        if (res.error) summary[res.validator].errors++;
+      if (!summary[res.validator]) continue;
+      summary[res.validator].totalTests += res.total;
+      summary[res.validator].failedTests += res.failures;
+      summary[res.validator].totalTime += res.time;
+      if (res.error) summary[res.validator].errors++;
     }
   }
 }
@@ -133,35 +156,35 @@ for (const suiteName in allResults) {
     html += `<tr>
       <td>${suiteName}</td>
       <td>${test.description}</td>`;
-    
+
     // Find fastest for this row again for display logic
     let fastestTime = Infinity;
     let fastestValidator = null;
     test.results.forEach(r => {
-        if (!r.error && r.time < fastestTime) {
-            fastestTime = r.time;
-            fastestValidator = r.validator;
-        }
+      if (!r.error && r.time < fastestTime) {
+        fastestTime = r.time;
+        fastestValidator = r.validator;
+      }
     });
 
     validatorList.forEach(v => {
       const res = test.results.find(r => r.validator === v);
       if (res) {
         if (res.error) {
-           html += `<td class="fail">ERROR: ${res.error}</td><td>-</td>`;
+          html += `<td class="fail">ERROR: ${res.error}</td><td>-</td>`;
         } else {
-           const classParams = res.failures > 0 ? 'class="fail"' : 'class="pass"';
-           
-           let timeDisplay = res.time.toFixed(4);
-           if (v === fastestValidator) {
-               timeDisplay = `<b>${timeDisplay}</b>`;
-           } else if (fastestValidator) {
-               // Calculate diff
-               const diff = ((res.time - fastestTime) / fastestTime * 100).toFixed(0);
-               timeDisplay = `${timeDisplay} <span style="font-size:0.8em; color:#666">(+${diff}%)</span>`;
-           }
+          const classParams = res.failures > 0 ? 'class="fail"' : 'class="pass"';
 
-           html += `<td ${classParams}>${res.failures} / ${res.total}</td>
+          let timeDisplay = res.time.toFixed(4);
+          if (v === fastestValidator) {
+            timeDisplay = `<b>${timeDisplay}</b>`;
+          } else if (fastestValidator) {
+            // Calculate diff
+            const diff = ((res.time - fastestTime) / fastestTime * 100).toFixed(0);
+            timeDisplay = `${timeDisplay} <span style="font-size:0.8em; color:#666">(+${diff}%)</span>`;
+          }
+
+          html += `<td ${classParams}>${res.failures} / ${res.total}</td>
                     <td>${timeDisplay}</td>`;
         }
       } else {
