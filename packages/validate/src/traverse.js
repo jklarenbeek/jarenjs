@@ -213,7 +213,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 }
 
 export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions()) {
-  const { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
+  let { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
   if (!schemas.has(leftUri))
     throw new Error(`The root of reference: '$ref': '${base}', is not found in init-cache`);
 
@@ -236,6 +236,10 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
       throw new Error(`The '${current}' is not is not a valid schema in '${leftUri}'`);
 
     schema = schema[part];
+    if (isObjectClass(schema) && isStringType(schema.$id) && !isStringWhiteSpace(schema.$id)) {
+      const { id } = createJsonPointer(schema.$id, base, opts);
+      base = id;
+    }
   }
 
   return { id: base, schema };

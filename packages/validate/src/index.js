@@ -127,6 +127,13 @@ class ValidationRoot {
     const schemas = this._schemas;
     const traverse = this._traverse;
     const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
+
+    if (objects.has(id)) {
+      const obj = objects.get(id);
+      if (obj != null)
+        return obj;
+    }
+
     return ValidationRoot._createObject(this, id, root);
   }
 
