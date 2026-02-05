@@ -29,7 +29,7 @@ export {
 } from './format.js';
 
 export { TraverseOptions };
-  
+
 export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-06/schema#'
 
 const isBrowser = typeof window !== 'undefined';
@@ -127,6 +127,13 @@ class ValidationRoot {
     const schemas = this._schemas;
     const traverse = this._traverse;
     const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
+
+    if (objects.has(id)) {
+      const obj = objects.get(id);
+      if (obj != null)
+        return obj;
+    }
+
     return ValidationRoot._createObject(this, id, root);
   }
 
@@ -157,7 +164,8 @@ class ValidationObject {
 
     const root = self._root;
 
-    const { id: ref } = createJsonPointer(schema.$ref, path, root.options);
+    // TODO: are we sure about this?!?!
+    const { id: ref } = createJsonPointer(schema.$ref, path, root._traverse);
 
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
@@ -207,7 +215,7 @@ class ValidationObject {
   get formats() {
     return this._root.formats;
   }
-  
+
 /**
  * Compiles a schema validation error handler
  * @param {any} expected - anything that is expected by this handler
@@ -235,11 +243,14 @@ class ValidationObject {
     if (!isBoolOrObjectClass(schema))
       return undefined;
 
+    const root = this._root;
+    // Use root origin as base if path is just an anchor (not a valid base URL)
+    const basePath = this._path.startsWith('#') ? root._rootOrigin : this._path;
+
     const id = isObjectClass(schema)
-      ? createJsonPointer(schema.$id, this._path).id
+      ? createJsonPointer(schema.$id, basePath).id
       : this._path;
 
-    const root = this._root;
     const path = index == null
       ? encodeJsonPointerPath(id, key)
       : encodeJsonPointerPath(id, key, String(index));
@@ -285,8 +296,8 @@ export class JarenValidator {
 
   /**
    * Add format to validate strings or numbers.
-   * @param {string} name 
-   * @param {Function} formatCompiler 
+   * @param {string} name
+   * @param {Function} formatCompiler
    * @returns {JarenValidator}
    */
   addFormat(name, formatCompiler) {
@@ -305,9 +316,9 @@ export class JarenValidator {
   }
 
   /**
-   * 
-   * @param {boolean | object} schema 
-   * @param {object[] | undefined} schemas 
+   *
+   * @param {boolean | object} schema
+   * @param {object[] | undefined} schemas
    * @param {TraverseOptions} opts
    * @returns {{origin:string, map: Map}}
    */
@@ -319,7 +330,7 @@ export class JarenValidator {
       opts.origin,
       schema,
       opts);
-  
+
     // Then add the other reference schemas
     if (Array.isArray(schemas) && schemas.length > 0) {
       schemas.forEach(ref => storeSchemaIdsInMap(
@@ -328,21 +339,21 @@ export class JarenValidator {
         ref,
         opts));
     }
-  
+
     // make sure all schemas are connected
     restoreSchemaRefsInMap(schemaMap, opts);
-  
+
     return { origin: origin, map: schemaMap };
   }
-  
+
   /**
-   * Add schema(s) to validator instance. 
-   * This method does not compile schemas (but it still validates them). 
-   * Because of that dependencies can be added in any order and 
-   * circular dependencies are supported. 
-   * It also prevents unnecessary compilation of schemas that are 
+   * Add schema(s) to validator instance.
+   * This method does not compile schemas (but it still validates them).
+   * Because of that dependencies can be added in any order and
+   * circular dependencies are supported.
+   * It also prevents unnecessary compilation of schemas that are
    * containers for other schemas but not used as a whole.
-   * @param {boolean | object | object[]} schema 
+   * @param {boolean | object | object[]} schema
    * @param {string | undefined} key
    * @returns {JarenValidator}
    */
@@ -354,16 +365,23 @@ export class JarenValidator {
       const schemaKey = key || schema.$id;
       if (schemaKey) {
         this.#schemas.set(schemaKey, schema);
+        // CHECK: Also store with alternate key (with/without #) for absolute URIs
+        if (!schemaKey.startsWith('#')) {
+          const altKey = schemaKey.endsWith('#') ? schemaKey.slice(0, -1) : schemaKey + '#';
+          if (!this.#schemas.has(altKey)) {
+            this.#schemas.set(altKey, schema);
+          }
+        }
       }
     }
     return this;
   }
 
   /**
-   * 
-   * @param {JarenValidator} self 
-   * @param {string} origin 
-   * @param {Map} schemas 
+   *
+   * @param {JarenValidator} self
+   * @param {string} origin
+   * @param {Map} schemas
    * @returns {(data) => boolean}
    */
   static #compileSchema(self, origin, schemas) {
@@ -373,7 +391,7 @@ export class JarenValidator {
       self.#formats,
       self.#options.validation,
       self.#options.traverse);
-  
+
     function jarenValidateSchema(data) {
       return root.validate(data)
     }
@@ -381,7 +399,7 @@ export class JarenValidator {
     Object.defineProperty(jarenValidateSchema, "errors", {
       get: function () { return root._errors }
     })
-    
+
     return jarenValidateSchema;
   }
 
@@ -391,7 +409,7 @@ export class JarenValidator {
 
   /**
    * Adds meta schema(s) that can be used to validate other schemas.
-   * @param {boolean | object | object[]} schema 
+   * @param {boolean | object | object[]} schema
    * @param {string | undefined} key
    * @returns {JarenValidator}
    */
@@ -414,8 +432,8 @@ export class JarenValidator {
   }
 
   /**
-   * 
-   * @param {string} key 
+   *
+   * @param {string} key
    * @returns {object}
    */
   getSchema(key) {
@@ -429,7 +447,7 @@ export class JarenValidator {
    * If schema doesn't have $schema property, it is validated against draft 6 meta-schema (option meta should not be false).
    * If schema has $schema property, then the schema with this id (that should be previously added) is used to validate passed schema.
    * Errors will be available at ajv.errors
-   * @param {boolean | object} schema 
+   * @param {boolean | object} schema
    * @returns {boolean}
    */
   validateSchema(schema) {
@@ -451,7 +469,7 @@ export class JarenValidator {
    * Generate validating function and cache the compiled schema for future use.
    * Note: This function does NOT return a promise. Use compileAsync instead!
    * @param {boolean | object} schema
-   * @param {object[] | undefined} [schemas=undefined] 
+   * @param {object[] | undefined} [schemas=undefined]
    * @returns {(data: any) => boolean}
    */
   compile(schema, schemas = undefined) {

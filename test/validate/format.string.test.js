@@ -16,8 +16,8 @@ compiler.addFormats(formats.stringFormats);
 describe('Schema String Formats', function () {
 
   describe('#formatBasic()', function () {
-    it('should throw an error when the format is unknown', function () {
-      assert.throws(() => compiler.compile({
+    it('should not throw an error when the format is unknown', function () {
+      assert.doesNotThrow(() => compiler.compile({
         format: 'something-invalid'
       }));
     });

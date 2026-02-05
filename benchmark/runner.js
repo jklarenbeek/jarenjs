@@ -18,12 +18,22 @@ class TestValidator {
       throw new Error('No validator');
 
     const asserts = this.#test.tests;
+    let failures = 0;
+    
+    const start = performance.now();
     for (let j = 0; j < asserts.length; ++j) {
       const item = asserts[j];
       // @ts-ignore
       const valid = adaptor.run(validator, item.data) === item.valid;
-      console.log(`- ${item.description} = ${valid}`);
+      if (!valid) failures++;
     }
+    const end = performance.now();
+    
+    return {
+      failures,
+      total: asserts.length,
+      time: end - start
+    };
   }
 
 }
@@ -78,12 +88,28 @@ export class TestRunner {
   }
 
   static runTest(test) {
-    console.log(`### test: '${test.description}'`);
-
+    const results = [];
     for (let i = 0; i < TestRunner.#validators.length; ++i) {
       const validator = TestRunner.#validators[i];
-      const runner = validator.createTest(test);
-      runner.test();
+      const adaptorName = validator.#adaptor.name;
+      try {
+        const runner = validator.createTest(test);
+        const result = runner.test();
+        results.push({
+          validator: adaptorName,
+          ...result
+        });
+      } catch (err) {
+        console.log(`- ${adaptorName} failed: ${err.message}`);
+        results.push({
+          validator: adaptorName,
+          error: err.message,
+          failures: 0,
+          total: 0,
+          time: 0
+        });
+      }
     }
+    return results;
   }
 }

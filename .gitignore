@@ -91,4 +91,7 @@ typings/
 dist/
 
 # parcel runtime output
-.parcel-cache/
+.parcel-cache
+
+# benchmark results
+benchmark/results/

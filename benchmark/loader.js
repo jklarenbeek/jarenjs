@@ -14,7 +14,7 @@ function resolveJson(basePath, baseUri = undefined) {
   return (store, filePath) => {
     const fileBase = filePath.replace(basePath, '');
     const id = baseUri
-      ? new URL(fileBase, 'http://localhost:1234').href
+      ? new URL(fileBase, baseUri).href
       : fileBase;
     store[id] = require(`./${filePath}`);
     return store;
@@ -28,14 +28,14 @@ export async function loadRemoteJson(draft) {
     { cwd: DEFAULT_GLOB_CDW, ignore: '**/draft*/**/*.json' }
   );
   const baseRemotes = (await getBaseRemoteFiles())
-    .reduce(resolveJson('suite\\remotes\\', 'http://localhost:1234'), {});
+    .reduce(resolveJson('suite/remotes/', 'http://localhost:1234'), {});
 
   const getDraftRemoteFiles = async (version) => await glob(
     `suite/remotes/${version}/**/*.json`,
     { cwd: DEFAULT_GLOB_CDW }
   );
   const draftRemotes = (await getDraftRemoteFiles(draft))
-    .reduce(resolveJson(`suite\\remotes\\${draft}`, 'http://localhost:1234'), {});
+    .reduce(resolveJson(`suite/remotes/${draft}/`, `http://localhost:1234/${draft}/`), {});
 
   return { ...baseRemotes, ...draftRemotes };
 }
