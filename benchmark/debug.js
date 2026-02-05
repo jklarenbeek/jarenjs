@@ -6,7 +6,7 @@ import * as jaren from './adaptors/jaren.js';
 const [,, targetFile, targetDesc] = process.argv;
 
 if (!targetFile) {
-  console.log('Usage: node debug.js <testfile.json> [description]');
+  console.log('Usage: node benchmark/debug.js <testfile.json> [description]');
   process.exit(1);
 }
 

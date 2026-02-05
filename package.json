@@ -24,6 +24,7 @@
     "test": "node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
     "cover:all": "c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node --no-warnings=ExperimentalWarning --test ./test/**/*.test.js",
+    "cover:bench": "npx c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node benchmark/debug.js '/required.json' 'required validation'",
     "build": "npm run build --workspaces --if-present",
     "build:jaren": "node esbuild.config.js",
     "version:patch": "npm version patch --no-git-tag-version --ws --include-workspace-root",

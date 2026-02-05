@@ -16,9 +16,10 @@ export function loader(draft, remoteSchemas) {
     .addFormats(formats.numberFormats)
     .addFormats(formats.stringFormats)
     .addFormats(formats.dateTimeFormats);
-  
+
   // Add meta-schema using addMetaSchema which properly processes internal refs
-  jaren.addMetaSchema(meta.schema, meta.draft);
+  //jaren.addMetaSchema(meta.schema, meta.draft);
+  jaren.addSchema(meta.schema, meta.draft);
 
   for (const id in remoteSchemas) {
     let schemaId = id;
