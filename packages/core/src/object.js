@@ -97,11 +97,11 @@ export function equalsDeep(target, source) {
 }
 
 /**
- * 
- * @param {Map} map 
- * @param  {...Map} iterables 
+ *
+ * @param {Map} map
+ * @param  {...Map} iterables
  */
-export function mapMerge(map, ...iterables) {
+export function mergeMap(map, ...iterables) {
   for (const iterable of iterables) {
     for (const item of iterable) {
       map.set(...item);
@@ -110,11 +110,11 @@ export function mapMerge(map, ...iterables) {
 }
 
 /**
- * 
- * @param {Set<any>} set 
- * @param  {...Array<Set<any>>} iterables 
+ *
+ * @param {Set<any>} set
+ * @param  {...Array<Set<any>>} iterables
  */
-export function setMerge(set, ...iterables) {
+export function mergeSet(set, ...iterables) {
   for (const iterable of iterables) {
     for (const item of iterable) {
       set.add(item);
