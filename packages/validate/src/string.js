@@ -16,6 +16,8 @@ import {
   trueThat,
 } from '@jarenjs/core/function';
 
+const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 function compileMinLength(schemaObj, jsonSchema) {
   const min = getIntishType(jsonSchema.minLength) || 0;
   if (min < 1) return undefined;
@@ -62,6 +64,16 @@ function compileStringIntern(schemaObj, jsonSchema) {
   const isMaxLength = maxLength || trueThat;
   const isMatch = pattern || trueThat;
 
+  if (schemaObj.options.useGrapheme) {
+    return function validateStringIntern(data, dataPath) {
+      let len = 0;
+      for (const _ of segmenter.segment(data)) len++;
+      return isMinLength(len, dataPath)
+        && isMaxLength(len, dataPath)
+        && isMatch(data, dataPath);
+    }
+  }
+
   return function validateStringIntern(data, dataPath) {
     const len = data.length;
     return isMinLength(len, dataPath)
@@ -75,7 +87,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
   if (intern == null) return undefined;
 
   return function validateStringBasic(data, dataPath) {
-    return isStringType(data)
-      && intern(data, dataPath);
+    return !isStringType(data)
+      || intern(data, dataPath);
   };
 }

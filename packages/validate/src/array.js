@@ -16,13 +16,10 @@ import {
 } from '@jarenjs/core/function';
 
 import {
-  isUniqueArray,
-} from '@jarenjs/core/array';
-
-import {
   getBoolOrObjectClass,
   getArrayClassMinItems,
   isOfSchemaType,
+  isUniqueDeepArray,
 } from './tools.js';
 
 //#region Primitives
@@ -60,7 +57,7 @@ function createBooleanValidator(schemaObj, jsonSchema, key, validationFn) {
 }
 
 const compileUniqueItems = (schemaObj, jsonSchema) =>
-  createBooleanValidator(schemaObj, jsonSchema, 'uniqueItems', isUniqueArray);
+  createBooleanValidator(schemaObj, jsonSchema, 'uniqueItems', isUniqueDeepArray);
 //#endregion
 
 //#region Tuple

@@ -74,7 +74,8 @@ function compileNumberMultipleOf(schemaObj, jsonSchema) {
   const addError = schemaObj.createErrorHandler(mulOf, 'multipleOf');
 
   return function validateMultipleOf(data, dataPath) {
-    return data % mulOf === 0
+    const q = data / mulOf;
+    return Math.abs(q - Math.round(q)) < 1e-6
       || addError(data, dataPath);
   };
 }

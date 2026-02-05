@@ -61,7 +61,7 @@ export function isBigIntType(data) {
 //#region Scalar Getters
 /**
  * Returns the string type of the input object if it is a string; otherwise, returns the default value.
- * 
+ *
  * @param {any} obj - The input object to check its type.
  * @param {string|undefined} [def=undefined] - The default value to return if the input object is not a string.
  * @returns {string} The string type of the input object or the default value.
@@ -196,7 +196,7 @@ export function isTypedArray(data) {
 
 //#region Object Getters
 export function getObjectType(obj, def = undefined) {
-  return isObjectClass(obj) ? obj : def;
+  return isObjectType(obj) ? obj : def;
 }
 
 export function getArrayClass(obj, def = undefined) {
@@ -206,7 +206,7 @@ export function getArrayClass(obj, def = undefined) {
 
 /**
  * Calculates the inclusive and exclusive bounds based on the provided parameters.
- * 
+ *
  * @param {function} getType - A function to determine the type of the inclusive and exclusive bounds.
  * @param {number|string|undefined} inclusive - The inclusive bound value.
  * @param {number|string|boolean|undefined} exclusive - The exclusive bound value.

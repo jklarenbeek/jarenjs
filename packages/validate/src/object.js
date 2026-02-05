@@ -1,7 +1,8 @@
 //@ts-check
 
 import {
-  isObjectClass,
+  // isObjectClass, // to specific
+  isObjectType, // slowerc
   isArrayClass,
   getObjectType,
 } from '@jarenjs/core';
@@ -42,8 +43,8 @@ function compileMinProperties(schemaObj, jsonSchema) {
 }
 
 function compileMaxProperties(schemaObj, jsonSchema) {
-  const max = getIntishType(jsonSchema.maxProperties) || -1;
-  if (max < 0) return undefined;
+  const max = getIntishType(jsonSchema.maxProperties);
+  if (max == null || max < 0) return undefined;
   const min = getIntishType(jsonSchema.minProperties) || 0;
   if (max < min) throw new Error('maxProperties must be greater then minProperties');
 
@@ -61,6 +62,9 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
   /** @type {function(string, string):boolean} */
   const addError = schemaObj.createErrorHandler(required, 'requiredProperties');
   return function validateRequiredProperties(dataKeys = [], dataPath = '') {
+    if (!(dataKeys.length > 0))
+      return false;
+
     let valid = true;
     for (let i = 0; i < rlength; ++i) {
       const key = required[i];
@@ -78,7 +82,10 @@ function compilePropertyNames(schemaObj, jsonSchema) {
   const propNames = getBoolOrObjectClass(jsonSchema.propertyNames);
   if (propNames == null) return undefined;
 
-  return schemaObj.createValidator(propNames, 'propertyNames');
+  const propertyNamesValidator = schemaObj.createValidator(propNames, 'propertyNames');
+  return function validatePropertyNames(dataKey) {
+    return propertyNamesValidator(dataKey);
+  }
 }
 
 function compileProperties(schemaObj, jsonSchema) {
@@ -88,20 +95,20 @@ function compileProperties(schemaObj, jsonSchema) {
   const keys = Object.keys(properties);
   if (keys.length === 0) return undefined;
 
-  const validators = {};
+  const validators = new Map();
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
     const schemas = properties[key];
     const validator = schemaObj.createValidator(schemas, 'properties', key);
     if (validator != null)
-      validators[key] = validator;
+      validators.set(key, validator);
   }
-  if (Object.keys(validators).length === 0)
+  if (validators.size === 0)
     return undefined;
 
   return function validatePropertyItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
-    const validator = validators[dataKey];
+    const validator = validators.get(dataKey);
     if (validator == null)
       return result;
     else {
@@ -119,36 +126,31 @@ function compilePatternProperties(schemaObj, jsonSchema) {
   const entryKeys = Object.keys(entries);
   if (entryKeys.length === 0) return undefined;
 
-  const patterns = {};
+  const patterns = new Map();
   for (let i = 0; i < entryKeys.length; ++i) {
     const key = entryKeys[i];
     const pattern = createRegExp(key);
     if (pattern != null)
-      patterns[key] = pattern;
+      patterns.set(key, pattern);
   }
 
-  const patternKeys = Object.keys(patterns);
-  if (patternKeys.length === 0) return undefined;
+  if (patterns.size === 0) return undefined;
 
-  const validators = {};
-  for (let i = 0; i < patternKeys.length; ++i) {
-    const key = patternKeys[i];
+  const validators = new Map();
+  for (const [key] of patterns) {
     const schema = entries[key];
     const validator = schemaObj.createValidator(schema, 'patternProperties', key);
     if (validator != null)
-      validators[key] = validator;
+      validators.set(key, validator);
   }
 
-  const validatorKeys = Object.keys(validators);
-  if (validatorKeys.length === 0) return undefined;
+  if (validators.size === 0) return undefined;
 
   return function validatePatternPropertiesItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
-    for (let i = 0; i < validatorKeys.length; ++i) {
-      const key = validatorKeys[i];
-      const pattern = patterns[key];
+    for (const [key, validate] of validators) {
+      const pattern = patterns.get(key);
       if (pattern.test(dataKey)) {
-        const validate = validators[key];
         result.addMatch(validate(data[dataKey], dataPath, dataRoot, dataKey));
       }
     }
@@ -178,7 +180,7 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
 function compileUnevaluatedProperties(schemaObj, jsonSchema) {
   const unevaluatedProperties = getBoolOrObjectClass(jsonSchema.unevaluatedProperties);
   if (unevaluatedProperties == null) return undefined;
-  
+
   if (unevaluatedProperties === false) {
     const addError = schemaObj.createErrorHandler(false, 'unevaluatedProperties');
     return (data, dataPath, dataRoot, dataKey) => addError(dataKey, data);
@@ -213,27 +215,27 @@ function compileDependentSchemas(schemaObj, jsonSchema) {
   const dependentSchemas = getObjectType(jsonSchema.dependentSchemas);
   if (dependentSchemas == null) return undefined;
 
-  const validators = {};
+  const validators = new Map();
   for (const key in dependentSchemas) {
-    if (key in dependentSchemas) {
+    if (Object.prototype.hasOwnProperty.call(dependentSchemas, key)) {
       const schema = dependentSchemas[key];
       if (!isBoolOrObjectClass(schema) && !schemaObj.options.skipErrors)
         throw new Error(`Expected Schema at '${schemaObj.path}/${key}'`);
 
       const validator = schemaObj.createValidator(schema, 'dependentSchemas', key);
       if (validator != null)
-        validators[key] = validator;
+        validators.set(key, validator);
       else
         throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
     }
   }
 
-  if (Object.keys(validators).length === 0)
+  if (validators.size === 0)
     return undefined;
 
   return function validateDependentSchemasItem(data, dataPath, dataRoot, dataKey) {
-    if (dataKey in validators) {
-      const validator = validators[dataKey];
+    if (validators.has(dataKey)) {
+      const validator = validators.get(dataKey);
       return validator(data, dataPath, dataRoot, dataKey);
     }
     return true;
@@ -245,35 +247,35 @@ function compileDependencies(schemaObj, jsonSchema) {
   if (dependencies == null)
     return undefined;
 
-  const validators = {};
+  const validators = new Map();
   for (const key in dependencies) {
-    if (key in dependencies) {
+    if (Object.prototype.hasOwnProperty.call(dependencies, key)) {
       const right = dependencies[key];
       if (isBoolOrObjectClass(right)) {
         const validator = schemaObj.createValidator(right, 'dependencies', key);
         if (validator != null)
-          validators[key] = validator;
+          validators.set(key, validator);
         else
           throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
       }
       else if (isArrayClass(right)) {
         const addError = schemaObj.createErrorHandler(right, ['dependencies', key]);
-        validators[key] = function validateRequiredDependency(data, dataPath, dataRoot, dataKey) {
+        validators.set(key, function validateRequiredDependency(data, dataPath, dataRoot, dataKey) {
           return includesAll(Object.keys(data), right)
             || addError(data, dataKey, dataPath);
-        };
+        });
       }
       else if (!schemaObj.options.skipErrors)
         throw new Error(`Expected Schema or Array at '${schemaObj.path}/${key}'`);
     }
   }
 
-  if (Object.keys(validators).length === 0)
+  if (validators.size === 0)
     return undefined;
 
   return function validateDependenciesItem(data, dataPath, dataRoot, dataKey) {
-    if (dataKey in validators) {
-      const validator = validators[dataKey];
+    if (validators.has(dataKey)) {
+      const validator = validators.get(dataKey);
       return validator(data, dataPath, dataRoot, dataKey);
     }
     return true;
@@ -389,7 +391,7 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
   const validateChildren = objectChildren || trueThat;
 
   return function validateObjectSchema(data, dataPath, dataRoot) {
-    if (isObjectClass(data)) {
+    if (isObjectType(data)) {
       const dataKeys = Object.keys(data);
       return validatePrimitives(data, dataPath, dataRoot, dataKeys)
         && validateChildren(data, dataPath, dataRoot, dataKeys);

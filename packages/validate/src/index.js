@@ -61,9 +61,11 @@ class ValidationError {
 
 class ValidationOptions {
   constructor(
-    skipErrors = true
+    skipErrors = true,
+    useGrapheme = true
   ) {
-    this.skipErrors = skipErrors
+    this.skipErrors = skipErrors;
+    this.useGrapheme = true;
   }
 }
 

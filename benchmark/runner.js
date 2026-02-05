@@ -12,23 +12,31 @@ class TestValidator {
     const adaptor = this.#adaptor;
     if (adaptor == null)
       throw new Error('No adaptor');
-    
+
     const validator = this.#validator;
     if (validator == null)
       throw new Error('No validator');
 
     const asserts = this.#test.tests;
     let failures = 0;
-    
+
     const start = performance.now();
     for (let j = 0; j < asserts.length; ++j) {
       const item = asserts[j];
       // @ts-ignore
       const valid = adaptor.run(validator, item.data) === item.valid;
-      if (!valid) failures++;
+      if (!valid) {
+        failures++;
+        if (adaptor.name === 'Jaren') {
+           console.log(`FAIL at ${adaptor.name} -> [${this.#test.description}]: ${item.description}(${j})`);
+           // console.log('Schema:', JSON.stringify(this.#test.schema, null, 2));
+           // console.log('Data:', JSON.stringify(item.data, null, 2));
+           // console.log('Expected:', item.valid);
+        }
+      }
     }
     const end = performance.now();
-    
+
     return {
       failures,
       total: asserts.length,
@@ -55,12 +63,12 @@ export class TestRunner {
       this.#instance = this.#adaptor.loader(this.#draft, remotes);
     }
   }
-  
+
   createTest(test) {
     if (this.#adaptor) {
       const adaptor = this.#adaptor;
       // @ts-ignore
-      const validator = this.#adaptor.setup(this.#instance, test.schema)
+      const validator = adaptor.setup(this.#instance, test.schema)
       return new TestValidator(adaptor, validator, test);
     }
   }
