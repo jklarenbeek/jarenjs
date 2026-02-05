@@ -18,7 +18,7 @@ npm run build
 npm run cover
 ```
 
-At its current state, we recommend you use the `@jarenjs/validate` package, which is stable and will not change any of its public interfaces. 
+At its current state, we recommend you use the `@jarenjs/validate` package, which is stable and will not change any of its public interfaces.
 
 For format support please use the `@jarenjs/formats` package with it.
 
@@ -348,7 +348,7 @@ Procrastination
 I will look up what that means, later...
 ```
 
-For detailed documentation on using Jaren, including API references and advanced usage examples, visit our official documentation. Which is the code itself. 
+For detailed documentation on using Jaren, including API references and advanced usage examples, visit our official documentation. Which is the code itself.
 
 ### 🤓 Javascript Type Extensions
 
@@ -416,5 +416,5 @@ Good question! I believe that vanilla javascript for a library like this is a li
 
 If you find bugs, or want to know what a function is doing, please don't hesitate to ask me by filing an issue. Off topic questions I'd rather not see, but any jaren related question is very welcome.
 
-Please file an issue at [the github jaren repository](https://github.com/jklarenbeek/jaren/issues).
+Please file an issue at [the github jaren repository](https://github.com/jklarenbeek/jarenjs/issues).
 

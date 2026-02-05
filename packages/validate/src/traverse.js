@@ -268,7 +268,7 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
 
 export class TraverseOptions extends JsonPointerOptions {
   constructor(
-    origin = 'https://github.com/jklarenbeek/jaren',
+    origin = 'https://github.com/jklarenbeek/jarenjs',
     mergeSchemas = true,
     anchorsGlobal = true,
     anchorsAllowed = true,
