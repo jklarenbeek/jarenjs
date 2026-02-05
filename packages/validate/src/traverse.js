@@ -28,7 +28,7 @@ function encodeJsonPointerKey(key) {
 export function encodeJsonPointerPath(path, key, index) {
   return index == null
     ? `${path}/${encodeJsonPointerKey(key)}`
-    : `${path}/${encodeJsonPointerKey(key)}/${encodeJsonPointerKey(index)}`;
+    : `${path}/${encodeJsonPointerKey(key)}/${encodeJsonPointerKey(String(index))}`;
 }
 
 function decodeJsonPointerKey(key) {
@@ -166,7 +166,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 
     // iterate through all properties
     for (const [key, value] of Object.entries(obj)) {
-      if (!isObjectClass(value))
+      if (!isObjectClass(value) && !Array.isArray(value))
         continue;
 
       // is the property a schema object to traverse in?
@@ -240,7 +240,7 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
   let current = '';
   for (const part of fragments) {
     current = current + '/' + part;
-    if (!isBoolOrObjectClass(schema[part]))
+    if (!isBoolOrObjectClass(schema[part]) && !Array.isArray(schema[part]))
       throw new Error(`The '${current}' is not is not a valid schema in '${leftUri}'`);
 
     schema = schema[part];

@@ -13,3 +13,4 @@ export function deepEqual(actual, expected, message) {
 }
 
 export const throws = assert.throws;
+export const doesNotThrow = assert.doesNotThrow;
