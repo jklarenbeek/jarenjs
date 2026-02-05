@@ -22,7 +22,7 @@ import {
   hasSchemaRef,
 } from './tools.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
-import { mapMerge } from '@jarenjs/core/object';
+import { mergeMap } from '@jarenjs/core/object';
 
 export {
   registerFormatCompilers
@@ -422,13 +422,13 @@ export class JarenValidator {
       const { origin, map } = JarenValidator.#traverseSchema(first, schema, undefined, new TraverseOptions(key));
       const compiled = JarenValidator.#compileSchema(this, origin, map);
       this.#metaSchemas.set(origin, compiled);
-      mapMerge(this.#schemas, map);
+      mergeMap(this.#schemas, map);
     }
     else if (isBoolOrObjectClass(schema)) {
       const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, undefined, new TraverseOptions(key));
       const compiled = JarenValidator.#compileSchema(this, origin, map);
       this.#metaSchemas.set(origin, compiled);
-      mapMerge(this.#schemas, map);
+      mergeMap(this.#schemas, map);
     }
     return this;
   }
