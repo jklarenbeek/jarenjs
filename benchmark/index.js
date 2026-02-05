@@ -58,7 +58,9 @@ for (const [key, tests] of Object.entries(jsonTests)) {
       );
     }
 
-    console.log(`Test run complete: asserts ${sums.total}, failures ${sums.failures}, time ${sums.time.toFixed(3)}`);
+    // trim output
+    if (sums.failures > 0)
+      console.log(`Test run complete: asserts ${sums.total}, failures ${sums.failures}, time ${sums.time.toFixed(3)}`);
 
     results.forEach(r => validators.add(r.validator));
   }
