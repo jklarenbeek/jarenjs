@@ -59,3 +59,36 @@ export function createRegExp(pattern) {
 
   throw new Error(`Unknown Regular Expression Pattern Type: ${pattern}`);
 }
+
+let segmenterCache = null;
+function getSegmenter() {
+  if (segmenterCache === null) {
+    segmenterCache = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  }
+  return segmenterCache;
+}
+
+export function isAsciiString(str) {
+  const len = str.length;
+  for (let i = 0; i < len; i++) {
+    if (str.charCodeAt(i) > 127) return false;
+  }
+  return true;
+}
+
+export function getStringLength(str, useGrapheme = false) {
+  if (!useGrapheme) {
+    return str.length;
+  }
+  // Fast-path: check ASCII inline to avoid function call overhead
+  const len = str.length;
+  for (let i = 0; i < len; i++) {
+    if (str.charCodeAt(i) > 127) {
+      // Non-ASCII found - use grapheme counting
+      let count = i;
+      for (const _ of getSegmenter().segment(str.slice(i))) count++;
+      return count;
+    }
+  }
+  return len;
+}

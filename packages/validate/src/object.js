@@ -59,9 +59,10 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
   if (required == null) return undefined;
 
   const rlength = required.length;
-  /** @type {function(string, string):boolean} */
-  const addError = schemaObj.createErrorHandler(required, 'requiredProperties');
-  return function validateRequiredProperties(dataKeys = [], dataPath = '') {
+  /** @type {function(string, any, string):boolean} */
+  // Use array key to get keyed error handler: addKeyedError(dataKey, data, ...meta)
+  const addError = schemaObj.createErrorHandler(required, ['required']);
+  return function validateRequiredProperties(data = {}, dataKeys = [], dataPath = '') {
     if (!(dataKeys.length > 0))
       return false;
 
@@ -70,7 +71,7 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
       const key = required[i];
       const idx = dataKeys.indexOf(key);
       if (idx === -1)
-        valid &&= addError(key, dataPath);
+        valid &&= addError(key, data, dataPath);
     }
     return valid;
   };
@@ -163,7 +164,7 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
   if (additional == null) return undefined;
 
   if (additional === false) {
-    const addError = schemaObj.createErrorHandler(false, 'additionalProperties');
+    const addError = schemaObj.createErrorHandler(false, ['additionalProperties']);
 
     return function validateNoAdditionalProperties(data, dataPath, dataRoot, dataKey) {
       return addError(dataKey, data);
@@ -294,9 +295,99 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     || requiredProperties) == null)
     return undefined;
 
+  // OPTIMIZATION: Inline the validation to reduce function call overhead
+  const min = getIntishType(jsonSchema.minProperties) || 0;
+  const max = getIntishType(jsonSchema.maxProperties);
+  const required = getArrayClassMinItems(jsonSchema.required, 1);
+  
+  const hasMin = min > 0;
+  const hasMax = max != null && max >= 0;
+  const hasRequired = required != null && required.length > 0;
+
+  // OPTIMIZATION: Pre-bind error handlers outside the returned function
+  if (hasMin && !hasMax && !hasRequired) {
+    const addError = schemaObj.createErrorHandler(min, 'minProperties');
+    return function validateMinPropertiesOnly(data, dataPath, dataRoot, dataKeys) {
+      const len = dataKeys ? dataKeys.length : Object.keys(data).length;
+      return len >= min || addError(len, dataPath);
+    };
+  }
+  
+  if (!hasMin && hasMax && !hasRequired) {
+    const addError = schemaObj.createErrorHandler(max, 'maxProperties');
+    return function validateMaxPropertiesOnly(data, dataPath, dataRoot, dataKeys) {
+      const len = dataKeys ? dataKeys.length : Object.keys(data).length;
+      return len <= max || addError(len, dataPath);
+    };
+  }
+  
+  if (hasMin && hasMax && !hasRequired) {
+    const addMinError = schemaObj.createErrorHandler(min, 'minProperties');
+    const addMaxError = schemaObj.createErrorHandler(max, 'maxProperties');
+    return function validateMinMaxProperties(data, dataPath, dataRoot, dataKeys) {
+      const len = dataKeys ? dataKeys.length : Object.keys(data).length;
+      return (len >= min || addMinError(len, dataPath))
+          && (len <= max || addMaxError(len, dataPath));
+    };
+  }
+
+  // OPTIMIZATION: Specialized paths for required properties
+  if (!hasMin && !hasMax && hasRequired) {
+    const rlength = required.length;
+    const addError = schemaObj.createErrorHandler(required, ['required']);
+    return function validateRequiredOnly(data, dataPath, dataRoot, dataKeys) {
+      const keys = dataKeys || Object.keys(data);
+      let valid = true;
+      for (let i = 0; i < rlength; ++i) {
+        const key = required[i];
+        if (keys.indexOf(key) === -1)
+          valid &&= addError(key, data, dataPath);
+      }
+      return valid;
+    };
+  }
+
+  if (hasMin && !hasMax && hasRequired) {
+    const addMinError = schemaObj.createErrorHandler(min, 'minProperties');
+    const rlength = required.length;
+    const addReqError = schemaObj.createErrorHandler(required, ['required']);
+    return function validateMinAndRequired(data, dataPath, dataRoot, dataKeys) {
+      const keys = dataKeys || Object.keys(data);
+      const len = keys.length;
+      if (len < min && !addMinError(len, dataPath))
+        return false;
+      let valid = true;
+      for (let i = 0; i < rlength; ++i) {
+        const key = required[i];
+        if (keys.indexOf(key) === -1)
+          valid &&= addReqError(key, data, dataPath);
+      }
+      return valid;
+    };
+  }
+
+  if (!hasMin && hasMax && hasRequired) {
+    const addMaxError = schemaObj.createErrorHandler(max, 'maxProperties');
+    const rlength = required.length;
+    const addReqError = schemaObj.createErrorHandler(required, ['required']);
+    return function validateMaxAndRequired(data, dataPath, dataRoot, dataKeys) {
+      const keys = dataKeys || Object.keys(data);
+      const len = keys.length;
+      if (len > max && !addMaxError(len, dataPath))
+        return false;
+      let valid = true;
+      for (let i = 0; i < rlength; ++i) {
+        const key = required[i];
+        if (keys.indexOf(key) === -1)
+          valid &&= addReqError(key, data, dataPath);
+      }
+      return valid;
+    };
+  }
+
+  // Generic case with all checks
   const isMinProperties = minProperties || trueThat;
   const isMaxProperties = maxProperties || trueThat;
-
   const hasRequiredProperties = requiredProperties || trueThat;
 
   return function validateObjectPrimitives(data, dataPath, dataRoot, dataKeys) {
@@ -304,7 +395,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     const len = keys.length;
     return isMinProperties(len, dataPath)
       && isMaxProperties(len, dataPath)
-      && hasRequiredProperties(keys, dataPath);
+      && hasRequiredProperties(data, keys, dataPath);
   };
 }
 
@@ -364,14 +455,23 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
   if (propertyValidator == null)
     return undefined;
 
+  // OPTIMIZATION: Inline ValidationResult operations to reduce object allocations
   return function validateObjectChildren(data, dataPath, dataRoot, dataKeys) {
-    const result = new ValidationResult();
-    for (let i = 0; i < dataKeys.length; ++i) {
-      const dataKey = dataKeys[i];
-
-      result.addResult(propertyValidator(data, dataPath, dataRoot, dataKey));
+    let totalErrors = 0;
+    const len = dataKeys.length;
+    const validator = propertyValidator;
+    for (let i = 0; i < len; ++i) {
+      const result = validator(data, dataPath, dataRoot, dataKeys[i]);
+      if (result !== true) {
+        // result can be false or a ValidationResult-like object
+        if (result === false) {
+          totalErrors++;
+        } else {
+          totalErrors += result.errors || 0;
+        }
+      }
     }
-    return result.isValid();
+    return totalErrors === 0;
   };
 }
 

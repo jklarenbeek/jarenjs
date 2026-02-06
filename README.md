@@ -86,6 +86,24 @@ node benchmark/debug.js '/ref.json' '$ref prevents a sibling'
 node benchmark/debug.js '/ref.json' '$ref prevents a sibling' --verbose
 ```
 
+### Code Coverage Analysis
+
+Analyze which functions are touched when running specific test suites:
+
+```bash
+# Show files with >0% function coverage
+node benchmark/coverage.js '/required.json'
+
+# Only show files with >25% coverage (filters out noise)
+node benchmark/coverage.js '/required.json' --threshold 25
+
+# Show TOUCHED and NOT touched functions with hit counts
+node benchmark/coverage.js '/required.json' --threshold 25 --functions
+
+# Show only TOUCHED functions (cleaner output)
+node benchmark/coverage.js '/required.json' --threshold 25 --touched-only
+```
+
 The benchmark results are written to `benchmark/results/results.html`.
 
 ### Running Tests

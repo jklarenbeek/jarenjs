@@ -111,7 +111,7 @@ function compileOneOf(schemaObj, jsonSchema) {
         found = true;
       }
     }
-    return found;
+    return found || addError(data, dataPath);
   };
 }
 

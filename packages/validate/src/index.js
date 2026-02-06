@@ -47,7 +47,7 @@ const performance = (() => isBrowser
     },
   })();
 
-class ValidationError {
+class InternalValidationError {
   constructor(obj, key, expected, dataKey, value, rest) {
     this.timeStamp = performance.now();
     this.object = obj;
@@ -59,13 +59,52 @@ class ValidationError {
   }
 }
 
+/**
+ * JSON Schema Validation Error
+ * Represents a validation error according to the JSON Schema specification.
+ * @see https://json-schema.org/draft/2020-12/json-schema-core.html#output
+ */
+export class ValidationError {
+  /**
+   * @param {object} options - Error options
+   * @param {string} options.keyword - The keyword that failed validation
+   * @param {string} options.instancePath - JSON Pointer to the data location
+   * @param {string} options.schemaPath - JSON Pointer to the schema location
+   * @param {object} options.params - Keyword-specific parameters
+   * @param {string} [options.message] - Human-readable error message
+   */
+  constructor(options) {
+    this.keyword = options.keyword;
+    this.instancePath = options.instancePath || '';
+    this.schemaPath = options.schemaPath || '';
+    this.params = options.params || {};
+    this.message = options.message || '';
+  }
+
+  /**
+   * Convert error to a plain object
+   * @returns {object} Plain object representation
+   */
+  toJSON() {
+    return {
+      keyword: this.keyword,
+      instancePath: this.instancePath,
+      schemaPath: this.schemaPath,
+      params: this.params,
+      message: this.message,
+    };
+  }
+}
+
 class ValidationOptions {
   constructor(
     skipErrors = true,
-    useGrapheme = true
+    useGrapheme = true,
+    collectErrors = false
   ) {
     this.skipErrors = skipErrors;
-    this.useGrapheme = true;
+    this.useGrapheme = useGrapheme;
+    this.collectErrors = collectErrors;
   }
 }
 
@@ -119,24 +158,21 @@ class ValidationRoot {
   }
 
   resolveObject(ref, path, schema) {
-    // return a validator if compiled
+    // OPTIMIZATION: Fast path - check if already compiled first
     const objects = this._objects;
-    if (objects.has(ref)) {
-      const obj = objects.get(ref);
-      if (obj != null)
-        return objects.get(ref);
-    }
+    const cached = objects.get(ref);
+    if (cached != null) return cached;
 
+    // OPTIMIZATION: Resolve ref chain and check final ID cache
     const schemas = this._schemas;
     const traverse = this._traverse;
     const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
 
-    if (objects.has(id)) {
-      const obj = objects.get(id);
-      if (obj != null)
-        return obj;
-    }
+    // Check if final ID is already compiled
+    const finalCached = objects.get(id);
+    if (finalCached != null) return finalCached;
 
+    // Create and cache the validation object
     return ValidationRoot._createObject(this, id, root);
   }
 
@@ -174,22 +210,26 @@ class ValidationObject {
     const refBase = baseUri || path;
     const { id: ref } = createJsonPointer(schema.$ref, refBase, root._traverse);
 
+    // OPTIMIZATION: Direct validator binding - avoid wrapper function overhead
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
       const validator = resolved.validate;
-      self._validator = function validateRefSchemaOnTime(data, dataRoot) {
-        return validator(data, dataRoot);
-      };
-      return self._validator;
+      self._validator = validator;
+      return validator;
     }
 
+    // OPTIMIZATION: Pre-bind values to avoid closure overhead in hot path
+    const rootRef = root;
+    const boundRef = ref;
+    const boundRefBase = refBase;
+    const boundSchema = schema;
+
     return function resolveSchemaCompiler(data, dataRoot) {
-      const obj = root.resolveObject(ref, refBase, schema);
+      const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
       const validator = obj.validate;
-      self._validator = function validateRefSchemaLate(_data, _dataRoot) {
-        return validator(_data, _dataRoot);
-      };
-      return self._validator(data, dataRoot);
+      // Cache the validator directly - no wrapper function
+      self._validator = validator;
+      return validator(data, dataRoot);
     };
   }
 
@@ -235,13 +275,13 @@ class ValidationObject {
 
     if (!Array.isArray(key)) {
       return function addNormalError(data, ...meta) {
-        const error = new ValidationError(self, key, expected, null, data, meta);
+        const error = new InternalValidationError(self, key, expected, null, data, meta);
         return self._root.addError(error);
       };
     }
     else {
       return function addKeyedError(dataKey, data, ...meta) {
-        const error = new ValidationError(self, key, expected, dataKey, data, meta);
+        const error = new InternalValidationError(self, key, expected, dataKey, data, meta);
         return self._root.addError(error);
       };
     }
@@ -280,10 +320,25 @@ export class ValidatorOptions {
     validation = new ValidationOptions(),
     traverse = new TraverseOptions(),
   ) {
-    this.formats = formats;
-    this.schemas = schemas;
-    this.validation = validation;
-    this.traverse = traverse;
+    // Support object destructuring: new ValidatorOptions({ collectErrors: true })
+    if (formats && typeof formats === 'object' && !Array.isArray(formats) &&
+        !(formats instanceof Map)) {
+      const opts = formats;
+      this.formats = opts.formats || {};
+      this.schemas = opts.schemas || [];
+      // If collectErrors is passed directly, create ValidationOptions with it
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null) {
+        this.validation = new ValidationOptions(opts.skipErrors || true, opts.useGrapheme || false, opts.collectErrors || false);
+      } else {
+        this.validation = opts.validation || new ValidationOptions();
+      }
+      this.traverse = opts.traverse || new TraverseOptions();
+    } else {
+      this.formats = formats;
+      this.schemas = schemas;
+      this.validation = validation;
+      this.traverse = traverse;
+    }
   }
 }
 
@@ -383,7 +438,7 @@ export class JarenValidator {
             this.#schemas.set(altKey, schema);
           }
         }
-        
+
         // Also traverse the schema to find and store all internal $id anchors
         // This is important for remote schemas that may have location-independent identifiers
         // We use a wrapper that skips already-existing keys instead of throwing
@@ -403,7 +458,7 @@ export class JarenValidator {
    */
   #traverseAndStoreIds(baseUri, schema) {
     const traverseOpts = this.#options.traverse;
-    
+
     // Create options with anchorsGlobal: false to scope anchors to their document.
     // This prevents conflicts when multiple schemas use the same anchor names (e.g., '#foo').
     // Anchors will be stored as 'baseUri#anchor' instead of just '#anchor'.
@@ -414,7 +469,7 @@ export class JarenValidator {
       traverseOpts.anchorsAllowed,
       traverseOpts.skipErrors
     );
-    
+
     // Use a wrapper map to collect new entries, then merge them
     const newSchemas = new Map();
     try {
@@ -422,7 +477,7 @@ export class JarenValidator {
     } catch (e) {
       // Ignore errors for already-existing schemas at the root level
     }
-    
+
     // Merge new entries into the main schemas map, skipping existing keys
     for (const [id, value] of newSchemas.entries()) {
       if (!this.#schemas.has(id)) {
@@ -432,11 +487,117 @@ export class JarenValidator {
   }
 
   /**
+   * Convert internal validation errors to public ValidationError format
+   * @param {InternalValidationError[]} internalErrors
+   * @returns {ValidationError[]}
+   */
+  static #convertErrors(internalErrors) {
+    return internalErrors.map(err => {
+      const keyword = Array.isArray(err.key) ? err.key[err.key.length - 1] : err.key;
+
+      // Build params based on error type
+      const params = {};
+      if (keyword === 'required') {
+        params.missingProperty = err.dataKey;
+      } else if (keyword === 'type') {
+        if (Array.isArray(err.expected)) {
+          params.types = err.expected;
+        } else {
+          params.type = err.expected;
+        }
+      } else if (['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minProperties', 'maxProperties', 'minItems', 'maxItems'].includes(keyword)) {
+        params.limit = err.expected;
+        if (keyword === 'minimum' || keyword === 'maximum') {
+          params.comparison = keyword === 'minimum' ? '>=' : '<=';
+        } else if (keyword === 'exclusiveMinimum' || keyword === 'exclusiveMaximum') {
+          params.comparison = keyword === 'exclusiveMinimum' ? '>' : '<';
+        }
+      } else if (keyword === 'multipleOf') {
+        params.multipleOf = err.expected;
+      } else if (keyword === 'pattern') {
+        params.pattern = err.expected?.source || err.expected;
+      } else if (keyword === 'additionalProperties') {
+        params.additionalProperty = err.dataKey;
+      }
+
+      // Generate message
+      let message = `validation failed for keyword '${keyword}'`;
+      if (keyword === 'required') {
+        message = params.missingProperty
+          ? `must have required property '${params.missingProperty}'`
+          : 'must have required properties';
+      } else if (keyword === 'type') {
+        message = params.types
+          ? `must be one of the following types: ${params.types.join(', ')}`
+          : `must be ${params.type === 'integer' ? 'an' : 'a'} ${params.type}`;
+      } else if (keyword === 'minimum' || keyword === 'maximum') {
+        message = `must be ${params.comparison} ${params.limit}`;
+      } else if (keyword === 'exclusiveMinimum' || keyword === 'exclusiveMaximum') {
+        message = `must be ${params.comparison} ${params.limit}`;
+      } else if (keyword === 'multipleOf') {
+        message = `must be multiple of ${params.multipleOf}`;
+      } else if (keyword === 'minLength') {
+        message = `must NOT have fewer than ${params.limit} characters`;
+      } else if (keyword === 'maxLength') {
+        message = `must NOT have more than ${params.limit} characters`;
+      } else if (keyword === 'pattern') {
+        message = `must match pattern "${params.pattern}"`;
+      } else if (keyword === 'additionalProperties') {
+        message = params.additionalProperty
+          ? `must NOT have additional property '${params.additionalProperty}'`
+          : 'must NOT have additional properties';
+      } else if (keyword === 'minProperties') {
+        message = `must NOT have fewer than ${params.limit} properties`;
+      } else if (keyword === 'maxProperties') {
+        message = `must NOT have more than ${params.limit} properties`;
+      } else if (keyword === 'minItems') {
+        message = `must NOT have fewer than ${params.limit} items`;
+      } else if (keyword === 'maxItems') {
+        message = `must NOT have more than ${params.limit} items`;
+      } else if (keyword === 'uniqueItems') {
+        message = 'must NOT have duplicate items';
+      } else if (keyword === 'contains') {
+        message = 'must contain at least one valid item';
+      } else if (keyword === 'items') {
+        message = 'array items are invalid';
+      } else if (keyword === 'allOf') {
+        message = 'must match all of the subschemas';
+      } else if (keyword === 'anyOf') {
+        message = 'must match a subschema in anyOf';
+      } else if (keyword === 'oneOf') {
+        message = 'must match exactly one subschema in oneOf';
+      } else if (keyword === 'not') {
+        message = 'must NOT match the subschema';
+      } else if (keyword === 'format') {
+        const formatName = err.expected || err.value;
+        params.format = formatName;
+        message = `must match format "${formatName}"`;
+      } else if (keyword === 'if') {
+        message = 'must match "if" schema';
+      } else if (keyword === 'then') {
+        message = 'must match "then" schema';
+      } else if (keyword === 'else') {
+        message = 'must match "else" schema';
+      } else if (keyword === 'false schema') {
+        message = 'boolean schema false is always invalid';
+      }
+
+      return new ValidationError({
+        keyword,
+        instancePath: '',  // TODO: implement proper path tracking
+        schemaPath: err.object?._path || '',
+        params,
+        message,
+      });
+    });
+  }
+
+  /**
    *
    * @param {JarenValidator} self
    * @param {string} origin
    * @param {Map} schemas
-   * @returns {(data) => boolean}
+   * @returns {(data) => boolean | {valid: boolean, errors: ValidationError[]}}
    */
   static #compileSchema(self, origin, schemas) {
     const root = new ValidationRoot(
@@ -446,8 +607,17 @@ export class JarenValidator {
       self.#options.validation,
       self.#options.traverse);
 
+    const collectErrors = self.#options.validation?.collectErrors || false;
+
     function jarenValidateSchema(data) {
-      return root.validate(data)
+      const valid = root.validate(data);
+      if (collectErrors) {
+        return {
+          valid,
+          errors: valid ? [] : JarenValidator.#convertErrors(root._errors)
+        };
+      }
+      return valid;
     }
 
     Object.defineProperty(jarenValidateSchema, "errors", {
@@ -529,15 +699,5 @@ export class JarenValidator {
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#options.traverse);
     return JarenValidator.#compileSchema(this, origin, map);
-  }
-
-  /**
-   * Generate validating function and cache the compiled schema for future use.
-   * Note: This function returns a promise.
-   * @param {boolean | object} schema
-   * @returns {Promise<any>}
-   */
-  compileAsync(schema) {
-    throw new Error('compileAsync is not implemented');
   }
 }

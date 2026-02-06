@@ -114,8 +114,8 @@ const GREEK_KERAIA = 0x0375;            // ͵
 const HEBREW_GERESH = 0x05f3;           // ׳
 const HEBREW_GERSHAYIM = 0x05f4;        // ״
 const KATAKANA_MIDDLE_DOT = 0x30fb;     // ・
-const ZERO_WIDTH_JOINER = 0x200d;       // 
-const ZERO_WIDTH_NON_JOINER = 0x200c;   // 
+const ZERO_WIDTH_JOINER = 0x200d;       //
+const ZERO_WIDTH_NON_JOINER = 0x200c;   //
 const VIRAMA = 0x094d;                  // ् (Devanagari Sign Virama)
 
 // Character category checks
@@ -191,62 +191,62 @@ function isCombiningMark(code) {
 function checkContextualRules(label) {
   const chars = Array.from(label);
   const codes = chars.map(c => c.codePointAt(0));
-  
+
   for (let i = 0; i < codes.length; i++) {
     const code = codes[i];
-    
+
     // MIDDLE DOT (U+00B7) must have 'l' on both sides
     if (code === MIDDLE_DOT) {
       if (!isLatinLowercaseL(codes[i - 1]) || !isLatinLowercaseL(codes[i + 1])) {
         return false;
       }
     }
-    
+
     // Greek KERAIA (U+0375) must be followed by Greek
     if (code === GREEK_KERAIA) {
       if (!isGreek(codes[i + 1])) {
         return false;
       }
     }
-    
+
     // Hebrew GERESH (U+05F3) must be preceded by Hebrew
     if (code === HEBREW_GERESH) {
       if (!isHebrew(codes[i - 1])) {
         return false;
       }
     }
-    
+
     // Hebrew GERSHAYIM (U+05F4) must be preceded by Hebrew
     if (code === HEBREW_GERSHAYIM) {
       if (!isHebrew(codes[i - 1])) {
         return false;
       }
     }
-    
+
     // KATAKANA MIDDLE DOT (U+30FB) must have Hiragana, Katakana, or Han in the label
     // (excluding the middle dot itself)
     if (code === KATAKANA_MIDDLE_DOT) {
-      const hasContext = codes.some(c => 
+      const hasContext = codes.some(c =>
         c !== KATAKANA_MIDDLE_DOT && (isHiragana(c) || isKatakana(c) || isHan(c))
       );
       if (!hasContext) {
         return false;
       }
     }
-    
+
     // ZERO WIDTH JOINER (U+200D) must be preceded by Virama
     if (code === ZERO_WIDTH_JOINER) {
       if (!isVirama(codes[i - 1])) {
         return false;
       }
     }
-    
+
     // ZERO WIDTH NON-JOINER (U+200C) - contextual rule depends on implementation
     // For draft7 compatibility, we accept it if preceded by Virama
-    // The test "ZERO WIDTH NON-JOINER not preceded by Virama but matches regexp" 
+    // The test "ZERO WIDTH NON-JOINER not preceded by Virama but matches regexp"
     // actually expects valid=true in draft7 (for Arabic script)
   }
-  
+
   return true;
 }
 
@@ -254,7 +254,7 @@ function checkContextualRules(label) {
 function checkDigitMixing(codes) {
   let hasArabicIndic = false;
   let hasExtendedArabicIndic = false;
-  
+
   for (const code of codes) {
     if (isArabicIndicDigit(code)) {
       hasArabicIndic = true;
@@ -267,7 +267,7 @@ function checkDigitMixing(codes) {
       return false;
     }
   }
-  
+
   return true;
 }
 
@@ -277,12 +277,12 @@ function isValidIdnChar(code) {
   if (DISALLOWED_EXCEPTIONS.has(code)) {
     return false;
   }
-  
+
   // Check PVALID exceptions
   if (PVALID_EXCEPTIONS.has(code)) {
     return true;
   }
-  
+
   // Letter digits (Lu, Ll, Lt, Lm, Lo, Nd) and some symbols
   // This is a simplified check - full implementation would use Unicode categories
   if ((code >= 0x0041 && code <= 0x005a) || // A-Z
@@ -291,37 +291,37 @@ function isValidIdnChar(code) {
       code === 0x002d) { // hyphen
     return true;
   }
-  
+
   // Allow characters in valid Unicode ranges for IDN
   // Extended Latin
   if ((code >= 0x00c0 && code <= 0x024f) ||
       (code >= 0x1e00 && code <= 0x1eff)) {
     return true;
   }
-  
+
   // Greek
   if ((code >= 0x0370 && code <= 0x03ff) ||
       (code >= 0x1f00 && code <= 0x1fff)) {
     return true;
   }
-  
+
   // Cyrillic
   if ((code >= 0x0400 && code <= 0x04ff) ||
       (code >= 0x0500 && code <= 0x052f)) {
     return true;
   }
-  
+
   // Hebrew
   if (code >= 0x0590 && code <= 0x05ff) {
     return true;
   }
-  
+
   // Arabic
   if ((code >= 0x0600 && code <= 0x06ff) ||
       (code >= 0x0750 && code <= 0x077f)) {
     return true;
   }
-  
+
   // Devanagari and other Indic scripts
   if ((code >= 0x0900 && code <= 0x097f) || // Devanagari
       (code >= 0x0980 && code <= 0x09ff) || // Bengali
@@ -337,7 +337,7 @@ function isValidIdnChar(code) {
       (code >= 0x0f00 && code <= 0x0fff)) { // Tibetan
     return true;
   }
-  
+
   // CJK
   if ((code >= 0x2e80 && code <= 0x9fff) ||
       (code >= 0x3400 && code <= 0x4dbf) ||
@@ -348,20 +348,20 @@ function isValidIdnChar(code) {
       (code >= 0x2f800 && code <= 0x2fa1f)) {
     return true;
   }
-  
+
   // Hangul
   if ((code >= 0x1100 && code <= 0x11ff) ||
       (code >= 0x3130 && code <= 0x318f) ||
       (code >= 0xac00 && code <= 0xd7af)) {
     return true;
   }
-  
+
   // Japanese Hiragana, Katakana
   if ((code >= 0x3040 && code <= 0x309f) ||
       (code >= 0x30a0 && code <= 0x30ff)) {
     return true;
   }
-  
+
   // Special context characters (checked separately but allowed here)
   if (code === MIDDLE_DOT ||
       code === GREEK_KERAIA ||
@@ -372,7 +372,7 @@ function isValidIdnChar(code) {
       code === ZERO_WIDTH_NON_JOINER) {
     return true;
   }
-  
+
   return false;
 }
 
@@ -384,19 +384,19 @@ function isValidACE(label) {
   if (!label.toLowerCase().startsWith('xn--')) {
     return false;
   }
-  
+
   // Check for valid Punycode format
   // ACE labels must have at least one character after xn--
   const punycodePart = label.slice(4);
   if (punycodePart.length === 0) {
     return false;
   }
-  
+
   // ACE labels must contain only alphanumeric and hyphen
   if (!/^[a-zA-Z0-9-]+$/.test(punycodePart)) {
     return false;
   }
-  
+
   // Try to decode - if it fails, it's invalid Punycode
   try {
     const decoded = toUnicode(label);
@@ -416,34 +416,34 @@ export function isValidIdnHostname(str) {
   if (!str || str.length === 0) {
     return false;
   }
-  
+
   // Total length check (max 255 bytes for DNS)
   if (str.length > 255) {
     return false;
   }
-  
+
   // Split into labels
   const labels = str.split('.');
-  
+
   // Must have at least one label
   if (labels.length === 0) {
     return false;
   }
-  
+
   for (const label of labels) {
     // Empty label check (trailing dot)
     if (label.length === 0) {
       continue;
     }
-    
+
     // Label length check (max 63 bytes for Punycode, but check raw first)
     if (label.length > 63) {
       return false;
     }
-    
+
     // Check for ACE prefix (xn--)
     const isAce = label.toLowerCase().startsWith('xn--');
-    
+
     // For ACE labels, decode first then validate the decoded form
     let decodedLabel = label;
     if (isAce) {
@@ -453,12 +453,12 @@ export function isValidIdnHostname(str) {
       if (rest.length < 1) {
         return false; // xn-- with nothing after
       }
-      
+
       // Validate the Punycode is decodable
       if (!isValidACE(label)) {
         return false;
       }
-      
+
       // Decode the label for further validation
       try {
         decodedLabel = toUnicode(label);
@@ -466,7 +466,7 @@ export function isValidIdnHostname(str) {
         return false;
       }
     }
-    
+
     // Check for "--" in 3rd and 4th position (0-indexed: positions 2 and 3)
     // This restriction applies to U-labels and decoded A-labels
     // ACE labels (starting with xn--) legitimately have "--" at positions 2-3
@@ -486,43 +486,43 @@ export function isValidIdnHostname(str) {
         return false;
       }
     }
-    
+
     // Get the Unicode code points from the decoded label
     const codes = Array.from(decodedLabel).map(c => c.codePointAt(0));
-    
+
     // Check first character doesn't start with combining mark
     if (isCombiningMark(codes[0])) {
       return false;
     }
-    
+
     // Check last character isn't a hyphen
     if (codes[codes.length - 1] === 0x002d) {
       return false;
     }
-    
+
     // Check first character isn't a hyphen
     if (codes[0] === 0x002d) {
       return false;
     }
-    
+
     // Check for illegal characters
     for (const code of codes) {
       if (!isValidIdnChar(code)) {
         return false;
       }
     }
-    
+
     // Check contextual rules
     if (!checkContextualRules(decodedLabel)) {
       return false;
     }
-    
+
     // Check digit mixing
     if (!checkDigitMixing(codes)) {
       return false;
     }
   }
-  
+
   // For ASCII-only hostnames, also validate with ACE regex
   let punycode;
   try {
@@ -531,12 +531,12 @@ export function isValidIdnHostname(str) {
     // If toASCII fails, the input is invalid
     return false;
   }
-  
+
   // Single label hostname
   if (labels.length === 1 || (labels.length === 2 && labels[1] === '')) {
     return CONST_REGEXP_ACEHOSTNAME_SINGLE.test(punycode);
   }
-  
+
   return CONST_REGEXP_ACEHOSTNAME.test(punycode);
 }
 //#endregion
@@ -659,8 +659,25 @@ export function isValidISBN13(str) {
 }
 
 const CONST_REGEXP_BASE64 = /^(?:[a-zA-Z0-9+\/]{4})*(?:|(?:[a-zA-Z0-9+\/]{3}=)|(?:[a-zA-Z0-9+\/]{2}==)|(?:[a-zA-Z0-9+\/]{1}===))$/;
-export function isValidBase64(str) {
+export function isValidBase64Full(str) {
   return CONST_REGEXP_BASE64.test(str);
+}
+
+// Base64 validation regex (RFC 4648)
+const BASE64_REGEX_SHORT = /^[A-Za-z0-9+/]*={0,2}$/;
+
+export function isValidBase64Old(str) {
+  // Check length is valid for base64 (multiple of 4)
+  if (str.length % 4 !== 0) return false;
+  // Check characters are valid base64
+  if (!BASE64_REGEX_SHORT.test(str)) return false;
+  return true;
+}
+
+const BASE64_REGEX = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/;
+
+export function isValidBase64(str) {
+  return BASE64_REGEX.test(str);
 }
 
 const CONST_REGEXP_COUNTRY_ALPHA2 = /^(AF|AX|AL|DZ|AS|AD|AO|AI|AQ|AG|AR|AM|AW|AU|AT|AZ|BS|BH|BD|BB|BY|BE|BZ|BJ|BM|BT|BO|BQ|BA|BW|BV|BR|IO|BN|BG|BF|BI|KH|CM|CA|CV|KY|CF|TD|CL|CN|CX|CC|CO|KM|CG|CD|CK|CR|CI|HR|CU|CW|CY|CZ|DK|DJ|DM|DO|EC|EG|SV|GQ|ER|EE|ET|FK|FO|FJ|FI|FR|GF|PF|TF|GA|GM|GE|DE|GH|GI|GR|GL|GD|GP|GU|GT|GG|GN|GW|GY|HT|HM|VA|HN|HK|HU|IS|IN|ID|IR|IQ|IE|IM|IL|IT|JM|JP|JE|JO|KZ|KE|KI|KP|KR|KW|KG|LA|LV|LB|LS|LR|LY|LI|LT|LU|MO|MK|MG|MW|MY|MV|ML|MT|MH|MQ|MR|MU|YT|MX|FM|MD|MC|MN|ME|MS|MA|MZ|MM|NA|NR|NP|NL|NC|NZ|NI|NE|NG|NU|NF|MP|NO|OM|PK|PW|PS|PA|PG|PY|PE|PH|PN|PL|PT|PR|QA|RE|RO|RU|RW|BL|SH|KN|LC|MF|PM|VC|WS|SM|ST|SA|SN|RS|SC|SL|SG|SX|SK|SI|SB|SO|ZA|GS|SS|ES|LK|SD|SR|SJ|SZ|SE|CH|SY|TW|TJ|TZ|TH|TL|TG|TK|TO|TT|TN|TR|TM|TC|TV|UG|UA|AE|GB|US|UM|UY|UZ|VU|VE|VN|VG|VI|WF|EH|YE|ZM|ZW|XK)/i;

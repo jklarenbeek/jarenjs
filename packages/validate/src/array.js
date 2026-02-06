@@ -241,11 +241,13 @@ function compileArrayChildren(schemaObj, jsonSchema) {
 
     return function validateArrayItemsOnly(data, dataPath, dataRoot) {
       const len = resolveLength(data.length);
+      const validator = validateItem;
+      const arr = data;
 
       let invalid = 0;
       for (let i = 0; i < len; ++i) {
-        const obj = data[i];
-        if (validateItem(obj, dataPath, dataRoot, i) === false) {
+        // Inline: cache array access and validator call
+        if (validator(arr[i], dataPath, dataRoot, i) !== true) {
           invalid++;
         }
       }
@@ -257,11 +259,13 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   if (validateItem == null) {
     return function validateArrayContainsOnly(data, dataPath) {
       const len = resolveLength(data.length);
+      const validator = validateContains;
+      const arr = data;
 
       let contains = 0;
       for (let i = 0; i < len; ++i) {
-        const obj = data[i];
-        if (validateContains(obj, dataPath) === true) {
+        // Inline: cache array access and validator call
+        if (validator(arr[i], dataPath) === true) {
           contains++;
         }
       }
@@ -271,15 +275,19 @@ function compileArrayChildren(schemaObj, jsonSchema) {
 
   return function validateArrayChildren(data, dataPath, dataRoot) {
     const len = resolveLength(data.length);
+    const itemValidator = validateItem;
+    const containsValidator = validateContains;
+    const arr = data;
 
     let invalid = 0;
     let contains = 0;
     for (let i = 0; i < len; ++i) {
-      const obj = data[i];
-      if (validateItem(obj, dataPath, dataRoot, i) !== true) {
+      const obj = arr[i];
+      // Inline: cache validators and combine checks
+      if (itemValidator(obj, dataPath, dataRoot, i) !== true) {
         invalid++;
       }
-      if (validateContains(obj, dataPath, dataRoot) === true) {
+      if (containsValidator(obj, dataPath, dataRoot) === true) {
         contains++;
       }
     }

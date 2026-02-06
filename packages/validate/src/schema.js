@@ -28,6 +28,7 @@ import { compileEnumBasic } from './enum.js';
 import { compileNumberBasic } from './number.js';
 import { compileBigIntBasic } from './bigint.js';
 import { compileStringBasic } from './string.js';
+import { compileContentSchema } from './content.js';
 import { compileObjectSchema } from './object.js';
 import { compileArraySchema } from './array.js';
 import { compileCombineSchema } from './combine.js';
@@ -157,7 +158,12 @@ function compileTypeBasic(schemaObj, jsonSchema) {
 
 export function compileSchemaObject(schemaObj, jsonSchema) {
   if (jsonSchema === true) return trueThat;
-  if (jsonSchema === false) return falseThat;
+  if (jsonSchema === false) {
+    const addError = schemaObj.createErrorHandler(false, 'false schema');
+    return function validateFalseSchema(data, dataPath) {
+      return addError(data, dataPath);
+    };
+  }
   if (!isObjectType(jsonSchema))
     throw new Error('JSON Schema MUST be a boolean or Object Type');
 
@@ -178,6 +184,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   addFunctionToArray(validators, compileBigIntBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileStringBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileFormatBasic(schemaObj, jsonSchema));
+  addFunctionToArray(validators, compileContentSchema(schemaObj, jsonSchema));
 
   addFunctionToArray(validators, compileArraySchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileObjectSchema(schemaObj, jsonSchema));
