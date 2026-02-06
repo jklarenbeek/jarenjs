@@ -49,11 +49,12 @@ export function createRegExp(pattern) {
       if (e >= 0) {
         const r = pattern.substring(1, e);
         const g = pattern.substring(e + 1);
-        return new RegExp(r, g);
+        // Add unicode flag if not already present
+        return g.includes('u') ? new RegExp(r, g) : new RegExp(r, g + 'u');
       }
     }
     else
-      return new RegExp(pattern);
+      return new RegExp(pattern, 'u');
   }
 
   throw new Error(`Unknown Regular Expression Pattern Type: ${pattern}`);

@@ -63,13 +63,42 @@ export function isDateOnlyRFC3339(str) {
   return isDateOnlyInRange(y, m, d);
 }
 
-export function isTimeOnlyInRange(hrs = 0, min = 0, sec = 0, tzh = 0, tzm = 0) {
-  return ((hrs === 23 && min === 59 && sec === 60)
-    || (hrs >= 0 && hrs <= 23
-      && min >= 0 && min <= 59
-      && sec >= 0 && sec <= 59))
-    && (tzh >= 0 && tzh <= 23
-      && tzm >= 0 && tzm <= 59);
+export function isTimeOnlyInRange(hrs = 0, min = 0, sec = 0, tzh = 0, tzm = 0, tzSign = 1) {
+  // Validate timezone offset range
+  if (tzh < 0 || tzh > 23 || tzm < 0 || tzm > 59)
+    return false;
+  
+  // For leap seconds (sec === 60), we need to check if the corresponding UTC time
+  // is 23:59:60. A leap second is only valid at the very end of a UTC day.
+  if (sec === 60) {
+    // Calculate what the UTC time would be
+    // UTC = local - offset (if offset is positive, local is ahead of UTC)
+    // So: UTC = local + (tzSign * tzh) hours + (tzSign * tzm) minutes
+    let utcHrs = hrs - (tzSign * tzh);
+    let utcMin = min - (tzSign * tzm);
+    
+    // Handle wrap-around
+    while (utcMin < 0) {
+      utcMin += 60;
+      utcHrs -= 1;
+    }
+    while (utcMin >= 60) {
+      utcMin -= 60;
+      utcHrs += 1;
+    }
+    while (utcHrs < 0) {
+      utcHrs += 24;
+    }
+    utcHrs = utcHrs % 24;
+    
+    // Leap second is only valid at 23:59:60 UTC
+    return utcHrs === 23 && utcMin === 59 && sec === 60;
+  }
+  
+  // Normal time validation (sec 0-59)
+  return hrs >= 0 && hrs <= 23
+    && min >= 0 && min <= 59
+    && sec >= 0 && sec <= 59;
 }
 
 export function isTimeOnlyRFC3339(str) {
@@ -85,7 +114,11 @@ export function isTimeOnlyRFC3339(str) {
   const s = parseInt(r[3], 10) | 0;
   const th = parseInt(r[8], 10) | 0;
   const tm = parseInt(r[9], 10) | 0;
-  return isTimeOnlyInRange(h, m, s, th, tm);
+  // r[7] is the timezone sign (+ or -)
+  // + means local time is ahead of UTC, so we subtract to get UTC
+  // - means local time is behind UTC, so we add to get UTC
+  const tzSign = r[7] === '-' ? -1 : 1;
+  return isTimeOnlyInRange(h, m, s, th, tm, tzSign);
 }
 
 export function isDateTimeRFC3339(str) {

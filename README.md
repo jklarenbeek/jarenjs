@@ -10,19 +10,93 @@ Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSO
 
 ## 🚀 Quick Start
 
-We recommend you clone this repository and install the dependencies with nodejs by just running the following command in the terminal at the root of the repository.
+### Installation
 
 ```bash
 npm install
 npm run build
-npm run cover
 ```
 
-At its current state, we recommend you use the `@jarenjs/validate` package, which is stable and will not change any of its public interfaces.
+### Basic Usage
 
-For format support please use the `@jarenjs/formats` package with it.
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
 
-But for now its recommended you dive into the test folder and try to find your way from there.
+const jaren = new JarenValidator();
+
+const schema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    age: { type: 'integer', minimum: 0 }
+  },
+  required: ['name']
+};
+
+const validate = jaren.compile(schema);
+
+console.log(validate({ name: 'John', age: 30 })); // true
+console.log(validate({ age: 30 }));               // false (missing required field)
+console.log(validate({ name: 'John', age: -5 })); // false (age below minimum)
+```
+
+### Using External Schemas with `$ref`
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
+const jaren = new JarenValidator();
+
+// Add external schemas that can be referenced
+jaren.addSchema({
+  $id: 'https://example.com/address.json',
+  type: 'object',
+  properties: {
+    street: { type: 'string' },
+    city: { type: 'string' }
+  }
+});
+
+const schema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    address: { $ref: 'https://example.com/address.json' }
+  }
+};
+
+const validate = jaren.compile(schema);
+```
+
+### Running the Benchmark Suite
+
+The benchmark suite runs Jaren against the official JSON Schema Test Suite and compares results with Ajv.
+
+```bash
+# Run all benchmarks
+npm run benchmark
+
+# Run a specific test suite
+node benchmark/debug.js '/ref.json'
+
+# Run a specific test by name
+node benchmark/debug.js '/ref.json' '$ref prevents a sibling'
+
+# Run with verbose output
+node benchmark/debug.js '/ref.json' '$ref prevents a sibling' --verbose
+```
+
+The benchmark results are written to `benchmark/results/results.html`.
+
+### Running Tests
+
+```bash
+# Run all tests with coverage
+npm run cover
+
+# Run tests in watch mode
+npm run test:watch
+```
 
 ## 🔑 JSON Schema Validation Keywords
 
@@ -259,22 +333,22 @@ but it apparently was scheduled for the next release.
   - current
 - 0.9
   - [x] Jaren as a drop-in replacement for Ajv
-  - [ ] add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
+  - [x] add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
   - [ ] Fixing JSON error schema output
   - [ ] add error reporting tests
 - 🎉 1.0 Stable release for `draft7`
-  - add i18n
-  - add development documentation
-  - add examples
+  - [ ] add i18n
+  - [ ] add development documentation
+  - [ ] add examples
 - 1.1
-  - Modelling Inheritance with JSON Schema
-  - Express array constraints more cleanly
+  - [ ] Modelling Inheritance with JSON Schema
+  - [ ] Express array constraints more cleanly
 - 1.2
-  - Using Dynamic References to Support Generic Types
+  - [ ] Using Dynamic References to Support Generic Types
 - 1.3
-  - Runtime schema manipulation of constraints
+  - [ ] Runtime schema manipulation of constraints
 - 1.4-1.9
-  - Fix bugs and/or add forgotten features for latest draft compliance
+  - [ ] Fix bugs and/or add forgotten features for latest draft compliance
 - 2.0 🎉 Stable release for `draft2020`
 
 <details>

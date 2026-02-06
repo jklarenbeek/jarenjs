@@ -32,6 +32,7 @@ import { compileObjectSchema } from './object.js';
 import { compileArraySchema } from './array.js';
 import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
+import { hasSchemaRef } from './tools.js';
 
 function compileRequired(schemaObj, jsonSchema) {
   // if required is not true, we have nothing.
@@ -162,6 +163,12 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   if (Object.keys(jsonSchema).length === 0)
     return trueThat;
+
+  // In draft 7 and earlier, $ref completely replaces the schema
+  // and all sibling keywords must be ignored
+  if (hasSchemaRef(jsonSchema)) {
+    return undefined;
+  }
 
   const validators = [];
   addFunctionToArray(validators, compileRequired(schemaObj, jsonSchema));

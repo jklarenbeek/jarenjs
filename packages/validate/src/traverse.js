@@ -119,8 +119,10 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     // @ts-ignore
     const { obj, base, path } = queue.shift();
 
-    if (isStringType(obj.$id) && !isStringWhiteSpace(obj.$id)) {
-      const { id } = createJsonPointer(obj.$id, base, opts);
+    // Handle $id (draft 6+) or id (draft 4) for identifying subschemas
+    const idKeyword = isStringType(obj.$id) ? obj.$id : isStringType(obj.id) ? obj.id : undefined;
+    if (isStringType(idKeyword) && !isStringWhiteSpace(idKeyword)) {
+      const { id } = createJsonPointer(idKeyword, base, opts);
       if (!schemas.has(id))
         schemas.set(id, obj);
       else if (schemas.get(id) == null)
@@ -161,7 +163,10 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       if (!schemas.has(ref))
         schemas.set(ref, null);
 
-      continue;
+      // Don't continue here - we need to process other schemas in the same
+      // parent object (like definitions) even if this one has a $ref.
+      // The $ref just means we don't traverse INTO this object's properties,
+      // but siblings should still be processed.
     }
 
     // iterate through all properties
@@ -233,6 +238,28 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
     return { id: base, schema };
   }
 
+  // If the fragment is a plain name anchor (not a JSON pointer starting with /),
+  // look it up directly in the schemas map as a location-independent identifier
+  if (!fragment.startsWith('/')) {
+    // The anchor could be stored as just the fragment (e.g., "#foo") or as a full URI
+    // Try the full id first (which includes the base URI)
+    if (schemas.has(base)) {
+      return { id: base, schema: schemas.get(base) };
+    }
+    // Try the scoped anchor format: baseUri + fragment (e.g., "https://example.com/schema#foo")
+    // This handles anchors stored with anchorsGlobal: false
+    const scopedAnchorId = `${leftUri}${fragment}`;
+    if (schemas.has(scopedAnchorId)) {
+      return { id: scopedAnchorId, schema: schemas.get(scopedAnchorId) };
+    }
+    // Try just the fragment with hash (global anchor format)
+    const fragmentWithHash = `#${fragment}`;
+    if (schemas.has(fragmentWithHash)) {
+      return { id: fragmentWithHash, schema: schemas.get(fragmentWithHash) };
+    }
+    // Fall through to JSON pointer traversal for backward compatibility
+  }
+
   // Decode and resolve the JSON pointer
   const fragments = decodeJsonPointerPath(fragment);
 
@@ -297,25 +324,26 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     if (!isObjectClass(item))
       return { id: base, schema: item };
 
-    result = opts.mergeSchemas == true
-      ? { ...item, ...result }
-      : { ...item };
+    // In draft 7 and earlier, $ref completely replaces the schema
+    // and all sibling keywords must be ignored. We only keep the $ref
+    // to resolve it, discarding all other keywords from this item.
+    if (hasSchemaRef(item)) {
+      const ref = item.$ref;
+      const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);
 
-    if (!hasSchemaRef(item))
+      if (seen.has(id))
+        return { id: base, schema: result };
+
+      seen.add(id);
+
+      queue.push({ item: schema, base: id });
+    } else {
+      // No $ref in this item, merge as normal
+      result = opts.mergeSchemas == true
+        ? { ...item, ...result }
+        : { ...item };
       return { id: base, schema: result };
-
-    delete result.$ref;
-
-    const ref = item.$ref;
-
-    const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);
-
-    if (seen.has(id))
-      return { id: base, schema: result };
-
-    seen.add(id);
-
-    queue.push({ item: schema, base: id });
+    }
   }
 
   throw new Error(`The json schema '${baseUri}' can not be resolved!`);
