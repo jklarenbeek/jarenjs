@@ -78,6 +78,34 @@ export function compileStringBasic(schemaObj, jsonSchema) {
   const intern = compileStringIntern(schemaObj, jsonSchema);
   if (intern == null) return undefined;
 
+  // Fast path for simple maxLength-only schemas (most common case)
+  // This inlines the validation to reduce function call overhead
+  const max = getIntishType(jsonSchema.maxLength);
+  const min = getIntishType(jsonSchema.minLength) || 0;
+  const hasPattern = jsonSchema.pattern != null;
+  const useGrapheme = schemaObj.options.useGrapheme;
+
+  if (!hasPattern && !useGrapheme) {
+    // Simple maxLength-only without grapheme counting
+    if (max >= 0 && min < 1) {
+      const addError = schemaObj.createErrorHandler(max, 'maxLength');
+      return function validateStringMaxLength(data, dataPath) {
+        if (!isStringType(data)) return true;
+        return data.length <= max || addError(data.length, dataPath);
+      };
+    }
+
+    // Simple minLength-only without grapheme counting
+    if (min > 0 && max < 0) {
+      const addError = schemaObj.createErrorHandler(min, 'minLength');
+      return function validateStringMinLength(data, dataPath) {
+        if (!isStringType(data)) return true;
+        return data.length >= min || addError(data.length, dataPath);
+      };
+    }
+  }
+
+  // Generic case
   return function validateStringBasic(data, dataPath) {
     return !isStringType(data)
       || intern(data, dataPath);

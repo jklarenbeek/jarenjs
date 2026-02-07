@@ -295,16 +295,16 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     || requiredProperties) == null)
     return undefined;
 
-  // OPTIMIZATION: Inline the validation to reduce function call overhead
+  // Inline the validation to reduce function call overhead
   const min = getIntishType(jsonSchema.minProperties) || 0;
   const max = getIntishType(jsonSchema.maxProperties);
   const required = getArrayClassMinItems(jsonSchema.required, 1);
-  
+
   const hasMin = min > 0;
   const hasMax = max != null && max >= 0;
   const hasRequired = required != null && required.length > 0;
 
-  // OPTIMIZATION: Pre-bind error handlers outside the returned function
+  // Pre-bind error handlers outside the returned function
   if (hasMin && !hasMax && !hasRequired) {
     const addError = schemaObj.createErrorHandler(min, 'minProperties');
     return function validateMinPropertiesOnly(data, dataPath, dataRoot, dataKeys) {
@@ -312,7 +312,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       return len >= min || addError(len, dataPath);
     };
   }
-  
+
   if (!hasMin && hasMax && !hasRequired) {
     const addError = schemaObj.createErrorHandler(max, 'maxProperties');
     return function validateMaxPropertiesOnly(data, dataPath, dataRoot, dataKeys) {
@@ -320,7 +320,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       return len <= max || addError(len, dataPath);
     };
   }
-  
+
   if (hasMin && hasMax && !hasRequired) {
     const addMinError = schemaObj.createErrorHandler(min, 'minProperties');
     const addMaxError = schemaObj.createErrorHandler(max, 'maxProperties');
@@ -331,11 +331,15 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     };
   }
 
-  // OPTIMIZATION: Specialized paths for required properties
+  // Specialized paths for required properties
   if (!hasMin && !hasMax && hasRequired) {
     const rlength = required.length;
     const addError = schemaObj.createErrorHandler(required, ['required']);
     return function validateRequiredOnly(data, dataPath, dataRoot, dataKeys) {
+      // Required properties only apply to objects, not arrays or other types
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        return true;
+      }
       const keys = dataKeys || Object.keys(data);
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
@@ -352,6 +356,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     const rlength = required.length;
     const addReqError = schemaObj.createErrorHandler(required, ['required']);
     return function validateMinAndRequired(data, dataPath, dataRoot, dataKeys) {
+      // Required/minProperties only apply to objects, not arrays or other types
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        return true;
+      }
       const keys = dataKeys || Object.keys(data);
       const len = keys.length;
       if (len < min && !addMinError(len, dataPath))
@@ -371,6 +379,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
     const rlength = required.length;
     const addReqError = schemaObj.createErrorHandler(required, ['required']);
     return function validateMaxAndRequired(data, dataPath, dataRoot, dataKeys) {
+      // Required/maxProperties only apply to objects, not arrays or other types
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        return true;
+      }
       const keys = dataKeys || Object.keys(data);
       const len = keys.length;
       if (len > max && !addMaxError(len, dataPath))
@@ -455,7 +467,7 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
   if (propertyValidator == null)
     return undefined;
 
-  // OPTIMIZATION: Inline ValidationResult operations to reduce object allocations
+  // Inline ValidationResult operations to reduce object allocations
   return function validateObjectChildren(data, dataPath, dataRoot, dataKeys) {
     let totalErrors = 0;
     const len = dataKeys.length;

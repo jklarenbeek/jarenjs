@@ -109,8 +109,8 @@ class ValidationOptions {
 }
 
 class ValidationRoot {
-  static _createObject(self, path, schema, baseUri) {
-    const objects = self._objects;
+  static #createObject(self, path, schema, baseUri) {
+    const objects = self.#objects;
     if (objects.has(path)) {
       const p = objects.get(path);
       if (p != null)
@@ -122,34 +122,47 @@ class ValidationRoot {
     return obj;
   }
 
+  #rootOrigin = null;
+  #schemas = null;
+  #formats = null;
+  #options = null;
+  #traverse = null;
+  #objects = null;
+  #errors = null;
+  #firstSchema = null;
+
   constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions) {
     const schema = schemas.get(origin);
-    this._rootOrigin = origin;
-    this._schemas = schemas;
-    this._formats = formats;
+    this.#rootOrigin = origin;
+    this.#schemas = schemas;
+    this.#formats = formats;
 
-    this._options = opts;
-    this._traverse = traverse;
+    this.#options = opts;
+    this.#traverse = traverse;
 
-    this._objects = new Map();
-    this._errors = [];
+    this.#objects = new Map();
+    this.#errors = [];
 
     // For the root schema, baseUri is the origin
-    this._firstSchema = ValidationRoot._createObject(this, origin, schema, origin);
+    this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
   }
 
-  get options() { return this._options; }
+  get rootOrigin() { return this.#rootOrigin; }
 
-  get formats() { return this._formats; }
+  get traverse() { return this.#traverse; }
 
-  get errors() { return this._errors; }
+  get options() { return this.#options; }
+
+  get formats() { return this.#formats; }
+
+  get errors() { return this.#errors; }
 
   createObject(path, schema, baseUri) {
-    return ValidationRoot._createObject(this, path, schema, baseUri);
+    return ValidationRoot.#createObject(this, path, schema, baseUri);
   }
 
   unresolvedObject(path) {
-    const objects = this._objects;
+    const objects = this.#objects;
     if (objects.has(path))
       return objects.get(path);
 
@@ -158,14 +171,14 @@ class ValidationRoot {
   }
 
   resolveObject(ref, path, schema) {
-    // OPTIMIZATION: Fast path - check if already compiled first
-    const objects = this._objects;
+    // Fast path - check if already compiled first
+    const objects = this.#objects;
     const cached = objects.get(ref);
     if (cached != null) return cached;
 
-    // OPTIMIZATION: Resolve ref chain and check final ID cache
-    const schemas = this._schemas;
-    const traverse = this._traverse;
+    // Resolve ref chain and check final ID cache
+    const schemas = this.#schemas;
+    const traverse = this.#traverse;
     const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
 
     // Check if final ID is already compiled
@@ -173,19 +186,19 @@ class ValidationRoot {
     if (finalCached != null) return finalCached;
 
     // Create and cache the validation object
-    return ValidationRoot._createObject(this, id, root);
+    return ValidationRoot.#createObject(this, id, root);
   }
 
   addError(error /*:JarenError*/) {
-    this._errors.push(error);
+    this.#errors.push(error);
     return false;
   }
 
   validate(data /*:unknown*/) {
     // clear all errors
-    this._errors = [];
+    this.#errors = [];
     // call compiled validator
-    return this._firstSchema.validate(data, data);
+    return this.#firstSchema.validate(data, data);
   }
 }
 
@@ -198,27 +211,29 @@ class ValidationObject {
    * @param {string} baseUri The base URI for resolving $ref (parent's base, before any sibling $id)
    * @returns {function(any, any):boolean} A function that validates data against the compiled schema and returns a boolean.
    */
-  static _compileValidator(self, path, schema, baseUri) {
+  static compileValidator(self, path, schema, baseUri) {
     if (!hasSchemaRef(schema))
       return compileSchemaObject(self, schema);
 
-    const root = self._root;
+    const root = self.#root;
 
     // When resolving $ref, use baseUri (parent's base) instead of path.
     // This ensures that a sibling $id does not change the base URI for $ref resolution.
     // Per JSON Schema spec, $ref prevents a sibling $id from changing the base URI.
     const refBase = baseUri || path;
-    const { id: ref } = createJsonPointer(schema.$ref, refBase, root._traverse);
+    const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse);
 
-    // OPTIMIZATION: Direct validator binding - avoid wrapper function overhead
+    // Since refs are now pre-compiled at compile time,
+    // we should always find the target immediately
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
       const validator = resolved.validate;
-      self._validator = validator;
+      self.#validator = validator;
       return validator;
     }
 
-    // OPTIMIZATION: Pre-bind values to avoid closure overhead in hot path
+    // Fallback for edge cases (e.g., recursive refs that weren't pre-compiled)
+    // Pre-bind values to avoid closure overhead in hot path
     const rootRef = root;
     const boundRef = ref;
     const boundRefBase = refBase;
@@ -228,40 +243,61 @@ class ValidationObject {
       const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
       const validator = obj.validate;
       // Cache the validator directly - no wrapper function
-      self._validator = validator;
+      self.#validator = validator;
       return validator(data, dataRoot);
     };
   }
 
-  constructor(root, path, schema, baseUri) {
-    this._root = root;
-    this._path = path;
-    this._baseUri = baseUri || path;  // Store base URI for child objects
-    this._members = [];
-    this._schema = schema;
-    this._validator = null;
+  #root = null;
+  #path = null;
+  #members = null;
+  #schema = null;
+  #validator = null;
+  #baseUri = null;
+  #effectiveBaseUri = null;
 
-    this._validator = ValidationObject._compileValidator(this, path, schema, baseUri);
+  constructor(root, path, schema, baseUri) {
+    this.#root = root;
+    this.#path = path;
+    this.#members = [];
+    this.#schema = schema;
+    this.#validator = null;
+
+    // Calculate the effective base URI for this schema.
+    // The effective base is what children should use for resolving relative $refs.
+    // If this schema has an $id, it becomes the new base for children.
+    if (isObjectClass(schema) && schema.$id) {
+      // This schema has its own $id - resolve it against the parent's baseUri
+      // to get the absolute base for children
+      const { id: resolvedId } = createJsonPointer(schema.$id, baseUri);
+      this.#effectiveBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
+    } else {
+      // No $id - inherit parent's base
+      this.#effectiveBaseUri = baseUri;
+    }
+    this.#baseUri = baseUri;
+
+    this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
   }
 
   get path() {
-    return this._path;
+    return this.#path;
   }
 
   get errors() {
-    return this._root.errors;
+    return this.#root.errors;
   }
 
   get validate() {
-    return this._validator;
+    return this.#validator;
   }
 
   get options() {
-    return this._root.options;
+    return this.#root.options;
   }
 
   get formats() {
-    return this._root.formats;
+    return this.#root.formats;
   }
 
 /**
@@ -276,13 +312,13 @@ class ValidationObject {
     if (!Array.isArray(key)) {
       return function addNormalError(data, ...meta) {
         const error = new InternalValidationError(self, key, expected, null, data, meta);
-        return self._root.addError(error);
+        return self.#root.addError(error);
       };
     }
     else {
       return function addKeyedError(dataKey, data, ...meta) {
         const error = new InternalValidationError(self, key, expected, dataKey, data, meta);
-        return self._root.addError(error);
+        return self.#root.addError(error);
       };
     }
   }
@@ -291,25 +327,41 @@ class ValidationObject {
     if (!isBoolOrObjectClass(schema))
       return undefined;
 
-    const root = this._root;
-    // Use root origin as base if path is just an anchor (not a valid base URL)
-    const basePath = this._path.startsWith('#') ? root._rootOrigin : this._path;
+    const root = this.#root;
+    // Use the effective base URI for resolving relative $refs
+    // This is either: (a) the resolved $id of this schema, or (b) the inherited base from parent
+    let basePath = this.#effectiveBaseUri;
+    // Strip trailing '#' for URL resolution - a base URL ending with '#' breaks relative ref resolution
+    if (basePath && basePath.endsWith('#')) {
+      basePath = basePath.slice(0, -1);
+    }
 
-    const id = isObjectClass(schema)
-      ? createJsonPointer(schema.$id, basePath).id
-      : this._path;
+    // Check if schema has $id - this affects how we calculate the path
+    const hasId = isObjectClass(schema) && schema.$id;
 
-    const path = index == null
-      ? encodeJsonPointerPath(id, key)
-      : encodeJsonPointerPath(id, key, String(index));
+    // If schema has $id, resolve it against basePath to get the new base URI
+    // Otherwise, use the current path
+    const id = hasId
+      ? createJsonPointer(schema.$id, basePath || this.#path).id
+      : this.#path;
+
+    // If schema has $id, use the resolved ID as the path (it defines the schema's location)
+    // Otherwise, append key/index to create a JSON pointer path
+    const path = hasId
+      ? id
+      : index == null
+        ? encodeJsonPointerPath(id, key)
+        : encodeJsonPointerPath(id, key, String(index));
+
+
 
     // Pass basePath as the baseUri for the child object.
     // This ensures that $ref in the child will be resolved against basePath,
     // not against any sibling $id that the child might have.
     const child = root.createObject(path, schema, basePath);
-    this._members.push(child);
+    this.#members.push(child);
 
-    return child._validator;
+    return child.#validator;
   }
 }
 
@@ -585,7 +637,7 @@ export class JarenValidator {
       return new ValidationError({
         keyword,
         instancePath: '',  // TODO: implement proper path tracking
-        schemaPath: err.object?._path || '',
+        schemaPath: err.object?.path || '',
         params,
         message,
       });
@@ -614,14 +666,43 @@ export class JarenValidator {
       if (collectErrors) {
         return {
           valid,
-          errors: valid ? [] : JarenValidator.#convertErrors(root._errors)
+          errors: valid ? [] : JarenValidator.#convertErrors(root.errors)
         };
       }
       return valid;
     }
 
     Object.defineProperty(jarenValidateSchema, "errors", {
-      get: function () { return root._errors }
+      get: function () { return root.errors }
+    })
+
+    return jarenValidateSchema;
+  }
+
+  /**
+   * Compile schema using a pre-created ValidationRoot (with pre-compiled refs).
+   * @param {JarenValidator} self
+   * @param {string} origin
+   * @param {Map} schemas
+   * @param {ValidationRoot} root - Pre-created root with pre-compiled refs
+   * @returns {(data) => boolean | {valid: boolean, errors: ValidationError[]}}
+   */
+  static #compileSchemaWithRoot(self, origin, schemas, root) {
+    const collectErrors = self.#options.validation?.collectErrors || false;
+
+    function jarenValidateSchema(data) {
+      const valid = root.validate(data);
+      if (collectErrors) {
+        return {
+          valid,
+          errors: valid ? [] : JarenValidator.#convertErrors(root.errors)
+        };
+      }
+      return valid;
+    }
+
+    Object.defineProperty(jarenValidateSchema, "errors", {
+      get: function () { return root.errors }
     })
 
     return jarenValidateSchema;
@@ -690,6 +771,158 @@ export class JarenValidator {
   }
 
   /**
+   * Pre-compile refs to eliminate validation-time overhead.
+   * Creates ValidationObjects for all refs in the schemas map during compile time.
+   * @param {ValidationRoot} root - The validation root
+   * @param {Map} schemas - The schemas map
+   * @param {string} origin - The origin schema ID
+   * @private
+   */
+  static #precompileRefs(root, schemas, origin) {
+    // Pre-create validation objects for all refs in the schemas map
+    // This moves ref resolution from validation time to compile time
+
+    // First pass: Create objects for schemas with $id (canonical paths)
+    // These establish the base URIs for their descendants
+    for (const [id, schema] of schemas.entries()) {
+      // Skip if already compiled
+      if (root.unresolvedObject(id) !== null) continue;
+
+      // Skip null placeholders
+      if (schema == null) continue;
+
+      // Only process schemas with $id that are stored under their $id path
+      // (not JSON pointer paths)
+      if (!isObjectClass(schema) || !schema.$id) continue;
+
+      // Check if this id matches the resolved $id
+      const { id: resolvedId } = createJsonPointer(schema.$id, origin);
+      if (id === resolvedId || id === resolvedId + '#') {
+        // This is a canonical $id path - create with origin as base
+        try {
+          root.createObject(id, schema, origin);
+        } catch (e) {
+          // May fail if dependencies not resolved yet
+        }
+      }
+    }
+
+    // Second pass: Create objects for remaining schemas
+    // This includes:
+    // 1. JSON pointer paths (e.g., #/definitions/x) - calculate baseUri by finding nearest ancestor $id
+    // 2. Canonical $id paths with relative $ids that weren't matched in first pass
+    for (const [id, schema] of schemas.entries()) {
+      // Skip if already compiled
+      if (root.unresolvedObject(id) !== null) continue;
+
+      // Skip null placeholders
+      if (schema == null) continue;
+
+      // Skip schemas without $id that aren't refs - they're subschemas
+      // that will be reached through traversal from a parent
+      const hasId = isObjectClass(schema) && schema.$id;
+      const isJsonPointerPath = id.includes('#/');
+      const isCanonicalPath = !isJsonPointerPath && id.endsWith('#');
+
+      if (!hasId && !isJsonPointerPath) continue;
+
+      // Calculate baseUri for this schema
+      let baseUri = origin;
+
+      if (isJsonPointerPath) {
+        // JSON pointer path - traverse from root to find nearest $id ancestor
+        const hashIndex = id.indexOf('#/');
+        const baseDoc = id.substring(0, hashIndex);
+        const pointer = id.substring(hashIndex + 1);
+        const pointerParts = pointer.split('/').filter(p => p);
+
+        const rootId = baseDoc + '#';
+        const rootSchema = schemas.get(rootId);
+
+        // Check if the root schema has an $id that matches the baseDoc.
+        // If so, the baseDoc is already the resolved $id and we shouldn't
+        // apply $id resolution during traversal (that would double-resolve).
+        let rootIdMatchesBaseDoc = false;
+        if (rootSchema && isObjectClass(rootSchema) && rootSchema.$id) {
+          const { id: resolvedRootId } = createJsonPointer(rootSchema.$id, origin);
+          const resolvedRootBase = resolvedRootId.endsWith('#') ? resolvedRootId.slice(0, -1) : resolvedRootId;
+          if (baseDoc === resolvedRootBase) {
+            rootIdMatchesBaseDoc = true;
+          }
+        }
+
+        let currentSchema = rootSchema;
+        let currentBaseUri = baseDoc;
+
+        // Traverse and find the nearest $id ancestor
+        for (let i = 0; i < pointerParts.length && currentSchema; i++) {
+          const part = pointerParts[i];
+
+          // Check if current schema has $id (before moving to child)
+          if (isObjectClass(currentSchema) && currentSchema.$id) {
+            const isRootSchema = (i === 0);
+            const shouldApplyId = !isRootSchema || !rootIdMatchesBaseDoc;
+
+            if (shouldApplyId) {
+              const { id: resolvedId } = createJsonPointer(currentSchema.$id, currentBaseUri);
+              currentBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
+            }
+          }
+
+          // Move to next level - handle both direct properties and definitions/$defs
+          const nextSchema = currentSchema[part] ||
+                            currentSchema.$defs?.[part] ||
+                            currentSchema.definitions?.[part];
+          currentSchema = nextSchema;
+        }
+
+        baseUri = currentBaseUri;
+      } else if (hasId && isCanonicalPath) {
+        // Canonical $id path that wasn't handled in first pass
+        // This happens when the $id is relative and resolves differently
+        // than against the origin. We need to find the correct base URI.
+
+        // Find any schema in the map that has this schema as a descendant
+        // and use its $id as the base
+        for (const [candidateId, candidateSchema] of schemas.entries()) {
+          if (!candidateSchema || candidateSchema === schema) continue;
+
+          // Check if candidate is an ancestor by checking if our id starts with candidate's path
+          if (isJsonPointerPath && id.startsWith(candidateId.replace('#', '#/') + '/')) {
+            // This is a descendant of a JSON pointer path - skip for now
+            continue;
+          }
+
+          // If candidate has an $id, it could be our base
+          if (isObjectClass(candidateSchema) && candidateSchema.$id) {
+            // Try resolving our $id against this candidate's resolved $id
+            const { id: candidateResolvedId } = createJsonPointer(candidateSchema.$id, origin);
+            const candidateBase = candidateResolvedId.endsWith('#') ? candidateResolvedId.slice(0, -1) : candidateResolvedId;
+
+            try {
+              const { id: testResolvedId } = createJsonPointer(schema.$id, candidateBase);
+              const testResolvedIdWithHash = testResolvedId.endsWith('#') ? testResolvedId : testResolvedId + '#';
+
+              if (id === testResolvedIdWithHash || id === testResolvedId) {
+                baseUri = candidateBase;
+                break;
+              }
+            } catch (e) {
+              // Invalid URL, skip this candidate
+            }
+          }
+        }
+      }
+
+      try {
+        root.createObject(id, schema, baseUri);
+      } catch (e) {
+        // Ref may not be resolvable yet, that's ok
+      }
+    }
+  }
+
+  /**
    * Generate validating function and cache the compiled schema for future use.
    * Note: This function does NOT return a promise. Use compileAsync instead!
    * @param {boolean | object} schema
@@ -698,6 +931,21 @@ export class JarenValidator {
    */
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#options.traverse);
-    return JarenValidator.#compileSchema(this, origin, map);
+
+    // Pre-compile all refs before returning the validator
+    // This ensures all ref chains are resolved at compile time
+    const root = new ValidationRoot(
+      origin,
+      map,
+      this.#formats,
+      this.#options.validation,
+      this.#options.traverse
+    );
+
+    // Pre-create validation objects for all refs
+    JarenValidator.#precompileRefs(root, map, origin);
+
+    // Re-compile with the pre-populated root
+    return JarenValidator.#compileSchemaWithRoot(this, origin, map, root);
   }
 }

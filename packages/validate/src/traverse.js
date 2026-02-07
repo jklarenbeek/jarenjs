@@ -285,11 +285,36 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
     if (item != null)
       continue;
 
-    const { schema } = resolveRefSchemaShallow(schemas, id, null, opts);
-    if (schema == null)
-      throw new Error(`Can not resolve schema for '${id}'`);
+    // Try to use resolveRefSchemaDeep to flatten ref chains
+    // This resolves a→b→c into a→c, eliminating chain traversal at validation time
+    // If deep resolution fails (e.g., remote ref not loaded yet), fall back to shallow
+    try {
+      const { id: finalId, schema: finalSchema } = resolveRefSchemaDeep(
+        schemas,
+        id,
+        { $ref: id },
+        opts
+      );
 
-    schemas.set(id, schema);
+      if (finalSchema == null)
+        throw new Error(`Can not resolve schema for '${id}'`);
+
+      // Store the final resolved schema (flattened ref chain)
+      schemas.set(id, finalSchema);
+
+      // Also store under the final ID for direct access if not already present
+      if (finalId !== id && !schemas.has(finalId)) {
+        schemas.set(finalId, finalSchema);
+      }
+    } catch (e) {
+      // If deep resolution fails (remote ref not loaded), fall back to shallow resolution
+      // This preserves the original behavior for unresolved refs
+      const { schema } = resolveRefSchemaShallow(schemas, id, null, opts);
+      if (schema == null)
+        throw new Error(`Can not resolve schema for '${id}'`);
+
+      schemas.set(id, schema);
+    }
   }
 }
 

@@ -352,10 +352,12 @@ but it apparently was scheduled for the next release.
 - 0.9
   - [x] Jaren as a drop-in replacement for Ajv
   - [x] add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
-  - [ ] Fixing JSON error schema output
-  - [ ] add error reporting tests
+  - [x] Fixing JSON error schema output
+  - [x] add error reporting tests
 - 🎉 1.0 Stable release for `draft7`
-  - [ ] add i18n
+  - [ ] add AI bot workflow and bootstrap prompt
+  - [ ] add a website to github pages with typescript and react.
+  - [ ] add i18n - translations of errors should be available!
   - [ ] add development documentation
   - [ ] add examples
 - 1.1

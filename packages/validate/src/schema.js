@@ -167,13 +167,79 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   if (!isObjectType(jsonSchema))
     throw new Error('JSON Schema MUST be a boolean or Object Type');
 
-  if (Object.keys(jsonSchema).length === 0)
+  const keys = Object.keys(jsonSchema);
+  if (keys.length === 0)
     return trueThat;
 
   // In draft 7 and earlier, $ref completely replaces the schema
   // and all sibling keywords must be ignored
   if (hasSchemaRef(jsonSchema)) {
     return undefined;
+  }
+
+  // Fast paths for common simple schema patterns
+  // These inline the validation to reduce function call overhead
+
+  // Fast path: type-only schema (most common case: {"type": "string"})
+  if (keys.length === 1 && jsonSchema.type !== undefined) {
+    const type = jsonSchema.type;
+    // Only handle single type strings here (not arrays of types)
+    if (typeof type === 'string') {
+      const addError = schemaObj.createErrorHandler(type, 'type');
+
+      switch (type) {
+        case 'string':
+          return function validateTypeStringOnly(data, dataPath) {
+            return data === undefined || typeof data === 'string' || addError(data, dataPath);
+          };
+        case 'number':
+          return function validateTypeNumberOnly(data, dataPath) {
+            return data === undefined || (typeof data === 'number' && !isNaN(data)) || addError(data, dataPath);
+          };
+        case 'integer':
+          return function validateTypeIntegerOnly(data, dataPath) {
+            return data === undefined || Number.isInteger(data) || addError(data, dataPath);
+          };
+        case 'boolean':
+          return function validateTypeBooleanOnly(data, dataPath) {
+            return data === undefined || typeof data === 'boolean' || addError(data, dataPath);
+          };
+        case 'array':
+          return function validateTypeArrayOnly(data, dataPath) {
+            return data === undefined || Array.isArray(data) || addError(data, dataPath);
+          };
+        case 'object':
+          return function validateTypeObjectOnly(data, dataPath) {
+            return data === undefined || (typeof data === 'object' && data !== null && !Array.isArray(data))
+              || addError(data, dataPath);
+          };
+        case 'null':
+          return function validateTypeNullOnly(data, dataPath) {
+            return data === undefined || data === null || addError(data, dataPath);
+          };
+      }
+    }
+  }
+
+  // Fast path: required-only schema (common case: {"required": ["foo", "bar"]})
+  if (keys.length === 1 && jsonSchema.required !== undefined) {
+    const required = jsonSchema.required;
+    if (Array.isArray(required) && required.length > 0) {
+      const addError = schemaObj.createErrorHandler(required, ['required']);
+      const rlen = required.length;
+
+      return function validateRequiredOnly(data, dataPath) {
+        // Required only applies to objects, not arrays or primitives
+        if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+        const dataKeys = Object.keys(data);
+        for (let i = 0; i < rlen; i++) {
+          if (dataKeys.indexOf(required[i]) === -1) {
+            return addError(required[i], data, dataPath);
+          }
+        }
+        return true;
+      };
+    }
   }
 
   const validators = [];

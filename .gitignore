@@ -95,3 +95,8 @@ dist/
 
 # benchmark results
 benchmark/results/
+
+# TODO: AI integration
+.gitignore
+PROGRESS.md
+NEXT_SESSION.md
