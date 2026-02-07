@@ -105,6 +105,19 @@ export function compileStringBasic(schemaObj, jsonSchema) {
     }
   }
 
+  // Fast path for pattern-only schemas (common in ecmascript-regex tests)
+  // This eliminates the intermediate function call overhead
+  if (hasPattern && max < 0 && min < 1) {
+    const pattern = createRegExp(jsonSchema.pattern);
+    if (pattern != null) {
+      const addError = schemaObj.createErrorHandler(pattern, 'pattern');
+      return function validateStringPatternOnly(data, dataPath) {
+        if (!isStringType(data)) return true;
+        return pattern.test(data) || addError(data, dataPath);
+      };
+    }
+  }
+
   // Generic case
   return function validateStringBasic(data, dataPath) {
     return !isStringType(data)

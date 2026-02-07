@@ -96,19 +96,46 @@ export class ValidationError {
   }
 }
 
+/**
+ * ValidationOptions configures the behavior of the validation process.
+ * @class
+ */
 class ValidationOptions {
+  /**
+   * Creates validation options.
+   * @param {boolean} [skipErrors=true] - Whether to stop at first error or continue
+   * @param {boolean} [useGrapheme=true] - Whether to use grapheme cluster counting for strings
+   * @param {boolean} [collectErrors=false] - Whether to collect all errors or just return boolean
+   */
   constructor(
     skipErrors = true,
     useGrapheme = true,
     collectErrors = false
   ) {
+    /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
+    /** @type {boolean} Whether to use grapheme cluster counting for string length */
     this.useGrapheme = useGrapheme;
+    /** @type {boolean} Whether to collect and return detailed errors */
     this.collectErrors = collectErrors;
   }
 }
 
+/**
+ * ValidationRoot manages the compilation and validation context for a schema.
+ * It holds references to all schemas, formats, options, and compiled ValidationObjects.
+ * @class
+ */
 class ValidationRoot {
+  /**
+   * Creates a ValidationObject and stores it in the root's object map.
+   * @private
+   * @param {ValidationRoot} self - The ValidationRoot instance
+   * @param {string} path - The URI path for this schema object
+   * @param {object|boolean} schema - The JSON schema
+   * @param {string} baseUri - The base URI for resolving relative refs
+   * @returns {ValidationObject} The created ValidationObject
+   */
   static #createObject(self, path, schema, baseUri) {
     const objects = self.#objects;
     if (objects.has(path)) {
@@ -122,15 +149,31 @@ class ValidationRoot {
     return obj;
   }
 
+  /** @type {string|null} The root schema origin/URI */
   #rootOrigin = null;
+  /** @type {Map|null} Map of schema paths to schema objects */
   #schemas = null;
+  /** @type {object|null} Registered format validators */
   #formats = null;
+  /** @type {ValidationOptions|null} Validation options */
   #options = null;
+  /** @type {TraverseOptions|null} Schema traversal options */
   #traverse = null;
+  /** @type {Map|null} Map of paths to ValidationObjects */
   #objects = null;
+  /** @type {Array} Array of validation errors */
   #errors = null;
+  /** @type {ValidationObject|null} The root schema's ValidationObject */
   #firstSchema = null;
 
+  /**
+   * Creates a new ValidationRoot.
+   * @param {string} origin - The root schema origin/URI
+   * @param {Map} schemas - Map of schema paths to schema objects
+   * @param {object} formats - Registered format validators
+   * @param {ValidationOptions} [opts] - Validation options
+   * @param {TraverseOptions} [traverse] - Schema traversal options
+   */
   constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions) {
     const schema = schemas.get(origin);
     this.#rootOrigin = origin;
@@ -147,20 +190,37 @@ class ValidationRoot {
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
   }
 
+  /** @returns {string} The root schema origin/URI */
   get rootOrigin() { return this.#rootOrigin; }
 
+  /** @returns {TraverseOptions} Schema traversal options */
   get traverse() { return this.#traverse; }
 
+  /** @returns {ValidationOptions} Validation options */
   get options() { return this.#options; }
 
+  /** @returns {object} Registered format validators */
   get formats() { return this.#formats; }
 
+  /** @returns {Array} Array of validation errors */
   get errors() { return this.#errors; }
 
+  /**
+   * Creates a new ValidationObject for the given path and schema.
+   * @param {string} path - The URI path for this schema object
+   * @param {object|boolean} schema - The JSON schema
+   * @param {string} baseUri - The base URI for resolving relative refs
+   * @returns {ValidationObject} The created ValidationObject
+   */
   createObject(path, schema, baseUri) {
     return ValidationRoot.#createObject(this, path, schema, baseUri);
   }
 
+  /**
+   * Checks if an object exists at the given path without creating it.
+   * @param {string} path - The URI path to check
+   * @returns {ValidationObject|null|undefined} The existing object, null if marked unresolved, or undefined if not known
+   */
   unresolvedObject(path) {
     const objects = this.#objects;
     if (objects.has(path))
@@ -170,6 +230,13 @@ class ValidationRoot {
     return null;
   }
 
+  /**
+   * Resolves a $ref to a ValidationObject, creating it if necessary.
+   * @param {string} ref - The reference URI to resolve
+   * @param {string} path - The current path (for error messages)
+   * @param {object} schema - The schema containing the $ref
+   * @returns {ValidationObject} The resolved ValidationObject
+   */
   resolveObject(ref, path, schema) {
     // Fast path - check if already compiled first
     const objects = this.#objects;
@@ -189,11 +256,21 @@ class ValidationRoot {
     return ValidationRoot.#createObject(this, id, root);
   }
 
-  addError(error /*:JarenError*/) {
+  /**
+   * Adds an error to the validation errors list.
+   * @param {InternalValidationError} error - The error to add
+   * @returns {boolean} Always returns false for convenience in validators
+   */
+  addError(error /*:InternalValidationError*/) {
     this.#errors.push(error);
     return false;
   }
 
+  /**
+   * Validates data against the root schema.
+   * @param {unknown} data - The data to validate
+   * @returns {boolean} True if valid, false otherwise
+   */
   validate(data /*:unknown*/) {
     // clear all errors
     this.#errors = [];
@@ -202,13 +279,23 @@ class ValidationRoot {
   }
 }
 
+/**
+ * ValidationObject represents a single schema location with its compiled validator.
+ * It handles the compilation of schema validation logic and provides methods for
+ * creating child validators and error handlers.
+ * @class
+ */
 class ValidationObject {
   /**
-   * Compiles a schema validation error handler
-   * @param {ValidationObject} self The validation object that is compiling this validator
-   * @param {string} path The path to this schema object
-   * @param {any} schema The schema object to compile
-   * @param {string} baseUri The base URI for resolving $ref (parent's base, before any sibling $id)
+   * Compiles a validator function for the given schema.
+   * This is the main entry point for schema compilation. It handles:
+   * - Simple schemas (type-only, required-only) via fast paths
+   * - Schemas with $ref by resolving to target validators
+   * - Complex schemas by delegating to compileSchemaObject
+   * @param {ValidationObject} self - The validation object that is compiling this validator
+   * @param {string} path - The path to this schema object (its URI identifier)
+   * @param {any} schema - The schema object to compile
+   * @param {string} baseUri - The base URI for resolving $ref (parent's base, before any sibling $id)
    * @returns {function(any, any):boolean} A function that validates data against the compiled schema and returns a boolean.
    */
   static compileValidator(self, path, schema, baseUri) {
@@ -248,14 +335,28 @@ class ValidationObject {
     };
   }
 
+  /** @type {ValidationRoot} The root validation context */
   #root = null;
+  /** @type {string} The URI path identifying this schema object */
   #path = null;
+  /** @type {ValidationObject[]} Child validation objects created by this object */
   #members = null;
+  /** @type {any} The schema object being validated */
   #schema = null;
+  /** @type {function|null} The compiled validator function */
   #validator = null;
+  /** @type {string} The base URI passed during construction */
   #baseUri = null;
+  /** @type {string} The effective base URI for child $ref resolution */
   #effectiveBaseUri = null;
 
+  /**
+   * Creates a new ValidationObject.
+   * @param {ValidationRoot} root - The root validation context
+   * @param {string} path - The URI path identifying this schema object
+   * @param {any} schema - The schema object to compile
+   * @param {string} baseUri - The base URI for resolving $ref
+   */
   constructor(root, path, schema, baseUri) {
     this.#root = root;
     this.#path = path;
@@ -280,32 +381,37 @@ class ValidationObject {
     this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
   }
 
+  /** @returns {string} The URI path identifying this schema object */
   get path() {
     return this.#path;
   }
 
+  /** @returns {Array} The current validation errors from the root */
   get errors() {
     return this.#root.errors;
   }
 
+  /** @returns {function} The compiled validator function */
   get validate() {
     return this.#validator;
   }
 
+  /** @returns {ValidationOptions} The validation options */
   get options() {
     return this.#root.options;
   }
 
+  /** @returns {object} The registered format validators */
   get formats() {
     return this.#root.formats;
   }
 
 /**
- * Compiles a schema validation error handler
- * @param {any} expected - anything that is expected by this handler
- * @param {string | string[]} key - the key or keys that is expected
- * @returns {function(unknown): boolean} A function that validates data against the compiled schema and returns a boolean.
- */
+   * Creates an error handler function for validation failures.
+   * @param {any} expected - The expected value that failed validation
+   * @param {string | string[]} key - The keyword or keywords that failed
+   * @returns {function(unknown, ...any): boolean} A function that adds an error and returns false
+   */
   createErrorHandler(expected, key) {
     const self = this;
 
@@ -323,6 +429,14 @@ class ValidationObject {
     }
   }
 
+  /**
+   * Creates a validator function for a child schema.
+   * This is used when compiling nested schemas (e.g., array items, object properties).
+   * @param {object|boolean} schema - The child schema to compile
+   * @param {string} key - The property key where the schema is located
+   * @param {number} [index] - Optional array index for tuple items
+   * @returns {function|undefined} The compiled validator function, or undefined if schema is invalid
+   */
   createValidator(schema, key, index) {
     if (!isBoolOrObjectClass(schema))
       return undefined;
@@ -365,7 +479,29 @@ class ValidationObject {
   }
 }
 
+/**
+ * ValidatorOptions configures the JarenValidator instance.
+ * Can be created with positional arguments or an options object.
+ * @class
+ * @example
+ * // Positional arguments
+ * const options = new ValidatorOptions(formats, schemas, validation, traverse);
+ * 
+ * // Options object (recommended)
+ * const options = new ValidatorOptions({
+ *   formats: { custom: validator },
+ *   collectErrors: true,
+ *   useGrapheme: false
+ * });
+ */
 export class ValidatorOptions {
+  /**
+   * Creates validator options.
+   * @param {object|object[]} [formats={}] - Format validators or options object
+   * @param {object[]} [schemas=[]] - Initial schemas to register
+   * @param {ValidationOptions} [validation] - Validation behavior options
+   * @param {TraverseOptions} [traverse] - Schema traversal options
+   */
   constructor(
     formats = {},
     schemas = [],
@@ -376,14 +512,18 @@ export class ValidatorOptions {
     if (formats && typeof formats === 'object' && !Array.isArray(formats) &&
         !(formats instanceof Map)) {
       const opts = formats;
+      /** @type {object} Registered format validators */
       this.formats = opts.formats || {};
+      /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
       if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null) {
         this.validation = new ValidationOptions(opts.skipErrors || true, opts.useGrapheme || false, opts.collectErrors || false);
       } else {
+        /** @type {ValidationOptions} Validation behavior options */
         this.validation = opts.validation || new ValidationOptions();
       }
+      /** @type {TraverseOptions} Schema traversal options */
       this.traverse = opts.traverse || new TraverseOptions();
     } else {
       this.formats = formats;
@@ -394,16 +534,29 @@ export class ValidatorOptions {
   }
 }
 
+/**
+ * JarenValidator is the main entry point for JSON Schema validation.
+ * It manages schema registration, format registration, and compilation.
+ * @class
+ * @example
+ * const validator = new JarenValidator();
+ * validator.addSchema({ $id: 'http://example.com/schema', type: 'object' });
+ * const validate = validator.compile({ $ref: 'http://example.com/schema' });
+ * const valid = validate({ foo: 'bar' }); // true
+ */
 export class JarenValidator {
-
+  /** @type {object} Registered format validators */
   #formats = {}
+  /** @type {Map} Map of schema URIs to schema objects */
   #schemas = new Map();
+  /** @type {Map} Map of meta-schema URIs to compiled validators */
   #metaSchemas = new Map();
+  /** @type {ValidatorOptions} Validator options */
   #options = new ValidatorOptions();
 
   /**
-   * Create a new JarenValidator instance
-   * @param {ValidatorOptions} [options] - Validator options
+   * Creates a new JarenValidator instance.
+   * @param {ValidatorOptions} [options] - Validator options including formats, schemas, validation options, and traverse options
    */
   constructor(options = new ValidatorOptions()) {
     this.#formats = options.formats || {};
@@ -413,10 +566,14 @@ export class JarenValidator {
   }
 
   /**
-   * Add format to validate strings or numbers.
-   * @param {string} name
-   * @param {Function} formatCompiler
-   * @returns {JarenValidator}
+   * Adds a format validator.
+   * @param {string} name - The format name (e.g., 'email', 'uri', 'date-time')
+   * @param {Function} formatCompiler - A function that compiles format validators
+   * @returns {JarenValidator} This validator instance for chaining
+   * @example
+   * validator.addFormat('custom', (schemaObj, schema) => {
+   *   return (data) => data.startsWith('custom:');
+   * });
    */
   addFormat(name, formatCompiler) {
     registerFormatCompiler(
@@ -426,6 +583,11 @@ export class JarenValidator {
     return this;
   }
 
+  /**
+   * Adds multiple format validators at once.
+   * @param {object} formatCompilers - Object mapping format names to compiler functions
+   * @returns {JarenValidator} This validator instance for chaining
+   */
   addFormats(formatCompilers) {
     registerFormatCompilers(
       this.#formats,
@@ -465,15 +627,21 @@ export class JarenValidator {
   }
 
   /**
-   * Add schema(s) to validator instance.
-   * This method does not compile schemas (but it still validates them).
-   * Because of that dependencies can be added in any order and
-   * circular dependencies are supported.
-   * It also prevents unnecessary compilation of schemas that are
-   * containers for other schemas but not used as a whole.
-   * @param {boolean | object | object[]} schema
-   * @param {string | undefined} key
-   * @returns {JarenValidator}
+   * Adds schema(s) to the validator instance.
+   * This method does not compile schemas - it only registers them for reference.
+   * Dependencies can be added in any order, and circular dependencies are supported.
+   * @param {boolean | object | object[]} schema - The schema(s) to add
+   * @param {string} [key] - Optional key/URI to register the schema under
+   * @returns {JarenValidator} This validator instance for chaining
+   * @example
+   * // Add a single schema
+   * validator.addSchema({ $id: 'http://example.com/user', type: 'object' });
+   * 
+   * // Add multiple schemas
+   * validator.addSchema([schema1, schema2]);
+   * 
+   * // Add with explicit key
+   * validator.addSchema({ type: 'string' }, 'http://example.com/name');
    */
   addSchema(schema, key = undefined) {
     if (Array.isArray(schema)) {
@@ -713,10 +881,13 @@ export class JarenValidator {
   }
 
   /**
-   * Adds meta schema(s) that can be used to validate other schemas.
-   * @param {boolean | object | object[]} schema
-   * @param {string | undefined} key
-   * @returns {JarenValidator}
+   * Adds meta-schema(s) that can be used to validate schemas.
+   * Meta-schemas are schemas that describe the structure of valid JSON schemas.
+   * @param {boolean | object | object[]} schema - The meta-schema(s) to add
+   * @param {string} [key] - Optional key/URI for the meta-schema
+   * @returns {JarenValidator} This validator instance for chaining
+   * @example
+   * validator.addMetaSchema(draft7MetaSchema, 'http://json-schema.org/draft-07/schema');
    */
   addMetaSchema(schema, key = undefined) {
     key = JarenValidator.normalizeUriKey(key)
@@ -737,9 +908,9 @@ export class JarenValidator {
   }
 
   /**
-   *
-   * @param {string} key
-   * @returns {object}
+   * Retrieves a registered schema by its key/URI.
+   * @param {string} key - The schema URI/key
+   * @returns {object|null} The registered schema, or null if not found
    */
   getSchema(key) {
     key = JarenValidator.normalizeUriKey(key)
@@ -747,13 +918,13 @@ export class JarenValidator {
   }
 
   /**
-   * Validates schema. This method should be used to validate schemas rather than validate due to the inconsistency of uri format in JSON Schema standard.
-   * By default this method is called automatically when the schema is added, so you rarely need to use it directly.
-   * If schema doesn't have $schema property, it is validated against draft 6 meta-schema (option meta should not be false).
-   * If schema has $schema property, then the schema with this id (that should be previously added) is used to validate passed schema.
-   * Errors will be available at ajv.errors
-   * @param {boolean | object} schema
-   * @returns {boolean}
+   * Validates a schema against a registered meta-schema.
+   * This is used to ensure schemas are valid according to the JSON Schema specification.
+   * @param {boolean | object} schema - The schema to validate
+   * @returns {boolean} True if the schema is valid
+   * @example
+   * validator.addMetaSchema(draft7MetaSchema);
+   * const isValid = validator.validateSchema({ type: 'string' }); // true
    */
   validateSchema(schema) {
     // if no meta schema is present, just return true;
@@ -923,11 +1094,27 @@ export class JarenValidator {
   }
 
   /**
-   * Generate validating function and cache the compiled schema for future use.
-   * Note: This function does NOT return a promise. Use compileAsync instead!
-   * @param {boolean | object} schema
-   * @param {object[] | undefined} [schemas=undefined]
-   * @returns {(data: any) => boolean}
+   * Compiles a schema into a validation function.
+   * This is the main method for creating validators. It resolves all $ref references,
+   * compiles the schema structure, and returns a function that validates data.
+   * @param {boolean | object} schema - The schema to compile
+   * @param {object[]} [schemas] - Additional schemas to reference during compilation
+   * @returns {(data: any) => boolean | {valid: boolean, errors: ValidationError[]}} A validation function
+   * @example
+   * const validate = validator.compile({
+   *   type: 'object',
+   *   properties: {
+   *     name: { type: 'string' }
+   *   }
+   * });
+   * 
+   * const valid = validate({ name: 'John' }); // true
+   * const invalid = validate({ name: 123 }); // false
+   * 
+   * // With error collection
+   * validator = new JarenValidator({ collectErrors: true });
+   * const result = validate({ name: 123 });
+   * // result = { valid: false, errors: [...] }
    */
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#options.traverse);

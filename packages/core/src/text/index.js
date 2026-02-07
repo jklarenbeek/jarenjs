@@ -376,8 +376,8 @@ function isValidIdnChar(code) {
   return false;
 }
 
-const CONST_REGEXP_ACEHOSTNAME = /^(?!-)(xn--)?[a-zA-Z0-9][a-zA-Z0-9-_]{0,61}[a-zA-Z0-9]{0,1}\.(?!-)(xn--)?([a-zA-Z0-9\-]{1,50}|[a-zA-Z0-9-]{1,30}\.[a-zA-Z]{2,})$/;
-const CONST_REGEXP_ACEHOSTNAME_SINGLE = /^(?!-)(xn--)?[a-zA-Z0-9][a-zA-Z0-9-_]{0,61}[a-zA-Z0-9]{0,1}$/;
+const CONST_REGEXP_ACEHOSTNAME = /^(?!-)(xn--)?[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\.(?!-)(xn--)?([a-zA-Z0-9\-]{1,50}|[a-zA-Z0-9-]{1,30}\.[a-zA-Z]{2,})$/;
+const CONST_REGEXP_ACEHOSTNAME_SINGLE = /^(?!-)(xn--)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
 
 // Check if label is valid ACE (Punycode)
 function isValidACE(label) {
@@ -420,6 +420,35 @@ export function isValidIdnHostname(str) {
   // Total length check (max 255 bytes for DNS)
   if (str.length > 255) {
     return false;
+  }
+
+  // Fast path: ASCII-only hostnames without ACE prefix
+  // Most hostnames are ASCII-only, so we can validate them quickly
+  let isAsciiOnly = true;
+  let hasAcePrefix = false;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code > 127) {
+      isAsciiOnly = false;
+      break;
+    }
+    // Check for xn-- prefix (case insensitive)
+    if (!hasAcePrefix && code === 120 || code === 88) { // 'x' or 'X'
+      if (str.length >= i + 4 &&
+          (str.charCodeAt(i + 1) === 110 || str.charCodeAt(i + 1) === 78) && // 'n' or 'N'
+          str.charCodeAt(i + 2) === 45 && str.charCodeAt(i + 3) === 45) { // '--'
+        hasAcePrefix = true;
+      }
+    }
+  }
+  
+  // For ASCII-only hostnames without ACE prefix, use simple hostname validation
+  if (isAsciiOnly && !hasAcePrefix) {
+    // Single label hostname
+    if (!str.includes('.')) {
+      return CONST_REGEXP_ACEHOSTNAME_SINGLE.test(str);
+    }
+    return CONST_REGEXP_ACEHOSTNAME.test(str);
   }
 
   // Split into labels
