@@ -93,7 +93,9 @@ function compileProperties(schemaObj, jsonSchema) {
   const properties = getObjectType(jsonSchema.properties);
   if (properties == null) return undefined;
 
-  const keys = Object.keys(properties);
+  // Use Object.getOwnPropertyNames to handle __proto__ correctly
+  // Object.keys() doesn't return __proto__ when defined via { __proto__: value }
+  const keys = Object.getOwnPropertyNames(properties);
   if (keys.length === 0) return undefined;
 
   const validators = new Map();
@@ -124,7 +126,8 @@ function compilePatternProperties(schemaObj, jsonSchema) {
   const entries = getObjectType(jsonSchema.patternProperties);
   if (entries == null) return undefined;
 
-  const entryKeys = Object.keys(entries);
+  // Use Object.getOwnPropertyNames to handle __proto__ correctly
+  const entryKeys = Object.getOwnPropertyNames(entries);
   if (entryKeys.length === 0) return undefined;
 
   const patterns = new Map();

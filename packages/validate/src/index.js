@@ -272,8 +272,11 @@ class ValidationRoot {
    * @returns {boolean} True if valid, false otherwise
    */
   validate(data /*:unknown*/) {
-    // clear all errors
-    this.#errors = [];
+    // only clear errors array when we need to collect errors
+    // When skipErrors=true (default), we don't use the errors array
+    if (!this.#options.skipErrors) {
+      this.#errors = [];
+    }
     // call compiled validator
     return this.#firstSchema.validate(data, data);
   }
@@ -406,6 +409,11 @@ class ValidationObject {
     return this.#root.formats;
   }
 
+  /** @returns {ValidationRoot} The root validation context */
+  get root() {
+    return this.#root;
+  }
+
 /**
    * Creates an error handler function for validation failures.
    * @param {any} expected - The expected value that failed validation
@@ -414,6 +422,23 @@ class ValidationObject {
    */
   createErrorHandler(expected, key) {
     const self = this;
+
+    // when skipErrors is true, we don't need to create error objects
+    // Just return false immediately to avoid the overhead of error creation
+    if (self.#root.options.skipErrors) {
+      if (!Array.isArray(key)) {
+        return function addNormalErrorFast(data, ...meta) {
+          // Just return false without creating error object
+          return false;
+        };
+      }
+      else {
+        return function addKeyedErrorFast(dataKey, data, ...meta) {
+          // Just return false without creating error object
+          return false;
+        };
+      }
+    }
 
     if (!Array.isArray(key)) {
       return function addNormalError(data, ...meta) {
@@ -486,7 +511,7 @@ class ValidationObject {
  * @example
  * // Positional arguments
  * const options = new ValidatorOptions(formats, schemas, validation, traverse);
- * 
+ *
  * // Options object (recommended)
  * const options = new ValidatorOptions({
  *   formats: { custom: validator },
@@ -636,10 +661,10 @@ export class JarenValidator {
    * @example
    * // Add a single schema
    * validator.addSchema({ $id: 'http://example.com/user', type: 'object' });
-   * 
+   *
    * // Add multiple schemas
    * validator.addSchema([schema1, schema2]);
-   * 
+   *
    * // Add with explicit key
    * validator.addSchema({ type: 'string' }, 'http://example.com/name');
    */
@@ -1107,10 +1132,10 @@ export class JarenValidator {
    *     name: { type: 'string' }
    *   }
    * });
-   * 
+   *
    * const valid = validate({ name: 'John' }); // true
    * const invalid = validate({ name: 123 }); // false
-   * 
+   *
    * // With error collection
    * validator = new JarenValidator({ collectErrors: true });
    * const result = validate({ name: 123 });

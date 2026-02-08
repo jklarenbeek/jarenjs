@@ -61,7 +61,7 @@ export function createRegExp(pattern) {
 }
 
 let segmenterCache = null;
-function getSegmenter() {
+export function getSegmenter() {
   if (segmenterCache === null) {
     segmenterCache = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   }

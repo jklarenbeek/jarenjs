@@ -23,6 +23,11 @@ import {
   createIsSchemaTypeHandler,
 } from './tools.js';
 
+import {
+  getStringLength,
+  getSegmenter,
+} from '@jarenjs/core/string';
+
 import { compileFormatBasic } from './format.js';
 import { compileEnumBasic } from './enum.js';
 import { compileNumberBasic } from './number.js';
@@ -239,6 +244,54 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
         }
         return true;
       };
+    }
+  }
+
+  // Fast path: minLength-only schema (common case: {"minLength": 2})
+  // This avoids the overhead of compileStringBasic for simple cases
+  if (keys.length === 1 && jsonSchema.minLength !== undefined) {
+    const min = jsonSchema.minLength;
+    if (typeof min === 'number' && min > 0 && Number.isFinite(min)) {
+      const addError = schemaObj.createErrorHandler(min, 'minLength');
+      const useGrapheme = schemaObj.options.useGrapheme;
+
+      if (!useGrapheme) {
+        // Simple byte counting
+        return function validateMinLengthOnly(data, dataPath) {
+          if (typeof data !== 'string') return true;
+          return data.length >= min || addError(data.length, dataPath);
+        };
+      } else {
+        // Grapheme counting - use getStringLength
+        return function validateMinLengthGrapheme(data, dataPath) {
+          if (typeof data !== 'string') return true;
+          const len = getStringLength(data, true);
+          return len >= min || addError(len, dataPath);
+        };
+      }
+    }
+  }
+
+  // Fast path: maxLength-only schema (common case: {"maxLength": 10})
+  if (keys.length === 1 && jsonSchema.maxLength !== undefined) {
+    const max = jsonSchema.maxLength;
+    if (typeof max === 'number' && max >= 0 && Number.isFinite(max)) {
+      const addError = schemaObj.createErrorHandler(max, 'maxLength');
+      const useGrapheme = schemaObj.options.useGrapheme;
+
+      if (!useGrapheme) {
+        return function validateMaxLengthOnly(data, dataPath) {
+          if (typeof data !== 'string') return true;
+          return data.length <= max || addError(data.length, dataPath);
+        };
+      } else {
+        // Grapheme counting - use getStringLength
+        return function validateMaxLengthGrapheme(data, dataPath) {
+          if (typeof data !== 'string') return true;
+          const len = getStringLength(data, true);
+          return len <= max || addError(len, dataPath);
+        };
+      }
     }
   }
 

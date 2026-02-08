@@ -67,7 +67,22 @@ function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
   if (tuple == null)
     return undefined;
 
-  const validators = tuple.map((item, i) => compileItemValidator(schemaObj, item, itemsKey, i));
+  // Cache for $ref validators - multiple items may reference the same schema
+  const refCache = new Map();
+
+  const validators = tuple.map((item, i) => {
+    // Fast path: $ref schemas - resolve directly and cache
+    if (item !== null && typeof item === 'object' && item.$ref !== undefined && Object.keys(item).length === 1) {
+      const refKey = item.$ref;
+      if (refCache.has(refKey)) {
+        return refCache.get(refKey);
+      }
+      const validator = compileItemValidator(schemaObj, item, itemsKey, i);
+      refCache.set(refKey, validator);
+      return validator;
+    }
+    return compileItemValidator(schemaObj, item, itemsKey, i);
+  });
   const vlength = validators.length;
 
   const additional = getBoolOrObjectClass(jsonSchema[additionalKey], true);
@@ -216,15 +231,34 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
 
   // For simple type schemas, use inline validation
   if (typeof itemSchema === 'object' && itemSchema !== null) {
-    const keys = Object.keys(itemSchema);
+    // Fast path: $ref-only schema - check property directly before calling Object.keys
+    // This avoids the overhead of Object.keys for the most common case
+    if (itemSchema.$ref !== undefined) {
+      const keys = Object.keys(itemSchema);
+      if (keys.length === 1) {
+        // Use the root to resolve the ref directly to the target validator
+        // This avoids the overhead of creating an intermediate ValidationObject
+        const root = schemaObj.root;
+        if (root && root.resolveObject) {
+          try {
+            const targetObj = root.resolveObject(itemSchema.$ref, schemaObj.path, itemSchema);
+            if (targetObj && targetObj.validate) {
+              return targetObj.validate;
+            }
+          } catch (e) {
+            // Fall through to default handling
+          }
+        }
+      }
+    }
 
-    // Fast path: type-only schema (most common case)
-    if (keys.length === 1 && itemSchema.type !== undefined) {
+    // Fast path: type-only schema (most common case) - check property directly first
+    if (itemSchema.type !== undefined && Object.keys(itemSchema).length === 1) {
       return compileTypeOnlyValidator(itemSchema.type);
     }
 
-    // Fast path: required-only schema
-    if (keys.length === 1 && itemSchema.required !== undefined) {
+    // Fast path: required-only schema - check property directly first
+    if (itemSchema.required !== undefined && Object.keys(itemSchema).length === 1) {
       const required = itemSchema.required;
       return function validateRequiredOnly(data, dataPath, dataRoot) {
         if (typeof data !== 'object' || data === null) return false;

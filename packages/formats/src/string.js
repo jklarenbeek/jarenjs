@@ -53,6 +53,15 @@ function createStringFormatCompiler(formatName, isFormatTest) {
     if (jsonSchema.format !== formatName)
       throw new Error('Format is not equal to jsonSchema (should not happen!)');
 
+    // when skipErrors is true, we don't need to create error objects
+    if (schemaObj.options.skipErrors) {
+      return function validateStringFormatFast(data, dataPath) {
+        return isStringType(data)
+          ? isFormatTest(data)
+          : true;
+      };
+    }
+
     const addError = schemaObj.createErrorHandler(formatName, 'format', isFormatTest.constructor.name);
 
     return function validateStringFormat(data, dataPath) {

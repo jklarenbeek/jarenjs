@@ -205,10 +205,10 @@ describe('Schema Object Type', function () {
       assert.isTrue(validate({ foo: null }), 'allows null values');
     });
 
-    it.skip('should not validate properties whose names are Javascript object property names', function () {
+    it('should validate properties whose names are Javascript object property names', function () {
       const validate = compiler.compile({
         properties: {
-          __proto__: { type: 'number' }, // __proto__ is the one that I cannot fix atm.
+          ['__proto__']: { type: 'number' },
           toString: {
             properties: { length: { type: 'string' } },
           },
@@ -220,11 +220,11 @@ describe('Schema Object Type', function () {
       assert.isTrue(validate(12), 'ignores other non-objects');
       assert.isTrue(validate({}), 'none of the properties mentioned');
       assert.isTrue(validate({
-        __proto__: 12,
+        ['__proto__']: 12,
         toString: { length: 'foo' },
         constructor: 37,
       }), 'all present and valid');
-      assert.isFalse(validate({ __proto__: 'foo' }), '__proto__ not valid');
+      assert.isFalse(validate({ ['__proto__']: 'foo' }), '__proto__ not valid');
       assert.isFalse(validate({ toString: { length: 37 } }), 'toString not valid');
       assert.isFalse(validate({ constructor: { length: 37 } }), 'constructor not valid');
     });

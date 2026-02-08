@@ -199,7 +199,7 @@ describe('Schema Generics', function () {
     });
   });
 
-  describe.skip('#content()', function () {
+  describe('#content()', function () {
     // https://json-schema.org/understanding-json-schema/reference/non_json_data.html
     const validate = compiler.compile({
       type: 'string',

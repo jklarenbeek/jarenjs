@@ -20,8 +20,13 @@ const compiler = new JarenValidator()
 describe('Schema References', function () {
   describe('#refIds()', function () {
     it.skip('should show invalid use of fragments in location-independent $id', function () {
-      // TODO: not sure what is going wrong here when I added a validation pattern to $id
-      // in draft-7. Its not really important!? so we leave it for later.
+      // TODO: This test is skipped because the validation behavior for $id with
+      // fragment identifiers is unclear. The JSON Schema spec allows certain uses
+      // of fragments in $id, but this test expects them to be invalid.
+      // See: https://json-schema.org/draft-07/json-schema-core#rfc.section.8.2
+      //
+      // When enabling this test, verify what the actual JSON Schema meta-schema
+      // expects for each of these cases.
       const validate = compiler.compile({
         $ref: defaultSchema.draft
       });

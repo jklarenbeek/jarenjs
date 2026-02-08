@@ -12,6 +12,7 @@ import {
 import {
   createRegExp,
   getStringLength,
+  getSegmenter,
 } from '@jarenjs/core/string';
 
 import {
@@ -80,28 +81,68 @@ export function compileStringBasic(schemaObj, jsonSchema) {
 
   // Fast path for simple maxLength-only schemas (most common case)
   // This inlines the validation to reduce function call overhead
-  const max = getIntishType(jsonSchema.maxLength);
+  const max = getIntishType(jsonSchema.maxLength) ?? -1;
   const min = getIntishType(jsonSchema.minLength) || 0;
   const hasPattern = jsonSchema.pattern != null;
   const useGrapheme = schemaObj.options.useGrapheme;
 
-  if (!hasPattern && !useGrapheme) {
-    // Simple maxLength-only without grapheme counting
-    if (max >= 0 && min < 1) {
-      const addError = schemaObj.createErrorHandler(max, 'maxLength');
-      return function validateStringMaxLength(data, dataPath) {
-        if (!isStringType(data)) return true;
-        return data.length <= max || addError(data.length, dataPath);
-      };
-    }
+  if (!hasPattern) {
+    if (!useGrapheme) {
+      // Simple maxLength-only without grapheme counting
+      if (max >= 0 && min < 1) {
+        const addError = schemaObj.createErrorHandler(max, 'maxLength');
+        return function validateStringMaxLength(data, dataPath) {
+          if (!isStringType(data)) return true;
+          return data.length <= max || addError(data.length, dataPath);
+        };
+      }
 
-    // Simple minLength-only without grapheme counting
-    if (min > 0 && max < 0) {
-      const addError = schemaObj.createErrorHandler(min, 'minLength');
-      return function validateStringMinLength(data, dataPath) {
-        if (!isStringType(data)) return true;
-        return data.length >= min || addError(data.length, dataPath);
-      };
+      // Simple minLength-only without grapheme counting
+      if (min > 0 && max < 0) {
+        const addError = schemaObj.createErrorHandler(min, 'minLength');
+        return function validateStringMinLength(data, dataPath) {
+          if (!isStringType(data)) return true;
+          return data.length >= min || addError(data.length, dataPath);
+        };
+      }
+    } else {
+      // Fast path WITH grapheme counting - inline the ASCII fast-path logic
+      // This avoids the function call overhead of getStringLength for ASCII strings
+      if (max >= 0 && min < 1) {
+        const addError = schemaObj.createErrorHandler(max, 'maxLength');
+        return function validateStringMaxLengthGrapheme(data, dataPath) {
+          if (!isStringType(data)) return true;
+          // Inline ASCII check + grapheme counting
+          let len = data.length;
+          for (let i = 0; i < len; i++) {
+            if (data.charCodeAt(i) > 127) {
+              // Non-ASCII found - use grapheme counting for remaining
+              len = i;
+              for (const _ of getSegmenter().segment(data.slice(i))) len++;
+              break;
+            }
+          }
+          return len <= max || addError(len, dataPath);
+        };
+      }
+
+      if (min > 0 && max < 0) {
+        const addError = schemaObj.createErrorHandler(min, 'minLength');
+        return function validateStringMinLengthGrapheme(data, dataPath) {
+          if (!isStringType(data)) return true;
+          // Inline ASCII check + grapheme counting
+          let len = data.length;
+          for (let i = 0; i < len; i++) {
+            if (data.charCodeAt(i) > 127) {
+              // Non-ASCII found - use grapheme counting for remaining
+              len = i;
+              for (const _ of getSegmenter().segment(data.slice(i))) len++;
+              break;
+            }
+          }
+          return len >= min || addError(len, dataPath);
+        };
+      }
     }
   }
 

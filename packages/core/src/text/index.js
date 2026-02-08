@@ -432,11 +432,13 @@ export function isValidIdnHostname(str) {
       isAsciiOnly = false;
       break;
     }
-    // Check for xn-- prefix (case insensitive)
-    if (!hasAcePrefix && code === 120 || code === 88) { // 'x' or 'X'
-      if (str.length >= i + 4 &&
-          (str.charCodeAt(i + 1) === 110 || str.charCodeAt(i + 1) === 78) && // 'n' or 'N'
-          str.charCodeAt(i + 2) === 45 && str.charCodeAt(i + 3) === 45) { // '--'
+    // Check for xn-- prefix (case insensitive) - check at position 0 or after a dot
+    if ((code === 120 || code === 88) && // 'x' or 'X'
+        i + 3 < str.length &&
+        (str.charCodeAt(i + 1) === 110 || str.charCodeAt(i + 1) === 78) && // 'n' or 'N'
+        str.charCodeAt(i + 2) === 45 && str.charCodeAt(i + 3) === 45) { // '--'
+      // Only count as ACE prefix if it's at start or after a dot
+      if (i === 0 || str.charCodeAt(i - 1) === 46) { // dot = 46
         hasAcePrefix = true;
       }
     }
@@ -627,7 +629,40 @@ export function isValidUriTemplate(str) {
 
 //#region IRI Tests
 const CONST_REGEXP_ABSOLUTE_IRI = /^([a-z]([a-z]|\d|\+|-|\.)*):(\/\/(((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:)*@)?((\[(?:(?:(?:[0-9a-f]{1,4}:){7}(?:[0-9a-f]{1,4}|:))|(?:(?:[0-9a-f]{1,4}:){6}(?::[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(?:(?:[0-9a-f]{1,4}:){5}(?:(?:(?::[0-9a-f]{1,4}){1,2})|:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(?:(?:[0-9a-f]{1,4}:){4}(?:(?:(?::[0-9a-f]{1,4}){1,3})|(?:(?::[0-9a-f]{1,4})?:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(?:(?:[0-9a-f]{1,4}:){3}(?:(?:(?::[0-9a-f]{1,4}){1,4})|(?:(?::[0-9a-f]{1,4}){0,2}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(?:(?:[0-9a-f]{1,4}:){2}(?:(?:(?::[0-9a-f]{1,4}){1,5})|(?:(?::[0-9a-f]{1,4}){0,3}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(?:(?:[0-9a-f]{1,4}:){1}(?:(?:(?::[0-9a-f]{1,4}){1,6})|(?:(?::[0-9a-f]{1,4}){0,4}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(?::(?:(?:(?::[0-9a-f]{1,4}){1,7})|(?:(?::[0-9a-f]{1,4}){0,5}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))\])|((\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5])\.(\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5]))|(([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=])*)(:\d*)?)(\/(([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)*)*|(\/((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)+(\/(([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)*)*)?)|((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)+(\/(([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)*)*)|((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)){0})(\?((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)|[\uE000-\uF8FF]|\/|\?)*)?(\#((([a-z]|\d|-|\.|_|~|[\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF])|(%[\da-f]{2})|[!\$&'\(\)\*\+,;=]|:|@)|\/|\?)*)?$/i;
+// Fast path regex for simple ASCII-only IRIs
+// Only matches common, unambiguous cases to avoid false positives
+const CONST_REGEXP_ASCII_IRI = /^(?:[a-z][a-z0-9+\-.]*:)\/\/[^\s:]+(:\d+)?(\/[^\s]*)?$/i;
+
 export function isValidIRI(str) {
+  // Fast path: check if string is ASCII-only and doesn't contain complex patterns
+  // If so, use a much simpler regex that's ~10x faster
+  let isAsciiOnly = true;
+  let hasSquareBracket = false;
+  let colonCount = 0;
+  
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code > 127) {
+      isAsciiOnly = false;
+      break;
+    }
+    if (code === 91 || code === 93) { // '[' or ']'
+      hasSquareBracket = true;
+    }
+    if (code === 58) { // ':'
+      colonCount++;
+    }
+  }
+  
+  // Use fast path only for simple ASCII-only IRIs:
+  // - No Unicode characters
+  // - No square brackets (IPv6 literals)
+  // - At most 2 colons (for scheme and optional port, not IPv6)
+  if (isAsciiOnly && !hasSquareBracket && colonCount <= 2) {
+    return CONST_REGEXP_ASCII_IRI.test(str);
+  }
+  
+  // Fall back to full IRI regex for complex strings
   return CONST_REGEXP_ABSOLUTE_IRI.test(str);
 }
 
