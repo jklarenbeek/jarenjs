@@ -1,6 +1,7 @@
 //@ts-check
 
 import {
+  isObjectType,
   isScalarType,
 } from '@jarenjs/core';
 
@@ -11,6 +12,7 @@ import {
 import {
   getArrayClassMinItems,
 } from './tools.js';
+import { isDollarDataReference } from './dollar-data.js';
 
 // export const exampleEnumDataStructure = {
 //   allOf: [
@@ -75,7 +77,11 @@ import {
 
 function compileConst(schemaObj, jsonSchema) {
   const constant = jsonSchema.const;
-  if (constant === undefined) return undefined;
+  if (constant === undefined)
+    return undefined;
+
+  if (isDollarDataReference(constant))
+    return undefined;
 
   const addError = schemaObj.createErrorHandler(constant, 'const');
 

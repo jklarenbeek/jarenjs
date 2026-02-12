@@ -44,6 +44,9 @@ function compileMaxLength(schemaObj, jsonSchema) {
 }
 
 function compilePattern(schemaObj, jsonSchema) {
+  // Skip if pattern is a $data reference object (has $data property)
+  if (jsonSchema.pattern && typeof jsonSchema.pattern === 'object' && jsonSchema.pattern.$data) return undefined;
+
   const pattern = createRegExp(jsonSchema.pattern);
   if (pattern == null) return undefined;
 

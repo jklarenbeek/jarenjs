@@ -444,22 +444,24 @@ function compileObjectProperty(schemaObj, jsonSchema) {
 
   return function validateObjectProperty(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
+    // Build the child dataPath by appending the property key
+    const newPath = dataPath ? `${dataPath}/${dataKey}` : `/${dataKey}`;
 
     result.addValid(validateName(dataKey))
-      .addResult(validateProperty(data, dataPath, dataRoot, dataKey))
-      .addResult(validatePattern(data, dataPath, dataRoot, dataKey))
-      .addValid(validateDepRequired(data, dataPath, dataRoot, dataKey))
-      .addValid(validateDepSchemas(data, dataPath, dataRoot, dataKey))
-      .addValid(validateDependency(data, dataPath, dataRoot, dataKey));
+      .addResult(validateProperty(data, newPath, dataRoot, dataKey))
+      .addResult(validatePattern(data, newPath, dataRoot, dataKey))
+      .addValid(validateDepRequired(data, newPath, dataRoot, dataKey))
+      .addValid(validateDepSchemas(data, newPath, dataRoot, dataKey))
+      .addValid(validateDependency(data, newPath, dataRoot, dataKey));
 
     if (additionalValidator)
       return !result.match
-        ? result.addMatch(additionalValidator(data, dataPath, dataRoot, dataKey))
+        ? result.addMatch(additionalValidator(data, newPath, dataRoot, dataKey))
         : result;
 
     if (unevaluatedValidator)
       // @ts-ignore
-      result.addValid(unevaluatedValidator(data, dataPath, dataRoot, dataKey));
+      result.addValid(unevaluatedValidator(data, newPath, dataRoot, dataKey));
 
     return result;
   };
@@ -474,9 +476,8 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
   return function validateObjectChildren(data, dataPath, dataRoot, dataKeys) {
     let totalErrors = 0;
     const len = dataKeys.length;
-    const validator = propertyValidator;
     for (let i = 0; i < len; ++i) {
-      const result = validator(data, dataPath, dataRoot, dataKeys[i]);
+      const result = propertyValidator(data, dataPath, dataRoot, dataKeys[i]);
       if (result !== true) {
         // result can be false or a ValidationResult-like object
         if (result === false) {

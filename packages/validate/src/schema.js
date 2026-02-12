@@ -39,6 +39,7 @@ import { compileArraySchema } from './array.js';
 import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
+import { compileDollarDataSchema, hasDollarDataReferences } from './dollar-data.js';
 import { hasSchemaRef } from './tools.js';
 
 function compileRequired(schemaObj, jsonSchema) {
@@ -183,6 +184,10 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     return undefined;
   }
 
+  // Check if schema has any $data references
+  // If so, we need to use the $data-aware compilation path
+  const hasDollarData = hasDollarDataReferences(jsonSchema);
+
   // Fast paths for common simple schema patterns
   // These inline the validation to reduce function call overhead
 
@@ -300,6 +305,12 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   addFunctionToArray(validators, compileRequired(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileTypeBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileEnumBasic(schemaObj, jsonSchema));
+  
+  // Compile $data-aware validators for keywords with $data references
+  // This handles cases like: { "maximum": { "$data": "1/larger" } }
+  const dollarDataValidator = compileDollarDataSchema(schemaObj, jsonSchema);
+  addFunctionToArray(validators, dollarDataValidator);
+  
   addFunctionToArray(validators, compileNumberBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileBigIntBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileStringBasic(schemaObj, jsonSchema));
