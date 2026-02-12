@@ -91,8 +91,43 @@ export interface JSONSchema {
   formatExclusiveMinimum?: string;
   formatExclusiveMaximum?: string;
 
+  // Data keyword for referencing instance data (json-everything style)
+  data?: DataKeywordSchema;
+
   // Extensibility for custom keywords and additional properties
   [key: string]: unknown;
+}
+
+/**
+ * Data keyword schema for referencing instance data.
+ * Allows constraints to reference values from other parts of the instance.
+ * @see https://docs.json-everything.net/schema/examples/data-ref/
+ */
+export interface DataKeywordSchema {
+  // Number constraints referencing instance data
+  minimum?: string;           // JSON Pointer to minimum value
+  maximum?: string;           // JSON Pointer to maximum value
+  exclusiveMinimum?: string;  // JSON Pointer to exclusive minimum value
+  exclusiveMaximum?: string;  // JSON Pointer to exclusive maximum value
+  multipleOf?: string;        // JSON Pointer to multipleOf value
+
+  // String constraints referencing instance data
+  minLength?: string;         // JSON Pointer to minLength value
+  maxLength?: string;         // JSON Pointer to maxLength value
+  pattern?: string;           // JSON Pointer to pattern string
+  format?: string;            // JSON Pointer to format name
+
+  // Enum/const referencing instance data
+  enum?: string;              // JSON Pointer to array of valid values
+  const?: string;             // JSON Pointer to constant value
+
+  // Array constraints referencing instance data
+  minItems?: string;          // JSON Pointer to minItems value
+  maxItems?: string;          // JSON Pointer to maxItems value
+
+  // Object constraints referencing instance data
+  minProperties?: string;     // JSON Pointer to minProperties value
+  maxProperties?: string;     // JSON Pointer to maxProperties value
 }
 
 /**

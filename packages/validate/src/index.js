@@ -277,7 +277,8 @@ export class ValidationRoot {
       this.#errors = [];
     }
     // call compiled validator
-    return this.#firstSchema.validate(data, data);
+    // Pass dataRoot as the third argument for data keyword support
+    return this.#firstSchema.validate(data, '', data);
   }
 }
 

@@ -137,6 +137,7 @@ Jaren supports a wide range of JSON Schema validation keywords. Here's a quick o
 - All types: `enum`, `const`
 - Compound: `not`, `oneOf`, `anyOf`, `allOf`, `if/then/else`
 - Meta: `$id`, `$ref`, `$anchor`
+- **Non-standard**: `data` (json-everything's [data-ref](https://docs.json-everything.net/schema/examples/data-ref/) proposal)
 
 <details>
 <summary>🔥 For a complete list of supported keywords and their implementation status, click here</summary>
@@ -218,6 +219,57 @@ See also:
 - ❌ $dynamicAnchor | _new `draft2020`_
 - ❌ $data | _(Ajv specific)_
 - ❌ [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) | _new `draft2020`_
+
+### 🔑 Non-standard keywords
+
+- `data` | json-everything's [data-ref](https://docs.json-everything.net/schema/examples/data-ref/) proposal
+
+  The `data` keyword allows you to reference values from the instance being validated, enabling dynamic constraints based on other parts of the data.
+
+  **Example - Requiring B >= A:**
+  ```json
+  {
+    "type": "object",
+    "properties": {
+      "A": { "type": "number" },
+      "B": {
+        "type": "number",
+        "data": {
+          "minimum": "/A"
+        }
+      }
+    }
+  }
+  ```
+  - Passes: `{ "A": 5, "B": 10 }` (10 >= 5)
+  - Fails: `{ "A": 15, "B": 10 }` (10 < 15)
+
+  **Example - Enum from instance array:**
+  ```json
+  {
+    "type": "object",
+    "properties": {
+      "color": {
+        "data": {
+          "enum": "/validColors"
+        }
+      },
+      "validColors": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+  ```
+
+  **Supported keywords within `data`:**
+  - Number constraints: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`
+  - String constraints: `minLength`, `maxLength`, `pattern`, `format`
+  - Array constraints: `minItems`, `maxItems`
+  - Object constraints: `minProperties`, `maxProperties`
+  - Value constraints: `enum`, `const`
+
+  Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported.
 
 ### 🔑 Miscellaneous keywords
 
@@ -369,7 +421,7 @@ but it apparently was scheduled for the next release.
 - 1.2
   - [ ] Using Dynamic References to Support Generic Types
 - 1.3
-  - [ ] Runtime schema manipulation of constraints
+  - [x] Runtime schema manipulation of constraints (via `data` keyword - json-everything's data-ref proposal)
 - 1.4-1.9
   - [ ] Fix bugs and/or add forgotten features for latest draft compliance
 - 2.0 🎉 Stable release for `draft2020`
@@ -428,7 +480,14 @@ See also:
 
 ### 👉 Runtime schema manipulation of constraints
 
+✅ **IMPLEMENTED**: Jaren now supports the `data-ref` proposal from json-everything! The `data` keyword allows you to reference values from the instance being validated, enabling dynamic constraints based on other parts of the data.
+
 The Ajv JSON Schema validator has implemented the $data keyword that can extend the otherwise constant schema values with dynamic runtime values for the following keywords: `const`, `enum`, `format`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minProperties`, `maxProperties`, `required`, `minItems`, `maxItems`, `uniqueItems`. This however has seen enough criticism from multiple developers claiming not to follow the json spec intention and or not being comprehensive enough for more radical manipulations. Besides those against the proposal, many developers and companies use the `$data` keyword, or other implementations like the `data-ref` proposal from json-everything, successfully.
+
+**Jaren's implementation** follows the json-everything `data-ref` proposal, supporting:
+- Absolute JSON Pointers (e.g., `/A`, `/limits/min`)
+- Relative JSON Pointers (e.g., `0/parent`, `1/sibling`)
+- All common constraint keywords: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `enum`, `const`, `minItems`, `maxItems`, `minProperties`, `maxProperties`
 
 See also:
 - [$data](https://github.com/json-schema-org/json-schema-spec/issues/51)

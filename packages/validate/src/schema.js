@@ -38,6 +38,7 @@ import { compileObjectSchema } from './object.js';
 import { compileArraySchema } from './array.js';
 import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
+import { compileDataSchema } from './data.js';
 import { hasSchemaRef } from './tools.js';
 
 function compileRequired(schemaObj, jsonSchema) {
@@ -310,6 +311,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   addFunctionToArray(validators, compileCombineSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileConditionSchema(schemaObj, jsonSchema));
+  addFunctionToArray(validators, compileDataSchema(schemaObj, jsonSchema));
 
   // same as empty schema
   if (validators.length === 0)
