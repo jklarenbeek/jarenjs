@@ -72,9 +72,13 @@ function createStringFormatCompiler(formatName, isFormatTest) {
   };
 }
 
+export const compileAlphaFormat = createStringFormatCompiler('alpha', isValidAlpha);
+
+export const compileAlphaNumericFormat = createStringFormatCompiler('alphanumeric', isValidAlphaNumeric);
+
 export const formatValidators = {
-  'alpha': createStringFormatCompiler('alpha', isValidAlpha),
-  'alphanumeric': createStringFormatCompiler('alphanumeric', isValidAlphaNumeric),
+  'alpha': compileAlphaFormat,
+  'alphanumeric': compileAlphaNumericFormat,
   'identifier': createStringFormatCompiler('identifier', isValidIdentifier),
   'html-identifier': createStringFormatCompiler('html-identifier', isValidHtmlIdentifier),
   'css-identifier': createStringFormatCompiler('css-identifier', isValidCssIdentifier),

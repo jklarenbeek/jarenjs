@@ -68,12 +68,15 @@ const schema = {
 const validate = jaren.compile(schema);
 ```
 
+There is an extensive [HOWTO](docs/HOWTO.md) document in the `docs/` folder.
+
 ### Running the Benchmark Suite
 
 The benchmark suite runs Jaren against the official JSON Schema Test Suite and compares results with Ajv.
 
 ```bash
-# Run all benchmarks
+# Run all benchmarks (one run only) and
+# create a html document in benchmark/results/results.html
 npm run benchmark
 
 # Run a specific test suite
@@ -343,7 +346,7 @@ Formats for numbers validate both numbers and strings as number types. If you wa
 ## 📅 Roadmap
 
 ```
-I manager tried to open that door before,
+My manager tried to open that door before,
 but it apparently was scheduled for the next release.
 ```
 
@@ -358,8 +361,8 @@ but it apparently was scheduled for the next release.
   - [ ] add AI bot workflow and bootstrap prompt
   - [ ] add a website to github pages with typescript and react.
   - [ ] add i18n - translations of errors should be available!
-  - [ ] add development documentation
-  - [ ] add examples
+  - [x] add development documentation
+  - [x] add examples
 - 1.1
   - [ ] Modelling Inheritance with JSON Schema
   - [ ] Express array constraints more cleanly
@@ -384,7 +387,7 @@ You can trust that if I say I do something, I will definitely do it unless I don
 
 Jaren is a mono-repo with multiple workspaces in the ./packages directory. Because of this, Jaren imports its core, validator, formats and in later versions its reviver (see [JSON.parse]()) and replacer (see [JSON.stringify](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify)) from its workspace packages. This has not been done yet and simply exports the available packages from its workspace imports, without wrapping them into a Jaren class that exposes a similar api as Ajv does.
 
-On a extra note: Ajv compiles or a function or a promise. Jaren will NOT do this, instead it will expose an extra method for async compilers: compileAsync.
+On a extra note: Ajv compiles to a function or a promise. Jaren will NOT do this, instead it will expose an extra method for async compilers: compileAsync.
 Note also: that Jaren will NOT include a default meta schema, but has to be added separately by the caller.
 
 See also:
@@ -442,6 +445,8 @@ Procrastination
 I will look up what that means, later...
 ```
 
+For a detailed overview of the [architecture](docs/ARCHITECTURE.md) and how Jaren works please see the `docs/` folder.
+
 For detailed documentation on using Jaren, including API references and advanced usage examples, visit our official documentation. Which is the code itself.
 
 ### 🤓 Javascript Type Extensions
@@ -493,7 +498,7 @@ We welcome contributions from the community! Here's how you can help:
 #### Why!?, Why would you create another json schema validator?
 </summary>
 
-I am aware of the excellent `Ajv` and `zod` validators, but I really needed to understand json schema in the first place and I wanted to do something else (see if I could beat its first place in speed). We as programmers work with validation all over the place, especially at the front-end, but also at the back-end and in the middle-ware. Since 2023 I started working a lot with LLM's and I believe that in order to work with them in a more natural way, we need to speak JSON, all the way down. So I decided to create a JSON Schema validator that is fully compliant with the JSON Schema specification and should be fast for the fun of it, but that is also easy to understand and easy to extend. Not by plugins perse, but by simply opening up the code and see what is going on.
+I am aware of the excellent `Ajv` and `zod` validators, but I really wanted to understand json schema and I wanted to do something else (see if I could beat its first place in speed). We as programmers work with validation all over the place, especially at the front-end, but also at the back-end and in the middle-ware. Since 2023 I started working a lot with LLM's and I believe that in order to work with them in a more natural way, we need to speak JSON, all the way down. So I decided to create a JSON Schema validator that is fully compliant with the JSON Schema specification and should be fast for the fun of it, but that is also easy to understand and easy to extend. Not by plugins perse, but by simply opening up the code and see what is going on.
 
 </details>
 

@@ -5,7 +5,6 @@ import {
   isObjectOfClass,
 } from './index.js';
 
-//#region String Tools
 export function isStringEmpty(data) {
   return typeof data === 'string' && !data;
 }
