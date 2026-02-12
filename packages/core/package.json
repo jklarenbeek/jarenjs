@@ -29,6 +29,8 @@
     "./object": "./src/object.js",
     "./string": "./src/string.js",
     "./text": "./src/text/index.js",
-    "./math": "./src/math/index.js"
+    "./text/*": "./src/text/*.js",
+    "./math": "./src/math/index.js",
+    "./math/*": "./src/math/*.js"
   }
 }

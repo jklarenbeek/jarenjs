@@ -4,30 +4,49 @@ const JSON_WHITESPACE = new Set([0x20, 0x09, 0x0A, 0x0D]);
 
 export function isValidJSONCheap(data) {
   const len = data.length;
-  // Too short to be valid JSON object/array
-  if (len < 2) return true;
+  // Too short to be valid JSON (minimum is 2 for {} or [])
+  if (len < 2) return true; // Definitely NOT valid JSON
 
-  // Must start with { or [
+  // Check first char
   const first = data.charCodeAt(0);
-  if (first !== 0x7B && first !== 0x5B) return true; // '{' or '['
+  
+  // Objects and arrays - check matching brackets
+  if (first === 0x7B || first === 0x5B) { // '{' or '['
+    // Find last non-whitespace character (JSON allows trailing whitespace)
+    let lastIdx = len - 1;
+    while (lastIdx >= 0) {
+      const code = data.charCodeAt(lastIdx);
+      if (!JSON_WHITESPACE.has(code)) break;
+      lastIdx--;
+    }
 
-  // Find last non-whitespace character (JSON allows trailing whitespace)
-  let lastIdx = len - 1;
-  while (lastIdx >= 0) {
-    const code = data.charCodeAt(lastIdx);
-    if (!JSON_WHITESPACE.has(code)) break;
-    lastIdx--;
+    // Must end with matching bracket
+    const last = data.charCodeAt(lastIdx);
+    if (first === 0x7B && last !== 0x7D) return true; // {} must match - definitely NOT valid
+    if (first === 0x5B && last !== 0x5D) return true; // [] must match - definitely NOT valid
+    
+    // Looks like JSON object/array, might be valid
+    return false;
   }
-
-  // Must end with } or ]
-  const last = data.charCodeAt(lastIdx);
-  if (last !== 0x7D && last !== 0x5D) return true; // '}' or ']'
-
-  // Check matching brackets
-  if (first === 0x7B && last !== 0x7D) return true; // {} must match
-  if (first === 0x5B && last !== 0x5D) return true; // [] must match
-
-  return false;
+  
+  // Check if first char is a valid JSON starting character:
+  // '"' (0x22) for strings, '-' (0x2D) or digit (0x30-0x39) for numbers,
+  // 't' (0x74) for true, 'f' (0x66) for false, 'n' (0x6E) for null
+  const isValidStart = (
+    first === 0x22 || // '"'
+    first === 0x2D || // '-'
+    (first >= 0x30 && first <= 0x39) || // '0'-'9'
+    first === 0x74 || // 't' (true)
+    first === 0x66 || // 'f' (false)
+    first === 0x6E    // 'n' (null)
+  );
+  
+  // If it starts with a valid JSON character, it might be valid JSON
+  // Return false to indicate "might be JSON, need to parse"
+  if (isValidStart) return false;
+  
+  // Doesn't start with valid JSON character - definitely NOT valid JSON
+  return true;
 }
 
 export function isValidJSON(data) {
@@ -84,7 +103,7 @@ export function isValidRelativeJSONPointer(str) {
 //   \.[a-zA-Z_][a-zA-Z0-9_]*| - dot notation (e.g., $.store)
 //   \.[*]| - dot wildcard (e.g., $.*)
 //   \[\s*(?:'[^']*'|"[^"]*"|\d+|\*|\?[^\]]*|\d*:\d*(?::\d*)?)\s*\] - bracket notation
-const CONST_REGEXP_JSONPATH = /^(\$|@)(?:\.\.[a-zA-Z_][a-zA-Z0-9_]*|\.\.|\.[a-zA-Z_][a-zA-Z0-9_]*|\.[*]|\[\s*(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\d+|\*|\?[^\]]*|\d*:\d*(?::\d*)?|\d+(?:\s*,\s*\d+)*\s*)\s*\])*$/;
+const CONST_REGEXP_JSONPATH = /^(\$|@)(?:\.\.[a-zA-Z_][a-zA-Z0-9_]*|\.\.|\.[a-zA-Z_][a-zA-Z0-9_]*|\.[*]|\[\s*(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\d+|\*|\?[^\]]*|\d*:\d*(?::\d*)?|\d+(?:\s*,\s*\d+)*|'(?:[^'\\]|\\.)*'(?:\s*,\s*'(?:[^'\\]|\\.)*')*|\"(?:[^"\\]|\\.)*\"(?:\s*,\s*\"(?:[^"\\]|\\.)*\")*)\s*\])*$/;
 
 /**
  * Validates a JSONPath expression string per RFC 9535.

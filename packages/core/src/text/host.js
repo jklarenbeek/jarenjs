@@ -235,7 +235,8 @@ export function isValidIdnHostname(str) {
 //#endregion
 
 //#region URL Tests
-const CONST_REGEXP_URL = /^[(http(s)?):\/\/(www\.)?\w-/=#%&\.\?]{2,}\.[a-z]{2,}([\w-/=#%&\.\?]*)$/i;
+// Simple URL regex that requires a protocol (http:// or https://)
+const CONST_REGEXP_URL = /^https?:\/\/[^\s]+$/i;
 export function isValidUrl(str) {
   return CONST_REGEXP_URL.test(str);
 }

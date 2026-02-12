@@ -5,7 +5,7 @@ import {
   mathi32_MULTIPLIER,
   Vec2i32,
   def_Vec2i32
-} from '@jarenjs/core/calc';
+} from '@jarenjs/core/math';
 
 describe('Vec2i32', () => {
   describe('Constructor and static methods', () => {

@@ -18,7 +18,7 @@ import {
   mathi32_PI42,
   mathi32_MULTIPLIER,
   Int32
-} from '@jarenjs/core/calc';
+} from '@jarenjs/core/math';
 
 describe('mathi32 primitives', async (t) => {
   it('mathi32_abs', () => {

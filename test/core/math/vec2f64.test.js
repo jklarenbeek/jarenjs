@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { Vec2f64 } from '@jarenjs/core/calc';
+import { Vec2f64 } from '@jarenjs/core/math';
 
 describe('Vec2f64', () => {
   describe('constructor and new', () => {

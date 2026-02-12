@@ -15,7 +15,7 @@ import {
   mathf64_max,
   mathf64_random,
   Float64,
-} from '@jarenjs/core/calc'
+} from '@jarenjs/core/math'
   //from '../../../packages/core/src/calc/float64.js';
 
 describe('#Mathf64 primitives', function () {

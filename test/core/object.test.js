@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
-import { equalsDeep } from '@jarenjs/core/object';
+import { equalsDeep, mergeMap, mergeSet } from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
 
@@ -128,4 +128,118 @@ describe('equalsDeep', () => {
 
   //class DeepTest { constructor(value1, value2) { this.a = value1, this.b = { c: value2 } } }
   
+});
+
+describe('mergeMap', () => {
+  it('should merge multiple maps into the target map', () => {
+    const target = new Map([['a', 1]]);
+    const source1 = new Map([['b', 2]]);
+    const source2 = new Map([['c', 3]]);
+    
+    mergeMap(target, source1, source2);
+    
+    assert.isTrue(equalsDeep(target, new Map([['a', 1], ['b', 2], ['c', 3]])));
+  });
+
+  it('should overwrite existing keys with values from later maps', () => {
+    const target = new Map([['a', 1]]);
+    const source = new Map([['a', 2]]);
+    
+    mergeMap(target, source);
+    
+    assert.isTrue(equalsDeep(target, new Map([['a', 2]])));
+  });
+
+  it('should handle merging an empty map', () => {
+    const target = new Map([['a', 1]]);
+    const empty = new Map();
+    
+    mergeMap(target, empty);
+    
+    assert.isTrue(equalsDeep(target, new Map([['a', 1]])));
+  });
+
+  it('should handle merging into an empty map', () => {
+    const target = new Map();
+    const source = new Map([['a', 1], ['b', 2]]);
+    
+    mergeMap(target, source);
+    
+    assert.isTrue(equalsDeep(target, new Map([['a', 1], ['b', 2]])));
+  });
+
+  it('should handle merging with no source maps', () => {
+    const target = new Map([['a', 1]]);
+    
+    mergeMap(target);
+    
+    assert.isTrue(equalsDeep(target, new Map([['a', 1]])));
+  });
+
+  it('should handle complex values in maps', () => {
+    const target = new Map([['obj', { x: 1 }]]);
+    const source = new Map([['arr', [1, 2, 3]]]);
+    
+    mergeMap(target, source);
+    
+    assert.isTrue(target.has('obj'));
+    assert.isTrue(target.has('arr'));
+    assert.isTrue(equalsDeep(target.get('arr'), [1, 2, 3]));
+  });
+});
+
+describe('mergeSet', () => {
+  it('should merge multiple sets into the target set', () => {
+    const target = new Set([1, 2]);
+    const source1 = new Set([3, 4]);
+    const source2 = new Set([5, 6]);
+    
+    mergeSet(target, source1, source2);
+    
+    assert.isTrue(equalsDeep(target, new Set([1, 2, 3, 4, 5, 6])));
+  });
+
+  it('should not add duplicate values', () => {
+    const target = new Set([1, 2]);
+    const source = new Set([2, 3]);
+    
+    mergeSet(target, source);
+    
+    assert.isTrue(equalsDeep(target, new Set([1, 2, 3])));
+  });
+
+  it('should handle merging an empty set', () => {
+    const target = new Set([1, 2]);
+    const empty = new Set();
+    
+    mergeSet(target, empty);
+    
+    assert.isTrue(equalsDeep(target, new Set([1, 2])));
+  });
+
+  it('should handle merging into an empty set', () => {
+    const target = new Set();
+    const source = new Set([1, 2, 3]);
+    
+    mergeSet(target, source);
+    
+    assert.isTrue(equalsDeep(target, new Set([1, 2, 3])));
+  });
+
+  it('should handle merging with no source sets', () => {
+    const target = new Set([1, 2]);
+    
+    mergeSet(target);
+    
+    assert.isTrue(equalsDeep(target, new Set([1, 2])));
+  });
+
+  it('should handle complex values in sets', () => {
+    const target = new Set([{ a: 1 }]);
+    const source = new Set([[1, 2, 3]]);
+    
+    mergeSet(target, source);
+    
+    assert.isTrue(target.size === 2);
+  });
 });

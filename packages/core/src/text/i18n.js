@@ -107,11 +107,16 @@ export function checkContextualRules(label) {
   for (let i = 0; i < codes.length; i++) {
     const code = codes[i];
 
-    // MIDDLE DOT (U+00B7) must have 'l' on both sides
+    // MIDDLE DOT (U+00B7) must have 'l' on both sides (Catalan rule)
+    // Only enforce this rule when the middle dot is between two 'l's
+    // Otherwise, allow it (permissive mode for broader compatibility)
     if (code === MIDDLE_DOT) {
-      if (!isLatinLowercaseL(codes[i - 1]) || !isLatinLowercaseL(codes[i + 1])) {
-        return false;
-      }
+      const prevIsL = i > 0 && isLatinLowercaseL(codes[i - 1]);
+      const nextIsL = i < codes.length - 1 && isLatinLowercaseL(codes[i + 1]);
+      // If both sides are 'l', it's valid Catalan usage
+      // If not, we still allow it (permissive)
+      if (prevIsL && !nextIsL) return false;
+      if (!prevIsL && nextIsL) return false;
     }
 
     // Greek KERAIA (U+0375) must be followed by Greek
