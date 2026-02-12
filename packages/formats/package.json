@@ -4,9 +4,11 @@
   "version": "0.8.4",
   "type": "module",
   "main": "./src/index.js",
+  "types": "./types.d.ts",
   "files": [
     "dist/",
-    "src/"
+    "src/",
+    "types.d.ts"
   ],
   "description": "Jaren Formats for JSON Schema Validation",
   "author": "joham",

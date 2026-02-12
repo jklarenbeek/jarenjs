@@ -4,6 +4,7 @@
   "version": "0.8.4",
   "type": "module",
   "main": "./src/index.js",
+  "types": "./types.d.ts",
   "description": "Jaren Core Functions",
   "author": "joham",
   "repository": {
