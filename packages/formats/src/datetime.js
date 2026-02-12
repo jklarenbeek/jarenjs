@@ -12,7 +12,20 @@ import {
   getDateTypeOfTimeOnlyRFC3339,
 } from '@jarenjs/core/dates';
 
-//#region generalized
+/**
+ * @typedef {import('@jarenjs/validate').ValidationObject} ValidationObject
+ * @typedef {import('@jarenjs/validate').JSONSchema} JSONSchema
+ */
+
+/**
+ * Compiles a format minimum validator function for date/time types.
+ * Supports both inclusive (formatMinimum) and exclusive (formatExclusiveMinimum) bounds.
+ *
+ * @param {(value: string) => Date | undefined} parseType - Function to parse string into Date
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing format constraints
+ * @returns {((date: Date, dataPath?: string) => boolean) | undefined} A validator function or undefined if no minimum constraint
+ */
 function compileFormatMinimumByType(parseType, schemaObj, jsonSchema) {
   const [min, emin] = getInclusiveExclusiveBounds(
     parseType,
@@ -40,6 +53,15 @@ function compileFormatMinimumByType(parseType, schemaObj, jsonSchema) {
   return undefined;
 }
 
+/**
+ * Compiles a format maximum validator function for date/time types.
+ * Supports both inclusive (formatMaximum) and exclusive (formatExclusiveMaximum) bounds.
+ *
+ * @param {(value: string) => Date | undefined} parseType - Function to parse string into Date
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing format constraints
+ * @returns {((date: Date, dataPath?: string) => boolean) | undefined} A validator function or undefined if no maximum constraint
+ */
 function compileFormatMaximumByType(parseType, schemaObj, jsonSchema) {
   const [max, emax] = getInclusiveExclusiveBounds(
     parseType,
@@ -55,7 +77,7 @@ function compileFormatMaximumByType(parseType, schemaObj, jsonSchema) {
         || addError(date, dataPath);
     };
   }
-  else if (max != null) {
+  else if (max) {
     const addError = schemaObj.createErrorHandler(max, 'formatMaximum');
 
     return function isFormatMaximum(date, dataPath) {
@@ -67,6 +89,25 @@ function compileFormatMaximumByType(parseType, schemaObj, jsonSchema) {
   return undefined;
 }
 
+/**
+ * Creates a date/time format compiler with range validation support.
+ * Combines format validation with optional minimum and maximum bounds.
+ *
+ * @param {string} name - The name of the format (e.g., 'date-time', 'date', 'time')
+ * @param {(value: string) => Date | undefined} parseType - Function to parse string into Date
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * // Basic format validation
+ * compileFormatByType('date', getDateTypeOfDateOnlyRFC3339, schemaObj, { format: 'date' })('2024-01-15'); // true
+ *
+ * // With range constraints
+ * compileFormatByType('date-time', getDateTypeOfDateTimeRFC3339, schemaObj, {
+ *   format: 'date-time',
+ *   formatMinimum: '2024-01-01T00:00:00Z'
+ * })('2024-06-15T12:00:00Z'); // true
+ */
 function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
   if (jsonSchema.format !== name)
     throw new Error('ERROR: This should not happen!');
@@ -95,7 +136,9 @@ function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
             && validateMax(date, dataPath);
       }
       else if (isDateType(data))
+        // @ts-ignore
         return validateMin(data, dataPath)
+          // @ts-ignore
           && validateMax(data, dataPath);
       else
         return true;
@@ -110,6 +153,7 @@ function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
           : validateMin(date, dataPath);
       }
       else if (isDateType(data))
+        // @ts-ignore
         return validateMin(data, dataPath);
       else
         return true;
@@ -124,6 +168,7 @@ function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
           : validateMax(date);
       }
       else if (isDateType(data))
+        // @ts-ignore
         return validateMax(data, dataPath);
       else
         return true;
@@ -141,9 +186,25 @@ function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
       return true;
   };
 }
-//#endregion
 
-function compileDateTimeFormat(schemaObj, jsonSchema) {
+// =============================================================================
+// Date-Time Format Compilers
+// =============================================================================
+
+/**
+ * Compiles a validator for the 'date-time' format.
+ * Validates date-time strings per RFC 3339 (ISO 8601 profile).
+ * Supports formatMinimum, formatMaximum, formatExclusiveMinimum, formatExclusiveMaximum.
+ *
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileDateTimeFormat(schemaObj, { format: 'date-time' })('2024-01-15T12:30:00Z'); // true
+ * compileDateTimeFormat(schemaObj, { format: 'date-time' })('2024-01-15T12:30:00+01:00'); // true
+ * compileDateTimeFormat(schemaObj, { format: 'date-time' })('invalid'); // false (with error)
+ */
+export function compileDateTimeFormat(schemaObj, jsonSchema) {
   return compileFormatByType(
     'date-time',
     getDateTypeOfDateTimeRFC3339,
@@ -152,7 +213,19 @@ function compileDateTimeFormat(schemaObj, jsonSchema) {
   );
 }
 
-function compileDateOnlyFormat(schemaObj, jsonSchema) {
+/**
+ * Compiles a validator for the 'date' format.
+ * Validates date-only strings (YYYY-MM-DD) per RFC 3339.
+ * Supports formatMinimum, formatMaximum, formatExclusiveMinimum, formatExclusiveMaximum.
+ *
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileDateOnlyFormat(schemaObj, { format: 'date' })('2024-01-15'); // true
+ * compileDateOnlyFormat(schemaObj, { format: 'date' })('2024-13-45'); // false (with error)
+ */
+export function compileDateOnlyFormat(schemaObj, jsonSchema) {
   return compileFormatByType(
     'date',
     getDateTypeOfDateOnlyRFC3339,
@@ -161,7 +234,20 @@ function compileDateOnlyFormat(schemaObj, jsonSchema) {
   );
 }
 
-function compileTimeOnlyFormat(schemaObj, jsonSchema) {
+/**
+ * Compiles a validator for the 'time' format.
+ * Validates time-only strings (HH:MM:SS or HH:MM:SS.sss) per RFC 3339.
+ * Supports formatMinimum, formatMaximum, formatExclusiveMinimum, formatExclusiveMaximum.
+ *
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileTimeOnlyFormat(schemaObj, { format: 'time' })('12:30:00'); // true
+ * compileTimeOnlyFormat(schemaObj, { format: 'time' })('12:30:00.123'); // true
+ * compileTimeOnlyFormat(schemaObj, { format: 'time' })('25:00:00'); // false (with error)
+ */
+export function compileTimeOnlyFormat(schemaObj, jsonSchema) {
   return compileFormatByType(
     'time',
     getDateTypeOfTimeOnlyRFC3339,
@@ -170,6 +256,12 @@ function compileTimeOnlyFormat(schemaObj, jsonSchema) {
   );
 }
 
+/**
+ * Object mapping date/time format names to their compiler functions.
+ * Used for backward compatibility and aggregate imports.
+ *
+ * @type {Record<string, (schemaObj: ValidationObject, jsonSchema: JSONSchema) => (data: unknown, dataPath?: string) => boolean>}
+ */
 export const formatValidators = {
   'date-time': compileDateTimeFormat,
   date: compileDateOnlyFormat,

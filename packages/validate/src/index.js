@@ -100,7 +100,7 @@ export class ValidationError {
  * ValidationOptions configures the behavior of the validation process.
  * @class
  */
-class ValidationOptions {
+export class ValidationOptions {
   /**
    * Creates validation options.
    * @param {boolean} [skipErrors=true] - Whether to stop at first error or continue
@@ -126,10 +126,9 @@ class ValidationOptions {
  * It holds references to all schemas, formats, options, and compiled ValidationObjects.
  * @class
  */
-class ValidationRoot {
+export class ValidationRoot {
   /**
    * Creates a ValidationObject and stores it in the root's object map.
-   * @private
    * @param {ValidationRoot} self - The ValidationRoot instance
    * @param {string} path - The URI path for this schema object
    * @param {object|boolean} schema - The JSON schema
@@ -288,7 +287,7 @@ class ValidationRoot {
  * creating child validators and error handlers.
  * @class
  */
-class ValidationObject {
+export class ValidationObject {
   /**
    * Compiles a validator function for the given schema.
    * This is the main entry point for schema compilation. It handles:
@@ -972,7 +971,6 @@ export class JarenValidator {
    * @param {ValidationRoot} root - The validation root
    * @param {Map} schemas - The schemas map
    * @param {string} origin - The origin schema ID
-   * @private
    */
   static #precompileRefs(root, schemas, origin) {
     // Pre-create validation objects for all refs in the schemas map
