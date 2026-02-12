@@ -255,9 +255,9 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `date` | according to [RFC3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6), time-zone is mandatory
 - `time` | according to [RFC3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6), time-zone is mandatory
 
-- ❌ `duration` | duration from RFC3339
-- ❌ `iso-date-time` | date-time with optional time-zone
-- ❌ `iso-time` | time with optional time-zone
+- `duration` | duration from RFC3339
+- `iso-date-time` | ISO 8601 date-time with optional timezone
+- `iso-time` | ISO 8601 time with optional timezone
 
 *Note: All date time formats can use formatMinimum / formatMaximum and formatExclusiveMinimum and formatExclusiveMaximum*
 
@@ -297,7 +297,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `json-pointer` | JSON-pointer according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901)
 - `json-pointer-uri-fragment` | JSON-pointer fragment according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901#section-6)
 - `relative-json-pointer` | relative JSON-pointer according to [draft-luff-relative-json-pointer-00](https://datatracker.ietf.org/doc/html/draft-luff-relative-json-pointer-00)
-- ❌ `json-path` | JSONPath according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html)
+- `json-path` | JSONPath according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html)
 
 #### 🗨 Miscellaneous formats
 

@@ -73,6 +73,9 @@ export const compileJsonPointerFormat: FormatCompiler;
 export const compileJsonPointerUriFragmentFormat: FormatCompiler;
 export const compileRelativeJsonPointerFormat: FormatCompiler;
 
+// JSONPath
+export const compileJsonPathFormat: FormatCompiler;
+
 // ISBN
 export const compileIsbn10Format: FormatCompiler;
 export const compileIsbn13Format: FormatCompiler;
@@ -101,6 +104,10 @@ export function compileDateTimeFormat(schemaObj: ValidationObject, jsonSchema: J
 export function compileDateOnlyFormat(schemaObj: ValidationObject, jsonSchema: JSONSchema): FormatValidator;
 export function compileTimeOnlyFormat(schemaObj: ValidationObject, jsonSchema: JSONSchema): FormatValidator;
 
+export function compileDurationFormat(schemaObj: ValidationObject, jsonSchema: JSONSchema): FormatValidator;
+export function compileISODateTimeFormat(schemaObj: ValidationObject, jsonSchema: JSONSchema): FormatValidator;
+export function compileISOTimeFormat(schemaObj: ValidationObject, jsonSchema: JSONSchema): FormatValidator;
+
 /**
  * All date-time format validators keyed by format name
  */
@@ -108,6 +115,9 @@ export const dateTimeFormats: {
   'date-time': typeof compileDateTimeFormat;
   date: typeof compileDateOnlyFormat;
   time: typeof compileTimeOnlyFormat;
+  duration: typeof compileDurationFormat;
+  'iso-date-time': typeof compileISODateTimeFormat;
+  'iso-time': typeof compileISOTimeFormat;
 };
 
 // =============================================================================

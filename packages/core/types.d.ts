@@ -160,6 +160,15 @@ export function getDateTypeOfDateOnlyRFC3339(str: string, def?: Date): Date | un
 export function getDateTypeOfTimeOnlyRFC3339(str: string, def?: Date): Date | undefined;
 export function getDateTypeOfDateTimeRFC3339(str: string, def?: Date): Date | undefined;
 
+// Duration validation (RFC 3339)
+export function isValidDuration(str: string): boolean;
+
+// ISO 8601 date-time and time with optional timezone
+export function isValidISODateTime(str: string): boolean;
+export function isValidISOTime(str: string): boolean;
+export function getDateTypeOfISODateTime(str: string, def?: Date): Date | undefined;
+export function getDateTypeOfISOTime(str: string, def?: Date): Date | undefined;
+
 // =============================================================================
 // Float Module (float.js)
 // =============================================================================
@@ -379,6 +388,7 @@ export function isValidJSON(data: string): boolean;
 export function isValidJSONPointer(str: string): boolean;
 export function isValidJSONPointerUriFragment(str: string): boolean;
 export function isValidRelativeJSONPointer(str: string): boolean;
+export function isValidJSONPath(str: string): boolean;
 
 // =============================================================================
 // Text Module - Base64 (text/base64.js)

@@ -18,6 +18,7 @@ import {
   isValidJSONPointer,
   isValidJSONPointerUriFragment,
   isValidRelativeJSONPointer,
+  isValidJSONPath,
   isValidUrl,
   isValidEmail,
   isValidHostname,
@@ -466,6 +467,25 @@ export const compileJsonPointerUriFragmentFormat = createStringFormatCompiler('j
 export const compileRelativeJsonPointerFormat = createStringFormatCompiler('relative-json-pointer', isValidRelativeJSONPointer);
 
 // =============================================================================
+// JSONPath Format Compiler (RFC 9535)
+// =============================================================================
+
+/**
+ * Compiles a validator for the 'json-path' format.
+ * Validates JSONPath expressions per RFC 9535.
+ *
+ * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$.store.book[0].title'); // true
+ * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$..name'); // true
+ * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$[*]'); // true
+ * compileJsonPathFormat(schemaObj, { format: 'json-path' })('store'); // false (with error)
+ */
+export const compileJsonPathFormat = createStringFormatCompiler('json-path', isValidJSONPath);
+
+// =============================================================================
 // ISBN Format Compilers
 // =============================================================================
 
@@ -608,6 +628,8 @@ export const formatValidators = {
   'json-pointer': compileJsonPointerFormat,
   'json-pointer-uri-fragment': compileJsonPointerUriFragmentFormat,
   'relative-json-pointer': compileRelativeJsonPointerFormat,
+  // JSONPath
+  'json-path': compileJsonPathFormat,
   // ISBN
   'isbn10': compileIsbn10Format,
   'isbn13': compileIsbn13Format,

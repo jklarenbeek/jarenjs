@@ -10,6 +10,11 @@ import {
   getDateTypeOfDateTimeRFC3339,
   getDateTypeOfDateOnlyRFC3339,
   getDateTypeOfTimeOnlyRFC3339,
+  isValidDuration,
+  isValidISODateTime,
+  isValidISOTime,
+  getDateTypeOfISODateTime,
+  getDateTypeOfISOTime,
 } from '@jarenjs/core/dates';
 
 /**
@@ -256,6 +261,99 @@ export function compileTimeOnlyFormat(schemaObj, jsonSchema) {
   );
 }
 
+// =============================================================================
+// Duration Format Compiler (RFC 3339)
+// =============================================================================
+
+/**
+ * Compiles a validator for the 'duration' format.
+ * Validates duration strings per RFC 3339.
+ * Format: P[n]Y[n]M[n]DT[n]H[n]M[n]S or P[n]W
+ * Examples: P1Y2M3DT4H5M6S, P1W, PT1H
+ *
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileDurationFormat(schemaObj, { format: 'duration' })('P1Y2M3DT4H5M6S'); // true
+ * compileDurationFormat(schemaObj, { format: 'duration' })('P1W'); // true
+ * compileDurationFormat(schemaObj, { format: 'duration' })('PT1H30M'); // true
+ * compileDurationFormat(schemaObj, { format: 'duration' })('P'); // false (with error)
+ */
+export function compileDurationFormat(schemaObj, jsonSchema) {
+  if (jsonSchema.format !== 'duration')
+    throw new Error('ERROR: This should not happen!');
+
+  // when skipErrors is true, we don't need to create error objects
+  if (schemaObj.options.skipErrors) {
+    return function validateDurationFast(data, dataPath) {
+      return isStringType(data)
+        ? isValidDuration(data)
+        : true;
+    };
+  }
+
+  const addError = schemaObj.createErrorHandler('duration', 'format');
+
+  return function validateDuration(data, dataPath) {
+    return isStringType(data)
+      ? isValidDuration(data) || addError(data, dataPath)
+      : true;
+  };
+}
+
+// =============================================================================
+// ISO Date-Time and ISO Time Format Compilers
+// =============================================================================
+
+/**
+ * Compiles a validator for the 'iso-date-time' format.
+ * Validates ISO 8601 date-time strings with optional timezone.
+ * Unlike RFC 3339 date-time, the timezone is optional.
+ * Supports formatMinimum, formatMaximum, formatExclusiveMinimum, formatExclusiveMaximum.
+ *
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileISODateTimeFormat(schemaObj, { format: 'iso-date-time' })('2024-01-15T12:30:00Z'); // true
+ * compileISODateTimeFormat(schemaObj, { format: 'iso-date-time' })('2024-01-15T12:30:00+01:00'); // true
+ * compileISODateTimeFormat(schemaObj, { format: 'iso-date-time' })('2024-01-15T12:30:00'); // true (no timezone)
+ * compileISODateTimeFormat(schemaObj, { format: 'iso-date-time' })('2024-13-15T12:30:00'); // false (with error)
+ */
+export function compileISODateTimeFormat(schemaObj, jsonSchema) {
+  return compileFormatByType(
+    'iso-date-time',
+    getDateTypeOfISODateTime,
+    schemaObj,
+    jsonSchema,
+  );
+}
+
+/**
+ * Compiles a validator for the 'iso-time' format.
+ * Validates ISO 8601 time strings with optional timezone.
+ * Unlike RFC 3339 time, the timezone is optional.
+ * Supports formatMinimum, formatMaximum, formatExclusiveMinimum, formatExclusiveMaximum.
+ *
+ * @param {ValidationObject} schemaObj - The validation object for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileISOTimeFormat(schemaObj, { format: 'iso-time' })('12:30:00Z'); // true
+ * compileISOTimeFormat(schemaObj, { format: 'iso-time' })('12:30:00+01:00'); // true
+ * compileISOTimeFormat(schemaObj, { format: 'iso-time' })('12:30:00'); // true (no timezone)
+ * compileISOTimeFormat(schemaObj, { format: 'iso-time' })('25:00:00'); // false (with error)
+ */
+export function compileISOTimeFormat(schemaObj, jsonSchema) {
+  return compileFormatByType(
+    'iso-time',
+    getDateTypeOfISOTime,
+    schemaObj,
+    jsonSchema,
+  );
+}
+
 /**
  * Object mapping date/time format names to their compiler functions.
  * Used for backward compatibility and aggregate imports.
@@ -266,4 +364,7 @@ export const formatValidators = {
   'date-time': compileDateTimeFormat,
   date: compileDateOnlyFormat,
   time: compileTimeOnlyFormat,
+  duration: compileDurationFormat,
+  'iso-date-time': compileISODateTimeFormat,
+  'iso-time': compileISOTimeFormat,
 };
