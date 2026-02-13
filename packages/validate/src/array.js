@@ -70,22 +70,11 @@ function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
   if (tuple == null)
     return undefined;
 
-  // Cache for $ref validators - multiple items may reference the same schema
-  const refCache = new Map();
-
-  const validators = tuple.map((item, i) => {
-    // Fast path: $ref schemas - resolve directly and cache
-    if (item !== null && typeof item === 'object' && item.$ref !== undefined && Object.keys(item).length === 1) {
-      const refKey = item.$ref;
-      if (refCache.has(refKey)) {
-        return refCache.get(refKey);
-      }
-      const validator = compileItemValidator(schemaObj, item, itemsKey, i);
-      refCache.set(refKey, validator);
-      return validator;
-    }
-    return compileItemValidator(schemaObj, item, itemsKey, i);
-  });
+  // Pre-compile all validators upfront
+  const validators = new Array(tuple.length);
+  for (let i = 0; i < tuple.length; i++) {
+    validators[i] = compileItemValidator(schemaObj, tuple[i], itemsKey, i);
+  }
   const vlength = validators.length;
 
   const additional = getBoolOrObjectClass(jsonSchema[additionalKey], true);
@@ -93,15 +82,13 @@ function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
     if (additional === true) {
       return function validateTupleBoolTrue(data, dataPath, dataRoot, i) {
         if (i >= vlength) return true;
-        const validator = validators[i];
-        return validator(data, dataPath, dataRoot);
+        return validators[i](data, dataPath, dataRoot);
       };
     }
     // additional === false
     return function validateTupleBoolFalse(data, dataPath, dataRoot, i) {
       if (i >= vlength) return false;
-      const validator = validators[i];
-      return validator(data, dataPath, dataRoot);
+      return validators[i](data, dataPath, dataRoot);
     };
   }
 
@@ -109,8 +96,7 @@ function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
   const validateAdditional = schemaObj.createValidator(additional, additionalKey);
   return function validateTupleSchema(data, dataPath, dataRoot, i) {
     if (i < vlength) {
-      const validator = validators[i];
-      return validator(data, dataPath, dataRoot);
+      return validators[i](data, dataPath, dataRoot);
     }
     return validateAdditional(data, dataPath, dataRoot);
   };

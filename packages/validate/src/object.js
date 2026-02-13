@@ -251,36 +251,87 @@ function compileDependencies(schemaObj, jsonSchema) {
   if (dependencies == null)
     return undefined;
 
-  const validators = new Map();
-  for (const key in dependencies) {
-    if (Object.prototype.hasOwnProperty.call(dependencies, key)) {
-      const right = dependencies[key];
-      if (isBoolOrObjectClass(right)) {
-        const validator = schemaObj.createValidator(right, 'dependencies', key);
-        if (validator != null)
-          validators.set(key, validator);
-        else
-          throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
-      }
-      else if (isArrayClass(right)) {
-        const addError = schemaObj.createErrorHandler(right, ['dependencies', key]);
-        validators.set(key, function validateRequiredDependency(data, dataPath, dataRoot, dataKey) {
-          return includesAll(Object.keys(data), right)
-            || addError(data, dataKey, dataPath);
-        });
-      }
-      else if (!schemaObj.options.skipErrors)
-        throw new Error(`Expected Schema or Array at '${schemaObj.path}/${key}'`);
-    }
-  }
-
-  if (validators.size === 0)
+  // Collect dependency entries into arrays for faster access
+  const depKeys = Object.keys(dependencies);
+  if (depKeys.length === 0)
     return undefined;
 
+  // Separate schema dependencies from required dependencies for optimization
+  const schemaDeps = [];
+  const requiredDeps = [];
+
+  for (let i = 0; i < depKeys.length; i++) {
+    const key = depKeys[i];
+    const right = dependencies[key];
+    if (isBoolOrObjectClass(right)) {
+      const validator = schemaObj.createValidator(right, 'dependencies', key);
+      if (validator != null)
+        schemaDeps.push({ key, validator });
+      else if (!schemaObj.options.skipErrors)
+        throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
+    }
+    else if (isArrayClass(right)) {
+      const addError = schemaObj.createErrorHandler(right, ['dependencies', key]);
+      requiredDeps.push({ key, required: right, addError });
+    }
+    else if (!schemaObj.options.skipErrors)
+      throw new Error(`Expected Schema or Array at '${schemaObj.path}/${key}'`);
+  }
+
+  if (schemaDeps.length === 0 && requiredDeps.length === 0)
+    return undefined;
+
+  // Single schema dependency - most common case
+  if (schemaDeps.length === 1 && requiredDeps.length === 0) {
+    const { key, validator } = schemaDeps[0];
+    return function validateSingleSchemaDep(data, dataPath, dataRoot, dataKey) {
+      if (dataKey === key) {
+        return validator(data, dataPath, dataRoot, dataKey);
+      }
+      return true;
+    };
+  }
+
+  // Single required dependency - common case
+  if (requiredDeps.length === 1 && schemaDeps.length === 0) {
+    const { key, required, addError } = requiredDeps[0];
+    const rlen = required.length;
+    return function validateSingleRequiredDep(data, dataPath, dataRoot, dataKey) {
+      if (dataKey === key) {
+        const dataKeys = Object.keys(data);
+        for (let i = 0; i < rlen; i++) {
+          if (!dataKeys.includes(required[i])) {
+            return addError(data, dataKey, dataPath);
+          }
+        }
+      }
+      return true;
+    };
+  }
+
+  // Multiple dependencies - generic case
+  // Create lookup maps for faster access
+  const schemaDepMap = new Map();
+  for (let i = 0; i < schemaDeps.length; i++) {
+    schemaDepMap.set(schemaDeps[i].key, schemaDeps[i].validator);
+  }
+  const requiredDepMap = new Map();
+  for (let i = 0; i < requiredDeps.length; i++) {
+    requiredDepMap.set(requiredDeps[i].key, requiredDeps[i]);
+  }
+
   return function validateDependenciesItem(data, dataPath, dataRoot, dataKey) {
-    if (validators.has(dataKey)) {
-      const validator = validators.get(dataKey);
-      return validator(data, dataPath, dataRoot, dataKey);
+    // Check schema dependencies first
+    const schemaValidator = schemaDepMap.get(dataKey);
+    if (schemaValidator != null) {
+      return schemaValidator(data, dataPath, dataRoot, dataKey);
+    }
+    // Check required dependencies
+    const reqDep = requiredDepMap.get(dataKey);
+    if (reqDep != null) {
+      const { required, addError } = reqDep;
+      return includesAll(Object.keys(data), required)
+        || addError(data, dataKey, dataPath);
     }
     return true;
   };
