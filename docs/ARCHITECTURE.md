@@ -561,6 +561,7 @@ Options:
   --draft, -d VERSION    JSON Schema draft version (default: draft7)
                          Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020
   --top N                Show only top N slowest tests
+  --success-only         Drop all test that have failures or errors in either engine
   --verbose, -v          Verbose output
 
 # Profile specific test suite

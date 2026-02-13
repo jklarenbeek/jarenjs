@@ -92,7 +92,7 @@ let html = `<!DOCTYPE html>
 // Summary Calculation
 const summary = {};
 validatorList.forEach(v => {
-  summary[v] = { totalTests: 0, failedTests: 0, totalTime: 0, errors: 0, wins: 0 };
+  summary[v] = { totalTests: 0, failedTests: 0, totalTime: 0, errors: 0, wins: 0, successTime: 0 };
 });
 
 for (const suiteName in allResults) {
@@ -114,12 +114,21 @@ for (const suiteName in allResults) {
       summary[fastestValidator].wins++;
     }
 
+    // Check if ALL validators succeeded (no failures, no errors)
+    const allSucceeded = test.results.length > 0 && test.results.every(res =>
+      !res.error && res.failures === 0
+    );
+
     for (const res of test.results) {
       if (!summary[res.validator]) continue;
       summary[res.validator].totalTests += res.total;
       summary[res.validator].failedTests += res.failures;
       summary[res.validator].totalTime += res.time;
       if (res.error) summary[res.validator].errors++;
+      // Only add time if all validators succeeded
+      if (allSucceeded) {
+        summary[res.validator].successTime += res.time;
+      }
     }
   }
 }
@@ -135,6 +144,7 @@ validatorList.forEach(v => {
       <p>Failures: ${s.failedTests}</p>
       <p>Errors: ${s.errors}</p>
       <p>Pass Rate: ${passRate}%</p>
+      <p>Success Time: ${s.successTime.toFixed(2)} ms</p>
       <p>Total Time: ${s.totalTime.toFixed(2)} ms</p>
       <p><b>Fastest In: ${s.wins} tests</b></p>
     </div>

@@ -77,6 +77,7 @@ function parseArgs() {
     verbose: false,
     topN: null, // Only show top N slowest tests
     draft: DEFAULT_TEST_DRAFT, // Draft version to use
+    successOnly: false, // Only include tests where all agents succeed
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -96,6 +97,8 @@ function parseArgs() {
       options.topN = parseInt(args[++i], 10) || null;
     } else if (arg === '--draft' || arg === '-d') {
       options.draft = args[++i] || DEFAULT_TEST_DRAFT;
+    } else if (arg === '--success-only') {
+      options.successOnly = true;
     } else if (!arg.startsWith('--')) {
       options.targetFile = arg;
     }
@@ -109,9 +112,11 @@ function parseArgs() {
  * @param {Object} test - The test object from test suite
  * @param {number} iterations - Number of iterations to run
  * @param {string} draft - The draft version to use
+ * @param {Object} remotes - Remote schemas
+ * @param {boolean} successOnly - If true, skip tests where any agent fails
  * @returns {Object} Profiling results
  */
-function profileTest(test, iterations, draft, remotes) {
+function profileTest(test, iterations, draft, remotes, successOnly = false) {
   const results = TestRunner.runTest(test);
   const jarenResult = results.find(r => r.validator === 'Jaren');
   const ajvResult = results.find(r => r.validator === 'Ajv');
@@ -120,11 +125,21 @@ function profileTest(test, iterations, draft, remotes) {
     return null;
   }
 
+  // Check for errors first
   if (jarenResult.error || ajvResult.error) {
     return {
       description: test.description,
       jarenError: jarenResult.error || null,
       ajvError: ajvResult.error || null,
+    };
+  }
+
+  // If successOnly mode, skip tests where any agent has failures
+  if (successOnly && (jarenResult.failures > 0 || ajvResult.failures > 0)) {
+    return {
+      description: test.description,
+      jarenError: jarenResult.failures > 0 ? `Failed ${jarenResult.failures} assertions` : null,
+      ajvError: ajvResult.failures > 0 ? `Failed ${ajvResult.failures} assertions` : null,
     };
   }
 
@@ -188,14 +203,16 @@ function profileTest(test, iterations, draft, remotes) {
  * @param {Object} tests - The tests object from loader
  * @param {number} iterations - Number of iterations
  * @param {string} draft - The draft version to use
+ * @param {Object} remotes - Remote schemas
+ * @param {boolean} successOnly - If true, skip tests where any agent fails
  * @returns {Array} Array of profiling results
  */
-function profileSuite(fileKey, tests, iterations, draft, remotes) {
+function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = false) {
   const results = [];
   
   for (const test of tests) {
     try {
-      const profile = profileTest(test, iterations, draft, remotes);
+      const profile = profileTest(test, iterations, draft, remotes, successOnly);
       if (profile) {
         results.push({
           suite: fileKey,
@@ -415,6 +432,7 @@ async function main() {
     console.log('  --draft, -d VERSION    JSON Schema draft version (default: draft7)');
     console.log('                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020');
     console.log('  --top N                Show only top N slowest tests');
+    console.log('  --success-only         Exclude tests where any agent fails or errors');
     console.log('  --verbose, -v          Verbose output');
     process.exit(1);
   }
@@ -444,7 +462,7 @@ async function main() {
       if (options.verbose) {
         console.log(`Profiling ${fileKey}...`);
       }
-      const suiteResults = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes);
+      const suiteResults = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
       results.push(...suiteResults);
       completedSuites++;
       
@@ -464,7 +482,7 @@ async function main() {
     }
 
     console.log(`Profiling ${fileKey} with ${options.iterations} iterations (draft: ${schemaDraft})...\n`);
-    results = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft);
+    results = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
   } else {
     console.error('Error: Must specify a test file with --profile, or use --profile-all');
     process.exit(1);
