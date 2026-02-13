@@ -42,7 +42,7 @@ import {
 } from '@jarenjs/core';
 
 import {
-  deepEqual,
+  equalsDeep,
 } from '@jarenjs/core/object';
 
 import {
@@ -320,7 +320,7 @@ function compileDollarDataUniqueItems(schemaObj, ref) {
     // Check for duplicates using deep equality
     for (let i = 0; i < data.length; i++) {
       for (let j = i + 1; j < data.length; j++) {
-        if (deepEqual(data[i], data[j])) {
+        if (equalsDeep(data[i], data[j])) {
           return addError(true, data, dataPath);
         }
       }

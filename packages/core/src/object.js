@@ -97,43 +97,15 @@ export function equalsDeep(target, source) {
 }
 
 /**
- * Deep equality check for uniqueItems validation
- * @param {any} a - First value
- * @param {any} b - Second value
- * @returns {boolean} True if values are deeply equal
+ * Check if all items in an array are unique using deep equality
+ * @param {any[]} arr - The array to check
+ * @returns {boolean} True if all items are unique
  */
-export function deepEqual(a, b) {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== 'object' || a === null || b === null) return false;
-
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i])) return false;
-    }
-    return true;
-  }
-
-  if (Array.isArray(a) || Array.isArray(b)) return false;
-
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-
-  for (const key of keysA) {
-    if (!keysB.includes(key)) return false;
-    if (!deepEqual(a[key], b[key])) return false;
-  }
-
-  return true;
-}
-
 export function isUniqueDeepArray(arr) {
   if (!Array.isArray(arr) || arr.length < 2) return true;
   for (let i = 0; i < arr.length; i++) {
     for (let j = i + 1; j < arr.length; j++) {
-      if (deepEqual(arr[i], arr[j])) return false;
+      if (equalsDeep(arr[i], arr[j])) return false;
     }
   }
   return true;
