@@ -6,6 +6,10 @@ import {
 } from '@jarenjs/core';
 
 import {
+  isUniqueDeepArray,
+} from '@jarenjs/core/object';
+
+import {
   getBoolishType,
   getIntishType,
 } from '@jarenjs/core/number';
@@ -19,7 +23,6 @@ import {
   getBoolOrObjectClass,
   getArrayClassMinItems,
   isOfSchemaType,
-  isUniqueDeepArray,
 } from './tools.js';
 
 //#region Primitives

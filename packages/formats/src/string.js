@@ -15,10 +15,6 @@ import {
   isValidUri,
   isValidUriRef,
   isValidUriTemplate,
-  isValidJSONPointer,
-  isValidJSONPointerUriFragment,
-  isValidRelativeJSONPointer,
-  isValidJSONPath,
   isValidUrl,
   isValidEmail,
   isValidHostname,
@@ -48,6 +44,13 @@ import {
   isValidCountryAlpha2,
   isValidIBAN,
 } from '@jarenjs/core/text';
+
+import {
+  isValidJSONPointer,
+  isValidJSONPointerUriFragment,
+  isValidRelativeJSONPointer,
+  isValidJSONPath,
+} from '@jarenjs/core/json';
 
 /**
  * @typedef {import('@jarenjs/validate').ValidationObject} ValidationObject

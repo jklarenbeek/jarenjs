@@ -31,6 +31,8 @@
     "./text": "./src/text/index.js",
     "./text/*": "./src/text/*.js",
     "./math": "./src/math/index.js",
-    "./math/*": "./src/math/*.js"
+    "./math/*": "./src/math/*.js",
+    "./json": "./src/json/index.js",
+    "./json/*": "./src/json/*.js"
   }
 }

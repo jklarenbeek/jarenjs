@@ -9,7 +9,7 @@ export function isValidJSONCheap(data) {
 
   // Check first char
   const first = data.charCodeAt(0);
-  
+
   // Objects and arrays - check matching brackets
   if (first === 0x7B || first === 0x5B) { // '{' or '['
     // Find last non-whitespace character (JSON allows trailing whitespace)
@@ -24,11 +24,11 @@ export function isValidJSONCheap(data) {
     const last = data.charCodeAt(lastIdx);
     if (first === 0x7B && last !== 0x7D) return true; // {} must match - definitely NOT valid
     if (first === 0x5B && last !== 0x5D) return true; // [] must match - definitely NOT valid
-    
+
     // Looks like JSON object/array, might be valid
     return false;
   }
-  
+
   // Check if first char is a valid JSON starting character:
   // '"' (0x22) for strings, '-' (0x2D) or digit (0x30-0x39) for numbers,
   // 't' (0x74) for true, 'f' (0x66) for false, 'n' (0x6E) for null
@@ -40,11 +40,11 @@ export function isValidJSONCheap(data) {
     first === 0x66 || // 'f' (false)
     first === 0x6E    // 'n' (null)
   );
-  
+
   // If it starts with a valid JSON character, it might be valid JSON
   // Return false to indicate "might be JSON, need to parse"
   if (isValidStart) return false;
-  
+
   // Doesn't start with valid JSON character - definitely NOT valid JSON
   return true;
 }
@@ -87,7 +87,7 @@ export function isValidRelativeJSONPointer(str) {
 // Basic JSONPath structure:
 // $                         - root
 // $.store.book[0].title     - dot notation with array index
-// $['store']['book'][0]     - bracket notation  
+// $['store']['book'][0]     - bracket notation
 // $..name                   - recursive descent
 // $.*                       - wildcard
 // $[?(@.price < 10)]        - filter expression
@@ -107,7 +107,7 @@ const CONST_REGEXP_JSONPATH = /^(\$|@)(?:\.\.[a-zA-Z_][a-zA-Z0-9_]*|\.\.|\.[a-zA
 
 /**
  * Validates a JSONPath expression string per RFC 9535.
- * 
+ *
  * JSONPath syntax includes:
  * - $ - root node selector
  * - @ - current node selector (used in filter expressions)
@@ -118,7 +118,7 @@ const CONST_REGEXP_JSONPATH = /^(\$|@)(?:\.\.[a-zA-Z_][a-zA-Z0-9_]*|\.\.|\.[a-zA
  * - [start:end:step] - array slice
  * - [?expression] - filter expression
  * - .. - recursive descent
- * 
+ *
  * @param {string} str - The JSONPath expression to validate
  * @returns {boolean} - True if the string is a valid JSONPath expression
  * @example

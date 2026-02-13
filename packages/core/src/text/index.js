@@ -7,5 +7,4 @@ export * from './email.js';
 export * from './host.js';
 export * from './i18n.js';
 export * from './identifiers.js';
-export * from './json.js';
 export * from './misc.js';

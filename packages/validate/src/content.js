@@ -5,8 +5,11 @@ import {
 
 import {
   isValidBase64Fast,
-  isValidJSON,
 } from '@jarenjs/core/text';
+
+import {
+  isValidJSON,
+} from '@jarenjs/core/json';
 
 export function compileContentEncoding(schemaObj, jsonSchema) {
   const encoding = getStringType(jsonSchema.contentEncoding);
