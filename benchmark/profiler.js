@@ -11,6 +11,8 @@
  *   node benchmark/profiler.js --profile-all
  *   node benchmark/profiler.js --profile-all --output csv
  *   node benchmark/profiler.js --profile-all --output json
+ *   node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12
+ *   node benchmark/profiler.js --profile-all --output json --filepath results.json
  */
 
 import { loadTestSuiteJson, loadRemoteJson } from './loader.js';
@@ -65,6 +67,16 @@ function getSchemaDraft(draft) {
   return DRAFT_SCHEMA_MAP[draft] || draft;
 }
 
+/**
+ * Parse comma-separated draft list
+ * @param {string} draftArg - Draft argument (e.g., "draft7" or "draft7,draft2019-09")
+ * @returns {string[]} Array of draft names
+ */
+function parseDrafts(draftArg) {
+  if (!draftArg) return [DEFAULT_TEST_DRAFT];
+  return draftArg.split(',').map(d => d.trim()).filter(d => d);
+}
+
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -76,8 +88,9 @@ function parseArgs() {
     output: 'console', // 'console', 'csv', 'json'
     verbose: false,
     topN: null, // Only show top N slowest tests
-    draft: DEFAULT_TEST_DRAFT, // Draft version to use
+    drafts: [DEFAULT_TEST_DRAFT], // Array of draft versions to use
     successOnly: false, // Only include tests where all agents succeed
+    filepath: null, // Custom output file path
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -96,9 +109,11 @@ function parseArgs() {
     } else if (arg === '--top') {
       options.topN = parseInt(args[++i], 10) || null;
     } else if (arg === '--draft' || arg === '-d') {
-      options.draft = args[++i] || DEFAULT_TEST_DRAFT;
+      options.drafts = parseDrafts(args[++i]);
     } else if (arg === '--success-only') {
       options.successOnly = true;
+    } else if (arg === '--filepath' || arg === '-f') {
+      options.filepath = args[++i];
     } else if (!arg.startsWith('--')) {
       options.targetFile = arg;
     }
@@ -117,6 +132,9 @@ function parseArgs() {
  * @returns {Object} Profiling results
  */
 function profileTest(test, iterations, draft, remotes, successOnly = false) {
+  // First, validate the test to check for errors/failures
+  TestRunner.initialize(draft, jaren, ajv);
+  TestRunner.load(remotes);
   const results = TestRunner.runTest(test);
   const jarenResult = results.find(r => r.validator === 'Jaren');
   const ajvResult = results.find(r => r.validator === 'Ajv');
@@ -377,7 +395,7 @@ function exportCsv(results, outputPath) {
 function exportJson(results, outputPath, options) {
   const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
-
+  
   const output = {
     metadata: {
       timestamp: new Date().toISOString(),
@@ -385,6 +403,7 @@ function exportJson(results, outputPath, options) {
       warmupIterations: WARMUP_ITERATIONS,
       totalTests: results.length,
       validTests: validResults.length,
+      drafts: options.drafts,
     },
     summary: {
       avgRatio: validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length,
@@ -403,57 +422,23 @@ function exportJson(results, outputPath, options) {
 }
 
 /**
- * Main profiling function
+ * Profile a single draft version
+ * @param {string} draft - Draft version to profile
+ * @param {Object} options - Profiling options
+ * @returns {Array} Results for this draft
  */
-async function main() {
-  const options = parseArgs();
-
-  // Validate draft option
-  if (!SUPPORTED_DRAFTS.includes(options.draft)) {
-    console.error(`Error: Unsupported draft '${options.draft}'`);
-    console.error(`Supported drafts: ${SUPPORTED_DRAFTS.join(', ')}`);
-    process.exit(1);
-  }
-
-  // Validate options
-  if (!options.profile && !options.profileAll) {
-    console.log('Usage:');
-    console.log('  node benchmark/profiler.js \'/string.json\' --profile');
-    console.log('  node benchmark/profiler.js \'/string.json\' --profile --iterations 5000');
-    console.log('  node benchmark/profiler.js --profile-all');
-    console.log('  node benchmark/profiler.js --profile-all --output csv');
-    console.log('  node benchmark/profiler.js --profile-all --output json');
-    console.log('');
-    console.log('Options:');
-    console.log('  --profile              Profile a specific test file');
-    console.log('  --profile-all          Profile all test files');
-    console.log('  --iterations, -i N     Number of iterations (default: 1000)');
-    console.log('  --output, -o FORMAT    Output format: console, csv, json (default: console)');
-    console.log('  --draft, -d VERSION    JSON Schema draft version (default: draft7)');
-    console.log('                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020');
-    console.log('  --top N                Show only top N slowest tests');
-    console.log('  --success-only         Exclude tests where any agent fails or errors');
-    console.log('  --verbose, -v          Verbose output');
-    process.exit(1);
-  }
-
-  // Get the proper draft names for different purposes
-  const schemaDraft = getSchemaDraft(options.draft);
-  const folderDraft = getDraftFolder(options.draft);
-
-  // Initialize test runner
-  TestRunner.initialize(schemaDraft, jaren, ajv);
-  const remotes = await loadRemoteJson(folderDraft);
-  TestRunner.load(remotes);
+async function profileDraft(draft, options) {
+  const schemaDraft = getSchemaDraft(draft);
+  const folderDraft = getDraftFolder(draft);
 
   // Load tests
   const allTests = await loadTestSuiteJson(folderDraft);
+  const remotes = await loadRemoteJson(folderDraft);
 
   let results = [];
 
   if (options.profileAll) {
-    console.log(`Profiling all test suites with ${options.iterations} iterations each...`);
-    console.log('This may take a while...\n');
+    console.log(`\nProfiling ${draft} with ${options.iterations} iterations each...`);
 
     const suiteKeys = Object.keys(allTests).sort();
     let completedSuites = 0;
@@ -467,10 +452,10 @@ async function main() {
       completedSuites++;
       
       if (!options.verbose) {
-        process.stdout.write(`\rProgress: ${completedSuites}/${suiteKeys.length} suites completed`);
+        process.stdout.write(`\r  Progress: ${completedSuites}/${suiteKeys.length} suites completed`);
       }
     }
-    console.log('\n');
+    console.log('');
   } else if (options.profile && options.targetFile) {
     const fileKey = options.targetFile.startsWith('/') ? options.targetFile : '/' + options.targetFile;
     
@@ -481,30 +466,106 @@ async function main() {
       process.exit(1);
     }
 
-    console.log(`Profiling ${fileKey} with ${options.iterations} iterations (draft: ${schemaDraft})...\n`);
+    console.log(`Profiling ${fileKey} with ${options.iterations} iterations (${draft})...\n`);
     results = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
-  } else {
-    console.error('Error: Must specify a test file with --profile, or use --profile-all');
+  }
+
+  return results;
+}
+
+/**
+ * Main profiling function
+ */
+async function main() {
+  const options = parseArgs();
+
+  // Validate draft options
+  const invalidDrafts = options.drafts.filter(d => !SUPPORTED_DRAFTS.includes(d));
+  if (invalidDrafts.length > 0) {
+    console.error(`Error: Unsupported draft(s): ${invalidDrafts.join(', ')}`);
+    console.error(`Supported drafts: ${SUPPORTED_DRAFTS.join(', ')}`);
     process.exit(1);
+  }
+
+  // Validate options
+  if (!options.profile && !options.profileAll) {
+    console.log('Usage:');
+    console.log('  node benchmark/profiler.js \'/string.json\' --profile');
+    console.log('  node benchmark/profiler.js \'/string.json\' --profile --iterations 5000');
+    console.log('  node benchmark/profiler.js --profile-all');
+    console.log('  node benchmark/profiler.js --profile-all --output csv');
+    console.log('  node benchmark/profiler.js --profile-all --output json');
+    console.log('  node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12');
+    console.log('  node benchmark/profiler.js --profile-all --output json --filepath results.json');
+    console.log('');
+    console.log('Options:');
+    console.log('  --profile              Profile a specific test file');
+    console.log('  --profile-all          Profile all test files');
+    console.log('  --iterations, -i N     Number of iterations (default: 1000)');
+    console.log('  --output, -o FORMAT    Output format: console, csv, json (default: console)');
+    console.log('  --draft, -d VERSION    JSON Schema draft version(s), comma-separated');
+    console.log('                         (default: draft7)');
+    console.log('                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020');
+    console.log('  --filepath, -f PATH    Output file path (for csv/json output)');
+    console.log('                         Default: benchmark/results/profile-{timestamp}.{ext}');
+    console.log('  --top N                Show only top N slowest tests');
+    console.log('  --success-only         Exclude tests where any agent fails or errors');
+    console.log('  --verbose, -v          Verbose output');
+    process.exit(1);
+  }
+
+  // Profile all specified drafts
+  const allResults = [];
+  
+  for (const draft of options.drafts) {
+    const draftResults = await profileDraft(draft, options);
+    allResults.push(...draftResults);
   }
 
   // Output results
   if (options.output === 'csv') {
-    const outputDir = path.join('benchmark', 'results');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
+    let outputPath;
+    if (options.filepath) {
+      outputPath = options.filepath;
+      // Ensure directory exists
+      const dir = path.dirname(outputPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } else {
+      const outputDir = path.join('benchmark', 'results');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      outputPath = path.join(outputDir, `profile-${timestamp}.csv`);
     }
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    exportCsv(results, path.join(outputDir, `profile-${timestamp}.csv`));
+    exportCsv(allResults, outputPath);
   } else if (options.output === 'json') {
-    const outputDir = path.join('benchmark', 'results');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
+    let outputPath;
+    if (options.filepath) {
+      outputPath = options.filepath;
+      // Ensure directory exists
+      const dir = path.dirname(outputPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } else {
+      const outputDir = path.join('benchmark', 'results');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      outputPath = path.join(outputDir, `profile-${timestamp}.json`);
     }
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    exportJson(results, path.join(outputDir, `profile-${timestamp}.json`), options);
+    exportJson(allResults, outputPath, options);
   } else {
-    printConsoleTable(results, options, schemaDraft, folderDraft);
+    // Console output - just show summary for first draft to avoid too much output
+    printConsoleTable(allResults, options, options.drafts[0], getDraftFolder(options.drafts[0]));
+    
+    if (options.drafts.length > 1) {
+      console.log(`\nTotal tests across ${options.drafts.length} drafts: ${allResults.length}`);
+    }
   }
 }
 
