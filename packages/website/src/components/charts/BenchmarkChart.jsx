@@ -2,14 +2,12 @@ import { useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@components/ui/card';
 import { Badge } from '@components/ui/badge';
 import { cn, formatDuration } from '@lib/utils';
-import { FileJson, Zap, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { FileJson, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import PropTypes from 'prop-types';
 
-// ==================== OVERVIEW COMPONENTS ====================
+// ==================== DRAFT FILTER COMPONENT ====================
 
-function OverviewChart({ data }) {
-  const [selectedDrafts, setSelectedDrafts] = useState(new Set());
-
+function DraftFilter({ data, selectedDrafts, onSelectionChange }) {
   const chartData = useMemo(() => {
     if (!data?.byDraft) return [];
     return Object.entries(data.byDraft).map(([key, draft]) => ({
@@ -17,17 +15,10 @@ function OverviewChart({ data }) {
       name: formatDraftName(key),
       ...draft,
     }));
-  }, [data]);
-
-  // Initialize selected drafts when data loads
-  useMemo(() => {
-    if (chartData.length > 0 && selectedDrafts.size === 0) {
-      setSelectedDrafts(new Set(chartData.map(d => d.key)));
-    }
-  }, [chartData, selectedDrafts.size]);
+  }, [data?.byDraft]);
 
   const toggleDraft = (draftKey) => {
-    setSelectedDrafts(prev => {
+    onSelectionChange(prev => {
       const next = new Set(prev);
       if (next.has(draftKey)) {
         next.delete(draftKey);
@@ -38,16 +29,83 @@ function OverviewChart({ data }) {
     });
   };
 
-  const selectAll = () => setSelectedDrafts(new Set(chartData.map(d => d.key)));
-  const selectNone = () => setSelectedDrafts(new Set());
+  const selectAll = () => onSelectionChange(new Set(chartData.map(d => d.key)));
+  const selectNone = () => onSelectionChange(new Set());
 
-  const filteredChartData = useMemo(() => {
-    return chartData.filter(d => selectedDrafts.has(d.key));
-  }, [chartData, selectedDrafts]);
+  const filteredCount = chartData.filter(d => selectedDrafts.has(d.key)).length;
+
+  if (chartData.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="p-4 bg-muted/30 rounded-lg border">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium">Filter drafts:</span>
+        <div className="flex gap-2">
+          <button
+            onClick={selectAll}
+            className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 transition-colors"
+          >
+            Select All
+          </button>
+          <button
+            onClick={selectNone}
+            className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 transition-colors"
+          >
+            Select None
+          </button>
+        </div>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        {chartData.map((draft) => (
+          <button
+            key={draft.key}
+            onClick={() => toggleDraft(draft.key)}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+              selectedDrafts.has(draft.key)
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            {draft.name}
+            <span className="ml-1.5 text-xs opacity-80">
+              ({draft.totalTests})
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 text-xs text-muted-foreground">
+        Showing {filteredCount} of {chartData.length} drafts
+      </div>
+    </div>
+  );
+}
+
+DraftFilter.propTypes = {
+  data: PropTypes.shape({
+    byDraft: PropTypes.object,
+  }),
+  selectedDrafts: PropTypes.instanceOf(Set).isRequired,
+  onSelectionChange: PropTypes.func.isRequired,
+};
+
+// ==================== OVERVIEW COMPONENTS ====================
+
+function OverviewChart({ data }) {
+  const chartData = useMemo(() => {
+    if (!data?.byDraft) return [];
+    return Object.entries(data.byDraft).map(([key, draft]) => ({
+      key,
+      name: formatDraftName(key),
+      ...draft,
+    }));
+  }, [data]);
 
   const totals = useMemo(() => {
-    if (!data?.byDraft || selectedDrafts.size === 0) return null;
-    return filteredChartData.reduce(
+    if (!data?.byDraft || chartData.length === 0) return null;
+    return chartData.reduce(
       (acc, draft) => ({
         jarenTotalTime: acc.jarenTotalTime + draft.jarenTotalTime,
         ajvTotalTime: acc.ajvTotalTime + draft.ajvTotalTime,
@@ -69,13 +127,13 @@ function OverviewChart({ data }) {
         ajvFailures: 0,
       }
     );
-  }, [filteredChartData, selectedDrafts.size]);
+  }, [chartData]);
 
   if (!data || chartData.length === 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
-          No benchmark data available
+          No benchmark data available for selected drafts
         </CardContent>
       </Card>
     );
@@ -87,49 +145,6 @@ function OverviewChart({ data }) {
         <CardTitle className="text-lg">Performance Overview by Draft</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* Draft Selection Buttons */}
-        <div className="mb-4 p-3 bg-muted/30 rounded-lg">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-muted-foreground">Filter drafts:</span>
-            <div className="flex gap-2">
-              <button
-                onClick={selectAll}
-                className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 transition-colors"
-              >
-                Select All
-              </button>
-              <button
-                onClick={selectNone}
-                className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 transition-colors"
-              >
-                Select None
-              </button>
-            </div>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {chartData.map((draft) => (
-              <button
-                key={draft.key}
-                onClick={() => toggleDraft(draft.key)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                  selectedDrafts.has(draft.key)
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-              >
-                {draft.name}
-                <span className="ml-1.5 text-xs opacity-80">
-                  ({draft.totalTests})
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            Showing {filteredChartData.length} of {chartData.length} drafts
-          </div>
-        </div>
-
         {/* Aggregated Totals for Selected Drafts */}
         {totals && (
           <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-muted/50 rounded-lg">
@@ -150,7 +165,7 @@ function OverviewChart({ data }) {
 
         {/* Selected Draft Cards */}
         <div className="space-y-4">
-          {filteredChartData.map((draft) => (
+          {chartData.map((draft) => (
             <DraftOverviewCard key={draft.key} data={draft} />
           ))}
         </div>
@@ -324,22 +339,34 @@ EngineBarDetailed.propTypes = {
 
 // ==================== BY SUITE COMPONENTS ====================
 
+const SORT_OPTIONS = {
+  name: { label: 'Suite Name', sort: (a, b) => a.name.localeCompare(b.name) },
+  totalTests: { label: 'Total Tests', sort: (a, b) => b.totalTests - a.totalTests },
+  ratio: { label: 'Performance Ratio', sort: (a, b) => (b.ajvTotalTime / b.jarenTotalTime) - (a.ajvTotalTime / a.jarenTotalTime) },
+  jarenTime: { label: 'Jaren Time (slowest first)', sort: (a, b) => b.jarenTotalTime - a.jarenTotalTime },
+  ajvTime: { label: 'AJV Time (slowest first)', sort: (a, b) => b.ajvTotalTime - a.ajvTotalTime },
+};
+
 function SuiteChart({ data }) {
+  const [sortBy, setSortBy] = useState('name');
+
   const chartData = useMemo(() => {
     if (!data?.bySuite) return [];
-    return Object.entries(data.bySuite)
+    const items = Object.entries(data.bySuite)
       .map(([key, suite]) => ({
         key,
         ...suite,
-      }))
-      .sort((a, b) => b.totalTests - a.totalTests);
-  }, [data]);
+      }));
+    
+    const sortFn = SORT_OPTIONS[sortBy]?.sort || SORT_OPTIONS.name.sort;
+    return items.sort(sortFn);
+  }, [data, sortBy]);
 
   if (!data || chartData.length === 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
-          No suite data available
+          No suite data available for selected drafts
         </CardContent>
       </Card>
     );
@@ -347,6 +374,26 @@ function SuiteChart({ data }) {
 
   return (
     <div className="space-y-4">
+      {/* Sort Controls */}
+      <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border">
+        <span className="text-sm text-muted-foreground">
+          {chartData.length} suite{chartData.length !== 1 ? 's' : ''}
+        </span>
+        <div className="flex items-center gap-2">
+          <label htmlFor="sort-by" className="text-sm font-medium">Sort by:</label>
+          <select
+            id="sort-by"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="text-sm px-3 py-1.5 rounded-md bg-background border border-input focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {Object.entries(SORT_OPTIONS).map(([key, option]) => (
+              <option key={key} value={key}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {chartData.map((suite) => (
         <SuiteCard key={suite.key} data={suite} />
       ))}
@@ -506,7 +553,7 @@ function DetailsTable({ data }) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
-          No detailed data available
+          No detailed data available for selected drafts
         </CardContent>
       </Card>
     );
@@ -688,6 +735,7 @@ function formatDraftName(name) {
 // ==================== EXPORTS ====================
 
 export {
+  DraftFilter,
   OverviewChart,
   SuiteChart,
   DetailsTable,

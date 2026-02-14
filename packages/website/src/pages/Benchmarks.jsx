@@ -5,7 +5,8 @@ import {
   OverviewChart, 
   SuiteChart, 
   DetailsTable,
-  MetricsCard 
+  MetricsCard,
+  DraftFilter
 } from '@components/charts/BenchmarkChart';
 import { Card, CardHeader, CardTitle, CardContent } from '@components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@components/ui/tabs';
@@ -27,15 +28,114 @@ import { formatDuration } from '@lib/utils';
 function Benchmarks() {
   const { data, loading } = useBenchmarkData();
   const [activeTab, setActiveTab] = useState('overview');
+  const [selectedDrafts, setSelectedDrafts] = useState(new Set());
 
-  // Get summary data
-  const summary = useMemo(() => {
-    return data?.summary || {};
+  // Get all available draft keys
+  const draftKeys = useMemo(() => {
+    if (!data?.byDraft) return [];
+    return Object.keys(data.byDraft);
   }, [data]);
+
+  // Initialize selected drafts when data loads
+  useMemo(() => {
+    if (draftKeys.length > 0 && selectedDrafts.size === 0) {
+      setSelectedDrafts(new Set(draftKeys));
+    }
+  }, [draftKeys, selectedDrafts.size]);
+
+  // Filter data based on selected drafts
+  const filteredData = useMemo(() => {
+    if (!data || selectedDrafts.size === 0) return null;
+
+    // Filter byDraft
+    const filteredByDraft = {};
+    for (const key of selectedDrafts) {
+      if (data.byDraft?.[key]) {
+        filteredByDraft[key] = data.byDraft[key];
+      }
+    }
+
+    // Filter bySuite - only include suites that belong to selected drafts
+    const filteredBySuite = {};
+    for (const [key, suite] of Object.entries(data.bySuite || {})) {
+      // Check if this suite's draft is selected
+      if (selectedDrafts.has(suite.draft)) {
+        filteredBySuite[key] = suite;
+      }
+    }
+
+    // Filter byDetails - only include details that belong to selected drafts
+    const filteredByDetails = (data.byDetails || []).filter(
+      detail => selectedDrafts.has(detail.draft)
+    );
+
+    // Filter slowestTests
+    const filteredSlowestTests = (data.slowestTests || []).filter(
+      test => selectedDrafts.has(test.draft)
+    );
+
+    // Recalculate summary based on filtered data
+    const summary = {
+      totalTests: 0,
+      validTests: 0,
+      totalWithErrors: 0,
+      totalWithoutErrors: 0,
+      jarenTotalTime: 0,
+      ajvTotalTime: 0,
+      jarenSuccessTime: 0,
+      ajvSuccessTime: 0,
+      jarenErrors: 0,
+      ajvErrors: 0,
+      jarenFailures: 0,
+      ajvFailures: 0,
+      jarenFaster: 0,
+    };
+
+    for (const draft of Object.values(filteredByDraft)) {
+      summary.totalTests += draft.totalTests;
+      summary.validTests += draft.validTests;
+      summary.totalWithErrors += draft.testsWithErrors;
+      summary.totalWithoutErrors += draft.totalTests - draft.testsWithErrors;
+      summary.jarenTotalTime += draft.jarenTotalTime;
+      summary.ajvTotalTime += draft.ajvTotalTime;
+      summary.jarenSuccessTime += draft.jarenSuccessTime;
+      summary.ajvSuccessTime += draft.ajvSuccessTime;
+      summary.jarenErrors += draft.jarenErrors;
+      summary.ajvErrors += draft.ajvErrors;
+      summary.jarenFailures += draft.jarenFailures;
+      summary.ajvFailures += draft.ajvFailures;
+    }
+
+    // Count jarenFaster from filtered details
+    for (const detail of filteredByDetails) {
+      if (detail.ratio > 1) {
+        summary.jarenFaster++;
+      }
+    }
+
+    // Calculate average ratio
+    summary.averageRatio = filteredByDetails.length > 0
+      ? (filteredByDetails.reduce((sum, d) => sum + d.ratio, 0) / filteredByDetails.length).toFixed(2)
+      : '0.00';
+
+    return {
+      ...data,
+      byDraft: filteredByDraft,
+      bySuite: filteredBySuite,
+      byDetails: filteredByDetails,
+      slowestTests: filteredSlowestTests,
+      summary,
+    };
+  }, [data, selectedDrafts]);
+
+  // Get summary data from filtered data
+  const summary = useMemo(() => {
+    return filteredData?.summary || {};
+  }, [filteredData]);
 
   // Get header stats based on active tab
   const headerStats = useMemo(() => {
-    if (!data) return null;
+    if (!filteredData) return null;
 
     const statsConfig = {
       overview: {
@@ -78,7 +178,7 @@ function Benchmarks() {
         stats: [
           { 
             title: 'Total Suites', 
-            value: Object.keys(data.bySuite || {}).length, 
+            value: Object.keys(filteredData.bySuite || {}).length, 
             subtitle: 'test files',
             icon: FileJson 
           },
@@ -136,7 +236,7 @@ function Benchmarks() {
     };
 
     return statsConfig[activeTab] || null;
-  }, [activeTab, data, summary]);
+  }, [activeTab, filteredData, summary]);
 
   if (loading) {
     return (
@@ -171,6 +271,17 @@ function Benchmarks() {
           </p>
         </div>
 
+        {/* Draft Filter - Moved to top */}
+        {data?.byDraft && (
+          <div className="mb-6">
+            <DraftFilter
+              data={data}
+              selectedDrafts={selectedDrafts}
+              onSelectionChange={setSelectedDrafts}
+            />
+          </div>
+        )}
+
         {/* Dynamic Header Cards */}
         {headerStats && (
           <div className="mb-6">
@@ -196,7 +307,7 @@ function Benchmarks() {
 
           <TabsContent value="overview" className="space-y-6">
             <div className="grid lg:grid-cols-2 gap-6">
-              <OverviewChart data={data} />
+              <OverviewChart data={filteredData} />
 
               {/* Performance Insights */}
               <Card>
@@ -232,11 +343,11 @@ function Benchmarks() {
                     </p>
                   </div>
 
-                  {data?.slowestTests && data.slowestTests.length > 0 && (
+                  {filteredData?.slowestTests && filteredData.slowestTests.length > 0 && (
                     <div className="space-y-2">
                       <h4 className="font-medium">Areas for Improvement</h4>
                       <div className="space-y-1">
-                        {data.slowestTests.slice(0, 3).map((test, i) => (
+                        {filteredData.slowestTests.slice(0, 3).map((test, i) => (
                           <div key={i} className="flex items-center justify-between text-sm">
                             <span className="truncate max-w-[200px]" title={test.name}>
                               {test.name}
@@ -253,11 +364,11 @@ function Benchmarks() {
           </TabsContent>
 
           <TabsContent value="suites" className="space-y-6">
-            <SuiteChart data={data} />
+            <SuiteChart data={filteredData} />
           </TabsContent>
 
           <TabsContent value="details">
-            <DetailsTable data={data} />
+            <DetailsTable data={filteredData} />
           </TabsContent>
         </Tabs>
       </Container>

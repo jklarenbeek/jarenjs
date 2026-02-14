@@ -128,9 +128,16 @@ function groupBySuite(results) {
   const bySuite = {};
   for (const [suite, suiteResults] of Object.entries(groups)) {
     const validResults = suiteResults.filter(r => !r.hasError);
+    
+    // Get all unique drafts for this suite
+    const drafts = [...new Set(suiteResults.map(r => r.draft).filter(Boolean))];
+    // Use the first draft as primary (most suites belong to a single draft)
+    const primaryDraft = drafts[0] || 'unknown';
 
     bySuite[suite] = {
       name: suite.replace(/^\//, ''),
+      draft: primaryDraft,
+      drafts: drafts,
       totalTests: suiteResults.length,
       validTests: validResults.length,
       testsWithErrors: suiteResults.length - validResults.length,
