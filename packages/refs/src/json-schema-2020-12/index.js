@@ -7,7 +7,8 @@ const draft2020 = [
   draft.unevaluated,
   draft.content,
   draft.core,
-  draft.format,
+  draft.formatAnnotation,
+  draft.formatAssertion,
   draft.metadata,
   draft.validation,
 ];

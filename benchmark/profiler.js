@@ -2,9 +2,9 @@
 
 /**
  * JarenJS Performance Profiler
- * 
+ *
  * Profiles Jaren vs AJV performance on JSON Schema Test Suite tests.
- * 
+ *
  * Usage:
  *   node benchmark/profiler.js '/string.json' --profile
  *   node benchmark/profiler.js '/string.json' --profile --iterations 5000
@@ -21,41 +21,110 @@ import * as ajv from './adaptors/ajv.js';
 import * as jaren from './adaptors/jaren.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { glob } from 'glob';
 
 const DEFAULT_TEST_DRAFT = 'draft7';
 const DEFAULT_ITERATIONS = 1000;
 const WARMUP_ITERATIONS = 100;
-
-// Supported draft versions
-const SUPPORTED_DRAFTS = ['draft6', 'draft7', 'draft2019-09', '2019', 'draft2020-12', '2020'];
-
-// Map draft aliases to test suite folder names
-const DRAFT_FOLDER_MAP = {
-  'draft6': 'draft6',
-  'draft7': 'draft7',
-  'draft2019-09': 'draft2019-09',
-  '2019': 'draft2019-09',
-  'draft2020-12': 'draft2020-12',
-  '2020': 'draft2020-12',
-};
+const TEST_SUITE_DIR = './benchmark/suite/tests';
 
 // Map draft aliases to schema draft names (for Jaren)
 const DRAFT_SCHEMA_MAP = {
   'draft6': 'draft6',
   'draft7': 'draft7',
   'draft2019-09': 'draft2019-09',
-  '2019': '2019',
+  '2019': 'draft2019-09',
   'draft2020-12': 'draft2020-12',
-  '2020': '2020',
+  '2020': 'draft2020-12',
+  'latest': 'latest',
+  'draft-next': 'draft-next',
 };
+
+// Cache for discovered drafts
+let discoveredDraftsCache = null;
+
+/**
+ * Discover available test suites from the benchmark/suite/tests folder
+ * @returns {Object} Object with draft folder names as keys and info as values
+ */
+async function discoverAvailableDrafts() {
+  if (discoveredDraftsCache) {
+    return discoveredDraftsCache;
+  }
+
+  const drafts = {};
+
+  try {
+    const entries = await fs.promises.readdir(TEST_SUITE_DIR, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const folderName = entry.name;
+        drafts[folderName] = {
+          folder: folderName,
+          isSymlink: false,
+        };
+      } else if (entry.isSymbolicLink()) {
+        // Handle symlinks like 'latest'
+        const linkPath = path.join(TEST_SUITE_DIR, entry.name);
+        try {
+          const target = await fs.promises.readlink(linkPath);
+          const targetName = path.basename(target);
+          drafts[entry.name] = {
+            folder: entry.name,
+            isSymlink: true,
+            target: targetName,
+          };
+        } catch (e) {
+          // Ignore broken symlinks
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`Error discovering drafts from ${TEST_SUITE_DIR}:`, e.message);
+  }
+
+  discoveredDraftsCache = drafts;
+  return drafts;
+}
+
+/**
+ * Get list of supported draft names including discovered ones
+ * @returns {string[]} Array of supported draft names
+ */
+async function getSupportedDrafts() {
+  const available = await discoverAvailableDrafts();
+  const folderNames = Object.keys(available);
+
+  // Combine with known aliases
+  const allDrafts = new Set([
+    ...folderNames,
+    ...Object.keys(DRAFT_SCHEMA_MAP),
+  ]);
+
+  return Array.from(allDrafts).sort();
+}
 
 /**
  * Get the test suite folder name for a draft alias
  * @param {string} draft - Draft alias
- * @returns {string} Test suite folder name
+ * @param {Object} availableDrafts - Available drafts from discoverAvailableDrafts
+ * @returns {string|null} Test suite folder name or null if not found
  */
-function getDraftFolder(draft) {
-  return DRAFT_FOLDER_MAP[draft] || draft;
+function getDraftFolder(draft, availableDrafts) {
+  // First check if it's a direct folder name
+  if (availableDrafts[draft]) {
+    return availableDrafts[draft].folder;
+  }
+
+  // Check if it's a known alias
+  const mapped = DRAFT_SCHEMA_MAP[draft];
+  if (mapped && availableDrafts[mapped]) {
+    return availableDrafts[mapped].folder;
+  }
+
+  // Try the draft name as-is
+  return draft;
 }
 
 /**
@@ -65,6 +134,18 @@ function getDraftFolder(draft) {
  */
 function getSchemaDraft(draft) {
   return DRAFT_SCHEMA_MAP[draft] || draft;
+}
+
+/**
+ * Check if a draft is valid/supported
+ * @param {string} draft - Draft name to check
+ * @param {Object} availableDrafts - Available drafts from discoverAvailableDrafts
+ * @returns {boolean} True if valid
+ */
+function isValidDraft(draft, availableDrafts) {
+  if (availableDrafts[draft]) return true;
+  if (DRAFT_SCHEMA_MAP[draft] && availableDrafts[DRAFT_SCHEMA_MAP[draft]]) return true;
+  return false;
 }
 
 /**
@@ -78,7 +159,7 @@ function parseDrafts(draftArg) {
 }
 
 // Parse command line arguments
-function parseArgs() {
+async function parseArgs() {
   const args = process.argv.slice(2);
   const options = {
     targetFile: null,
@@ -95,7 +176,7 @@ function parseArgs() {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === '--profile') {
       options.profile = true;
     } else if (arg === '--profile-all') {
@@ -149,6 +230,8 @@ function profileTest(test, iterations, draft, remotes, successOnly = false) {
       description: test.description,
       jarenError: jarenResult.error || null,
       ajvError: ajvResult.error || null,
+      jarenFailures: 0,
+      ajvFailures: 0,
     };
   }
 
@@ -158,8 +241,18 @@ function profileTest(test, iterations, draft, remotes, successOnly = false) {
       description: test.description,
       jarenError: jarenResult.failures > 0 ? `Failed ${jarenResult.failures} assertions` : null,
       ajvError: ajvResult.failures > 0 ? `Failed ${ajvResult.failures} assertions` : null,
+      jarenFailures: jarenResult.failures,
+      ajvFailures: ajvResult.failures,
     };
   }
+
+  // Determine if this is a "success" test (no failures and no errors)
+  const isSuccessTest = jarenResult.failures === 0 && ajvResult.failures === 0 &&
+                        !jarenResult.error && !ajvResult.error;
+
+  // Track failures for display
+  const jarenFailures = jarenResult.failures;
+  const ajvFailures = ajvResult.failures;
 
   // Warmup phase - run a few iterations to stabilize JIT
   const jarenInstance = jaren.loader(draft, remotes);
@@ -212,6 +305,9 @@ function profileTest(test, iterations, draft, remotes, successOnly = false) {
     diff,
     diffPercent,
     testCount: test.tests.length,
+    isSuccessTest,
+    jarenFailures,
+    ajvFailures,
   };
 }
 
@@ -227,7 +323,7 @@ function profileTest(test, iterations, draft, remotes, successOnly = false) {
  */
 function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = false) {
   const results = [];
-  
+
   for (const test of tests) {
     try {
       const profile = profileTest(test, iterations, draft, remotes, successOnly);
@@ -264,36 +360,84 @@ function formatTime(timeMs) {
   }
 }
 
+function padStart(text, targetWidth) {
+  const visualWidth = [...text].reduce((width, char) => {
+    const code = char.codePointAt(0);
+    // Emoji and wide characters typically take 2 cells
+    return width + (code > 0x1F000 ? 2 : 1);
+  }, 0);
+
+  const padding = Math.max(0, targetWidth - visualWidth);
+  return ' '.repeat(padding) + text;
+}
+
 /**
  * Print results to console in table format
  * @param {Array} results - Profiling results
  * @param {Object} options - Output options
  * @param {string} schemaDraft - The schema draft version
  * @param {string} folderDraft - The test suite folder name
+ * @param {Object} availableDrafts - Available drafts from discoverAvailableDrafts
  */
-function printConsoleTable(results, options, schemaDraft, folderDraft) {
+function printConsoleTable(results, options, schemaDraft, folderDraft, availableDrafts) {
   // Filter out errors and sort by ratio (slowest first)
   const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
 
-  // Limit to top N if specified
-  const displayResults = options.topN ? sortedResults.slice(0, options.topN) : sortedResults;
+  // Calculate success-only stats
+  const successResults = validResults.filter(r => r.isSuccessTest);
+
+  // Calculate failure/error counts per engine
+  const errorResults = results.filter(r => r.error || r.jarenError || r.ajvError);
+  const jarenErrors = errorResults.filter(r => r.jarenError).length;
+  const ajvErrors = errorResults.filter(r => r.ajvError).length;
+  const jarenFailures = validResults.filter(r => r.jarenFailures > 0).length;
+  const ajvFailures = validResults.filter(r => r.ajvFailures > 0).length;
+
+  // Combine all results for display (valid + errors), sorted by ratio
+  const allDisplayResults = [...results].sort((a, b) => {
+    // Put error results at the end
+    const aValid = !a.error && !a.jarenError && !a.ajvError;
+    const bValid = !b.error && !b.ajvError && !b.ajvError;
+    if (!aValid && bValid) return 1;
+    if (aValid && !bValid) return -1;
+    // Both valid, sort by ratio
+    if (aValid && bValid) return (b.ratio || 0) - (a.ratio || 0);
+    return 0;
+  });
+
+  // Limit to top N if specified (but include errors)
+  let displayResults;
+  if (options.topN) {
+    const validCount = validResults.length;
+    const topValid = sortedResults.slice(0, options.topN);
+    displayResults = [...topValid, ...errorResults];
+  } else {
+    displayResults = allDisplayResults;
+  }
 
   // Print summary
   console.log('\n' + '='.repeat(100));
   console.log('PERFORMANCE PROFILE SUMMARY');
   console.log('='.repeat(100));
   console.log(`Draft version: ${schemaDraft} (folder: ${folderDraft})`);
-  console.log(`Total tests profiled: ${validResults.length}`);
+  console.log(`Total tests profiled: ${results.length}`);
+  console.log(`  Valid tests: ${validResults.length}`);
+  console.log(`  Tests with errors: ${errorResults.length}`);
+  console.log(`Success tests (no failures/errors): ${successResults.length}`);
   console.log(`Iterations per test: ${options.iterations}`);
-  console.log(`Tests with errors: ${results.length - validResults.length}`);
-  
+
+  // Engine-specific failure/error counts
+  console.log(`\nEngine Results:`);
+  console.log(`  Jaren: ${results.length - jarenErrors - jarenFailures} passed, ${jarenFailures} failed, ${jarenErrors} errors`);
+  console.log(`  AJV:   ${results.length - ajvErrors - ajvFailures} passed, ${ajvFailures} failed, ${ajvErrors} errors`);
+
   if (validResults.length === 0) {
     console.log('\nNo valid results to display.');
     return;
   }
 
-  // Calculate aggregate statistics
+  // Calculate aggregate statistics (for valid results only)
   const avgRatio = validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length;
   const minRatio = Math.min(...validResults.map(r => r.ratio));
   const maxRatio = Math.max(...validResults.map(r => r.ratio));
@@ -301,66 +445,112 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
   const tied = validResults.filter(r => r.ratio === 1.0).length;
   const ajvWins = validResults.filter(r => r.ratio > 1.0).length;
 
-  console.log(`\nAggregate Statistics:`);
+  console.log(`\nAggregate Statistics (Valid Tests):`);
   console.log(`  Average Ratio: ${avgRatio.toFixed(2)}x`);
   console.log(`  Min Ratio: ${minRatio.toFixed(2)}x`);
   console.log(`  Max Ratio: ${maxRatio.toFixed(2)}x`);
   console.log(`  Jaren faster: ${jarenWins} tests`);
   console.log(`  Tied: ${tied} tests`);
   console.log(`  AJV faster: ${ajvWins} tests`);
+
+  // Calculate success-only statistics
+  if (successResults.length > 0) {
+    const successAvgRatio = successResults.reduce((sum, r) => sum + r.ratio, 0) / successResults.length;
+    const successMinRatio = Math.min(...successResults.map(r => r.ratio));
+    const successMaxRatio = Math.max(...successResults.map(r => r.ratio));
+    const successJarenWins = successResults.filter(r => r.ratio < 1.0).length;
+    const successTied = successResults.filter(r => r.ratio === 1.0).length;
+    const successAjvWins = successResults.filter(r => r.ratio > 1.0).length;
+
+    console.log(`\nSuccess Tests Only (no failures/errors):`);
+    console.log(`  Count: ${successResults.length} tests`);
+    console.log(`  Average Ratio: ${successAvgRatio.toFixed(2)}x`);
+    console.log(`  Min Ratio: ${successMinRatio.toFixed(2)}x`);
+    console.log(`  Max Ratio: ${successMaxRatio.toFixed(2)}x`);
+    console.log(`  Jaren faster: ${successJarenWins} tests`);
+    console.log(`  Tied: ${successTied} tests`);
+    console.log(`  AJV faster: ${successAjvWins} tests`);
+  }
+
   console.log('');
 
   // Print detailed results
   console.log('='.repeat(100));
-  console.log('DETAILED RESULTS (sorted by ratio, slowest first)');
+  console.log('DETAILED RESULTS (sorted by ratio, slowest first; ❌ indicates failure/error)');
   console.log('='.repeat(100));
 
   // Print header
   const suiteWidth = 25;
   const descWidth = 40;
+  const timeWidth = 12;  // Increased to accommodate ❌ prefix (3 chars: ❌ + space)
+  const ratioWidth = 10; // Increased to accommodate indicator + ratio
   console.log(
     `${'Suite'.padEnd(suiteWidth)} | ` +
     `${'Test Description'.padEnd(descWidth)} | ` +
-    `${'Jaren'.padStart(10)} | ` +
-    `${'AJV'.padStart(10)} | ` +
-    `${'Ratio'.padStart(8)} | ` +
+    `${'Jaren'.padStart(timeWidth)} | ` +
+    `${'AJV'.padStart(timeWidth)} | ` +
+    `${'Ratio'.padStart(ratioWidth)} | ` +
     `${'Diff'.padStart(10)}`
   );
-  console.log('-'.repeat(115));
+  console.log('-'.repeat(123));
 
   // Print rows
   for (const r of displayResults) {
-    const suite = r.suite.length > suiteWidth - 3 
+    const suite = r.suite.length > suiteWidth - 3
       ? r.suite.substring(0, suiteWidth - 3) + '...'
       : r.suite;
-    const desc = r.description.length > descWidth - 3 
+    const desc = r.description.length > descWidth - 3
       ? r.description.substring(0, descWidth - 3) + '...'
       : r.description;
-    
-    const ratioStr = r.ratio.toFixed(2) + 'x';
-    const ratioIndicator = r.ratio < 1.0 ? '✓' : r.ratio > 2.0 ? '⚠' : ' ';
-    
-    console.log(
-      `${suite.padEnd(suiteWidth)} | ` +
-      `${desc.padEnd(descWidth)} | ` +
-      `${formatTime(r.jarenTime).padStart(10)} | ` +
-      `${formatTime(r.ajvTime).padStart(10)} | ` +
-      `${ratioIndicator} ${ratioStr.padStart(6)} | ` +
-      `${(r.diff > 0 ? '+' : '') + formatTime(r.diff).padStart(8)}`
-    );
-  }
 
-  // Print errors if any
-  const errorResults = results.filter(r => r.error || r.jarenError || r.ajvError);
-  if (errorResults.length > 0) {
-    console.log('\n' + '='.repeat(100));
-    console.log('ERRORS');
-    console.log('='.repeat(100));
-    for (const r of errorResults) {
-      console.log(`\n${r.suite} - ${r.description}:`);
-      if (r.error) console.log(`  Profile error: ${r.error}`);
-      if (r.jarenError) console.log(`  Jaren error: ${r.jarenError}`);
-      if (r.ajvError) console.log(`  AJV error: ${r.ajvError}`);
+    // Check for errors or failures
+    const hasJarenError = r.jarenError || r.error;
+    const hasAjvError = r.ajvError;
+    const hasJarenFailure = r.jarenFailures > 0;
+    const hasAjvFailure = r.ajvFailures > 0;
+
+    // Format time with ❌ indicator if error or failure
+    let jarenTimeStr;
+    if (hasJarenError) {
+      jarenTimeStr = padStart('❌ Error', timeWidth);
+    } else if (hasJarenFailure) {
+      jarenTimeStr = padStart(`❌ ${formatTime(r.jarenTime || 0)}`, timeWidth);
+    } else {
+      jarenTimeStr = padStart(formatTime(r.jarenTime || 0), timeWidth);
+    }
+
+    let ajvTimeStr;
+    if (hasAjvError) {
+      ajvTimeStr = padStart('❌ Error', timeWidth);
+    } else if (hasAjvFailure) {
+      ajvTimeStr = padStart(`❌ ${formatTime(r.ajvTime || 0)}`, timeWidth);
+    } else {
+      ajvTimeStr = padStart(formatTime(r.ajvTime || 0), timeWidth);
+    }
+
+    // For error rows, don't show ratio/diff
+    if (hasJarenError || hasAjvError) {
+      console.log(
+        `${suite.padEnd(suiteWidth)} | ` +
+        `${desc.padEnd(descWidth)} | ` +
+        `${jarenTimeStr.padStart(timeWidth)} | ` +
+        `${ajvTimeStr.padStart(timeWidth)} | ` +
+        `${'-'.padStart(ratioWidth)} | ` +
+        `${'-'.padStart(10)}`
+      );
+    } else {
+      const ratioStr = r.ratio.toFixed(2) + 'x';
+      const ratioIndicator = r.ratio < 1.0 ? '✓' : r.ratio > 2.0 ? '⚠' : ' ';
+      const ratioCol = `${ratioIndicator} ${ratioStr.padStart(6)}`.padStart(ratioWidth);
+
+      console.log(
+        `${suite.padEnd(suiteWidth)} | ` +
+        `${desc.padEnd(descWidth)} | ` +
+        `${jarenTimeStr.padStart(timeWidth)} | ` +
+        `${ajvTimeStr.padStart(timeWidth)} | ` +
+        `${ratioCol} | ` +
+        `${(r.diff > 0 ? '+' : '') + formatTime(r.diff).padStart(8)}`
+      );
     }
   }
 
@@ -376,10 +566,10 @@ function exportCsv(results, outputPath) {
   const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
 
-  let csv = 'Suite,Description,Assertions,Jaren Time (ms),Jaren Total (ms),AJV Time (ms),AJV Total (ms),Ratio,Diff (ms),Diff (%),Assertions/Iter\n';
-  
+  let csv = 'Suite,Description,Assertions,Jaren Time (ms),Jaren Total (ms),AJV Time (ms),AJV Total (ms),Ratio,Diff (ms),Diff (%),Assertions/Iter,IsSuccessTest\n';
+
   for (const r of sortedResults) {
-    csv += `"${r.suite}","${r.description.replace(/"/g, '""')}",${r.assertions},${r.jarenTime},${r.jarenTotal},${r.ajvTime},${r.ajvTotal},${r.ratio},${r.diff},${r.diffPercent},${r.testCount}\n`;
+    csv += `"${r.suite}","${r.description.replace(/"/g, '""')}",${r.assertions},${r.jarenTime},${r.jarenTotal},${r.ajvTime},${r.ajvTotal},${r.ratio},${r.diff},${r.diffPercent},${r.testCount},${r.isSuccessTest ? 'true' : 'false'}\n`;
   }
 
   fs.writeFileSync(outputPath, csv);
@@ -391,11 +581,14 @@ function exportCsv(results, outputPath) {
  * @param {Array} results - Profiling results
  * @param {string} outputPath - Output file path
  * @param {Object} options - Options for metadata
+ * @param {Object} availableDrafts - Available drafts info
  */
-function exportJson(results, outputPath, options) {
+function exportJson(results, outputPath, options, availableDrafts) {
   const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
-  
+
+  const successResults = validResults.filter(r => r.isSuccessTest);
+
   const output = {
     metadata: {
       timestamp: new Date().toISOString(),
@@ -403,15 +596,26 @@ function exportJson(results, outputPath, options) {
       warmupIterations: WARMUP_ITERATIONS,
       totalTests: results.length,
       validTests: validResults.length,
+      successTests: successResults.length,
       drafts: options.drafts,
     },
     summary: {
-      avgRatio: validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length,
-      minRatio: Math.min(...validResults.map(r => r.ratio)),
-      maxRatio: Math.max(...validResults.map(r => r.ratio)),
-      jarenWins: validResults.filter(r => r.ratio < 1.0).length,
-      tied: validResults.filter(r => r.ratio === 1.0).length,
-      ajvWins: validResults.filter(r => r.ratio > 1.0).length,
+      all: {
+        avgRatio: validResults.length > 0 ? validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length : 0,
+        minRatio: validResults.length > 0 ? Math.min(...validResults.map(r => r.ratio)) : 0,
+        maxRatio: validResults.length > 0 ? Math.max(...validResults.map(r => r.ratio)) : 0,
+        jarenWins: validResults.filter(r => r.ratio < 1.0).length,
+        tied: validResults.filter(r => r.ratio === 1.0).length,
+        ajvWins: validResults.filter(r => r.ratio > 1.0).length,
+      },
+      successOnly: successResults.length > 0 ? {
+        avgRatio: successResults.reduce((sum, r) => sum + r.ratio, 0) / successResults.length,
+        minRatio: Math.min(...successResults.map(r => r.ratio)),
+        maxRatio: Math.max(...successResults.map(r => r.ratio)),
+        jarenWins: successResults.filter(r => r.ratio < 1.0).length,
+        tied: successResults.filter(r => r.ratio === 1.0).length,
+        ajvWins: successResults.filter(r => r.ratio > 1.0).length,
+      } : null,
     },
     results: sortedResults,
     errors: results.filter(r => r.error || r.jarenError || r.ajvError),
@@ -425,11 +629,17 @@ function exportJson(results, outputPath, options) {
  * Profile a single draft version
  * @param {string} draft - Draft version to profile
  * @param {Object} options - Profiling options
+ * @param {Object} availableDrafts - Available drafts from discoverAvailableDrafts
  * @returns {Array} Results for this draft
  */
-async function profileDraft(draft, options) {
+async function profileDraft(draft, options, availableDrafts) {
   const schemaDraft = getSchemaDraft(draft);
-  const folderDraft = getDraftFolder(draft);
+  const folderDraft = getDraftFolder(draft, availableDrafts);
+
+  if (!folderDraft) {
+    console.error(`Draft '${draft}' not found in available test suites.`);
+    return [];
+  }
 
   // Load tests
   const allTests = await loadTestSuiteJson(folderDraft);
@@ -450,7 +660,7 @@ async function profileDraft(draft, options) {
       const suiteResults = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
       results.push(...suiteResults);
       completedSuites++;
-      
+
       if (!options.verbose) {
         process.stdout.write(`\r  Progress: ${completedSuites}/${suiteKeys.length} suites completed`);
       }
@@ -458,7 +668,7 @@ async function profileDraft(draft, options) {
     console.log('');
   } else if (options.profile && options.targetFile) {
     const fileKey = options.targetFile.startsWith('/') ? options.targetFile : '/' + options.targetFile;
-    
+
     if (!allTests[fileKey]) {
       console.error(`Test file '${fileKey}' not found.`);
       console.log('Available test files:');
@@ -477,13 +687,16 @@ async function profileDraft(draft, options) {
  * Main profiling function
  */
 async function main() {
-  const options = parseArgs();
+  const options = await parseArgs();
+  const availableDrafts = await discoverAvailableDrafts();
+  const supportedDrafts = await getSupportedDrafts();
 
   // Validate draft options
-  const invalidDrafts = options.drafts.filter(d => !SUPPORTED_DRAFTS.includes(d));
+  const invalidDrafts = options.drafts.filter(d => !isValidDraft(d, availableDrafts));
   if (invalidDrafts.length > 0) {
     console.error(`Error: Unsupported draft(s): ${invalidDrafts.join(', ')}`);
-    console.error(`Supported drafts: ${SUPPORTED_DRAFTS.join(', ')}`);
+    console.error(`Available test suites: ${Object.keys(availableDrafts).join(', ')}`);
+    console.error(`Supported aliases: ${Object.keys(DRAFT_SCHEMA_MAP).join(', ')}`);
     process.exit(1);
   }
 
@@ -504,8 +717,9 @@ async function main() {
     console.log('  --iterations, -i N     Number of iterations (default: 1000)');
     console.log('  --output, -o FORMAT    Output format: console, csv, json (default: console)');
     console.log('  --draft, -d VERSION    JSON Schema draft version(s), comma-separated');
-    console.log('                         (default: draft7)');
-    console.log('                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020');
+    console.log(`                         (default: ${DEFAULT_TEST_DRAFT})`);
+    console.log(`                         Available: ${Object.keys(availableDrafts).join(', ')}`);
+    console.log(`                         Aliases: ${Object.keys(DRAFT_SCHEMA_MAP).join(', ')}`);
     console.log('  --filepath, -f PATH    Output file path (for csv/json output)');
     console.log('                         Default: benchmark/results/profile-{timestamp}.{ext}');
     console.log('  --top N                Show only top N slowest tests');
@@ -516,13 +730,21 @@ async function main() {
 
   // Profile all specified drafts
   const allResults = [];
-  
+
   for (const draft of options.drafts) {
-    const draftResults = await profileDraft(draft, options);
+    const draftResults = await profileDraft(draft, options, availableDrafts);
+
+    // For console output, print immediately per draft
+    if (options.output === 'console') {
+      const schemaDraft = getSchemaDraft(draft);
+      const folderDraft = getDraftFolder(draft, availableDrafts);
+      printConsoleTable(draftResults, options, schemaDraft, folderDraft, availableDrafts);
+    }
+
     allResults.push(...draftResults);
   }
 
-  // Output results
+  // Output results (for non-console formats)
   if (options.output === 'csv') {
     let outputPath;
     if (options.filepath) {
@@ -558,13 +780,11 @@ async function main() {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       outputPath = path.join(outputDir, `profile-${timestamp}.json`);
     }
-    exportJson(allResults, outputPath, options);
+    exportJson(allResults, outputPath, options, availableDrafts);
   } else {
-    // Console output - just show summary for first draft to avoid too much output
-    printConsoleTable(allResults, options, options.drafts[0], getDraftFolder(options.drafts[0]));
-    
+    // Console output already printed per draft above
     if (options.drafts.length > 1) {
-      console.log(`\nTotal tests across ${options.drafts.length} drafts: ${allResults.length}`);
+      console.log(`\nTotal tests across ${options.drafts.length} drafts: ${allResults.filter(r => !r.error && !r.jarenError && !r.ajvError).length}`);
     }
   }
 }

@@ -18,8 +18,9 @@ export function loader(draft, remoteSchemas) {
     .addFormats(formats.dateTimeFormats);
 
   // Add meta-schema using addMetaSchema which properly processes internal refs
-  //jaren.addMetaSchema(meta.schema, meta.draft);
-  jaren.addSchema(meta.schema, meta.draft);
+  // This is necessary for drafts like 2019-09 and 2020-12 that have multiple meta-schemas
+  // We spread into a new array because addMetaSchema uses shift() which mutates the array
+  jaren.addMetaSchema([...meta.schema], meta.draft);
 
   for (const id in remoteSchemas) {
     let schemaId = id;
