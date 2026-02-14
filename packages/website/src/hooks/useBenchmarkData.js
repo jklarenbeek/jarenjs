@@ -11,18 +11,14 @@ export function useBenchmarkData() {
   useEffect(() => {
     async function loadBenchmarks() {
       try {
-        // Try to load the results.json file
         const response = await fetch('/jarenjs/results.json');
         if (!response.ok) {
-          // If file doesn't exist, use mock data for demo
           setData(getMockBenchmarkData());
-          setLoading(false);
           return;
         }
         const results = await response.json();
         setData(processBenchmarkData(results));
       } catch {
-        // Use mock data on error
         setData(getMockBenchmarkData());
       } finally {
         setLoading(false);
@@ -37,56 +33,59 @@ export function useBenchmarkData() {
 
 /**
  * Process raw benchmark data for visualization
- * @param {Object} raw - Raw benchmark results
+ * @param {Object} raw - Raw benchmark results from profiler.js
  * @returns {Object} - Processed data
  */
 function processBenchmarkData(raw) {
-  if (!raw || !raw.results) {
+  if (!raw?.results || !raw?.summary?.byDraft) {
     return getMockBenchmarkData();
   }
 
+  // Normalize results with consistent field names
   const results = raw.results.map(r => ({
     ...r,
-    // Determine errors and failures
-    jarenError: r.jarenError || null,
-    ajvError: r.ajvError || null,
-    jarenFailed: r.jarenFailed || r.jarenFailures > 0 || false,
-    ajvFailed: r.ajvFailed || r.ajvFailures > 0 || false,
-    // A test is "successful" if it has no errors
     hasError: !!(r.jarenError || r.ajvError),
+    jarenFailed: r.jarenFailures > 0,
+    ajvFailed: r.ajvFailures > 0,
   }));
 
-  const resultsWithErrors = results.filter(r => r.hasError);
-  const resultsWithoutErrors = results.filter(r => !r.hasError);
+  const validResults = results.filter(r => !r.hasError);
+  const errors = raw.errors || [];
 
-  // Calculate overall metrics
-  const overall = calculateMetrics(results, 'overall');
+  // Process byDraft from summary with timing data
+  const byDraft = {};
+  for (const [draft, stats] of Object.entries(raw.summary.byDraft)) {
+    byDraft[draft] = {
+      name: draft,
+      ...stats,
+      testsWithErrors: stats.totalTests - stats.validTests,
+      jarenFaster: stats.all.jarenWins,
+      ajvFaster: stats.all.ajvWins,
+      similar: stats.all.tied,
+      avgRatio: stats.all.avgRatio,
+    };
+  }
 
-  // Group by draft and calculate metrics
-  const byDraft = groupByDraft(results);
-
-  // Group by suite and calculate metrics
+  // Process bySuite
   const bySuite = groupBySuite(results);
 
-  // Get drafts from metadata or infer from results
-  const drafts = raw.metadata?.drafts || [...new Set(results.map(r => r.draft).filter(Boolean))];
+  // Calculate overall timing from summary
+  const overall = raw.summary.overall;
 
   return {
     summary: {
-      totalTests: results.length,
-      totalWithErrors: resultsWithErrors.length,
-      totalWithoutErrors: resultsWithoutErrors.length,
-      averageRatio: overall.avgRatio.toFixed(2),
-      jarenFaster: overall.jarenFaster,
-      ajvFaster: overall.ajvFaster,
-      similar: overall.similar,
-      drafts: drafts,
-      // Overall timing metrics
+      totalTests: raw.metadata.totalTests,
+      totalWithErrors: raw.metadata.totalTests - raw.metadata.validTests,
+      totalWithoutErrors: raw.metadata.validTests,
+      averageRatio: overall.all.avgRatio.toFixed(2),
+      jarenFaster: overall.all.jarenWins,
+      ajvFaster: overall.all.ajvWins,
+      similar: overall.all.tied,
+      drafts: raw.metadata.drafts,
       jarenTotalTime: overall.jarenTotalTime,
       ajvTotalTime: overall.ajvTotalTime,
       jarenSuccessTime: overall.jarenSuccessTime,
       ajvSuccessTime: overall.ajvSuccessTime,
-      // Error counts
       jarenErrors: overall.jarenErrors,
       ajvErrors: overall.ajvErrors,
       jarenFailures: overall.jarenFailures,
@@ -94,7 +93,6 @@ function processBenchmarkData(raw) {
     },
     byDraft,
     bySuite,
-    // Details sorted by time difference rate (ratio)
     byDetails: results
       .slice()
       .sort((a, b) => Math.abs(b.ratio - 1) - Math.abs(a.ratio - 1)),
@@ -107,94 +105,8 @@ function processBenchmarkData(raw) {
       .sort((a, b) => a.ratio - b.ratio)
       .slice(0, 10),
     allResults: results,
-    errors: resultsWithErrors,
+    errors,
   };
-}
-
-/**
- * Calculate metrics for a set of results
- * @param {Array} results - Benchmark results
- * @param {string} name - Name of the group
- * @returns {Object} - Calculated metrics
- */
-function calculateMetrics(results, name) {
-  const validResults = results.filter(r => !r.hasError);
-  const withErrors = results.filter(r => r.hasError);
-
-  // Timing calculations
-  const jarenTotalTime = results.reduce((sum, r) => sum + (r.jarenTotal || r.jarenTime || 0), 0);
-  const ajvTotalTime = results.reduce((sum, r) => sum + (r.ajvTotal || r.ajvTime || 0), 0);
-  
-  // Success-time: time for tests without errors
-  const jarenSuccessTime = validResults.reduce((sum, r) => sum + (r.jarenTotal || r.jarenTime || 0), 0);
-  const ajvSuccessTime = validResults.reduce((sum, r) => sum + (r.ajvTotal || r.ajvTime || 0), 0);
-
-  // Error/failure counts
-  const jarenErrors = withErrors.filter(r => r.jarenError).length;
-  const ajvErrors = withErrors.filter(r => r.ajvError).length;
-  const jarenFailures = results.filter(r => r.jarenFailed).length;
-  const ajvFailures = results.filter(r => r.ajvFailed).length;
-
-  // Performance metrics
-  const ratios = validResults.map(r => r.ratio);
-  const avgRatio = ratios.length > 0 
-    ? ratios.reduce((a, b) => a + b, 0) / ratios.length 
-    : 0;
-  
-  const jarenFaster = validResults.filter(r => r.ratio < 0.9).length;
-  const ajvFaster = validResults.filter(r => r.ratio > 1.1).length;
-  const similar = validResults.filter(r => r.ratio >= 0.9 && r.ratio <= 1.1).length;
-
-  return {
-    name,
-    totalTests: results.length,
-    validTests: validResults.length,
-    testsWithErrors: withErrors.length,
-    jarenTotalTime,
-    ajvTotalTime,
-    jarenSuccessTime,
-    ajvSuccessTime,
-    jarenErrors,
-    ajvErrors,
-    jarenFailures,
-    ajvFailures,
-    avgRatio,
-    jarenFaster,
-    ajvFaster,
-    similar,
-  };
-}
-
-/**
- * Group benchmark results by draft version
- * @param {Array} results - Benchmark results
- * @returns {Object} - Grouped results by draft with metrics
- */
-function groupByDraft(results) {
-  const groups = {};
-  
-  results.forEach(result => {
-    // Extract draft from suite or name
-    let draft = result.draft;
-    if (!draft && result.suite) {
-      const match = result.suite.match(/(draft\d+|draft\d{4}-\d{2})/);
-      draft = match ? match[1] : 'unknown';
-    }
-    if (!draft) draft = 'unknown';
-    
-    if (!groups[draft]) {
-      groups[draft] = [];
-    }
-    groups[draft].push(result);
-  });
-  
-  // Calculate metrics for each draft
-  const byDraft = {};
-  for (const [draft, draftResults] of Object.entries(groups)) {
-    byDraft[draft] = calculateMetrics(draftResults, draft);
-  }
-  
-  return byDraft;
 }
 
 /**
@@ -204,21 +116,38 @@ function groupByDraft(results) {
  */
 function groupBySuite(results) {
   const groups = {};
-  
-  results.forEach(result => {
-    const suite = result.suite || result.file || 'unknown';
+
+  for (const result of results) {
+    const suite = result.suite || 'unknown';
     if (!groups[suite]) {
       groups[suite] = [];
     }
     groups[suite].push(result);
-  });
-  
-  // Calculate metrics for each suite
+  }
+
   const bySuite = {};
   for (const [suite, suiteResults] of Object.entries(groups)) {
-    bySuite[suite] = calculateMetrics(suiteResults, suite);
+    const validResults = suiteResults.filter(r => !r.hasError);
+
+    bySuite[suite] = {
+      name: suite.replace(/^\//, ''),
+      totalTests: suiteResults.length,
+      validTests: validResults.length,
+      testsWithErrors: suiteResults.length - validResults.length,
+      jarenTotalTime: suiteResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0),
+      ajvTotalTime: suiteResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0),
+      jarenSuccessTime: validResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0),
+      ajvSuccessTime: validResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0),
+      jarenErrors: suiteResults.filter(r => r.jarenError).length,
+      ajvErrors: suiteResults.filter(r => r.ajvError).length,
+      jarenFailures: validResults.filter(r => r.jarenFailures > 0).length,
+      ajvFailures: validResults.filter(r => r.ajvFailures > 0).length,
+      avgRatio: validResults.length > 0
+        ? validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length
+        : 0,
+    };
   }
-  
+
   return bySuite;
 }
 
@@ -227,45 +156,133 @@ function groupBySuite(results) {
  * @returns {Object} - Mock benchmark data
  */
 function getMockBenchmarkData() {
-  // Generate mock results that look like real profiler output
   const drafts = ['draft7', 'draft2019-09', 'draft2020-12'];
   const suites = [
-    '/type.json', '/string.json', '/number.json', '/object.json', 
+    '/type.json', '/string.json', '/number.json', '/object.json',
     '/array.json', '/ref.json', '/logic.json', '/format.json'
   ];
   const allResults = [];
-  
-  drafts.forEach(draft => {
-    suites.forEach(suite => {
-      // Generate ~20 tests per suite per draft
+
+  for (const draft of drafts) {
+    for (const suite of suites) {
       for (let i = 0; i < 20; i++) {
-        const hasError = Math.random() < 0.05; // 5% error rate
-        const hasFailure = !hasError && Math.random() < 0.1; // 10% failure rate (of non-errors)
-        const ratio = 0.3 + Math.random() * 2.5; // Random ratio between 0.3 and 2.8
+        const ratio = 0.5 + Math.random() * 2;
         const jarenTime = 0.1 + Math.random() * 5;
-        const ajvTime = jarenTime * ratio;
-        
+
         allResults.push({
-          name: `${draft}_${suite.replace(/[^a-z]/g, '')}_test_${i}`,
           suite: `/${draft}${suite}`,
-          draft: draft,
+          draft,
           description: `Test case ${i} for ${suite}`,
-          ratio: ratio,
-          jarenTime: jarenTime,
+          ratio,
+          jarenTime,
           jarenTotal: jarenTime,
-          ajvTime: ajvTime,
-          ajvTotal: ajvTime,
-          jarenError: hasError && Math.random() < 0.5 ? 'Mock error' : null,
-          ajvError: hasError && Math.random() < 0.5 ? 'Mock error' : null,
-          jarenFailed: hasFailure,
-          ajvFailed: hasFailure && Math.random() < 0.5,
+          ajvTime: jarenTime * ratio,
+          ajvTotal: jarenTime * ratio,
+          jarenError: null,
+          ajvError: null,
+          jarenFailures: 0,
+          ajvFailures: 0,
+          jarenFailed: false,
+          ajvFailed: false,
+          hasError: false,
+          isSuccessTest: true,
           testCount: 1,
           assertions: Math.floor(Math.random() * 5) + 1,
         });
       }
-    });
+    }
+  }
+
+  return processBenchmarkData({
+    results: allResults,
+    errors: [],
+    metadata: { drafts, totalTests: allResults.length, validTests: allResults.length, successTests: allResults.length },
+    summary: {
+      overall: {
+        jarenTotalTime: allResults.reduce((s, r) => s + r.jarenTotal, 0),
+        ajvTotalTime: allResults.reduce((s, r) => s + r.ajvTotal, 0),
+        jarenSuccessTime: allResults.reduce((s, r) => s + r.jarenTotal, 0),
+        ajvSuccessTime: allResults.reduce((s, r) => s + r.ajvTotal, 0),
+        jarenErrors: 0,
+        ajvErrors: 0,
+        jarenFailures: 0,
+        ajvFailures: 0,
+        all: {
+          avgRatio: 1.2,
+          minRatio: 0.5,
+          maxRatio: 2.5,
+          jarenWins: 300,
+          tied: 50,
+          ajvWins: 150,
+        },
+        successOnly: {
+          avgRatio: 1.1,
+          minRatio: 0.5,
+          maxRatio: 2.0,
+          jarenWins: 280,
+          tied: 50,
+          ajvWins: 120,
+        },
+      },
+      byDraft: {
+        draft7: {
+          totalTests: 160,
+          validTests: 160,
+          successTests: 160,
+          jarenTotalTime: 400,
+          ajvTotalTime: 480,
+          jarenSuccessTime: 400,
+          ajvSuccessTime: 480,
+          jarenErrors: 0,
+          ajvErrors: 0,
+          jarenFailures: 0,
+          ajvFailures: 0,
+          all: { avgRatio: 1.2, minRatio: 0.5, maxRatio: 2.5, jarenWins: 100, tied: 20, ajvWins: 40 },
+          successOnly: { avgRatio: 1.1, minRatio: 0.5, maxRatio: 2.0, jarenWins: 95, tied: 20, ajvWins: 30 },
+        },
+        'draft2019-09': {
+          totalTests: 160,
+          validTests: 160,
+          successTests: 160,
+          jarenTotalTime: 400,
+          ajvTotalTime: 480,
+          jarenSuccessTime: 400,
+          ajvSuccessTime: 480,
+          jarenErrors: 0,
+          ajvErrors: 0,
+          jarenFailures: 0,
+          ajvFailures: 0,
+          all: { avgRatio: 1.15, minRatio: 0.6, maxRatio: 2.3, jarenWins: 100, tied: 15, ajvWins: 45 },
+          successOnly: { avgRatio: 1.05, minRatio: 0.6, maxRatio: 1.8, jarenWins: 95, tied: 15, ajvWins: 35 },
+        },
+        'draft2020-12': {
+          totalTests: 160,
+          validTests: 160,
+          successTests: 160,
+          jarenTotalTime: 400,
+          ajvTotalTime: 480,
+          jarenSuccessTime: 400,
+          ajvSuccessTime: 480,
+          jarenErrors: 0,
+          ajvErrors: 0,
+          jarenFailures: 0,
+          ajvFailures: 0,
+          all: { avgRatio: 1.25, minRatio: 0.55, maxRatio: 2.7, jarenWins: 100, tied: 15, ajvWins: 45 },
+          successOnly: { avgRatio: 1.15, minRatio: 0.55, maxRatio: 2.2, jarenWins: 90, tied: 15, ajvWins: 35 },
+        },
+      },
+      engineStats: {
+        jaren: {
+          draft7: { passed: 160, failed: 0, errors: 0 },
+          'draft2019-09': { passed: 160, failed: 0, errors: 0 },
+          'draft2020-12': { passed: 160, failed: 0, errors: 0 },
+        },
+        ajv: {
+          draft7: { passed: 160, failed: 0, errors: 0 },
+          'draft2019-09': { passed: 160, failed: 0, errors: 0 },
+          'draft2020-12': { passed: 160, failed: 0, errors: 0 },
+        },
+      },
+    },
   });
-  
-  // Process the mock data
-  return processBenchmarkData({ results: allResults, metadata: { drafts } });
 }

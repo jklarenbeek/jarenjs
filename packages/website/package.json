@@ -5,12 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:benchmark": "npm run benchmark:generate && npm run dev",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist",
+    "predeploy": "npm run benchmark:generate && npm run build",
+    "deploy": "gh-pages -d dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "benchmark:generate": "cd ../.. && node benchmark/profiler.js --profile-all --draft draft7,draft2020-12 --iterations 1000 --output json --filepath packages/website/public/results.json",
+    "benchmark:quick": "cd ../.. && node benchmark/profiler.js --profile-all --draft draft7 --iterations 100 --output json --filepath packages/website/public/results.json"
   },
   "dependencies": {
     "@jarenjs/core": "file:../core",

@@ -330,12 +330,14 @@ function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = 
       if (profile) {
         results.push({
           suite: fileKey,
+          draft: draft,
           ...profile,
         });
       }
     } catch (e) {
       results.push({
         suite: fileKey,
+        draft: draft,
         description: test.description,
         error: e.message,
       });
@@ -577,17 +579,104 @@ function exportCsv(results, outputPath) {
 }
 
 /**
+ * Calculate summary statistics for a set of results
+ * @param {Array} results - Results to calculate stats for
+ * @returns {Object} Summary statistics
+ */
+function calculateSummaryStats(results) {
+  const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
+  const successResults = validResults.filter(r => r.isSuccessTest);
+  
+  if (validResults.length === 0) {
+    return {
+      all: { avgRatio: 0, minRatio: 0, maxRatio: 0, jarenWins: 0, tied: 0, ajvWins: 0 },
+      successOnly: null,
+    };
+  }
+  
+  return {
+    all: {
+      avgRatio: validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length,
+      minRatio: Math.min(...validResults.map(r => r.ratio)),
+      maxRatio: Math.max(...validResults.map(r => r.ratio)),
+      jarenWins: validResults.filter(r => r.ratio < 1.0).length,
+      tied: validResults.filter(r => r.ratio === 1.0).length,
+      ajvWins: validResults.filter(r => r.ratio > 1.0).length,
+    },
+    successOnly: successResults.length > 0 ? {
+      avgRatio: successResults.reduce((sum, r) => sum + r.ratio, 0) / successResults.length,
+      minRatio: Math.min(...successResults.map(r => r.ratio)),
+      maxRatio: Math.max(...successResults.map(r => r.ratio)),
+      jarenWins: successResults.filter(r => r.ratio < 1.0).length,
+      tied: successResults.filter(r => r.ratio === 1.0).length,
+      ajvWins: successResults.filter(r => r.ratio > 1.0).length,
+    } : null,
+  };
+}
+
+/**
  * Export results to JSON format
  * @param {Array} results - Profiling results
  * @param {string} outputPath - Output file path
  * @param {Object} options - Options for metadata
- * @param {Object} availableDrafts - Available drafts info
  */
-function exportJson(results, outputPath, options, availableDrafts) {
+function exportJson(results, outputPath, options) {
   const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
-
   const successResults = validResults.filter(r => r.isSuccessTest);
+  
+  // Calculate per-draft summaries
+  const byDraft = {};
+  const engineStats = { jaren: {}, ajv: {} };
+  
+  for (const draft of options.drafts) {
+    const draftResults = results.filter(r => r.draft === draft);
+    const draftErrors = draftResults.filter(r => r.error || r.jarenError || r.ajvError);
+    const draftValidResults = draftResults.filter(r => !r.error && !r.jarenError && !r.ajvError);
+    const draftSuccessResults = draftValidResults.filter(r => r.isSuccessTest);
+    
+    // Calculate timing totals for this draft
+    // Total time = all tests (including errors and failures)
+    const jarenTotalTime = draftResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
+    const ajvTotalTime = draftResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+    // Success time = only tests with no errors AND no failures
+    const jarenSuccessTime = draftSuccessResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
+    const ajvSuccessTime = draftSuccessResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+    
+    byDraft[draft] = {
+      totalTests: draftResults.length,
+      validTests: draftValidResults.length,
+      successTests: draftSuccessResults.length,
+      jarenTotalTime,
+      ajvTotalTime,
+      jarenSuccessTime,
+      ajvSuccessTime,
+      jarenErrors: draftErrors.filter(r => r.jarenError).length,
+      ajvErrors: draftErrors.filter(r => r.ajvError).length,
+      jarenFailures: draftValidResults.filter(r => r.jarenFailures > 0).length,
+      ajvFailures: draftValidResults.filter(r => r.ajvFailures > 0).length,
+      ...calculateSummaryStats(draftResults),
+    };
+    
+    engineStats.jaren[draft] = {
+      passed: draftResults.length - draftErrors.filter(r => r.jarenError).length - draftValidResults.filter(r => r.jarenFailures > 0).length,
+      failed: draftValidResults.filter(r => r.jarenFailures > 0).length,
+      errors: draftErrors.filter(r => r.jarenError).length,
+    };
+    engineStats.ajv[draft] = {
+      passed: draftResults.length - draftErrors.filter(r => r.ajvError).length - draftValidResults.filter(r => r.ajvFailures > 0).length,
+      failed: draftValidResults.filter(r => r.ajvFailures > 0).length,
+      errors: draftErrors.filter(r => r.ajvError).length,
+    };
+  }
+
+  // Calculate overall timing totals
+  // Total time = all tests (including errors and failures)
+  const jarenTotalTime = results.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
+  const ajvTotalTime = results.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+  // Success time = only tests with no errors AND no failures
+  const jarenSuccessTime = successResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
+  const ajvSuccessTime = successResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
 
   const output = {
     metadata: {
@@ -600,22 +689,19 @@ function exportJson(results, outputPath, options, availableDrafts) {
       drafts: options.drafts,
     },
     summary: {
-      all: {
-        avgRatio: validResults.length > 0 ? validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length : 0,
-        minRatio: validResults.length > 0 ? Math.min(...validResults.map(r => r.ratio)) : 0,
-        maxRatio: validResults.length > 0 ? Math.max(...validResults.map(r => r.ratio)) : 0,
-        jarenWins: validResults.filter(r => r.ratio < 1.0).length,
-        tied: validResults.filter(r => r.ratio === 1.0).length,
-        ajvWins: validResults.filter(r => r.ratio > 1.0).length,
+      overall: {
+        jarenTotalTime,
+        ajvTotalTime,
+        jarenSuccessTime,
+        ajvSuccessTime,
+        jarenErrors: results.filter(r => r.jarenError).length,
+        ajvErrors: results.filter(r => r.ajvError).length,
+        jarenFailures: validResults.filter(r => r.jarenFailures > 0).length,
+        ajvFailures: validResults.filter(r => r.ajvFailures > 0).length,
+        ...calculateSummaryStats(results),
       },
-      successOnly: successResults.length > 0 ? {
-        avgRatio: successResults.reduce((sum, r) => sum + r.ratio, 0) / successResults.length,
-        minRatio: Math.min(...successResults.map(r => r.ratio)),
-        maxRatio: Math.max(...successResults.map(r => r.ratio)),
-        jarenWins: successResults.filter(r => r.ratio < 1.0).length,
-        tied: successResults.filter(r => r.ratio === 1.0).length,
-        ajvWins: successResults.filter(r => r.ratio > 1.0).length,
-      } : null,
+      byDraft,
+      engineStats,
     },
     results: sortedResults,
     errors: results.filter(r => r.error || r.jarenError || r.ajvError),
@@ -780,7 +866,7 @@ async function main() {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       outputPath = path.join(outputDir, `profile-${timestamp}.json`);
     }
-    exportJson(allResults, outputPath, options, availableDrafts);
+    exportJson(allResults, outputPath, options);
   } else {
     // Console output already printed per draft above
     if (options.drafts.length > 1) {

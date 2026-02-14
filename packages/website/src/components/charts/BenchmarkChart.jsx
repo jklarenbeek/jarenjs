@@ -1,26 +1,53 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@components/ui/card';
 import { Badge } from '@components/ui/badge';
 import { cn, formatDuration } from '@lib/utils';
-import { FileJson, Zap } from 'lucide-react';
+import { FileJson, Zap, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import PropTypes from 'prop-types';
 
 // ==================== OVERVIEW COMPONENTS ====================
 
 function OverviewChart({ data }) {
+  const [selectedDrafts, setSelectedDrafts] = useState(new Set());
+
   const chartData = useMemo(() => {
     if (!data?.byDraft) return [];
-    return Object.entries(data.byDraft).map(([name, draft]) => ({
-      name: formatDraftName(name),
-      key: name,
+    return Object.entries(data.byDraft).map(([key, draft]) => ({
+      key,
+      name: formatDraftName(key),
       ...draft,
     }));
   }, [data]);
 
-  // Calculate overall totals
+  // Initialize selected drafts when data loads
+  useMemo(() => {
+    if (chartData.length > 0 && selectedDrafts.size === 0) {
+      setSelectedDrafts(new Set(chartData.map(d => d.key)));
+    }
+  }, [chartData, selectedDrafts.size]);
+
+  const toggleDraft = (draftKey) => {
+    setSelectedDrafts(prev => {
+      const next = new Set(prev);
+      if (next.has(draftKey)) {
+        next.delete(draftKey);
+      } else {
+        next.add(draftKey);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedDrafts(new Set(chartData.map(d => d.key)));
+  const selectNone = () => setSelectedDrafts(new Set());
+
+  const filteredChartData = useMemo(() => {
+    return chartData.filter(d => selectedDrafts.has(d.key));
+  }, [chartData, selectedDrafts]);
+
   const totals = useMemo(() => {
-    if (!data?.byDraft) return null;
-    return Object.values(data.byDraft).reduce(
+    if (!data?.byDraft || selectedDrafts.size === 0) return null;
+    return filteredChartData.reduce(
       (acc, draft) => ({
         jarenTotalTime: acc.jarenTotalTime + draft.jarenTotalTime,
         ajvTotalTime: acc.ajvTotalTime + draft.ajvTotalTime,
@@ -30,7 +57,6 @@ function OverviewChart({ data }) {
         ajvErrors: acc.ajvErrors + draft.ajvErrors,
         jarenFailures: acc.jarenFailures + draft.jarenFailures,
         ajvFailures: acc.ajvFailures + draft.ajvFailures,
-        totalTests: acc.totalTests + draft.totalTests,
       }),
       {
         jarenTotalTime: 0,
@@ -41,10 +67,9 @@ function OverviewChart({ data }) {
         ajvErrors: 0,
         jarenFailures: 0,
         ajvFailures: 0,
-        totalTests: 0,
       }
     );
-  }, [data]);
+  }, [filteredChartData, selectedDrafts.size]);
 
   if (!data || chartData.length === 0) {
     return (
@@ -62,31 +87,70 @@ function OverviewChart({ data }) {
         <CardTitle className="text-lg">Performance Overview by Draft</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* Overall Totals Summary */}
+        {/* Draft Selection Buttons */}
+        <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-muted-foreground">Filter drafts:</span>
+            <div className="flex gap-2">
+              <button
+                onClick={selectAll}
+                className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 transition-colors"
+              >
+                Select All
+              </button>
+              <button
+                onClick={selectNone}
+                className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80 transition-colors"
+              >
+                Select None
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {chartData.map((draft) => (
+              <button
+                key={draft.key}
+                onClick={() => toggleDraft(draft.key)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                  selectedDrafts.has(draft.key)
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                {draft.name}
+                <span className="ml-1.5 text-xs opacity-80">
+                  ({draft.totalTests})
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            Showing {filteredChartData.length} of {chartData.length} drafts
+          </div>
+        </div>
+
+        {/* Aggregated Totals for Selected Drafts */}
         {totals && (
           <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-muted/50 rounded-lg">
-            <EngineSummary 
-              name="JarenJS" 
-              totalTime={totals.jarenTotalTime}
-              successTime={totals.jarenSuccessTime}
-              errors={totals.jarenErrors}
-              failures={totals.jarenFailures}
+            <EngineSummary
+              name="JarenJS"
+              {...totals}
+              timeKey="jaren"
               color="primary"
             />
-            <EngineSummary 
-              name="AJV" 
-              totalTime={totals.ajvTotalTime}
-              successTime={totals.ajvSuccessTime}
-              errors={totals.ajvErrors}
-              failures={totals.ajvFailures}
+            <EngineSummary
+              name="AJV"
+              {...totals}
+              timeKey="ajv"
               color="secondary"
             />
           </div>
         )}
 
-        {/* Per Draft Breakdown */}
+        {/* Selected Draft Cards */}
         <div className="space-y-4">
-          {chartData.map((draft) => (
+          {filteredChartData.map((draft) => (
             <DraftOverviewCard key={draft.key} data={draft} />
           ))}
         </div>
@@ -101,9 +165,17 @@ OverviewChart.propTypes = {
   }),
 };
 
-function EngineSummary({ name, totalTime, successTime, errors, failures, color }) {
+function EngineSummary({ name, timeKey, color, ...totals }) {
+  const totalTime = totals[`${timeKey}TotalTime`];
+  const successTime = totals[`${timeKey}SuccessTime`];
+  const errors = totals[`${timeKey}Errors`];
+  const failures = totals[`${timeKey}Failures`];
+
   return (
-    <div className={cn("p-3 rounded-lg border", color === 'primary' ? 'border-primary/20 bg-primary/5' : 'border-secondary/20 bg-secondary/5')}> 
+    <div className={cn(
+      "p-3 rounded-lg border",
+      color === 'primary' ? 'border-primary/20 bg-primary/5' : 'border-secondary/20 bg-secondary/5'
+    )}>
       <h4 className="font-semibold mb-2">{name}</h4>
       <div className="space-y-1 text-sm">
         <div className="flex justify-between">
@@ -116,11 +188,11 @@ function EngineSummary({ name, totalTime, successTime, errors, failures, color }
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Errors:</span>
-          <span className={cn("font-medium", errors > 0 ? 'text-red-600' : '')}>{errors}</span>
+          <span className={cn("font-medium", errors > 0 && 'text-red-600')}>{errors}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Failures:</span>
-          <span className={cn("font-medium", failures > 0 ? 'text-amber-600' : '')}>{failures}</span>
+          <span className={cn("font-medium", failures > 0 && 'text-amber-600')}>{failures}</span>
         </div>
       </div>
     </div>
@@ -129,24 +201,27 @@ function EngineSummary({ name, totalTime, successTime, errors, failures, color }
 
 EngineSummary.propTypes = {
   name: PropTypes.string.isRequired,
-  totalTime: PropTypes.number.isRequired,
-  successTime: PropTypes.number.isRequired,
-  errors: PropTypes.number.isRequired,
-  failures: PropTypes.number.isRequired,
+  timeKey: PropTypes.string.isRequired,
   color: PropTypes.string.isRequired,
 };
 
 function DraftOverviewCard({ data }) {
   const maxTime = Math.max(data.jarenTotalTime, data.ajvTotalTime) || 1;
-  
+
   return (
     <div className="border rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <h4 className="font-medium">{data.name}</h4>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Badge variant="outline" className="text-xs">
+            {data.totalTests} tests
+          </Badge>
+          <Badge variant="secondary" className="text-xs">
+            {data.validTests} valid
+          </Badge>
           {data.testsWithErrors > 0 && (
             <Badge variant="destructive" className="text-xs">
-              {data.testsWithErrors} errors
+              {data.testsWithErrors} with issues
             </Badge>
           )}
           <Badge variant={data.avgRatio > 1 ? 'success' : 'warning'} className="text-xs">
@@ -154,51 +229,26 @@ function DraftOverviewCard({ data }) {
           </Badge>
         </div>
       </div>
-      
-      <div className="space-y-3">
-        {/* Jaren */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-primary" />
-              Jaren
-            </span>
-            <span className="font-mono">{formatDuration(data.jarenTotalTime)}</span>
-          </div>
-          <div className="h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full"
-              style={{ width: `${(data.jarenTotalTime / maxTime) * 100}%` }}
-            />
-          </div>
-          <div className="flex gap-2 text-xs text-muted-foreground">
-            <span>Success: {formatDuration(data.jarenSuccessTime)}</span>
-            {data.jarenErrors > 0 && <span className="text-red-600">Errors: {data.jarenErrors}</span>}
-            {data.jarenFailures > 0 && <span className="text-amber-600">Failures: {data.jarenFailures}</span>}
-          </div>
-        </div>
 
-        {/* AJV */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-secondary" />
-              AJV
-            </span>
-            <span className="font-mono">{formatDuration(data.ajvTotalTime)}</span>
-          </div>
-          <div className="h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-secondary rounded-full"
-              style={{ width: `${(data.ajvTotalTime / maxTime) * 100}%` }}
-            />
-          </div>
-          <div className="flex gap-2 text-xs text-muted-foreground">
-            <span>Success: {formatDuration(data.ajvSuccessTime)}</span>
-            {data.ajvErrors > 0 && <span className="text-red-600">Errors: {data.ajvErrors}</span>}
-            {data.ajvFailures > 0 && <span className="text-amber-600">Failures: {data.ajvFailures}</span>}
-          </div>
-        </div>
+      <div className="space-y-3">
+        <EngineBarDetailed
+          name="Jaren"
+          totalTime={data.jarenTotalTime}
+          successTime={data.jarenSuccessTime}
+          maxTime={maxTime}
+          errors={data.jarenErrors}
+          failures={data.jarenFailures}
+          color="primary"
+        />
+        <EngineBarDetailed
+          name="AJV"
+          totalTime={data.ajvTotalTime}
+          successTime={data.ajvSuccessTime}
+          maxTime={maxTime}
+          errors={data.ajvErrors}
+          failures={data.ajvFailures}
+          color="secondary"
+        />
       </div>
     </div>
   );
@@ -207,6 +257,9 @@ function DraftOverviewCard({ data }) {
 DraftOverviewCard.propTypes = {
   data: PropTypes.shape({
     name: PropTypes.string.isRequired,
+    totalTests: PropTypes.number.isRequired,
+    validTests: PropTypes.number.isRequired,
+    testsWithErrors: PropTypes.number.isRequired,
     jarenTotalTime: PropTypes.number.isRequired,
     ajvTotalTime: PropTypes.number.isRequired,
     jarenSuccessTime: PropTypes.number.isRequired,
@@ -215,9 +268,58 @@ DraftOverviewCard.propTypes = {
     ajvErrors: PropTypes.number.isRequired,
     jarenFailures: PropTypes.number.isRequired,
     ajvFailures: PropTypes.number.isRequired,
-    testsWithErrors: PropTypes.number.isRequired,
     avgRatio: PropTypes.number.isRequired,
   }).isRequired,
+};
+
+function EngineBarDetailed({ name, totalTime, successTime, maxTime, errors, failures, color }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground flex items-center gap-1">
+          <span className={cn("w-2 h-2 rounded-full", color === 'primary' ? 'bg-primary' : 'bg-secondary')} />
+          {name}
+        </span>
+        <div className="flex gap-2">
+          {errors > 0 && (
+            <Badge variant="destructive" className="text-[10px] px-1 py-0">
+              <XCircle className="w-3 h-3 mr-0.5" />
+              {errors}
+            </Badge>
+          )}
+          {failures > 0 && (
+            <Badge variant="warning" className="text-[10px] px-1 py-0">
+              <AlertTriangle className="w-3 h-3 mr-0.5" />
+              {failures}
+            </Badge>
+          )}
+          <span className="font-mono">{formatDuration(totalTime)}</span>
+        </div>
+      </div>
+      <div className="h-2 bg-muted rounded-full overflow-hidden">
+        <div
+          className={cn("h-full rounded-full", color === 'primary' ? 'bg-primary' : 'bg-secondary')}
+          style={{ width: `${(totalTime / maxTime) * 100}%` }}
+        />
+      </div>
+      <div className="flex gap-3 text-xs text-muted-foreground">
+        <span>Total: <span className="font-medium">{formatDuration(totalTime)}</span></span>
+        <span className="text-green-600">Success: <span className="font-medium">{formatDuration(successTime)}</span></span>
+        {errors > 0 && <span className="text-red-600">Errors: {errors}</span>}
+        {failures > 0 && <span className="text-amber-600">Failures: {failures}</span>}
+      </div>
+    </div>
+  );
+}
+
+EngineBarDetailed.propTypes = {
+  name: PropTypes.string.isRequired,
+  totalTime: PropTypes.number.isRequired,
+  successTime: PropTypes.number.isRequired,
+  maxTime: PropTypes.number.isRequired,
+  errors: PropTypes.number.isRequired,
+  failures: PropTypes.number.isRequired,
+  color: PropTypes.string.isRequired,
 };
 
 // ==================== BY SUITE COMPONENTS ====================
@@ -226,12 +328,11 @@ function SuiteChart({ data }) {
   const chartData = useMemo(() => {
     if (!data?.bySuite) return [];
     return Object.entries(data.bySuite)
-      .map(([name, suite]) => ({
-        name: name.replace(/^\//, ''),
-        key: name,
+      .map(([key, suite]) => ({
+        key,
         ...suite,
       }))
-      .sort((a, b) => b.totalTests - a.totalTests); // Sort by number of tests
+      .sort((a, b) => b.totalTests - a.totalTests);
   }, [data]);
 
   if (!data || chartData.length === 0) {
@@ -262,7 +363,7 @@ SuiteChart.propTypes = {
 function SuiteCard({ data }) {
   const maxTime = Math.max(data.jarenTotalTime, data.ajvTotalTime) || 1;
   const timeRatio = data.ajvTotalTime / data.jarenTotalTime;
-  
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -271,13 +372,19 @@ function SuiteCard({ data }) {
             <FileJson className="h-4 w-4 text-muted-foreground" />
             <CardTitle className="text-base">{data.name}</CardTitle>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="outline" className="text-xs">
+              {data.totalTests} tests
+            </Badge>
             {data.testsWithErrors > 0 && (
               <Badge variant="destructive" className="text-xs">
-                {data.testsWithErrors} errors
+                {data.testsWithErrors} with issues
               </Badge>
             )}
-            <Badge variant={timeRatio > 1 ? 'success' : timeRatio < 1 ? 'warning' : 'secondary'} className="text-xs">
+            <Badge
+              variant={timeRatio > 1 ? 'success' : timeRatio < 1 ? 'warning' : 'secondary'}
+              className="text-xs"
+            >
               {timeRatio.toFixed(2)}x
             </Badge>
           </div>
@@ -285,60 +392,23 @@ function SuiteCard({ data }) {
       </CardHeader>
       <CardContent className="pt-0">
         <div className="grid grid-cols-2 gap-6">
-          {/* Jaren */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">JarenJS</span>
-              <span className="font-mono text-sm">{formatDuration(data.jarenTotalTime)}</span>
-            </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full"
-                style={{ width: `${(data.jarenTotalTime / maxTime) * 100}%` }}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-              <div>
-                <span className="text-green-600 font-medium">{formatDuration(data.jarenSuccessTime)}</span>
-                <span className="block">success time</span>
-              </div>
-              <div className="text-right">
-                {data.jarenErrors > 0 && <div className="text-red-600">{data.jarenErrors} errors</div>}
-                {data.jarenFailures > 0 && <div className="text-amber-600">{data.jarenFailures} failures</div>}
-                {data.jarenErrors === 0 && data.jarenFailures === 0 && <span className="text-green-600">✓ All passed</span>}
-              </div>
-            </div>
-          </div>
-
-          {/* AJV */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">AJV</span>
-              <span className="font-mono text-sm">{formatDuration(data.ajvTotalTime)}</span>
-            </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-secondary rounded-full"
-                style={{ width: `${(data.ajvTotalTime / maxTime) * 100}%` }}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-              <div>
-                <span className="text-green-600 font-medium">{formatDuration(data.ajvSuccessTime)}</span>
-                <span className="block">success time</span>
-              </div>
-              <div className="text-right">
-                {data.ajvErrors > 0 && <div className="text-red-600">{data.ajvErrors} errors</div>}
-                {data.ajvFailures > 0 && <div className="text-amber-600">{data.ajvFailures} failures</div>}
-                {data.ajvErrors === 0 && data.ajvFailures === 0 && <span className="text-green-600">✓ All passed</span>}
-              </div>
-            </div>
-          </div>
+          <EngineSuiteStats
+            name="JarenJS"
+            data={data}
+            maxTime={maxTime}
+            timeKey="jaren"
+          />
+          <EngineSuiteStats
+            name="AJV"
+            data={data}
+            maxTime={maxTime}
+            timeKey="ajv"
+          />
         </div>
 
         <div className="mt-3 pt-3 border-t text-xs text-muted-foreground flex justify-between">
-          <span>{data.totalTests} tests</span>
-          <span>{data.validTests} valid • {data.testsWithErrors} with errors</span>
+          <span>{data.totalTests} tests total</span>
+          <span>{data.validTests} valid • {data.testsWithErrors} with issues</span>
         </div>
       </CardContent>
     </Card>
@@ -362,13 +432,75 @@ SuiteCard.propTypes = {
   }).isRequired,
 };
 
+function EngineSuiteStats({ name, data, maxTime, timeKey }) {
+  const time = data[`${timeKey}TotalTime`];
+  const successTime = data[`${timeKey}SuccessTime`];
+  const errors = data[`${timeKey}Errors`];
+  const failures = data[`${timeKey}Failures`];
+  const isPrimary = timeKey === 'jaren';
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">{name}</span>
+        <div className="flex gap-1">
+          {errors > 0 && (
+            <Badge variant="destructive" className="text-[10px] px-1">
+              {errors} err
+            </Badge>
+          )}
+          {failures > 0 && (
+            <Badge variant="warning" className="text-[10px] px-1">
+              {failures} fail
+            </Badge>
+          )}
+          <span className="font-mono text-sm">{formatDuration(time)}</span>
+        </div>
+      </div>
+      <div className="h-2 bg-muted rounded-full overflow-hidden">
+        <div
+          className={cn("h-full rounded-full", isPrimary ? 'bg-primary' : 'bg-secondary')}
+          style={{ width: `${(time / maxTime) * 100}%` }}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+        <div>
+          <span className="block">Total: <span className="font-medium">{formatDuration(time)}</span></span>
+          <span className="text-green-600">Success: <span className="font-medium">{formatDuration(successTime)}</span></span>
+        </div>
+        <div className="text-right">
+          {errors > 0 && <div className="text-red-600">{errors} errors</div>}
+          {failures > 0 && <div className="text-amber-600">{failures} failures</div>}
+          {errors === 0 && failures === 0 && (
+            <span className="text-green-600 flex items-center justify-end gap-1">
+              <CheckCircle className="w-3 h-3" />
+              All passed
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+EngineSuiteStats.propTypes = {
+  name: PropTypes.string.isRequired,
+  data: PropTypes.object.isRequired,
+  maxTime: PropTypes.number.isRequired,
+  timeKey: PropTypes.string.isRequired,
+};
+
 // ==================== DETAILS COMPONENTS ====================
 
 function DetailsTable({ data }) {
   const results = useMemo(() => {
-    if (!data?.byDetails) return [];
-    return data.byDetails;
+    return data?.byDetails || [];
   }, [data]);
+
+  const { validResults, errorResults } = useMemo(() => ({
+    validResults: results.filter(r => !r.hasError),
+    errorResults: results.filter(r => r.hasError),
+  }), [results]);
 
   if (!data || results.length === 0) {
     return (
@@ -389,6 +521,22 @@ function DetailsTable({ data }) {
         </p>
       </CardHeader>
       <CardContent>
+        {/* Summary Stats */}
+        <div className="mb-4 p-3 bg-muted/50 rounded-lg flex gap-4 text-sm">
+          <div>
+            <span className="text-muted-foreground">Total:</span>
+            <span className="font-medium ml-1">{results.length}</span>
+          </div>
+          <div>
+            <span className="text-green-600">Valid:</span>
+            <span className="font-medium ml-1">{validResults.length}</span>
+          </div>
+          <div>
+            <span className="text-red-600">With Issues:</span>
+            <span className="font-medium ml-1">{errorResults.length}</span>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -396,20 +544,23 @@ function DetailsTable({ data }) {
                 <th className="text-left py-2 px-2">Test</th>
                 <th className="text-center py-2 px-2">Status</th>
                 <th className="text-right py-2 px-2">Ratio</th>
-                <th className="text-right py-2 px-2">Jaren Time</th>
-                <th className="text-right py-2 px-2">AJV Time</th>
+                <th className="text-right py-2 px-2">Total Time</th>
                 <th className="text-right py-2 px-2">Success Time</th>
+                <th className="text-right py-2 px-2">Combined</th>
               </tr>
             </thead>
             <tbody>
               {results.map((result, index) => (
                 <tr key={index} className="border-b last:border-0 hover:bg-muted/50">
                   <td className="py-2 px-2">
-                    <div className="font-mono text-xs truncate max-w-[250px]" title={result.name}>
-                      {result.name || result.description}
+                    <div className="font-mono text-xs truncate max-w-[250px]" title={result.description}>
+                      {result.description}
                     </div>
                     <div className="text-xs text-muted-foreground truncate max-w-[250px]">
                       {result.suite}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Draft: {result.draft}
                     </div>
                   </td>
                   <td className="py-2 px-2 text-center">
@@ -422,19 +573,13 @@ function DetailsTable({ data }) {
                     {result.ratio.toFixed(2)}x
                   </td>
                   <td className="text-right py-2 px-2 font-mono">
-                    {formatDuration(result.jarenTotal || result.jarenTime)}
+                    {formatDuration(result.jarenTotal)}
                   </td>
-                  <td className="text-right py-2 px-2 font-mono">
-                    {formatDuration(result.ajvTotal || result.ajvTime)}
+                  <td className="text-right py-2 px-2 font-mono text-green-600">
+                    {result.isSuccessTest ? formatDuration(result.jarenTotal) : '-'}
                   </td>
-                  <td className="text-right py-2 px-2">
-                    {result.hasError ? (
-                      <span className="text-red-600 text-xs">Has errors</span>
-                    ) : (
-                      <span className="text-green-600 font-mono text-xs">
-                        {formatDuration((result.jarenTotal || result.jarenTime) + (result.ajvTotal || result.ajvTime))}
-                      </span>
-                    )}
+                  <td className="text-right py-2 px-2 font-mono text-xs">
+                    {formatDuration(result.jarenTotal + result.ajvTotal)}
                   </td>
                 </tr>
               ))}
@@ -456,6 +601,7 @@ function StatusBadge({ result }) {
   if (result.jarenError || result.ajvError) {
     return (
       <Badge variant="destructive" className="text-xs">
+        <XCircle className="w-3 h-3 mr-1" />
         Error
       </Badge>
     );
@@ -463,12 +609,14 @@ function StatusBadge({ result }) {
   if (result.jarenFailed || result.ajvFailed) {
     return (
       <Badge variant="warning" className="text-xs">
+        <AlertTriangle className="w-3 h-3 mr-1" />
         Failed
       </Badge>
     );
   }
   return (
     <Badge variant="success" className="text-xs bg-green-100 text-green-800 hover:bg-green-100">
+      <CheckCircle className="w-3 h-3 mr-1" />
       Pass
     </Badge>
   );
@@ -484,15 +632,7 @@ StatusBadge.propTypes = {
   }).isRequired,
 };
 
-// ==================== LEGACY COMPONENTS (for backward compatibility) ====================
-
-function BenchmarkChart({ data }) {
-  return <OverviewChart data={data} />;
-}
-
-BenchmarkChart.propTypes = {
-  data: PropTypes.object,
-};
+// ==================== METRICS CARD ====================
 
 function MetricsCard({ title, value, subtitle, trend, trendUp, icon: Icon }) {
   return (
@@ -534,36 +674,22 @@ MetricsCard.propTypes = {
   icon: PropTypes.elementType,
 };
 
-function ComparisonTable({ data }) {
-  return <DetailsTable data={data} />;
-}
-
-ComparisonTable.propTypes = {
-  data: PropTypes.object,
-};
-
 // ==================== UTILITY FUNCTIONS ====================
 
 function formatDraftName(name) {
   const names = {
     draft7: 'Draft 07',
-    draft2019: 'Draft 2019-09',
     'draft2019-09': 'Draft 2019-09',
-    draft2020: 'Draft 2020-12',
     'draft2020-12': 'Draft 2020-12',
-    other: 'Other Tests',
-    unknown: 'Unknown',
   };
   return names[name] || name;
 }
 
 // ==================== EXPORTS ====================
 
-export { 
-  BenchmarkChart, 
-  MetricsCard, 
-  ComparisonTable,
+export {
   OverviewChart,
   SuiteChart,
   DetailsTable,
+  MetricsCard,
 };
