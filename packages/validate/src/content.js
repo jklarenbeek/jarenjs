@@ -67,6 +67,13 @@ export function compileContentSchema(schemaObj, jsonSchema) {
 
   if (encoding == null && mediaType == null) return undefined;
 
+  // Per JSON Schema 2019-09/2020-12 spec, contentEncoding and contentMediaType
+  // are annotation keywords by default, not assertion keywords.
+  // They only validate when contentValidation option is explicitly enabled.
+  if (!schemaObj.options.contentValidation) {
+    return undefined;
+  }
+
   const contentEncodingValidator = compileContentEncoding(schemaObj, jsonSchema);
   const contentMediaTypeValidator = compileContentMediaType(schemaObj, jsonSchema);
 

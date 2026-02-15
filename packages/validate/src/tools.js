@@ -65,6 +65,18 @@ export function hasSchemaRef(schema) {
     && !isStringWhiteSpace(schema.$ref);
 }
 
+export function hasSchemaRecursiveRef(schema) {
+  return isObjectClass(schema)
+    && isStringType(schema.$recursiveRef)
+    && !isStringWhiteSpace(schema.$recursiveRef);
+}
+
+export function hasSchemaDynamicRef(schema) {
+  return isObjectClass(schema)
+    && isStringType(schema.$dynamicRef)
+    && !isStringWhiteSpace(schema.$dynamicRef);
+}
+
 export function createIsSchemaTypeHandler(type, isStrict = false) {
   switch (type) {
     case 'null': return isNullValue;

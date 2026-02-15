@@ -45,7 +45,7 @@ export function encodeJsonPointerArray(path, array) {
 }
 
 class JsonPointerOptions {
-  constructor(anchorsGlobal = true, anchorsAllowed = true, skipErrors = true) {
+  constructor(anchorsGlobal = false, anchorsAllowed = true, skipErrors = true) {
     this.anchorsGlobal = anchorsGlobal;
     this.anchorsAllowed = anchorsAllowed;
     this.skipErrors = skipErrors;
@@ -322,7 +322,7 @@ export class TraverseOptions extends JsonPointerOptions {
   constructor(
     origin = 'https://github.com/jklarenbeek/jarenjs',
     mergeSchemas = true,
-    anchorsGlobal = true,
+    anchorsGlobal = false,
     anchorsAllowed = true,
     skipErrors = true
   ) {

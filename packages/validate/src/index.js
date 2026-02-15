@@ -32,6 +32,21 @@ export { TraverseOptions };
 
 export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-06/schema#'
 
+/**
+ * Detects the JSON Schema draft version from the schema's $schema property
+ * @param {object} schema - The JSON schema
+ * @returns {number} - The draft version (6, 7, 2019, or 2020)
+ */
+export function detectSchemaDraft(schema) {
+  if (!schema || typeof schema !== 'object') return 7; // default to draft7
+  const schemaUrl = schema.$schema || '';
+  if (schemaUrl.includes('2020-12')) return 2020;
+  if (schemaUrl.includes('2019-09')) return 2019;
+  if (schemaUrl.includes('draft-07') || schemaUrl.includes('draft/07')) return 7;
+  if (schemaUrl.includes('draft-06') || schemaUrl.includes('draft/06')) return 6;
+  return 7; // default to draft7 behavior
+}
+
 const isBrowser = typeof window !== 'undefined';
 
 const performance = (() => isBrowser
@@ -106,11 +121,15 @@ export class ValidationOptions {
    * @param {boolean} [skipErrors=true] - Whether to stop at first error or continue
    * @param {boolean} [useGrapheme=true] - Whether to use grapheme cluster counting for strings
    * @param {boolean} [collectErrors=false] - Whether to collect all errors or just return boolean
+   * @param {boolean|null} [contentValidation=null] - Whether to validate contentEncoding/contentMediaType (null = auto based on draft)
+   * @param {number} [draftVersion=7] - The JSON Schema draft version (6, 7, 2019, or 2020)
    */
   constructor(
     skipErrors = true,
     useGrapheme = true,
-    collectErrors = false
+    collectErrors = false,
+    contentValidation = null,
+    draftVersion = 7
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -118,6 +137,10 @@ export class ValidationOptions {
     this.useGrapheme = useGrapheme;
     /** @type {boolean} Whether to collect and return detailed errors */
     this.collectErrors = collectErrors;
+    /** @type {boolean|null} Whether to validate contentEncoding/contentMediaType (null = auto based on draft) */
+    this.contentValidation = contentValidation;
+    /** @type {number} The JSON Schema draft version (6, 7, 2019, or 2020) */
+    this.draftVersion = draftVersion;
   }
 }
 
@@ -313,13 +336,27 @@ export class ValidationObject {
     const refBase = baseUri || path;
     const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse);
 
+    // In draft 2019-09+, $ref can have sibling keywords that are applied together.
+    // In draft 7 and earlier, $ref overrides siblings.
+    const draftVersion = root.options.draftVersion || 7;
+    // Only check for sibling validators in draft 2019-09+
+    const siblingValidator = draftVersion >= 2019 ? compileSchemaObject(self, schema) : null;
+
     // Since refs are now pre-compiled at compile time,
     // we should always find the target immediately
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
-      const validator = resolved.validate;
-      self.#validator = validator;
-      return validator;
+      const refValidator = resolved.validate;
+      
+      // If there are sibling validators (draft 2019-09+), combine them with the ref validator
+      if (siblingValidator) {
+        return function validateRefWithSiblings(data, dataPath, dataRoot) {
+          return refValidator(data, dataPath, dataRoot) && siblingValidator(data, dataPath, dataRoot);
+        };
+      }
+      
+      self.#validator = refValidator;
+      return refValidator;
     }
 
     // Fallback for edge cases (e.g., recursive refs that weren't pre-compiled)
@@ -328,13 +365,20 @@ export class ValidationObject {
     const boundRef = ref;
     const boundRefBase = refBase;
     const boundSchema = schema;
+    const boundSiblingValidator = siblingValidator;
 
     return function resolveSchemaCompiler(data, dataRoot) {
       const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
-      const validator = obj.validate;
+      const refValidator = obj.validate;
+      
+      // If there are sibling validators (draft 2019-09+), combine them with the ref validator
+      if (boundSiblingValidator) {
+        return refValidator(data, dataRoot) && boundSiblingValidator(data, dataRoot);
+      }
+      
       // Cache the validator directly - no wrapper function
-      self.#validator = validator;
-      return validator(data, dataRoot);
+      self.#validator = refValidator;
+      return refValidator(data, dataRoot);
     };
   }
 
@@ -542,8 +586,14 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null) {
-        this.validation = new ValidationOptions(opts.skipErrors || true, opts.useGrapheme || false, opts.collectErrors || false);
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null) {
+        this.validation = new ValidationOptions(
+          opts.skipErrors ?? true,
+          opts.useGrapheme ?? true,
+          opts.collectErrors ?? false,
+          opts.contentValidation ?? false,
+          opts.draftVersion ?? 7
+        );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
         this.validation = opts.validation || new ValidationOptions();
@@ -1143,13 +1193,26 @@ export class JarenValidator {
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#options.traverse);
 
+    // Detect draft version from schema and update validation options
+    const draftVersion = detectSchemaDraft(schema);
+    const existingValidation = this.#options.validation || new ValidationOptions();
+    // For draft7, contentValidation defaults to true; for 2019-09+, defaults to false
+    const contentValidationDefault = draftVersion < 2019;
+    const validationOptions = new ValidationOptions(
+      existingValidation.skipErrors ?? true,
+      existingValidation.useGrapheme ?? true,
+      existingValidation.collectErrors ?? false,
+      existingValidation.contentValidation ?? contentValidationDefault,
+      draftVersion
+    );
+
     // Pre-compile all refs before returning the validator
     // This ensures all ref chains are resolved at compile time
     const root = new ValidationRoot(
       origin,
       map,
       this.#formats,
-      this.#options.validation,
+      validationOptions,
       this.#options.traverse
     );
 

@@ -40,7 +40,7 @@ import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
 import { compileDollarDataSchema, hasDollarDataReferences } from './dollar-data.js';
-import { hasSchemaRef } from './tools.js';
+import { hasSchemaRef, hasSchemaRecursiveRef } from './tools.js';
 
 function compileRequired(schemaObj, jsonSchema) {
   // if required is not true, we have nothing.
@@ -179,9 +179,28 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     return trueThat;
 
   // In draft 7 and earlier, $ref completely replaces the schema
-  // and all sibling keywords must be ignored
-  if (hasSchemaRef(jsonSchema)) {
-    return undefined;
+  // and all sibling keywords must be ignored. In draft 2019-09+,
+  // $ref is just another keyword that can have siblings.
+  // We need to check the actual behavior based on schema context.
+  // If schema has ONLY $ref (and meta keywords), use the ref-only path.
+  // If schema has $ref with validation siblings, process them together (2019-09+ only).
+  const draftVersion = schemaObj.options.draftVersion || 7;
+  if (hasSchemaRef(jsonSchema) && !hasSchemaRecursiveRef(jsonSchema)) {
+    // Check if there are any validation-related sibling keywords
+    // In draft 2019-09+, if there are validation siblings, we process them together
+    const validationKeywords = ['type', 'const', 'enum', 'multipleOf', 'maximum', 'exclusiveMaximum',
+      'minimum', 'exclusiveMinimum', 'maxLength', 'minLength', 'pattern', 'maxItems', 'minItems',
+      'uniqueItems', 'maxContains', 'minContains', 'maxProperties', 'minProperties', 'required',
+      'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
+      'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
+      'then', 'else', 'propertyNames', 'format', 'contentEncoding', 'contentMediaType'];
+    const hasValidationSiblings = keys.some(k => validationKeywords.includes(k));
+    // In draft 7 and earlier, $ref always overrides siblings regardless
+    // In draft 2019-09+, $ref can have validation siblings
+    if (!hasValidationSiblings || draftVersion < 2019) {
+      return undefined;
+    }
+    // Otherwise, continue to process siblings alongside $ref (2019-09+ only)
   }
 
   // Check if schema has any $data references
