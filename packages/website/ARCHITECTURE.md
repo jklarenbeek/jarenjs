@@ -372,7 +372,7 @@ graph LR
 | Package | Purpose | Integration Point |
 |---------|---------|-------------------|
 | `@jarenjs/validate` | JSON Schema validation | `useJarenValidator` hook |
-| `@jarenjs/formats` | String format validators | Added via `validator.addFormats()` |
+| `@jarenjs/formats` | Schema format validators | Added via `validator.addFormats()` |
 | `@jarenjs/core` | Utility functions | Used internally by validate |
 | `@jarenjs/refs` | $ref resolution | Used internally by validate |
 

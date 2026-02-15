@@ -506,6 +506,24 @@ createErrorHandler(expected, key) {
 
 ## Debugging Guide
 
+### Using the Debug Tool
+
+The `benchmark/debug.js` tool is the primary way to investigate test failures:
+
+```bash
+# Find the failing test
+node benchmark/debug.js '/anchor.json' --list --draft 2019
+
+# Run the specific failing test with verbose output
+node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019 --verbose
+
+# Compare Jaren vs AJV behavior
+node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019 --compare
+
+# Export the test case for isolated debugging
+node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019 --export-test debug.json
+```
+
 ### "Can not resolve schema for 'X'"
 
 **Cause**: The ref `X` is not in schemasMap
@@ -544,35 +562,38 @@ console.log('Resolving ref:', ref, 'against baseUri:', baseUri);
 Performance comparison between Jaren and AJV.
 
 ```bash
-# Get help with what you can do
-joham@HOME:~/projects/jarenjs$ node benchmark/profiler.js
-Usage:
-  node benchmark/profiler.js '/string.json' --profile
-  node benchmark/profiler.js '/string.json' --profile --iterations 5000
-  node benchmark/profiler.js --profile-all
-  node benchmark/profiler.js --profile-all --output csv
-  node benchmark/profiler.js --profile-all --output json
+# Profile specific test suite with draft selection
+node benchmark/profiler.js '/ref.json' --profile --draft 2019 --iterations 1000
 
+# Profile all tests for multiple drafts
+node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12
+
+# Export results to JSON with custom file path
+node benchmark/profiler.js --profile-all --output json --filepath results.json
+
+# Show only top 10 slowest tests
+node benchmark/profiler.js '/ref.json' --profile --top 10
+
+# Only include tests where all engines succeed
+node benchmark/profiler.js '/ref.json' --profile --success-only
+
+# Full options
 Options:
   --profile              Profile a specific test file
   --profile-all          Profile all test files
   --iterations, -i N     Number of iterations (default: 1000)
   --output, -o FORMAT    Output format: console, csv, json (default: console)
-  --draft, -d VERSION    JSON Schema draft version (default: draft7)
+  --draft, -d VERSION    JSON Schema draft version(s), comma-separated
                          Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020
+  --filepath, -f PATH    Output file path for csv/json
   --top N                Show only top N slowest tests
-  --success-only         Drop all test that have failures or errors in either engine
+  --success-only         Only include tests where all agents succeed
   --verbose, -v          Verbose output
-
-# Profile specific test suite
-node benchmark/profiler.js '/ref.json' --profile --iterations 1000
-
-# Profile all tests and export to JSON
-node benchmark/profiler.js --profile-all --output json
 ```
 
 ### coverage.js
-Code coverage analysis for profiling runs.
+
+Code coverage analysis using c8 to find which functions are touched during test execution.
 
 ```bash
 # Show files with >25% function coverage
@@ -583,10 +604,22 @@ node benchmark/coverage.js '/required.json' --threshold 25 --functions
 
 # Show only touched functions
 node benchmark/coverage.js '/required.json' --threshold 25 --touched-only
+
+# Adjust iterations for better coverage data
+node benchmark/coverage.js '/required.json' --iterations 5000
+
+# Full options
+Options:
+  --threshold <n>    Filter files with coverage <= n% (default: 0)
+  --functions        Show TOUCHED and NOT touched functions with hit counts
+  --touched-only     Show only TOUCHED functions
+  --iterations <n>   Number of profiling iterations (default: 1000)
+  --temp-dir <dir>   Temporary directory for c8 coverage data
 ```
 
 ### callgraph.js
-Call graph analysis using Node.js built-in profiler.
+
+Call graph analysis using Node.js built-in `--prof` profiler. Generates text-based call graphs showing hot paths and call chains.
 
 ```bash
 # Generate call graph for a test suite
@@ -594,10 +627,81 @@ node benchmark/callgraph.js '/ref.json'
 
 # More iterations for better accuracy
 node benchmark/callgraph.js '/ref.json' --iterations 5000 --top-functions=30
+
+# Show deeper call chains
+node benchmark/callgraph.js '/ref.json' --max-depth=15
+
+# Include Node.js internal functions
+node benchmark/callgraph.js '/ref.json' --include-internals
+
+# Filter by specific pattern
+node benchmark/callgraph.js '/ref.json' --filter 'validate'
+
+# Full options
+Options:
+  --iterations, -i N       Number of iterations (default: 1000)
+  --top-functions N        Show top N hottest functions (default: 20)
+  --max-depth N            Maximum call chain depth (default: 10)
+  --filter <pattern>       Filter functions by pattern (default: jaren)
+  --include-internals      Include Node.js internal functions
+  --verbose, -v            Show detailed output
 ```
 
 ### debug.js
-A script used by the user to skip through the code without being bothered by unnecaserry loops.
+
+Powerful debugging utility for investigating test failures and understanding schema validation behavior.
+
+```bash
+# List all test files for a draft
+node benchmark/debug.js --list-files --draft 2019
+
+# List all test cases in a file with keyword summaries
+node benchmark/debug.js '/anchor.json' --list --draft 2019
+
+# Run a specific test suite with draft selection
+node benchmark/debug.js '/anchor.json' --draft 2019
+
+# Run a specific test by description (partial match)
+node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019
+
+# Run a specific test by index
+node benchmark/debug.js '/anchor.json' --index 3 --draft 2019
+
+# Export test suite to JSON
+node benchmark/debug.js '/anchor.json' --export anchor-tests.json --draft 2019
+
+# Export specific test case
+node benchmark/debug.js '/anchor.json' --index 3 --export-test test.json --draft 2019
+
+# Dry run - show schema and assertions without validating
+node benchmark/debug.js '/anchor.json' --dry-run --draft 2019
+
+# Show detailed validation errors
+node benchmark/debug.js '/ref.json' 'nested refs' --show-errors
+
+# Interactive mode - step through assertions
+node benchmark/debug.js '/ref.json' 'nested refs' --interactive
+
+# Detailed comparison between Jaren and AJV
+node benchmark/debug.js '/ref.json' 'nested refs' --compare
+
+# Run only Jaren (skip AJV comparison)
+node benchmark/debug.js '/ref.json' 'nested refs' --jaren-only
+
+# Minimal output (errors only)
+node benchmark/debug.js '/ref.json' --silent
+```
+
+### Tool Separation
+
+Each benchmark tool has a distinct purpose:
+
+| Tool | Purpose | Use When |
+|------|---------|----------|
+| `debug.js` | Test inspection and assertion-level debugging | Investigating specific test failures |
+| `profiler.js` | Performance measurement and comparison | Measuring Jaren vs AJV speed |
+| `coverage.js` | Code coverage analysis | Finding untested code paths |
+| `callgraph.js` | Call graph generation | Analyzing hot paths and call chains |
 
 ---
 

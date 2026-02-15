@@ -70,23 +70,80 @@ const validate = jaren.compile(schema);
 
 There is an extensive [HOWTO](docs/HOWTO.md) document in the `docs/` folder.
 
+### Debug Tool
+
+A powerful debugging utility for investigating test failures and understanding schema validation behavior.
+
+```bash
+# List all test files for a draft
+node benchmark/debug.js --list-files --draft 2019
+
+# List all test cases in a file with keyword summaries
+node benchmark/debug.js '/anchor.json' --list --draft 2019
+
+# Run a specific test suite with draft selection
+node benchmark/debug.js '/anchor.json' --draft 2019
+
+# Run a specific test by description (partial match)
+node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019
+
+# Run a specific test by index
+node benchmark/debug.js '/anchor.json' --index 3 --draft 2019
+
+# Export test suite to JSON
+node benchmark/debug.js '/anchor.json' --export anchor-tests.json --draft 2019
+
+# Export specific test case
+node benchmark/debug.js '/anchor.json' --index 3 --export-test test.json --draft 2019
+
+# Dry run - show schema and assertions without validating
+node benchmark/debug.js '/anchor.json' --dry-run --draft 2019
+
+# Show detailed validation errors
+node benchmark/debug.js '/ref.json' 'nested refs' --show-errors
+
+# Interactive mode - step through assertions
+node benchmark/debug.js '/ref.json' 'nested refs' --interactive
+
+# Detailed comparison between Jaren and AJV
+node benchmark/debug.js '/ref.json' 'nested refs' --compare
+
+# Verbose output with full schema and data
+node benchmark/debug.js '/ref.json' 'nested refs' --verbose
+```
+
 ### Running the Benchmark Suite
 
 The benchmark suite runs Jaren against the official JSON Schema Test Suite and compares results with Ajv.
 
 ```bash
-# Run all benchmarks (one run only) and
-# create a html document in benchmark/results/results.html
-npm run benchmark
+# Profile specific test suite with draft selection
+node benchmark/profiler.js '/ref.json' --profile --draft 2019 --iterations 1000
 
-# Run a specific test suite
-node benchmark/debug.js '/ref.json'
+# Profile all tests for multiple drafts
+node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12
 
-# Run a specific test by name
-node benchmark/debug.js '/ref.json' '$ref prevents a sibling'
+# Export results to JSON with custom file path
+node benchmark/profiler.js --profile-all --output json --filepath results.json
 
-# Run with verbose output
-node benchmark/debug.js '/ref.json' '$ref prevents a sibling' --verbose
+# Show only top 10 slowest tests
+node benchmark/profiler.js '/ref.json' --profile --top 10
+
+# Only include tests where all engines succeed
+node benchmark/profiler.js '/ref.json' --profile --success-only
+
+# Full options
+Options:
+  --profile              Profile a specific test file
+  --profile-all          Profile all test files
+  --iterations, -i N     Number of iterations (default: 1000)
+  --output, -o FORMAT    Output format: console, csv, json (default: console)
+  --draft, -d VERSION    JSON Schema draft version(s), comma-separated
+                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020
+  --filepath, -f PATH    Output file path for csv/json
+  --top N                Show only top N slowest tests
+  --success-only         Only include tests where all agents succeed
+  --verbose, -v          Verbose output
 ```
 
 ### Code Coverage Analysis
@@ -105,9 +162,50 @@ node benchmark/coverage.js '/required.json' --threshold 25 --functions
 
 # Show only TOUCHED functions (cleaner output)
 node benchmark/coverage.js '/required.json' --threshold 25 --touched-only
+
+# Adjust iterations for coverage analysis
+node benchmark/coverage.js '/required.json' --iterations 5000
+
+# Full options
+Options:
+  --threshold <n>    Filter files with coverage <= n% (default: 0)
+  --functions        Show TOUCHED and NOT touched functions
+  --touched-only     Show only TOUCHED functions
+  --iterations <n>   Number of profiling iterations (default: 1000)
+  --temp-dir <dir>   Temporary directory for c8
 ```
 
 The benchmark results are written to `benchmark/results/results.html`.
+
+### Call Graph Analysis
+
+Call graph analysis using Node.js built-in profiler.
+
+```bash
+# Generate call graph for a test suite
+node benchmark/callgraph.js '/ref.json'
+
+# More iterations for better accuracy
+node benchmark/callgraph.js '/ref.json' --iterations 5000 --top-functions=30
+
+# Show deeper call chains
+node benchmark/callgraph.js '/ref.json' --max-depth=15
+
+# Include Node.js internal functions
+node benchmark/callgraph.js '/ref.json' --include-internals
+
+# Filter by pattern
+node benchmark/callgraph.js '/ref.json' --filter 'validate'
+
+# Full options
+Options:
+  --iterations, -i N       Number of iterations (default: 1000)
+  --top-functions N        Show top N hottest functions (default: 20)
+  --max-depth N            Maximum call chain depth (default: 10)
+  --filter <pattern>       Filter functions by pattern (default: jaren)
+  --include-internals      Include Node.js internal functions
+  --verbose, -v            Show detailed output
+```
 
 ### Running Tests
 
