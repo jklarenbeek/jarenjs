@@ -50,7 +50,24 @@ function processBenchmarkData(raw) {
   }));
 
   const validResults = results.filter(r => !r.hasError);
-  const errors = raw.errors || [];
+  
+  // Normalize errors array to have same structure as results
+  const errors = (raw.errors || []).map(e => ({
+    ...e,
+    hasError: !!(e.jarenError || e.ajvError),
+    jarenFailed: false,
+    ajvFailed: false,
+    jarenFailures: 0,
+    ajvFailures: 0,
+    jarenTotal: 0,
+    ajvTotal: 0,
+    jarenTime: 0,
+    ajvTime: 0,
+    ratio: 0,
+    isSuccessTest: false,
+    testCount: 1,
+    assertions: 0,
+  }));
 
   // Process byDraft from summary with timing data
   const byDraft = {};
@@ -66,8 +83,8 @@ function processBenchmarkData(raw) {
     };
   }
 
-  // Process bySuite
-  const bySuite = groupBySuite(results);
+  // Process bySuite - include both results and errors
+  const bySuite = groupBySuite(results, errors);
 
   // Calculate overall timing from summary
   const overall = raw.summary.overall;
@@ -110,41 +127,65 @@ function processBenchmarkData(raw) {
 }
 
 /**
- * Group benchmark results by suite (file)
+ * Group benchmark results by suite and draft
  * @param {Array} results - Benchmark results
- * @returns {Object} - Grouped results by suite with metrics
+ * @param {Array} errors - Error entries from errors array
+ * @returns {Object} - Grouped results by suite-draft combination with metrics
  */
-function groupBySuite(results) {
+function groupBySuite(results, errors = []) {
   const groups = {};
 
+  // Group by suite AND draft combination
   for (const result of results) {
     const suite = result.suite || 'unknown';
-    if (!groups[suite]) {
-      groups[suite] = [];
+    const draft = result.draft || 'unknown';
+    const key = `${suite}::${draft}`;
+    
+    if (!groups[key]) {
+      groups[key] = {
+        suite,
+        draft,
+        results: [],
+      };
     }
-    groups[suite].push(result);
+    groups[key].results.push(result);
+  }
+
+  // Add error entries to existing groups or create new groups for error-only suites
+  for (const error of errors) {
+    const suite = error.suite || 'unknown';
+    const draft = error.draft || 'unknown';
+    const key = `${suite}::${draft}`;
+    
+    if (!groups[key]) {
+      groups[key] = {
+        suite,
+        draft,
+        results: [],
+      };
+    }
+    groups[key].results.push(error);
   }
 
   const bySuite = {};
-  for (const [suite, suiteResults] of Object.entries(groups)) {
-    const validResults = suiteResults.filter(r => !r.hasError);
-    
-    // Get all unique drafts for this suite
-    const drafts = [...new Set(suiteResults.map(r => r.draft).filter(Boolean))];
-    // Use the first draft as primary (most suites belong to a single draft)
-    const primaryDraft = drafts[0] || 'unknown';
+  for (const [key, group] of Object.entries(groups)) {
+    const suiteResults = group.results;
+    // Valid = no errors from either engine
+    const validResults = suiteResults.filter(r => !r.jarenError && !r.ajvError);
+    // Success = valid AND no failures (isSuccessTest flag from profiler)
+    const successResults = validResults.filter(r => r.isSuccessTest);
 
-    bySuite[suite] = {
-      name: suite.replace(/^\//, ''),
-      draft: primaryDraft,
-      drafts: drafts,
+    bySuite[key] = {
+      name: group.suite.replace(/^\//, ''),
+      suite: group.suite,
+      draft: group.draft,
       totalTests: suiteResults.length,
       validTests: validResults.length,
       testsWithErrors: suiteResults.length - validResults.length,
       jarenTotalTime: suiteResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0),
       ajvTotalTime: suiteResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0),
-      jarenSuccessTime: validResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0),
-      ajvSuccessTime: validResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0),
+      jarenSuccessTime: successResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0),
+      ajvSuccessTime: successResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0),
       jarenErrors: suiteResults.filter(r => r.jarenError).length,
       ajvErrors: suiteResults.filter(r => r.ajvError).length,
       jarenFailures: validResults.filter(r => r.jarenFailures > 0).length,

@@ -58,7 +58,7 @@ function Benchmarks() {
     // Filter bySuite - only include suites that belong to selected drafts
     const filteredBySuite = {};
     for (const [key, suite] of Object.entries(data.bySuite || {})) {
-      // Check if this suite's draft is selected
+      // Check if this suite's draft is selected (key format is 'suite::draft')
       if (selectedDrafts.has(suite.draft)) {
         filteredBySuite[key] = suite;
       }
