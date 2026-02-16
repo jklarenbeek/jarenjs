@@ -62,11 +62,59 @@ class JsonPointer {
 }
 
 export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions()) {
-  const url = !isStringType(refUri) || isStringWhiteSpace(refUri)
-    ? new URL(baseUri)
-    : !isStringType(baseUri) || isStringWhiteSpace(baseUri)
-      ? new URL(refUri)
-      : new URL(refUri, baseUri);
+  let url;
+  try {
+    url = !isStringType(refUri) || isStringWhiteSpace(refUri)
+      ? new URL(baseUri)
+      : !isStringType(baseUri) || isStringWhiteSpace(baseUri)
+        ? new URL(refUri)
+        : new URL(refUri, baseUri);
+  } catch (e) {
+    // Handle case where baseUri is a relative reference (not a valid URL)
+    // Only apply manual resolution when baseUri is a plain identifier (no scheme, no /)
+    const isRelativeBase = isStringType(baseUri) && !/^[a-z][a-z0-9+.-]*:/i.test(baseUri);
+    
+    if (isStringType(refUri) && isRelativeBase) {
+      // If refUri is absolute (has a scheme), use it as-is
+      if (/^[a-z][a-z0-9+.-]*:/i.test(refUri)) {
+        url = new URL(refUri);
+      } else if (refUri.startsWith('#')) {
+        // Fragment-only reference: combine with baseUri
+        const effectiveBase = baseUri;
+        url = new URL(refUri, 'http://example.com/' + effectiveBase);
+        // Restore the original baseUri in the result
+        const href = url.href.replace('http://example.com/', '');
+        const [uri, fragment] = href.split('#');
+        return new JsonPointer(
+          effectiveBase + refUri,
+          undefined,
+          effectiveBase + '#',
+          fragment || null
+        );
+      } else if (refUri.includes('#')) {
+        // refUri has a fragment: manual resolution
+        const [refBase, refFragment] = refUri.split('#');
+        const resolvedId = baseUri.endsWith('/') 
+          ? baseUri + refBase + '#' + refFragment
+          : baseUri + '/' + refBase + '#' + refFragment;
+        return new JsonPointer(
+          resolvedId,
+          undefined,
+          baseUri + '#',
+          refFragment
+        );
+      } else {
+        // No fragment: simple concatenation
+        const resolvedId = baseUri.endsWith('/')
+          ? baseUri + refUri
+          : baseUri + '/' + refUri;
+        return new JsonPointer(resolvedId + '#', undefined, resolvedId + '#', null);
+      }
+    } else {
+      // Re-throw the original error if we can't handle it
+      throw e;
+    }
+  }
 
   const [uri, fragment] = url.href.split('#');
   const [leftUri, search] = uri.split('?');
@@ -156,6 +204,20 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       // we reset the baseUri when the $anchor property is set.
       if (!id.startsWith('#')) // except when anchors are global
         baseUri = id;
+    }
+
+    // Handle $dynamicAnchor (draft 2020-12) - similar to $anchor but for $dynamicRef
+    if (isStringType(obj.$dynamicAnchor) && !isStringWhiteSpace(obj.$dynamicAnchor)) {
+      const { id } = createJsonPointer(`#${obj.$dynamicAnchor}`, baseUri, opts);
+      if (!schemas.has(id))
+        schemas.set(id, obj);
+      else if (schemas.get(id) == null)
+        schemas.set(id, obj);
+      else
+        throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
+
+      // Note: $dynamicAnchor does NOT change the baseUri like $anchor does
+      // It's only used for $dynamicRef resolution
     }
 
     if (isStringType(obj.$ref) && !isStringWhiteSpace(obj.$ref)) {

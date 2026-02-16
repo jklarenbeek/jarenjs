@@ -23,6 +23,7 @@ import {
 } from './tools.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
+import { DynamicScope, hasRecursiveAnchor, hasDynamicAnchor, getDynamicAnchorName, collectDynamicAnchors } from './dynamic-ref.js';
 
 export {
   registerFormatCompilers
@@ -187,6 +188,10 @@ export class ValidationRoot {
   #errors = null;
   /** @type {ValidationObject|null} The root schema's ValidationObject */
   #firstSchema = null;
+  /** @type {DynamicScope|null} The dynamic scope tracker for $recursiveRef/$dynamicRef */
+  #dynamicScope = null;
+  /** @type {Map<string, Function[]>} Map of anchor names to stacks of validator functions */
+  #dynamicAnchors = null;
 
   /**
    * Creates a new ValidationRoot.
@@ -207,6 +212,8 @@ export class ValidationRoot {
 
     this.#objects = new Map();
     this.#errors = [];
+    this.#dynamicScope = new DynamicScope();
+    this.#dynamicAnchors = new Map();
 
     // For the root schema, baseUri is the origin
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
@@ -226,6 +233,9 @@ export class ValidationRoot {
 
   /** @returns {Array} Array of validation errors */
   get errors() { return this.#errors; }
+
+  /** @returns {ValidationObject} The root schema's ValidationObject */
+  get firstSchema() { return this.#firstSchema; }
 
   /**
    * Creates a new ValidationObject for the given path and schema.
@@ -250,6 +260,34 @@ export class ValidationRoot {
 
     objects.set(path, null);
     return null;
+  }
+
+  /**
+   * Gets the raw schema object for a given reference without compiling it.
+   * Used to check schema properties (like $recursiveAnchor) at compile time.
+   * @param {string} ref - The reference URI to resolve
+   * @param {string} path - The current path (for error messages)
+   * @param {object} schema - The schema containing the $ref
+   * @returns {{id: string, schema: object}|null} The resolved schema info or null
+   */
+  getRawSchema(ref, path, schema) {
+    try {
+      const schemas = this.#schemas;
+      const traverse = this.#traverse;
+      return resolveRefSchemaDeep(schemas, path, schema, traverse);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Gets the raw schema object by its URI/ID directly from the schemas map.
+   * This performs a direct lookup without following references.
+   * @param {string} uri - The schema URI to look up
+   * @returns {object|undefined} The raw schema object or undefined
+   */
+  getSchemaByUri(uri) {
+    return this.#schemas.get(uri);
   }
 
   /**
@@ -299,9 +337,115 @@ export class ValidationRoot {
     if (!this.#options.skipErrors) {
       this.#errors = [];
     }
+    // Reset dynamic scope and anchors at the start of validation
+    this.#dynamicScope = new DynamicScope();
+    this.#dynamicAnchors = new Map();
+    
+    // Check if root schema has dynamic anchor and register it
+    const firstSchema = this.#firstSchema;
+    const rootSchema = firstSchema.schema;
+    const hasRecAnchor = isObjectClass(rootSchema) && hasRecursiveAnchor(rootSchema);
+    const dynAnchorName = isObjectClass(rootSchema) ? getDynamicAnchorName(rootSchema) : null;
+    
+    if (hasRecAnchor || dynAnchorName) {
+      const anchorName = dynAnchorName || '';
+      const rootValidator = firstSchema.validate;
+      this.pushDynamicAnchorValidator(anchorName, rootValidator);
+      try {
+        // call compiled validator with dataRoot as third argument
+        return rootValidator(data, '', data);
+      } finally {
+        this.popDynamicAnchorValidator(anchorName);
+      }
+    }
+    
     // call compiled validator
     // Pass dataRoot as the third argument for data keyword support
-    return this.#firstSchema.validate(data, '', data);
+    return firstSchema.validate(data, '', data);
+  }
+
+  /**
+   * Get the dynamic scope tracker.
+   * @returns {DynamicScope} The dynamic scope
+   */
+  get dynamicScope() {
+    return this.#dynamicScope;
+  }
+
+  /**
+   * Get the stored validator for a dynamic anchor.
+   * Used by $dynamicRef for runtime resolution.
+   * Returns the top of the stack (most recently registered validator = nearest).
+   * @param {string} anchorName - The anchor name
+   * @returns {Function|null} The validator function or null if not set
+   */
+  getDynamicAnchorValidator(anchorName) {
+    const stack = this.#dynamicAnchors.get(anchorName);
+    if (!stack || stack.length === 0) return null;
+    return stack[stack.length - 1];
+  }
+
+  /**
+   * Get the outermost validator for a recursive anchor.
+   * Used by $recursiveRef for runtime resolution.
+   * Returns the bottom of the stack (first/outermost registered validator).
+   * @param {string} anchorName - The anchor name (empty string for $recursiveRef)
+   * @returns {Function|null} The validator function or null if not set
+   */
+  getOutermostDynamicAnchorValidator(anchorName) {
+    const stack = this.#dynamicAnchors.get(anchorName);
+    if (!stack || stack.length === 0) return null;
+    return stack[0];
+  }
+
+  /**
+   * Push a validator onto the stack for a dynamic anchor.
+   * Called when entering a schema with $recursiveAnchor or $dynamicAnchor.
+   * @param {string} anchorName - The anchor name
+   * @param {Function} validator - The validator function
+   */
+  pushDynamicAnchorValidator(anchorName, validator) {
+    if (!this.#dynamicAnchors.has(anchorName)) {
+      this.#dynamicAnchors.set(anchorName, []);
+    }
+    this.#dynamicAnchors.get(anchorName).push(validator);
+  }
+
+  /**
+   * Pop a validator from the stack for a dynamic anchor.
+   * Called when exiting a schema with $recursiveAnchor or $dynamicAnchor.
+   * @param {string} anchorName - The anchor name
+   */
+  popDynamicAnchorValidator(anchorName) {
+    const stack = this.#dynamicAnchors.get(anchorName);
+    if (stack && stack.length > 0) {
+      stack.pop();
+    }
+  }
+
+  /**
+   * Get or create a validator for a given schema.
+   * This is used when we need a validator for a schema at validation time
+   * (e.g., for dynamic anchors collected from $defs).
+   * @param {object} schema - The schema to create a validator for
+   * @param {string} basePath - The base path for the schema
+   * @param {string} baseUri - The base URI for the schema
+   * @returns {Function} The validator function
+   */
+  getOrCreateValidator(schema, basePath, baseUri) {
+    // Create a unique path for this schema based on its content
+    // We use a simple JSON stringify for now, but this could be improved
+    const path = basePath + '/$def-anchor/' + JSON.stringify(schema).slice(0, 50);
+    
+    // Check if we already have an object for this path
+    let obj = this.#objects.get(path);
+    if (obj != null) {
+      return obj.validate;
+    }
+    
+    // Create a new validation object for this schema
+    obj = ValidationRoot.#createObject(this, path, schema, baseUri);
+    return obj.validate;
   }
 }
 
@@ -342,11 +486,79 @@ export class ValidationObject {
     // Only check for sibling validators in draft 2019-09+
     const siblingValidator = draftVersion >= 2019 ? compileSchemaObject(self, schema) : null;
 
+    // Collect dynamic anchors from the current schema's $defs/definitions.
+    // When following a $ref, dynamic anchors defined in the source schema's $defs
+    // should be in scope for $dynamicRef in the target schema.
+    // This handles cases like: root has $defs.foo with $dynamicAnchor, root.$ref points to list,
+    // and list.items has $dynamicRef that should resolve to root.$defs.foo's anchor.
+    const sourceDynamicAnchors = draftVersion >= 2020 ? collectDynamicAnchors(schema) : [];
+
     // Since refs are now pre-compiled at compile time,
     // we should always find the target immediately
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
       const refValidator = resolved.validate;
+      const resolvedSchema = resolved.schema;
+      
+      // Check if the target schema has a dynamic anchor ($recursiveAnchor or $dynamicAnchor)
+      // If so, we need to wrap the call to register the anchor at validation time
+      const hasRecAnchor = isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema);
+      const dynAnchorName = isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null;
+      
+      if (hasRecAnchor || dynAnchorName || sourceDynamicAnchors.length > 0) {
+        const anchorName = dynAnchorName || ''; // empty string for $recursiveAnchor
+        
+        // Wrap the ref validator to register dynamic anchor at call time (validation time)
+        if (siblingValidator) {
+          return function validateRefWithDynamicAnchorAndSiblings(data, dataPath, dataRoot) {
+            // Register source schema's dynamic anchors first
+            for (let i = 0; i < sourceDynamicAnchors.length; i++) {
+              const anchor = sourceDynamicAnchors[i];
+              const validator = root.getOrCreateValidator(anchor.schema, path, baseUri);
+              root.pushDynamicAnchorValidator(anchor.name, validator);
+            }
+            // Then register target's dynamic anchor if any
+            if (hasRecAnchor || dynAnchorName) {
+              root.pushDynamicAnchorValidator(anchorName, refValidator);
+            }
+            try {
+              return refValidator(data, dataPath, dataRoot) && siblingValidator(data, dataPath, dataRoot);
+            } finally {
+              // Pop in reverse order
+              if (hasRecAnchor || dynAnchorName) {
+                root.popDynamicAnchorValidator(anchorName);
+              }
+              for (let i = sourceDynamicAnchors.length - 1; i >= 0; i--) {
+                root.popDynamicAnchorValidator(sourceDynamicAnchors[i].name);
+              }
+            }
+          };
+        } else {
+          return function validateRefWithDynamicAnchor(data, dataPath, dataRoot) {
+            // Register source schema's dynamic anchors first
+            for (let i = 0; i < sourceDynamicAnchors.length; i++) {
+              const anchor = sourceDynamicAnchors[i];
+              const validator = root.getOrCreateValidator(anchor.schema, path, baseUri);
+              root.pushDynamicAnchorValidator(anchor.name, validator);
+            }
+            // Then register target's dynamic anchor if any
+            if (hasRecAnchor || dynAnchorName) {
+              root.pushDynamicAnchorValidator(anchorName, refValidator);
+            }
+            try {
+              return refValidator(data, dataPath, dataRoot);
+            } finally {
+              // Pop in reverse order
+              if (hasRecAnchor || dynAnchorName) {
+                root.popDynamicAnchorValidator(anchorName);
+              }
+              for (let i = sourceDynamicAnchors.length - 1; i >= 0; i--) {
+                root.popDynamicAnchorValidator(sourceDynamicAnchors[i].name);
+              }
+            }
+          };
+        }
+      }
       
       // If there are sibling validators (draft 2019-09+), combine them with the ref validator
       if (siblingValidator) {
@@ -366,19 +578,53 @@ export class ValidationObject {
     const boundRefBase = refBase;
     const boundSchema = schema;
     const boundSiblingValidator = siblingValidator;
+    const boundSourceAnchors = sourceDynamicAnchors;
 
-    return function resolveSchemaCompiler(data, dataRoot) {
+    return function resolveSchemaCompiler(data, dataPath, dataRoot) {
       const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
       const refValidator = obj.validate;
+      const resolvedSchema = obj.schema;
       
-      // If there are sibling validators (draft 2019-09+), combine them with the ref validator
-      if (boundSiblingValidator) {
-        return refValidator(data, dataRoot) && boundSiblingValidator(data, dataRoot);
+      // Check if the resolved schema has a dynamic anchor
+      const hasRecAnchor = isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema);
+      const dynAnchorName = isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null;
+      
+      // Register source anchors first
+      for (let i = 0; i < boundSourceAnchors.length; i++) {
+        const anchor = boundSourceAnchors[i];
+        const validator = rootRef.getOrCreateValidator(anchor.schema, path, baseUri);
+        rootRef.pushDynamicAnchorValidator(anchor.name, validator);
       }
       
-      // Cache the validator directly - no wrapper function
-      self.#validator = refValidator;
-      return refValidator(data, dataRoot);
+      try {
+        if (hasRecAnchor || dynAnchorName) {
+          const anchorName = dynAnchorName || '';
+          rootRef.pushDynamicAnchorValidator(anchorName, refValidator);
+          try {
+            // If there are sibling validators (draft 2019-09+), combine them with the ref validator
+            if (boundSiblingValidator) {
+              return refValidator(data, dataPath, dataRoot) && boundSiblingValidator(data, dataPath, dataRoot);
+            }
+            return refValidator(data, dataPath, dataRoot);
+          } finally {
+            rootRef.popDynamicAnchorValidator(anchorName);
+          }
+        }
+        
+        // If there are sibling validators (draft 2019-09+), combine them with the ref validator
+        if (boundSiblingValidator) {
+          return refValidator(data, dataPath, dataRoot) && boundSiblingValidator(data, dataPath, dataRoot);
+        }
+        
+        // Cache the validator directly - no wrapper function
+        self.#validator = refValidator;
+        return refValidator(data, dataPath, dataRoot);
+      } finally {
+        // Pop source anchors
+        for (let i = boundSourceAnchors.length - 1; i >= 0; i--) {
+          rootRef.popDynamicAnchorValidator(boundSourceAnchors[i].name);
+        }
+      }
     };
   }
 
@@ -433,6 +679,11 @@ export class ValidationObject {
     return this.#path;
   }
 
+  /** @returns {string} The effective base URI for resolving relative $refs */
+  get baseUri() {
+    return this.#effectiveBaseUri;
+  }
+
   /** @returns {Array} The current validation errors from the root */
   get errors() {
     return this.#root.errors;
@@ -456,6 +707,11 @@ export class ValidationObject {
   /** @returns {ValidationRoot} The root validation context */
   get root() {
     return this.#root;
+  }
+
+  /** @returns {object} The schema object */
+  get schema() {
+    return this.#schema;
   }
 
 /**

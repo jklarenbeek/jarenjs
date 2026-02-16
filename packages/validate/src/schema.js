@@ -3,6 +3,7 @@
 import {
   isObjectType,
   getStringType,
+  isObjectClass,
 } from '@jarenjs/core';
 
 import {
@@ -40,7 +41,224 @@ import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
 import { compileDollarDataSchema, hasDollarDataReferences } from './dollar-data.js';
-import { hasSchemaRef, hasSchemaRecursiveRef } from './tools.js';
+import { hasSchemaRef, hasSchemaRecursiveRef, hasSchemaDynamicRef } from './tools.js';
+import { createJsonPointer } from './traverse.js';
+
+/**
+ * Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12).
+ * These keywords require runtime resolution based on dynamic scope.
+ * 
+ * $recursiveRef: References the nearest parent schema with $recursiveAnchor: true
+ * $dynamicRef: References the nearest parent schema with matching $dynamicAnchor name
+ * 
+ * @param {ValidationObject} schemaObj - The validation object
+ * @param {object} jsonSchema - The JSON schema
+ * @returns {Function|undefined} The compiled validator function
+ */
+function compileDynamicRef(schemaObj, jsonSchema) {
+  // Check for $recursiveRef (draft 2019-09)
+  if (hasSchemaRecursiveRef(jsonSchema)) {
+    return compileRecursiveRef(schemaObj, jsonSchema);
+  }
+
+  // Check for $dynamicRef (draft 2020-12)
+  if (hasSchemaDynamicRef(jsonSchema)) {
+    return compileDynamicAnchorRef(schemaObj, jsonSchema);
+  }
+
+  return undefined;
+}
+
+/**
+ * Compile $recursiveRef which references the outermost $recursiveAnchor: true.
+ * 
+ * Per JSON Schema 2019-09 spec:
+ * 1. The initial target is determined by resolving the reference as a URI reference
+ *    against the current base URI (like $ref)
+ * 2. If the initial target has $recursiveAnchor: true, look up the dynamic scope
+ *    for the outermost $recursiveAnchor and use that schema instead
+ * 3. Otherwise, use the initial target (like a normal $ref)
+ * 
+ * @param {ValidationObject} schemaObj - The validation object
+ * @param {object} jsonSchema - The JSON schema containing $recursiveRef
+ * @returns {Function} The compiled validator function
+ */
+function compileRecursiveRef(schemaObj, jsonSchema) {
+  const root = schemaObj.root;
+  const ref = jsonSchema.$recursiveRef;
+  const addError = schemaObj.createErrorHandler(ref, '$recursiveRef');
+
+  // $recursiveRef only supports "#" (the current document root)
+  if (ref !== '#') {
+    // For non-# refs, fall back to normal $ref behavior
+    return undefined;
+  }
+
+  // Get the base URI for resolving the reference
+  // This is the effective base URI of the schema containing $recursiveRef
+  // (accounts for $id of containing schemas)
+  const baseUri = schemaObj.baseUri;
+  
+  // Resolve the reference to find the initial target URI
+  // For "#", this resolves against the baseUri
+  const { id: initialTargetUri } = createJsonPointer(ref, baseUri);
+  
+  // Look up the initial target schema by its URI
+  // We do a direct lookup in the schemas map to avoid triggering compilation
+  // The initialTargetUri might have a trailing '#' which we need to handle
+  let initialTargetSchema = root.getSchemaByUri(initialTargetUri);
+  if (!initialTargetSchema && initialTargetUri.endsWith('#')) {
+    initialTargetSchema = root.getSchemaByUri(initialTargetUri.slice(0, -1));
+  }
+  
+  // Check if the initial target has $recursiveAnchor: true
+  // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
+  const useDynamicScope = isObjectClass(initialTargetSchema) && initialTargetSchema.$recursiveAnchor === true;
+
+  return function validateRecursiveRef(data, dataPath, dataRoot) {
+    if (useDynamicScope) {
+      // The initial target has $recursiveAnchor: true
+      // Look up the dynamic scope for the outermost $recursiveAnchor
+      const outermostValidator = root.getOutermostDynamicAnchorValidator('');
+      
+      if (outermostValidator) {
+        // Found an outermost $recursiveAnchor - use that validator
+        return outermostValidator(data, dataPath, dataRoot);
+      }
+    }
+
+    // Either no $recursiveAnchor on initial target, or no dynamic scope available
+    // Fall back to normal resolution like $ref
+    const targetObj = root.resolveObject(initialTargetUri, baseUri, jsonSchema);
+    if (targetObj) {
+      return targetObj.validate(data, dataPath, dataRoot);
+    }
+
+    return addError(data, dataPath);
+  };
+}
+
+/**
+ * Compile $dynamicRef which references the nearest matching $dynamicAnchor.
+ * 
+ * Per JSON Schema 2020-12 spec:
+ * 1. The initial target is determined by resolving the reference as a URI reference
+ *    against the current base URI (like $ref)
+ * 2. If the initial target has $dynamicAnchor with matching name, look up the dynamic scope
+ *    for the nearest $dynamicAnchor with that name and use that schema instead
+ * 3. Otherwise, use the initial target (like a normal $ref)
+ * 
+ * @param {ValidationObject} schemaObj - The validation object
+ * @param {object} jsonSchema - The JSON schema containing $dynamicRef
+ * @returns {Function} The compiled validator function
+ */
+function compileDynamicAnchorRef(schemaObj, jsonSchema) {
+  const root = schemaObj.root;
+  const ref = jsonSchema.$dynamicRef;
+  const addError = schemaObj.createErrorHandler(ref, '$dynamicRef');
+
+  // $dynamicRef is typically a fragment reference like "#name"
+  // For non-hash references, fall back to normal $ref behavior
+  // BUT we must defer resolution to validation time to avoid infinite recursion
+  // when the target schema also has $dynamicRef
+  if (!ref.startsWith('#')) {
+    // Non-fragment $dynamicRef - defer resolution to validation time
+    const baseUri = schemaObj.baseUri;
+    const resolvedPointer = createJsonPointer(ref, baseUri);
+    const resolvedRef = resolvedPointer.id;
+    
+    // Look up the target schema at compile time
+    let targetSchema = root.getSchemaByUri(resolvedRef);
+    if (!targetSchema && resolvedRef.includes('#')) {
+      // Try without fragment
+      const [baseRef] = resolvedRef.split('#');
+      targetSchema = root.getSchemaByUri(baseRef);
+    }
+    
+    if (targetSchema) {
+      // Return a validator that creates the target object at validation time
+      // This avoids infinite recursion during compilation
+      return function validateDynamicRefAsRef(data, dataPath, dataRoot) {
+        let targetObj = root.unresolvedObject(resolvedRef);
+        if (targetObj === null) {
+          targetObj = root.createObject(resolvedRef, targetSchema, baseUri);
+        }
+        if (targetObj) {
+          return targetObj.validate(data, dataPath, dataRoot);
+        }
+        return addError(data, dataPath);
+      };
+    }
+    return addError;
+  }
+
+  const anchorName = ref.slice(1); // Remove the "#" prefix
+  
+  // Get the base URI for resolving the reference
+  const baseUri = schemaObj.baseUri;
+  
+  // Resolve the reference to find the initial target URI
+  const { id: initialTargetUri } = createJsonPointer(ref, baseUri);
+  
+  // Look up the initial target schema by its URI
+  let initialTargetSchema = root.getSchemaByUri(initialTargetUri);
+  if (!initialTargetSchema && initialTargetUri.endsWith('#')) {
+    initialTargetSchema = root.getSchemaByUri(initialTargetUri.slice(0, -1));
+  }
+  
+  // Check if the initial target has matching $dynamicAnchor
+  // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
+  const hasDynamicAnchor = isObjectClass(initialTargetSchema) && initialTargetSchema.$dynamicAnchor === anchorName;
+
+  return function validateDynamicRef(data, dataPath, dataRoot) {
+    if (hasDynamicAnchor) {
+      // The initial target has matching $dynamicAnchor
+      // Look up the dynamic scope for the nearest $dynamicAnchor with this name
+      const dynamicValidator = root.getDynamicAnchorValidator(anchorName);
+      
+      if (dynamicValidator) {
+        // Found a matching $dynamicAnchor in scope - use that validator
+        return dynamicValidator(data, dataPath, dataRoot);
+      }
+      
+      // No dynamic scope available - use the initial target directly
+      // The initial target schema was already found at compile time (initialTargetSchema)
+      // Check if already compiled, otherwise create the validation object
+      let targetObj = root.unresolvedObject(initialTargetUri);
+      if (targetObj === null) {
+        // Not compiled yet - create it using the initial target schema we found at compile time
+        targetObj = root.createObject(initialTargetUri, initialTargetSchema, baseUri);
+      }
+      if (targetObj) {
+        const targetValidator = targetObj.validate;
+        // Register this schema's dynamic anchor for the duration of the validation
+        // This allows nested $dynamicRef to find this anchor
+        root.pushDynamicAnchorValidator(anchorName, targetValidator);
+        try {
+          return targetValidator(data, dataPath, dataRoot);
+        } finally {
+          root.popDynamicAnchorValidator(anchorName);
+        }
+      }
+    }
+
+    // Either no $dynamicAnchor on initial target, or no dynamic scope available
+    // Fall back to normal resolution like $ref
+    // For this case, we look up the schema directly and create a validation object
+    const targetSchema = initialTargetSchema || root.getSchemaByUri(initialTargetUri);
+    if (targetSchema) {
+      let targetObj = root.unresolvedObject(initialTargetUri);
+      if (targetObj === null) {
+        targetObj = root.createObject(initialTargetUri, targetSchema, baseUri);
+      }
+      if (targetObj) {
+        return targetObj.validate(data, dataPath, dataRoot);
+      }
+    }
+
+    return addError(data, dataPath);
+  };
+}
 
 function compileRequired(schemaObj, jsonSchema) {
   // if required is not true, we have nothing.
@@ -342,6 +560,9 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   addFunctionToArray(validators, compileCombineSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileConditionSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileDataSchema(schemaObj, jsonSchema));
+
+  // Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12)
+  addFunctionToArray(validators, compileDynamicRef(schemaObj, jsonSchema));
 
   // same as empty schema
   if (validators.length === 0)
