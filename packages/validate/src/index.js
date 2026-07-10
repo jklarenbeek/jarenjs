@@ -2,6 +2,7 @@
 
 import {
   isObjectClass,
+  isStringType,
 } from '@jarenjs/core';
 
 import {
@@ -126,13 +127,15 @@ export class ValidationOptions {
    * @param {boolean} [collectErrors=false] - Whether to collect all errors or just return boolean
    * @param {boolean|null} [contentValidation=null] - Whether to validate contentEncoding/contentMediaType (null = auto based on draft)
    * @param {number} [draftVersion=7] - The JSON Schema draft version (6, 7, 2019, or 2020)
+   * @param {boolean} [vocabValidation=true] - Whether the validation vocabulary is enabled (false when the schema's metaschema omits it via $vocabulary)
    */
   constructor(
     skipErrors = true,
     useGrapheme = true,
     collectErrors = false,
     contentValidation = null,
-    draftVersion = 7
+    draftVersion = 7,
+    vocabValidation = true
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -144,6 +147,8 @@ export class ValidationOptions {
     this.contentValidation = contentValidation;
     /** @type {number} The JSON Schema draft version (6, 7, 2019, or 2020) */
     this.draftVersion = draftVersion;
+    /** @type {boolean} Whether validation vocabulary keywords (type, minimum, ...) are asserted */
+    this.vocabValidation = vocabValidation;
   }
 }
 
@@ -161,7 +166,7 @@ export class ValidationRoot {
    * @param {string} baseUri - The base URI for resolving relative refs
    * @returns {ValidationObject} The created ValidationObject
    */
-  static #createObject(self, path, schema, baseUri) {
+  static #createObject(self, path, schema, baseUri, parentDeclaredDraft = null) {
     const objects = self.#objects;
     if (objects.has(path)) {
       const p = objects.get(path);
@@ -169,7 +174,7 @@ export class ValidationRoot {
         throw new Error(`Object at '${path}' is already created`);
     }
 
-    const obj = new ValidationObject(self, path, schema, baseUri);
+    const obj = new ValidationObject(self, path, schema, baseUri, parentDeclaredDraft);
     objects.set(path, obj);
     return obj;
   }
@@ -205,32 +210,48 @@ export class ValidationRoot {
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
   #evalLog = new EvalLog();
 
+  /** Keywords whose value is a map of arbitrary names to schemas; those
+   * names must not be mistaken for keywords (e.g. a metaschema declaring
+   * a property named 'unevaluatedProperties'). */
+  static #SCAN_MAP_KEYWORDS = new Set([
+    'properties', 'patternProperties', 'dependentSchemas',
+    '$defs', 'definitions',
+  ]);
+
   /**
    * Recursively scans a schema (sub)tree for keys that require special
    * runtime support: '$data' references and 'unevaluatedProperties'/
-   * 'unevaluatedItems'. Conservative: a property literally named like one
-   * of these keywords also matches.
+   * 'unevaluatedItems'. Keys inside name->schema maps (properties, $defs,
+   * ...) are property/definition names and are not treated as keywords.
    * @param {any} node - The schema node to scan
    * @param {Set<object>} seen - Cycle guard
    * @param {{dollarData: boolean, unevaluated: boolean}} flags - Output flags
+   * @param {boolean} [isSchema=true] - Whether node's keys are schema keywords
    */
-  static #scanSchemaFeatures(node, seen, flags) {
+  static #scanSchemaFeatures(node, seen, flags, isSchema = true) {
     if (node == null || typeof node !== 'object') return;
     if (flags.dollarData && flags.unevaluated) return;
     if (seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; ++i) {
-        ValidationRoot.#scanSchemaFeatures(node[i], seen, flags);
+        ValidationRoot.#scanSchemaFeatures(node[i], seen, flags, isSchema);
       }
       return;
     }
     const keys = Object.keys(node);
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
-      if (key === '$data') flags.dollarData = true;
-      else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
-      ValidationRoot.#scanSchemaFeatures(node[key], seen, flags);
+      if (isSchema) {
+        if (key === '$data') flags.dollarData = true;
+        else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
+        if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
+          // The value is a name->schema map: its keys are names, its values schemas.
+          ValidationRoot.#scanSchemaFeatures(node[key], seen, flags, false);
+          continue;
+        }
+      }
+      ValidationRoot.#scanSchemaFeatures(node[key], seen, flags, true);
     }
   }
 
@@ -314,8 +335,8 @@ export class ValidationRoot {
    * @param {string} baseUri - The base URI for resolving relative refs
    * @returns {ValidationObject} The created ValidationObject
    */
-  createObject(path, schema, baseUri) {
-    return ValidationRoot.#createObject(this, path, schema, baseUri);
+  createObject(path, schema, baseUri, parentDeclaredDraft = null) {
+    return ValidationRoot.#createObject(this, path, schema, baseUri, parentDeclaredDraft);
   }
 
   /**
@@ -544,15 +565,19 @@ export class ValidationObject {
 
     const root = self.#root;
 
-    // When resolving $ref, use baseUri (parent's base) instead of path.
-    // This ensures that a sibling $id does not change the base URI for $ref resolution.
-    // Per JSON Schema spec, $ref prevents a sibling $id from changing the base URI.
-    const refBase = baseUri || path;
-    const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse);
-
     // In draft 2019-09+, $ref can have sibling keywords that are applied together.
     // In draft 7 and earlier, $ref overrides siblings.
     const draftVersion = root.options.draftVersion || 7;
+
+    // Base URI for resolving $ref:
+    // - Draft 7 and earlier: $ref replaces the schema entirely, so a sibling
+    //   $id does not change the base URI - resolve against the parent's base.
+    // - Draft 2019-09+: $id establishes the base URI for the schema object it
+    //   appears in, INCLUDING a sibling $ref (self.baseUri accounts for $id).
+    const refBase = draftVersion >= 2019
+      ? (self.baseUri || baseUri || path)
+      : (baseUri || path);
+    const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse);
     // Only check for sibling validators in draft 2019-09+
     const siblingValidator = draftVersion >= 2019 ? compileSchemaObject(self, schema) : null;
 
@@ -716,6 +741,8 @@ export class ValidationObject {
   #baseUri = null;
   /** @type {string} The effective base URI for child $ref resolution */
   #effectiveBaseUri = null;
+  /** @type {number|null} Draft version declared by this schema's document ($schema), inherited by subschemas; null when never declared */
+  #declaredDraft = null;
 
   /**
    * Creates a new ValidationObject.
@@ -723,13 +750,20 @@ export class ValidationObject {
    * @param {string} path - The URI path identifying this schema object
    * @param {any} schema - The schema object to compile
    * @param {string} baseUri - The base URI for resolving $ref
+   * @param {number|null} [parentDeclaredDraft] - The declared draft inherited from the parent schema object
    */
-  constructor(root, path, schema, baseUri) {
+  constructor(root, path, schema, baseUri, parentDeclaredDraft = null) {
     this.#root = root;
     this.#path = path;
     this.#members = [];
     this.#schema = schema;
     this.#validator = null;
+
+    // A document that declares its own $schema is processed per that draft
+    // (cross-draft references); subschemas inherit the document's draft.
+    this.#declaredDraft = (isObjectClass(schema) && isStringType(schema.$schema))
+      ? detectSchemaDraft(schema)
+      : parentDeclaredDraft;
 
     // Calculate the effective base URI for this schema.
     // The effective base is what children should use for resolving relative $refs.
@@ -786,6 +820,11 @@ export class ValidationObject {
   /** @returns {object} The schema object */
   get schema() {
     return this.#schema;
+  }
+
+  /** @returns {number|null} Draft version declared by this schema's document via $schema, or null when never declared */
+  get declaredDraft() {
+    return this.#declaredDraft;
   }
 
 /**
@@ -871,7 +910,8 @@ export class ValidationObject {
     // Pass basePath as the baseUri for the child object.
     // This ensures that $ref in the child will be resolved against basePath,
     // not against any sibling $id that the child might have.
-    const child = root.createObject(path, schema, basePath);
+    // The child inherits this document's declared draft version.
+    const child = root.createObject(path, schema, basePath, this.#declaredDraft);
     this.#members.push(child);
 
     return child.#validator;
@@ -1528,12 +1568,29 @@ export class JarenValidator {
     const existingValidation = this.#options.validation || new ValidationOptions();
     // For draft7, contentValidation defaults to true; for 2019-09+, defaults to false
     const contentValidationDefault = draftVersion < 2019;
+
+    // When the schema declares a custom metaschema via $schema, its
+    // $vocabulary decides which keyword vocabularies are asserted. A
+    // metaschema that omits the validation vocabulary turns keywords like
+    // 'type' and 'minimum' into annotations that assert nothing.
+    let vocabValidation = true;
+    if (isObjectClass(schema) && isStringType(schema.$schema)) {
+      const metaKey = JarenValidator.normalizeUriKey(schema.$schema);
+      const metaSchema = map.get(metaKey)
+        || map.get(metaKey.endsWith('#') ? metaKey.slice(0, -1) : metaKey + '#');
+      if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
+        vocabValidation = Object.keys(metaSchema.$vocabulary)
+          .some(uri => uri.includes('/vocab/validation'));
+      }
+    }
+
     const validationOptions = new ValidationOptions(
       existingValidation.skipErrors ?? true,
       existingValidation.useGrapheme ?? true,
       existingValidation.collectErrors ?? false,
       existingValidation.contentValidation ?? contentValidationDefault,
-      draftVersion
+      draftVersion,
+      vocabValidation
     );
 
     // Pre-compile all refs before returning the validator

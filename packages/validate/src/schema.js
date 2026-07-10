@@ -433,11 +433,15 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // If so, we need to use the $data-aware compilation path
   const hasDollarData = hasDollarDataReferences(jsonSchema);
 
+  // When the metaschema's $vocabulary omits the validation vocabulary,
+  // keywords like type/enum/minimum/minLength assert nothing.
+  const vocabValidation = schemaObj.options.vocabValidation !== false;
+
   // Fast paths for common simple schema patterns
   // These inline the validation to reduce function call overhead
 
   // Fast path: type-only schema (most common case: {"type": "string"})
-  if (keys.length === 1 && jsonSchema.type !== undefined) {
+  if (vocabValidation && keys.length === 1 && jsonSchema.type !== undefined) {
     const type = jsonSchema.type;
     // Only handle single type strings here (not arrays of types)
     if (typeof type === 'string') {
@@ -478,7 +482,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   }
 
   // Fast path: required-only schema (common case: {"required": ["foo", "bar"]})
-  if (keys.length === 1 && jsonSchema.required !== undefined) {
+  if (vocabValidation && keys.length === 1 && jsonSchema.required !== undefined) {
     const required = jsonSchema.required;
     if (Array.isArray(required) && required.length > 0) {
       const addError = schemaObj.createErrorHandler(required, ['required']);
@@ -500,7 +504,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   // Fast path: minLength-only schema (common case: {"minLength": 2})
   // This avoids the overhead of compileStringBasic for simple cases
-  if (keys.length === 1 && jsonSchema.minLength !== undefined) {
+  if (vocabValidation && keys.length === 1 && jsonSchema.minLength !== undefined) {
     const min = jsonSchema.minLength;
     if (typeof min === 'number' && min > 0 && Number.isFinite(min)) {
       const addError = schemaObj.createErrorHandler(min, 'minLength');
@@ -524,7 +528,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   }
 
   // Fast path: maxLength-only schema (common case: {"maxLength": 10})
-  if (keys.length === 1 && jsonSchema.maxLength !== undefined) {
+  if (vocabValidation && keys.length === 1 && jsonSchema.maxLength !== undefined) {
     const max = jsonSchema.maxLength;
     if (typeof max === 'number' && max >= 0 && Number.isFinite(max)) {
       const addError = schemaObj.createErrorHandler(max, 'maxLength');
@@ -547,18 +551,20 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   }
 
   const validators = [];
-  addFunctionToArray(validators, compileRequired(schemaObj, jsonSchema));
-  addFunctionToArray(validators, compileTypeBasic(schemaObj, jsonSchema));
-  addFunctionToArray(validators, compileEnumBasic(schemaObj, jsonSchema));
-  
-  // Compile $data-aware validators for keywords with $data references
-  // This handles cases like: { "maximum": { "$data": "1/larger" } }
-  const dollarDataValidator = compileDollarDataSchema(schemaObj, jsonSchema);
-  addFunctionToArray(validators, dollarDataValidator);
-  
-  addFunctionToArray(validators, compileNumberBasic(schemaObj, jsonSchema));
-  addFunctionToArray(validators, compileBigIntBasic(schemaObj, jsonSchema));
-  addFunctionToArray(validators, compileStringBasic(schemaObj, jsonSchema));
+  if (vocabValidation) {
+    addFunctionToArray(validators, compileRequired(schemaObj, jsonSchema));
+    addFunctionToArray(validators, compileTypeBasic(schemaObj, jsonSchema));
+    addFunctionToArray(validators, compileEnumBasic(schemaObj, jsonSchema));
+
+    // Compile $data-aware validators for keywords with $data references
+    // This handles cases like: { "maximum": { "$data": "1/larger" } }
+    const dollarDataValidator = compileDollarDataSchema(schemaObj, jsonSchema);
+    addFunctionToArray(validators, dollarDataValidator);
+
+    addFunctionToArray(validators, compileNumberBasic(schemaObj, jsonSchema));
+    addFunctionToArray(validators, compileBigIntBasic(schemaObj, jsonSchema));
+    addFunctionToArray(validators, compileStringBasic(schemaObj, jsonSchema));
+  }
   addFunctionToArray(validators, compileFormatBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileContentSchema(schemaObj, jsonSchema));
 
