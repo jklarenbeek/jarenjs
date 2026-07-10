@@ -16,6 +16,9 @@ This document describes the internal architecture of JarenJS, a high-performance
   - [ValidationRoot](#validationroot)
   - [ValidationObject](#validationobject)
 - [$ref Resolution](#ref-resolution)
+- [Annotation Tracking](#annotation-tracking-unevaluatedproperties--unevaluateditems)
+- [Dynamic References](#dynamic-references)
+- [Drafts and Vocabularies](#drafts-and-vocabularies)
 - [Data Structures](#data-structures)
 - [Performance Optimizations](#performance-optimizations)
 - [Error Handling](#error-handling)
@@ -33,11 +36,19 @@ JarenJS is a JSON Schema validator that compiles schemas into optimized validati
 |------|---------|
 | `packages/validate/src/index.js` | Main validator classes (`JarenValidator`, `ValidationRoot`, `ValidationObject`) |
 | `packages/validate/src/traverse.js` | Schema traversal and ref resolution (`storeSchemaIdsInMap`, `restoreSchemaRefsInMap`) |
-| `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`) |
+| `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`), `$recursiveRef`/`$dynamicRef` |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |
 | `packages/validate/src/number.js` | Number validation logic |
+| `packages/validate/src/combine.js` | `allOf`/`anyOf`/`oneOf`/`not` |
+| `packages/validate/src/condition.js` | `if`/`then`/`else` |
+| `packages/validate/src/unevaluated.js` | `unevaluatedProperties`/`unevaluatedItems` final-stage validators |
+| `packages/validate/src/dynamic-ref.js` | Dynamic-scope helpers and `$dynamicAnchor` collection |
+| `packages/validate/src/tools.js` | Shared helpers, `EvalLog` annotation log, `ValidationResult` |
+| `packages/validate/src/format.js` | The `format` keyword and format-compiler registry |
+| `packages/validate/src/dollar-data.js` | Ajv-style `$data` references |
+| `packages/validate/src/data.js` | json-everything `data` (data-ref) keyword |
 
 ---
 
@@ -51,15 +62,11 @@ The most important insight from Jaren's development: **all ref resolution must h
 - Validation functions are pre-compiled before any data is validated
 - No URI resolution happens during validation
 
-### 2. Lazy vs Eager Evaluation Trade-offs
+### 2. Eager Evaluation
 
-Early versions used lazy evaluation (resolve refs on first validation), which caused catastrophic first-call performance. The current architecture uses eager evaluation:
+Refs are resolved eagerly at compile time, never lazily on first validation. This keeps the first `validate(data)` call as fast as every subsequent one:
 
 ```javascript
-// Old (lazy): Ref resolved at validation time - SLOW
-validate(data); // First call triggers resolveRefSchemaDeep()
-
-// New (eager): Ref resolved at compile time - FAST
 const validate = compile(schema); // All refs resolved here
 validate(data); // Direct function call, no resolution
 ```
@@ -147,7 +154,7 @@ compile(schema, schemas)
 - After `restoreSchemaRefsInMap`, all ref values are resolved schemas (not null)
 - **Ref chains are flattened**: `A → B → C` becomes `A → C`
 
-**The Critical Optimization**: `restoreSchemaRefsInMap` now uses `resolveRefSchemaDeep` instead of `resolveRefSchemaShallow`. This follows the entire ref chain at load time and stores the final schema directly.
+**The Critical Optimization**: `restoreSchemaRefsInMap` uses `resolveRefSchemaDeep` to follow the entire ref chain at load time and store the final schema directly.
 
 ### Phase 3: Compilation
 
@@ -174,7 +181,7 @@ compile()
 - Manages the `Map<string, ValidationObject>` called `#objects`
 - Entry point: `validate(data)` clears errors and calls `#firstSchema.validate(data, data)`
 - Creates objects via `createObject()` and caches them in `#objects`
-- **Pre-compilation**: Now creates ValidationObjects for ALL refs before returning
+- **Pre-compilation**: creates ValidationObjects for ALL refs before returning
 
 #### ValidationObject
 - Represents a single schema location (identified by URI)
@@ -319,9 +326,49 @@ When schemas have `$id` that changes the base URI:
 
 **Resolution Rules**:
 1. `$id` changes the base URI for itself and all children
-2. `$ref` is resolved against the current base URI
+2. `$ref` is resolved against the current base URI. In draft 2019-09 and later this includes a sibling `$id` on the same schema object; in draft 7 and earlier `$ref` replaces the whole schema, so a sibling `$id` does not affect it
 3. Relative `$id` values resolve against the parent's base URI
 4. Trailing `#` is stripped for URL resolution
+
+---
+
+## Annotation Tracking (unevaluatedProperties / unevaluatedItems)
+
+The `unevaluatedProperties` and `unevaluatedItems` keywords apply to whatever the rest of the schema did NOT evaluate. Supporting them requires knowing, at validation time, which properties and items were successfully evaluated by sibling keywords and by in-place applicators (`allOf`/`anyOf`/`oneOf`/`if-then-else`/`$ref`/`$recursiveRef`/`dependentSchemas`).
+
+### EvalLog
+
+`EvalLog` (in `tools.js`) is a per-`ValidationRoot` log of `(instance, key)` pairs:
+
+- **Producers**: `properties`, `patternProperties`, `additionalProperties`, `items`, `prefixItems` and `additionalItems` record each successful evaluation. String keys mark object properties; numeric keys mark array indexes; the numeric key `-1` means "all items of this array". `contains` contributes item annotations in draft 2020-12 only. `propertyNames` contributes nothing.
+- **Instance identity**: entries are keyed by object reference, so annotations naturally scope to the correct instance through `$ref` chains and recursion.
+- **mark/rollback**: applicators that discard annotations take a `mark()` before running a subschema and `rollback(mark)` afterwards. Failed `anyOf`/`oneOf` branches roll back, `not` always rolls back, and a failed `if` rolls back before `else` runs. With tracking active, `anyOf` runs every branch (annotations from ALL successful branches count), and a lone `if` without `then`/`else` still runs for its annotations.
+- **The check runs last**: `wrapUnevaluated` (in `unevaluated.js`) wraps the compiled schema validator, takes its mark before the schema starts (including a sibling `$ref`, so the ref target's annotations are visible), runs everything, and then validates the leftovers. `unevaluatedProperties`/`unevaluatedItems` themselves annotate what they validate, so outer `unevaluated*` keywords see their work too.
+
+### Zero cost when unused
+
+At compile time the schema set is scanned once for `unevaluatedProperties`/`unevaluatedItems` keywords (the scan knows that keys inside `properties`/`$defs`-style maps are names, not keywords). When absent, no tracking code is compiled into any validator and the log is never touched.
+
+---
+
+## Dynamic References
+
+`$recursiveRef`/`$recursiveAnchor` (draft 2019-09) and `$dynamicRef`/`$dynamicAnchor` (draft 2020-12) resolve against the **dynamic scope**: the chain of schema resources entered during evaluation.
+
+- **Resource entry**: validation of the root schema, and every `$ref` crossing into another resource, pushes ALL `$dynamicAnchor`s of that resource onto per-anchor-name stacks (`collectDynamicAnchorsDeep` gathers them wherever they sit — `$defs`, `allOf` branches, `properties` — stopping at embedded `$id` boundaries). The stacks are popped when the resource is exited (`try/finally`).
+- **Resolution**: a `$dynamicRef "#name"` first checks the bookending requirement (the resolved lexical target must carry a matching `$dynamicAnchor`), then resolves to the anchor in the **outermost** resource of the dynamic scope — the bottom of the stack. `$recursiveRef "#"` behaves similarly with the anonymous anchor.
+- **Pointer fragments**: a `$dynamicRef` whose fragment is a JSON pointer (e.g. `#/$defs/x`) behaves identically to `$ref`, with no dynamic resolution.
+
+---
+
+## Drafts and Vocabularies
+
+The draft a schema is processed under is detected from its `$schema` declaration (`detectSchemaDraft`), with draft 7 as the default.
+
+- **Per-document drafts (cross-draft references)**: every `ValidationObject` tracks the draft its *document* declares, inherited by subschemas. A referenced document that declares another draft is processed with that draft's keyword set: a draft-07 document ignores `dependentRequired`/`dependentSchemas`, and a pre-2020 document ignores `prefixItems`.
+- **$vocabulary**: when the schema's `$schema` points to a registered custom metaschema, its `$vocabulary` selects keyword behavior. A metaschema that omits the validation vocabulary turns keywords like `type`, `enum` and `minimum` into annotations that assert nothing (applicator keywords keep working). A metaschema that declares the `format-assertion` vocabulary turns format assertion on.
+- **format assertion**: through draft 2019-09 the `format` keyword asserts by default; from draft 2020-12 on it is annotation-only. The `formatAssertion` option overrides the default in either direction.
+- **content keywords**: `contentEncoding`/`contentMediaType` assert in draft 7 and are annotation-only from 2019-09 on, controlled by the `contentValidation` option.
 
 ---
 
@@ -382,78 +429,57 @@ Map<string, ValidationObject> {
 
 ## Performance Optimizations
 
-### 1. Ref Chain Flattening
+### 1. Allocation-Free Validation Calls
 
-Before: A→B→C resolved at validation time (3 lookups)
-After: A→C stored directly (1 lookup)
+`ValidationRoot.validate()` performs no allocations: per-validation constants (the root validator, its dynamic-anchor registration, the root resource's `$dynamicAnchor` list) are precomputed at compile time, and reusable structures (the errors array, the dynamic-anchor stacks, the evaluation log) are cleared rather than reallocated.
 
-**Result**: 81x improvement on nested refs benchmark
+### 2. Ref Chain Flattening
 
-### 2. Pre-compilation of All Refs
+Ref chains (`A -> B -> C`) are flattened at load time by `restoreSchemaRefsInMap`, so a `$ref` costs a single direct function call at validation time instead of a chain of lookups.
 
-Before: ValidationObject created on first use
-After: All ValidationObjects created during `compile()`
+### 3. Pre-compilation of All Refs
 
-**Result**: First validation is as fast as subsequent ones
+`#precompileRefs` creates `ValidationObject`s for every ref in the schema map during `compile()`, so the first validation is as fast as every subsequent one.
 
-### 3. Fast Paths for Simple Schemas
+### 4. Fast Paths for Simple Schemas
 
-Type-only schemas compile to inline checks:
+Common schema shapes compile to specialized inline validators instead of composed closure chains:
 
-```javascript
-// Schema: { "type": "string" }
-function validate(data) {
-  return typeof data === 'string' || data === undefined;
-}
-```
+- Type-only schemas (`{ "type": "string" }`) compile to a single `typeof` check.
+- Single-constraint number, string, array and object schemas call their one validator directly, without pass-through stubs.
+- Properties-only object schemas iterate the (fixed) schema keys with `Object.hasOwn` instead of allocating `Object.keys(data)` and doing a map lookup per data key.
+- The default object-children loop is a fused per-key pass over `properties`/`patternProperties`/`additionalProperties`/dependencies that bails on the first failure without per-key result objects.
 
-### 4. Skip Error Creation
+### 5. Skip Error Creation
 
-When `skipErrors: true` (default), failed validations just return `false` without creating error objects:
+When `skipErrors: true` (default), failed validations just return `false`; error handlers compile to constant-false functions and no error objects are ever created:
 
 ```javascript
-// Before: Creates error object even when not needed
-return pattern.test(data) || addError(data, dataPath);
-
-// After: Just returns false
-if (options.skipErrors) {
-  return pattern.test(data);  // No error creation
-}
+return pattern.test(data); // No error creation
 ```
 
-### 5. ASCII-Only Fast Paths
+### 6. Compile-Time Feature Detection
 
-For string validation, check if data is ASCII-only to avoid expensive grapheme counting:
+The schema set is scanned once at compile time for features with runtime cost:
 
-```javascript
-function getStringLength(str, useGrapheme) {
-  if (!useGrapheme) return str.length;
+- `$data` references — without them, child data-path strings are never built during object validation.
+- `unevaluatedProperties`/`unevaluatedItems` — without them, no annotation tracking code is compiled into any validator.
 
-  // Fast path: check if ASCII-only
-  for (let i = 0; i < str.length; i++) {
-    if (str.charCodeAt(i) > 127) {
-      // Use Intl.Segmenter for Unicode
-      return [...str].length;
-    }
-  }
-  return str.length;  // ASCII-only, simple length
-}
-```
+### 7. uniqueItems Without Deep Comparison
 
-### 6. IRI Fast Path
+`uniqueItems` dedupes scalars through pairwise `===` (small arrays) or a `Set` (larger/mixed arrays); the pairwise deep comparison runs only among items that are actually objects or arrays.
 
-IRI validation uses a simple regex for ASCII-only IRIs:
+### 8. Unicode String Length Fast Paths
 
-```javascript
-function isValidIRI(str) {
-  // Fast path: ASCII-only IRIs use simple regex
-  if (isAsciiOnly(str)) {
-    return ASCII_IRI_REGEX.test(str);
-  }
-  // Fall back to complex Unicode regex
-  return FULL_IRI_REGEX.test(str);
-}
-```
+Grapheme-aware string length (`useGrapheme: true`, the default) avoids `Intl.Segmenter` whenever it can:
+
+- ASCII-only strings use `str.length` directly.
+- Non-ASCII strings without cluster-forming characters (combining marks, ZWJ, variation selectors, regional indicators, Hangul jamo, emoji modifiers) count code points with a simple surrogate-aware loop.
+- Only strings that can actually form multi-codepoint grapheme clusters pay for the segmenter.
+
+### 9. Format Fast Paths
+
+Format validators try a cheap common-case check before a comprehensive one, e.g. email validates the dot-atom form with a single regex and only falls back to RFC 5321 quoted-string/address-literal parsing when that fails; IRI validation uses a simple regex for ASCII-only input.
 
 ---
 
@@ -707,15 +733,12 @@ Each benchmark tool has a distinct purpose:
 
 ## Implementation Notes
 
-### How $ref Works (Draft 7)
+### How $ref Works
 
-1. **$ref ignores siblings**: When a schema has `$ref`, all other keywords are ignored
-2. **$ref resolution order**:
-   - Resolve `$ref` against current base URI
-   - Do NOT apply sibling `$id` when resolving `$ref`
-   - After resolution, the referenced schema completely replaces the current schema
+1. **Draft 7 and earlier - $ref ignores siblings**: when a schema has `$ref`, all other keywords are ignored, the referenced schema completely replaces the current schema, and a sibling `$id` does not affect `$ref` resolution
+2. **Draft 2019-09 and later - $ref has siblings**: `$ref` is just another keyword; sibling keywords (including `unevaluatedProperties`/`unevaluatedItems`) apply together with the referenced schema, and a sibling `$id` DOES establish the base URI the `$ref` resolves against
 3. **Location-independent identifiers**: Anchors like `#foo` should be resolvable within their document
-4. **Ref chain resolution happens at compile time**: Now pre-resolved via `restoreSchemaRefsInMap` and `#precompileRefs`
+4. **Ref chain resolution happens at compile time**: pre-resolved via `restoreSchemaRefsInMap` and `#precompileRefs`
 
 ### ECMAScript Regex in JSON Schema
 
@@ -727,15 +750,16 @@ Each benchmark tool has a distinct purpose:
 
 ## Summary
 
-JarenJS achieves high performance through:
+JarenJS validates all of draft-06, draft-07, 2019-09 and 2020-12 - passing 100% of the official JSON-Schema-Test-Suite for draft-07, 2019-09 and 2020-12 - and achieves high performance through:
 
 1. **Compile-time ref resolution** - All refs resolved before validation
 2. **Function inlining** - Simple schemas compile to direct checks
 3. **Fast paths** - ASCII-only checks skip expensive Unicode operations
 4. **Error skipping** - Default mode avoids error object creation
-5. **Efficient data structures** - Maps for O(1) lookups, minimal allocations
+5. **Efficient data structures** - Maps for O(1) lookups, allocation-free validation calls
+6. **Compile-time feature detection** - annotation tracking and data-path building only exist in compiled validators that need them
 
 The architecture cleanly separates concerns:
 - **Schema loading** handles URI resolution and ref flattening
-- **Compilation** creates optimized validation functions
-- **Validation** executes compiled functions with minimal overhead
+- **Compilation** creates optimized validation functions, selects draft and vocabulary behavior
+- **Validation** executes compiled functions with minimal overhead, tracking annotations and dynamic scope only when the schema requires it
