@@ -1068,6 +1068,11 @@ export class JarenValidator {
    * @param {ValidatorOptions} [options] - Validator options including formats, schemas, validation options, and traverse options
    */
   constructor(options = new ValidatorOptions()) {
+    // Accept a plain options object ({ skipErrors, collectErrors, ... })
+    // as well as a ValidatorOptions instance.
+    if (!(options instanceof ValidatorOptions)) {
+      options = new ValidatorOptions(options);
+    }
     this.#formats = options.formats || {};
     this.#schemas = new Map();
     this.#metaSchemas = new Map();
@@ -1311,9 +1316,16 @@ export class JarenValidator {
         message = 'boolean schema false is always invalid';
       }
 
+      // Validators pass the data path as the first meta argument to the
+      // error handler; use it when it looks like a JSON pointer.
+      const meta0 = err.rest?.[0];
+      const instancePath = (typeof meta0 === 'string' && (meta0 === '' || meta0.charCodeAt(0) === 0x2f))
+        ? meta0
+        : '';
+
       return new ValidationError({
         keyword,
-        instancePath: '',  // TODO: implement proper path tracking
+        instancePath,
         schemaPath: err.object?.path || '',
         params,
         message,

@@ -49,7 +49,6 @@ function processBenchmarkData(raw) {
     ajvFailed: r.ajvFailures > 0,
   }));
 
-  const validResults = results.filter(r => !r.hasError);
   
   // Normalize errors array to have same structure as results
   const errors = (raw.errors || []).map(e => ({

@@ -3,7 +3,7 @@ import { cn, copyToClipboard } from '@lib/utils';
 import { Button } from './button';
 import { Copy, Check } from 'lucide-react';
 
-function CodeBlock({ className, children, language = 'javascript', showCopy = true }) {
+function CodeBlock({ className, children, showCopy = true }) {
   const [copied, setCopied] = React.useState(false);
   
   const handleCopy = async () => {

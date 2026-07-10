@@ -3,7 +3,6 @@ import { DraftSupport, keywordCategories } from '@components/features/DraftSuppo
 import { CodeBlock } from '@components/ui/code-block';
 import { Badge } from '@components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@components/ui/card';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@components/ui/tabs';
 
 const basicExample = `import { JarenValidator } from '@jarenjs/validate';
 import { stringFormats } from '@jarenjs/formats';
@@ -115,7 +114,7 @@ function Documentation() {
             <section id="quick-start">
               <h2 className="text-2xl font-bold mb-4">Quick Start</h2>
               <p className="text-muted-foreground mb-4">
-                Here's a simple example to get you started with JarenJS:
+                Here&apos;s a simple example to get you started with JarenJS:
               </p>
               <CodeBlock showCopy>{basicExample}</CodeBlock>
             </section>

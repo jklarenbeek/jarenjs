@@ -5,6 +5,7 @@ The official GitHub Pages website for JarenJS - a modern JSON Schema validator f
 ## Features
 
 - **Interactive Playground**: Test JSON Schema validation in real-time
+- **Generated Forms**: Live form generation from any schema via `@jarenjs/forms`, with preemptive per-field validation
 - **Benchmark Visualizations**: Performance comparisons with AJV
 - **Documentation**: Complete guide to using JarenJS
 - **Code Examples**: Common validation patterns and use cases
