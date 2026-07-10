@@ -198,13 +198,6 @@ function compileArrayItems(schemaObj, jsonSchema) {
   return schemaObj.createValidator(items, 'items');
 }
 
-function compileUnevaluatedItems(schemaObj, jsonSchema) {
-  const unevaluatedItems = getObjectType(jsonSchema.unevaluatedItems);
-  if (unevaluatedItems == null) return undefined;
-
-  return schemaObj.createValidator(unevaluatedItems, 'unevaluatedItems');
-}
-
 /**
  * Compile item schema directly without intermediate wrapper
  * This flattens the call stack by avoiding nested validator function calls
@@ -354,6 +347,24 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   const items = jsonSchema.items;
   const isTuple = getArrayClassMinItems(items, 1) != null;
 
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+  // In draft 2020-12 contains produces item annotations; in 2019-09 it doesn't.
+  const trackContains = track && (schemaObj.options.draftVersion || 7) >= 2020;
+
+  // Indexes below this limit count as evaluated (for unevaluatedItems) when
+  // their item validation succeeds. Extra tuple items beyond the tuple length
+  // pass validation when additionalItems/items is ABSENT, but are then not
+  // evaluated and must remain visible to unevaluatedItems.
+  let evalLimit = Infinity;
+  if (track) {
+    if (prefixItems != null) {
+      if (items === undefined) evalLimit = prefixItems.length;
+    } else if (isTuple) {
+      if (jsonSchema.additionalItems === undefined) evalLimit = items.length;
+    }
+  }
+
   let validateItem;
 
   if (prefixItems != null) {
@@ -385,8 +396,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   }
 
   const validateContains = compileArrayContains(schemaObj, jsonSchema);
-  const validateUnevaluated = compileUnevaluatedItems(schemaObj, jsonSchema); // TODO
-  if ((validateItem || validateContains || validateUnevaluated) == null)
+  if ((validateItem || validateContains) == null)
     return undefined;
 
   const validateMinMax = compileContainsMinMax(schemaObj, jsonSchema) || trueThat;
@@ -401,6 +411,14 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   if (validateContains == null && validateItem != null) {
     // if validateItem is trueThat, just check length
     if (validateItem === trueThat) {
+      // items: true evaluates every item, which matters when annotations
+      // are tracked for unevaluatedItems.
+      if (track) {
+        return function validateArrayItemsTrue(data, dataPath, dataRoot) {
+          root.evalLog.add(data, -1);
+          return true;
+        };
+      }
       return undefined; // No actual validation needed
     }
 
@@ -416,6 +434,9 @@ function compileArrayChildren(schemaObj, jsonSchema) {
         // Direct validator call, no intermediate wrappers
         if (validator(arr[i], dataPath, dataRoot, i) !== true) {
           invalid++;
+        }
+        else if (track && i < evalLimit) {
+          root.evalLog.add(data, i);
         }
       }
       return invalid === 0
@@ -435,6 +456,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       for (let i = 0; i < len; ++i) {
         if (validator(arr[i], dataPath) === true) {
           contains++;
+          if (trackContains) root.evalLog.add(data, i);
         }
       }
       return validateMinMax(contains, dataPath);
@@ -457,8 +479,12 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       if (itemValidator(obj, dataPath, dataRoot, i) !== true) {
         invalid++;
       }
+      else if (track && i < evalLimit) {
+        root.evalLog.add(data, i);
+      }
       if (containsValidator(obj, dataPath, dataRoot) === true) {
         contains++;
+        if (trackContains) root.evalLog.add(data, i);
       }
     }
     return invalid === 0

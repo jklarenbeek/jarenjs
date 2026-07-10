@@ -20,7 +20,9 @@ import {
 import {
   isBoolOrObjectClass,
   hasSchemaRef,
+  EvalLog,
 } from './tools.js';
+import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
 import { DynamicScope, hasRecursiveAnchor, hasDynamicAnchor, getDynamicAnchorName, collectDynamicAnchors } from './dynamic-ref.js';
@@ -198,31 +200,38 @@ export class ValidationRoot {
   #rootValidator = null;
   /** @type {boolean} Whether any schema in this compilation contains a $data reference */
   #usesDollarData = false;
+  /** @type {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
+  #usesUnevaluated = false;
+  /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
+  #evalLog = new EvalLog();
 
   /**
-   * Recursively checks whether a schema (sub)tree contains a '$data' key.
-   * Conservative: a property literally named '$data' also matches.
+   * Recursively scans a schema (sub)tree for keys that require special
+   * runtime support: '$data' references and 'unevaluatedProperties'/
+   * 'unevaluatedItems'. Conservative: a property literally named like one
+   * of these keywords also matches.
    * @param {any} node - The schema node to scan
    * @param {Set<object>} seen - Cycle guard
-   * @returns {boolean} True when a $data key was found
+   * @param {{dollarData: boolean, unevaluated: boolean}} flags - Output flags
    */
-  static #containsDollarData(node, seen) {
-    if (node == null || typeof node !== 'object') return false;
-    if (seen.has(node)) return false;
+  static #scanSchemaFeatures(node, seen, flags) {
+    if (node == null || typeof node !== 'object') return;
+    if (flags.dollarData && flags.unevaluated) return;
+    if (seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; ++i) {
-        if (ValidationRoot.#containsDollarData(node[i], seen)) return true;
+        ValidationRoot.#scanSchemaFeatures(node[i], seen, flags);
       }
-      return false;
+      return;
     }
     const keys = Object.keys(node);
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
-      if (key === '$data') return true;
-      if (ValidationRoot.#containsDollarData(node[key], seen)) return true;
+      if (key === '$data') flags.dollarData = true;
+      else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
+      ValidationRoot.#scanSchemaFeatures(node[key], seen, flags);
     }
-    return false;
   }
 
   /**
@@ -247,16 +256,17 @@ export class ValidationRoot {
     this.#dynamicScope = new DynamicScope();
     this.#dynamicAnchors = new Map();
 
-    // Detect $data references once so fast paths can skip building
-    // per-property path strings when nothing will ever consume them.
+    // Detect $data references and unevaluated* keywords once, so fast paths
+    // can skip path building / annotation logging when nothing consumes them.
     // Must run before validators are compiled below.
+    const flags = { dollarData: false, unevaluated: false };
     const seen = new Set();
     for (const value of schemas.values()) {
-      if (ValidationRoot.#containsDollarData(value, seen)) {
-        this.#usesDollarData = true;
-        break;
-      }
+      ValidationRoot.#scanSchemaFeatures(value, seen, flags);
+      if (flags.dollarData && flags.unevaluated) break;
     }
+    this.#usesDollarData = flags.dollarData;
+    this.#usesUnevaluated = flags.unevaluated;
 
     // For the root schema, baseUri is the origin
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
@@ -290,6 +300,12 @@ export class ValidationRoot {
 
   /** @returns {boolean} Whether any schema in this compilation contains a $data reference */
   get usesDollarData() { return this.#usesDollarData; }
+
+  /** @returns {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
+  get usesUnevaluated() { return this.#usesUnevaluated; }
+
+  /** @returns {EvalLog} The evaluation log for unevaluated* annotation tracking */
+  get evalLog() { return this.#evalLog; }
 
   /**
    * Creates a new ValidationObject for the given path and schema.
@@ -395,6 +411,10 @@ export class ValidationRoot {
     // normally empty here already; clear defensively without reallocating.
     if (this.#dynamicAnchors.size !== 0) {
       this.#dynamicAnchors.clear();
+    }
+    // Clear evaluation annotations from the previous validation
+    if (this.#usesUnevaluated) {
+      this.#evalLog.reset();
     }
 
     const rootValidator = this.#rootValidator;
@@ -560,7 +580,9 @@ export class ValidationObject {
         
         // Wrap the ref validator to register dynamic anchor at call time (validation time)
         if (siblingValidator) {
-          return function validateRefWithDynamicAnchorAndSiblings(data, dataPath, dataRoot) {
+          // unevaluated* keywords must see annotations produced by the $ref
+          // target, so the wrapper goes around the combined validator.
+          return wrapUnevaluated(self, schema, function validateRefWithDynamicAnchorAndSiblings(data, dataPath, dataRoot) {
             // Register source schema's dynamic anchors first
             for (let i = 0; i < sourceDynamicAnchors.length; i++) {
               const anchor = sourceDynamicAnchors[i];
@@ -582,7 +604,7 @@ export class ValidationObject {
                 root.popDynamicAnchorValidator(sourceDynamicAnchors[i].name);
               }
             }
-          };
+          });
         } else {
           return function validateRefWithDynamicAnchor(data, dataPath, dataRoot) {
             // Register source schema's dynamic anchors first
@@ -612,9 +634,11 @@ export class ValidationObject {
       
       // If there are sibling validators (draft 2019-09+), combine them with the ref validator
       if (siblingValidator) {
-        return function validateRefWithSiblings(data, dataPath, dataRoot) {
+        // unevaluated* keywords must see annotations produced by the $ref
+        // target, so the wrapper goes around the combined validator.
+        return wrapUnevaluated(self, schema, function validateRefWithSiblings(data, dataPath, dataRoot) {
           return refValidator(data, dataPath, dataRoot) && siblingValidator(data, dataPath, dataRoot);
-        };
+        });
       }
       
       self.#validator = refValidator;
@@ -630,7 +654,7 @@ export class ValidationObject {
     const boundSiblingValidator = siblingValidator;
     const boundSourceAnchors = sourceDynamicAnchors;
 
-    return function resolveSchemaCompiler(data, dataPath, dataRoot) {
+    return wrapUnevaluated(self, schema, function resolveSchemaCompiler(data, dataPath, dataRoot) {
       const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
       const refValidator = obj.validate;
       const resolvedSchema = obj.schema;
@@ -675,7 +699,7 @@ export class ValidationObject {
           rootRef.popDynamicAnchorValidator(boundSourceAnchors[i].name);
         }
       }
-    };
+    });
   }
 
   /** @type {ValidationRoot} The root validation context */

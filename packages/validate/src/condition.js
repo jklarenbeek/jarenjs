@@ -21,7 +21,20 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
   const tmpElse = schemaObj.createValidator(jsonSchema.else, 'else');
 
   if (validateIf == null) return undefined;
-  if (tmpThen == null && tmpElse == null) return undefined;
+  if (tmpThen == null && tmpElse == null) {
+    // A lone 'if' asserts nothing, but with annotation tracking its
+    // annotations (when it passes) must stay visible to unevaluated*.
+    if (root.usesUnevaluated) {
+      return function validateLoneIf(data, dataPath, dataRoot, dataKey) {
+        const log = root.evalLog;
+        const mark = log.mark();
+        if (validateIf(data, dataPath, dataRoot, dataKey) === false)
+          log.rollback(mark);
+        return true;
+      };
+    }
+    return undefined;
+  }
 
   // Check if then/else schemas have dynamic anchors
   const thenSchema = jsonSchema.then;
@@ -37,7 +50,21 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
 
   const validateThen = fallbackFn(tmpThen);
   const validateElse = fallbackFn(tmpElse);
-  
+
+  // With annotation tracking, annotations produced by a failing 'if' are
+  // rolled back; annotations from a passing 'if' are kept for unevaluated*.
+  if (root.usesUnevaluated && !thenHasAnchor && !elseHasAnchor) {
+    return function validateConditionTracked(data, dataPath, dataRoot, dataKey) {
+      const log = root.evalLog;
+      const mark = log.mark();
+      if (validateIf(data, dataPath, dataRoot, dataKey)) {
+        return validateThen(data, dataPath, dataRoot, dataKey);
+      }
+      log.rollback(mark);
+      return validateElse(data, dataPath, dataRoot, dataKey);
+    };
+  }
+
   // If neither then nor else has dynamic anchors, use simple validation
   if (!thenHasAnchor && !elseHasAnchor) {
     return function validateCondition(data, dataRoot) {
@@ -49,7 +76,9 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
   }
   
   // If then or else has dynamic anchors, wrap validation to register them
+  const track = root.usesUnevaluated;
   return function validateConditionWithDynamicAnchors(data, dataPath, dataRoot) {
+    const mark = track ? root.evalLog.mark() : 0;
     if (validateIf(data)) {
       // Validate then branch with dynamic anchor registration
       if (thenHasAnchor && tmpThen) {
@@ -63,6 +92,8 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
       }
       return validateThen(data, dataRoot);
     } else {
+      // Annotations from the failed 'if' must not leak to unevaluated*
+      if (track) root.evalLog.rollback(mark);
       // Validate else branch with dynamic anchor registration
       if (elseHasAnchor && tmpElse) {
         const anchorName = elseDynAnchorName || '';

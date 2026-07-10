@@ -116,15 +116,18 @@ function compileProperties(schemaObj, jsonSchema) {
   const validators = buildPropertyValidators(schemaObj, jsonSchema);
   if (validators == null) return undefined;
 
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+
   return function validatePropertyItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
     const validator = validators.get(dataKey);
     if (validator == null)
       return result;
     else {
-      return result.addMatch(
-        validator(data[dataKey], dataPath, dataRoot, dataKey),
-      );
+      const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
+      if (track && valid === true) root.evalLog.add(data, dataKey);
+      return result.addMatch(valid);
     }
   };
 }
@@ -157,12 +160,17 @@ function compilePatternProperties(schemaObj, jsonSchema) {
   const list = buildPatternValidators(schemaObj, jsonSchema);
   if (list == null) return undefined;
 
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+
   return function validatePatternPropertiesItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
     for (let i = 0; i < list.length; ++i) {
       const { pattern, validator } = list[i];
       if (pattern.test(dataKey)) {
-        result.addMatch(validator(data[dataKey], dataPath, dataRoot, dataKey));
+        const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
+        if (track && valid === true) root.evalLog.add(data, dataKey);
+        result.addMatch(valid);
       }
     }
     return result;
@@ -181,23 +189,15 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
     };
   }
 
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
   const validator = schemaObj.createValidator(additional, 'additionalProperties');
 
   return function validateAdditionalPropertyItem(data, dataPath, dataRoot, dataKey) {
-    return validator(data[dataKey], dataPath, dataRoot, dataKey);
+    const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
+    if (track && valid === true) root.evalLog.add(data, dataKey);
+    return valid;
   };
-}
-
-function compileUnevaluatedProperties(schemaObj, jsonSchema) {
-  const unevaluatedProperties = getBoolOrObjectClass(jsonSchema.unevaluatedProperties);
-  if (unevaluatedProperties == null) return undefined;
-
-  if (unevaluatedProperties === false) {
-    const addError = schemaObj.createErrorHandler(false, 'unevaluatedProperties');
-    return (data, dataPath, dataRoot, dataKey) => addError(dataKey, data);
-  }
-
-  return schemaObj.createValidator(unevaluatedProperties, 'unevaluatedProperties');
 }
 //#endregion
 
@@ -480,7 +480,6 @@ function compileObjectProperty(schemaObj, jsonSchema) {
   const depSchemasValidator = compileDependentSchemas(schemaObj, jsonSchema);
   const dependencyValidator = compileDependencies(schemaObj, jsonSchema);
   const depRequiredValidator = compileDependentRequired(schemaObj, jsonSchema);
-  const unevaluatedValidator = compileUnevaluatedProperties(schemaObj, jsonSchema);
 
   if ((patternValidator
     || namesValidator
@@ -488,8 +487,7 @@ function compileObjectProperty(schemaObj, jsonSchema) {
     || depRequiredValidator
     || depSchemasValidator
     || dependencyValidator
-    || additionalValidator
-    || unevaluatedValidator) == null)
+    || additionalValidator) == null)
     return undefined;
 
   const validateName = namesValidator || trueThat;
@@ -517,10 +515,6 @@ function compileObjectProperty(schemaObj, jsonSchema) {
         ? result.addMatch(additionalValidator(data, newPath, dataRoot, dataKey))
         : result;
 
-    if (unevaluatedValidator)
-      // @ts-ignore
-      result.addValid(unevaluatedValidator(data, newPath, dataRoot, dataKey));
-
     return result;
   };
 }
@@ -540,12 +534,18 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
   const dependencyValidator = compileDependencies(schemaObj, jsonSchema) || null;
   const depRequiredValidator = compileDependentRequired(schemaObj, jsonSchema) || null;
 
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+
   const additional = getBoolOrObjectClass(jsonSchema.additionalProperties);
   const additionalFalse = additional === false;
   const additionalValidator = (additional != null && additional !== false && additional !== true)
     ? schemaObj.createValidator(additional, 'additionalProperties')
     : null;
-  const hasAdditional = additionalFalse || additionalValidator != null;
+  // additionalProperties: true evaluates every leftover property, which
+  // matters when annotations are tracked for unevaluatedProperties.
+  const additionalTrue = additional === true && track;
+  const hasAdditional = additionalFalse || additionalTrue || additionalValidator != null;
 
   if (namesValidator == null
     && propsMap == null
@@ -560,7 +560,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
 
   // Child paths are only consumed by $data relative-pointer resolution
   // in skipErrors mode; skip the per-property string concat otherwise.
-  const extendPaths = schemaObj.root.usesDollarData;
+  const extendPaths = root.usesDollarData;
 
   return function validateObjectChildrenFast(data, dataPath, dataRoot, dataKeys) {
     const len = dataKeys.length;
@@ -579,6 +579,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
           childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
           if (propValidator(data[dataKey], childPath, dataRoot, dataKey) === false)
             return false;
+          if (track) root.evalLog.add(data, dataKey);
         }
       }
 
@@ -590,6 +591,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
             if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
             if (entry.validator(data[dataKey], childPath, dataRoot, dataKey) === false)
               return false;
+            if (track) root.evalLog.add(data, dataKey);
           }
         }
       }
@@ -597,9 +599,12 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
       if (matched === false && hasAdditional) {
         if (additionalFalse)
           return false;
-        if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
-        if (additionalValidator(data[dataKey], childPath, dataRoot, dataKey) === false)
-          return false;
+        if (additionalValidator != null) {
+          if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+          if (additionalValidator(data[dataKey], childPath, dataRoot, dataKey) === false)
+            return false;
+        }
+        if (track) root.evalLog.add(data, dataKey);
       }
 
       if (depRequiredValidator != null || depSchemasValidator != null || dependencyValidator != null) {
@@ -619,9 +624,9 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
 export function compileObjectChildren(schemaObj, jsonSchema) {
   // Fast path: when errors are skipped (default) we can bail on the first
   // failure and avoid per-key result bookkeeping entirely.
-  // unevaluatedProperties needs annotation-style bookkeeping - generic path only.
-  if (schemaObj.options.skipErrors
-    && getBoolOrObjectClass(jsonSchema.unevaluatedProperties) == null)
+  // (unevaluatedProperties runs separately as a final-stage validator,
+  // see unevaluated.js)
+  if (schemaObj.options.skipErrors)
     return compileObjectChildrenFast(schemaObj, jsonSchema);
 
   const propertyValidator = compileObjectProperty(schemaObj, jsonSchema);
@@ -662,7 +667,6 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
     && jsonSchema.dependencies == null
     && jsonSchema.dependentSchemas == null
     && jsonSchema.dependentRequired == null
-    && jsonSchema.unevaluatedProperties == null
     && jsonSchema.minProperties == null
     && jsonSchema.maxProperties == null
     && jsonSchema.required == null
@@ -675,17 +679,24 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
     const propValidators = Array.from(propsMap.values());
     const propCount = propKeys.length;
 
+    const root = schemaObj.root;
+    const track = root.usesUnevaluated;
+
     // Child paths are only consumed by $data relative-pointer resolution
     // in skipErrors mode; skip the per-property string concat otherwise.
-    if (schemaObj.root.usesDollarData) {
-      return function validateObjectPropertiesOnlyPaths(data, dataPath, dataRoot) {
+    if (root.usesDollarData || track) {
+      const extendPaths = root.usesDollarData;
+      return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
         if (!isObjectType(data)) return true;
         for (let i = 0; i < propCount; ++i) {
           const key = propKeys[i];
           // Object.hasOwn: avoid picking up inherited members like toString
-          if (Object.hasOwn(data, key)
-            && propValidators[i](data[key], dataPath + '/' + key, dataRoot, key) === false)
-            return false;
+          if (Object.hasOwn(data, key)) {
+            const childPath = extendPaths ? dataPath + '/' + key : dataPath;
+            if (propValidators[i](data[key], childPath, dataRoot, key) === false)
+              return false;
+            if (track) root.evalLog.add(data, key);
+          }
         }
         return true;
       };
