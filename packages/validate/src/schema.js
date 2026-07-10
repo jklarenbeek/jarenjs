@@ -158,6 +158,25 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   const ref = jsonSchema.$dynamicRef;
   const addError = schemaObj.createErrorHandler(ref, '$dynamicRef');
 
+  // A $dynamicRef whose fragment is a JSON POINTER (not a plain-name anchor)
+  // behaves identically to $ref: no dynamic resolution takes place.
+  if (ref.startsWith('#') && ref.charAt(1) === '/') {
+    const baseUri = schemaObj.baseUri;
+    const { id: resolvedRef } = createJsonPointer(ref, baseUri);
+    return function validateDynamicRefPointer(data, dataPath, dataRoot) {
+      let targetObj;
+      try {
+        targetObj = root.resolveObject(resolvedRef, baseUri, { $ref: resolvedRef });
+      } catch (e) {
+        return addError(data, dataPath);
+      }
+      if (targetObj) {
+        return targetObj.validate(data, dataPath, dataRoot);
+      }
+      return addError(data, dataPath);
+    };
+  }
+
   // $dynamicRef is typically a fragment reference like "#name"
   // For non-hash references, fall back to normal $ref behavior
   // BUT we must defer resolution to validation time to avoid infinite recursion

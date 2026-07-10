@@ -212,11 +212,11 @@ async function parseArgs() {
  * @param {boolean} successOnly - If true, skip tests where any agent fails
  * @returns {Object} Profiling results
  */
-function profileTest(test, iterations, draft, remotes, successOnly = false) {
+function profileTest(test, iterations, draft, remotes, successOnly = false, suiteName = undefined) {
   // First, validate the test to check for errors/failures
   TestRunner.initialize(draft, jaren, ajv);
   TestRunner.load(remotes);
-  const results = TestRunner.runTest(test);
+  const results = TestRunner.runTest(test, suiteName);
   const jarenResult = results.find(r => r.validator === 'Jaren');
   const ajvResult = results.find(r => r.validator === 'Ajv');
 
@@ -257,8 +257,8 @@ function profileTest(test, iterations, draft, remotes, successOnly = false) {
   // Warmup phase - run a few iterations to stabilize JIT
   const jarenInstance = jaren.loader(draft, remotes);
   const ajvInstance = ajv.loader(draft, remotes);
-  const jarenValidator = jaren.setup(jarenInstance, test.schema);
-  const ajvValidator = ajv.setup(ajvInstance, test.schema);
+  const jarenValidator = jaren.setup(jarenInstance, test.schema, suiteName);
+  const ajvValidator = ajv.setup(ajvInstance, test.schema, suiteName);
 
   for (let i = 0; i < WARMUP_ITERATIONS; i++) {
     for (const item of test.tests) {
@@ -326,7 +326,7 @@ function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = 
 
   for (const test of tests) {
     try {
-      const profile = profileTest(test, iterations, draft, remotes, successOnly);
+      const profile = profileTest(test, iterations, draft, remotes, successOnly, fileKey);
       if (profile) {
         results.push({
           suite: fileKey,

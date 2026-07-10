@@ -26,7 +26,7 @@ import {
 import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
-import { DynamicScope, hasRecursiveAnchor, hasDynamicAnchor, getDynamicAnchorName, collectDynamicAnchors } from './dynamic-ref.js';
+import { DynamicScope, hasRecursiveAnchor, hasDynamicAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
 
 export {
   registerFormatCompilers
@@ -128,6 +128,7 @@ export class ValidationOptions {
    * @param {boolean|null} [contentValidation=null] - Whether to validate contentEncoding/contentMediaType (null = auto based on draft)
    * @param {number} [draftVersion=7] - The JSON Schema draft version (6, 7, 2019, or 2020)
    * @param {boolean} [vocabValidation=true] - Whether the validation vocabulary is enabled (false when the schema's metaschema omits it via $vocabulary)
+   * @param {boolean|null} [formatAssertion=null] - Whether format asserts (null = auto: asserts below draft 2020-12, annotation-only from 2020-12 on)
    */
   constructor(
     skipErrors = true,
@@ -135,7 +136,8 @@ export class ValidationOptions {
     collectErrors = false,
     contentValidation = null,
     draftVersion = 7,
-    vocabValidation = true
+    vocabValidation = true,
+    formatAssertion = null
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -149,6 +151,8 @@ export class ValidationOptions {
     this.draftVersion = draftVersion;
     /** @type {boolean} Whether validation vocabulary keywords (type, minimum, ...) are asserted */
     this.vocabValidation = vocabValidation;
+    /** @type {boolean|null} Whether the format keyword asserts (null = auto by draft) */
+    this.formatAssertion = formatAssertion;
   }
 }
 
@@ -203,6 +207,8 @@ export class ValidationRoot {
   #rootAnchorName = null;
   /** @type {function|null} Cached compiled validator of the root schema */
   #rootValidator = null;
+  /** @type {Array<{name: string, schema: object, validator: (function|null)}>} $dynamicAnchors of the root resource (excluding the root's own), registered on each validation */
+  #rootDynamicAnchors = [];
   /** @type {boolean} Whether any schema in this compilation contains a $data reference */
   #usesDollarData = false;
   /** @type {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
@@ -299,6 +305,11 @@ export class ValidationRoot {
     const dynAnchorName = isObjectClass(rootSchema) ? getDynamicAnchorName(rootSchema) : null;
     this.#rootAnchorName = (hasRecAnchor || dynAnchorName) ? (dynAnchorName || '') : null;
     this.#rootValidator = this.#firstSchema.validate;
+
+    // Entering the root resource brings ALL of its $dynamicAnchors into the
+    // dynamic scope (the root's own anchor is handled via #rootAnchorName).
+    this.#rootDynamicAnchors = collectDynamicAnchorsDeep(rootSchema)
+      .filter(anchor => anchor.schema !== rootSchema);
   }
 
   /** @returns {string} The root schema origin/URI */
@@ -440,13 +451,25 @@ export class ValidationRoot {
 
     const rootValidator = this.#rootValidator;
     const anchorName = this.#rootAnchorName;
-    if (anchorName !== null) {
-      this.pushDynamicAnchorValidator(anchorName, rootValidator);
+    const rootAnchors = this.#rootDynamicAnchors;
+    if (anchorName !== null || rootAnchors.length !== 0) {
+      if (anchorName !== null)
+        this.pushDynamicAnchorValidator(anchorName, rootValidator);
+      for (let i = 0; i < rootAnchors.length; ++i) {
+        const anchor = rootAnchors[i];
+        if (anchor.validator === null)
+          anchor.validator = this.getOrCreateValidator(anchor.schema, this.#rootOrigin, this.#rootOrigin);
+        this.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+      }
       try {
         // call compiled validator with dataRoot as third argument
         return rootValidator(data, '', data);
       } finally {
-        this.popDynamicAnchorValidator(anchorName);
+        for (let i = rootAnchors.length - 1; i >= 0; --i) {
+          this.popDynamicAnchorValidator(rootAnchors[i].name);
+        }
+        if (anchorName !== null)
+          this.popDynamicAnchorValidator(anchorName);
       }
     }
 
@@ -466,14 +489,15 @@ export class ValidationRoot {
   /**
    * Get the stored validator for a dynamic anchor.
    * Used by $dynamicRef for runtime resolution.
-   * Returns the top of the stack (most recently registered validator = nearest).
+   * Per draft 2020-12, $dynamicRef resolves to the FIRST (outermost)
+   * resource in the dynamic scope that defines the anchor.
    * @param {string} anchorName - The anchor name
    * @returns {Function|null} The validator function or null if not set
    */
   getDynamicAnchorValidator(anchorName) {
     const stack = this.#dynamicAnchors.get(anchorName);
     if (!stack || stack.length === 0) return null;
-    return stack[stack.length - 1];
+    return stack[0];
   }
 
   /**
@@ -599,20 +623,34 @@ export class ValidationObject {
       // If so, we need to wrap the call to register the anchor at validation time
       const hasRecAnchor = isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema);
       const dynAnchorName = isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null;
-      
-      if (hasRecAnchor || dynAnchorName || sourceDynamicAnchors.length > 0) {
+
+      // Entering the target resource brings ALL of its $dynamicAnchors into
+      // the dynamic scope (the target root's own anchor is pushed separately
+      // as refValidator below). Source $defs anchors are kept for schemas
+      // whose resource entry point is the $ref itself.
+      const enterAnchors = sourceDynamicAnchors.slice();
+      const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema);
+      for (let i = 0; i < targetDeepAnchors.length; i++) {
+        const anchor = targetDeepAnchors[i];
+        if (anchor.schema === resolvedSchema) continue;
+        anchor.base = resolved.baseUri;
+        enterAnchors.push(anchor);
+      }
+
+      if (hasRecAnchor || dynAnchorName || enterAnchors.length > 0) {
         const anchorName = dynAnchorName || ''; // empty string for $recursiveAnchor
-        
+
         // Wrap the ref validator to register dynamic anchor at call time (validation time)
         if (siblingValidator) {
           // unevaluated* keywords must see annotations produced by the $ref
           // target, so the wrapper goes around the combined validator.
           return wrapUnevaluated(self, schema, function validateRefWithDynamicAnchorAndSiblings(data, dataPath, dataRoot) {
-            // Register source schema's dynamic anchors first
-            for (let i = 0; i < sourceDynamicAnchors.length; i++) {
-              const anchor = sourceDynamicAnchors[i];
-              const validator = root.getOrCreateValidator(anchor.schema, path, baseUri);
-              root.pushDynamicAnchorValidator(anchor.name, validator);
+            // Register the entered resource's dynamic anchors first
+            for (let i = 0; i < enterAnchors.length; i++) {
+              const anchor = enterAnchors[i];
+              if (anchor.validator == null)
+                anchor.validator = root.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
+              root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
             }
             // Then register target's dynamic anchor if any
             if (hasRecAnchor || dynAnchorName) {
@@ -625,18 +663,19 @@ export class ValidationObject {
               if (hasRecAnchor || dynAnchorName) {
                 root.popDynamicAnchorValidator(anchorName);
               }
-              for (let i = sourceDynamicAnchors.length - 1; i >= 0; i--) {
-                root.popDynamicAnchorValidator(sourceDynamicAnchors[i].name);
+              for (let i = enterAnchors.length - 1; i >= 0; i--) {
+                root.popDynamicAnchorValidator(enterAnchors[i].name);
               }
             }
           });
         } else {
           return function validateRefWithDynamicAnchor(data, dataPath, dataRoot) {
-            // Register source schema's dynamic anchors first
-            for (let i = 0; i < sourceDynamicAnchors.length; i++) {
-              const anchor = sourceDynamicAnchors[i];
-              const validator = root.getOrCreateValidator(anchor.schema, path, baseUri);
-              root.pushDynamicAnchorValidator(anchor.name, validator);
+            // Register the entered resource's dynamic anchors first
+            for (let i = 0; i < enterAnchors.length; i++) {
+              const anchor = enterAnchors[i];
+              if (anchor.validator == null)
+                anchor.validator = root.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
+              root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
             }
             // Then register target's dynamic anchor if any
             if (hasRecAnchor || dynAnchorName) {
@@ -649,8 +688,8 @@ export class ValidationObject {
               if (hasRecAnchor || dynAnchorName) {
                 root.popDynamicAnchorValidator(anchorName);
               }
-              for (let i = sourceDynamicAnchors.length - 1; i >= 0; i--) {
-                root.popDynamicAnchorValidator(sourceDynamicAnchors[i].name);
+              for (let i = enterAnchors.length - 1; i >= 0; i--) {
+                root.popDynamicAnchorValidator(enterAnchors[i].name);
               }
             }
           };
@@ -679,22 +718,41 @@ export class ValidationObject {
     const boundSiblingValidator = siblingValidator;
     const boundSourceAnchors = sourceDynamicAnchors;
 
+    // Memoized state of the first resolution - the target never changes.
+    let resolvedState = null;
+
     return wrapUnevaluated(self, schema, function resolveSchemaCompiler(data, dataPath, dataRoot) {
-      const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
-      const refValidator = obj.validate;
-      const resolvedSchema = obj.schema;
-      
-      // Check if the resolved schema has a dynamic anchor
-      const hasRecAnchor = isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema);
-      const dynAnchorName = isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null;
-      
-      // Register source anchors first
-      for (let i = 0; i < boundSourceAnchors.length; i++) {
-        const anchor = boundSourceAnchors[i];
-        const validator = rootRef.getOrCreateValidator(anchor.schema, path, baseUri);
-        rootRef.pushDynamicAnchorValidator(anchor.name, validator);
+      if (resolvedState === null) {
+        const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
+        const resolvedSchema = obj.schema;
+
+        // Entering the target resource brings ALL of its $dynamicAnchors into
+        // the dynamic scope, exactly like the pre-compiled path above.
+        const enterAnchors = boundSourceAnchors.slice();
+        const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema);
+        for (let i = 0; i < targetDeepAnchors.length; i++) {
+          const anchor = targetDeepAnchors[i];
+          if (anchor.schema === resolvedSchema) continue;
+          anchor.base = obj.baseUri;
+          enterAnchors.push(anchor);
+        }
+
+        resolvedState = {
+          refValidator: obj.validate,
+          enterAnchors,
+          hasRecAnchor: isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema),
+          dynAnchorName: isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null,
+        };
       }
-      
+      const { refValidator, enterAnchors, hasRecAnchor, dynAnchorName } = resolvedState;
+
+      for (let i = 0; i < enterAnchors.length; i++) {
+        const anchor = enterAnchors[i];
+        if (anchor.validator == null)
+          anchor.validator = rootRef.getOrCreateValidator(anchor.schema, path, anchor.base || baseUri);
+        rootRef.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+      }
+
       try {
         if (hasRecAnchor || dynAnchorName) {
           const anchorName = dynAnchorName || '';
@@ -709,19 +767,23 @@ export class ValidationObject {
             rootRef.popDynamicAnchorValidator(anchorName);
           }
         }
-        
+
         // If there are sibling validators (draft 2019-09+), combine them with the ref validator
         if (boundSiblingValidator) {
           return refValidator(data, dataPath, dataRoot) && boundSiblingValidator(data, dataPath, dataRoot);
         }
-        
-        // Cache the validator directly - no wrapper function
-        self.#validator = refValidator;
+
+        // Cache the validator directly (skipping this resolver) only when
+        // this ref registers no dynamic anchors - otherwise later calls
+        // would lose the registrations.
+        if (enterAnchors.length === 0) {
+          self.#validator = refValidator;
+        }
         return refValidator(data, dataPath, dataRoot);
       } finally {
-        // Pop source anchors
-        for (let i = boundSourceAnchors.length - 1; i >= 0; i--) {
-          rootRef.popDynamicAnchorValidator(boundSourceAnchors[i].name);
+        // Pop anchors in reverse order
+        for (let i = enterAnchors.length - 1; i >= 0; i--) {
+          rootRef.popDynamicAnchorValidator(enterAnchors[i].name);
         }
       }
     });
@@ -956,13 +1018,15 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null) {
         this.validation = new ValidationOptions(
           opts.skipErrors ?? true,
           opts.useGrapheme ?? true,
           opts.collectErrors ?? false,
           opts.contentValidation ?? false,
-          opts.draftVersion ?? 7
+          opts.draftVersion ?? 7,
+          true,
+          opts.formatAssertion ?? null
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1574,6 +1638,10 @@ export class JarenValidator {
     // metaschema that omits the validation vocabulary turns keywords like
     // 'type' and 'minimum' into annotations that assert nothing.
     let vocabValidation = true;
+    // In draft 2020-12 the format keyword is annotation-only unless the
+    // metaschema opts into the format-assertion vocabulary (or the user
+    // sets the formatAssertion option explicitly).
+    let formatAssertion = existingValidation.formatAssertion ?? null;
     if (isObjectClass(schema) && isStringType(schema.$schema)) {
       const metaKey = JarenValidator.normalizeUriKey(schema.$schema);
       const metaSchema = map.get(metaKey)
@@ -1581,7 +1649,14 @@ export class JarenValidator {
       if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
         vocabValidation = Object.keys(metaSchema.$vocabulary)
           .some(uri => uri.includes('/vocab/validation'));
+        if (formatAssertion == null
+          && Object.keys(metaSchema.$vocabulary).some(uri => uri.includes('/vocab/format-assertion'))) {
+          formatAssertion = true;
+        }
       }
+    }
+    if (formatAssertion == null) {
+      formatAssertion = draftVersion < 2020;
     }
 
     const validationOptions = new ValidationOptions(
@@ -1590,7 +1665,8 @@ export class JarenValidator {
       existingValidation.collectErrors ?? false,
       existingValidation.contentValidation ?? contentValidationDefault,
       draftVersion,
-      vocabValidation
+      vocabValidation,
+      formatAssertion
     );
 
     // Pre-compile all refs before returning the validator

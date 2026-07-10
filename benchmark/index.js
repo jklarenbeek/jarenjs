@@ -32,7 +32,7 @@ for (const [key, tests] of Object.entries(jsonTests)) {
   for (let i = 0; i < tests.length; ++i) {
     const test = tests[i];
     // TODO: select adapter
-    const results = TestRunner.runTest(test);
+    const results = TestRunner.runTest(test, key);
 
     // Structure: { description: string, results: [{ validator, failures, total, time, error? }] }
     allResults[key].push({

@@ -184,6 +184,11 @@ function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   if (items === true) return trueThat;
   if (items !== false) return undefined;
 
+  // With prefixItems (draft 2020-12), items:false only forbids items beyond
+  // the prefix; that is enforced by the tuple validator, not here.
+  if (getArrayClassMinItems(jsonSchema.prefixItems, 1) != null)
+    return undefined;
+
   const addError = schemaObj.createErrorHandler(false, 'items');
   return function validateArrayItemsFalse(data, dataPath) {
     return data.length === 0

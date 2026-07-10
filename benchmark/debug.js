@@ -343,7 +343,7 @@ async function exportTestCase(test, testIndex, exportPath) {
 }
 
 // Run a single test case with detailed output
-async function runTestCase(test, options, draft, remotes) {
+async function runTestCase(test, options, draft, remotes, suiteName = undefined) {
   const adaptors = [];
   if (!options.ajvOnly) adaptors.push(jaren);
   if (!options.jarenOnly) adaptors.push(ajv);
@@ -371,7 +371,7 @@ async function runTestCase(test, options, draft, remotes) {
   }
 
   // Run the test
-  const results = TestRunner.runTest(test);
+  const results = TestRunner.runTest(test, suiteName);
 
   // Print results per validator
   for (const res of results) {
@@ -388,7 +388,7 @@ async function runTestCase(test, options, draft, remotes) {
     if (options.verbose || options.compare || options.showErrors || options.interactive) {
       const adaptor = res.validator === 'Ajv' ? ajv : jaren;
       const instance = adaptor.loader(draft, remotes);
-      const validator = adaptor.setup(instance, test.schema);
+      const validator = adaptor.setup(instance, test.schema, suiteName);
 
       console.log('\nAssertions:');
       
@@ -574,7 +574,7 @@ async function main() {
       }
       
       try {
-        await runTestCase(test, options, draft, remotes);
+        await runTestCase(test, options, draft, remotes, fileKey);
         
         // Check for failures
         const adaptors = [];
@@ -582,7 +582,7 @@ async function main() {
         if (!options.jarenOnly) adaptors.push(ajv);
         TestRunner.initialize(draft, ...adaptors);
         TestRunner.load(remotes);
-        const results = TestRunner.runTest(test);
+        const results = TestRunner.runTest(test, fileKey);
         const failures = results.reduce((sum, r) => sum + (r.failures || 0), 0);
         totalFailures += failures;
       } catch (e) {
@@ -613,7 +613,7 @@ async function main() {
   // Run single test case
   if (testToRun) {
     try {
-      await runTestCase(testToRun, options, draft, remotes);
+      await runTestCase(testToRun, options, draft, remotes, fileKey);
     } catch (e) {
       console.error(color('red', `Error: ${e.message}`));
       if (options.verbose) {
