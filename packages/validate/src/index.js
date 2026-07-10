@@ -192,6 +192,38 @@ export class ValidationRoot {
   #dynamicScope = null;
   /** @type {Map<string, Function[]>} Map of anchor names to stacks of validator functions */
   #dynamicAnchors = null;
+  /** @type {string|null} Anchor name to register for the root schema on each validation, or null when not needed */
+  #rootAnchorName = null;
+  /** @type {function|null} Cached compiled validator of the root schema */
+  #rootValidator = null;
+  /** @type {boolean} Whether any schema in this compilation contains a $data reference */
+  #usesDollarData = false;
+
+  /**
+   * Recursively checks whether a schema (sub)tree contains a '$data' key.
+   * Conservative: a property literally named '$data' also matches.
+   * @param {any} node - The schema node to scan
+   * @param {Set<object>} seen - Cycle guard
+   * @returns {boolean} True when a $data key was found
+   */
+  static #containsDollarData(node, seen) {
+    if (node == null || typeof node !== 'object') return false;
+    if (seen.has(node)) return false;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; ++i) {
+        if (ValidationRoot.#containsDollarData(node[i], seen)) return true;
+      }
+      return false;
+    }
+    const keys = Object.keys(node);
+    for (let i = 0; i < keys.length; ++i) {
+      const key = keys[i];
+      if (key === '$data') return true;
+      if (ValidationRoot.#containsDollarData(node[key], seen)) return true;
+    }
+    return false;
+  }
 
   /**
    * Creates a new ValidationRoot.
@@ -215,8 +247,27 @@ export class ValidationRoot {
     this.#dynamicScope = new DynamicScope();
     this.#dynamicAnchors = new Map();
 
+    // Detect $data references once so fast paths can skip building
+    // per-property path strings when nothing will ever consume them.
+    // Must run before validators are compiled below.
+    const seen = new Set();
+    for (const value of schemas.values()) {
+      if (ValidationRoot.#containsDollarData(value, seen)) {
+        this.#usesDollarData = true;
+        break;
+      }
+    }
+
     // For the root schema, baseUri is the origin
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
+
+    // Precompute per-validation constants so validate() stays allocation-free.
+    // The root schema never changes after compilation.
+    const rootSchema = this.#firstSchema.schema;
+    const hasRecAnchor = isObjectClass(rootSchema) && hasRecursiveAnchor(rootSchema);
+    const dynAnchorName = isObjectClass(rootSchema) ? getDynamicAnchorName(rootSchema) : null;
+    this.#rootAnchorName = (hasRecAnchor || dynAnchorName) ? (dynAnchorName || '') : null;
+    this.#rootValidator = this.#firstSchema.validate;
   }
 
   /** @returns {string} The root schema origin/URI */
@@ -236,6 +287,9 @@ export class ValidationRoot {
 
   /** @returns {ValidationObject} The root schema's ValidationObject */
   get firstSchema() { return this.#firstSchema; }
+
+  /** @returns {boolean} Whether any schema in this compilation contains a $data reference */
+  get usesDollarData() { return this.#usesDollarData; }
 
   /**
    * Creates a new ValidationObject for the given path and schema.
@@ -337,19 +391,15 @@ export class ValidationRoot {
     if (!this.#options.skipErrors) {
       this.#errors = [];
     }
-    // Reset dynamic scope and anchors at the start of validation
-    this.#dynamicScope = new DynamicScope();
-    this.#dynamicAnchors = new Map();
-    
-    // Check if root schema has dynamic anchor and register it
-    const firstSchema = this.#firstSchema;
-    const rootSchema = firstSchema.schema;
-    const hasRecAnchor = isObjectClass(rootSchema) && hasRecursiveAnchor(rootSchema);
-    const dynAnchorName = isObjectClass(rootSchema) ? getDynamicAnchorName(rootSchema) : null;
-    
-    if (hasRecAnchor || dynAnchorName) {
-      const anchorName = dynAnchorName || '';
-      const rootValidator = firstSchema.validate;
+    // Push/pop pairs are balanced (try/finally), so the anchors map is
+    // normally empty here already; clear defensively without reallocating.
+    if (this.#dynamicAnchors.size !== 0) {
+      this.#dynamicAnchors.clear();
+    }
+
+    const rootValidator = this.#rootValidator;
+    const anchorName = this.#rootAnchorName;
+    if (anchorName !== null) {
       this.pushDynamicAnchorValidator(anchorName, rootValidator);
       try {
         // call compiled validator with dataRoot as third argument
@@ -358,10 +408,10 @@ export class ValidationRoot {
         this.popDynamicAnchorValidator(anchorName);
       }
     }
-    
+
     // call compiled validator
     // Pass dataRoot as the third argument for data keyword support
-    return firstSchema.validate(data, '', data);
+    return rootValidator(data, '', data);
   }
 
   /**

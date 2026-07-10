@@ -315,15 +315,36 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
     || uniqueItems) == null)
     return undefined;
 
+  // Single-constraint schemas are the common case; skip the trueThat chain.
+  if (minItems == null && maxItems == null)
+    return uniqueItems;
+
+  if (uniqueItems == null) {
+    if (maxItems == null) {
+      return function validateArrayMinItems(data, dataPath) {
+        return minItems(data.length, dataPath);
+      };
+    }
+    if (minItems == null) {
+      return function validateArrayMaxItems(data, dataPath) {
+        return maxItems(data.length, dataPath);
+      };
+    }
+    return function validateArrayMinMaxItems(data, dataPath) {
+      const len = data.length;
+      return minItems(len, dataPath)
+        && maxItems(len, dataPath);
+    };
+  }
+
   const isMinItems = minItems || trueThat;
   const isMaxItems = maxItems || trueThat;
-  const isUniqueItems = uniqueItems || trueThat;
 
   return function validateArrayPrimitives(data, dataPath) {
     const len = data.length;
     return isMinItems(len, dataPath)
       && isMaxItems(len, dataPath)
-      && isUniqueItems(data, dataPath);
+      && uniqueItems(data, dataPath);
   };
 }
 
@@ -459,6 +480,37 @@ export function compileArraySchema(schemaObj, jsonSchema) {
     || compiledContainsBoolean
     || compiledArrayChildren) === undefined)
     return undefined;
+
+  // Single-validator schemas are the common case; skip the trueThat chain.
+  const parts = [];
+  if (compiledPrimitives) parts.push(compiledPrimitives);
+  if (compiledItemsBoolean && compiledItemsBoolean !== trueThat) parts.push(compiledItemsBoolean);
+  if (compiledContainsBoolean) parts.push(compiledContainsBoolean);
+  if (compiledArrayChildren) parts.push(compiledArrayChildren);
+
+  if (parts.length === 0)
+    return undefined;
+
+  if (parts.length === 1) {
+    const single = parts[0];
+    return function validateArraySchemaSingle(data, dataPath, dataRoot) {
+      return isArrayClass(data)
+        ? single(data, dataPath, dataRoot)
+        : true;
+    };
+  }
+
+  if (parts.length === 2) {
+    const first = parts[0];
+    const second = parts[1];
+    return function validateArraySchemaDouble(data, dataPath, dataRoot) {
+      if (isArrayClass(data)) {
+        return first(data, dataPath, dataRoot)
+          && second(data, dataPath, dataRoot);
+      }
+      return true;
+    };
+  }
 
   const validatePrimitives = compiledPrimitives || trueThat;
   const hasBooleanItems = compiledItemsBoolean || trueThat;
