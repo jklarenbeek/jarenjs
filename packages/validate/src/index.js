@@ -1019,10 +1019,12 @@ export class ValidatorOptions {
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
       if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null) {
+        const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
-          opts.skipErrors ?? true,
+          // collecting errors implies actually recording them
+          opts.skipErrors ?? !collectErrors,
           opts.useGrapheme ?? true,
-          opts.collectErrors ?? false,
+          collectErrors,
           opts.contentValidation ?? false,
           opts.draftVersion ?? 7,
           true,

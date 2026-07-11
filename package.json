@@ -21,12 +21,12 @@
   "scripts": {
     "clean": "rimraf --glob ./packages/**/dist/*.{js,map}",
     "lint": "eslint ./packages/**/*.js",
-    "test": "node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
-    "test:core": "node --no-warnings=ExperimentalWarning --test test/core/**/*.test.js",
-    "test:validate": "node --no-warnings=ExperimentalWarning --test test/validate/**/*.test.js",
-    "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
-    "cover:core": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/core/**/*.test.js",
-    "cover:validate": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/validate/**/*.test.js",
+    "test": "node --no-warnings=ExperimentalWarning --test 'test/**/*.test.js'",
+    "test:core": "node --no-warnings=ExperimentalWarning --test 'test/core/**/*.test.js'",
+    "test:validate": "node --no-warnings=ExperimentalWarning --test 'test/validate/**/*.test.js'",
+    "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test 'test/**/*.test.js'",
+    "cover:core": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test 'test/core/**/*.test.js'",
+    "cover:validate": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test 'test/validate/**/*.test.js'",
     "cover:profiler": "npx c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node benchmark/profiler.js --profile-all --iterations 1000",
     "build": "npm run build --workspaces --if-present",
     "build:jaren": "node esbuild.config.js",
@@ -36,7 +36,9 @@
     "commit:linux": "git commit -am v$npm_package_version && git tag v$npm_package_version",
     "commit:win32": "git commit -am v%npm_package_version% && git tag v%npm_package_version%",
     "push": "git push && git push --tags",
-    "benchmark": "node ./benchmark/index.js"
+    "benchmark": "node ./benchmark/index.js",
+    "cover:suite": "node benchmark/coverage.js --all --unit-tests",
+    "test:forms": "node --no-warnings=ExperimentalWarning --test 'test/forms/**/*.test.js'"
   },
   "keywords": [
     "JSON",

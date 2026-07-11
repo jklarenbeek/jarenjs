@@ -8,7 +8,7 @@ import {
   isValidJSONPointerUriFragment,
   isValidRelativeJSONPointer,
   isValidJSONPath,
-} from '@jarenjs/core/text/json';
+} from '@jarenjs/core/json';
 
 describe('isValidJSONCheap', () => {
   it('should return true for strings too short to be JSON', () => {

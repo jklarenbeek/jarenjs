@@ -160,32 +160,47 @@ Options:
 
 ### Code Coverage Analysis
 
-Analyze which functions are touched when running specific test suites:
+Analyze which functions are touched - and which are not - when running the
+official test suite and/or the repository unit tests. Coverage from every
+run is merged into a single report, so you get one complete picture to
+decide where tests are missing and what might be dead code:
 
 ```bash
-# Show files with >0% function coverage
-node benchmark/coverage.js '/required.json'
+# The full picture: every draft of the official suite PLUS the unit tests
+node benchmark/coverage.js --all --unit-tests
 
-# Only show files with >25% coverage (filters out noise)
+# Complete official suite (draft7, 2019-09, 2020-12) with per-function detail
+node benchmark/coverage.js --all --functions
+
+# Machine readable output for diffing between runs
+node benchmark/coverage.js --all --unit-tests --json coverage/analysis.json
+
+# What does a single suite file touch?
 node benchmark/coverage.js '/required.json' --threshold 25
 
 # Show TOUCHED and NOT touched functions with hit counts
-node benchmark/coverage.js '/required.json' --threshold 25 --functions
-
-# Show only TOUCHED functions (cleaner output)
-node benchmark/coverage.js '/required.json' --threshold 25 --touched-only
-
-# Adjust iterations for coverage analysis
-node benchmark/coverage.js '/required.json' --iterations 5000
+node benchmark/coverage.js '/required.json' --functions
 
 # Full options
+What to run (combine freely; at least one is required):
+  <testfile.json>    Cover a single official-suite file (e.g. '/ref.json')
+  --all              Cover the COMPLETE official suite (all drafts)
+  --unit-tests       Cover the repository unit tests (node --test test/)
+
 Options:
-  --threshold <n>    Filter files with coverage <= n% (default: 0)
+  --draft <list>     Draft(s) to run, comma separated
+                     (default for --all: draft7,draft2019-09,draft2020-12)
+  --iterations <n>   Profiling iterations (default: 1 with --all, 1000 single file)
+  --threshold <n>    Only show files with function coverage > n% (default: 0)
   --functions        Show TOUCHED and NOT touched functions
   --touched-only     Show only TOUCHED functions
-  --iterations <n>   Number of profiling iterations (default: 1000)
-  --temp-dir <dir>   Temporary directory for c8
+  --json <path>      Write the full analysis as JSON
+  --temp-dir <dir>   Temporary directory for V8 coverage data
 ```
+
+The report ends with three actionable sections: **untouched functions**
+(add tests or consider removal), **files with 0% function coverage**, and
+**files never loaded at all** - the strongest dead-code candidates.
 
 The benchmark results are written to `benchmark/results/results.html`.
 
