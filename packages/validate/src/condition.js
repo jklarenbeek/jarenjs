@@ -10,7 +10,6 @@ import {
 
 import {
   hasRecursiveAnchor,
-  hasDynamicAnchor,
   getDynamicAnchorName,
 } from './dynamic-ref.js';
 

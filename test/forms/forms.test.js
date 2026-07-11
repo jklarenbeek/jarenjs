@@ -418,4 +418,17 @@ describe('Format Registry', function () {
     assert.isTrue(getFormatInfo('json-pointer').test('/a/b'));
     assert.isTrue(!getFormatInfo('json-pointer').test('a/b'));
   });
+
+  it('should test regular expressions for validity', function () {
+    assert.isTrue(getFormatInfo('regex').test('^[a-z]+$'));
+    assert.isTrue(!getFormatInfo('regex').test('(unclosed'));
+  });
+
+  it('should accept anything for control-hint-only formats', function () {
+    assert.isTrue(getFormatInfo('password').test('anything at all'));
+    assert.isTrue(getFormatInfo('textarea').test('multi\nline'));
+    assert.isTrue(getFormatInfo('multiline').test(''));
+    assert.isTrue(getFormatInfo('password').control === 'password');
+    assert.isTrue(getFormatInfo('textarea').control === 'textarea');
+  });
 });

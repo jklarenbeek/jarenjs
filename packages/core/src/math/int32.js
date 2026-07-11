@@ -44,6 +44,7 @@ export class Int32 {
 
   static fib(n = 0) {
     n = n | 0;
+    if (n < 1) return 0;
     let c = 0;
     let x = 1;
     let i = 1;
@@ -52,7 +53,7 @@ export class Int32 {
       c = x | 0;
       x = t | 0;
     }
-    return c | 0;
+    return x | 0;
   }
 
   static mag2(dx = 0, dy = 0) {
@@ -138,12 +139,12 @@ export class Int32 {
     return -(
       (((255 - value) & ((value - 255) >> 31)) - 255) &
       ((((255 - value) & ((value - 255) >> 31)) - 255) >> 31)
-    );
+    ) | 0;
   }
   static clampu_u8b(value = 0) {
     value = value | 0;
     value &= -(value >= 0);
-    return value | ~-!(value & -256);
+    return (value | ~-!(value & -256)) & 0xff;
   }
 
   static inRange(value = 0, min = 0, max = 0) {
@@ -217,11 +218,11 @@ export class Int32 {
 
   static sinLpEx(r = 0) {
     r = r | 0;
-    return (
-      (r < 0
-        ? mathi32_PI41 * r + mathi32_PI42 * r * r
-        : mathi32_PI41 * r - mathi32_PI42 * r * r) | 0
-    );
+    // r and the result are radians/sine scaled by the multiplier; the
+    // quadratic term therefore needs a double division to stay in scale.
+    const linear = (mathi32_PI41 * r) / mathi32_MULTIPLIER;
+    const quad = (((mathi32_PI42 * r) / mathi32_MULTIPLIER) * r) / mathi32_MULTIPLIER;
+    return (r < 0 ? linear + quad : linear - quad) | 0;
   }
 
   static sinLp(r = 0) {

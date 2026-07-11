@@ -274,7 +274,6 @@ flowchart LR
 
     subgraph "Infrastructure"
         INDEX --> TRAVERSE[traverse.js]
-        INDEX --> ERRORS[errors.js]
         INDEX --> TOOLS[tools.js]
         INDEX --> DYNREF[dynamic-ref.js]
     end
@@ -725,7 +724,6 @@ flowchart TB
 
         subgraph "Infrastructure"
             TRAV[traverse.js]
-            ERR[errors.js]
             TOOLS[tools.js]
         end
     end
@@ -741,7 +739,7 @@ flowchart TB
         CORE_JSON[json/index.js]
     end
 
-    INDEX --> SCHEMA & TRAV & ERR & TOOLS & FMT
+    INDEX --> SCHEMA & TRAV & TOOLS & FMT
     SCHEMA --> STR & NUM & BINT & ARR & OBJ & COMB & COND & ENUM & CONT & DATA & DDLR
 
     INDEX --> CORE
@@ -985,7 +983,6 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions`, `ValidationError` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
-| `errors.js` | Error handling | `ValidationError`, `ErrorCollection`, `errorMessages` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaRef`, `createIsSchemaTypeHandler` |
 | `string.js` | String keywords | `compileStringBasic` |
 | `number.js` | Number keywords | `compileNumberBasic` |

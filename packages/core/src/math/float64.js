@@ -125,7 +125,8 @@ export class Float64 {
   }
 
   static fib(n = 0.0) {
-    n = +n;
+    n = +mathf64_floor(+n);
+    if (!(n >= 1.0)) return 0.0;
     let c = 0.0;
     let x = 1.0;
     let i = 1.0;
@@ -134,7 +135,7 @@ export class Float64 {
       c = +x;
       x = +t;
     }
-    return +c;
+    return +x;
   }
 
   // https://gist.github.com/geraldyeo/988116export

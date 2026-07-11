@@ -137,16 +137,24 @@ describe('#Float64 primitives', function () {
     assert.equal(Float64.mag(1, 1), Math.sqrt(2));
   });
 
-  it.skip('Float64.isqrt', (t) => {
-    assert.equal(Float64.isqrt(4).toFixed(6), '0.500000');
-    assert.equal(Float64.isqrt(9).toFixed(6), '0.333333');
-    assert.equal(Float64.isqrt(1).toFixed(6), '1.000000');
+  it('Float64.isqrt', (t) => {
+    // Fast inverse square root: one Newton iteration, ~0.2% max error
+    assert.ok(Math.abs(Float64.isqrt(4) - 0.5) < 0.005);
+    assert.ok(Math.abs(Float64.isqrt(9) - 1 / 3) < 0.005);
+    assert.ok(Math.abs(Float64.isqrt(1) - 1) < 0.005);
+    assert.ok(Math.abs(Float64.isqrt(100) - 0.1) < 0.001);
   });
 
-  it.skip('Float64.fib', (t) => {
+  it('Float64.fib', (t) => {
     assert.equal(Float64.fib(0), 0);
     assert.equal(Float64.fib(1), 1);
     assert.equal(Float64.fib(10), 55);
+    // Non-integer input is floored instead of looping forever
+    assert.equal(Float64.fib(10.9), 55);
+  });
+
+  it('Float64.cosHp', (t) => {
+    assert.throws(() => Float64.cosHp(1), /not implemented/);
   });
 
   it('Float64.fib2', (t) => {

@@ -403,7 +403,7 @@ See also:
 ### 🔑 Miscellaneous keywords
 
 - ❌ strict
-- strictFormat | used to enforce a specific format type like numbers and integers _(in-progress)_
+- ❌ strictFormat
 - ❌ strictTuple
 - ❌ errorMessage
 - definitions | used by initial schema traversal _deprecated in `draft2019`_
@@ -503,7 +503,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 
 ### ✍ Formats for numbers
 
-Formats for numbers validate both numbers and strings as number types. If you want to strictly only allow number types, you can explicitly set the `strictFormat` keyword to boolean `true` to only allow strict number or integer types.
+Formats for numbers validate both numbers and strings as number types; combine them with the `type` keyword (e.g. `{ "type": "integer", "format": "int32" }`) when only real number types should be allowed.
 
 #### 🗨 Formats integer numbers
 

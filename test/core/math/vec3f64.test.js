@@ -247,5 +247,15 @@ describe('Vec3f64', () => {
       assert.equal(v.y, 4 / mag);
       assert.equal(v.z, 5 / mag);
     });
+
+    it('should calculate the cross product in place', () => {
+      const v = new Vec3f64(1, 0, 0);
+      v.icross(new Vec3f64(0, 1, 0));
+      assert.deepEqual(v, new Vec3f64(0, 0, 1));
+
+      const w = new Vec3f64(2, 3, 4);
+      w.icross(new Vec3f64(5, 6, 7));
+      assert.deepEqual(w, new Vec3f64(-3, 6, -3));
+    });
   });
 });

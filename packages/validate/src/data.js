@@ -29,7 +29,6 @@ import {
   isStringType,
   isNumberType,
   isArrayClass,
-  isObjectType,
 } from '@jarenjs/core';
 
 import {
@@ -318,16 +317,37 @@ function compileDataFormat(schemaObj, ref) {
 
   const addError = schemaObj.createErrorHandler(ref, 'format');
 
+  // The registry holds format COMPILERS; compile (and cache) a validator
+  // per referenced format name at validation time.
+  const compiled = new Map();
+  const mockSchemaObj = {
+    createErrorHandler: () => () => false,
+    options: { skipErrors: true },
+  };
+
   return function validateDataFormat(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
     const { value: formatName, found } = resolveDataRef(dataRoot, dataPath, ref);
     if (!found || !isStringType(formatName)) return true;
 
-    const formatValidator = formats[formatName];
-    if (!formatValidator) return true;
+    let validator = compiled.get(formatName);
+    if (validator === undefined) {
+      const formatCompiler = formats[formatName];
+      validator = null;
+      if (formatCompiler) {
+        try {
+          const candidate = formatCompiler(mockSchemaObj, { format: formatName });
+          if (typeof candidate === 'function') validator = candidate;
+        } catch (e) {
+          // An uncompilable format asserts nothing
+        }
+      }
+      compiled.set(formatName, validator);
+    }
+    if (validator === null) return true;
 
-    return formatValidator(data) || addError(formatName, data, dataPath);
+    return validator(data, dataPath) || addError(formatName, data, dataPath);
   };
 }
 
@@ -425,13 +445,4 @@ export function compileDataSchema(schemaObj, jsonSchema) {
     }
     return true;
   };
-}
-
-/**
- * Check if the schema has a data keyword
- * @param {object} jsonSchema - The JSON schema to check
- * @returns {boolean} True if the schema has a data keyword
- */
-export function hasDataKeyword(jsonSchema) {
-  return isObjectType(jsonSchema) && isObjectType(jsonSchema.data);
 }

@@ -49,7 +49,7 @@ export function getSchemaDraftByName(name) {
  * @returns {{draft:string, schema: object[]}}
  */
 export function getSchemaDraftById(schemaId) {
-  if (!isStringType())
+  if (!isStringType(schemaId))
     throw new Error('The schema id must be of type string');
 
   const $id = schemaId.toLowerCase();

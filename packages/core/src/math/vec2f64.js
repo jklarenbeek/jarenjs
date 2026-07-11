@@ -653,8 +653,9 @@ export class Vec2f64 {
    * @returns {Vec2f64} the vector rotated 90 degrees counter-clockwise
    */
   irotn90() {
+    const x = +this.x;
     this.x = +this.y;
-    this.y = +(-(+this.x));
+    this.y = +(-x);
     return this;
   }
 
@@ -663,8 +664,9 @@ export class Vec2f64 {
    * @returns {Vec2f64} the vector rotated 90 degrees clockwise
    */
   irot90() {
+    const x = +this.x;
     this.x = +(-(+this.y));
-    this.y = +this.x;
+    this.y = +x;
     return this;
   }
 
@@ -674,8 +676,10 @@ export class Vec2f64 {
    * @returns {Vec2f64} transformed output vector
    */
   irotate(radians = 0.0) {
-    this.x = +(+(+this.x * +mathf64_cos(+radians)) - +(+this.y * +mathf64_sin(+radians)));
-    this.y = +(+(+this.x * +mathf64_sin(+radians)) + +(+this.y * +mathf64_cos(+radians)));
+    const x = +this.x;
+    const y = +this.y;
+    this.x = +(+(x * +mathf64_cos(+radians)) - +(y * +mathf64_sin(+radians)));
+    this.y = +(+(x * +mathf64_sin(+radians)) + +(y * +mathf64_cos(+radians)));
     return this;
   }
 
@@ -686,10 +690,12 @@ export class Vec2f64 {
    * @returns {Vec2f64} transformed output vector
    */
   iabout(v = def_Vec2f64, radians = 0.0) {
-    this.x = +(+v.x + +(+(+(+this.x - +v.x) * +mathf64_cos(+radians))
-      - +(+(+this.y - +v.y) * +mathf64_sin(+radians))));
-    this.y = +(+v.y + +(+(+(+this.x - +v.x) * +mathf64_sin(+radians))
-      + +(+(+this.y - +v.y) * +mathf64_cos(+radians))));
+    const dx = +(+this.x - +v.x);
+    const dy = +(+this.y - +v.y);
+    this.x = +(+v.x + +(+(dx * +mathf64_cos(+radians))
+      - +(dy * +mathf64_sin(+radians))));
+    this.y = +(+v.y + +(+(dx * +mathf64_sin(+radians))
+      + +(dy * +mathf64_cos(+radians))));
     return this;
   }
 
