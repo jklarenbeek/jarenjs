@@ -1,0 +1,30 @@
+{
+  "name": "@jarenjs/forms",
+  "private": false,
+  "version": "0.8.4",
+  "type": "module",
+  "main": "./src/index.js",
+  "files": [
+    "src/"
+  ],
+  "description": "Framework-agnostic form model generator for JSON Schema with preemptive per-field validation powered by @jarenjs/core",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/forms"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "json",
+    "schema",
+    "form",
+    "forms",
+    "generator",
+    "validation"
+  ],
+  "peerDependencies": {
+    "@jarenjs/core": "*"
+  }
+}

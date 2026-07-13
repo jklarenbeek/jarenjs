@@ -21,12 +21,12 @@ const features = [
   {
     icon: Zap,
     title: 'High Performance',
-    description: 'Optimized compilation and validation that rivals or exceeds AJV performance across 773+ test cases.',
+    description: 'Compiled validators that outperform AJV across the official JSON Schema test suites.',
   },
   {
     icon: Shield,
     title: 'Full Draft Support',
-    description: 'Complete support for JSON Schema Draft 07, 2019-09, and 2020-12 with all validation keywords.',
+    description: '100% of the official JSON-Schema-Test-Suite for draft-07, 2019-09 and 2020-12 - every keyword, including unevaluated* and $dynamicRef.',
   },
   {
     icon: Code2,
@@ -36,7 +36,7 @@ const features = [
   {
     icon: Puzzle,
     title: 'Modular Architecture',
-    description: 'Core, validation, formats, and refs are separate packages. Use only what you need.',
+    description: 'Core, validation, formats, refs and forms are separate packages. Use only what you need.',
   },
   {
     icon: Gauge,

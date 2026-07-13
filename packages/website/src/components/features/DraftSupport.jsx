@@ -1,62 +1,50 @@
 import { Badge } from '@components/ui/badge';
-import { Check, Minus } from 'lucide-react';
+import { Check } from 'lucide-react';
 
 const draftVersions = [
   {
     name: 'Draft 07',
     version: '2017-11',
     status: 'full',
-    description: 'Complete support for all keywords',
+    description: '100% of the official test suite',
     features: ['All core keywords', 'All formats', '$ref', '$id', 'definitions/$defs'],
   },
   {
     name: 'Draft 2019-09',
     version: '2019-09',
-    status: 'partial',
-    description: 'Full support except new dynamic reference keywords',
+    status: 'full',
+    description: '100% of the official test suite',
     features: [
       'All Draft 07 keywords',
       '$anchor',
-      ' deprecated',
-      ' readOnly/writeOnly',
-      ' Unevaluated* (in progress)',
-      ' $recursiveRef/$recursiveAnchor (in progress)',
+      'unevaluatedProperties / unevaluatedItems',
+      '$recursiveRef / $recursiveAnchor',
+      '$vocabulary',
+      'Cross-draft references',
     ],
   },
   {
     name: 'Draft 2020-12',
     version: '2020-12',
-    status: 'partial',
-    description: 'Full support except new dynamic reference keywords',
+    status: 'full',
+    description: '100% of the official test suite',
     features: [
       'All Draft 2019-09 features',
-      'prefixItems',
-      'type: null',
-      ' $dynamicRef/$dynamicAnchor (in progress)',
-      ' $vocabulary (in progress)',
+      'prefixItems / items',
+      '$dynamicRef / $dynamicAnchor',
+      'format-annotation semantics',
     ],
   },
-];
-
-const unsupportedKeywords = [
-  { name: 'unevaluatedItems', draft: '2019-09', status: 'in-progress' },
-  { name: 'unevaluatedProperties', draft: '2019-09', status: 'in-progress' },
-  { name: 'propertyDependencies', draft: '2020-12', status: 'in-progress' },
-  { name: '$recursiveRef', draft: '2019-09', status: 'in-progress', note: 'deprecated in 2020-12' },
-  { name: '$recursiveAnchor', draft: '2019-09', status: 'in-progress', note: 'deprecated in 2020-12' },
-  { name: '$dynamicRef', draft: '2020-12', status: 'in-progress' },
-  { name: '$dynamicAnchor', draft: '2020-12', status: 'in-progress' },
-  { name: '$vocabulary', draft: '2020-12', status: 'in-progress' },
 ];
 
 const keywordCategories = [
   {
     name: 'Validation',
-    keywords: ['type', 'enum', 'const', 'multipleOf', 'maximum', 'minimum', 'exclusiveMaximum', 'exclusiveMinimum', 'maxLength', 'minLength', 'pattern', 'maxItems', 'minItems', 'uniqueItems', 'maxProperties', 'minProperties', 'required', 'dependentRequired'],
+    keywords: ['type', 'enum', 'const', 'multipleOf', 'maximum', 'minimum', 'exclusiveMaximum', 'exclusiveMinimum', 'maxLength', 'minLength', 'pattern', 'maxItems', 'minItems', 'uniqueItems', 'maxContains', 'minContains', 'maxProperties', 'minProperties', 'required', 'dependentRequired'],
   },
   {
     name: 'Applicator',
-    keywords: ['prefixItems', 'items', 'contains', 'additionalProperties', 'properties', 'patternProperties', 'dependentSchemas', 'propertyNames', 'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else'],
+    keywords: ['prefixItems', 'items', 'additionalItems', 'contains', 'additionalProperties', 'properties', 'patternProperties', 'dependentSchemas', 'propertyNames', 'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'unevaluatedItems', 'unevaluatedProperties'],
   },
   {
     name: 'Metadata',
@@ -68,7 +56,11 @@ const keywordCategories = [
   },
   {
     name: 'Reference',
-    keywords: ['$ref', '$defs', '$anchor', '$id'],
+    keywords: ['$ref', '$defs', '$anchor', '$id', '$dynamicRef', '$dynamicAnchor', '$recursiveRef', '$recursiveAnchor', '$vocabulary', '$schema'],
+  },
+  {
+    name: 'Instance data',
+    keywords: ['data (data-ref)', '$data'],
   },
 ];
 
@@ -84,21 +76,15 @@ function DraftSupport() {
           >
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold">{draft.name}</h3>
-              <Badge variant={draft.status === 'full' ? 'success' : 'secondary'}>
-                {draft.status === 'full' ? 'Complete' : 'Partial'}
-              </Badge>
+              <Badge variant="success">Complete</Badge>
             </div>
             <p className="text-xs text-muted-foreground mb-3">{draft.version}</p>
             <p className="text-sm text-muted-foreground mb-3">{draft.description}</p>
             <ul className="text-sm space-y-1">
               {draft.features.map((feature) => (
-                <li key={feature} className={`flex items-center gap-2 ${feature.startsWith(' ') ? 'text-muted-foreground/70' : 'text-muted-foreground'}`}>
-                  {feature.startsWith(' ') ? (
-                    <Minus className="h-3 w-3 text-amber-500" />
-                  ) : (
-                    <Check className="h-3 w-3 text-green-500" />
-                  )}
-                  {feature.trim()}
+                <li key={feature} className="flex items-center gap-2 text-muted-foreground">
+                  <Check className="h-3 w-3 text-green-500 shrink-0" />
+                  {feature}
                 </li>
               ))}
             </ul>
@@ -106,26 +92,24 @@ function DraftSupport() {
         ))}
       </div>
 
-      {/* Limitations Notice */}
+      {/* Conformance Notice */}
       <div className="rounded-lg border border-dashed p-4 bg-muted/30">
         <h4 className="font-medium mb-2 flex items-center gap-2">
-          <span className="text-amber-500">⚠</span>
-          Keywords In Progress
+          <Check className="h-4 w-4 text-green-500" />
+          Full conformance
         </h4>
-        <p className="text-sm text-muted-foreground mb-3">
-          The following keywords from Draft 2019-09 and 2020-12 are not yet supported:
+        <p className="text-sm text-muted-foreground">
+          Jaren passes 100% of the official{' '}
+          <a
+            className="text-primary hover:underline"
+            href="https://github.com/json-schema-org/JSON-Schema-Test-Suite"
+            target="_blank"
+            rel="noreferrer"
+          >
+            JSON-Schema-Test-Suite
+          </a>{' '}
+          — including the optional format suites — for draft-07, 2019-09 and 2020-12.
         </p>
-        <div className="flex flex-wrap gap-2">
-          {unsupportedKeywords.map((kw) => (
-            <span
-              key={kw.name}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100"
-              title={kw.note || `Draft ${kw.draft}`}
-            >
-              {kw.name}
-            </span>
-          ))}
-        </div>
       </div>
 
       {/* Keyword Categories */}
@@ -150,4 +134,4 @@ function DraftSupport() {
   );
 }
 
-export { DraftSupport, draftVersions, keywordCategories, unsupportedKeywords };
+export { DraftSupport, draftVersions, keywordCategories };

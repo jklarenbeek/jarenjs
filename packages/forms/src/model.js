@@ -1,0 +1,296 @@
+//@ts-check
+
+/**
+ * Form model builder: turns a JSON Schema into a tree of field descriptors
+ * that a UI layer (React, vanilla DOM, ...) can render as a form.
+ *
+ * The builder resolves local `$ref`s (`#/$defs/...`, `#/definitions/...`),
+ * shallowly merges `allOf` branches, and annotates every field with the
+ * constraints and rendering hints needed for preemptive per-field
+ * validation (see validate.js).
+ */
+
+import {
+  getFormatInfo,
+} from './formats.js';
+
+const DEFAULT_MAX_DEPTH = 24;
+
+/**
+ * @typedef {object} FormField
+ * @property {string} pointer - JSON pointer into the DATA (e.g. '/user/name')
+ * @property {string} key - Property name (or '-' for an array item template)
+ * @property {string} label - Human friendly label (schema title or humanized key)
+ * @property {string|undefined} description
+ * @property {object} schema - The resolved subschema for this field
+ * @property {string} kind - 'string'|'number'|'integer'|'boolean'|'enum'|'const'|'object'|'array'|'unknown'
+ * @property {string} control - Suggested control: 'text'|'email'|'url'|'password'|'textarea'|'number'|'checkbox'|'select'|'date'|'color'|'json'
+ * @property {boolean} required - Whether the parent object requires this property
+ * @property {boolean} readOnly
+ * @property {Array<any>|null} enumValues - Options for a select control
+ * @property {any} constValue - Fixed value when the schema is a const
+ * @property {any} defaultValue
+ * @property {string|undefined} placeholder
+ * @property {object} constraints - minLength/maxLength/pattern/minimum/... extracted for the UI
+ * @property {Array<FormField>|null} children - Child fields for object kinds
+ * @property {FormField|null} item - Template field for array items
+ * @property {Array<FormField>|null} tuple - Fixed prefix fields for tuple arrays
+ */
+
+/**
+ * Convert 'firstName' / 'first_name' / 'first-name' to 'First Name'.
+ * @param {string} key
+ * @returns {string}
+ */
+export function humanizeKey(key) {
+  if (typeof key !== 'string' || key.length === 0) return String(key);
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Resolve a local JSON pointer ('#/$defs/foo') inside the root document.
+ * @param {string} ref
+ * @param {object} rootSchema
+ * @returns {object|boolean|null} The referenced schema or null when unresolvable
+ */
+function resolveLocalRef(ref, rootSchema) {
+  if (typeof ref !== 'string' || !ref.startsWith('#/')) return null;
+  const parts = ref.slice(2).split('/').map(
+    (p) => decodeURIComponent(p.replace(/~1/g, '/').replace(/~0/g, '~')));
+  let current = rootSchema;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return null;
+    current = current[part];
+  }
+  return current === undefined ? null : current;
+}
+
+/**
+ * Resolve local $refs and shallowly merge allOf branches into a single
+ * effective schema object for form purposes.
+ * @param {object|boolean} schema
+ * @param {object} rootSchema
+ * @param {number} depth
+ * @returns {object|boolean}
+ */
+export function resolveSchema(schema, rootSchema, depth = 0) {
+  if (depth > DEFAULT_MAX_DEPTH) return schema;
+  if (schema == null || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+
+  let resolved = schema;
+
+  if (typeof schema.$ref === 'string') {
+    const target = resolveLocalRef(schema.$ref, rootSchema);
+    if (target != null && typeof target === 'object') {
+      const deref = resolveSchema(target, rootSchema, depth + 1);
+      // 2019-09+: siblings apply together with the referenced schema
+      const { $ref, ...siblings } = schema;
+      resolved = (deref && typeof deref === 'object')
+        ? { ...deref, ...siblings }
+        : deref;
+    }
+  }
+
+  if (resolved && typeof resolved === 'object' && Array.isArray(resolved.allOf)) {
+    const merged = { ...resolved };
+    delete merged.allOf;
+    const requiredSets = merged.required ? [merged.required] : [];
+    for (const branch of resolved.allOf) {
+      const sub = resolveSchema(branch, rootSchema, depth + 1);
+      if (sub == null || typeof sub !== 'object') continue;
+      if (sub.properties) {
+        merged.properties = { ...sub.properties, ...(merged.properties || {}) };
+      }
+      if (Array.isArray(sub.required)) requiredSets.push(sub.required);
+      for (const key of Object.keys(sub)) {
+        if (key === 'properties' || key === 'required' || key === 'allOf') continue;
+        if (merged[key] === undefined) merged[key] = sub[key];
+      }
+    }
+    if (requiredSets.length > 0) {
+      merged.required = [...new Set(requiredSets.flat())];
+    }
+    resolved = merged;
+  }
+
+  return resolved;
+}
+
+/**
+ * Derive the field kind from a resolved schema.
+ * @param {object|boolean} schema
+ * @returns {string}
+ */
+export function getFieldKind(schema) {
+  if (schema == null || typeof schema !== 'object') return 'unknown';
+  if (schema.const !== undefined) return 'const';
+  if (Array.isArray(schema.enum)) return 'enum';
+
+  let type = schema.type;
+  if (Array.isArray(type)) {
+    // Pick the first non-null type for rendering purposes
+    type = type.find((t) => t !== 'null') ?? type[0];
+  }
+  switch (type) {
+    case 'string': return 'string';
+    case 'number': return 'number';
+    case 'integer': return 'integer';
+    case 'boolean': return 'boolean';
+    case 'object': return 'object';
+    case 'array': return 'array';
+    default: break;
+  }
+
+  // Infer from structural keywords when type is absent
+  if (schema.properties || schema.patternProperties || schema.additionalProperties !== undefined) return 'object';
+  if (schema.items !== undefined || schema.prefixItems !== undefined) return 'array';
+  if (schema.minLength !== undefined || schema.maxLength !== undefined || schema.pattern !== undefined || schema.format !== undefined) return 'string';
+  if (schema.minimum !== undefined || schema.maximum !== undefined || schema.multipleOf !== undefined) return 'number';
+  return 'unknown';
+}
+
+/**
+ * Derive the suggested UI control for a field.
+ * @param {string} kind
+ * @param {object} schema
+ * @returns {string}
+ */
+function getControl(kind, schema) {
+  switch (kind) {
+    case 'const': return 'const';
+    case 'enum': return 'select';
+    case 'boolean': return 'checkbox';
+    case 'number':
+    case 'integer': return 'number';
+    case 'object': return 'object';
+    case 'array': return 'array';
+    case 'string': {
+      const info = getFormatInfo(schema.format);
+      if (info) return info.control;
+      if (schema.contentEncoding === 'base64' || schema.contentMediaType) return 'textarea';
+      const max = schema.maxLength;
+      if (max !== undefined && max > 120) return 'textarea';
+      return 'text';
+    }
+    default: return 'json';
+  }
+}
+
+/**
+ * Extract the constraint set the UI and the preemptive field validation use.
+ * @param {object} schema
+ * @returns {object}
+ */
+function getConstraints(schema) {
+  const c = {};
+  for (const key of [
+    'minLength', 'maxLength', 'pattern', 'format',
+    'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
+    'minItems', 'maxItems', 'uniqueItems',
+    'minProperties', 'maxProperties',
+  ]) {
+    if (schema[key] !== undefined) c[key] = schema[key];
+  }
+  return c;
+}
+
+/**
+ * Build a single field descriptor.
+ * @param {object|boolean} rawSchema - The (possibly unresolved) subschema
+ * @param {object} rootSchema - The root schema document for $ref resolution
+ * @param {string} pointer - JSON pointer into the data
+ * @param {string} key - Property name or '-' for an item template
+ * @param {boolean} required
+ * @param {number} depth
+ * @returns {FormField}
+ */
+function buildField(rawSchema, rootSchema, pointer, key, required, depth) {
+  const schema = resolveSchema(rawSchema, rootSchema, depth);
+  const effective = (schema != null && typeof schema === 'object') ? schema : {};
+  const kind = getFieldKind(schema);
+  const control = getControl(kind, effective);
+  const formatInfo = getFormatInfo(effective.format);
+
+  /** @type {FormField} */
+  const field = {
+    pointer,
+    key,
+    label: effective.title || humanizeKey(key),
+    description: effective.description,
+    schema: effective,
+    kind,
+    control,
+    required,
+    readOnly: effective.readOnly === true,
+    enumValues: kind === 'enum' ? effective.enum : null,
+    constValue: kind === 'const' ? effective.const : undefined,
+    defaultValue: effective.default,
+    placeholder: effective.examples?.[0] !== undefined
+      ? String(effective.examples[0])
+      : formatInfo?.placeholder,
+    constraints: getConstraints(effective),
+    children: null,
+    item: null,
+    tuple: null,
+  };
+
+  if (depth >= DEFAULT_MAX_DEPTH) return field;
+
+  if (kind === 'object' && effective.properties) {
+    const requiredSet = new Set(Array.isArray(effective.required) ? effective.required : []);
+    field.children = Object.entries(effective.properties).map(([name, propSchema]) =>
+      buildField(
+        propSchema, rootSchema,
+        `${pointer}/${escapePointerKey(name)}`, name,
+        requiredSet.has(name), depth + 1));
+  }
+
+  if (kind === 'array') {
+    const prefix = Array.isArray(effective.prefixItems)
+      ? effective.prefixItems
+      : (Array.isArray(effective.items) ? effective.items : null);
+    if (prefix) {
+      field.tuple = prefix.map((itemSchema, i) =>
+        buildField(itemSchema, rootSchema, `${pointer}/${i}`, String(i), false, depth + 1));
+      const rest = Array.isArray(effective.items) ? effective.additionalItems : effective.items;
+      if (rest != null && typeof rest === 'object') {
+        field.item = buildField(rest, rootSchema, `${pointer}/-`, '-', false, depth + 1);
+      }
+    }
+    else if (effective.items != null && typeof effective.items === 'object') {
+      field.item = buildField(effective.items, rootSchema, `${pointer}/-`, '-', false, depth + 1);
+    }
+    else {
+      field.item = buildField({}, rootSchema, `${pointer}/-`, '-', false, depth + 1);
+    }
+  }
+
+  return field;
+}
+
+function escapePointerKey(key) {
+  return String(key).replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+/**
+ * Build the form model for a JSON schema.
+ *
+ * @param {object|boolean} schema - The root JSON schema
+ * @returns {FormField} The root field descriptor (kind 'object' for object schemas)
+ * @example
+ * const model = buildFormModel({
+ *   type: 'object',
+ *   properties: { email: { type: 'string', format: 'email' } },
+ *   required: ['email'],
+ * });
+ * model.children[0].control; // 'email'
+ */
+export function buildFormModel(schema) {
+  const rootSchema = (schema != null && typeof schema === 'object') ? schema : {};
+  return buildField(schema, rootSchema, '', '', false, 0);
+}
