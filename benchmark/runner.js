@@ -64,11 +64,11 @@ export class TestRunner {
     }
   }
 
-  createTest(test) {
+  createTest(test, suiteName = undefined) {
     if (this.#adaptor) {
       const adaptor = this.#adaptor;
       // @ts-ignore
-      const validator = adaptor.setup(this.#instance, test.schema)
+      const validator = adaptor.setup(this.#instance, test.schema, suiteName)
       return new TestValidator(adaptor, validator, test);
     }
   }
@@ -95,13 +95,13 @@ export class TestRunner {
     }
   }
 
-  static runTest(test) {
+  static runTest(test, suiteName = undefined) {
     const results = [];
     for (let i = 0; i < TestRunner.#validators.length; ++i) {
       const validator = TestRunner.#validators[i];
       const adaptorName = validator.#adaptor.name;
       try {
-        const runner = validator.createTest(test);
+        const runner = validator.createTest(test, suiteName);
         const result = runner.test();
         results.push({
           validator: adaptorName,

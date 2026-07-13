@@ -184,6 +184,11 @@ function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   if (items === true) return trueThat;
   if (items !== false) return undefined;
 
+  // With prefixItems (draft 2020-12), items:false only forbids items beyond
+  // the prefix; that is enforced by the tuple validator, not here.
+  if (getArrayClassMinItems(jsonSchema.prefixItems, 1) != null)
+    return undefined;
+
   const addError = schemaObj.createErrorHandler(false, 'items');
   return function validateArrayItemsFalse(data, dataPath) {
     return data.length === 0
@@ -299,7 +304,6 @@ function compileTypeOnlyValidator(type) {
 
 //#region Main
 export function compileArrayPrimitives(schemaObj, jsonSchema) {
-  // TODO: figure out if we need such a check for real!
   // minItems/maxItems/uniqueItems belong to the validation vocabulary;
   // assert nothing when the metaschema disables it.
   if (schemaObj.options.vocabValidation === false)

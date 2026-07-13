@@ -149,15 +149,61 @@ export function getDynamicAnchorName(schema) {
 }
 
 /**
+ * Collect ALL dynamic anchors of a schema RESOURCE: every $dynamicAnchor
+ * reachable from the given schema without crossing into an embedded
+ * resource (a subschema that declares its own $id).
+ *
+ * Per draft 2020-12, entering a schema resource during evaluation brings
+ * every $dynamicAnchor of that resource into the dynamic scope - wherever
+ * it sits ($defs, allOf branches, properties, ...), not just at the root.
+ *
+ * @param {object} schema - The resource root schema object
+ * @returns {Array<{name: string, schema: object, validator: (function|null)}>}
+ */
+export function collectDynamicAnchorsDeep(schema) {
+  const anchors = [];
+  if (!isObjectClass(schema)) return anchors;
+
+  const seen = new Set();
+  const queue = [{ node: schema, isRoot: true }];
+  while (queue.length > 0) {
+    const { node, isRoot } = queue.shift();
+    if (!isObjectClass(node) && !Array.isArray(node)) continue;
+    if (seen.has(node)) continue;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; ++i) {
+        queue.push({ node: node[i], isRoot: false });
+      }
+      continue;
+    }
+
+    // A nested $id starts a new (embedded) resource - its anchors enter
+    // the dynamic scope only when that resource itself is entered.
+    if (!isRoot && isStringType(node.$id)) continue;
+
+    const anchorName = getDynamicAnchorName(node);
+    if (anchorName) {
+      anchors.push({ name: anchorName, schema: node, validator: null });
+    }
+
+    for (const key of Object.keys(node)) {
+      queue.push({ node: node[key], isRoot: false });
+    }
+  }
+
+  return anchors;
+}
+
+/**
  * Collect all dynamic anchors from a schema's immediate definitions ($defs/definitions).
  * This is used to find all $dynamicAnchor definitions that should be in scope
  * when following a $ref from this schema.
- * 
+ *
  * IMPORTANT: This only collects from the IMMEDIATE $defs of the given schema,
- * not recursively. The dynamic scope should only include anchors from schemas
- * that are "siblings" to the $ref target in the $defs, not from nested $defs
- * of the target schema itself.
- * 
+ * not recursively.
+ *
  * @param {object} schema - The schema object
  * @returns {Array<{name: string, schema: object}>} Array of {name, schema} objects
  */

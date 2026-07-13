@@ -33,6 +33,11 @@ export function getSchemaFormatCompiler(registered, name) {
 export function compileFormatBasic(schemaObj, jsonSchema) {
   if (!isStringType(jsonSchema.format))
     return undefined;
+
+  // From draft 2020-12 on, format is annotation-only unless assertion is
+  // enabled (formatAssertion option or format-assertion vocabulary).
+  if (schemaObj.options.formatAssertion === false)
+    return undefined;
   const compiler = getSchemaFormatCompiler(
     schemaObj.formats,
     jsonSchema.format);

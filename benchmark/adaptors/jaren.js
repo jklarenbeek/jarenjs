@@ -1,5 +1,5 @@
 
-import { JarenValidator } from "@jarenjs/validate";
+import { JarenValidator, ValidatorOptions } from "@jarenjs/validate";
 
 import * as formats from '@jarenjs/formats';
 
@@ -9,8 +9,8 @@ import {
 
 export const name = "Jaren";
 
-export function loader(draft, remoteSchemas) {
-  const jaren = new JarenValidator()
+function buildValidator(draft, remoteSchemas, options = undefined) {
+  const jaren = new JarenValidator(options ? new ValidatorOptions(options) : undefined)
     .addFormats(formats.numberFormats)
     .addFormats(formats.stringFormats)
     .addFormats(formats.dateTimeFormats);
@@ -39,8 +39,25 @@ export function loader(draft, remoteSchemas) {
   return jaren;
 }
 
-export function setup(instance, schema) {
-  return instance.compile(schema);
+export function loader(draft, remoteSchemas) {
+  return {
+    draft,
+    remoteSchemas,
+    main: buildValidator(draft, remoteSchemas),
+    formatAssert: null,
+  };
+}
+
+export function setup(instance, schema, suiteName = undefined) {
+  // The optional/format suites assume the format-assertion behavior is
+  // enabled (per the JSON-Schema-Test-Suite conventions).
+  if (suiteName != null && suiteName.includes('/optional/format')) {
+    if (instance.formatAssert == null) {
+      instance.formatAssert = buildValidator(instance.draft, instance.remoteSchemas, { formatAssertion: true });
+    }
+    return instance.formatAssert.compile(schema);
+  }
+  return instance.main.compile(schema);
 }
 
 export function run(validator, data, schema) {
