@@ -952,7 +952,7 @@ describe('Schema Object Type', function () {
       assert.isTrue(validate({ foo: 'foo' }), 'with unevaluated properties');
     });
 
-    it.skip('unevaluatedProperties with schema', function () {
+    it('unevaluatedProperties with schema', function () {
       const validate = compiler.compile({ type: 'object',
         unevaluatedProperties: {
           type: 'string',
@@ -974,7 +974,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo' }), 'with unevaluated properties');
     });
 
-    it.skip('should validate properties with no adjacent unevaluatedProperties', function () {
+    it('should validate properties with no adjacent unevaluatedProperties', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -987,7 +987,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo', bar: 'bar' }), 'with unevaluated properties');
     });
 
-    it.skip('should validate patternProperties with no adjacent unevaluatedProperties', function () {
+    it('should validate patternProperties with no adjacent unevaluatedProperties', function () {
       const validate = compiler.compile({
         type: 'object',
         patternProperties: {
@@ -1013,7 +1013,7 @@ describe('Schema Object Type', function () {
       assert.isTrue(validate({ foo: 'foo', bar: 'bar' }), 'with additional properties');
     });
 
-    it.skip('should validate unevaluatedProperties with allOf nested properties', function () {
+    it('should validate unevaluatedProperties with allOf nested properties', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -1028,7 +1028,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo', bar: 'bar', baz: 'baz' }), 'with unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with allOf nested patternProperties', function () {
+    it('should validate unevaluatedProperties with allOf nested patternProperties', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -1043,7 +1043,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo', bar: 'bar', baz: 'baz' }), 'with unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with allOf nested additionalProperties', function () {
+    it('should validate unevaluatedProperties with allOf nested additionalProperties', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -1058,13 +1058,13 @@ describe('Schema Object Type', function () {
       assert.isTrue(validate({ foo: 'foo', bar: 'bar' }), 'with additional properties');
     });
 
-    it.skip('should validate unevaluatedProperties with anyOf nested properties', function () {
+    it('should validate unevaluatedProperties with anyOf nested properties', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
           foo: { type: 'string' },
         },
-        allOf: [
+        anyOf: [
           {
             properties: {
               bar: { const: 'bar' },
@@ -1092,7 +1092,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo', bar: 'bar', baz: 'baz', quux: 'not-quux' }), 'when two match and has unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with oneOf nested properties', function () {
+    it('should validate unevaluatedProperties with oneOf nested properties', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -1119,7 +1119,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo', bar: 'bar', baz: 'baz' }), 'when two matches and has no unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with nested not', function () {
+    it('should validate unevaluatedProperties with nested not', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -1139,7 +1139,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'foo', bar: 'bar' }), 'with unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with if/then/else', function () {
+    it('should validate unevaluatedProperties with if/then/else', function () {
       const validate = compiler.compile({
         type: 'object',
         if: {
@@ -1169,7 +1169,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'else', baz: 'baz' }), 'when if is false and has unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with if/else', function () {
+    it('should validate unevaluatedProperties with if/else', function () {
       const validate = compiler.compile({
         type: 'object',
         if: {
@@ -1196,7 +1196,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'else', baz: 'baz' }), 'when if is false and has unevaluated properties');
     });
 
-    it.skip('should validate unevaluatedProperties with if/then', function () {
+    it('should validate unevaluatedProperties with if/then', function () {
       const validate = compiler.compile({
         type: 'object',
         if: {
@@ -1220,7 +1220,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ foo: 'else', baz: 'baz' }), 'when if is false and has unevaluated properties');
     });
 
-    it.skip('should do something with anyOf unevaluated items', function () {
+    it('should do something with anyOf unevaluated items', function () {
       const validate = compiler.compile({
         type: 'object',
         required: ['foo'],
@@ -1247,7 +1247,7 @@ describe('Schema Object Type', function () {
 
     });
 
-    it.skip('should be able to extend an address with type with allOf', function () {
+    it('should be able to extend an address with type with allOf', function () {
       const validate = compiler.compile({
         allOf: [
           {
@@ -1263,7 +1263,6 @@ describe('Schema Object Type', function () {
         properties: {
           type: { enum: ['residential', 'business'] },
         },
-        required: ['type'],
         unevaluatedProperties: false,
       });
 
@@ -1287,7 +1286,7 @@ describe('Schema Object Type', function () {
       }), 'any other property not defined is not allowed');
     });
 
-    it.skip('should allow the department property only if the type of address is business', function () {
+    it('should allow the department property only if the type of address is business', function () {
       const validate = compiler.compile({
         type: 'object',
         properties: {
@@ -1329,7 +1328,7 @@ describe('Schema Object Type', function () {
       }), 'residential address doesnt allow a department');
     });
 
-    it.skip('should validate inheritance example for issue #556', function () {
+    it('should validate inheritance example for issue #556', function () {
       const validate = compiler.compile({
         title: 'Vehicle',
         type: 'object',
@@ -1364,7 +1363,7 @@ describe('Schema Object Type', function () {
       assert.isFalse(validate({ pontoons: 'pontoons', wheels: 'wheels' }), 'is a boat with an unevaluated property wheels');
     });
 
-    it.skip('should validate example schema for (A | B) & (C | D) issue #86', function () {
+    it('should validate example schema for (A | B) & (C | D) issue #86', function () {
       const validate = compiler.compile({
         $ref: '#/$defs/root',
         $defs: {

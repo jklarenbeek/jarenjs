@@ -109,6 +109,71 @@ export function createIsSchemaTypeHandler(type, isStrict = false) {
 
 //#endregion
 
+/**
+ * Records which properties (string keys) and items (numeric indexes) of a
+ * data instance were successfully evaluated during validation, so that
+ * unevaluatedProperties/unevaluatedItems can be checked afterwards.
+ *
+ * Entries are (data reference, key) pairs appended in application order.
+ * Applicators that discard annotations (failed anyOf/oneOf branches, not,
+ * failed if) take a mark() before running and rollback(mark) afterwards.
+ * The numeric key -1 means "all items of this array were evaluated".
+ */
+export class EvalLog {
+  #data = [];
+  #keys = [];
+  #len = 0;
+
+  /** Clears the log; called at the start of each root validation. */
+  reset() {
+    this.#data.length = 0;
+    this.#keys.length = 0;
+    this.#len = 0;
+  }
+
+  /** @returns {number} The current log position */
+  mark() {
+    return this.#len;
+  }
+
+  /** Discards all entries recorded after the given mark. */
+  rollback(mark) {
+    this.#len = mark;
+  }
+
+  /** Records that `key` of instance `data` was evaluated. */
+  add(data, key) {
+    this.#data[this.#len] = data;
+    this.#keys[this.#len] = key;
+    this.#len++;
+  }
+
+  /** @returns {boolean} True when property `key` of `data` was evaluated at or after `from` */
+  hasKey(data, key, from) {
+    const len = this.#len;
+    const datas = this.#data;
+    const keys = this.#keys;
+    for (let i = from; i < len; ++i) {
+      if (datas[i] === data && keys[i] === key) return true;
+    }
+    return false;
+  }
+
+  /** @returns {boolean} True when item `index` of `data` was evaluated at or after `from` (-1 entries cover all items) */
+  hasItem(data, index, from) {
+    const len = this.#len;
+    const datas = this.#data;
+    const keys = this.#keys;
+    for (let i = from; i < len; ++i) {
+      if (datas[i] === data) {
+        const k = keys[i];
+        if (k === index || k === -1) return true;
+      }
+    }
+    return false;
+  }
+}
+
 export class ValidationResult {
   static undefThat() {
     return new ValidationResult();

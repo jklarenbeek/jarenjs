@@ -571,7 +571,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['foo']), 'with unevaluated items');
     });
 
-    it.skip('unevaluatedItems is false', function () {
+    it('unevaluatedItems is false', function () {
       const validate = compiler.compile({
         unevaluatedItems: false,
       });
@@ -599,7 +599,7 @@ describe('Schema Array Type', function () {
       // TODO: add more tests
     });
 
-    it.skip('unevaluatedItems as schema string', function () {
+    it('unevaluatedItems as schema string', function () {
       const validate = compiler.compile({
         unevaluatedItems: {
           type: 'string',
@@ -620,7 +620,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['foo', 'bar']), 'unevaluated items doesnt apply');
     });
 
-    it.skip('unevaluatedItems with tuple', function () {
+    it('unevaluatedItems with tuple', function () {
       const validate = compiler.compile({
         items: [{ type: 'string' }],
         unevaluatedItems: false,
@@ -640,7 +640,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['foo', 42]), 'unevaluated items doesnt apply');
     });
 
-    it.skip('unevaluatedItems with ignored additionalItems', function () {
+    it('unevaluatedItems with ignored additionalItems', function () {
       const validate = compiler.compile({
         additionalItems: { type: 'number' },
         unevaluatedItems: { type: 'string' },
@@ -650,7 +650,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['foo', 'bar', 'baz']), 'all valid under unevaluatedItems');
     });
 
-    it.skip('unevaluatedItems with ignored allOf additionalItems', function () {
+    it('unevaluatedItems with ignored allOf additionalItems', function () {
       const validate = compiler.compile({
         allOf: [{ additionalItems: { type: 'number' } }],
         unevaluatedItems: { type: 'string' },
@@ -660,7 +660,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['foo', 'bar', 'baz']), 'all valid under unevaluatedItems');
     });
 
-    it.skip('unevaluatedItems with nested allOf tuple', function () {
+    it('unevaluatedItems with nested allOf tuple', function () {
       const validate = compiler.compile({
         items: [
           { type: 'string' },
@@ -680,7 +680,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo', 42, true]), 'with unevaluated items');
     });
 
-    it.skip('unevaluatedItems with nested anyOf items', function () {
+    it('unevaluatedItems with nested anyOf items', function () {
       const validate = compiler.compile({
         unevaluatedItems: { type: 'boolean' },
         anyOf: [
@@ -691,11 +691,13 @@ describe('Schema Array Type', function () {
 
       assert.isTrue(validate([true, false]), 'with only (valid) additional items');
       assert.isTrue(validate(['no', 'yes']), 'with no additional items');
-      assert.isTrue(validate(['no', true]), 'with valid additional items');
+      // a failed anyOf branch contributes no annotations, so 'no' stays
+      // unevaluated and must match the boolean unevaluatedItems schema
+      assert.isFalse(validate(['no', true]), 'string item is unevaluated when the items branch fails');
       assert.isFalse(validate(['yes', false]), 'with invalid additional items');
     });
 
-    it.skip('unevaluatedItems with nested allOf items and additionalItems', function () {
+    it('unevaluatedItems with nested allOf items and additionalItems', function () {
       const validate = compiler.compile({
         allOf: [
           {
@@ -712,7 +714,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['yes', 42, true]), 'with additional items');
     });
 
-    it.skip('unevaluatedItems with nested allOf items and unevaluatedItems', function () {
+    it('unevaluatedItems with nested allOf items and unevaluatedItems', function () {
       const validate = compiler.compile({
         allOf: [
           {
@@ -729,7 +731,7 @@ describe('Schema Array Type', function () {
       assert.isTrue(validate(['yes', 42, true]), 'with additional items');
     });
 
-    it.skip('unevaluatedItems with anyOf', function () {
+    it('unevaluatedItems with anyOf', function () {
       const validate = compiler.compile({
         items: [
           { const: 'foo' },
@@ -758,7 +760,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo', 'bar', 'baz', 42]), 'when two schemas match and has unevaluated items');
     });
 
-    it.skip('unevaluatedItems with oneOf', function () {
+    it('unevaluatedItems with oneOf', function () {
       const validate = compiler.compile({
         items: [
           { const: 'foo' },
@@ -784,7 +786,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['yes', 'no', 42]), 'with unevaluated items');
     });
 
-    it.skip('unevaluatedItems with not', function () {
+    it('unevaluatedItems with not', function () {
       const validate = compiler.compile({
         items: [
           { const: 'foo' },
@@ -803,7 +805,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['yes', 'no']), 'with unevaluated items');
     });
 
-    it.skip('unevaluatedItems can see annotations from if without then and else', function () {
+    it('unevaluatedItems can see annotations from if without then and else', function () {
       const validate = compiler.compile({
         if: {
           items: [{ const: 'foo' }],
@@ -815,7 +817,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['bar']), 'invalid in case if is evaluated');
     });
 
-    it.skip('unevaluatedItems with if/then/else', function () {
+    it('unevaluatedItems with if/then/else', function () {
       const validate = compiler.compile({
         items: [{ const: 'foo' }],
         if: {
@@ -848,7 +850,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo', 21, 42, 'else', 64]), 'when if doesnt match and it has unevaluated items');
     });
 
-    it.skip('unevaluatedItems with allof boolean true schemas', function () {
+    it('unevaluatedItems with allof boolean true schemas', function () {
       const validate = compiler.compile({
         allOf: [true],
         unevaluatedItems: false,
@@ -858,7 +860,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo']), 'with unevaluated item');
     });
 
-    it.skip('unevaluatedItems with $ref', function () {
+    it('unevaluatedItems with $ref', function () {
       const validate = compiler.compile({
         $ref: '#/$defs/bar',
         items: [
@@ -879,7 +881,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo', 'bar', 'baz']), 'with unevaluated item');
     });
 
-    it.skip('unevaluatedItems before $ref', function () {
+    it('unevaluatedItems before $ref', function () {
       const validate = compiler.compile({
         unevaluatedItems: false,
         items: [
@@ -900,7 +902,7 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo', 'bar', 'baz']), 'with unevaluated item');
     });
 
-    it.skip('should do something with unevaluated items', function () {
+    it('should do something with unevaluated items', function () {
       const validate = compiler.compile({
         type: 'array',
         items: [
@@ -916,7 +918,9 @@ describe('Schema Array Type', function () {
 
       assert.isTrue(validate([1, 2, 3]), 'tuple of 3 integers is valid');
       assert.isTrue(validate([1, 2, true]), 'tuple with 2 integers and a bool is valid ');
-      assert.isFalse(validate([1, 2]), 'third item is not present');
+      // without a third item both anyOf branches pass trivially;
+      // a minItems: 3 would be needed to require the third item
+      assert.isTrue(validate([1, 2]), 'tuple of 2 integers is valid without a third item');
       assert.isFalse(validate([1, 2, '3']), 'third item is unevaluated');
     });
   });

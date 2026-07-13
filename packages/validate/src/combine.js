@@ -67,6 +67,26 @@ function compileAnyOf(schemaObj, jsonSchema) {
 
   const addError = schemaObj.createErrorHandler(anyOf, 'anyOf');
 
+  // With annotation tracking every branch must run (annotations from ALL
+  // successful branches count for unevaluated*), and annotations from
+  // failed branches are rolled back.
+  const root = schemaObj.root;
+  if (root.usesUnevaluated) {
+    return function validateAnyOfTracked(data, dataPath, dataRoot, dataKey) {
+      if (data === undefined) return true;
+      const log = root.evalLog;
+      let found = false;
+      for (let i = 0; i < validators.length; ++i) {
+        const mark = log.mark();
+        if (validators[i](data, dataPath, dataRoot, dataKey) === true)
+          found = true;
+        else
+          log.rollback(mark);
+      }
+      return found || addError(data, dataPath);
+    };
+  }
+
   return function validateAnyOf(data, dataPath, dataRoot, dataKey) {
     if (data !== undefined) {
       for (let i = 0; i < validators.length; ++i) {
@@ -101,6 +121,27 @@ function compileOneOf(schemaObj, jsonSchema) {
 
   const addError = schemaObj.createErrorHandler(oneOf, 'oneOf');
 
+  // With annotation tracking, annotations from failed branches are rolled back.
+  const root = schemaObj.root;
+  if (root.usesUnevaluated) {
+    return function validateOneOfTracked(data, dataPath, dataRoot, dataKey) {
+      const log = root.evalLog;
+      let found = false;
+      for (let i = 0; i < validators.length; ++i) {
+        const mark = log.mark();
+        if (validators[i](data, dataPath, dataRoot, dataKey) === true) {
+          if (found === true)
+            return addError(data, dataPath);
+          found = true;
+        }
+        else {
+          log.rollback(mark);
+        }
+      }
+      return found || addError(data, dataPath);
+    };
+  }
+
   return function validateOneOf(data, dataPath, dataRoot, dataKey) {
     let found = false;
     for (let i = 0; i < validators.length; ++i) {
@@ -124,6 +165,21 @@ function compileNotOf(schemaObj, jsonSchema) {
   const validate = schemaObj.createValidator(notOf, 'not');
 
   const addError = schemaObj.createErrorHandler(notOf, 'not');
+
+  // Annotations produced inside a 'not' are never kept, whatever the outcome.
+  const root = schemaObj.root;
+  if (root.usesUnevaluated) {
+    return function validateNotOfTracked(data, dataPath, dataRoot, dataKey) {
+      if (data === undefined) return true;
+      const log = root.evalLog;
+      const mark = log.mark();
+      const valid = validate(data, dataPath, dataRoot, dataKey);
+      log.rollback(mark);
+      return valid === false
+        ? true
+        : addError(data, dataPath);
+    };
+  }
 
   return function validateNotOf(data, dataPath, dataRoot, dataKey) {
     if (data === undefined) return true;

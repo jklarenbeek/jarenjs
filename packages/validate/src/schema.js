@@ -41,6 +41,7 @@ import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
 import { compileDollarDataSchema, hasDollarDataReferences } from './dollar-data.js';
+import { wrapUnevaluated } from './unevaluated.js';
 import { hasSchemaRef, hasSchemaRecursiveRef, hasSchemaDynamicRef } from './tools.js';
 import { createJsonPointer } from './traverse.js';
 
@@ -403,6 +404,11 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // If schema has ONLY $ref (and meta keywords), use the ref-only path.
   // If schema has $ref with validation siblings, process them together (2019-09+ only).
   const draftVersion = schemaObj.options.draftVersion || 7;
+  // When compiling the sibling keywords of a $ref schema, the unevaluated*
+  // wrapper is applied by ValidationObject.compileValidator around the
+  // combined (ref + siblings) validator instead of here, so that the
+  // $ref target's annotations are visible to the unevaluated* check.
+  let refWithSiblings = false;
   if (hasSchemaRef(jsonSchema) && !hasSchemaRecursiveRef(jsonSchema)) {
     // Check if there are any validation-related sibling keywords
     // In draft 2019-09+, if there are validation siblings, we process them together
@@ -411,7 +417,8 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       'uniqueItems', 'maxContains', 'minContains', 'maxProperties', 'minProperties', 'required',
       'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
       'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
-      'then', 'else', 'propertyNames', 'format', 'contentEncoding', 'contentMediaType'];
+      'then', 'else', 'propertyNames', 'format', 'contentEncoding', 'contentMediaType',
+      'unevaluatedProperties', 'unevaluatedItems'];
     const hasValidationSiblings = keys.some(k => validationKeywords.includes(k));
     // In draft 7 and earlier, $ref always overrides siblings regardless
     // In draft 2019-09+, $ref can have validation siblings
@@ -419,6 +426,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       return undefined;
     }
     // Otherwise, continue to process siblings alongside $ref (2019-09+ only)
+    refWithSiblings = true;
   }
 
   // Check if schema has any $data references
@@ -564,34 +572,41 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12)
   addFunctionToArray(validators, compileDynamicRef(schemaObj, jsonSchema));
 
+  // The unevaluated* keywords run last, after every other keyword and
+  // in-place applicator has produced its annotations. For $ref siblings
+  // the wrapper is applied by the caller (see refWithSiblings above).
+  const finalize = refWithSiblings
+    ? (validator) => validator
+    : (validator) => wrapUnevaluated(schemaObj, jsonSchema, validator);
+
   // same as empty schema
   if (validators.length === 0)
-    return trueThat;
+    return finalize(trueThat);
 
   if (validators.length === 1)
-    return validators[0];
+    return finalize(validators[0]);
 
   if (validators.length === 2) {
     const first = validators[0];
     const second = validators[1];
-    return function validateDoubleSchemaObject(data, dataPath, dataRoot) {
+    return finalize(function validateDoubleSchemaObject(data, dataPath, dataRoot) {
       return first(data, dataPath, dataRoot)
         && second(data, dataPath, dataRoot);
-    };
+    });
   }
 
   if (validators.length === 3) {
     const first = validators[0];
     const second = validators[1];
     const thirth = validators[2];
-    return function validateTripleSchemaObject(data, dataPath, dataRoot) {
+    return finalize(function validateTripleSchemaObject(data, dataPath, dataRoot) {
       return first(data, dataPath, dataRoot)
         && second(data, dataPath, dataRoot)
         && thirth(data, dataPath, dataRoot);
-    };
+    });
   }
 
-  return function validateAllSchemaObject(data, dataPath, dataRoot) {
+  return finalize(function validateAllSchemaObject(data, dataPath, dataRoot) {
     for (let i = 0; i < validators.length; ++i) {
       const validator = validators[i];
       if (validator(data, dataPath, dataRoot) === false) {
@@ -599,5 +614,5 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       }
     }
     return true;
-  };
+  });
 }
