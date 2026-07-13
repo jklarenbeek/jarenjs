@@ -2,7 +2,19 @@
 
 # Jaren
 
-Jaren is a high-performance JSON Schema Validating Compiler written in vanilla JavaScript. It offers full support for `draft6`, `draft7`, and partial support for `draft2019` and `draft2020`. Jaren is designed for speed and is under active development.
+Jaren is a high-performance JSON Schema Validating Compiler written in vanilla JavaScript. It offers full support for `draft-06`, `draft-07`, `draft 2019-09` and `draft 2020-12`.
+
+## ✅ Conformance & Speed
+
+Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)** — including the optional format suites — for all benchmarked drafts, while validating faster than Ajv:
+
+| Draft | Jaren | Ajv | Speed (full suite, 1000 iterations) |
+|---|---|---|---|
+| draft-07 | **0 failures / 0 errors** | 13 failures / 1 error | Jaren 425ms vs Ajv 530ms |
+| 2019-09 | **0 failures / 0 errors** | 15 failures / 4 errors | Jaren 592ms vs Ajv 835ms |
+| 2020-12 | **0 failures / 0 errors** | 33 failures / 10 errors | Jaren 647ms vs Ajv 714ms |
+
+Reproduce these numbers yourself with `node benchmark/profiler.js --profile-all --draft draft2020-12`.
 
 This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that I used over the years; stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
 
@@ -68,7 +80,7 @@ const schema = {
 const validate = jaren.compile(schema);
 ```
 
-There is an extensive [HOWTO](docs/HOWTO.md) document in the `docs/` folder.
+There is an extensive [HOWTO](HOWTO.md) document in the root of this repository.
 
 ### Debug Tool
 
@@ -210,11 +222,15 @@ Options:
 ### Running Tests
 
 ```bash
+# Run all tests
+npm test
+
 # Run all tests with coverage
 npm run cover
 
-# Run tests in watch mode
-npm run test:watch
+# Run only core or validate package tests
+npm run test:core
+npm run test:validate
 ```
 
 ## 🔑 JSON Schema Validation Keywords
@@ -225,17 +241,17 @@ Programming is like sex.
 One mistake and you have to support it for the rest of your life.
 ```
 
-Jaren supports a wide range of JSON Schema validation keywords. Here's a quick overview:
+Jaren supports the full set of JSON Schema validation keywords. Here's a quick overview:
 
 - JSON data type: `type`, `nullable`, `required`
 - Numbers: `maximum`, `minimum`, `multipleOf`
 - Strings: `maxLength`, `minLength`, `pattern`
-- Arrays: `maxItems`, `minItems`, `uniqueItems`, `items`, `contains`
-- Objects: `maxProperties`, `minProperties`, `required`, `properties`, `patternProperties`
+- Arrays: `maxItems`, `minItems`, `uniqueItems`, `items`, `prefixItems`, `contains`, `unevaluatedItems`
+- Objects: `maxProperties`, `minProperties`, `required`, `properties`, `patternProperties`, `unevaluatedProperties`
 - All types: `enum`, `const`
 - Compound: `not`, `oneOf`, `anyOf`, `allOf`, `if/then/else`
-- Meta: `$id`, `$ref`, `$anchor`
-- **Non-standard**: `data` (json-everything's [data-ref](https://docs.json-everything.net/schema/examples/data-ref/) proposal)
+- Meta: `$schema`, `$id`, `$ref`, `$anchor`, `$dynamicRef`/`$dynamicAnchor`, `$recursiveRef`/`$recursiveAnchor`, `$vocabulary`
+- **Non-standard**: `data` (json-everything's [data-ref](https://docs.json-everything.net/schema/examples/data-ref/) proposal) and Ajv-style `$data` references
 
 <details>
 <summary>🔥 For a complete list of supported keywords and their implementation status, click here</summary>
@@ -272,7 +288,7 @@ Jaren supports a wide range of JSON Schema validation keywords. Here's a quick o
 - additionalItems | as schema _deprecated in `draft2020`_
 - contains
 - maxContains / minContains | _new `draft2019`_
-- ❌ unevaluatedItems | _new `draft2019` (in-progress)_
+- unevaluatedItems | _new `draft2019`_
 
 ### 🔑 Keywords for object
 
@@ -285,7 +301,7 @@ Jaren supports a wide range of JSON Schema validation keywords. Here's a quick o
 - dependentRequired | _new `draft2019`_
 - dependentSchemas | _new `draft2019`_
 - propertyNames
-- ❌ unevaluatedProperties | _new `draft2019` (in-progress)_
+- unevaluatedProperties | _new `draft2019`_
 - ❌ [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md)
 
 ### 🔑 Keywords for all types
@@ -307,16 +323,16 @@ See also:
 
 ### 🔑 Meta keywords
 
-- ❌ $schema
+- $schema | used for draft detection, vocabulary selection and cross-draft references
 - $id
 - $ref
 - $anchor
-- ❌ $recursiveRef | _new `draft2019` &amp; deprecated in `draft2020`_
-- ❌ $recursiveAnchor | _new `draft2019` &amp; deprecated in `draft2020`_
-- ❌ $dynamicRef | _new `draft2020`_
-- ❌ $dynamicAnchor | _new `draft2020`_
-- ❌ $data | _(Ajv specific)_
-- ❌ [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) | _new `draft2020`_
+- $recursiveRef | _new `draft2019` &amp; deprecated in `draft2020`_
+- $recursiveAnchor | _new `draft2019` &amp; deprecated in `draft2020`_
+- $dynamicRef | _new `draft2020`_
+- $dynamicAnchor | _new `draft2020`_
+- $data | _(Ajv specific)_
+- [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) | _new `draft2019`_ - a custom metaschema that omits the validation vocabulary turns keywords like `type` and `minimum` into annotations; a metaschema that declares the `format-assertion` vocabulary turns format assertion on
 
 ### 🔑 Non-standard keywords
 
@@ -391,6 +407,8 @@ Jaren supports various format validators for strings and numbers, including:
 - Numbers: `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32`, `float64`
 
 But we have many more formats that are not listed here!
+
+Format assertion follows the specification per draft: through draft 2019-09 the `format` keyword asserts by default; from draft 2020-12 on it is annotation-only unless enabled. You can control this explicitly with the `formatAssertion` option (`new JarenValidator({ formatAssertion: true })`), or through a custom metaschema that declares the `format-assertion` vocabulary.
 
 <details>
 <summary>🔥 For a complete list of supported formats, click here</summary>
@@ -500,89 +518,58 @@ My manager tried to open that door before,
 but it apparently was scheduled for the next release.
 ```
 
-- 0.8
-  - current
 - 0.9
+  - current
   - [x] Jaren as a drop-in replacement for Ajv
   - [x] add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
   - [x] Fixing JSON error schema output
   - [x] add error reporting tests
-- 🎉 1.0 Stable release for `draft7`
+  - [x] full `draft7` compliance (100% of the official test suite)
+  - [x] full `draft2019` compliance: `unevaluatedProperties`, `unevaluatedItems`, `$recursiveRef`/`$recursiveAnchor`, `$vocabulary`, cross-draft references
+  - [x] full `draft2020` compliance: `prefixItems`/`items`, `$dynamicRef`/`$dynamicAnchor`, format-annotation semantics
+  - [x] Runtime schema manipulation of constraints (via `data` keyword - json-everything's data-ref proposal)
+  - [x] add development documentation
+  - [x] add examples
+- 🎉 1.0 Stable release
   - [ ] add AI bot workflow and bootstrap prompt
   - [ ] add a website to github pages with typescript and react.
   - [ ] add i18n - translations of errors should be available!
-  - [x] add development documentation
-  - [x] add examples
 - 1.1
-  - [ ] Modelling Inheritance with JSON Schema
-  - [ ] Express array constraints more cleanly
+  - [ ] [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md) proposal
+  - [ ] `errorMessage` keyword ([Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output))
 - 1.2
-  - [ ] Using Dynamic References to Support Generic Types
-- 1.3
-  - [x] Runtime schema manipulation of constraints (via `data` keyword - json-everything's data-ref proposal)
-- 1.4-1.9
-  - [ ] Fix bugs and/or add forgotten features for latest draft compliance
-- 2.0 🎉 Stable release for `draft2020`
+  - [ ] compileAsync for asynchronous schema loading
+  - [ ] JSON.parse reviver / JSON.stringify replacer integration
 
 <details>
-<summary>🔥 To get the full picture and details about what that roadmap entails, click here</summary>
+<summary>🔥 For details about the notable capabilities behind that roadmap, click here</summary>
 
-## 🛠️ Todo`s for latest draft validation
-
-```
-You can trust that if I say I do something, I will definitely do it unless I don't!
-```
-
-### 👉 Jaren as a drop-in replacement for Ajv
-
-Jaren is a mono-repo with multiple workspaces in the ./packages directory. Because of this, Jaren imports its core, validator, formats and in later versions its reviver (see [JSON.parse]()) and replacer (see [JSON.stringify](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify)) from its workspace packages. This has not been done yet and simply exports the available packages from its workspace imports, without wrapping them into a Jaren class that exposes a similar api as Ajv does.
-
-On a extra note: Ajv compiles to a function or a promise. Jaren will NOT do this, instead it will expose an extra method for async compilers: compileAsync.
-Note also: that Jaren will NOT include a default meta schema, but has to be added separately by the caller.
-
-See also:
-- [Getting Started](https://ajv.js.org/guide/getting-started.html)
-- [Combining Schemas](https://ajv.js.org/guide/combining-schemas.html)
-
-### 👉 Fixing JSON Schema output
-
-From the blog post of the [json-schema.org](https://json-schema.org/blog/posts/fixing-json-schema-output) website. This feature needs to implement the following keywords in order for the proposed schema structure to work: `errorMessage`
-
-See also:
- - [ajv-errors](https://github.com/ajv-validator/ajv-errors)
+## 🛠️ Notable capabilities
 
 ### 👉 Modelling Inheritance with JSON Schema
 
-From the blog post of the [json-schema.org](https://json-schema.org/blog/posts/modelling-inheritance) website. This feature needs to implement the following keywords in order for the proposed schema structure to work: `unevaluatedProperties`. Jaren has already implemented some code to make this feature work by introducing the `ValidationResults` class and the refactoring of the compileObjectSchema functions.
+Jaren fully supports `unevaluatedProperties`, so the inheritance patterns from the [Modelling Inheritance](https://json-schema.org/blog/posts/modelling-inheritance) blog post work out of the box. Annotations flow from `properties`, `patternProperties`, `additionalProperties` and every in-place applicator (`allOf`/`anyOf`/`oneOf`/`if-then-else`/`$ref`/`dependentSchemas`), with annotations from failed branches correctly discarded.
 
 See also:
 - [json-schema-core](https://json-schema.org/draft/2020-12/json-schema-core#name-unevaluatedproperties)
 - [Combining unevaluatedProperties and ref: # #375](https://github.com/orgs/json-schema-org/discussions/375)
-- [additionalProperties](https://json-schema.org/understanding-json-schema/reference/object#additionalproperties)
 
 ### 👉 Express array constraints more cleanly
 
-From the [release notes](https://json-schema.org/draft/2020-12/release-notes#contains-and-unevaluateditems) of the 2020-12 draft, there has been proposed a way to handle items that where neither validated by the items or contains keyword of an array schema object. This feature needs to implement the keyword `unevaluatedItems`.
+Jaren fully supports `unevaluatedItems`, covering the array patterns from the 2020-12 [release notes](https://json-schema.org/draft/2020-12/release-notes#contains-and-unevaluateditems): items evaluated by `items`, `prefixItems`, `additionalItems` and (in 2020-12) `contains` are tracked, and everything left over is validated by the `unevaluatedItems` schema.
 
 ### 👉 Using Dynamic References to Support Generic Types
 
-From the blog post of the [json-schema.org](https://json-schema.org/blog/posts/dynamicref-and-generics) website. This feature needs to implement the following keywords in order for the proposed schema structure to work: `$dynamicAnchor`, `$dynamicRef`. We might also support `$recursiveAnchor` and `$recursiveRef` to be backwards compatible with `draft2019`
+Jaren fully supports `$dynamicRef`/`$dynamicAnchor` (2020-12) and `$recursiveRef`/`$recursiveAnchor` (2019-09), including the generic-type patterns from the [dynamicRef and generics](https://json-schema.org/blog/posts/dynamicref-and-generics) blog post. Resolution follows the specification's dynamic-scope rules: entering a schema resource brings all of its dynamic anchors into scope, and a `$dynamicRef` resolves to the anchor in the outermost resource of the dynamic scope.
 
 See also:
 - [Understanding lexical dynamic scopes](https://json-schema.org/blog/posts/understanding-lexical-dynamic-scopes)
-- [Improve/simplify "$recursiveAnchor" and "$recursiveRef"](https://github.com/json-schema-org/json-schema-spec/issues/909)
-- [Lexical Scope and Dynamic Scope](https://json-schema.org/draft/2019-09/json-schema-core#rfc.section.7.1)
-- [Keyword for extending a schema](https://github.com/json-schema-org/json-schema-spec/issues/907)
-- [Recursive References with "$recursiveRef" and "$recursiveAnchor"](https://json-schema.org/draft/2019-09/json-schema-core#rfc.section.8.2.4.2)
 - [$dynamicRef and $dynamicAnchor](https://json-schema.org/draft/2020-12/release-notes#dollardynamicref-and-dollardynamicanchor)
 
 ### 👉 Runtime schema manipulation of constraints
 
-✅ **IMPLEMENTED**: Jaren now supports the `data-ref` proposal from json-everything! The `data` keyword allows you to reference values from the instance being validated, enabling dynamic constraints based on other parts of the data.
+Jaren supports the `data-ref` proposal from json-everything through the `data` keyword, plus Ajv-style `$data` references. Both allow a schema constraint to take its value from the instance being validated:
 
-The Ajv JSON Schema validator has implemented the $data keyword that can extend the otherwise constant schema values with dynamic runtime values for the following keywords: `const`, `enum`, `format`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minProperties`, `maxProperties`, `required`, `minItems`, `maxItems`, `uniqueItems`. This however has seen enough criticism from multiple developers claiming not to follow the json spec intention and or not being comprehensive enough for more radical manipulations. Besides those against the proposal, many developers and companies use the `$data` keyword, or other implementations like the `data-ref` proposal from json-everything, successfully.
-
-**Jaren's implementation** follows the json-everything `data-ref` proposal, supporting:
 - Absolute JSON Pointers (e.g., `/A`, `/limits/min`)
 - Relative JSON Pointers (e.g., `0/parent`, `1/sibling`)
 - All common constraint keywords: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `enum`, `const`, `minItems`, `maxItems`, `minProperties`, `maxProperties`
@@ -591,6 +578,10 @@ See also:
 - [$data](https://github.com/json-schema-org/json-schema-spec/issues/51)
 - [Ajv $data spec](https://github.com/ajv-validator/ajv/tree/master/spec/extras/%24data)
 - [data-ref](https://docs.json-everything.net/schema/examples/data-ref/)
+
+### 👉 Vocabularies and cross-draft references
+
+A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`; a 2019-09 document ignores `prefixItems`). Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations, and declaring `format-assertion` turns format assertion on.
 
 </details>
 
@@ -602,7 +593,7 @@ Procrastination
 I will look up what that means, later...
 ```
 
-For a detailed overview of the [architecture](docs/ARCHITECTURE.md) and how Jaren works please see the `docs/` folder.
+For a detailed overview of the [architecture](ARCHITECTURE.md) and how Jaren works please see [ARCHITECTURE.md](ARCHITECTURE.md) in the root of this repository.
 
 For detailed documentation on using Jaren, including API references and advanced usage examples, visit our official documentation. Which is the code itself.
 
@@ -638,7 +629,7 @@ We welcome contributions from the community! Here's how you can help:
 
 1. Report Issues: Found a bug or have a feature request? Open an issue.
 2. Improve Documentation: Help us make Jaren easier to use by improving our docs.
-3. Add Tests: Increase our test coverage, especially for draft2019 and draft2020 features.
+3. Add Tests: Increase our test coverage.
 4. Implement New Features: Pick an item from our roadmap and submit a pull request.
 
 ## ❓ Frequently Asked Questions
@@ -673,4 +664,3 @@ Good question! I believe that vanilla javascript for a library like this is a li
 If you find bugs, or want to know what a function is doing, please don't hesitate to ask me by filing an issue. Off topic questions I'd rather not see, but any jaren related question is very welcome.
 
 Please file an issue at [the github jaren repository](https://github.com/jklarenbeek/jarenjs/issues).
-

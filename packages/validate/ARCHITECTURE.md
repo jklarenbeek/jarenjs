@@ -46,13 +46,9 @@ The most important architectural insight: **all ref resolution must happen at co
 
 ### 2. Lazy vs Eager Evaluation Trade-offs
 
-Early versions used lazy evaluation (resolve refs on first validation), which caused catastrophic first-call performance. The current architecture uses eager evaluation:
+Refs are resolved eagerly at compile time, never lazily on first validation. This keeps the first `validate(data)` call as fast as every subsequent one:
 
 ```javascript
-// Old (lazy): Ref resolved at validation time - SLOW
-validate(data); // First call triggers resolveRefSchemaDeep()
-
-// New (eager): Ref resolved at compile time - FAST
 const validate = compile(schema); // All refs resolved here
 validate(data); // Direct function call, no resolution
 ```
@@ -273,12 +269,14 @@ flowchart LR
         SCHEMA --> CONTENT[content.js]
         SCHEMA --> DATA[data.js]
         SCHEMA --> DDLR[dollar-data.js]
+        SCHEMA --> UNEVAL[unevaluated.js]
     end
 
     subgraph "Infrastructure"
         INDEX --> TRAVERSE[traverse.js]
         INDEX --> ERRORS[errors.js]
         INDEX --> TOOLS[tools.js]
+        INDEX --> DYNREF[dynamic-ref.js]
     end
 
     subgraph "External Dependencies"
@@ -676,11 +674,15 @@ flowchart TD
     B -->|true| D{ASCII check}
 
     D -->|All ASCII| E[data.length]
-    D -->|Non-ASCII| F[Segmenter iteration]
+    D -->|Non-ASCII| F{Cluster-forming chars?}
+
+    F -->|No| J[Code point count]
+    F -->|Yes| K[Segmenter iteration]
 
     C --> G[Fast path]
     E --> G
-    F --> H[Slow path]
+    J --> G
+    K --> H[Slow path]
 
     G --> I[Inline in hot loop]
     H --> I
@@ -874,24 +876,24 @@ Map<string, ValidationObject> {
 | `resolveRefSchemaDeep` | traverse.js | Follow ref chain to final schema |
 | `restoreSchemaRefsInMap` | traverse.js | Flatten all ref chains at load time |
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment) |
-| `JarenValidator.compile` | index.js | Main entry point for schema compilation |
+| `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
-| `ValidationObject.compileValidator` | index.js | Compile validator, now with pre-compilation |
+| `ValidationObject.compileValidator` | index.js | Compile validator, ref combination, dynamic-anchor registration |
 | `ValidationRoot.resolveObject` | index.js | Resolve ref to ValidationObject (fallback only) |
+| `wrapUnevaluated` | unevaluated.js | Final-stage unevaluatedProperties/unevaluatedItems check |
+| `EvalLog` | tools.js | Annotation log with mark/rollback for unevaluated* |
+| `collectDynamicAnchorsDeep` | dynamic-ref.js | Gather a resource's $dynamicAnchors for scope entry |
 
 ---
 
 ## Implementation Notes
 
-### How $ref Works (Draft 7)
+### How $ref Works
 
-1. **$ref ignores siblings**: When a schema has `$ref`, all other keywords are ignored
-2. **$ref resolution order**:
-   - Resolve `$ref` against current base URI
-   - Do NOT apply sibling `$id` when resolving `$ref`
-   - After resolution, the referenced schema completely replaces the current schema
+1. **Draft 7 and earlier - $ref ignores siblings**: when a schema has `$ref`, all other keywords are ignored, the referenced schema completely replaces the current schema, and a sibling `$id` does not affect `$ref` resolution
+2. **Draft 2019-09 and later - $ref has siblings**: `$ref` is just another keyword; sibling keywords apply together with the referenced schema, and a sibling `$id` DOES establish the base URI the `$ref` resolves against
 3. **Location-independent identifiers**: Anchors like `#foo` should be resolvable within their document
-4. **Ref chain resolution happens at compile time**: Now pre-resolved via `restoreSchemaRefsInMap` and `#precompileRefs`
+4. **Ref chain resolution happens at compile time**: pre-resolved via `restoreSchemaRefsInMap` and `#precompileRefs`
 
 ### Base URI Resolution
 
@@ -997,6 +999,8 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `content.js` | Content encoding | `compileContentSchema` |
 | `data.js` | Data keyword | `compileDataSchema` |
 | `dollar-data.js` | $data keyword | `compileDollarDataSchema` |
+| `unevaluated.js` | unevaluated* keywords | `wrapUnevaluated` |
+| `dynamic-ref.js` | Dynamic scope helpers | `collectDynamicAnchorsDeep`, `hasRecursiveAnchor`, `getDynamicAnchorName` |
 
 ---
 
@@ -1039,6 +1043,24 @@ For broader context on how this package fits into the JarenJS ecosystem:
 - Maximizes compatibility with existing schema ecosystems
 - Different use cases favor different reference styles
 - Minimal overhead when not used
+
+### 5. Annotation Tracking via a Shared Log
+
+**Decision**: Implement `unevaluatedProperties`/`unevaluatedItems` with a per-root `EvalLog` of `(instance, key)` pairs and mark/rollback semantics, compiled in only when the schema set uses these keywords.
+
+**Rationale**:
+- Instance-identity keying makes annotations flow correctly through `$ref` chains and recursion without threading context through every validator signature
+- mark/rollback gives failed applicator branches (anyOf/oneOf/not/if) exact annotation-discarding semantics
+- The compile-time feature scan keeps schemas without unevaluated* keywords completely free of tracking overhead
+
+### 6. Dynamic Scope as Per-Anchor Stacks
+
+**Decision**: Track the dynamic scope for `$recursiveRef`/`$dynamicRef` as per-anchor-name validator stacks, pushed on resource entry (root validation and `$ref` crossings) and popped on exit.
+
+**Rationale**:
+- Entering a resource registers ALL of its `$dynamicAnchor`s (collected once at compile time), matching the specification's resource-based dynamic scope
+- Outermost-first resolution is a bottom-of-stack read
+- Balanced push/pop via try/finally keeps the scope correct across validation failures
 
 ---
 

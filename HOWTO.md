@@ -158,11 +158,20 @@ const jaren = new JarenValidator({
   // Affects minLength/maxLength for strings with emojis
   useGrapheme: true,
 
-  // Draft version for schema validation (default: undefined)
-  // Can be 'draft7', 'draft2019-09', 'draft2020-12'
-  draft: 'draft7'
+  // Assert contentEncoding/contentMediaType (default: per draft -
+  // asserted in draft 7 and earlier, annotation-only from 2019-09 on)
+  contentValidation: true,
+
+  // Assert the format keyword (default: per draft - asserted through
+  // 2019-09, annotation-only from 2020-12 on)
+  formatAssertion: true,
 });
 ```
+
+The JSON Schema draft is detected automatically from the schema's `$schema`
+declaration (`draft-06`, `draft-07`, `2019-09` or `2020-12`), defaulting to
+draft 7 when absent. Referenced documents that declare a different draft are
+processed per their own declaration.
 
 ### ASCII vs Grapheme Mode
 
@@ -186,8 +195,8 @@ console.log(validate2('abc')); // false - 3 code units
 ```
 
 **Recommendation**:
-- Use `useGrapheme: true` (default) if your data may contain emojis or complex Unicode
-- Use `useGrapheme: false` if you only validate ASCII strings (2-3x faster)
+- Use `useGrapheme: true` (default) if your data may contain emojis or complex Unicode; ASCII and most Unicode strings still take a cheap fast path
+- Use `useGrapheme: false` if you want lengths counted in UTF-16 code units
 
 ---
 
@@ -470,12 +479,17 @@ const prodValidator = new JarenValidator({ skipErrors: true });
 const devValidator = new JarenValidator({ skipErrors: false });
 ```
 
-### 3. Use ASCII Mode for Better Performance
+### 3. Grapheme Counting Is Cheap by Default
+
+String length validation (`minLength`/`maxLength`) with `useGrapheme: true`
+(the default) uses `str.length` for ASCII strings and a simple code-point
+count for most Unicode strings; only strings containing cluster-forming
+characters (combining marks, ZWJ emoji sequences, flags, ...) pay for
+`Intl.Segmenter`. Set `useGrapheme: false` to always count UTF-16 code
+units instead:
 
 ```javascript
-// If your data is ASCII-only, disable grapheme counting
 const jaren = new JarenValidator({ useGrapheme: false });
-// 2-3x faster for string length validation
 ```
 
 ### 4. Selective Format Loading
