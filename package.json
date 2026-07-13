@@ -37,7 +37,9 @@
     "commit:linux": "git commit -am v$npm_package_version && git tag v$npm_package_version",
     "commit:win32": "git commit -am v%npm_package_version% && git tag v%npm_package_version%",
     "push": "git push && git push --tags",
-    "benchmark": "node ./benchmark/index.js"
+    "benchmark": "node ./benchmark/index.js",
+    "benchmark:generate": "npm run benchmark:generate --workspace=@jarenjs/website",
+    "website:deploy": "npm run deploy --workspace=@jarenjs/website"
   },
   "keywords": [
     "JSON",
