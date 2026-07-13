@@ -89,7 +89,12 @@ function compilePropertyNames(schemaObj, jsonSchema) {
   }
 }
 
-function compileProperties(schemaObj, jsonSchema) {
+/**
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {Record<string, any>} jsonSchema
+ * @returns {Map<string, Function> | undefined}
+ */
+function buildPropertyValidators(schemaObj, jsonSchema) {
   const properties = getObjectType(jsonSchema.properties);
   if (properties == null) return undefined;
 
@@ -109,6 +114,18 @@ function compileProperties(schemaObj, jsonSchema) {
   if (validators.size === 0)
     return undefined;
 
+  return validators;
+}
+
+/**
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {Record<string, any>} jsonSchema
+ * @returns {Function | undefined}
+ */
+function compileProperties(schemaObj, jsonSchema) {
+  const validators = buildPropertyValidators(schemaObj, jsonSchema);
+  if (validators == null) return undefined;
+
   return function validatePropertyItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
     const validator = validators.get(dataKey);
@@ -122,7 +139,12 @@ function compileProperties(schemaObj, jsonSchema) {
   };
 }
 
-function compilePatternProperties(schemaObj, jsonSchema) {
+/**
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {Record<string, any>} jsonSchema
+ * @returns {Array<{pattern: RegExp, validator: Function}> | undefined}
+ */
+function buildPatternValidators(schemaObj, jsonSchema) {
   const entries = getObjectType(jsonSchema.patternProperties);
   if (entries == null) return undefined;
 
@@ -130,32 +152,37 @@ function compilePatternProperties(schemaObj, jsonSchema) {
   const entryKeys = Object.getOwnPropertyNames(entries);
   if (entryKeys.length === 0) return undefined;
 
-  const patterns = new Map();
+  const list = [];
   for (let i = 0; i < entryKeys.length; ++i) {
     const key = entryKeys[i];
     const pattern = createRegExp(key);
-    if (pattern != null)
-      patterns.set(key, pattern);
-  }
+    if (pattern == null) continue;
 
-  if (patterns.size === 0) return undefined;
-
-  const validators = new Map();
-  for (const [key] of patterns) {
-    const schema = entries[key];
-    const validator = schemaObj.createValidator(schema, 'patternProperties', key);
+    const validator = schemaObj.createValidator(entries[key], 'patternProperties', key);
     if (validator != null)
-      validators.set(key, validator);
+      list.push({ pattern, validator });
   }
 
-  if (validators.size === 0) return undefined;
+  if (list.length === 0) return undefined;
+
+  return list;
+}
+
+/**
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {Record<string, any>} jsonSchema
+ * @returns {Function | undefined}
+ */
+function compilePatternProperties(schemaObj, jsonSchema) {
+  const list = buildPatternValidators(schemaObj, jsonSchema);
+  if (list == null) return undefined;
 
   return function validatePatternPropertiesItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
-    for (const [key, validate] of validators) {
-      const pattern = patterns.get(key);
+    for (let i = 0; i < list.length; ++i) {
+      const { pattern, validator } = list[i];
       if (pattern.test(dataKey)) {
-        result.addMatch(validate(data[dataKey], dataPath, dataRoot, dataKey));
+        result.addMatch(validator(data[dataKey], dataPath, dataRoot, dataKey));
       }
     }
     return result;
@@ -518,7 +545,115 @@ function compileObjectProperty(schemaObj, jsonSchema) {
   };
 }
 
+/**
+ * Fused per-key validation loop for the default skipErrors mode.
+ * Avoids the per-key ValidationResult allocations and eagerly built child
+ * paths of the generic path; returns on the first failing property.
+ * Child paths are still built (lazily) because $data validators resolve
+ * relative JSON pointers against them at validation time.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {Record<string, any>} jsonSchema
+ * @returns {Function | undefined}
+ */
+function compileObjectChildrenFast(schemaObj, jsonSchema) {
+  const namesValidator = compilePropertyNames(schemaObj, jsonSchema);
+  const propsMap = buildPropertyValidators(schemaObj, jsonSchema) || null;
+  const patternList = buildPatternValidators(schemaObj, jsonSchema) || null;
+  const depSchemasValidator = compileDependentSchemas(schemaObj, jsonSchema) || null;
+  const dependencyValidator = compileDependencies(schemaObj, jsonSchema) || null;
+  const depRequiredValidator = compileDependentRequired(schemaObj, jsonSchema) || null;
+
+  const additional = getBoolOrObjectClass(jsonSchema.additionalProperties);
+  const additionalFalse = additional === false;
+  const additionalValidator = (additional != null && additional !== false && additional !== true)
+    ? schemaObj.createValidator(additional, 'additionalProperties')
+    : null;
+  const hasAdditional = additionalFalse || additionalValidator != null;
+
+  if (namesValidator == null
+    && propsMap == null
+    && patternList == null
+    && depSchemasValidator == null
+    && dependencyValidator == null
+    && depRequiredValidator == null
+    && !hasAdditional)
+    return undefined;
+
+  const validateName = namesValidator || null;
+
+  // Child paths are only consumed by $data relative-pointer resolution
+  // in skipErrors mode; skip the per-property string concat otherwise.
+  const extendPaths = schemaObj.root.usesDollarData;
+
+  /**
+   * @param {Record<string, any>} data
+   * @param {string} dataPath
+   * @param {unknown} dataRoot
+   * @param {string[]} dataKeys
+   * @returns {boolean}
+   */
+  return function validateObjectChildrenFast(data, dataPath, dataRoot, dataKeys) {
+    const len = dataKeys.length;
+    for (let i = 0; i < len; ++i) {
+      const dataKey = dataKeys[i];
+      if (validateName != null && validateName(dataKey) === false)
+        return false;
+
+      let matched = false;
+      let childPath = null;
+
+      if (propsMap != null) {
+        const propValidator = propsMap.get(dataKey);
+        if (propValidator != null) {
+          matched = true;
+          childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+          if (propValidator(data[dataKey], childPath, dataRoot, dataKey) === false)
+            return false;
+        }
+      }
+
+      if (patternList != null) {
+        for (let j = 0; j < patternList.length; ++j) {
+          const entry = patternList[j];
+          if (entry.pattern.test(dataKey)) {
+            matched = true;
+            if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+            if (entry.validator(data[dataKey], childPath, dataRoot, dataKey) === false)
+              return false;
+          }
+        }
+      }
+
+      if (matched === false && hasAdditional) {
+        if (additionalFalse)
+          return false;
+        if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+        if (/** @type {Function} */ (additionalValidator)(data[dataKey], childPath, dataRoot, dataKey) === false)
+          return false;
+      }
+
+      if (depRequiredValidator != null || depSchemasValidator != null || dependencyValidator != null) {
+        if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+        if (depRequiredValidator != null && depRequiredValidator(data, childPath, dataRoot, dataKey) === false)
+          return false;
+        if (depSchemasValidator != null && depSchemasValidator(data, childPath, dataRoot, dataKey) === false)
+          return false;
+        if (dependencyValidator != null && dependencyValidator(data, childPath, dataRoot, dataKey) === false)
+          return false;
+      }
+    }
+    return true;
+  };
+}
+
 export function compileObjectChildren(schemaObj, jsonSchema) {
+  // Fast path: when errors are skipped (default) we can bail on the first
+  // failure and avoid per-key result bookkeeping entirely.
+  // unevaluatedProperties needs annotation-style bookkeeping - generic path only.
+  if (schemaObj.options.skipErrors
+    && getBoolOrObjectClass(jsonSchema.unevaluatedProperties) == null)
+    return compileObjectChildrenFast(schemaObj, jsonSchema);
+
   const propertyValidator = compileObjectProperty(schemaObj, jsonSchema);
   if (propertyValidator == null)
     return undefined;
@@ -546,6 +681,70 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
 export function compileObjectSchema(schemaObj, jsonSchema) {
   if (isOfSchemaType(jsonSchema, 'map'))
     return undefined;
+
+  // Fast path: properties-only schema in skipErrors mode. Iterate the
+  // (fixed) schema keys with direct property access instead of allocating
+  // Object.keys(data) and doing a map lookup per data key.
+  if (schemaObj.options.skipErrors
+    && jsonSchema.patternProperties == null
+    && jsonSchema.additionalProperties == null
+    && jsonSchema.propertyNames == null
+    && jsonSchema.dependencies == null
+    && jsonSchema.dependentSchemas == null
+    && jsonSchema.dependentRequired == null
+    && jsonSchema.unevaluatedProperties == null
+    && jsonSchema.minProperties == null
+    && jsonSchema.maxProperties == null
+    && jsonSchema.required == null
+    && getObjectType(jsonSchema.properties) != null) {
+    const propsMap = buildPropertyValidators(schemaObj, jsonSchema);
+    if (propsMap == null)
+      return undefined;
+
+    const propKeys = Array.from(propsMap.keys());
+    const propValidators = Array.from(propsMap.values());
+    const propCount = propKeys.length;
+
+    // Child paths are only consumed by $data relative-pointer resolution
+    // in skipErrors mode; skip the per-property string concat otherwise.
+    if (schemaObj.root.usesDollarData) {
+      /**
+       * @param {Record<string, any>} data
+       * @param {string} dataPath
+       * @param {unknown} dataRoot
+       * @returns {boolean}
+       */
+      return function validateObjectPropertiesOnlyPaths(data, dataPath, dataRoot) {
+        if (!isObjectType(data)) return true;
+        for (let i = 0; i < propCount; ++i) {
+          const key = propKeys[i];
+          // Object.hasOwn: avoid picking up inherited members like toString
+          if (Object.hasOwn(data, key)
+            && propValidators[i](data[key], dataPath + '/' + key, dataRoot, key) === false)
+            return false;
+        }
+        return true;
+      };
+    }
+
+    /**
+     * @param {Record<string, any>} data
+     * @param {string} dataPath
+     * @param {unknown} dataRoot
+     * @returns {boolean}
+     */
+    return function validateObjectPropertiesOnly(data, dataPath, dataRoot) {
+      if (!isObjectType(data)) return true;
+      for (let i = 0; i < propCount; ++i) {
+        const key = propKeys[i];
+        // Object.hasOwn: avoid picking up inherited members like toString
+        if (Object.hasOwn(data, key)
+          && propValidators[i](data[key], dataPath, dataRoot, key) === false)
+          return false;
+      }
+      return true;
+    };
+  }
 
   const objectPrimitives = compileObjectPrimitives(schemaObj, jsonSchema);
   const objectChildren = compileObjectChildren(schemaObj, jsonSchema);

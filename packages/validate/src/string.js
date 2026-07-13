@@ -115,16 +115,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
         const addError = schemaObj.createErrorHandler(max, 'maxLength');
         return function validateStringMaxLengthGrapheme(data, dataPath) {
           if (!isStringType(data)) return true;
-          // Inline ASCII check + grapheme counting
-          let len = data.length;
-          for (let i = 0; i < len; i++) {
-            if (data.charCodeAt(i) > 127) {
-              // Non-ASCII found - use grapheme counting for remaining
-              len = i;
-              for (const _ of getSegmenter().segment(data.slice(i))) len++;
-              break;
-            }
-          }
+          const len = getStringLength(data, true);
           return len <= max || addError(len, dataPath);
         };
       }
@@ -133,16 +124,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
         const addError = schemaObj.createErrorHandler(min, 'minLength');
         return function validateStringMinLengthGrapheme(data, dataPath) {
           if (!isStringType(data)) return true;
-          // Inline ASCII check + grapheme counting
-          let len = data.length;
-          for (let i = 0; i < len; i++) {
-            if (data.charCodeAt(i) > 127) {
-              // Non-ASCII found - use grapheme counting for remaining
-              len = i;
-              for (const _ of getSegmenter().segment(data.slice(i))) len++;
-              break;
-            }
-          }
+          const len = getStringLength(data, true);
           return len >= min || addError(len, dataPath);
         };
       }

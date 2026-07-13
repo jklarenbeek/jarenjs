@@ -114,14 +114,36 @@ function compileNumberIntern(schemaObj, jsonSchema) {
   if (maximum == null && minimum == null && multipleOf == null)
     return undefined;
 
+  // Single-constraint schemas are the common case; call the one
+  // validator directly instead of chaining through trueThat stubs.
+  const count = (maximum ? 1 : 0) + (minimum ? 1 : 0) + (multipleOf ? 1 : 0);
+  if (count === 1)
+    return maximum || minimum || multipleOf;
+
+  if (multipleOf == null) {
+    /**
+     * @param {number} data
+     * @param {string} dataPath
+     * @returns {boolean}
+     */
+    return function validateNumberMinMax(data, dataPath) {
+      return /** @type {Function} */ (maximum)(data, dataPath)
+        && /** @type {Function} */ (minimum)(data, dataPath);
+    };
+  }
+
   const isMax = maximum || trueThat;
   const isMin = minimum || trueThat;
-  const isMul = multipleOf || trueThat;
 
+  /**
+   * @param {number} data
+   * @param {string} dataPath
+   * @returns {boolean}
+   */
   return function validateNumberIntern(data, dataPath) {
     return isMax(data, dataPath)
       && isMin(data, dataPath)
-      && isMul(data, dataPath);
+      && multipleOf(data, dataPath);
   };
 }
 

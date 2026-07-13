@@ -16,7 +16,8 @@
     "./src"
   ],
   "workspaces": [
-    "./packages/*"
+    "./packages/*",
+    "./benchmark"
   ],
   "scripts": {
     "clean": "rimraf --glob ./packages/**/dist/*.{js,map}",

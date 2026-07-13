@@ -7,6 +7,12 @@ import {
   isTypedArray,
 } from './index.js';
 
+/**
+ * Deep equality comparison for arbitrary values.
+ * @param {any} target
+ * @param {any} source
+ * @returns {boolean}
+ */
 export function equalsDeep(target, source) {
   if (target === source) return true;
   if (target == null) return false;
@@ -103,9 +109,52 @@ export function equalsDeep(target, source) {
  */
 export function isUniqueDeepArray(arr) {
   if (!Array.isArray(arr) || arr.length < 2) return true;
+
+  // Small all-scalar arrays: pairwise === beats allocating a Set.
+  if (arr.length <= 8) {
+    let allScalar = true;
+    for (let i = 0; i < arr.length; i++) {
+      const item = arr[i];
+      if ((typeof item === 'object' && item !== null) || typeof item === 'function') {
+        allScalar = false;
+        break;
+      }
+    }
+    if (allScalar) {
+      for (let i = 0; i < arr.length; i++) {
+        for (let j = i + 1; j < arr.length; j++) {
+          if (arr[i] === arr[j]) return false;
+        }
+      }
+      return true;
+    }
+  }
+
+  // Primitives are compared with === by equalsDeep and can never deep-equal
+  // an object, so they dedupe in O(n) through a Set (SameValueZero); only
+  // objects, arrays and functions need the pairwise deep comparison.
+  let seen = null;
+  let complex = null;
   for (let i = 0; i < arr.length; i++) {
-    for (let j = i + 1; j < arr.length; j++) {
-      if (equalsDeep(arr[i], arr[j])) return false;
+    const item = arr[i];
+    if ((typeof item === 'object' && item !== null) || typeof item === 'function') {
+      if (complex === null) complex = [item];
+      else complex.push(item);
+    }
+    else {
+      // NaN !== NaN under equalsDeep; keep NaN values always unique
+      if (typeof item === 'number' && item !== item) continue;
+      if (seen === null) seen = new Set();
+      else if (seen.has(item)) return false;
+      seen.add(item);
+    }
+  }
+
+  if (complex !== null && complex.length > 1) {
+    for (let i = 0; i < complex.length; i++) {
+      for (let j = i + 1; j < complex.length; j++) {
+        if (equalsDeep(complex[i], complex[j])) return false;
+      }
     }
   }
   return true;
@@ -113,8 +162,8 @@ export function isUniqueDeepArray(arr) {
 
 /**
  *
- * @param {Map} map
- * @param  {...Map} iterables
+ * @param {Map<any, any>} map
+ * @param {...Map<any, any>} iterables
  */
 export function mergeMap(map, ...iterables) {
   for (const iterable of iterables) {
