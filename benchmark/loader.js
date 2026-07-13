@@ -22,22 +22,18 @@ function resolveJson(basePath, baseUri = undefined) {
 };
 
 export async function loadRemoteJson(draft) {
-
-  const getBaseRemoteFiles = async () => await glob(
+  // Load ALL remotes, including every draft-specific directory, so that
+  // cross-draft references (e.g. a draft2019-09 schema referencing
+  // http://localhost:1234/draft2020-12/prefixItems.json) can resolve.
+  // Draft directories map to distinct URL prefixes, so there are no
+  // id collisions with the base remotes. draft-next is excluded because
+  // no validator ships meta-schemas for the unreleased spec draft.
+  const getRemoteFiles = async () => await glob(
     'suite/remotes/**/*.json',
-    { cwd: DEFAULT_GLOB_CDW, ignore: '**/draft*/**/*.json' }
+    { cwd: DEFAULT_GLOB_CDW, ignore: '**/draft-next/**/*.json' }
   );
-  const baseRemotes = (await getBaseRemoteFiles())
+  return (await getRemoteFiles())
     .reduce(resolveJson('suite/remotes/', 'http://localhost:1234'), {});
-
-  const getDraftRemoteFiles = async (version) => await glob(
-    `suite/remotes/${version}/**/*.json`,
-    { cwd: DEFAULT_GLOB_CDW }
-  );
-  const draftRemotes = (await getDraftRemoteFiles(draft))
-    .reduce(resolveJson(`suite/remotes/${draft}/`, `http://localhost:1234/${draft}/`), {});
-
-  return { ...baseRemotes, ...draftRemotes };
 }
 
 export async function loadTestSuiteJson(draft) {

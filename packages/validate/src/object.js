@@ -203,6 +203,12 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
 
 //#region Dependencies
 function compileDependentRequired(schemaObj, jsonSchema) {
+  // TODO: before we go to release remove this check, since it doesn't help anyone.
+  // dependentRequired only exists since draft 2019-09; a document that
+  // declares an older draft via $schema treats it as an unknown keyword.
+  if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019)
+    return undefined;
+
   const dependentRequired = getObjectType(jsonSchema.dependentRequired);
   if (dependentRequired == null)
     return undefined;
@@ -223,6 +229,12 @@ function compileDependentRequired(schemaObj, jsonSchema) {
 }
 
 function compileDependentSchemas(schemaObj, jsonSchema) {
+  // TODO: before we go to release remove this check, since it doesn't help anyone.
+  // dependentSchemas only exists since draft 2019-09; a document that
+  // declares an older draft via $schema treats it as an unknown keyword.
+  if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019)
+    return undefined;
+
   const dependentSchemas = getObjectType(jsonSchema.dependentSchemas);
   if (dependentSchemas == null) return undefined;
 
@@ -347,6 +359,12 @@ function compileDependencies(schemaObj, jsonSchema) {
 
 //#region Main
 export function compileObjectPrimitives(schemaObj, jsonSchema) {
+  // TODO: figure out if we need such a check for real!
+  // minProperties/maxProperties/required belong to the validation
+  // vocabulary; assert nothing when the metaschema disables it.
+  if (schemaObj.options.vocabValidation === false)
+    return undefined;
+
   const minProperties = compileMinProperties(schemaObj, jsonSchema);
   const maxProperties = compileMaxProperties(schemaObj, jsonSchema);
   const requiredProperties = compileRequiredProperties(schemaObj, jsonSchema);

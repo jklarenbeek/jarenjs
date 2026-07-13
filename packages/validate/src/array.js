@@ -299,6 +299,12 @@ function compileTypeOnlyValidator(type) {
 
 //#region Main
 export function compileArrayPrimitives(schemaObj, jsonSchema) {
+  // TODO: figure out if we need such a check for real!
+  // minItems/maxItems/uniqueItems belong to the validation vocabulary;
+  // assert nothing when the metaschema disables it.
+  if (schemaObj.options.vocabValidation === false)
+    return undefined;
+
   const minItems = compileMinItems(schemaObj, jsonSchema);
   const maxItems = compileMaxItems(schemaObj, jsonSchema);
   const uniqueItems = compileUniqueItems(schemaObj, jsonSchema);
@@ -342,8 +348,12 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
 }
 
 function compileArrayChildren(schemaObj, jsonSchema) {
-  // Check for prefixItems (draft 2020-12+) first, then items
-  const prefixItems = getArrayClassMinItems(jsonSchema.prefixItems, 1);
+  // Check for prefixItems (draft 2020-12+) first, then items.
+  // A document that declares an older draft via $schema treats
+  // prefixItems as an unknown keyword.
+  const prefixItems = (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2020)
+    ? undefined
+    : getArrayClassMinItems(jsonSchema.prefixItems, 1);
   const items = jsonSchema.items;
   const isTuple = getArrayClassMinItems(items, 1) != null;
 
