@@ -216,15 +216,53 @@ describe('Int32 class methods', async (t) => {
     assert.equal(Int32.wrapRadians(mathi32_PI1H), mathi32_PI1H);
   });
 
-  it.skip('Int32.sinLpEx', () => {
+  it('Int32.sinLpEx', () => {
+    // Low-precision parabola approximation of sine; input and output are
+    // scaled by the multiplier, so allow a small scaled tolerance.
     assert.equal(Int32.sinLpEx(0), 0);
-    assert.equal(Int32.sinLpEx(mathi32_PI1H), mathi32_MULTIPLIER);
-    assert.equal(Int32.sinLpEx(mathi32_PI), 0);
+    assert.ok(Math.abs(Int32.sinLpEx(mathi32_PI1H) - mathi32_MULTIPLIER) <= 60);
+    assert.ok(Math.abs(Int32.sinLpEx(mathi32_PI)) <= 60);
+    assert.ok(Math.abs(Int32.sinLpEx(-mathi32_PI1H) + mathi32_MULTIPLIER) <= 60);
   });
 
-  it.skip('Int32.sinLp', () => {
+  it('Int32.sinLp', () => {
     assert.equal(Int32.sinLp(0), 0);
-    assert.equal(Int32.sinLp(mathi32_PI1H), mathi32_MULTIPLIER);
-    assert.equal(Int32.sinLp(mathi32_PI), 0);
+    assert.equal(Int32.sinLp(mathi32_PI1H), Int32.sinLpEx(mathi32_PI1H));
+    // Inputs beyond PI are wrapped back into [-PI, PI] first
+    assert.ok(Math.abs(Int32.sinLp(mathi32_PI + mathi32_PI1H) + mathi32_MULTIPLIER) <= 60);
+    assert.ok(Math.abs(Int32.sinLp(mathi32_PI2)) <= 60);
+  });
+
+  it('Int32.fib', () => {
+    assert.equal(Int32.fib(0), 0);
+    assert.equal(Int32.fib(1), 1);
+    assert.equal(Int32.fib(2), 1);
+    assert.equal(Int32.fib(3), 2);
+    assert.equal(Int32.fib(4), 3);
+    assert.equal(Int32.fib(7), 13);
+    assert.equal(Int32.fib(10), 55);
+  });
+
+  it('Int32.clampu_u8a', () => {
+    assert.equal(Int32.clampu_u8a(0), 0);
+    assert.equal(Int32.clampu_u8a(100), 100);
+    assert.equal(Int32.clampu_u8a(255), 255);
+    assert.equal(Int32.clampu_u8a(300), 255);
+    assert.equal(Int32.clampu_u8a(-5), 0);
+  });
+
+  it('Int32.clampu_u8b', () => {
+    assert.equal(Int32.clampu_u8b(0), 0);
+    assert.equal(Int32.clampu_u8b(100), 100);
+    assert.equal(Int32.clampu_u8b(255), 255);
+    assert.equal(Int32.clampu_u8b(300), 255);
+    assert.equal(Int32.clampu_u8b(-5), 0);
+  });
+
+  it('Int32.toDegreesEx', () => {
+    // Radians are scaled by the multiplier on input, degrees on output
+    assert.equal(Int32.toDegreesEx(mathi32_PI), 180 * mathi32_MULTIPLIER);
+    assert.ok(Math.abs(Int32.toDegreesEx(mathi32_PI1H) - 90 * mathi32_MULTIPLIER) <= 30);
+    assert.equal(Int32.toDegreesEx(0), 0);
   });
 });

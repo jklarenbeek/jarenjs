@@ -198,9 +198,12 @@ export class Vec3f64 {
   }
 
   icross(v = def_Vec3f64) {
-    this.x = +(+(+this.y * +v.z) - +(+this.z * +v.y));
-    this.y = +(+(+this.z * +v.x) - +(+this.x * +v.z));
-    this.z = +(+(+this.x * +v.y) - +(+this.y * +v.x));
+    const x = +this.x;
+    const y = +this.y;
+    const z = +this.z;
+    this.x = +(+(y * +v.z) - +(z * +v.y));
+    this.y = +(+(z * +v.x) - +(x * +v.z));
+    this.z = +(+(x * +v.y) - +(y * +v.x));
     return this;
   }
 
@@ -220,4 +223,3 @@ export class Vec3f64 {
 }
 
 export const def_Vec3f64 = Object.freeze(Object.seal(Vec3f64.new()));
-

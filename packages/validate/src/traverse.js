@@ -40,10 +40,6 @@ export function decodeJsonPointerPath(path) {
   return path.split('/').map(decodeJsonPointerKey).splice(1);
 }
 
-export function encodeJsonPointerArray(path, array) {
-  return `${path}/${array.map(item => encodeJsonPointerKey(item)).join('/')}`;
-}
-
 class JsonPointerOptions {
   constructor(anchorsGlobal = false, anchorsAllowed = true, skipErrors = true) {
     this.anchorsGlobal = anchorsGlobal;

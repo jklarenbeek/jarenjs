@@ -196,13 +196,6 @@ function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   };
 }
 
-function compileArrayItems(schemaObj, jsonSchema) {
-  const items = getObjectType(jsonSchema.items);
-  if (items == null) return undefined;
-
-  return schemaObj.createValidator(items, 'items');
-}
-
 /**
  * Compile item schema directly without intermediate wrapper
  * This flattens the call stack by avoiding nested validator function calls
@@ -248,7 +241,8 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
     if (itemSchema.required !== undefined && Object.keys(itemSchema).length === 1) {
       const required = itemSchema.required;
       return function validateRequiredOnly(data, dataPath, dataRoot) {
-        if (typeof data !== 'object' || data === null) return false;
+        // Required properties only apply to objects, not arrays or other types
+        if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
         for (let i = 0; i < required.length; i++) {
           if (!(required[i] in data)) return false;
         }
@@ -401,14 +395,11 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       validateItem = function validateSingleItemSchema(data, dataPath, dataRoot, i) {
         return itemValidator(data, dataPath, dataRoot);
       };
-    } else if (items === false) {
-      const addError = schemaObj.createErrorHandler(false, 'items');
-      validateItem = function validateItemsFalse(data, dataPath, dataRoot, i) {
-        return addError(data, dataPath);
-      };
     } else if (items === true) {
       validateItem = trueThat;
     }
+    // items === false is fully handled by compileArrayItemsBoolean: only an
+    // empty array can pass, so a per-item validator would never be invoked.
   }
 
   const validateContains = compileArrayContains(schemaObj, jsonSchema);

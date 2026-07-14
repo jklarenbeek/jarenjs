@@ -26,7 +26,7 @@ import {
 import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
-import { DynamicScope, hasRecursiveAnchor, hasDynamicAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
+import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
 
 export {
   registerFormatCompilers
@@ -199,8 +199,6 @@ export class ValidationRoot {
   #errors = null;
   /** @type {ValidationObject|null} The root schema's ValidationObject */
   #firstSchema = null;
-  /** @type {DynamicScope|null} The dynamic scope tracker for $recursiveRef/$dynamicRef */
-  #dynamicScope = null;
   /** @type {Map<string, Function[]>} Map of anchor names to stacks of validator functions */
   #dynamicAnchors = null;
   /** @type {string|null} Anchor name to register for the root schema on each validation, or null when not needed */
@@ -249,7 +247,10 @@ export class ValidationRoot {
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
       if (isSchema) {
-        if (key === '$data') flags.dollarData = true;
+        // The json-everything 'data' keyword resolves relative pointers
+        // against the data path at validation time, just like '$data'.
+        if (key === '$data'
+          || (key === 'data' && node[key] !== null && typeof node[key] === 'object')) flags.dollarData = true;
         else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
         if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
           // The value is a name->schema map: its keys are names, its values schemas.
@@ -280,7 +281,6 @@ export class ValidationRoot {
 
     this.#objects = new Map();
     this.#errors = [];
-    this.#dynamicScope = new DynamicScope();
     this.#dynamicAnchors = new Map();
 
     // Detect $data references and unevaluated* keywords once, so fast paths
@@ -476,14 +476,6 @@ export class ValidationRoot {
     // call compiled validator
     // Pass dataRoot as the third argument for data keyword support
     return rootValidator(data, '', data);
-  }
-
-  /**
-   * Get the dynamic scope tracker.
-   * @returns {DynamicScope} The dynamic scope
-   */
-  get dynamicScope() {
-    return this.#dynamicScope;
   }
 
   /**
@@ -1019,10 +1011,12 @@ export class ValidatorOptions {
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
       if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null) {
+        const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
-          opts.skipErrors ?? true,
+          // collecting errors implies actually recording them
+          opts.skipErrors ?? !collectErrors,
           opts.useGrapheme ?? true,
-          opts.collectErrors ?? false,
+          collectErrors,
           opts.contentValidation ?? false,
           opts.draftVersion ?? 7,
           true,

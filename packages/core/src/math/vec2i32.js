@@ -104,7 +104,7 @@ export class Vec2i32 {
   }
 
   static phiEx(v = def_Vec2i32) {
-    return mathi32_MULTIPLIER * mathi32_asin((v.y | 0) / Vec2i32.mag(v));
+    return (mathi32_MULTIPLIER * mathi32_asin((v.y | 0) / Vec2i32.mag(v))) | 0;
   }
 
   //#endregion
@@ -173,23 +173,23 @@ export class Vec2i32 {
   }
 
   idiv(v = def_Vec2i32) {
-    this.x /= v.x | 0 | 0;
-    this.y /= v.y | 0 | 0;
+    this.x = ((this.x | 0) / (v.x | 0)) | 0;
+    this.y = ((this.y | 0) / (v.y | 0)) | 0;
     return this;
   }
 
   idivs(scalar = 0) {
     scalar = scalar | 0;
-    this.x /= scalar;
-    this.y /= scalar;
+    this.x = ((this.x | 0) / scalar) | 0;
+    this.y = ((this.y | 0) / scalar) | 0;
     return this;
   }
 
   //#endregion
 
   //#region instance advanced functions
-  inorm(v = def_Vec2i32) {
-    return this.idivs(Vec2i32.mag(v) | 0);
+  inorm() {
+    return this.idivs(Vec2i32.mag(this) | 0);
   }
 
   irotn90() {
@@ -200,9 +200,9 @@ export class Vec2i32 {
   }
 
   irot90() {
-    const t = this.y | 0;
-    this.x = -t | 0;
-    this.y = this.x | 0;
+    const t = this.x | 0;
+    this.x = -(this.y | 0) | 0;
+    this.y = t | 0;
     return this;
   }
 

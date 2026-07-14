@@ -140,16 +140,17 @@ describe('Vec2i32', () => {
       assert.equal(result, 0);
     });
 
-    it.skip('should calculate the theta angle of a vector', () => {
+    it('should calculate the theta angle of a vector', () => {
       const v = new Vec2i32(1, 1);
       const result = Vec2i32.thetaEx(v);
-      assert.equal(result, Math.round(Math.PI / 4 * mathi32_MULTIPLIER));
+      // Ex functions truncate the multiplier-scaled angle to an int32
+      assert.equal(result, (Math.PI / 4 * mathi32_MULTIPLIER) | 0);
     });
 
-    it.skip('should calculate the phi angle of a vector', () => {
+    it('should calculate the phi angle of a vector', () => {
       const v = new Vec2i32(3, 4);
       const result = Vec2i32.phiEx(v);
-      assert.equal(result, Math.round(Math.asin(4 / 5) * mathi32_MULTIPLIER));
+      assert.equal(result, (Math.asin(4 / 5) * mathi32_MULTIPLIER) | 0);
     });
   });
 
@@ -246,9 +247,10 @@ describe('Vec2i32', () => {
   });
 
   describe('Instance advanced functions', () => {
-    it.skip('should normalize a vector in-place', () => {
+    it('should normalize a vector in-place', () => {
       const v = new Vec2i32(3, 4);
       v.inorm();
+      // Integer division truncates the unit components to zero
       assert.equal(v.x, 0);
       assert.equal(v.y, 0);
     });
@@ -260,7 +262,7 @@ describe('Vec2i32', () => {
       assert.equal(v.y, -1);
     });
 
-    it.skip('should rotate a vector 90 degrees in-place', () => {
+    it('should rotate a vector 90 degrees in-place', () => {
       const v = new Vec2i32(1, 2);
       v.irot90();
       assert.equal(v.x, -2);

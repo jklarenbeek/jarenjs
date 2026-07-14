@@ -17,125 +17,12 @@
 import { isObjectClass, isStringType } from '@jarenjs/core';
 
 /**
- * DynamicScope tracks the dynamic scope during validation.
- * It maintains stacks of schemas with $recursiveAnchor and $dynamicAnchor.
- */
-export class DynamicScope {
-  /** @type {Array<{schema: object, path: string}>} Stack of schemas with $recursiveAnchor: true */
-  #recursiveAnchors = [];
-  
-  /** @type {Map<string, Array<{schema: object, path: string}>>} Map of anchor name to stack of schemas with that $dynamicAnchor */
-  #dynamicAnchors = new Map();
-
-  constructor() {
-    this.#recursiveAnchors = [];
-    this.#dynamicAnchors = new Map();
-  }
-
-  /**
-   * Push a schema onto the dynamic scope if it has a dynamic anchor.
-   * Call this when entering a schema during validation.
-   * @param {object} schema - The schema object
-   * @param {string} path - The schema path/URI
-   */
-  push(schema, path) {
-    if (!isObjectClass(schema)) return;
-
-    // Check for $recursiveAnchor: true (draft 2019-09)
-    if (schema.$recursiveAnchor === true) {
-      this.#recursiveAnchors.push({ schema, path });
-    }
-
-    // Check for $dynamicAnchor (draft 2020-12)
-    if (isStringType(schema.$dynamicAnchor)) {
-      const anchorName = schema.$dynamicAnchor;
-      if (!this.#dynamicAnchors.has(anchorName)) {
-        this.#dynamicAnchors.set(anchorName, []);
-      }
-      this.#dynamicAnchors.get(anchorName).push({ schema, path });
-    }
-  }
-
-  /**
-   * Pop a schema from the dynamic scope.
-   * Call this when exiting a schema during validation.
-   * @param {object} schema - The schema object
-   */
-  pop(schema) {
-    if (!isObjectClass(schema)) return;
-
-    // Pop $recursiveAnchor if present
-    if (schema.$recursiveAnchor === true && this.#recursiveAnchors.length > 0) {
-      this.#recursiveAnchors.pop();
-    }
-
-    // Pop $dynamicAnchor if present
-    if (isStringType(schema.$dynamicAnchor)) {
-      const anchorName = schema.$dynamicAnchor;
-      const stack = this.#dynamicAnchors.get(anchorName);
-      if (stack && stack.length > 0) {
-        stack.pop();
-      }
-    }
-  }
-
-  /**
-   * Get the current $recursiveAnchor target (nearest parent with $recursiveAnchor: true).
-   * Returns null if no $recursiveAnchor is in scope.
-   * @returns {{schema: object, path: string}|null}
-   */
-  getRecursiveAnchorTarget() {
-    if (this.#recursiveAnchors.length === 0) return null;
-    return this.#recursiveAnchors[this.#recursiveAnchors.length - 1];
-  }
-
-  /**
-   * Get the current $dynamicAnchor target for the given anchor name.
-   * Returns null if no matching $dynamicAnchor is in scope.
-   * @param {string} anchorName - The dynamic anchor name
-   * @returns {{schema: object, path: string}|null}
-   */
-  getDynamicAnchorTarget(anchorName) {
-    const stack = this.#dynamicAnchors.get(anchorName);
-    if (!stack || stack.length === 0) return null;
-    return stack[stack.length - 1];
-  }
-
-  /**
-   * Check if a $recursiveAnchor is currently in scope.
-   * @returns {boolean}
-   */
-  hasRecursiveAnchor() {
-    return this.#recursiveAnchors.length > 0;
-  }
-
-  /**
-   * Check if a $dynamicAnchor with the given name is currently in scope.
-   * @param {string} anchorName - The dynamic anchor name
-   * @returns {boolean}
-   */
-  hasDynamicAnchor(anchorName) {
-    const stack = this.#dynamicAnchors.get(anchorName);
-    return stack && stack.length > 0;
-  }
-}
-
-/**
  * Check if a schema has $recursiveAnchor: true.
  * @param {object} schema - The schema object
  * @returns {boolean}
  */
 export function hasRecursiveAnchor(schema) {
   return isObjectClass(schema) && schema.$recursiveAnchor === true;
-}
-
-/**
- * Check if a schema has $dynamicAnchor.
- * @param {object} schema - The schema object
- * @returns {boolean}
- */
-export function hasDynamicAnchor(schema) {
-  return isObjectClass(schema) && isStringType(schema.$dynamicAnchor);
 }
 
 /**

@@ -202,8 +202,4 @@ export class ValidationResult {
     this.errors += result.errors;
     return this;
   }
-
-  isValid() {
-    return this.errors === 0;
-  }
 }

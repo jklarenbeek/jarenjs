@@ -27,39 +27,26 @@ import {
  *
  * @param {string} formatName - The name of the format (e.g., 'int32', 'float64')
  * @param {(value: number) => boolean} isNumberTest - The function to test if a number matches the format constraints
- * @param {boolean} [strictFormat=false] - If true, validates raw numbers; if false, coerces strings to numbers
  * @returns {(schemaObj: ValidationObject, jsonSchema: JSONSchema) => (data: unknown, dataPath?: string) => boolean} A compiler function that creates number format validators
  * @example
- * // Strict validation (numbers only)
- * const compiler = createNumberFormatCompiler('int8', isValidInt8, true);
+ * const compiler = createNumberFormatCompiler('int8', isValidInt8);
  * const validator = compiler(schemaObj, { format: 'int8' });
  * validator(127); // true
- * validator(128); // false (out of int8 range)
- *
- * // Non-strict validation (coerces strings)
- * const compiler = createNumberFormatCompiler('int8', isValidInt8, false);
  * validator('127'); // true (coerced to number)
+ * validator(128); // false (out of int8 range)
  */
-function createNumberFormatCompiler(formatName, isNumberTest, strictFormat = false) {
+function createNumberFormatCompiler(formatName, isNumberTest) {
   return function compileNumberFormat(schemaObj, jsonSchema) {
     if (jsonSchema.format !== formatName)
       throw new Error('Format is not equal to jsonSchema (should not happen!)');
 
     const addError = schemaObj.createErrorHandler(formatName, 'format');
 
-    if (strictFormat === true)
-      return function validateNumberStrictFormat(data, dataPath) {
-        return data == null
-          // @ts-ignore
-          || isNumberTest(data)
-          || addError(data, dataPath);
-      };
-    else
-      return function validateNumberFormat(data, dataPath) {
-        return (data == null
-          || isNumberTest(Number(data))
-          || addError(data, dataPath));
-      };
+    return function validateNumberFormat(data, dataPath) {
+      return (data == null
+        || isNumberTest(Number(data))
+        || addError(data, dataPath));
+    };
   };
 }
 
