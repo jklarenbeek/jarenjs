@@ -1,5 +1,5 @@
 import { describe, it } from 'node:test';
-import * as assert from '../../assert.node.js';
+import * as assert from '../assert.node.js';
 
 import {
   isValidJSONCheap,
@@ -8,7 +8,7 @@ import {
   isValidJSONPointerUriFragment,
   isValidRelativeJSONPointer,
   isValidJSONPath,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 describe('isValidJSONCheap', () => {
   it('should return true for strings too short to be JSON', () => {

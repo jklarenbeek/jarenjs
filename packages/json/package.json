@@ -1,0 +1,31 @@
+{
+  "name": "@jarenjs/json",
+  "private": true,
+  "version": "0.8.4",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./types.d.ts",
+  "description": "Jaren JSON Addressing Standards",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/json"
+  },
+  "license": "MIT",
+  "keywords": [
+    "jaren",
+    "json",
+    "json-pointer",
+    "jsonpath"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./basic": "./src/basic.js",
+    "./pointer": "./src/pointer.js",
+    "./path": "./src/path.js"
+  },
+  "peerDependencies": {
+    "@jarenjs/core": "*"
+  }
+}

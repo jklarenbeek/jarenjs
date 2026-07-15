@@ -57,7 +57,7 @@ import {
   isValidJSONPointer,
   isValidJSONPointerUriFragment,
   isValidRelativeJSONPointer,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 import {
   createRegExp,

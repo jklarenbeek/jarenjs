@@ -47,7 +47,7 @@ import {
 
 import {
   resolveRelativePointer,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 /**
  * Check if a value is a $data reference object

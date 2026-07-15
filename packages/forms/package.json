@@ -25,6 +25,7 @@
     "validation"
   ],
   "peerDependencies": {
-    "@jarenjs/core": "*"
+    "@jarenjs/core": "*",
+    "@jarenjs/json": "*"
   }
 }

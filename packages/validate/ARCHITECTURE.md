@@ -736,7 +736,10 @@ flowchart TB
         CORE_OBJ[object.js]
         CORE_FN[function.js]
         CORE_TXT[text/index.js]
-        CORE_JSON[json/index.js]
+    end
+
+    subgraph "@jarenjs/json"
+        CORE_JSON[index.js]
     end
 
     INDEX --> SCHEMA & TRAV & TOOLS & FMT
@@ -972,7 +975,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 
 - **Project-wide Architecture**: See `/ARCHITECTURE.md` at the project root
 - **Developer Guide**: See `/HOWTO.md` at the project root
-- **Core Package**: Depends on `@jarenjs/core` for fundamental utilities
+- **Core Package**: Depends on `@jarenjs/core` for fundamental utilities and `@jarenjs/json` for the JSON addressing standards
 
 ---
 

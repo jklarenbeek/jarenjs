@@ -5,7 +5,7 @@ import {
   isValidJSONPointerUriFragment,
   isValidRelativeJSONPointer,
   isValidJSONPathStrict,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 import { createStringFormatCompiler } from './string.js';
 
@@ -56,7 +56,7 @@ export const compileRelativeJsonPointerFormat = createStringFormatCompiler('rela
  * Compiles a validator for the 'json-path' format.
  * Validates JSONPath query expressions strictly against the complete
  * RFC 9535 grammar, using the parser of the JSONPath compiler in
- * `@jarenjs/core/json`. This includes the well-typedness rules for
+ * `@jarenjs/json`. This includes the well-typedness rules for
  * function expressions, so queries like `$[?length(@)]` or comparisons
  * against non-singular queries are rejected.
  *

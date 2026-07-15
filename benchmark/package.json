@@ -28,6 +28,7 @@
     "benchmark": "^2.1.4",
     "glob": "^11.0.0",
     "@jarenjs/core": "*",
+    "@jarenjs/json": "*",
     "json-p3": "^2.2.2"
   }
 }

@@ -33,7 +33,7 @@ import {
 
 import {
   resolveDataRef,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 /**
  * Compile minimum constraint from data reference

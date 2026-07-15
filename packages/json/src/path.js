@@ -24,9 +24,9 @@
 
 //#region constants & shared helpers
 
-import { equalsJson } from '../object.js';
-import { countCodePoints, compareCodePoints } from '../string.js';
-import { compileIRegexp } from '../text/iregexp.js';
+import { equalsJson } from '@jarenjs/core/object';
+import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
+import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import {
   CC_TAB,
   CC_LF,
@@ -58,7 +58,7 @@ import {
   CC_UNDERSCORE,
   CC_PIPE,
   isDigitCode,
-} from '../scan.js';
+} from '@jarenjs/core/scan';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as

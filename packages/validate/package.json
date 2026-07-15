@@ -29,7 +29,8 @@
     "build": "node esbuild.config.js"
   },
   "peerDependencies": {
-    "@jarenjs/core": "*"
+    "@jarenjs/core": "*",
+    "@jarenjs/json": "*"
   },
   "devDependencies": {
     "esbuild": "^0.23.1"

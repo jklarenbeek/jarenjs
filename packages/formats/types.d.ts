@@ -97,7 +97,7 @@ export const compileJsonPointerFormat: FormatCompiler;
 export const compileJsonPointerUriFragmentFormat: FormatCompiler;
 export const compileRelativeJsonPointerFormat: FormatCompiler;
 
-// JSONPath (RFC 9535, strict grammar via the @jarenjs/core/json parser)
+// JSONPath (RFC 9535, strict grammar via the @jarenjs/json parser)
 export const compileJsonPathFormat: FormatCompiler;
 
 /**

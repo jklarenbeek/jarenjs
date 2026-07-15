@@ -16,7 +16,7 @@ Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/
 
 Reproduce these numbers yourself with `node benchmark/profiler.js --profile-all --draft draft2020-12`.
 
-The same treatment is applied to JSONPath: `@jarenjs/core/json` ships an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query compiler that passes all 703 tests of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) (normalized paths included) and backs the strict `json-path` format. Run `node benchmark/jsonpath.js --profile` to compare it against [json-p3](https://www.npmjs.com/package/json-p3).
+The same treatment is applied to JSONPath: `@jarenjs/json` ships an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query compiler that passes all 703 tests of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) (normalized paths included) and backs the strict `json-path` format. Run `node benchmark/jsonpath.js --profile` to compare it against [json-p3](https://www.npmjs.com/package/json-p3).
 
 This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that I used over the years; stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
 
@@ -494,7 +494,7 @@ These are grouped in `jsonFormats` of the `@jarenjs/formats` package.
 - `json-pointer` | JSON-pointer according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901)
 - `json-pointer-uri-fragment` | JSON-pointer fragment according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901#section-6)
 - `relative-json-pointer` | relative JSON-pointer according to [draft-luff-relative-json-pointer-00](https://datatracker.ietf.org/doc/html/draft-luff-relative-json-pointer-00)
-- `json-path` | JSONPath query according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html), checked against the complete grammar (including filter well-typedness) by the parser of the JSONPath compiler in `@jarenjs/core/json`
+- `json-path` | JSONPath query according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html), checked against the complete grammar (including filter well-typedness) by the parser of the JSONPath compiler in `@jarenjs/json`
 
 #### 🗨 Miscellaneous formats
 

@@ -24,9 +24,11 @@
     "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
     "test:core": "node --no-warnings=ExperimentalWarning --test test/core/**/*.test.js",
+    "test:json": "node --no-warnings=ExperimentalWarning --test test/json/**/*.test.js",
     "test:validate": "node --no-warnings=ExperimentalWarning --test test/validate/**/*.test.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/**/*.test.js",
     "cover:core": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/core/**/*.test.js",
+    "cover:json": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/json/**/*.test.js",
     "cover:validate": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test test/validate/**/*.test.js",
     "cover:profiler": "npx c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node benchmark/profiler.js --profile-all --iterations 1000",
     "build": "npm run build --workspaces --if-present",
@@ -79,6 +81,7 @@
   "dependencies": {
     "@types/node": "^22.5.5",
     "@jarenjs/core": "*",
+    "@jarenjs/json": "*",
     "@jarenjs/validate": "*",
     "@jarenjs/formats": "*",
     "@jarenjs/refs": "*"

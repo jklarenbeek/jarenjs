@@ -9,7 +9,7 @@ import {
 
 import {
   isValidJSON,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 export function compileContentEncoding(schemaObj, jsonSchema) {
   const encoding = getStringType(jsonSchema.contentEncoding);

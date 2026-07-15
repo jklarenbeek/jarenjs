@@ -47,7 +47,7 @@ const WARMUP_ITERATIONS = 100;
 // normalized paths (only engines that produce them are checked).
 const ENGINE_LOADERS = {
   jaren: async () => {
-    const { compileJSONPath } = await import('@jarenjs/core/json');
+    const { compileJSONPath } = await import('@jarenjs/json');
     return {
       key: 'jaren',
       name: 'Jaren',

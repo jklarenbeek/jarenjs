@@ -1,5 +1,5 @@
 import { describe, it } from 'node:test';
-import * as assert from '../../assert.node.js';
+import * as assert from '../assert.node.js';
 
 import {
   parseJSONPath,
@@ -7,7 +7,7 @@ import {
   queryJSONPath,
   isValidJSONPathStrict,
   JSONPathSyntaxError,
-} from '@jarenjs/core/json';
+} from '@jarenjs/json';
 
 // The bookstore example from RFC 9535, section 1.5
 const bookstore = {
