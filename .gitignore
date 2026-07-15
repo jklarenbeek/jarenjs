@@ -98,5 +98,6 @@ benchmark/results/
 
 # TODO: AI integration
 .gitignore
-PROGRESS.md
+TODO*.md
+PROGRESS*.md
 NEXT_SESSION.md
