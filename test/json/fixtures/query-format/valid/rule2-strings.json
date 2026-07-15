@@ -1,0 +1,7 @@
+{
+  "literal": "hello",
+  "escaped": "$$price",
+  "absolute": "$.store.book[*].price",
+  "variable": "$b['odd key'][0]",
+  "filtered": "$b[?@.x > 1]"
+}

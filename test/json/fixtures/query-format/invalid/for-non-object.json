@@ -1,0 +1,4 @@
+{
+  "$for": "$.store.book[*]",
+  "$return": "$b"
+}

@@ -1,0 +1,59 @@
+{
+  "$seq": [
+    {
+      "$count": "$.store.book[*]"
+    },
+    {
+      "$sum": "$.store.book[*].price"
+    },
+    {
+      "$avg": "$.store.book[*].price"
+    },
+    {
+      "$min": "$.store.book[*].price"
+    },
+    {
+      "$max": "$.store.book[*].price"
+    },
+    {
+      "$distinct": "$.store.book[*].category"
+    },
+    {
+      "$reverse": "$.store.book[*].title"
+    },
+    {
+      "$sort": "$.store.book[*].price"
+    },
+    {
+      "$head": "$.store.book[*]"
+    },
+    {
+      "$tail": "$.store.book[*]"
+    },
+    {
+      "$subsequence": [
+        "$.store.book[*]",
+        1,
+        2
+      ]
+    },
+    {
+      "$index-of": [
+        "$.store.book[*].category",
+        "fiction"
+      ]
+    },
+    {
+      "$range": [
+        1,
+        5
+      ]
+    },
+    {
+      "$get": [
+        "$.store.book[*]",
+        0
+      ]
+    }
+  ]
+}

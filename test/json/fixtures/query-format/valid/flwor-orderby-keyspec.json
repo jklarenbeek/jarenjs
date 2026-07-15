@@ -1,0 +1,14 @@
+{
+  "$for": {
+    "b": "$.store.book[*]"
+  },
+  "$orderby": [
+    {
+      "$key": "$b.price",
+      "$dir": "desc",
+      "$empty": "greatest"
+    },
+    "$b.title"
+  ],
+  "$return": "$b.title"
+}

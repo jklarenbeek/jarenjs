@@ -1,0 +1,6 @@
+{
+  "$let": {
+    "9bad": 1
+  },
+  "$return": null
+}

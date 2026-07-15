@@ -1,0 +1,7 @@
+{
+  "$for": {
+    "b": "$.store.book[*]"
+  },
+  "$orderby": [],
+  "$return": "$b.title"
+}

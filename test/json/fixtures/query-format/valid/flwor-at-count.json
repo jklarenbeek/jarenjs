@@ -1,0 +1,14 @@
+{
+  "$for": {
+    "b": {
+      "$in": "$.store.book[*]",
+      "$at": "i"
+    }
+  },
+  "$count": "n",
+  "$return": {
+    "index": "$i",
+    "row": "$n",
+    "title": "$b.title"
+  }
+}

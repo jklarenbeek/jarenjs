@@ -1,0 +1,17 @@
+{
+  "$for": {
+    "a": "$.store.book[*]"
+  },
+  "$return": {
+    "$let": {
+      "p": "$a.price"
+    },
+    "$where": {
+      "$gt": [
+        "$p",
+        10
+      ]
+    },
+    "$return": "$a.title"
+  }
+}

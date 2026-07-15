@@ -1,0 +1,17 @@
+{
+  "$for": {
+    "b": "$.store.book[*]",
+    "r": "$.ratings[*]"
+  },
+  "$where": {
+    "$eq": [
+      "$b.isbn",
+      "$r.isbn"
+    ]
+  },
+  "$orderby": "$b.price",
+  "$return": {
+    "title": "$b.title",
+    "stars": "$r.stars"
+  }
+}

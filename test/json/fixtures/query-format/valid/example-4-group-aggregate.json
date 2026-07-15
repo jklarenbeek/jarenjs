@@ -1,0 +1,17 @@
+{
+  "$for": {
+    "b": "$.store.book[*]"
+  },
+  "$groupby": {
+    "genre": "$b.category"
+  },
+  "$return": {
+    "genre": "$genre",
+    "count": {
+      "$count": "$b"
+    },
+    "avg": {
+      "$avg": "$b.price"
+    }
+  }
+}

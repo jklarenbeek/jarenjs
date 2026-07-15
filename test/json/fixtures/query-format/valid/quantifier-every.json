@@ -1,0 +1,8 @@
+{
+  "$every": {
+    "b": "$.store.book[*]"
+  },
+  "$satisfies": {
+    "$exists": "$b.title"
+  }
+}

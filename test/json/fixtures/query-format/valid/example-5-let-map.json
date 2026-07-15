@@ -1,0 +1,28 @@
+{
+  "$let": {
+    "prefix": "col_",
+    "book": "$.store.book[0]"
+  },
+  "$return": {
+    "$map": [
+      [
+        {
+          "$concat": [
+            "$prefix",
+            "title"
+          ]
+        },
+        "$book.title"
+      ],
+      [
+        {
+          "$concat": [
+            "$prefix",
+            "price"
+          ]
+        },
+        "$book.price"
+      ]
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "$seq": [
+    {
+      "$concat": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "$string-join": [
+        "$.store.book[*].title",
+        ", "
+      ]
+    },
+    {
+      "$substring": [
+        "hello",
+        1,
+        3
+      ]
+    },
+    {
+      "$contains": [
+        "hello",
+        "ell"
+      ]
+    },
+    {
+      "$starts-with": [
+        "hello",
+        "he"
+      ]
+    },
+    {
+      "$ends-with": [
+        "hello",
+        "lo"
+      ]
+    },
+    {
+      "$upper": "abc"
+    },
+    {
+      "$lower": "ABC"
+    },
+    {
+      "$string-length": "abc"
+    },
+    {
+      "$normalize-space": "  a  b  "
+    },
+    {
+      "$match": [
+        "abc",
+        "a.c"
+      ]
+    },
+    {
+      "$search": [
+        "abc",
+        "b"
+      ]
+    },
+    {
+      "$replace": [
+        "abc",
+        "b",
+        "x"
+      ]
+    }
+  ]
+}

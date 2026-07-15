@@ -1,0 +1,49 @@
+{
+  "$seq": [
+    {
+      "$is-string": "abc"
+    },
+    {
+      "$is-number": 1
+    },
+    {
+      "$is-boolean": true
+    },
+    {
+      "$is-null": null
+    },
+    {
+      "$is-array": {
+        "$const": [
+          1
+        ]
+      }
+    },
+    {
+      "$is-object": {
+        "$const": {}
+      }
+    },
+    {
+      "$string": 12
+    },
+    {
+      "$number": "12"
+    },
+    {
+      "$boolean": 1
+    },
+    {
+      "$coalesce": [
+        "$.missing",
+        "fallback"
+      ]
+    },
+    {
+      "$default": [
+        "$.missing",
+        0
+      ]
+    }
+  ]
+}

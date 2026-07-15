@@ -1,0 +1,13 @@
+{
+  "$if": [
+    {
+      "$exists": "$.store.bicycle"
+    },
+    {
+      "$seq": [
+        "$.store.bicycle.color",
+        "$.store.bicycle.price"
+      ]
+    }
+  ]
+}

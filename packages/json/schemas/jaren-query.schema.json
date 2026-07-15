@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-query/0.1",
+  "title": "Jaren JSON Query format 0.1",
+  "description": "Structural grammar of Jaren JSON Query documents (see packages/json/docs/QUERY-FORMAT.md). This schema is structural validation only: the compiler remains authoritative for semantic rules it cannot express - FLWOR clause keys apply in the fixed semantic order $for, $let, $where, $groupby, $orderby, $count, $return regardless of JSON key order; variable scoping, duplicate-binding detection and external-parameter collection are compiler rules (JQ0005/JQ0007); variable-rooted path strings are only head-checked here (full RFC 9535 segment grammar is JQ0004); per-argument runtime typing is JQ2xxx. Authored in a draft-neutral keyword subset; the draft-07 twin is a mechanical derivation.",
+  "allOf": [
+    { "$ref": "#/$defs/queryDocument" }
+  ],
+  "$defs": {
+    "queryDocument": {
+      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+      "oneOf": [
+        { "$ref": "#/$defs/versionEnvelope" },
+        { "$ref": "#/$defs/expression" }
+      ]
+    },
+    "versionEnvelope": {
+      "description": "Top-level version envelope. Only recognized at the top level of a query document.",
+      "type": "object",
+      "properties": {
+        "$query": { "const": "0.1" },
+        "$expr": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["$query", "$expr"],
+      "additionalProperties": false
+    },
+    "expression": {
+      "description": "Any expression per the encoding rules: scalars are literals, strings split on the leading '$', arrays are array constructors, objects partition into map constructors (no $-prefixed key) and operator phrases (all keys $-prefixed).",
+      "oneOf": [
+        { "$ref": "#/$defs/scalarLiteral" },
+        { "$ref": "#/$defs/stringExpression" },
+        { "$ref": "#/$defs/arrayConstructor" },
+        { "$ref": "#/$defs/objectExpression" }
+      ]
+    },
+    "scalarLiteral": {
+      "description": "Numbers, booleans and null are literal items.",
+      "type": ["null", "boolean", "number"]
+    },
+    "stringExpression": {
+      "description": "Rule 2: a string starting with '$' is a query expression ('$$' escapes a literal); any other string is a literal.",
+      "type": "string",
+      "anyOf": [
+        { "$ref": "#/$defs/literalString" },
+        { "$ref": "#/$defs/escapedStringLiteral" },
+        { "$ref": "#/$defs/absolutePathString" },
+        { "$ref": "#/$defs/variablePathString" }
+      ]
+    },
+    "literalString": {
+      "description": "A string that does not start with '$' denotes itself.",
+      "type": "string",
+      "pattern": "^([^$]|$)"
+    },
+    "escapedStringLiteral": {
+      "description": "A string starting with '$$' denotes the literal string with one leading '$' dropped.",
+      "type": "string",
+      "pattern": "^\\$\\$"
+    },
+    "absolutePathString": {
+      "description": "An absolute RFC 9535 JSONPath query rooted at the input document: '$' alone or starting '$.', '$[' or '$..'. The json-path format asserts the full RFC 9535 grammar where format assertion is enabled (format is annotation-only by default from draft 2020-12).",
+      "type": "string",
+      "pattern": "^\\$($|[.\\[])",
+      "format": "json-path"
+    },
+    "variablePathString": {
+      "description": "A variable-rooted path: '$name' with name matching [A-Za-z_][A-Za-z0-9_]*, optionally followed by RFC 9535 segments. Only the head is pattern-checked; the full segment grammar is enforced by the compiler (JQ0004).",
+      "type": "string",
+      "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*($|[.\\[])"
+    },
+    "arrayConstructor": {
+      "description": "An array in expression position constructs an array; element results are concatenated per XQuery sequence flattening.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/expression" }
+    },
+    "objectExpression": {
+      "description": "Rule 1: objects partition by $-prefixed keys. A mixed object matches neither branch and is invalid (JQ0001).",
+      "oneOf": [
+        { "$ref": "#/$defs/mapConstructor" },
+        { "$ref": "#/$defs/constPhrase" },
+        { "$ref": "#/$defs/mapPhrase" },
+        { "$ref": "#/$defs/flworPhrase" },
+        { "$ref": "#/$defs/somePhrase" },
+        { "$ref": "#/$defs/everyPhrase" },
+        { "$ref": "#/$defs/unaryOperatorPhrase" },
+        { "$ref": "#/$defs/binaryOperatorPhrase" },
+        { "$ref": "#/$defs/variadicOperatorPhrase" },
+        { "$ref": "#/$defs/nonEmptyVariadicOperatorPhrase" },
+        { "$ref": "#/$defs/conditionalArityOperatorPhrase" },
+        { "$ref": "#/$defs/stringJoinPhrase" },
+        { "$ref": "#/$defs/replacePhrase" }
+      ]
+    },
+    "mapConstructor": {
+      "description": "An object with no $-prefixed key: keys are literal member names, values are expressions. Use $map or $const for member names that start with '$'.",
+      "type": "object",
+      "patternProperties": {
+        "^\\$": false
+      },
+      "additionalProperties": { "$ref": "#/$defs/expression" }
+    },
+    "constPhrase": {
+      "description": "Quote: the value is returned verbatim, nothing inside is evaluated.",
+      "type": "object",
+      "properties": {
+        "$const": true
+      },
+      "required": ["$const"],
+      "additionalProperties": false
+    },
+    "mapPhrase": {
+      "description": "General map constructor for computed keys or keys starting with '$'. Each entry is a [keyExpr, valueExpr] pair; keyExpr must evaluate to a single string at runtime (JQ2004); later pairs win on duplicate keys.",
+      "type": "object",
+      "properties": {
+        "$map": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mapEntry" }
+        }
+      },
+      "required": ["$map"],
+      "additionalProperties": false
+    },
+    "mapEntry": {
+      "description": "One [keyExpr, valueExpr] pair of a $map phrase.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/expression" },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "flworPhrase": {
+      "description": "FLWOR phrase. Clauses apply in the fixed semantic order $for, $let, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $for/$let.",
+      "type": "object",
+      "properties": {
+        "$for": { "$ref": "#/$defs/forBindings" },
+        "$let": { "$ref": "#/$defs/bindingMap" },
+        "$where": { "$ref": "#/$defs/expression" },
+        "$groupby": { "$ref": "#/$defs/bindingMap" },
+        "$orderby": { "$ref": "#/$defs/orderBySpec" },
+        "$count": { "$ref": "#/$defs/variableName" },
+        "$return": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["$return"],
+      "anyOf": [
+        { "required": ["$for"] },
+        { "required": ["$let"] }
+      ],
+      "additionalProperties": false
+    },
+    "variableName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "forBindings": {
+      "description": "Iteration bindings: variable name to source expression or extended {$in, $at} binding. Bindings nest left-to-right in document key order and may be correlated; key-order-hostile producers should nest phrases instead.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/forSource" }
+    },
+    "forSource": {
+      "oneOf": [
+        { "$ref": "#/$defs/expression" },
+        { "$ref": "#/$defs/extendedForBinding" }
+      ]
+    },
+    "extendedForBinding": {
+      "description": "Extended $for binding: iterates $in and binds $at to the 0-based (D6) position variable.",
+      "type": "object",
+      "properties": {
+        "$in": { "$ref": "#/$defs/expression" },
+        "$at": { "$ref": "#/$defs/variableName" }
+      },
+      "required": ["$in", "$at"],
+      "additionalProperties": false
+    },
+    "bindingMap": {
+      "description": "Variable name to expression map, used by $let, $groupby and quantifier bindings.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/expression" }
+    },
+    "orderBySpec": {
+      "description": "A single key spec or a major-to-minor list of key specs. An array value is by specification ALWAYS a list of key specs, so the single form excludes arrays; write a single array-constructor key as {\"$key\": [...]}.",
+      "oneOf": [
+        { "$ref": "#/$defs/singleOrderByKey" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/orderByKey" },
+          "minItems": 1
+        }
+      ]
+    },
+    "singleOrderByKey": {
+      "description": "A key spec in non-list position: any non-array expression, or the explicit {$key, $dir, $empty} form.",
+      "oneOf": [
+        { "$ref": "#/$defs/scalarLiteral" },
+        { "$ref": "#/$defs/stringExpression" },
+        { "$ref": "#/$defs/objectExpression" },
+        { "$ref": "#/$defs/orderByKeySpec" }
+      ]
+    },
+    "orderByKey": {
+      "oneOf": [
+        { "$ref": "#/$defs/expression" },
+        { "$ref": "#/$defs/orderByKeySpec" }
+      ]
+    },
+    "orderByKeySpec": {
+      "description": "Explicit order key: direction defaults to 'asc', empty-sequence placement to 'least'.",
+      "type": "object",
+      "properties": {
+        "$key": { "$ref": "#/$defs/expression" },
+        "$dir": { "enum": ["asc", "desc"] },
+        "$empty": { "enum": ["least", "greatest"] }
+      },
+      "required": ["$key"],
+      "additionalProperties": false
+    },
+    "somePhrase": {
+      "description": "Existential quantifier: true iff some binding tuple satisfies the EBV of $satisfies; short-circuits.",
+      "type": "object",
+      "properties": {
+        "$some": { "$ref": "#/$defs/bindingMap" },
+        "$satisfies": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["$some", "$satisfies"],
+      "additionalProperties": false
+    },
+    "everyPhrase": {
+      "description": "Universal quantifier: true iff every binding tuple satisfies the EBV of $satisfies; short-circuits.",
+      "type": "object",
+      "properties": {
+        "$every": { "$ref": "#/$defs/bindingMap" },
+        "$satisfies": { "$ref": "#/$defs/expression" }
+      },
+      "required": ["$every", "$satisfies"],
+      "additionalProperties": false
+    },
+    "unaryOperatorPhrase": {
+      "description": "Operators whose value is a single operand expression.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$exists", "$empty", "$not", "$neg",
+          "$count", "$sum", "$avg", "$min", "$max",
+          "$distinct", "$reverse", "$sort", "$head", "$tail",
+          "$upper", "$lower", "$string-length", "$normalize-space",
+          "$string", "$number", "$boolean",
+          "$is-string", "$is-number", "$is-boolean", "$is-null", "$is-array", "$is-object"
+        ]
+      },
+      "additionalProperties": { "$ref": "#/$defs/expression" }
+    },
+    "binaryOperatorPhrase": {
+      "description": "Operators whose value is an array of exactly two operand expressions.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$eq", "$ne", "$lt", "$le", "$gt", "$ge",
+          "$add", "$sub", "$mul", "$div", "$idiv", "$mod",
+          "$contains", "$starts-with", "$ends-with", "$match", "$search",
+          "$index-of", "$range", "$get", "$default"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/expression" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "variadicOperatorPhrase": {
+      "description": "Variadic operators accepting zero or more operand expressions.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": ["$seq", "$concat"]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/expression" }
+      }
+    },
+    "nonEmptyVariadicOperatorPhrase": {
+      "description": "Variadic operators requiring at least one operand expression.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": ["$and", "$or", "$coalesce"]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/expression" },
+        "minItems": 1
+      }
+    },
+    "conditionalArityOperatorPhrase": {
+      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?].",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": ["$if", "$substring", "$subsequence"]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/expression" },
+        "minItems": 2,
+        "maxItems": 3
+      }
+    },
+    "stringJoinPhrase": {
+      "description": "$string-join [seq, separator?]: one or two operand expressions.",
+      "type": "object",
+      "properties": {
+        "$string-join": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expression" },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": ["$string-join"],
+      "additionalProperties": false
+    },
+    "replacePhrase": {
+      "description": "$replace [input, pattern, replacement]: exactly three operand expressions (I-Regexp has no flags argument, D5).",
+      "type": "object",
+      "properties": {
+        "$replace": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expression" },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": ["$replace"],
+      "additionalProperties": false
+    }
+  }
+}

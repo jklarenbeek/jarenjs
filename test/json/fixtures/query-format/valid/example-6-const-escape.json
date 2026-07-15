@@ -1,0 +1,9 @@
+{
+  "template": {
+    "$const": {
+      "$for": "kept verbatim",
+      "price": null
+    }
+  },
+  "label": "$$price"
+}

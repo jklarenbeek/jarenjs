@@ -1,0 +1,15 @@
+{
+  "$query": "0.1",
+  "$expr": {
+    "$for": {
+      "b": "$.store.book[*]"
+    },
+    "$where": {
+      "$ge": [
+        "$b.price",
+        "$minPrice"
+      ]
+    },
+    "$return": "$b.title"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$let": {
+    "books": "$.store.book[*]"
+  },
+  "$return": {
+    "$some": {
+      "b": "$books"
+    },
+    "$satisfies": {
+      "$gt": [
+        "$b.price",
+        20
+      ]
+    }
+  }
+}
