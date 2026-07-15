@@ -431,7 +431,8 @@ describe('normalized paths (RFC 9535 2.7)', () => {
   });
 
   it('should escape names in normalized paths', () => {
-    const data = { 'a b': { "c'd": { ' \n\\': 1 } } };
+    const nulKey = String.fromCharCode(0) + '\n\\';
+    const data = { 'a b': { "c'd": { [nulKey]: 1 } } };
     const q = compileJSONPath('$..*');
     const paths = q.paths(data);
     assert.deepEqual(paths, [
@@ -490,6 +491,117 @@ describe('compiled query API', () => {
   it('should answer one-shot queries through the cache', () => {
     assert.deepEqual(queryJSONPath('$[0]', ['a']), ['a']);
     assert.deepEqual(queryJSONPath('$[0]', ['b']), ['b']);
+  });
+});
+
+describe('I-Regexp conformance (RFC 9485)', () => {
+  // RFC 9535 2.4.6/2.4.7: match()/search() with a pattern that is not a
+  // valid I-Regexp must yield LogicalFalse, even when ECMAScript would
+  // happily execute it.
+  it('should reject ECMAScript-only syntax as LogicalFalse', () => {
+    assert.deepEqual(values('$[?match(@, "(?=a)a")]', ['a']), []); // lookahead
+    assert.deepEqual(values('$[?match(@, "(?:a)")]', ['a']), []); // non-capturing group
+    assert.deepEqual(values('$[?match(@, "(?i)a")]', ['A']), []); // inline flags
+    assert.deepEqual(values('$[?match(@, "(a)\\\\1")]', ['aa']), []); // backreference
+    assert.deepEqual(values('$[?search(@, "\\\\d")]', ['5']), []); // multi-char escape
+    assert.deepEqual(values('$[?search(@, "\\\\w")]', ['x']), []);
+    assert.deepEqual(values('$[?search(@, "\\\\b5")]', ['5']), []); // word boundary
+    assert.deepEqual(values('$[?match(@, "a*?")]', ['a']), []); // lazy quantifier
+    assert.deepEqual(values('$[?match(@, "a{1,2}?")]', ['a']), []);
+    assert.deepEqual(values('$[?match(@, "[]")]', ['a']), []); // empty class
+    assert.deepEqual(values('$[?match(@, "[^]")]', ['a']), []); // forbidden by RFC 9485
+    assert.deepEqual(values('$[?match(@, "\\\\p{Xx}")]', ['a']), []); // unknown category
+    assert.deepEqual(values('$[?match(@, "\\\\p{Lul}")]', ['a']), []);
+    assert.deepEqual(values('$[?match(@, "a{2,1}")]', ['a']), []); // out-of-order bounds
+  });
+
+  it('should give unescaped ^ and $ anchor semantics per the RFC 9485 5.3 conversion', () => {
+    // the CTS "explicit caret/dollar" tests require this behavior
+    assert.deepEqual(values('$[?match(@, "^ab.*")]', ['abc', 'axc', 'ab', 'xab']), ['abc', 'ab']);
+    assert.deepEqual(values('$[?match(@, ".*bc$")]', ['abc', 'axc', 'ab', 'abcx']), ['abc']);
+    assert.deepEqual(values('$[?search(@, "^ab")]', ['xab', 'aby']), ['aby']);
+    // literal forms: '\^' is a valid escape, a literal dollar needs a class
+    assert.deepEqual(values('$[?match(@, "\\\\^a")]', ['^a', 'a']), ['^a']);
+    assert.deepEqual(values('$[?match(@, "a[$]")]', ['a$', 'a']), ['a$']);
+    assert.deepEqual(values('$[?match(@, "a\\\\$")]', ['a$']), []); // \$ is not I-Regexp
+  });
+
+  it('should support the full I-Regexp feature set', () => {
+    assert.deepEqual(values('$[?match(@, "a|b")]', ['a', 'b', 'c']), ['a', 'b']);
+    assert.deepEqual(values('$[?match(@, "(ab)+")]', ['abab', 'aba']), ['abab']);
+    assert.deepEqual(values('$[?match(@, "a{2}")]', ['aa', 'a']), ['aa']);
+    assert.deepEqual(values('$[?match(@, "a{2,}")]', ['aaa', 'a']), ['aaa']);
+    assert.deepEqual(values('$[?match(@, "[a-c]")]', ['b', 'd']), ['b']);
+    assert.deepEqual(values('$[?match(@, "[^a-c]")]', ['b', 'd']), ['d']);
+    assert.deepEqual(values('$[?match(@, "[-a]")]', ['-', 'a', 'b']), ['-', 'a']);
+    assert.deepEqual(values('$[?match(@, "[a-]")]', ['-', 'a', 'b']), ['-', 'a']);
+    assert.deepEqual(values('$[?match(@, "\\\\p{Lu}")]', ['A', 'a']), ['A']);
+    assert.deepEqual(values('$[?match(@, "\\\\P{Lu}")]', ['A', 'a']), ['a']);
+    assert.deepEqual(values('$[?match(@, "\\\\(\\\\)")]', ['()']), ['()']);
+    assert.deepEqual(values('$[?match(@, "a\\\\-b")]', ['a-b']), ['a-b']); // \- outside class
+    assert.deepEqual(values('$[?match(@, "[\\\\n-\\\\r]")]', ['\n', 'a']), ['\n']); // escape range
+    assert.deepEqual(values('$[?match(@, "")]', ['', 'a']), ['']); // empty pattern
+    assert.deepEqual(values('$[?match(@, "a|")]', ['a', '']), ['a', '']); // empty branch
+  });
+});
+
+describe('Unicode scalar value ordering (RFC 9535 2.3.5.2.2)', () => {
+  it('should order strings by code points, not UTF-16 code units', () => {
+    // U+E000 < U+10000 by scalar value; UTF-16 code units say otherwise
+    assert.deepEqual(values('$[?@ < "\u{10000}"]', ['']), ['']);
+    assert.deepEqual(values('$[?@ > ""]', ['\u{10000}']), ['\u{10000}']);
+    assert.deepEqual(values('$[?@ < ""]', ['\u{10000}']), []);
+    assert.deepEqual(values('$[?@ <= "\u{10000}"]', ['\u{10000}']), ['\u{10000}']);
+  });
+
+  it('should order plain strings lexicographically', () => {
+    assert.deepEqual(values('$[?@ < "b"]', ['a', 'c']), ['a']);
+    assert.deepEqual(values('$[?@ < "ab"]', ['a', 'ab', 'abc']), ['a']);
+    assert.deepEqual(values('$[?@ >= "ab"]', ['a', 'ab', 'abc']), ['ab', 'abc']);
+  });
+});
+
+describe('lone surrogate rejection (RFC 9535 2.1)', () => {
+  const HI = String.fromCharCode(0xD834);
+  const LO = String.fromCharCode(0xDD1E);
+
+  it('should reject raw lone surrogates in member-name shorthand', () => {
+    assert.isFalse(isValidJSONPathStrict('$.' + HI));
+    assert.isFalse(isValidJSONPathStrict('$.a' + HI + 'b'));
+    assert.isFalse(isValidJSONPathStrict('$.' + LO));
+  });
+
+  it('should reject raw lone surrogates in string literals', () => {
+    assert.isFalse(isValidJSONPathStrict("$['" + HI + "']"));
+    assert.isFalse(isValidJSONPathStrict('$["' + LO + '"]'));
+  });
+
+  it('should accept well-formed raw surrogate pairs', () => {
+    assert.isTrue(isValidJSONPathStrict('$.' + HI + LO));
+    assert.isTrue(isValidJSONPathStrict("$['" + HI + LO + "']"));
+    assert.deepEqual(values('$.' + HI + LO, { [HI + LO]: 1 }), [1]);
+  });
+});
+
+describe('AST immutability', () => {
+  it('should expose a deeply frozen AST', () => {
+    const q = compileJSONPath('$.a[?@.b == 1]');
+    assert.isTrue(Object.isFrozen(q.ast));
+    assert.isTrue(Object.isFrozen(q.ast.segments));
+    assert.isTrue(Object.isFrozen(q.ast.segments[0].selectors[0]));
+    assert.isTrue(Object.isFrozen(q.ast.segments[1].selectors[0].expr));
+  });
+
+  it('should keep value mode and path mode in agreement', () => {
+    const q = compileJSONPath('$.a');
+    assert.throws(() => { q.ast.segments[0].selectors[0].name = 'b'; }, TypeError);
+    assert.deepEqual(q({ a: 1, b: 2 }), [1]);
+    assert.deepEqual(q.paths({ a: 1, b: 2 }), ["$['a']"]);
+  });
+
+  it('should return a fresh mutable AST from parseJSONPath', () => {
+    const ast = parseJSONPath('$.a');
+    assert.isFalse(Object.isFrozen(ast));
   });
 });
 

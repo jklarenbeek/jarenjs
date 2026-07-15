@@ -402,24 +402,47 @@ export class JSONPathSyntaxError extends SyntaxError {
   position: number;
 }
 
-export interface JSONPathSelector {
-  kind: 'name' | 'wildcard' | 'index' | 'slice' | 'filter';
-  name?: string;
-  index?: number;
-  start?: number | null;
-  end?: number | null;
-  step?: number | null;
-  expr?: object;
+export interface JSONPathNameSelector {
+  readonly kind: 'name';
+  readonly name: string;
 }
 
+export interface JSONPathWildcardSelector {
+  readonly kind: 'wildcard';
+}
+
+export interface JSONPathIndexSelector {
+  readonly kind: 'index';
+  readonly index: number;
+}
+
+export interface JSONPathSliceSelector {
+  readonly kind: 'slice';
+  readonly start: number | null;
+  readonly end: number | null;
+  readonly step: number | null;
+}
+
+export interface JSONPathFilterSelector {
+  readonly kind: 'filter';
+  readonly expr: object;
+}
+
+export type JSONPathSelector =
+  | JSONPathNameSelector
+  | JSONPathWildcardSelector
+  | JSONPathIndexSelector
+  | JSONPathSliceSelector
+  | JSONPathFilterSelector;
+
 export interface JSONPathSegment {
-  descendant: boolean;
-  selectors: JSONPathSelector[];
+  readonly descendant: boolean;
+  readonly selectors: readonly JSONPathSelector[];
 }
 
 export interface JSONPathAst {
-  relative: boolean;
-  segments: JSONPathSegment[];
+  readonly relative: boolean;
+  readonly segments: readonly JSONPathSegment[];
 }
 
 export interface JSONPathNode {
@@ -434,8 +457,8 @@ export interface JSONPathQuery {
   exists(data: any): boolean;
   nodes(data: any): JSONPathNode[];
   paths(data: any): string[];
-  source: string;
-  ast: JSONPathAst;
+  readonly source: string;
+  readonly ast: JSONPathAst;
 }
 
 export function parseJSONPath(source: string): JSONPathAst;
