@@ -23,7 +23,8 @@
     ".": "./src/index.js",
     "./basic": "./src/basic.js",
     "./pointer": "./src/pointer.js",
-    "./path": "./src/path.js"
+    "./path": "./src/path.js",
+    "./query": "./src/query/index.js"
   },
   "peerDependencies": {
     "@jarenjs/core": "*"
