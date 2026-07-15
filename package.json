@@ -38,6 +38,8 @@
     "commit:win32": "git commit -am v%npm_package_version% && git tag v%npm_package_version%",
     "push": "git push && git push --tags",
     "benchmark": "node ./benchmark/index.js",
+    "benchmark:jsonpath": "node ./benchmark/jsonpath.js",
+    "benchmark:jsonpath:profile": "node ./benchmark/jsonpath.js --profile --scale",
     "benchmark:generate": "npm run benchmark:generate --workspace=@jarenjs/website",
     "website:deploy": "npm run deploy --workspace=@jarenjs/website"
   },

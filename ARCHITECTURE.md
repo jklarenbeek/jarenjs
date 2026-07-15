@@ -718,6 +718,45 @@ node benchmark/debug.js '/ref.json' 'nested refs' --jaren-only
 node benchmark/debug.js '/ref.json' --silent
 ```
 
+### jsonpath.js
+
+Compliance and performance benchmark for the JSONPath (RFC 9535) compiler in
+`packages/core/src/json/path.js`. It runs the official [JSONPath Compliance
+Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite)
+(a git submodule at `benchmark/jsonpath-suite/`, like the JSON-Schema-Test-Suite
+at `benchmark/suite/`; including normalized-path verification) against Jaren
+and the RFC 9535-conformant contender
+[json-p3](https://www.npmjs.com/package/json-p3). This is a separate tool from
+`profiler.js` because the schema-draft/remotes machinery does not apply to
+JSONPath queries.
+
+```bash
+# after cloning, or when the suite is missing:
+git submodule update --init benchmark/jsonpath-suite
+```
+
+```bash
+# Compliance run over all engines (exit code 1 when Jaren fails a test)
+node benchmark/jsonpath.js
+
+# Only tests whose name contains a string, with failure details
+node benchmark/jsonpath.js 'functions, match' --verbose
+
+# Performance comparison per CTS query, plus synthetic 1000-item scenarios
+node benchmark/jsonpath.js --profile --scale
+
+# Full options
+Options:
+  --profile              Profile query performance instead of checking compliance
+  --verbose, -v          Show every compliance failure in detail
+  --iterations, -i N     Iterations per profiled query (default: 1000)
+  --top N                Show top N slowest queries in profile mode (default: 15)
+  --scale                Add synthetic 1000-item document scenarios to the profile
+  --engines a,b          Engines to run (default: jaren,json-p3)
+  --output, -o FORMAT    Output format: console, csv, json (default: console)
+  --filepath, -f PATH    Output file path for csv/json
+```
+
 ### Tool Separation
 
 Each benchmark tool has a distinct purpose:
@@ -728,6 +767,7 @@ Each benchmark tool has a distinct purpose:
 | `profiler.js` | Performance measurement and comparison | Measuring Jaren vs AJV speed |
 | `coverage.js` | Code coverage analysis | Finding untested code paths |
 | `callgraph.js` | Call graph generation | Analyzing hot paths and call chains |
+| `jsonpath.js` | JSONPath RFC 9535 compliance and performance | Verifying/benchmarking the JSONPath compiler vs json-p3 |
 
 ---
 
