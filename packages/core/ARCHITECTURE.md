@@ -119,6 +119,7 @@ flowchart TB
         subgraph JSONModules["JSON Utilities"]
             JSONIndex["json/index.js"]
             Pointer["pointer.js<br/>JSON Pointer RFC 6901"]
+            PathJSON["path.js<br/>JSONPath RFC 9535 compiler"]
             BasicJSON["basic.js<br/>JSON validation"]
         end
 
@@ -594,7 +595,7 @@ static clamp(value = 0.0, min = 0.0, max = 0.0) {
 
 ### 8. JSON Module (`json/`)
 
-JSON Pointer implementation per RFC 6901.
+The JSON addressing standards: JSON Pointer per RFC 6901 and a compiling JSONPath engine per RFC 9535.
 
 ```mermaid
 flowchart LR
@@ -607,11 +608,19 @@ flowchart LR
             Resolve["resolveDataRef()<br/>Absolute or relative"]
             GetValue["getValueByJsonPointer()<br/>Extract value from object"]
         end
+
+        subgraph Path["path.js"]
+            PathParse["parseJSONPath()<br/>strict RFC 9535 parser → AST"]
+            PathCompile["compileJSONPath()<br/>AST → specialized closures"]
+            PathQuery["queryJSONPath()<br/>one-shot + compiled-query cache"]
+            PathValid["isValidJSONPathStrict()<br/>grammar check"]
+        end
     end
 
     subgraph Usage["Used By"]
         Validate["@jarenjs/validate<br/>data keyword support"]
         Traverse["Schema traversal<br/>$ref resolution"]
+        Formats["@jarenjs/formats<br/>jsonFormats ('json-path', ...)"]
     end
 
     JSONModule --> Usage
@@ -643,6 +652,25 @@ getValueByJsonPointer(data, '', '/foo/bar');
 parseRelativeJsonPointer('1/parent');
 // { levels: 1, pointer: '/parent', hash: false }
 ```
+
+**JSONPath Compiler (path.js):**
+
+`path.js` applies the same compile-once philosophy as the schema validator to RFC 9535 queries, in two stages:
+
+1. **Parser** — a single-pass, charCode-level recursive-descent parser enforcing the complete RFC grammar: all selectors (name, wildcard, index, slice, filter), child/descendant segments, filter expressions, the built-in function extensions (`length`, `count`, `match`, `search`, `value`) and their well-typedness rules (section 2.4.3), I-JSON integer bounds, string escape rules and surrogate-pair validation. Produces a plain-object AST.
+2. **Compiler** — turns each segment into a specialized closure; selector kind, index sign, slice bounds, comparison operators and literal regexes are resolved at compile time. No `eval`/`new Function`, CSP-safe.
+
+Performance-critical decisions:
+
+- **Singular queries** (`$.a.b[3]`, only single name/index selectors) compile to a direct property walk — no intermediate arrays; the same getter implements filter comparables and existence tests.
+- **Nodelists as flat arrays**: segment functions have the shape `(input, output, root) => void`, pushing into a shared output array; the runner swaps arrays per segment and bails when empty.
+- **Nothing sentinel** (`JSONPATH_NOTHING` symbol) distinguishes a missing value from `null` in filter comparisons, per the RFC type system.
+- **I-Regexp** (RFC 9485) patterns for `match()`/`search()` are validated against the full I-Regexp grammar and translated to ECMAScript (`.` → `[^\n\r]`, `u` flag); literal patterns precompile their `RegExp`, dynamic patterns use a per-callsite monomorphic cache. Nonconforming patterns yield LogicalFalse, as the spec requires.
+- **String comparison** orders by Unicode scalar values (code points), not UTF-16 code units.
+- **Normalized-path mode** (RFC 9535 section 2.7, for `query.nodes()`/`query.paths()`) is compiled lazily on first use, so value-only queries never build path strings.
+- The exposed `query.ast` is deeply frozen so the lazily compiled path mode can never disagree with the eagerly compiled value mode.
+
+Conformance is enforced by the official JSONPath Compliance Test Suite (703 tests, including normalized paths) via `benchmark/jsonpath.js`; unit tests derived from the RFC's own examples live in `test/core/json/path.test.js`.
 
 ### 9. Object Module (`object.js`)
 
