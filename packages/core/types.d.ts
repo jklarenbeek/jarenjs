@@ -391,6 +391,59 @@ export function isValidRelativeJSONPointer(str: string): boolean;
 export function isValidJSONPath(str: string): boolean;
 
 // =============================================================================
+// JSON Module - JSONPath RFC 9535 (json/path.js)
+// =============================================================================
+
+export const JSONPATH_NOTHING: unique symbol;
+
+export class JSONPathSyntaxError extends SyntaxError {
+  constructor(message: string, source: string, position: number);
+  source: string;
+  position: number;
+}
+
+export interface JSONPathSelector {
+  kind: 'name' | 'wildcard' | 'index' | 'slice' | 'filter';
+  name?: string;
+  index?: number;
+  start?: number | null;
+  end?: number | null;
+  step?: number | null;
+  expr?: object;
+}
+
+export interface JSONPathSegment {
+  descendant: boolean;
+  selectors: JSONPathSelector[];
+}
+
+export interface JSONPathAst {
+  relative: boolean;
+  segments: JSONPathSegment[];
+}
+
+export interface JSONPathNode {
+  path: string;
+  value: any;
+}
+
+export interface JSONPathQuery {
+  (data: any): any[];
+  values(data: any): any[];
+  first(data: any): any;
+  exists(data: any): boolean;
+  nodes(data: any): JSONPathNode[];
+  paths(data: any): string[];
+  source: string;
+  ast: JSONPathAst;
+}
+
+export function parseJSONPath(source: string): JSONPathAst;
+export function compileJSONPath(source: string): JSONPathQuery;
+export function queryJSONPath(source: string, data: any): any[];
+export function isValidJSONPathStrict(str: string): boolean;
+
+// =============================================================================
 // Text Module - Base64 (text/base64.js)
 // =============================================================================
 
