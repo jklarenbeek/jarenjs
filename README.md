@@ -16,6 +16,8 @@ Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/
 
 Reproduce these numbers yourself with `node benchmark/profiler.js --profile-all --draft draft2020-12`.
 
+The same treatment is applied to JSONPath: `@jarenjs/core/json` ships an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query compiler that passes all 703 tests of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) (normalized paths included) and backs the strict `json-path` format. Run `node benchmark/jsonpath.js --profile` to compare it against [json-p3](https://www.npmjs.com/package/json-p3).
+
 This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that I used over the years; stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
 
 Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSONSchema.pdf) for a more comprehensive guide on what JSON Schema is (not Jaren!).
@@ -156,6 +158,16 @@ Options:
   --top N                Show only top N slowest tests
   --success-only         Only include tests where all agents succeed
   --verbose, -v          Verbose output
+```
+
+The JSONPath compiler has its own benchmark, driven by the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) (a git submodule at `benchmark/jsonpath-suite/`, initialized with `git submodule update --init`):
+
+```bash
+# Compliance run over all engines (Jaren and json-p3)
+node benchmark/jsonpath.js
+
+# Performance comparison per query, plus synthetic large-document scenarios
+node benchmark/jsonpath.js --profile --scale
 ```
 
 ### Code Coverage Analysis
@@ -475,12 +487,14 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `ipv4` | IP v4 address according to [RFC791](https://datatracker.ietf.org/doc/html/rfc791)
 - `ipv6` | IP v6 address according to [RFC2460](https://datatracker.ietf.org/doc/html/rfc2460)
 
-#### 🗨 Formats for json pointers
+#### 🗨 Formats for json pointers and paths
+
+These are grouped in `jsonFormats` of the `@jarenjs/formats` package.
 
 - `json-pointer` | JSON-pointer according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901)
 - `json-pointer-uri-fragment` | JSON-pointer fragment according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901#section-6)
 - `relative-json-pointer` | relative JSON-pointer according to [draft-luff-relative-json-pointer-00](https://datatracker.ietf.org/doc/html/draft-luff-relative-json-pointer-00)
-- `json-path` | JSONPath according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html)
+- `json-path` | JSONPath query according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html), checked against the complete grammar (including filter well-typedness) by the parser of the JSONPath compiler in `@jarenjs/core/json`
 
 #### 🗨 Miscellaneous formats
 

@@ -660,7 +660,11 @@ jaren.addSchema({
 Register format validators.
 
 ```javascript
-jaren.addFormats(formats.stringFormats);
+jaren
+  .addFormats(formats.stringFormats)   // email, uri, uuid, ...
+  .addFormats(formats.numberFormats)   // int8 ... float64
+  .addFormats(formats.dateTimeFormats) // date-time, duration, ...
+  .addFormats(formats.jsonFormats);    // json-pointer, json-path, ...
 ```
 
 **addFormat(name, compiler)**

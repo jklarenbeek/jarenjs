@@ -45,13 +45,6 @@ import {
   isValidIBAN,
 } from '@jarenjs/core/text';
 
-import {
-  isValidJSONPointer,
-  isValidJSONPointerUriFragment,
-  isValidRelativeJSONPointer,
-  isValidJSONPath,
-} from '@jarenjs/core/json';
-
 /**
  * @typedef {import('@jarenjs/validate').ValidationObject} ValidationObject
  * @typedef {import('@jarenjs/validate').JSONSchema} JSONSchema
@@ -68,7 +61,7 @@ import {
  * const validator = compiler(schemaObj, { format: 'email' });
  * validator('user@example.com'); // true
  */
-function createStringFormatCompiler(formatName, isFormatTest) {
+export function createStringFormatCompiler(formatName, isFormatTest) {
   return function compileStringFormat(schemaObj, jsonSchema) {
     if (jsonSchema.format !== formatName)
       throw new Error('Format is not equal to jsonSchema (should not happen!)');
@@ -436,59 +429,6 @@ export const compileUuidFormat = createStringFormatCompiler('uuid', isValidUUID)
 export const compileGuidFormat = createStringFormatCompiler('guid', isValidGUID);
 
 // =============================================================================
-// JSON Pointer Format Compilers
-// =============================================================================
-
-/**
- * Compiles a validator for the 'json-pointer' format.
- * Validates JSON Pointer strings per RFC 6901.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileJsonPointerFormat = createStringFormatCompiler('json-pointer', isValidJSONPointer);
-
-/**
- * Compiles a validator for the 'json-pointer-uri-fragment' format.
- * Validates JSON Pointer URI fragment strings (e.g., #/foo/bar).
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileJsonPointerUriFragmentFormat = createStringFormatCompiler('json-pointer-uri-fragment', isValidJSONPointerUriFragment);
-
-/**
- * Compiles a validator for the 'relative-json-pointer' format.
- * Validates Relative JSON Pointer strings.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileRelativeJsonPointerFormat = createStringFormatCompiler('relative-json-pointer', isValidRelativeJSONPointer);
-
-// =============================================================================
-// JSONPath Format Compiler (RFC 9535)
-// =============================================================================
-
-/**
- * Compiles a validator for the 'json-path' format.
- * Validates JSONPath expressions per RFC 9535.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- * @example
- * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$.store.book[0].title'); // true
- * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$..name'); // true
- * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$[*]'); // true
- * compileJsonPathFormat(schemaObj, { format: 'json-path' })('store'); // false (with error)
- */
-export const compileJsonPathFormat = createStringFormatCompiler('json-path', isValidJSONPath);
-
-// =============================================================================
 // ISBN Format Compilers
 // =============================================================================
 
@@ -627,12 +567,6 @@ export const formatValidators = {
   // UUID & GUID
   'uuid': compileUuidFormat,
   'guid': compileGuidFormat,
-  // JSON Pointer
-  'json-pointer': compileJsonPointerFormat,
-  'json-pointer-uri-fragment': compileJsonPointerUriFragmentFormat,
-  'relative-json-pointer': compileRelativeJsonPointerFormat,
-  // JSONPath
-  'json-path': compileJsonPathFormat,
   // ISBN
   'isbn10': compileIsbn10Format,
   'isbn13': compileIsbn13Format,

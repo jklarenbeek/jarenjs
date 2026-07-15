@@ -13,7 +13,8 @@ function buildValidator(draft, remoteSchemas, options = undefined) {
   const jaren = new JarenValidator(options ? new ValidatorOptions(options) : undefined)
     .addFormats(formats.numberFormats)
     .addFormats(formats.stringFormats)
-    .addFormats(formats.dateTimeFormats);
+    .addFormats(formats.dateTimeFormats)
+    .addFormats(formats.jsonFormats);
 
   // Add meta-schemas using addMetaSchema which properly processes internal refs
   // This is necessary for drafts like 2019-09 and 2020-12 that have multiple meta-schemas

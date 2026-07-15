@@ -1,6 +1,6 @@
 /**
  * JarenJS Formats - TypeScript Type Definitions
- * String, number, and date-time format validators
+ * String, number, date-time and JSON format validators
  */
 
 import { ValidationObject, JSONSchema } from '@jarenjs/validate';
@@ -68,14 +68,6 @@ export const compileIpv6Format: FormatCompiler;
 export const compileUuidFormat: FormatCompiler;
 export const compileGuidFormat: FormatCompiler;
 
-// JSON Pointer
-export const compileJsonPointerFormat: FormatCompiler;
-export const compileJsonPointerUriFragmentFormat: FormatCompiler;
-export const compileRelativeJsonPointerFormat: FormatCompiler;
-
-// JSONPath
-export const compileJsonPathFormat: FormatCompiler;
-
 // ISBN
 export const compileIsbn10Format: FormatCompiler;
 export const compileIsbn13Format: FormatCompiler;
@@ -94,7 +86,29 @@ export const compileIbanFormat: FormatCompiler;
 /**
  * All string format validators keyed by format name
  */
-export const formatValidators: Record<string, FormatCompiler>;
+export const stringFormats: Record<string, FormatCompiler>;
+
+// =============================================================================
+// JSON Formats (json.js)
+// =============================================================================
+
+// JSON Pointer (RFC 6901)
+export const compileJsonPointerFormat: FormatCompiler;
+export const compileJsonPointerUriFragmentFormat: FormatCompiler;
+export const compileRelativeJsonPointerFormat: FormatCompiler;
+
+// JSONPath (RFC 9535, strict grammar via the @jarenjs/core/json parser)
+export const compileJsonPathFormat: FormatCompiler;
+
+/**
+ * All JSON format validators keyed by format name
+ */
+export const jsonFormats: {
+  'json-pointer': typeof compileJsonPointerFormat;
+  'json-pointer-uri-fragment': typeof compileJsonPointerUriFragmentFormat;
+  'relative-json-pointer': typeof compileRelativeJsonPointerFormat;
+  'json-path': typeof compileJsonPathFormat;
+};
 
 // =============================================================================
 // Date-Time Formats

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { JarenValidator } from '@jarenjs/validate';
-import { stringFormats, numberFormats, dateTimeFormats } from '@jarenjs/formats';
+import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jarenjs/formats';
 
 /**
  * Detect a friendly draft name from a schema's $schema declaration.
@@ -39,7 +39,8 @@ export function useJarenValidator(options = {}) {
     })
       .addFormats(stringFormats)
       .addFormats(numberFormats)
-      .addFormats(dateTimeFormats);
+      .addFormats(dateTimeFormats)
+      .addFormats(jsonFormats);
   }, [formatAssertion]);
 
   const compileSchema = useCallback((schema) => {
