@@ -12,6 +12,8 @@ import {
   getSegmenter,
   isAsciiString,
   getStringLength,
+  countCodePoints,
+  compareCodePoints,
 } from '@jarenjs/core/string';
 
 describe('isStringEmpty', () => {
@@ -207,5 +209,60 @@ describe('getStringLength', () => {
   it('should handle empty string', () => {
     assert.deepEqual(getStringLength(''), 0);
     assert.deepEqual(getStringLength('', true), 0);
+  });
+});
+
+describe('countCodePoints', () => {
+  it('should count ASCII strings by character', () => {
+    assert.deepEqual(countCodePoints(''), 0);
+    assert.deepEqual(countCodePoints('hello'), 5);
+  });
+
+  it('should count BMP characters as one code point', () => {
+    assert.deepEqual(countCodePoints('héllo'), 5);
+    assert.deepEqual(countCodePoints('日本語'), 3);
+    assert.deepEqual(countCodePoints('｡'), 1);
+  });
+
+  it('should count surrogate pairs as one code point', () => {
+    assert.deepEqual(countCodePoints('🎉'), 1); // 2 UTF-16 code units
+    assert.deepEqual(countCodePoints('a\u{10000}b'), 3);
+    assert.deepEqual(countCodePoints('𝄞𝄞'), 2);
+  });
+
+  it('should tolerate lone surrogates as one code point each', () => {
+    assert.deepEqual(countCodePoints('\uD800'), 1);
+    assert.deepEqual(countCodePoints('\uDC00'), 1);
+    assert.deepEqual(countCodePoints('a\uD800b'), 3); // lone high before non-low
+    assert.deepEqual(countCodePoints('\uDC00\uD800'), 2); // reversed pair
+  });
+});
+
+describe('compareCodePoints', () => {
+  it('should return 0 for equal strings', () => {
+    assert.deepEqual(compareCodePoints('', ''), 0);
+    assert.deepEqual(compareCodePoints('abc', 'abc'), 0);
+    assert.deepEqual(compareCodePoints('a\u{10000}', 'a\u{10000}'), 0);
+  });
+
+  it('should order by the first differing code point', () => {
+    assert.deepEqual(compareCodePoints('abc', 'abd'), -1);
+    assert.deepEqual(compareCodePoints('abd', 'abc'), 1);
+    assert.deepEqual(compareCodePoints('b', 'a'), 1);
+  });
+
+  it('should sort a prefix before the longer string', () => {
+    assert.deepEqual(compareCodePoints('ab', 'abc'), -1);
+    assert.deepEqual(compareCodePoints('abc', 'ab'), 1);
+    assert.deepEqual(compareCodePoints('', 'a'), -1);
+  });
+
+  it('should order by Unicode scalar values where UTF-16 code units disagree', () => {
+    // U+FF61 (halfwidth ideographic full stop) vs U+10000 (surrogate pair):
+    // native < compares code units and puts the pair first — scalar order
+    // puts U+FF61 first
+    assert.isTrue('｡' > '\u{10000}');
+    assert.deepEqual(compareCodePoints('｡', '\u{10000}'), -1);
+    assert.deepEqual(compareCodePoints('\u{10000}', '｡'), 1);
   });
 });

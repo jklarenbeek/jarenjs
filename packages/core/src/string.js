@@ -143,14 +143,52 @@ export function getStringLength(str, useGrapheme = false) {
         return count;
       }
       // No cluster-forming characters: count code points (surrogate aware)
-      let count = i;
-      for (let j = i; j < len; j++) {
-        const c = str.charCodeAt(j);
-        if (c >= 0xD800 && c <= 0xDBFF) j++;
-        count++;
-      }
-      return count;
+      return countCodePoints(str);
     }
   }
   return len;
+}
+
+/**
+ * Count the Unicode code points of a string (surrogate-pair aware;
+ * a lone surrogate counts as one code point).
+ * @param {string} str
+ * @returns {number}
+ */
+export function countCodePoints(str) {
+  const slen = str.length;
+  let count = 0;
+  for (let i = 0; i < slen; i++) {
+    const c = str.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < slen) {
+      const d = str.charCodeAt(i + 1);
+      if (d >= 0xDC00 && d <= 0xDFFF)
+        i++;
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Compare two strings by Unicode scalar values (code points), per
+ * RFC 9535 section 2.3.5.2.2. This differs from JavaScript's native
+ * `<`, which compares UTF-16 code units and orders surrogate pairs
+ * (U+10000 and up) below unpaired BMP characters in U+E000-U+FFFF.
+ * When one string is a prefix of the other, the shorter sorts first.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} -1 when a < b, 0 when equal, 1 when a > b
+ */
+export function compareCodePoints(a, b) {
+  const alen = a.length;
+  const blen = b.length;
+  const m = alen < blen ? alen : blen;
+  let i = 0;
+  while (i < m && a.charCodeAt(i) === b.charCodeAt(i))
+    i++;
+  if (i === m)
+    return alen === blen ? 0 : (alen < blen ? -1 : 1);
+  // differing code units at i can never decode to equal code points
+  return a.codePointAt(i) < b.codePointAt(i) ? -1 : 1;
 }

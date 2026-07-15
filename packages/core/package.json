@@ -27,6 +27,7 @@
     "./integer": "./src/integer.js",
     "./number": "./src/number.js",
     "./object": "./src/object.js",
+    "./scan": "./src/scan.js",
     "./string": "./src/string.js",
     "./text": "./src/text/index.js",
     "./text/*": "./src/text/*.js",

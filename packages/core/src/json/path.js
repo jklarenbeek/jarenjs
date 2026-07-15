@@ -24,6 +24,42 @@
 
 //#region constants & shared helpers
 
+import { equalsJson } from '../object.js';
+import { countCodePoints, compareCodePoints } from '../string.js';
+import { compileIRegexp } from '../text/iregexp.js';
+import {
+  CC_TAB,
+  CC_LF,
+  CC_CR,
+  CC_SPACE,
+  CC_BANG,
+  CC_DQUOTE,
+  CC_DOLLAR,
+  CC_AMP,
+  CC_SQUOTE,
+  CC_LPAREN,
+  CC_RPAREN,
+  CC_STAR,
+  CC_COMMA,
+  CC_MINUS,
+  CC_DOT,
+  CC_SLASH,
+  CC_0,
+  CC_9,
+  CC_COLON,
+  CC_LT,
+  CC_EQ,
+  CC_GT,
+  CC_QUESTION,
+  CC_AT,
+  CC_LBRACKET,
+  CC_BACKSLASH,
+  CC_RBRACKET,
+  CC_UNDERSCORE,
+  CC_PIPE,
+  isDigitCode,
+} from '../scan.js';
+
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
  * distinct from the JSON value `null`.
@@ -70,40 +106,6 @@ const FUNCTIONS = {
 //#endregion
 
 //#region parser
-
-const CC_TAB = 0x09;
-const CC_LF = 0x0A;
-const CC_CR = 0x0D;
-const CC_SPACE = 0x20;
-const CC_BANG = 0x21;
-const CC_DQUOTE = 0x22;
-const CC_DOLLAR = 0x24;
-const CC_AMP = 0x26;
-const CC_SQUOTE = 0x27;
-const CC_LPAREN = 0x28;
-const CC_RPAREN = 0x29;
-const CC_STAR = 0x2A;
-const CC_COMMA = 0x2C;
-const CC_MINUS = 0x2D;
-const CC_DOT = 0x2E;
-const CC_SLASH = 0x2F;
-const CC_0 = 0x30;
-const CC_9 = 0x39;
-const CC_COLON = 0x3A;
-const CC_LT = 0x3C;
-const CC_EQ = 0x3D;
-const CC_GT = 0x3E;
-const CC_QUESTION = 0x3F;
-const CC_AT = 0x40;
-const CC_LBRACKET = 0x5B;
-const CC_BACKSLASH = 0x5C;
-const CC_RBRACKET = 0x5D;
-const CC_UNDERSCORE = 0x5F;
-const CC_PIPE = 0x7C;
-
-function isDigitCode(c) {
-  return c >= CC_0 && c <= CC_9;
-}
 
 function isNameFirstCode(c) {
   return (c >= 0x41 && c <= 0x5A) // A-Z
@@ -776,87 +778,22 @@ export function parseJSONPath(source) {
 
 //#region filter compilation
 
-/**
- * Structural equality of two JSON values per RFC 9535 section 2.3.5.2.2.
- */
-function deepEquals(a, b) {
-  if (a === b)
-    return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
-    return false;
-  const aIsArray = Array.isArray(a);
-  if (aIsArray !== Array.isArray(b))
-    return false;
-  if (aIsArray) {
-    const alen = a.length;
-    if (alen !== b.length)
-      return false;
-    for (let i = 0; i < alen; i++) {
-      if (!deepEquals(a[i], b[i]))
-        return false;
-    }
-    return true;
-  }
-  let count = 0;
-  for (const key in a) {
-    if (!hasOwn(a, key))
-      continue;
-    if (!hasOwn(b, key) || !deepEquals(a[key], b[key]))
-      return false;
-    count++;
-  }
-  for (const key in b) {
-    if (hasOwn(b, key))
-      count--;
-  }
-  return count === 0;
-}
-
+// structural equality per RFC 9535 section 2.3.5.2.2 (equalsJson),
+// lifted over the JSONPath-specific NOTHING sentinel
 function cmpEquals(a, b) {
   if (a === NOTHING || b === NOTHING)
     return a === b;
-  return deepEquals(a, b);
+  return equalsJson(a, b);
 }
 
-/**
- * Compare two strings by Unicode scalar values (code points), per
- * RFC 9535 section 2.3.5.2.2. This differs from JavaScript's native
- * `<`, which compares UTF-16 code units and orders surrogate pairs
- * (U+10000 and up) below unpaired BMP characters in U+E000-U+FFFF.
- */
-function stringLessCodePoints(a, b) {
-  const alen = a.length;
-  const blen = b.length;
-  const m = alen < blen ? alen : blen;
-  let i = 0;
-  while (i < m && a.charCodeAt(i) === b.charCodeAt(i))
-    i++;
-  if (i === m)
-    return alen < blen;
-  return a.codePointAt(i) < b.codePointAt(i);
-}
-
+// numbers by value, strings by Unicode scalar values (RFC 9535
+// section 2.3.5.2.2); other types do not order
 function cmpLess(a, b) {
   if (typeof a === 'number')
     return typeof b === 'number' && a < b;
   if (typeof a === 'string')
-    return typeof b === 'string' && stringLessCodePoints(a, b);
+    return typeof b === 'string' && compareCodePoints(a, b) < 0;
   return false;
-}
-
-function countCodePoints(str) {
-  const slen = str.length;
-  let count = 0;
-  for (let i = 0; i < slen; i++) {
-    const c = str.charCodeAt(i);
-    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < slen) {
-      const d = str.charCodeAt(i + 1);
-      if (d >= 0xDC00 && d <= 0xDFFF)
-        i++;
-    }
-    count++;
-  }
-  return count;
 }
 
 function countOwnKeys(obj) {
@@ -866,295 +803,6 @@ function countOwnKeys(obj) {
       count++;
   }
   return count;
-}
-
-// single-character escapes allowed by RFC 9485: \( \) \* \+ \- \. \? \[ \\ \] \^ \n \r \t \{ \| \}
-const IREGEXP_SINGLE_ESC = '()*+-.?[\\]^nrt{|}';
-
-// Unicode general categories allowed in \p{...} / \P{...} (RFC 9485):
-// the key is the major category, the value the allowed subcategory letters
-const IREGEXP_CATEGORIES = {
-  L: 'lmotu',
-  M: 'cen',
-  N: 'dlo',
-  P: 'cdefios',
-  Z: 'lps',
-  S: 'ckmo',
-  C: 'cfno',
-};
-
-/**
- * Validate an I-Regexp (RFC 9485) against its complete ABNF grammar and
- * translate it to an equivalent ECMAScript pattern (RFC 9485 section 5.3):
- *
- * - unescaped dots outside character classes become [^\n\r]
- * - '\-' outside a character class becomes '-' (not a valid ECMAScript
- *   escape under the 'u' flag)
- * - unescaped '^' and '$' (grammatically NormalChars) pass through
- *   unchanged: the RFC's own ECMAScript/PCRE/RE2/Ruby conversions
- *   (sections 5.3/5.4) leave them alone, which gives them anchor
- *   semantics, and the official JSONPath compliance test suite expects
- *   exactly that; write '\^' for a literal caret and '[$]' for a
- *   literal dollar ('\$' is not a valid I-Regexp escape)
- *
- * I-Regexp deliberately excludes lookaround, backreferences, lazy
- * quantifiers, multi-character escapes (\d \s \w), and inline flags; per
- * RFC 9535 sections 2.4.6/2.4.7 a nonconforming pattern makes
- * match()/search() yield LogicalFalse, so this returns null for them.
- *
- * @param {string} pattern - The I-Regexp pattern
- * @returns {string|null} The ECMAScript pattern source, or null when invalid
- */
-function translateIRegexp(pattern) {
-  const n = pattern.length;
-  let i = 0;
-  let out = '';
-
-  // reads the code point at i; -1 marks a lone surrogate (not a
-  // Unicode scalar value, so never valid in an I-Regexp)
-  function codePoint() {
-    const c = pattern.charCodeAt(i);
-    if (c >= 0xD800 && c <= 0xDFFF) {
-      if (c >= 0xDC00 || i + 1 >= n)
-        return -1;
-      const d = pattern.charCodeAt(i + 1);
-      return (d >= 0xDC00 && d <= 0xDFFF) ? pattern.codePointAt(i) : -1;
-    }
-    return c;
-  }
-
-  function emitCodePoint(cp) {
-    const width = cp > 0xFFFF ? 2 : 1;
-    out += pattern.slice(i, i + width);
-    i += width;
-  }
-
-  // NormalChar = %x00-27 / "," / "-" / %x2F-3E / %x40-5A / %x5E-7A / %x7E-D7FF / %xE000-10FFFF
-  function isNormalChar(cp) {
-    return cp <= 0x27
-      || cp === 0x2C || cp === 0x2D
-      || (cp >= 0x2F && cp <= 0x3E)
-      || (cp >= 0x40 && cp <= 0x5A)
-      || (cp >= 0x5E && cp <= 0x7A)
-      || cp >= 0x7E; // codePoint() already excluded surrogates
-  }
-
-  // CCchar = %x00-2C / %x2E-5A / %x5E-D7FF / %xE000-10FFFF (or SingleCharEsc)
-  function isCCchar(cp) {
-    return cp !== 0x2D && cp !== 0x5B && cp !== 0x5C && cp !== 0x5D;
-  }
-
-  // "\" already consumed; SingleCharEsc / catEsc / complEsc
-  function parseEscape(inClass) {
-    if (i >= n)
-      return false;
-    const ch = pattern[i];
-    if (ch === 'p' || ch === 'P') {
-      i++;
-      if (pattern[i] !== '{')
-        return false;
-      i++;
-      const sub = IREGEXP_CATEGORIES[pattern[i]];
-      if (sub === undefined)
-        return false;
-      let prop = pattern[i];
-      i++;
-      if (pattern[i] !== '}') {
-        if (i >= n || !sub.includes(pattern[i]))
-          return false;
-        prop += pattern[i];
-        i++;
-        if (pattern[i] !== '}')
-          return false;
-      }
-      i++;
-      out += '\\' + ch + '{' + prop + '}';
-      return true;
-    }
-    if (!IREGEXP_SINGLE_ESC.includes(ch))
-      return false;
-    // '\-' is a valid I-Regexp escape but not a valid ECMAScript 'u'
-    // escape outside a character class
-    out += (ch === '-' && !inClass) ? '-' : '\\' + ch;
-    i++;
-    return true;
-  }
-
-  // CCE1 = ( CCchar [ "-" CCchar ] ) / charClassEsc
-  function parseCCE1() {
-    let rangeStart = false; // \p{...} cannot start a range
-    if (pattern.charCodeAt(i) === 0x5C) { // backslash
-      i++;
-      const isCat = pattern[i] === 'p' || pattern[i] === 'P';
-      if (!parseEscape(true))
-        return false;
-      rangeStart = !isCat;
-    }
-    else {
-      const cp = codePoint();
-      if (cp < 0 || !isCCchar(cp))
-        return false;
-      emitCodePoint(cp);
-      rangeStart = true;
-    }
-    // optional range: "-" CCchar (a trailing "-]" belongs to the class)
-    if (rangeStart && pattern[i] === '-' && i + 1 < n && pattern[i + 1] !== ']') {
-      out += '-';
-      i++;
-      if (pattern.charCodeAt(i) === 0x5C) {
-        i++;
-        return pattern[i] !== 'p' && pattern[i] !== 'P' && parseEscape(true);
-      }
-      const cp = codePoint();
-      if (cp < 0 || !isCCchar(cp))
-        return false;
-      emitCodePoint(cp);
-    }
-    return true;
-  }
-
-  // charClassExpr = "[" [ "^" ] ( "-" / CCE1 ) *CCE1 [ "-" ] "]"
-  // (with the extra RFC 9485 restriction that "[^]" is not allowed)
-  function parseCharClassExpr() {
-    out += '[';
-    i++; // consume '['
-    if (pattern[i] === '^') {
-      out += '^';
-      i++;
-    }
-    if (pattern[i] === '-') {
-      out += '\\-';
-      i++;
-    }
-    else if (i >= n || pattern[i] === ']' || !parseCCE1()) {
-      return false;
-    }
-    for (;;) {
-      if (i >= n)
-        return false;
-      const ch = pattern[i];
-      if (ch === ']') {
-        out += ']';
-        i++;
-        return true;
-      }
-      if (ch === '-') { // only valid as the trailing "-]"
-        if (pattern[i + 1] !== ']')
-          return false;
-        out += '\\-]';
-        i += 2;
-        return true;
-      }
-      if (!parseCCE1())
-        return false;
-    }
-  }
-
-  // atom = NormalChar / charClass / ( "(" i-regexp ")" )
-  function parseAtom() {
-    const ch = pattern[i];
-    if (ch === '(') {
-      out += '(';
-      i++;
-      if (!parseAlternation())
-        return false;
-      if (pattern[i] !== ')')
-        return false;
-      out += ')';
-      i++;
-      return true;
-    }
-    if (ch === '.') { // matches any character except \n and \r
-      out += '[^\\n\\r]';
-      i++;
-      return true;
-    }
-    if (ch === '\\') {
-      i++;
-      return parseEscape(false);
-    }
-    if (ch === '[')
-      return parseCharClassExpr();
-    const cp = codePoint();
-    if (cp < 0 || !isNormalChar(cp))
-      return false;
-    emitCodePoint(cp);
-    return true;
-  }
-
-  // piece = atom [ quantifier ]
-  function parsePiece() {
-    if (!parseAtom())
-      return false;
-    const ch = pattern[i];
-    if (ch === '*' || ch === '+' || ch === '?') {
-      out += ch;
-      i++;
-    }
-    else if (ch === '{') { // range-quantifier = "{" QuantExact [ "," [ QuantExact ] ] "}"
-      let j = i + 1;
-      const first = j;
-      while (j < n && pattern.charCodeAt(j) >= CC_0 && pattern.charCodeAt(j) <= CC_9)
-        j++;
-      if (j === first)
-        return false;
-      if (pattern[j] === ',') {
-        j++;
-        while (j < n && pattern.charCodeAt(j) >= CC_0 && pattern.charCodeAt(j) <= CC_9)
-          j++;
-      }
-      if (pattern[j] !== '}')
-        return false;
-      out += pattern.slice(i, j + 1);
-      i = j + 1;
-    }
-    return true;
-  }
-
-  // branch = *piece
-  function parseBranch() {
-    while (i < n) {
-      const ch = pattern[i];
-      if (ch === '|' || ch === ')')
-        return true;
-      if (!parsePiece())
-        return false;
-    }
-    return true;
-  }
-
-  // i-regexp = branch *( "|" branch )
-  function parseAlternation() {
-    if (!parseBranch())
-      return false;
-    while (pattern[i] === '|') {
-      out += '|';
-      i++;
-      if (!parseBranch())
-        return false;
-    }
-    return true;
-  }
-
-  return (parseAlternation() && i === n) ? out : null;
-}
-
-/**
- * Compile an I-Regexp into an ECMAScript RegExp.
- * @param {string} pattern - The I-Regexp pattern
- * @param {boolean} fullMatch - Anchor for match() (true) or leave free for search() (false)
- * @returns {RegExp|null} null when the pattern is not a valid I-Regexp
- */
-function iregexpToRegExp(pattern, fullMatch) {
-  const translated = translateIRegexp(pattern);
-  if (translated === null)
-    return null;
-  try {
-    return new RegExp(fullMatch ? `^(?:${translated})$` : translated, 'u');
-  }
-  catch {
-    return null;
-  }
 }
 
 /**
@@ -1273,7 +921,7 @@ function compileRegexTest(func, fullMatch) {
   if (patternArg.kind === 'literal') {
     if (typeof patternArg.value !== 'string')
       return () => false;
-    const re = iregexpToRegExp(patternArg.value, fullMatch);
+    const re = compileIRegexp(patternArg.value, fullMatch);
     if (re === null)
       return () => false;
     return (current, root) => {
@@ -1294,7 +942,7 @@ function compileRegexTest(func, fullMatch) {
       return false;
     if (p !== lastPattern) {
       lastPattern = p;
-      lastRegExp = iregexpToRegExp(p, fullMatch);
+      lastRegExp = compileIRegexp(p, fullMatch);
     }
     return lastRegExp !== null && lastRegExp.test(s);
   };

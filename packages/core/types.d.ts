@@ -311,6 +311,9 @@ export function getIntishType(obj: unknown, def?: number): number | undefined;
 /** Deep equality check for objects, arrays, maps, sets, typed arrays */
 export function equalsDeep(target: unknown, source: unknown): boolean;
 
+/** Structural equality of two JSON values (RFC 9535 §2.3.5.2.2); JSON-only hot-path variant of equalsDeep */
+export function equalsJson(a: unknown, b: unknown): boolean;
+
 /** Merge multiple Maps into one */
 export function mergeMap<K, V>(map: Map<K, V>, ...iterables: Map<K, V>[]): void;
 
@@ -331,6 +334,52 @@ export function createRegExp(pattern: string | RegExp | null | undefined): RegEx
 export function getSegmenter(): Intl.Segmenter;
 export function isAsciiString(str: string): boolean;
 export function getStringLength(str: string, useGrapheme?: boolean): number;
+
+/** Count Unicode code points (surrogate-pair aware) */
+export function countCodePoints(str: string): number;
+
+/** Compare two strings by Unicode scalar values instead of UTF-16 code units */
+export function compareCodePoints(a: string, b: string): -1 | 0 | 1;
+
+// =============================================================================
+// Scan Module (scan.js)
+// =============================================================================
+
+export const CC_TAB: 0x09;
+export const CC_LF: 0x0A;
+export const CC_CR: 0x0D;
+export const CC_SPACE: 0x20;
+export const CC_BANG: 0x21;
+export const CC_DQUOTE: 0x22;
+export const CC_DOLLAR: 0x24;
+export const CC_AMP: 0x26;
+export const CC_SQUOTE: 0x27;
+export const CC_LPAREN: 0x28;
+export const CC_RPAREN: 0x29;
+export const CC_STAR: 0x2A;
+export const CC_COMMA: 0x2C;
+export const CC_MINUS: 0x2D;
+export const CC_DOT: 0x2E;
+export const CC_SLASH: 0x2F;
+export const CC_0: 0x30;
+export const CC_9: 0x39;
+export const CC_COLON: 0x3A;
+export const CC_LT: 0x3C;
+export const CC_EQ: 0x3D;
+export const CC_GT: 0x3E;
+export const CC_QUESTION: 0x3F;
+export const CC_AT: 0x40;
+export const CC_LBRACKET: 0x5B;
+export const CC_BACKSLASH: 0x5C;
+export const CC_RBRACKET: 0x5D;
+export const CC_UNDERSCORE: 0x5F;
+export const CC_PIPE: 0x7C;
+
+export function isDigitCode(c: number): boolean;
+export function isHexDigitCode(c: number): boolean;
+export function isWhitespaceCode(c: number): boolean;
+export function isAsciiLowerCode(c: number): boolean;
+export function isAsciiUpperCode(c: number): boolean;
 
 // =============================================================================
 // Text Module - Basic (text/basic.js)
@@ -378,6 +427,19 @@ export function isValidGUID(str: string): boolean;
 export function isValidIdentifier(str: string): boolean;
 export function isValidHtmlIdentifier(str: string): boolean;
 export function isValidCssIdentifier(str: string): boolean;
+
+// =============================================================================
+// Text Module - I-Regexp RFC 9485 (text/iregexp.js)
+// =============================================================================
+
+/** Translate an I-Regexp to ECMAScript pattern source, or null when invalid */
+export function translateIRegexp(pattern: string): string | null;
+
+/** Compile an I-Regexp to a unicode RegExp (anchored when fullMatch), or null when invalid */
+export function compileIRegexp(pattern: string, fullMatch?: boolean): RegExp | null;
+
+/** Validates a pattern against the complete I-Regexp grammar */
+export function isValidIRegexp(pattern: string): boolean;
 
 // =============================================================================
 // Text Module - JSON (text/json.js)

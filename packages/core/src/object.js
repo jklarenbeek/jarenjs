@@ -7,8 +7,15 @@ import {
   isTypedArray,
 } from './index.js';
 
+const hasOwn = Object.hasOwn;
+
 /**
  * Deep equality comparison for arbitrary values.
+ *
+ * Generic JavaScript equality: understands Maps, Sets, RegExps,
+ * functions, typed arrays and class instances (constructors must
+ * match). Not the same as `equalsJson`, which compares JSON values
+ * only and is the hot-path variant — keep both.
  * @param {any} target
  * @param {any} source
  * @returns {boolean}
@@ -100,6 +107,52 @@ export function equalsDeep(target, source) {
       return false;
   }
   return true;
+}
+
+/**
+ * Structural equality of two JSON values per RFC 9535 section 2.3.5.2.2.
+ *
+ * JSON-only equality: objects compare by own enumerable keys, arrays by
+ * index, primitives by `===` (so `1 === 1.0`, and `NaN` is never equal).
+ * Anything a JSON value cannot be — Map, Set, RegExp, function, class
+ * instance — compares by identity only. Deliberately not the same as
+ * `equalsDeep`, the generic JavaScript variant: this is the hot-path
+ * comparator of the JSONPath engine — do not merge the two.
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+export function equalsJson(a, b) {
+  if (a === b)
+    return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
+    return false;
+  const aIsArray = Array.isArray(a);
+  if (aIsArray !== Array.isArray(b))
+    return false;
+  if (aIsArray) {
+    const alen = a.length;
+    if (alen !== b.length)
+      return false;
+    for (let i = 0; i < alen; i++) {
+      if (!equalsJson(a[i], b[i]))
+        return false;
+    }
+    return true;
+  }
+  let count = 0;
+  for (const key in a) {
+    if (!hasOwn(a, key))
+      continue;
+    if (!hasOwn(b, key) || !equalsJson(a[key], b[key]))
+      return false;
+    count++;
+  }
+  for (const key in b) {
+    if (hasOwn(b, key))
+      count--;
+  }
+  return count === 0;
 }
 
 /**

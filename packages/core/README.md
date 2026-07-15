@@ -10,8 +10,9 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 |---|---|
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
-| `@jarenjs/core/object` | deep equality (`equalsDeep`), map/set merging |
-| `@jarenjs/core/string` | Unicode string helpers, cached regex compilation |
+| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), map/set merging |
+| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), cached regex compilation |
+| `@jarenjs/core/scan` | char-code constants and predicates for recursive-descent parsers |
 | `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) |
 | `@jarenjs/core/integer` | `int8` ... `uint64` ranges and validators |
 | `@jarenjs/core/float` | `float16` ... `float64` constants, validators, increment/decrement |
@@ -51,7 +52,7 @@ isValidIPv6('::ffff:192.168.0.1');        // true
 isValidUriTemplate('/users{/id}{?q}');    // true (RFC 6570)
 ```
 
-Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostnames, IDN hostnames, IPv4/IPv6, MAC, URI/URL/IRI and references, URI templates), `identifiers` (UUID, GUID, C/HTML/CSS identifiers), `base64`, `basic` (alpha, numeric, hex, web colors), `misc` (ISBN-10/13, ISO 3166 country codes, IBAN), `i18n` (Unicode script tests and IDNA context checks) and a complete `punycode` implementation.
+Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostnames, IDN hostnames, IPv4/IPv6, MAC, URI/URL/IRI and references, URI templates), `identifiers` (UUID, GUID, C/HTML/CSS identifiers), `iregexp` (I-Regexp / RFC 9485 validation and translation to `RegExp`: `isValidIRegexp`, `compileIRegexp`), `base64`, `basic` (alpha, numeric, hex, web colors), `misc` (ISBN-10/13, ISO 3166 country codes, IBAN), `i18n` (Unicode script tests and IDNA context checks) and a complete `punycode` implementation.
 
 ## Dates, numbers and math
 

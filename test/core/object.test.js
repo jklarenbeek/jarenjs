@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
-import { equalsDeep, mergeMap, mergeSet } from '@jarenjs/core/object';
+import { equalsDeep, equalsJson, mergeMap, mergeSet } from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
 
@@ -128,6 +128,92 @@ describe('equalsDeep', () => {
 
   //class DeepTest { constructor(value1, value2) { this.a = value1, this.b = { c: value2 } } }
   
+});
+
+describe('equalsJson', () => {
+
+  // primitives compare by ===
+  assert.isTrue(equalsJson(42, 42),
+    'should return true when comparing two identical primitive values');
+
+  assert.isTrue(equalsJson(1, 1.0),
+    'should return true for 1 and 1.0 (JSON numbers are doubles)');
+
+  assert.isFalse(equalsJson(42, 43),
+    'should return false when comparing two different primitive values');
+
+  assert.isFalse(equalsJson(1, '1'),
+    'should return false when comparing values of different JSON types');
+
+  // null handling
+  assert.isTrue(equalsJson(null, null),
+    'should return true when comparing null with null');
+
+  assert.isFalse(equalsJson(null, {}),
+    'should return false when comparing null with an object');
+
+  assert.isFalse(equalsJson({}, null),
+    'should return false when comparing an object with null');
+
+  // deep object equality, key order independent
+  assert.isTrue(equalsJson(
+    { a: 1, b: { c: [1, 2] } },
+    { b: { c: [1, 2] }, a: 1 }
+  ), 'should return true for deeply equal objects regardless of key order');
+
+  assert.isFalse(equalsJson(
+    { a: { b: 1 } },
+    { a: { b: 2 } }
+  ), 'should return false for nested objects with different values');
+
+  // deep array equality, order dependent
+  assert.isTrue(equalsJson([1, [2, { a: 3 }]], [1, [2, { a: 3 }]]),
+    'should return true for deeply equal arrays');
+
+  assert.isFalse(equalsJson([1, 2], [2, 1]),
+    'should return false for arrays with the same items in a different order');
+
+  assert.isFalse(equalsJson([1, 2, 3], [1, 2]),
+    'should return false for arrays with different lengths');
+
+  // array vs object mismatch
+  assert.isFalse(equalsJson([], {}),
+    'should return false when comparing an array with an object');
+
+  assert.isFalse(equalsJson({ 0: 'a' }, ['a']),
+    'should return false when comparing an array-like object with an array');
+
+  // extra-key mismatch, both directions
+  assert.isFalse(equalsJson({ a: 1 }, { a: 1, b: 2 }),
+    'should return false when the second object has an extra key');
+
+  assert.isFalse(equalsJson({ a: 1, b: 2 }, { a: 1 }),
+    'should return false when the first object has an extra key');
+
+  // contrast with equalsDeep: equalsJson only sees own enumerable keys,
+  // so two functions with identical source disagree between the two
+  const fnA = function () { return 'same'; };
+  const fnB = function () { return 'same'; };
+  assert.isTrue(equalsDeep(fnA, fnB),
+    'equalsDeep should compare functions by source');
+  assert.isFalse(equalsJson(fnA, fnB),
+    'equalsJson should compare functions by identity only');
+
+  // contrast with equalsDeep: equalsJson ignores constructors,
+  // equalsDeep requires them to match
+  class ShallowJson { constructor(value) { this.key = value; } }
+  assert.isFalse(equalsDeep({ key: 'value' }, new ShallowJson('value')),
+    'equalsDeep should return false for different constructors');
+  assert.isTrue(equalsJson({ key: 'value' }, new ShallowJson('value')),
+    'equalsJson should return true for equal own enumerable keys');
+
+  // contrast with equalsDeep: Map entries are not own enumerable keys,
+  // so equalsJson cannot tell two different Maps apart
+  assert.isFalse(equalsDeep(new Map([[1, 'a']]), new Map([[2, 'b']])),
+    'equalsDeep should compare Map entries');
+  assert.isTrue(equalsJson(new Map([[1, 'a']]), new Map([[2, 'b']])),
+    'equalsJson should not look at Map entries (JSON-only semantics)');
+
 });
 
 describe('mergeMap', () => {
