@@ -569,6 +569,15 @@ describe('XQuery front-end parser', () => {
       failsWith('not(.)', "unsupported construct 'context item expression'", 4);
     });
 
+    it('should reject string constructors, annotations, and URI-qualified names by name', () => {
+      failsWith('``[]``', "unsupported construct 'string constructor'", 0);
+      failsWith('matches("x", ``[["\']]``)', "unsupported construct 'string constructor'", 13);
+      failsWith('declare %private function local:f() { 1 }; 1', "unsupported construct 'annotation'", 8);
+      failsWith('declare %Q{http://a}x variable $foo := 1; $foo', "unsupported construct 'annotation'", 8);
+      failsWith('for $Q{urn:foo}x in (1, 2) return $x', "unsupported construct 'URI-qualified name'", 5);
+      failsWith('let $Q{}b := 13 return $b', "unsupported construct 'URI-qualified name'", 5);
+    });
+
     it('should reject constructors and block expressions by name', () => {
       failsWith('<a/>', "unsupported construct 'node constructor'", 0);
       failsWith('element {} {}', "unsupported construct 'computed node constructor'", 0);

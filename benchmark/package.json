@@ -23,12 +23,15 @@
     "directory": "benchmark"
   },
   "dependencies": {
+    "@jarenjs/core": "*",
+    "@jarenjs/json": "*",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "benchmark": "^2.1.4",
     "glob": "^11.0.0",
-    "@jarenjs/core": "*",
-    "@jarenjs/json": "*",
     "json-p3": "^2.2.2"
+  },
+  "devDependencies": {
+    "fast-xml-parser": "^5.10.1"
   }
 }

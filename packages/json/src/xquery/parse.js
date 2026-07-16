@@ -58,8 +58,10 @@ import {
 } from '@jarenjs/core/scan';
 
 const CC_HASH = 0x23;
+const CC_PERCENT = 0x25;
 const CC_PLUS = 0x2B;
 const CC_SEMICOLON = 0x3B;
+const CC_BACKTICK = 0x60;
 const CC_LBRACE = 0x7B;
 const CC_RBRACE = 0x7D;
 
@@ -367,6 +369,8 @@ export function parseXQuery(source) {
     skipWS();
     const at = pos;
     const name = parseNCName();
+    if (name === 'Q' && cc(pos) === CC_LBRACE)
+      fail("unsupported construct 'URI-qualified name'", at);
     if (cc(pos) === CC_COLON && isNameFirstCode(cc(pos + 1)))
       fail("unsupported construct 'namespaced variable'", at);
     if (!VAR_NAME_RE.test(name))
@@ -861,6 +865,8 @@ export function parseXQuery(source) {
       fail("unsupported construct 'path expression'", at);
     if (c === CC_LT)
       fail("unsupported construct 'node constructor'", at);
+    if (c === CC_BACKTICK)
+      fail("unsupported construct 'string constructor'", at);
     if (isNameFirstCode(c))
       return parseNamedPrimary(at);
     return fail('expected an expression');
@@ -1599,6 +1605,8 @@ export function parseXQuery(source) {
       const w = parseNCName();
       if (w === 'declare') {
         skipWS();
+        if (cc(pos) === CC_PERCENT)
+          fail("unsupported construct 'annotation'");
         if (!isNameFirstCode(cc(pos)))
           fail('expected a declaration keyword');
         const kind = parseNCName();

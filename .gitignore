@@ -95,6 +95,9 @@ dist/
 
 # benchmark results
 benchmark/results/
+# generated from the qt3tests submodule by `npm run qt3:convert`
+benchmark/qt3-json/
+benchmark/qt3-baseline.seed.json
 
 # TODO: AI integration
 .gitignore

@@ -311,7 +311,9 @@ Each is recognized and rejected by name (`unsupported construct '...'`):
 | direct (`<a/>`) and computed node constructors, `ordered {}`, `unordered {}`, `validate {}` | `node constructor`, `computed node constructor`, ... |
 | type declarations `as T` (anywhere), `allowing empty`, window clauses, collations | `type declaration`, `allowing empty`, `window clause`, `collation` |
 | string `&`-entities, non-finite number literals (`1e400`) | `character reference`, `non-finite number literal` |
-| namespaced variables `$ns:x`; NCName variables outside `[A-Za-z_][A-Za-z0-9_]*` (e.g. `$foo-bar`) | `namespaced variable`, `unsupported variable name` |
+| string constructors `` `...` ``, ` ``[...]`` ` | `string constructor` |
+| annotations `declare %ann ...` | `annotation` |
+| namespaced variables `$ns:x`; URI-qualified names `$Q{uri}x`; NCName variables outside `[A-Za-z_][A-Za-z0-9_]*` (e.g. `$foo-bar`) | `namespaced variable`, `URI-qualified name`, `unsupported variable name` |
 | library modules, every non-`variable` prolog declaration | §4.1 |
 
 **Prime v2 candidates** (noted for planning): the simple map operator `!`
