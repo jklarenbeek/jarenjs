@@ -1,0 +1,13 @@
+{
+  "$let": { "prices": "$.store.book[*].price" },
+  "$as": { "prices": { "type": "number", "minimum": 0 } },
+  "$return": {
+    "allCheap": { "$valid": ["$prices", { "type": "number", "maximum": 100 }] },
+    "bicycle": { "$assert": ["$.store.bicycle", {
+      "$defs": { "css-color": { "type": "string", "minLength": 1 } },
+      "type": "object",
+      "required": ["color"],
+      "properties": { "color": { "$ref": "#/$defs/css-color" } }
+    }] }
+  }
+}

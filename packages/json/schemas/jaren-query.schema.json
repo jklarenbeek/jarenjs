@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarenjs.dev/schemas/jaren-query/0.1",
   "title": "Jaren JSON Query format 0.1",
-  "description": "Structural grammar of Jaren JSON Query documents (see packages/json/docs/QUERY-FORMAT.md). This schema is structural validation only: the compiler remains authoritative for semantic rules it cannot express - FLWOR clause keys apply in the fixed semantic order $for, $let, $where, $groupby, $orderby, $count, $return regardless of JSON key order; variable scoping, duplicate-binding detection and external-parameter collection are compiler rules (JQ0005/JQ0007); variable-rooted path strings are only head-checked here (full RFC 9535 segment grammar is JQ0004); per-argument runtime typing is JQ2xxx. Authored in a draft-neutral keyword subset; the draft-07 twin is a mechanical derivation.",
+  "description": "Structural grammar of Jaren JSON Query documents (see packages/json/docs/QUERY-FORMAT.md). This schema is structural validation only: the compiler remains authoritative for semantic rules it cannot express - FLWOR clause keys apply in the fixed semantic order $for, $let, $as, $where, $groupby, $orderby, $count, $return regardless of JSON key order; variable scoping, duplicate-binding detection, external-parameter collection and $as name binding are compiler rules (JQ0005/JQ0007); variable-rooted path strings are only head-checked here (full RFC 9535 segment grammar is JQ0004); embedded JSON Schema literals are taken verbatim and never meta-validated here (the type-test compiler is authoritative, JQ0008/JQ0009); per-argument runtime typing is JQ2xxx. Authored in a draft-neutral keyword subset; the draft-07 twin is a mechanical derivation.",
   "allOf": [
     { "$ref": "#/$defs/queryDocument" }
   ],
@@ -88,7 +88,8 @@
         { "$ref": "#/$defs/nonEmptyVariadicOperatorPhrase" },
         { "$ref": "#/$defs/conditionalArityOperatorPhrase" },
         { "$ref": "#/$defs/stringJoinPhrase" },
-        { "$ref": "#/$defs/replacePhrase" }
+        { "$ref": "#/$defs/replacePhrase" },
+        { "$ref": "#/$defs/schemaOperatorPhrase" }
       ]
     },
     "mapConstructor": {
@@ -128,11 +129,12 @@
       "maxItems": 2
     },
     "flworPhrase": {
-      "description": "FLWOR phrase. Clauses apply in the fixed semantic order $for, $let, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $for/$let.",
+      "description": "FLWOR phrase. Clauses apply in the fixed semantic order $for, $let, $as, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $for/$let.",
       "type": "object",
       "properties": {
         "$for": { "$ref": "#/$defs/forBindings" },
         "$let": { "$ref": "#/$defs/bindingMap" },
+        "$as": { "$ref": "#/$defs/asClause" },
         "$where": { "$ref": "#/$defs/expression" },
         "$groupby": { "$ref": "#/$defs/bindingMap" },
         "$orderby": { "$ref": "#/$defs/orderBySpec" },
@@ -343,6 +345,31 @@
       },
       "required": ["$replace"],
       "additionalProperties": false
+    },
+    "schemaLiteral": {
+      "description": "A JSON Schema literal, taken verbatim - never interpreted as a query expression, so JSON Schema's $-prefixed keywords ($ref, $defs, ...) do not collide with Rule 1. Deliberately unconstrained (a true schema is draft-neutral by definition): embedded schemas are not meta-validated by this artifact; the consumer's type-test compiler is authoritative (JQ0009)."
+    },
+    "schemaOperatorPhrase": {
+      "description": "Schema operators $valid/$assert: [expr, schema] - exactly two elements, an operand expression and a verbatim JSON Schema literal. Tuple validation is outside the draft-neutral subset, so both positions validate uniformly as schema literals here; the operand position is normalized as an ordinary expression by the compiler (JQ0xxx).",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": ["$valid", "$assert"]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/schemaLiteral" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "asClause": {
+      "description": "The $as clause: variable-name to JSON Schema literal members, applied per tuple after $for/$let binding and before $where. Each name must be bound by the same phrase's $for (including $at names) or $let - a compiler rule (JQ0005); each binding validates per item at runtime (JQ2008).",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/schemaLiteral" }
     }
   }
 }

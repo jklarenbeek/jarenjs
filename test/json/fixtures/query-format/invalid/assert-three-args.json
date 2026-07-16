@@ -1,0 +1,3 @@
+{
+  "$assert": ["$.store.book[*]", { "type": "object" }, { "type": "object" }]
+}

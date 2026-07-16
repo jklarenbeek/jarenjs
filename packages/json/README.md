@@ -309,7 +309,8 @@ Honest caveats — what each competitor is optimized for:
 
 Ideas we consider interesting or necessary for this package, roughly in order of appetite:
 
-- [ ] **JSON Schema as the query type system** — `$valid`/`$assert` operators compiled by [`@jarenjs/validate`](../validate), and the JSLT-like template layer (an XSLT derivative) on top of the query engine. The operator registry already reserves the argument kinds.
+- [x] **JSON Schema as the query type system** — the `$valid`/`$assert` operators and the `$as` FLWOR clause embed JSON Schema literals in query documents ([QUERY-FORMAT §8.11](./docs/QUERY-FORMAT.md)), compiled through the dependency-free `compileTypeTest` hook; [`@jarenjs/validate/query`](../validate) supplies the reference hook (`createTypeTestCompiler`).
+- [ ] **JSLT template layer** — the XSLT-derivative stylesheet language on top of the query engine, where template matching and typing share the JSON Schema vocabulary. Design prelude: [docs/JSLT-PRELUDE.md](./docs/JSLT-PRELUDE.md).
 - [ ] **Filter optimizer / hash joins** — hoist `$`-absolute comparables out of filter loops, fuse adjacent singular segments, and turn `$where` equijoins into hash joins instead of nested loops (see the benchmark's join row).
 - [ ] **Write operations** — `set`/`insert`/`remove` at a pointer, a normalized path, or every node a JSONPath query selects, with a copy-on-write mode.
 - [ ] **JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396)** — apply and structural diff, built on compiled pointers; a diff that emits JSON Patch doubles as a change feed for [`@jarenjs/forms`](../forms).

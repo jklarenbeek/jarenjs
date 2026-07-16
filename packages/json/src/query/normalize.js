@@ -79,16 +79,12 @@ const VAR_HEAD_RE = /^\$([A-Za-z_][A-Za-z0-9_]*)/;
 // FLWOR clause keys (QUERY-FORMAT.md section 6.1) and quantifier keys
 // (section 7). Clauses apply in the fixed semantic order of section 6.1
 // regardless of JSON key order (D7).
-const FLWOR_KEYS = new Set(['$for', '$let', '$where', '$groupby', '$orderby', '$count', '$return']);
+const FLWOR_KEYS = new Set(['$for', '$let', '$as', '$where', '$groupby', '$orderby', '$count', '$return']);
 const QUANTIFIER_KEYS = new Set(['$some', '$every', '$satisfies']);
 
 // Keys of the explicit $orderby key-spec form (section 6.6). Contextual:
 // they are not operators and stay outside the KNOWN_KEYS vocabulary.
 const ORDERBY_SPEC_KEYS = new Set(['$key', '$dir', '$empty']);
-
-// Reserved, undefined keys (QUERY-FORMAT.md section 8.1): rejected by
-// v0.1 consumers.
-const RESERVED_KEYS = new Set(['$valid', '$assert', '$as']);
 
 // Escape hatches (QUERY-FORMAT.md section 3.5): structural forms with
 // dedicated normalizer cases; every other operator lives in the registry.
@@ -365,16 +361,45 @@ function normalizeElements(arg, docPath, scope, ctx) {
   return Object.freeze(out);
 }
 
+// A JSON Schema literal (the raw schema argument of $valid/$assert and
+// the $as clause, QUERY-FORMAT.md section 8.11): taken verbatim - never
+// normalized as an expression, since JSON Schema keywords are $-prefixed
+// ($ref, $defs) and must not collide with Rule 1 - deep-copied + frozen
+// like $const, and compiled once, at query compile time, into a hot-path
+// boolean predicate by the host-installed `options.compileTypeTest` hook.
+// No hook installed is JQ0008; a hook rejection (invalid schema) is
+// JQ0009, both at the owning operator's/clause's docPath.
+function compileSchemaLiteral(value, schemaPath, opPath, ctx) {
+  if (ctx.compileTypeTest === null)
+    fail('JQ0008', 'schema operators require a type-test compiler (options.compileTypeTest)', opPath);
+  const schema = deepFreezeCopy(value);
+  let test;
+  try {
+    test = ctx.compileTypeTest(schema, schemaPath);
+  }
+  catch (e) {
+    fail('JQ0009', `invalid schema literal: ${e.message}`, opPath);
+  }
+  if (typeof test !== 'function')
+    fail('JQ0009', 'the type-test compiler did not return a predicate function', opPath);
+  return { schema, test };
+}
+
 // One argument position of a registry operator, per its declared kind:
 // 'expr' normalizes an ordinary expression; 'raw' captures the value
-// verbatim, unevaluated (reserved for the type-system work order's schema
-// arguments); 'name' captures a validated variable name string. 'raw' and
-// 'name' produce inert `raw` nodes - compile-time data, never compiled.
-function normalizeArg(kind, value, argPath, scope, ctx) {
+// verbatim, unevaluated; 'schema' is 'raw' plus a compiled type-test
+// predicate (the type-system work order's schema arguments); 'name'
+// captures a validated variable name string. 'raw', 'schema' and 'name'
+// produce inert `raw` nodes - compile-time data, never compiled.
+function normalizeArg(kind, value, argPath, scope, ctx, opPath) {
   if (kind === 'expr')
     return normalizeExpr(value, argPath, scope, ctx);
   if (kind === 'raw')
     return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value: deepFreezeCopy(value) });
+  if (kind === 'schema') {
+    const { schema, test } = compileSchemaLiteral(value, argPath, opPath, ctx);
+    return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value: schema, test });
+  }
   // 'name'
   if (typeof value !== 'string' || !VAR_NAME_RE.test(value))
     fail('JQ0003', 'expected a variable name string', argPath);
@@ -388,7 +413,7 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   const params = entry.params;
   let args;
   if (typeof params === 'string') { // the single form: the value IS the argument
-    args = [normalizeArg(params, arg, opPath, scope, ctx)];
+    args = [normalizeArg(params, arg, opPath, scope, ctx, opPath)];
   }
   else {
     const kinds = params.kinds;
@@ -397,7 +422,7 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
     args = new Array(list.length);
     for (let i = 0; i < list.length; i++) {
       const kind = kinds[i < kinds.length ? i : kinds.length - 1];
-      args[i] = normalizeArg(kind, list[i], opPath + '/' + i, scope, ctx);
+      args[i] = normalizeArg(kind, list[i], opPath + '/' + i, scope, ctx, opPath);
     }
   }
   const cards = new Array(args.length);
@@ -438,8 +463,6 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
         return normalizeOperatorCall(key, OPERATORS[key], arg, docPath, opPath, scope, ctx);
       if (FLWOR_KEYS.has(key) || QUANTIFIER_KEYS.has(key))
         return fail('JQ0003', `'${key}' cannot form a phrase on its own`, docPath);
-      if (RESERVED_KEYS.has(key))
-        return fail('JQ0002', `'${key}' is reserved and not defined in this version`, docPath);
       return failUnknownOperator(key, docPath);
     }
   }
@@ -629,6 +652,10 @@ function collectReadSlots(node, out) {
         collectReadSlots(node.forBindings[i].expr, out);
       for (let i = 0; i < node.letBindings.length; i++)
         collectReadSlots(node.letBindings[i].expr, out);
+      if (node.asChecks !== null) { // reads its own binding slots per tuple
+        for (let i = 0; i < node.asChecks.length; i++)
+          out.add(node.asChecks[i].slot);
+      }
       if (node.where !== null)
         collectReadSlots(node.where, out);
       if (node.groupby !== null) {
@@ -647,7 +674,7 @@ function collectReadSlots(node, out) {
 
 // The full FLWOR phrase (section 6). Clauses normalize - and their
 // bindings scope - in the fixed semantic order of section 6.1 (D7):
-// $for -> $let -> $where -> $groupby -> $orderby -> $count -> $return.
+// $for -> $let -> $as -> $where -> $groupby -> $orderby -> $count -> $return.
 // A $groupby rebinds the phrase's tuple variables for every later
 // clause: key names become singletons (card OPT: a key may be the empty
 // sequence), every other binding becomes the sequence of its values
@@ -666,6 +693,46 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     sc = normalizeLetBindings(obj.$let, docPath + '/$let', sc, ctx, phraseNames, letBindings);
     for (let i = before; i < letBindings.length; i++)
       tupleSlots.push({ name: letBindings[i].name, slot: letBindings[i].slot });
+  }
+
+  // $as (section 6.4): schema assertions on the phrase's own bindings,
+  // applied per tuple after $for/$let and before $where. A $for/$at
+  // variable is validated as its one bound item; a $let variable per item
+  // of its bound sequence. The names must be binding sites of THIS phrase
+  // (JQ0005 otherwise); each schema compiles once via compileSchemaLiteral.
+  let asChecks = null;
+  if (hasOwn(obj, '$as')) {
+    const asPath = docPath + '/$as';
+    const asObj = obj.$as;
+    if (!isPlainObject(asObj))
+      return fail('JQ0003', "'$as' takes an object of variable-name to schema members", asPath);
+    const names = Object.keys(asObj);
+    if (names.length === 0)
+      return fail('JQ0003', "'$as' requires at least one member", asPath);
+    const checks = new Array(names.length);
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      const checkPath = asPath + '/' + escapeToken(name);
+      let slot = -1;
+      for (let j = 0; j < tupleSlots.length; j++) {
+        if (tupleSlots[j].name === name) {
+          slot = tupleSlots[j].slot;
+          break;
+        }
+      }
+      if (slot < 0)
+        return fail('JQ0005', `'$as' names '${name}', which is not bound by this phrase's '$for'/'$let'`, checkPath);
+      let isLet = false;
+      for (let j = 0; j < letBindings.length; j++) {
+        if (letBindings[j].name === name) {
+          isLet = true;
+          break;
+        }
+      }
+      const { schema, test } = compileSchemaLiteral(asObj[name], checkPath, checkPath, ctx);
+      checks[i] = Object.freeze({ name, slot, isLet, schema, test, docPath: checkPath });
+    }
+    asChecks = Object.freeze(checks);
   }
 
   const where = hasOwn(obj, '$where')
@@ -777,7 +844,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     kind: 'flwor', card, docPath,
     forBindings: Object.freeze(forBindings),
     letBindings: Object.freeze(letBindings),
-    where,
+    asChecks, where,
     groupby: groupby === null ? null : Object.freeze(groupby),
     orderby: orderby === null ? null : Object.freeze(orderby),
     count, ret,
@@ -845,13 +912,22 @@ function normalizeExpr(value, docPath, scope, ctx) {
 /**
  * Normalize a query document into the internal AST.
  * @param {any} doc - the query document (any JSON value)
+ * @param {object} [options] - compile options
+ * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
+ *   [options.compileTypeTest] - host hook compiling a JSON Schema literal
+ *   into a boolean item predicate (QUERY-FORMAT.md section 8.11). Called
+ *   once per schema literal, at query compile time. Without it, schema
+ *   operators ($valid/$assert/$as) are compile error JQ0008.
  * @returns {{ root: object, frameSize: number, externals: {name: string, slot: number}[] }}
  *   the AST root, the frame size, and the external parameters in order of
  *   first appearance (slot order)
  * @throws {JsonQueryCompileError} on any JQ0xxx condition
  */
-export function normalizeQuery(doc) {
-  const ctx = { nextSlot: 1, externals: new Map() };
+export function normalizeQuery(doc, options = {}) {
+  const compileTypeTest = typeof options.compileTypeTest === 'function'
+    ? options.compileTypeTest
+    : null;
+  const ctx = { nextSlot: 1, externals: new Map(), compileTypeTest };
   let expr = doc;
   let rootPath = '';
   // the version envelope is only recognized at the top level (section 4)

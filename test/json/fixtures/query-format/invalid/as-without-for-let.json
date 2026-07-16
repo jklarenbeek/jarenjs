@@ -1,0 +1,4 @@
+{
+  "$as": { "b": { "type": "object" } },
+  "$return": "$b"
+}

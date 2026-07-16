@@ -1,0 +1,10 @@
+{
+  "$for": { "b": "$.store.book[?@.isbn]", "r": "$.ratings[*]" },
+  "$as": { "b": { "type": "object", "required": ["isbn", "price"] } },
+  "$where": { "$and": [
+    { "$eq": ["$b.isbn", "$r.isbn"] },
+    { "$valid": ["$r.stars", { "type": "number", "minimum": 0, "maximum": 5 }] }
+  ] },
+  "$orderby": "$b.price",
+  "$return": { "title": "$b.title", "stars": "$r.stars" }
+}

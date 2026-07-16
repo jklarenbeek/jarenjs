@@ -316,7 +316,8 @@ function compileLet(node) {
 //#region FLWOR
 // The tuple stream is a chain of nested closures, each of signature
 // `(frame, out) -> void`: a $for clause iterates its source and calls the
-// next stage per item, $let assigns and calls once, $where gates on EBV.
+// next stage per item, $let assigns and calls once, $as validates bound
+// slots against compiled type tests, $where gates on EBV.
 // A tuple IS the current state of the frame slots - no tuple objects, no
 // intermediate arrays. `out` threads the current stage's collector
 // through untouched: the result accumulator, or a barrier's state.
@@ -397,6 +398,42 @@ function compileForClause(binding, next) {
       return;
     }
     emitForItemAt(v, f, slot, atSlot, 0, next, out);
+  };
+}
+
+// One $as check (section 6.4): validate a phrase binding's frame slot per
+// tuple against its compiled type-test predicate. A $for/$at variable is
+// always exactly one item; a $let variable is validated per item of its
+// bound sequence (the empty sequence passes vacuously). Failure is JQ2008,
+// naming the variable.
+function compileAsCheck(check, next) {
+  const { name, slot, test, docPath } = check;
+  if (!check.isLet) { // a $for/$at binding: one item per tuple
+    return (f, out) => {
+      const v = f[slot];
+      if (!test(v))
+        throw new JsonQueryRuntimeError('JQ2008',
+          `variable '${name}' failed its '$as' schema: ${describeItem(v)} does not satisfy it`, docPath);
+      next(f, out);
+    };
+  }
+  return (f, out) => {
+    const v = f[slot];
+    if (v !== EMPTY) {
+      if (v instanceof Seq) {
+        const items = v.items;
+        for (let i = 0; i < items.length; i++) {
+          if (!test(items[i]))
+            throw new JsonQueryRuntimeError('JQ2008',
+              `variable '${name}' failed its '$as' schema: item ${i} (${describeItem(items[i])}) does not satisfy it`, docPath);
+        }
+      }
+      else if (!test(v)) {
+        throw new JsonQueryRuntimeError('JQ2008',
+          `variable '${name}' failed its '$as' schema: ${describeItem(v)} does not satisfy it`, docPath);
+      }
+    }
+    next(f, out);
   };
 }
 
@@ -561,7 +598,7 @@ function compileFlwor(node) {
     };
   }
 
-  // the streaming prefix $for -> $let -> $where, feeding the first
+  // the streaming prefix $for -> $let -> $as -> $where, feeding the first
   // barrier's collector (or the final sink when there is none)
   let emit = groupby !== null ? groupSink : (orderby !== null ? rowSink : sink);
   if (node.where !== null) {
@@ -572,6 +609,10 @@ function compileFlwor(node) {
       if (ebv(cond(f), condPath))
         next(f, out);
     };
+  }
+  if (node.asChecks !== null) {
+    for (let i = node.asChecks.length - 1; i >= 0; i--)
+      emit = compileAsCheck(node.asChecks[i], emit);
   }
   const lets = node.letBindings;
   for (let i = lets.length - 1; i >= 0; i--) {

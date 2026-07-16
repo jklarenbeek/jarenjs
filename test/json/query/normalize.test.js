@@ -46,10 +46,13 @@ describe('Jaren JSON Query normalizer', () => {
       failsWith({ a: { $nope: [] } }, 'JQ0002', '/a');
     });
 
-    it('should reject the reserved keys $valid/$assert/$as', () => {
-      failsWith({ $valid: 1 }, 'JQ0002', '');
-      failsWith({ $assert: 1 }, 'JQ0002', '');
-      failsWith({ $as: 'string' }, 'JQ0002', '');
+    it('should treat the schema-operator keys as vocabulary (TODO_10: no longer reserved)', () => {
+      // $valid/$assert are registry operators now: a non-array operand is
+      // JQ0003 (bad shape), not JQ0002 (unknown key)
+      failsWith({ $valid: 1 }, 'JQ0003', '/$valid');
+      failsWith({ $assert: 1 }, 'JQ0003', '/$assert');
+      // $as is a FLWOR clause key and cannot stand alone
+      failsWith({ $as: 'string' }, 'JQ0003', '');
     });
 
     it('should reject $query/$expr outside the top level as unknown', () => {
@@ -363,11 +366,14 @@ describe('Jaren JSON Query normalizer', () => {
 
   describe('valid fixtures', () => {
     // With the operator library complete, every valid/ fixture compiles.
+    // The schema-operator fixtures need a type-test compiler (JQ0008
+    // without one); an accept-all stub keeps this suite validator-free.
+    const stubTypeTest = () => () => true;
     const names = fs.readdirSync(path.join(fixturesDir, 'valid')).filter((n) => n.endsWith('.json')).sort();
     for (const name of names) {
       const doc = JSON.parse(fs.readFileSync(path.join(fixturesDir, 'valid', name), 'utf8'));
       it(`should compile ${name}`, () => {
-        assert.strictEqual(typeof compileJsonQuery(doc), 'function');
+        assert.strictEqual(typeof compileJsonQuery(doc, { compileTypeTest: stubTypeTest }), 'function');
       });
     }
   });

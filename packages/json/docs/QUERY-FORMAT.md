@@ -347,6 +347,7 @@ optional clauses, plus the REQUIRED `$return`:
 |---|---|---|
 | `$for` | binding object (§6.2) | at least one of `$for`, `$let` |
 | `$let` | binding object (§6.3) | at least one of `$for`, `$let` |
+| `$as` | schema assertion object (§6.8) | OPTIONAL |
 | `$where` | expression | OPTIONAL |
 | `$groupby` | binding object (§6.5) | OPTIONAL |
 | `$orderby` | key spec or array of key specs (§6.6) | OPTIONAL |
@@ -357,7 +358,7 @@ The clauses apply in **fixed semantic order regardless of their order in the
 JSON document** (**D7**):
 
 ```
-$for → $let → $where → $groupby → $orderby → $count → $return
+$for → $let → $as → $where → $groupby → $orderby → $count → $return
 ```
 
 JSON key order is not interoperable — several ecosystems (e.g. Go maps)
@@ -540,6 +541,42 @@ expression. The two are structurally unambiguous — the clause occurs only
 among other FLWOR keys with `$return` present; the operator phrase is exactly
 one key.
 
+### 6.8 `$as` — schema assertions on bindings
+
+```json
+"$as": { name: schema, ... }
+```
+
+Numbered after `$count` for historical reasons; in the fixed clause order of
+§6.1, `$as` occupies the slot **between `$let` and `$where`**.
+
+Each member names a variable bound by **this phrase's** `$for` (including
+`$at` position names) or `$let`, and pairs it with a **JSON Schema literal**
+(§8.11): a JSON value taken **verbatim** — never interpreted as a query
+expression, so JSON Schema's `$`-prefixed keywords (`$ref`, `$defs`, ...) do
+not collide with Rule 1. A name not bound by the phrase's `$for`/`$let` is
+compile error `JQ0005`. Each schema is compiled once, at query compile time,
+by the consumer's type-test compiler (`JQ0008` when none is installed,
+`JQ0009` when it rejects the schema — see §8.11).
+
+Per tuple, after the `$for`/`$let` bindings are established and before
+`$where` applies:
+
+- a `$for` or `$at` variable is validated as its one bound **item**;
+- a `$let` variable is validated **per item of its bound sequence** (the
+  empty sequence passes vacuously — the schema sees items, never the
+  sequence itself, §8.11).
+
+The first failing item is runtime error `JQ2008`, naming the variable. `$as`
+never drops tuples — it asserts; use `$valid` in `$where` (§8.11) to filter
+instead.
+
+```json
+{ "$for": { "b": "$.store.book[*]" },
+  "$as":  { "b": { "type": "object", "required": ["title", "price"] } },
+  "$return": "$b.title" }
+```
+
 ---
 
 ## 7. Quantifier phrases
@@ -599,9 +636,8 @@ Operators keep that reference in their definition; F&O behavior is adapted
 to the JSON data model per the deviations of §11 (notably D1 numbers and
 D6 0-based positions).
 
-Reserved, undefined keys (rejected by v0.1 consumers and by the schema):
-`$valid`, `$assert`, `$as`. They are reserved for the JSON-Schema-as-type-
-system layer.
+The JSON-Schema-as-type-system layer defines `$valid` and `$assert` (§8.11)
+and the FLWOR clause `$as` (§6.8); no keys remain reserved in this version.
 
 ### 8.2 Sequences
 
@@ -829,6 +865,59 @@ error `JQ2001`.
             { "$default": ["$.missing", 0] } ] }
 ```
 
+### 8.11 Schema operators — `$valid $assert`
+
+**JSON Schema is this language's type system.** Where XQuery bolted XML
+Schema onto its type lattice, this format embeds JSON Schema documents
+directly inside query documents, as type tests and assertions. The same
+vocabulary that validates the data validates it *inside* queries.
+
+**Schema literals.** The second argument of `$valid`/`$assert` — like each
+member value of the `$as` clause (§6.8) — is a **JSON Schema literal**: a
+JSON value taken **verbatim**. It is never normalized or evaluated as a
+query expression; JSON Schema's `$`-prefixed keywords (`$ref`, `$defs`, ...)
+do not collide with Rule 1, `"$name"` strings inside it stay literal strings,
+and its arrays are not array constructors. Consumers MUST deep-copy and
+freeze the literal (like `$const`) and MUST compile it exactly once, at
+query compile time. The format's own JSON Schema (§12) admits any JSON value
+in schema-literal position and does **not** meta-validate it; validity of
+the embedded schema is the type-test compiler's judgment (`JQ0009`).
+
+**Per-item validation.** Both operators (and `$as`) validate the **items**
+of a sequence, one at a time — the schema sees each item, never the sequence
+itself. A sequence of three numbers validates against
+`{"type": "number"}`, not against an array schema.
+
+| Operator | Signature | Definition |
+|---|---|---|
+| `$valid` | `[expr, schema]` (exactly 2) | `true` iff **every** item of *expr*'s result satisfies *schema*; `true` over the empty sequence (vacuously, like `$every`). Never an error — the cheap test. |
+| `$assert` | `[expr, schema]` (exactly 2) | Identity on success: returns *expr*'s result unchanged when every item satisfies *schema*. The first failing item is runtime error `JQ2008` (at the operator's `docPath`). |
+
+```json
+{ "$for": { "b": "$.store.book[*]" },
+  "$where": { "$valid": ["$b", { "type": "object", "required": ["isbn"] }] },
+  "$return": { "$assert": ["$b.price", { "type": "number", "minimum": 0 }] } }
+```
+
+**The type-test compiler hook (non-normative implementation note).** The
+reference engine (`@jarenjs/json`) has **no dependency** on any JSON Schema
+validator. It defines an extension point instead:
+
+```
+compileJsonQuery(doc, { compileTypeTest: (schemaJson, docPath) => (value => boolean) })
+```
+
+The hook is invoked once per schema literal at **query compile time**, with
+the frozen literal and its RFC 6901 pointer; it returns the hot-path item
+predicate the compiled query closes over. `@jarenjs/validate/query` exports
+`createTypeTestCompiler(validatorOrFactory?)`, which compiles literals with
+a `JarenValidator` (boolean mode, errors off) — supplying an instance with
+registered schemas lets `$ref`s in query schema literals resolve against
+them. The dependency direction is validate → json; any conforming validator
+can implement the hook. A query using `$valid`/`$assert`/`$as` compiled
+**without** a hook is compile error `JQ0008`; a hook that rejects a schema
+literal (throws) is compile error `JQ0009` at the operator's `docPath`.
+
 ---
 
 ## 9. Variables, scoping, and external parameters
@@ -878,9 +967,11 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ0002` | Unknown operator / `$`-key outside the vocabulary | XPST0017 |
 | `JQ0003` | Known phrase with bad arity, value shape, or key combination | XPST0003 |
 | `JQ0004` | String starting `$` is not a valid path or escape (§3.2) | XPST0003 |
-| `JQ0005` | Variable reference that is neither bound nor collectible as an external (reserved for closed-world compilation modes; see §9) | XPST0008 |
+| `JQ0005` | Variable reference that is neither bound nor collectible as an external (reserved for closed-world compilation modes; see §9); also an `$as` member naming a variable not bound by its phrase's `$for`/`$let` (§6.8) | XPST0008 |
 | `JQ0006` | Version envelope with unknown or non-string `$query` (§4.2) | XQST0031 |
 | `JQ0007` | Duplicate variable binding within one phrase (§6.3) | XQST0089 |
+| `JQ0008` | Schema operator (`$valid`/`$assert`/`$as`) in a query compiled without a type-test compiler (§8.11) | XQST0009 |
+| `JQ0009` | Schema literal rejected by the type-test compiler (invalid embedded schema, §8.11) | XQST0059 |
 
 ### 10.3 Runtime errors (`JQ2xxx`)
 
@@ -893,6 +984,7 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2005` | Incomparable `$orderby`/`$sort` keys (§6.6, §8.9) | XPTY0004 |
 | `JQ2006` | Reference to an unbound external parameter (§9) | XPDY0002 |
 | `JQ2007` | Resource guard: an operator result exceeding an implementation limit (`$range` over 2³² items, §8.9) | XPDY0130 |
+| `JQ2008` | Schema assertion failure: an item rejected by `$assert`'s schema, or a bound variable rejected by its `$as` schema (§6.8, §8.11) | XPTY0004 |
 
 ---
 
@@ -961,9 +1053,13 @@ additionally carry `format: "json-path"` — the RFC 9535 format implemented by
 The schema cannot express, and therefore leaves to the compiler (stated in
 `description`s in the artifacts): fixed clause ordering (semantic, not
 structural — every key order is valid JSON), variable scoping and duplicate
-detection (`JQ0005`/`JQ0007`), full grammar of variable-rooted path segments
-(only the head is pattern-checked), and all runtime typing rules. Where the
-schema and this text disagree, this text wins and the schema has a bug.
+detection (`JQ0005`/`JQ0007`), `$as` name binding (`JQ0005`), full grammar
+of variable-rooted path segments (only the head is pattern-checked), and all
+runtime typing rules. Schema-literal positions (§8.11) validate as `true` —
+draft-neutral by definition; embedded JSON Schemas are deliberately **not**
+meta-validated by these artifacts (the type-test compiler is authoritative,
+`JQ0009`). Where the schema and this text disagree, this text wins and the
+schema has a bug.
 
 ---
 
@@ -1059,6 +1155,26 @@ is never interpreted) and whose `label` member is the literal string
 
 `$minPrice` is an external (§9), bound by the caller; also demonstrates the
 version envelope.
+
+### A.9 Schema type tests — `$as` and `$valid`
+
+```json
+{ "$for": { "b": "$.store.book[?@.isbn]", "r": "$.ratings[*]" },
+  "$as": { "b": { "type": "object", "required": ["isbn", "price"] } },
+  "$where": { "$and": [
+    { "$eq": ["$b.isbn", "$r.isbn"] },
+    { "$valid": ["$r.stars", { "type": "number", "minimum": 0, "maximum": 5 }] }
+  ] },
+  "$orderby": "$b.price",
+  "$return": { "title": "$b.title", "stars": "$r.stars" } }
+```
+
+The join of A.3 with JSON Schema as the type system (§6.8, §8.11): the path
+filter pre-selects books that have an `isbn`, the `$as` clause *asserts*
+that every joined `b` is an object carrying `isbn` and `price` (a violation
+would be `JQ2008`, not a dropped tuple), and the `$valid` conjunct *filters*
+rating pairs to plausible star values. Note the schema literals are verbatim
+JSON Schema — their keywords are not query operators.
 
 ---
 

@@ -41,7 +41,15 @@ const hasOwn = Object.hasOwn;
  *
  * @param {any} doc - the query document (any JSON value; a bare RFC 9535
  *   JSONPath string is the degenerate query)
- * @param {object} [options] - reserved; no options are defined yet
+ * @param {object} [options] - compile options
+ * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
+ *   [options.compileTypeTest] - hook compiling a JSON Schema literal into
+ *   a boolean item predicate, called once per schema literal at query
+ *   compile time (QUERY-FORMAT.md section 8.11). `@jarenjs/validate/query`
+ *   exports `createTypeTestCompiler()` producing one; any conforming
+ *   implementation works - this package never imports the validator.
+ *   Without a hook, the schema operators `$valid`/`$assert`/`$as` are
+ *   compile error JQ0008.
  * @returns {function} the compiled query function
  * @throws {JsonQueryCompileError} when the document violates the format
  * @example
@@ -53,8 +61,7 @@ const hasOwn = Object.hasOwn;
  * q(data, { max: 10 }); // { title: 'Sayings of the Century', cheap: true }
  */
 export function compileJsonQuery(doc, options = {}) {
-  void options; // reserved for later work orders
-  const { root, frameSize, externals } = normalizeQuery(doc);
+  const { root, frameSize, externals } = normalizeQuery(doc, options);
   const get = compileNode(root);
   const extCount = externals.length;
 

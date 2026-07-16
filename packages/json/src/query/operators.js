@@ -8,8 +8,10 @@
 //     single form (`{"$op": operand}`: the value IS the one argument);
 //     `{ kinds, min, variadic? }` is the array form (`{"$op": [a, b]}`),
 //     where `kinds[i]` is the expectation of position i - 'expr' (an
-//     ordinary expression), 'raw' (a verbatim JSON value, not evaluated;
-//     reserved for the schema arguments of the type-system work order) or
+//     ordinary expression), 'raw' (a verbatim JSON value, not evaluated),
+//     'schema' (a verbatim JSON Schema literal, compiled at query compile
+//     time into an item predicate at `args[i].test` - the schema
+//     arguments of $valid/$assert) or
 //     'name' (a variable name string). `min` is the minimum argument
 //     count; the maximum is `kinds.length`, or unbounded when `variadic`
 //     (the last kind repeats). normalize.js validates arity and shape
@@ -54,6 +56,8 @@ const ARGS_1_2 = Object.freeze({ kinds: Object.freeze(['expr', 'expr']), min: 1 
 const ARGS_2_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), min: 2 });
 const ARGS_0N = Object.freeze({ kinds: Object.freeze(['expr']), min: 0, variadic: true });
 const ARGS_1N = Object.freeze({ kinds: Object.freeze(['expr']), min: 1, variadic: true });
+// the schema operators $valid/$assert: [expr, schema] (section 8.11)
+const ARGS_EXPR_SCHEMA = Object.freeze({ kinds: Object.freeze(['expr', 'schema']), min: 2 });
 
 const RESULT_ONE = () => CARD_ONE;
 const RESULT_OPT = () => CARD_OPT;
@@ -1117,6 +1121,73 @@ export const OPERATORS = Object.freeze({
     params: ARGS_2,
     result: coalesceCard,
     compile: compileCoalesce,
+  },
+
+  //#endregion
+
+  //#region section 8.11 - schema operators
+  // JSON Schema as the type system: the schema argument is a verbatim
+  // literal ('schema' kind), compiled once at query compile time into the
+  // predicate at `args[1].test` by the host's compileTypeTest hook
+  // (JQ0008 without one). Validation is per ITEM of the operand's result
+  // sequence - the schema sees items, never the sequence itself.
+
+  '$valid': {
+    params: ARGS_EXPR_SCHEMA,
+    result: RESULT_ONE,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const test = args[1].test;
+      if (args[0].card === CARD_ONE)
+        return (f) => test(get(f));
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY) // vacuously true, like $every
+          return true;
+        if (v instanceof Seq) {
+          const items = v.items;
+          for (let i = 0; i < items.length; i++) {
+            if (!test(items[i]))
+              return false;
+          }
+          return true;
+        }
+        return test(v);
+      };
+    },
+  },
+
+  '$assert': {
+    params: ARGS_EXPR_SCHEMA,
+    result: resultOfOperand,
+    compile: (gets, args, docPath) => {
+      const get = gets[0];
+      const test = args[1].test;
+      if (args[0].card === CARD_ONE) {
+        return (f) => {
+          const v = get(f);
+          if (!test(v))
+            throw runtimeError('JQ2008', `'$assert' failed: ${describeItem(v)} does not satisfy the schema`, docPath);
+          return v;
+        };
+      }
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY) // no items, nothing to fail
+          return v;
+        if (v instanceof Seq) {
+          const items = v.items;
+          for (let i = 0; i < items.length; i++) {
+            if (!test(items[i]))
+              throw runtimeError('JQ2008', `'$assert' failed: item ${i} (${describeItem(items[i])}) does not satisfy the schema`, docPath);
+          }
+          return v;
+        }
+        if (!test(v))
+          throw runtimeError('JQ2008', `'$assert' failed: ${describeItem(v)} does not satisfy the schema`, docPath);
+        return v;
+      };
+    },
   },
 
   //#endregion

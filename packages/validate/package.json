@@ -5,6 +5,10 @@
   "type": "module",
   "main": "./src/index.js",
   "types": "./types.d.ts",
+  "exports": {
+    ".": "./src/index.js",
+    "./query": "./src/query.js"
+  },
   "files": [
     "dist/",
     "src/",
