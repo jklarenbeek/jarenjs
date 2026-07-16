@@ -61,7 +61,7 @@ Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostn
 
 ## JSON addressing standards
 
-The JSON addressing standards — JSON validation helpers, JSON Pointer (RFC 6901) and the compiling JSONPath engine (RFC 9535) — live in [`@jarenjs/json`](../json).
+The JSON addressing and query standards — JSON validation helpers, JSON Pointer (RFC 6901), the compiling JSONPath engine (RFC 9535), and the Jaren JSON Query language with its XQuery front-end — live in [`@jarenjs/json`](../json). This package supplies their foundations: the char-code scanner (`@jarenjs/core/scan`), `equalsJson` deep equality, code-point ordering, and the I-Regexp (RFC 9485) toolbox.
 
 ## Development
 

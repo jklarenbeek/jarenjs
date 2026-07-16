@@ -18,6 +18,8 @@ Reproduce these numbers yourself with `node benchmark/profiler.js --profile-all 
 
 The same treatment is applied to JSONPath: `@jarenjs/json` ships an [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) query compiler that passes all 703 tests of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) (normalized paths included) and backs the strict `json-path` format. Run `node benchmark/jsonpath.js --profile` to compare it against [json-p3](https://www.npmjs.com/package/json-p3).
 
+On top of that sits the **Jaren JSON Query** engine: FLWOR joins, grouping and reshaping with XQuery 3.1 semantics, written as JSON documents with JSONPath leaves. Run `npm run benchmark:jsonquery:profile` to compare it against [fontoxpath](https://www.npmjs.com/package/fontoxpath) and [jsonata](https://www.npmjs.com/package/jsonata), or `npm run benchmark:qt3` for the W3C QT3 scorecard. See [packages/json](packages/json/README.md).
+
 This library started as a personal merge of some useful javascript algorithms, functions, modules and classes, I programmed or snippits that I used over the years; stuff that I used and didn't want to forget about and wrapped them in an organized way into a monorepo as a JSON Schema validating compiler library that anyone can use.
 
 Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSONSchema.pdf) for a more comprehensive guide on what JSON Schema is (not Jaren!).
@@ -625,6 +627,10 @@ I will look up what that means, later...
 For a detailed overview of the [architecture](ARCHITECTURE.md) and how Jaren works please see [ARCHITECTURE.md](ARCHITECTURE.md) in the root of this repository.
 
 For detailed documentation on using Jaren, including API references and advanced usage examples, visit our official documentation. Which is the code itself.
+
+### 🔍 JSON Addressing & Queries
+
+The `@jarenjs/json` package implements the JSON addressing and query standards as compilers: JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)), the fully compliant JSONPath engine ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)), and the **Jaren JSON Query format** — a declarative query-and-transformation language with XQuery 3.1 semantics (FLWOR, joins, grouping, quantifiers, a 58-operator library) whose queries are themselves JSON documents with JSONPath strings as navigation leaves. The whole language is published as a JSON Schema, which makes it a natural target for LLM structured output; an XQuery *text* front-end (`parseXQuery`) doubles as the bridge to the W3C QT3 test suite. See [packages/json](packages/json/README.md) and its [ARCHITECTURE](packages/json/ARCHITECTURE.md).
 
 ### 📝 Form Generation
 

@@ -32,6 +32,8 @@
     "json-p3": "^2.2.2"
   },
   "devDependencies": {
-    "fast-xml-parser": "^5.10.1"
+    "fast-xml-parser": "^5.10.1",
+    "fontoxpath": "^3.34.0",
+    "jsonata": "^2.2.1"
   }
 }

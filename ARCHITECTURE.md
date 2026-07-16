@@ -30,6 +30,8 @@ This document describes the internal architecture of JarenJS, a high-performance
 
 JarenJS is a JSON Schema validator that compiles schemas into optimized validation functions. The architecture separates schema loading (URI resolution), compilation (validator creation), and validation (data checking) into distinct phases to enable compile-time optimizations and fast runtime performance.
 
+The monorepo splits into `@jarenjs/core` (zero-dependency foundation: type guards, Unicode strings, text validators, math), `@jarenjs/json` (the JSON addressing and query standards: JSON Pointer, the RFC 9535 JSONPath compiler, and the Jaren JSON Query engine with its XQuery text front-end — documented in its own [ARCHITECTURE](packages/json/ARCHITECTURE.md)), `@jarenjs/validate` (this document's subject), `@jarenjs/formats`, `@jarenjs/refs` and `@jarenjs/forms`. This document describes the validator; the compile-to-closures philosophy it lays out is shared by every compiler in the repository.
+
 ### Key Files
 
 | File | Purpose |
@@ -721,7 +723,7 @@ node benchmark/debug.js '/ref.json' --silent
 ### jsonpath.js
 
 Compliance and performance benchmark for the JSONPath (RFC 9535) compiler in
-`packages/core/src/json/path.js`. It runs the official [JSONPath Compliance
+`packages/json/src/path.js`. It runs the official [JSONPath Compliance
 Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite)
 (a git submodule at `benchmark/jsonpath-suite/`, like the JSON-Schema-Test-Suite
 at `benchmark/suite/`; including normalized-path verification) against Jaren
@@ -757,6 +759,24 @@ Options:
   --filepath, -f PATH    Output file path for csv/json
 ```
 
+### jsonquery.js
+
+Performance benchmark for the Jaren JSON Query engine in
+`packages/json/src/query/` against [fontoxpath](https://www.npmjs.com/package/fontoxpath)
+(XQuery 3.1 in JavaScript) and [jsonata](https://www.npmjs.com/package/jsonata).
+Runs a scenario matrix (singular access, filter + project, join, group +
+aggregate, deep reshape, compile time) over a scalable bookstore document,
+asserting result equivalence across engines before timing anything; the
+per-engine queries and fairness notes live in `benchmark/adaptors/jsonquery/`.
+
+```bash
+# Equivalence check over all engines (exit code 1 on any semantic mismatch)
+node benchmark/jsonquery.js
+
+# Performance comparison, plus 1000- and 10000-book documents
+node benchmark/jsonquery.js --profile --scale
+```
+
 ### Tool Separation
 
 Each benchmark tool has a distinct purpose:
@@ -768,6 +788,8 @@ Each benchmark tool has a distinct purpose:
 | `coverage.js` | Code coverage analysis | Finding untested code paths |
 | `callgraph.js` | Call graph generation | Analyzing hot paths and call chains |
 | `jsonpath.js` | JSONPath RFC 9535 compliance and performance | Verifying/benchmarking the JSONPath compiler vs json-p3 |
+| `jsonquery.js` | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking the query engine against XQuery/JSONata alternatives |
+| `qt3-runner.js` | W3C QT3 suite scorecard through the XQuery front-end | Checking query-engine compliance against the XQuery test suite |
 
 ---
 

@@ -2,8 +2,9 @@
 
 **Version 0.1 — Specification**
 
-Module: `@jarenjs/json/query` (engine implemented in later work orders; this
-document is the language contract).
+Module: `@jarenjs/json/query`. This document is the language contract; the
+package [README](../README.md) carries the guided tour and the engine's
+internals are described in [ARCHITECTURE](../ARCHITECTURE.md).
 
 > **Naming note (non-normative).** "Jaren JSON Query format" is a working name
 > and is used consistently throughout this document. The obvious short name
