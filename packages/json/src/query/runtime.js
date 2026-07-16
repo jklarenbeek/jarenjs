@@ -134,6 +134,59 @@ export function ebv(v, docPath) {
 }
 
 /**
+ * Deterministic serialization of one JSON item, for `$groupby` keys
+ * (QUERY-FORMAT.md section 6.5) — **engine-internal**, not an interchange
+ * format (related to the roadmap's canonical-JSON item). It exists solely
+ * so that deep-equal items (D2) map to the same string:
+ *
+ *   - object members serialize sorted by key (code-unit order), so key
+ *     order never matters;
+ *   - `-0` normalizes to `0` (D2: `-0` equals `0`);
+ *   - strings serialize via `JSON.stringify` (its escape discipline means
+ *     no raw control character ever appears in the output, so a control
+ *     character is safe as a composite-key separator);
+ *   - numbers serialize bare via `String(n)` — `NaN` and `±Infinity`
+ *     (reachable through `$div`) serialize as `NaN`/`Infinity`, which
+ *     cannot collide with quoted strings. Note this makes `NaN` group
+ *     with `NaN`, the XQuery grouping rule, even though `NaN` never
+ *     equals itself under `$eq`.
+ *
+ * @param {any} value - a JSON item (not EMPTY, not a Seq)
+ * @returns {string} a deterministic serialization for grouping
+ */
+export function stableKeyString(value) {
+  switch (typeof value) {
+    case 'string':
+      return JSON.stringify(value);
+    case 'number':
+      return value === 0 ? '0' : String(value); // normalizes -0
+    case 'boolean':
+      return value ? 'true' : 'false';
+    default:
+      break;
+  }
+  if (value === null)
+    return 'null';
+  if (Array.isArray(value)) {
+    let s = '[';
+    for (let i = 0; i < value.length; i++) {
+      if (i > 0)
+        s += ',';
+      s += stableKeyString(value[i]);
+    }
+    return s + ']';
+  }
+  const keys = Object.keys(value).sort();
+  let s = '{';
+  for (let i = 0; i < keys.length; i++) {
+    if (i > 0)
+      s += ',';
+    s += JSON.stringify(keys[i]) + ':' + stableKeyString(value[keys[i]]);
+  }
+  return s + '}';
+}
+
+/**
  * Debug-only invariant check: asserts a sequence value is well-formed
  * (a Seq holds 2+ items and contains no nested Seq or EMPTY). Used by
  * tests; never called on hot paths.

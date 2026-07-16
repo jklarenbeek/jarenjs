@@ -14,9 +14,9 @@
 // Scoping: lexical environments map variable names to frame slot indices.
 // Each compiled query evaluates against one frame array; slot 0 is the
 // input document, every binding site and every external parameter gets its
-// own slot from a single allocator (nesting-ready for the FLWOR clauses of
-// TODO_05). Free names become external parameters, collected in order of
-// first appearance.
+// own slot from a single allocator (nested FLWOR phrases simply keep
+// allocating in the same frame). Free names become external parameters,
+// collected in order of first appearance.
 
 import { parseJSONPath, JSONPathSyntaxError } from '../path.js';
 import { isSingularSegments } from '../segments.js';
@@ -63,10 +63,14 @@ const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const VAR_HEAD_RE = /^\$([A-Za-z_][A-Za-z0-9_]*)/;
 
 // FLWOR clause keys (QUERY-FORMAT.md section 6.1) and quantifier keys
-// (section 7). Only the degenerate {$let, $return} phrase is implemented
-// in this work order; the rest classify but raise JQ0099 (TODO_05).
+// (section 7). Clauses apply in the fixed semantic order of section 6.1
+// regardless of JSON key order (D7).
 const FLWOR_KEYS = new Set(['$for', '$let', '$where', '$groupby', '$orderby', '$count', '$return']);
 const QUANTIFIER_KEYS = new Set(['$some', '$every', '$satisfies']);
+
+// Keys of the explicit $orderby key-spec form (section 6.6). Contextual:
+// they are not operators and stay outside the KNOWN_KEYS vocabulary.
+const ORDERBY_SPEC_KEYS = new Set(['$key', '$dir', '$empty']);
 
 // Comparison and arithmetic operators implemented by this work order,
 // keyed to their AST op tag.
@@ -86,19 +90,26 @@ const TODO_06_OPERATORS = new Set([
   '$string-join', '$substring', '$contains', '$starts-with', '$ends-with',
   '$upper', '$lower', '$string-length', '$normalize-space',
   '$match', '$search', '$replace',
-  '$count', '$sum', '$avg', '$min', '$max',
+  '$min', '$max',
   '$distinct', '$reverse', '$sort', '$head', '$tail',
   '$subsequence', '$index-of', '$range', '$get',
   '$is-string', '$is-number', '$is-boolean', '$is-null', '$is-array', '$is-object',
   '$string', '$number', '$boolean', '$coalesce', '$default',
 ]);
 
+// Aggregates implemented provisionally by the FLWOR work order so that
+// $groupby is testable end-to-end ($avg because spec example A.4 uses it
+// verbatim); TODO_06 completes/confirms their semantics against the
+// full library definitions (section 8.8).
+const PROVISIONAL_AGGREGATES = new Set(['$count', '$sum', '$avg']);
+
 // Reserved, undefined keys (QUERY-FORMAT.md section 8.1): rejected by
 // v0.1 consumers.
 const RESERVED_KEYS = new Set(['$valid', '$assert', '$as']);
 
-// Operators of this work order that need no special normalizer beyond an
-// arity check (everything else has a dedicated case in normalizePhrase).
+// Operators of the engine-core work order that need no special normalizer
+// beyond an arity check (everything else has a dedicated case in
+// normalizePhrase).
 const TODO_04_OPERATORS = new Set([
   '$const', '$map', '$seq', '$exists', '$empty', '$if',
   '$and', '$or', '$not', '$neg', '$concat',
@@ -108,7 +119,8 @@ const TODO_04_OPERATORS = new Set([
 // The complete closed vocabulary: decides JQ0002 (unknown key) versus
 // JQ0003 (known keys in an invalid combination) for phrase objects.
 const KNOWN_KEYS = new Set([
-  ...FLWOR_KEYS, ...QUANTIFIER_KEYS, ...TODO_06_OPERATORS, ...TODO_04_OPERATORS,
+  ...FLWOR_KEYS, ...QUANTIFIER_KEYS, ...TODO_06_OPERATORS,
+  ...PROVISIONAL_AGGREGATES, ...TODO_04_OPERATORS,
 ]);
 
 //#endregion
@@ -265,8 +277,8 @@ function normalizeObject(obj, docPath, scope, ctx) {
 
 function normalizePhrase(obj, keys, docPath, scope, ctx) {
   // FLWOR phrase shape: only FLWOR clause keys, $return plus $for and/or
-  // $let present. The {$let, $return} subset is implemented here; any
-  // other clause is TODO_05 (JQ0099 placeholder).
+  // $let present (section 6.1). The degenerate {$let, $return} phrase
+  // keeps the direct 'let' node - it needs no tuple stream.
   let allFlwor = true;
   for (let i = 0; i < keys.length; i++) {
     if (!FLWOR_KEYS.has(keys[i])) {
@@ -275,16 +287,14 @@ function normalizePhrase(obj, keys, docPath, scope, ctx) {
     }
   }
   if (allFlwor && keys.length >= 2 && hasOwn(obj, '$return') && (hasOwn(obj, '$for') || hasOwn(obj, '$let'))) {
-    for (let i = 0; i < keys.length; i++) {
-      if (keys[i] !== '$let' && keys[i] !== '$return')
-        return fail('JQ0099', `FLWOR clause '${keys[i]}' is not implemented until TODO_05`, docPath);
-    }
-    return normalizeLetPhrase(obj, docPath, scope, ctx);
+    if (keys.length === 2 && hasOwn(obj, '$let'))
+      return normalizeLetPhrase(obj, docPath, scope, ctx);
+    return normalizeFlworPhrase(obj, docPath, scope, ctx);
   }
   // quantifier phrase shape (section 7): {$some|$every, $satisfies}
   if (keys.length === 2 && hasOwn(obj, '$satisfies')
     && (hasOwn(obj, '$some') || hasOwn(obj, '$every')))
-    return fail('JQ0099', 'quantifier phrases are not implemented until TODO_05', docPath);
+    return normalizeQuantifierPhrase(obj, docPath, scope, ctx);
 
   if (keys.length === 1)
     return normalizeOperator(keys[0], obj[keys[0]], docPath, scope, ctx);
@@ -393,6 +403,16 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
       });
     }
 
+    case '$count': // the operator (section 8.8), not the FLWOR clause: a
+    case '$sum': //   single-key object is always an operator (section 6.7)
+    case '$avg': { // provisional: completed in TODO_06 (see section 8.8)
+      const operand = normalizeExpr(arg, opPath, scope, ctx);
+      // $count/$sum always produce one number; $avg of an empty operand
+      // is the empty sequence
+      const card = key !== '$avg' || operand.card === CARD_ONE ? CARD_ONE : CARD_OPT;
+      return Object.freeze({ kind: 'aggregate', card, docPath, op: key.slice(1), operand });
+    }
+
     default: {
       const cmp = COMPARISON_OPS.get(key);
       if (cmp !== undefined) { // existential general comparisons (section 8.4)
@@ -424,44 +444,389 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
 
 //#endregion
 
-//#region $let phrase
+//#region FLWOR and quantifier phrases
 
-// The degenerate FLWOR phrase {$let, $return} (section 6.3). Bindings
-// evaluate sequentially in document key order; later sources see earlier
-// names of the same object (correlation). Each binding site gets its own
-// frame slot; rebinding a name from an enclosing phrase is ordinary
-// shadowing. `phraseNames` implements the JQ0007 duplicate check across a
-// phrase's binding sites - with only $let in this work order a duplicate
-// cannot be expressed through a JS object, but TODO_05 adds $for/$at/
-// $groupby names to the same set.
-function normalizeLetPhrase(obj, docPath, scope, ctx) {
-  const letObj = obj.$let;
-  const letPath = docPath + '/$let';
-  if (!isPlainObject(letObj))
-    return fail('JQ0003', "'$let' takes an object of variable bindings", letPath);
-  const names = Object.keys(letObj);
+// One JQ0007 duplicate set spans all of a phrase's binding sites: $for
+// names, $at names, $let names, $groupby key names, and the $count name
+// (section 6.3). Rebinding a name from an enclosing phrase is ordinary
+// shadowing and never hits this check.
+function bindPhraseName(name, phraseNames, bindPath) {
+  if (!VAR_NAME_RE.test(name))
+    fail('JQ0003', `'${name}' is not a valid variable name`, bindPath);
+  if (phraseNames.has(name))
+    fail('JQ0007', `duplicate binding of variable '${name}' within one phrase`, bindPath);
+  phraseNames.add(name);
+}
+
+function requireBindingObject(clause, bindObj, clausePath) {
+  if (!isPlainObject(bindObj))
+    fail('JQ0003', `'${clause}' takes an object of variable bindings`, clausePath);
+  const names = Object.keys(bindObj);
   if (names.length === 0)
-    return fail('JQ0003', "'$let' requires at least one binding", letPath);
+    fail('JQ0003', `'${clause}' requires at least one binding`, clausePath);
+  return names;
+}
+
+// $let bindings (section 6.3): each name binds the full sequence of its
+// expression - no iteration, no array unpacking. Bindings evaluate
+// sequentially in document key order; later sources see earlier names of
+// the same object (correlation). Shared by the degenerate {$let, $return}
+// phrase and the full FLWOR normalizer; returns the extended scope.
+function normalizeLetBindings(letObj, letPath, scope, ctx, phraseNames, bindings) {
+  const names = requireBindingObject('$let', letObj, letPath);
+  let sc = scope;
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const bindPath = letPath + '/' + escapeToken(name);
+    bindPhraseName(name, phraseNames, bindPath);
+    const source = letObj[name];
+    if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
+      return fail('JQ0003', "the extended '$in'/'$at' binding form is not available in '$let'", bindPath);
+    const expr = normalizeExpr(source, bindPath, sc, ctx);
+    const slot = ctx.nextSlot++;
+    sc = { name, slot, card: expr.card, parent: sc };
+    bindings.push(Object.freeze({ name, slot, expr }));
+  }
+  return sc;
+}
+
+// The degenerate FLWOR phrase {$let, $return}: a straight-line binding
+// chain, no tuple stream (the compiler keeps its direct fast path).
+function normalizeLetPhrase(obj, docPath, scope, ctx) {
+  const bindings = [];
+  const sc = normalizeLetBindings(obj.$let, docPath + '/$let', scope, ctx, new Set(), bindings);
+  const ret = normalizeExpr(obj.$return, docPath + '/$return', sc, ctx);
+  return Object.freeze({
+    kind: 'let', card: ret.card, docPath,
+    bindings: Object.freeze(bindings), ret,
+  });
+}
+
+// $for bindings (section 6.2): each name iterates its source, one item
+// per tuple (card ONE), with D4 array unpacking at runtime. The extended
+// {"$in": expr, "$at": name} form additionally binds a 0-based position
+// (D6). Multiple bindings nest left-to-right in document key order and
+// may be correlated. Returns the extended scope.
+function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings, tupleSlots) {
+  const names = requireBindingObject('$for', forObj, forPath);
+  let sc = scope;
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const bindPath = forPath + '/' + escapeToken(name);
+    bindPhraseName(name, phraseNames, bindPath);
+    let source = forObj[name];
+    let sourcePath = bindPath;
+    let atName = null;
+    if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at'))) {
+      if (Object.keys(source).length !== 2 || !hasOwn(source, '$in') || !hasOwn(source, '$at'))
+        return fail('JQ0003', "the extended binding form takes exactly the keys '$in' and '$at'", bindPath);
+      atName = source.$at;
+      if (typeof atName !== 'string' || !VAR_NAME_RE.test(atName))
+        return fail('JQ0003', "'$at' takes a variable name string", bindPath + '/$at');
+      source = source.$in;
+      sourcePath = bindPath + '/$in';
+    }
+    const expr = normalizeExpr(source, sourcePath, sc, ctx);
+    const slot = ctx.nextSlot++;
+    sc = { name, slot, card: CARD_ONE, parent: sc };
+    tupleSlots.push({ name, slot });
+    let atSlot = -1;
+    if (atName !== null) {
+      bindPhraseName(atName, phraseNames, bindPath + '/$at');
+      atSlot = ctx.nextSlot++;
+      sc = { name: atName, slot: atSlot, card: CARD_ONE, parent: sc };
+      tupleSlots.push({ name: atName, slot: atSlot });
+    }
+    bindings.push(Object.freeze({ name, slot, expr, atSlot }));
+  }
+  return sc;
+}
+
+// One $orderby key spec (section 6.6): an expression (ascending,
+// empty-least) or the explicit {"$key", "$dir"?, "$empty"?} form.
+function normalizeOrderbySpec(spec, specPath, scope, ctx) {
+  let key = spec;
+  let keyPath = specPath;
+  let desc = false;
+  let emptyGreatest = false;
+  if (isPlainObject(spec) && (hasOwn(spec, '$key') || hasOwn(spec, '$dir') || hasOwn(spec, '$empty'))) {
+    const specKeys = Object.keys(spec);
+    for (let i = 0; i < specKeys.length; i++) {
+      if (!ORDERBY_SPEC_KEYS.has(specKeys[i]))
+        return fail('JQ0003', `'${specKeys[i]}' is not a valid key of an $orderby key spec`, specPath);
+    }
+    if (!hasOwn(spec, '$key'))
+      return fail('JQ0003', "an explicit $orderby key spec requires '$key'", specPath);
+    if (hasOwn(spec, '$dir')) {
+      if (spec.$dir !== 'asc' && spec.$dir !== 'desc')
+        return fail('JQ0003', "'$dir' must be 'asc' or 'desc'", specPath + '/$dir');
+      desc = spec.$dir === 'desc';
+    }
+    if (hasOwn(spec, '$empty')) {
+      if (spec.$empty !== 'least' && spec.$empty !== 'greatest')
+        return fail('JQ0003', "'$empty' must be 'least' or 'greatest'", specPath + '/$empty');
+      emptyGreatest = spec.$empty === 'greatest';
+    }
+    key = spec.$key;
+    keyPath = specPath + '/$key';
+  }
+  return Object.freeze({
+    key: normalizeExpr(key, keyPath, scope, ctx),
+    desc, emptyGreatest, docPath: specPath,
+  });
+}
+
+// Collect the frame slots an expression subtree reads (variable
+// references and path roots). Barrier liveness: $groupby/$orderby
+// materialize only the phrase binding slots that later clauses read.
+// Over-approximation is safe; slots written by nested phrases before
+// being read merely widen a snapshot harmlessly.
+function collectReadSlots(node, out) {
+  switch (node.kind) {
+    case 'literal':
+      return;
+    case 'var':
+      out.add(node.slot);
+      return;
+    case 'path':
+      out.add(node.rootSlot);
+      return;
+    case 'object':
+      for (let i = 0; i < node.entries.length; i++)
+        collectReadSlots(node.entries[i].expr, out);
+      return;
+    case 'map':
+      for (let i = 0; i < node.pairs.length; i++) {
+        collectReadSlots(node.pairs[i].key, out);
+        collectReadSlots(node.pairs[i].value, out);
+      }
+      return;
+    case 'array':
+    case 'seq':
+      for (let i = 0; i < node.elements.length; i++)
+        collectReadSlots(node.elements[i], out);
+      return;
+    case 'cmp':
+    case 'arith':
+      collectReadSlots(node.left, out);
+      collectReadSlots(node.right, out);
+      return;
+    case 'neg':
+    case 'not':
+    case 'exists':
+    case 'aggregate':
+      collectReadSlots(node.operand, out);
+      return;
+    case 'and':
+    case 'or':
+    case 'concat':
+      for (let i = 0; i < node.operands.length; i++)
+        collectReadSlots(node.operands[i], out);
+      return;
+    case 'if':
+      collectReadSlots(node.cond, out);
+      collectReadSlots(node.then, out);
+      if (node.alt !== null)
+        collectReadSlots(node.alt, out);
+      return;
+    case 'let':
+      for (let i = 0; i < node.bindings.length; i++)
+        collectReadSlots(node.bindings[i].expr, out);
+      collectReadSlots(node.ret, out);
+      return;
+    case 'quant':
+      for (let i = 0; i < node.bindings.length; i++)
+        collectReadSlots(node.bindings[i].expr, out);
+      collectReadSlots(node.satisfies, out);
+      return;
+    default: { // 'flwor'
+      for (let i = 0; i < node.forBindings.length; i++)
+        collectReadSlots(node.forBindings[i].expr, out);
+      for (let i = 0; i < node.letBindings.length; i++)
+        collectReadSlots(node.letBindings[i].expr, out);
+      if (node.where !== null)
+        collectReadSlots(node.where, out);
+      if (node.groupby !== null) {
+        for (let i = 0; i < node.groupby.keys.length; i++)
+          collectReadSlots(node.groupby.keys[i].expr, out);
+      }
+      if (node.orderby !== null) {
+        for (let i = 0; i < node.orderby.specs.length; i++)
+          collectReadSlots(node.orderby.specs[i].key, out);
+      }
+      collectReadSlots(node.ret, out);
+      return;
+    }
+  }
+}
+
+// The full FLWOR phrase (section 6). Clauses normalize - and their
+// bindings scope - in the fixed semantic order of section 6.1 (D7):
+// $for -> $let -> $where -> $groupby -> $orderby -> $count -> $return.
+// A $groupby rebinds the phrase's tuple variables for every later
+// clause: key names become singletons (card OPT: a key may be the empty
+// sequence), every other binding becomes the sequence of its values
+// across the group's tuples (card MANY) - same slots, new static cards.
+function normalizeFlworPhrase(obj, docPath, scope, ctx) {
+  const phraseNames = new Set();
+  const tupleSlots = []; // {name, slot} per pre-group binding site, in order
+  const forBindings = [];
+  const letBindings = [];
+  let sc = scope;
+
+  if (hasOwn(obj, '$for'))
+    sc = normalizeForBindings(obj.$for, docPath + '/$for', sc, ctx, phraseNames, forBindings, tupleSlots);
+  if (hasOwn(obj, '$let')) {
+    const before = letBindings.length;
+    sc = normalizeLetBindings(obj.$let, docPath + '/$let', sc, ctx, phraseNames, letBindings);
+    for (let i = before; i < letBindings.length; i++)
+      tupleSlots.push({ name: letBindings[i].name, slot: letBindings[i].slot });
+  }
+
+  const where = hasOwn(obj, '$where')
+    ? normalizeExpr(obj.$where, docPath + '/$where', sc, ctx)
+    : null;
+
+  let groupby = null;
+  if (hasOwn(obj, '$groupby')) {
+    const groupPath = docPath + '/$groupby';
+    const names = requireBindingObject('$groupby', obj.$groupby, groupPath);
+    const keys = new Array(names.length);
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      const bindPath = groupPath + '/' + escapeToken(name);
+      bindPhraseName(name, phraseNames, bindPath);
+      // key expressions evaluate per tuple, in the pre-group scope
+      const expr = normalizeExpr(obj.$groupby[name], bindPath, sc, ctx);
+      keys[i] = Object.freeze({ name, slot: ctx.nextSlot++, expr, docPath: bindPath });
+    }
+    // post-group scope: same slots, rebound cards
+    sc = scope;
+    for (let i = 0; i < tupleSlots.length; i++)
+      sc = { name: tupleSlots[i].name, slot: tupleSlots[i].slot, card: CARD_MANY, parent: sc };
+    for (let i = 0; i < keys.length; i++)
+      sc = { name: keys[i].name, slot: keys[i].slot, card: CARD_OPT, parent: sc };
+    groupby = { keys: Object.freeze(keys), docPath: groupPath, accSlots: null };
+  }
+
+  let orderby = null;
+  if (hasOwn(obj, '$orderby')) {
+    const orderPath = docPath + '/$orderby';
+    const raw = obj.$orderby;
+    let specs;
+    if (Array.isArray(raw)) { // always a list of key specs, major to minor
+      if (raw.length === 0)
+        return fail('JQ0003', "'$orderby' takes a key spec or a non-empty array of key specs", orderPath);
+      specs = new Array(raw.length);
+      for (let i = 0; i < raw.length; i++)
+        specs[i] = normalizeOrderbySpec(raw[i], orderPath + '/' + i, sc, ctx);
+    }
+    else {
+      specs = [normalizeOrderbySpec(raw, orderPath, sc, ctx)];
+    }
+    orderby = { specs: Object.freeze(specs), docPath: orderPath, liveSlots: null };
+  }
+
+  let count = null;
+  if (hasOwn(obj, '$count')) {
+    const countPath = docPath + '/$count';
+    const name = obj.$count;
+    if (typeof name !== 'string')
+      return fail('JQ0003', "'$count' takes a variable name string", countPath);
+    bindPhraseName(name, phraseNames, countPath);
+    const slot = ctx.nextSlot++;
+    sc = { name, slot, card: CARD_ONE, parent: sc };
+    count = Object.freeze({ name, slot });
+  }
+
+  const ret = normalizeExpr(obj.$return, docPath + '/$return', sc, ctx);
+
+  // barrier liveness (compile-time): $groupby accumulates - and $orderby
+  // snapshots - only the binding slots that later clauses actually read.
+  // The $count slot is written after both barriers and is never live.
+  const retReads = new Set();
+  collectReadSlots(ret, retReads);
+  if (groupby !== null) {
+    const laterReads = new Set(retReads);
+    if (orderby !== null) {
+      for (let i = 0; i < orderby.specs.length; i++)
+        collectReadSlots(orderby.specs[i].key, laterReads);
+    }
+    const accSlots = [];
+    for (let i = 0; i < tupleSlots.length; i++) {
+      if (laterReads.has(tupleSlots[i].slot))
+        accSlots.push(tupleSlots[i].slot);
+    }
+    groupby.accSlots = Object.freeze(accSlots);
+  }
+  if (orderby !== null) {
+    // slots that still vary per tuple at the $orderby barrier
+    const barrierSlots = [];
+    if (groupby !== null) {
+      for (let i = 0; i < groupby.keys.length; i++)
+        barrierSlots.push(groupby.keys[i].slot);
+      for (let i = 0; i < groupby.accSlots.length; i++)
+        barrierSlots.push(groupby.accSlots[i]);
+    }
+    else {
+      for (let i = 0; i < tupleSlots.length; i++)
+        barrierSlots.push(tupleSlots[i].slot);
+    }
+    const liveSlots = [];
+    for (let i = 0; i < barrierSlots.length; i++) {
+      if (retReads.has(barrierSlots[i]))
+        liveSlots.push(barrierSlots[i]);
+    }
+    orderby.liveSlots = Object.freeze(liveSlots);
+  }
+
+  // phrase cardinality: MANY unless provably otherwise - a $let-only
+  // phrase yields exactly one tuple ($where may still drop it)
+  let card;
+  if (forBindings.length !== 0 || groupby !== null)
+    card = CARD_MANY;
+  else
+    card = where !== null ? joinCard(ret.card, CARD_ZERO) : ret.card;
+
+  return Object.freeze({
+    kind: 'flwor', card, docPath,
+    forBindings: Object.freeze(forBindings),
+    letBindings: Object.freeze(letBindings),
+    where,
+    groupby: groupby === null ? null : Object.freeze(groupby),
+    orderby: orderby === null ? null : Object.freeze(orderby),
+    count, ret,
+  });
+}
+
+// Quantifier phrases (section 7): {$some|$every, $satisfies}. The
+// binding object follows $for rules (names, key-order nesting,
+// correlation, D4 unpacking) except the extended $in/$at form (JQ0003).
+function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
+  const some = hasOwn(obj, '$some');
+  const clause = some ? '$some' : '$every';
+  const clausePath = docPath + '/' + clause;
+  const bindObj = obj[clause];
+  const names = requireBindingObject(clause, bindObj, clausePath);
   const phraseNames = new Set();
   const bindings = new Array(names.length);
   let sc = scope;
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
-    const bindPath = letPath + '/' + escapeToken(name);
-    if (!VAR_NAME_RE.test(name))
-      return fail('JQ0003', `'${name}' is not a valid variable name`, bindPath);
-    if (phraseNames.has(name))
-      return fail('JQ0007', `duplicate binding of variable '${name}' within one phrase`, bindPath);
-    phraseNames.add(name);
-    const expr = normalizeExpr(letObj[name], bindPath, sc, ctx);
+    const bindPath = clausePath + '/' + escapeToken(name);
+    bindPhraseName(name, phraseNames, bindPath);
+    const source = bindObj[name];
+    if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
+      return fail('JQ0003', "the extended '$in'/'$at' binding form is not available in quantifiers", bindPath);
+    const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
-    sc = { name, slot, card: expr.card, parent: sc };
+    sc = { name, slot, card: CARD_ONE, parent: sc };
     bindings[i] = Object.freeze({ name, slot, expr });
   }
-  const ret = normalizeExpr(obj.$return, docPath + '/$return', sc, ctx);
+  const satisfies = normalizeExpr(obj.$satisfies, docPath + '/$satisfies', sc, ctx);
   return Object.freeze({
-    kind: 'let', card: ret.card, docPath,
-    bindings: Object.freeze(bindings), ret,
+    kind: 'quant', card: CARD_ONE, docPath, some,
+    bindings: Object.freeze(bindings), satisfies,
   });
 }
 

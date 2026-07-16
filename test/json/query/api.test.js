@@ -151,9 +151,8 @@ describe('Jaren JSON Query public API', () => {
         { template: { $for: 'kept verbatim', price: null }, label: '$price' });
     });
 
-    // Example A.8 verbatim uses $for (TODO_05; the fixture asserts JQ0099
-    // in normalize.test.js) - this runs its envelope + external mechanics
-    // over the implemented $let phrase.
+    // Example A.8 verbatim (with $for) runs in flwor.test.js - this runs
+    // its envelope + external mechanics over the degenerate $let phrase.
     it('should run the envelope + external mechanics of example A.8', () => {
       const q = compileJsonQuery({
         $query: '0.1',

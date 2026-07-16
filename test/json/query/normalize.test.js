@@ -100,6 +100,51 @@ describe('Jaren JSON Query normalizer', () => {
       failsWith({ $let: { 'a-b': 1 }, $return: 1 }, 'JQ0003', '/$let/a-b');
     });
 
+    it('should validate the $for binding object', () => {
+      failsWith({ $for: '$.store.book[*]', $return: '$b' }, 'JQ0003', '/$for');
+      failsWith({ $for: {}, $return: 1 }, 'JQ0003', '/$for');
+      failsWith({ $for: { '9x': 1 }, $return: 1 }, 'JQ0003', '/$for/9x');
+    });
+
+    it('should validate the extended $in/$at binding form', () => {
+      failsWith({ $for: { b: { $in: '$.a[*]' } }, $return: '$b' }, 'JQ0003', '/$for/b');
+      failsWith({ $for: { b: { $at: 'i' } }, $return: '$b' }, 'JQ0003', '/$for/b');
+      failsWith({ $for: { b: { $in: 1, $at: 'i', $seq: [] } }, $return: '$b' }, 'JQ0003', '/$for/b');
+      failsWith({ $for: { b: { $in: 1, $at: 9 } }, $return: '$b' }, 'JQ0003', '/$for/b/$at');
+      failsWith({ $for: { b: { $in: 1, $at: '9x' } }, $return: '$b' }, 'JQ0003', '/$for/b/$at');
+    });
+
+    it('should reject the extended binding form in $let and quantifiers', () => {
+      failsWith({ $let: { b: { $in: '$.a[*]', $at: 'i' } }, $return: '$b' }, 'JQ0003', '/$let/b');
+      failsWith({ $some: { b: { $in: '$.a[*]', $at: 'i' } }, $satisfies: true }, 'JQ0003', '/$some/b');
+    });
+
+    it('should validate the $groupby binding object', () => {
+      failsWith({ $for: { b: '$.a[*]' }, $groupby: 1, $return: '$b' }, 'JQ0003', '/$groupby');
+      failsWith({ $for: { b: '$.a[*]' }, $groupby: {}, $return: '$b' }, 'JQ0003', '/$groupby');
+      failsWith({ $for: { b: '$.a[*]' }, $groupby: { '9x': '$b' }, $return: '$b' }, 'JQ0003', '/$groupby/9x');
+    });
+
+    it('should validate $orderby key specs', () => {
+      failsWith({ $for: { b: '$.a[*]' }, $orderby: [], $return: '$b' }, 'JQ0003', '/$orderby');
+      failsWith({ $for: { b: '$.a[*]' }, $orderby: { $key: '$b', $dir: 'ascending' }, $return: '$b' }, 'JQ0003', '/$orderby/$dir');
+      failsWith({ $for: { b: '$.a[*]' }, $orderby: { $key: '$b', $empty: 'first' }, $return: '$b' }, 'JQ0003', '/$orderby/$empty');
+      failsWith({ $for: { b: '$.a[*]' }, $orderby: { $dir: 'desc' }, $return: '$b' }, 'JQ0003', '/$orderby');
+      failsWith({ $for: { b: '$.a[*]' }, $orderby: { $key: '$b', $desc: true }, $return: '$b' }, 'JQ0003', '/$orderby');
+      failsWith({ $for: { b: '$.a[*]' }, $orderby: ['$b', { $dir: 'desc' }], $return: '$b' }, 'JQ0003', '/$orderby/1');
+    });
+
+    it('should validate the $count clause name', () => {
+      failsWith({ $for: { b: '$.a[*]' }, $count: 5, $return: '$b' }, 'JQ0003', '/$count');
+      failsWith({ $for: { b: '$.a[*]' }, $count: '9x', $return: '$b' }, 'JQ0003', '/$count');
+    });
+
+    it('should validate quantifier binding objects', () => {
+      failsWith({ $some: 1, $satisfies: true }, 'JQ0003', '/$some');
+      failsWith({ $every: {}, $satisfies: true }, 'JQ0003', '/$every');
+      failsWith({ $some: { '9x': 1 }, $satisfies: true }, 'JQ0003', '/$some/9x');
+    });
+
     it('should reject FLWOR clause keys that cannot form a phrase alone', () => {
       failsWith({ $return: 1 }, 'JQ0003', '');
       failsWith({ $let: { x: 1 } }, 'JQ0003', '');
@@ -157,10 +202,15 @@ describe('Jaren JSON Query normalizer', () => {
   });
 
   describe('JQ0007 - duplicate bindings, and shadowing', () => {
-    // A duplicate binding within one phrase cannot be expressed through a
-    // JavaScript object while $let is the only binding clause (JS objects
-    // cannot carry duplicate keys); the allocator check exists and TODO_05
-    // exercises it across $for/$let/$at/$groupby binding sites.
+    it('should reject duplicate bindings across a phrase\'s clauses', () => {
+      failsWith({ $for: { b: '$.a[*]' }, $let: { b: 1 }, $return: '$b' }, 'JQ0007', '/$let/b');
+      failsWith({ $for: { b: { $in: '$.a[*]', $at: 'b' } }, $return: '$b' }, 'JQ0007', '/$for/b/$at');
+      failsWith({ $for: { b: { $in: '$.a[*]', $at: 'i' }, i: 1 }, $return: '$b' }, 'JQ0007', '/$for/i');
+      failsWith({ $for: { b: '$.a[*]' }, $groupby: { b: '$b.x' }, $return: '$b' }, 'JQ0007', '/$groupby/b');
+      failsWith({ $for: { n: '$.a[*]' }, $count: 'n', $return: '$n' }, 'JQ0007', '/$count');
+      failsWith({ $let: { x: 1 }, $count: 'x', $return: '$x' }, 'JQ0007', '/$count');
+    });
+
     it('should allow rebinding a name from an enclosing phrase (shadowing)', () => {
       const q = compileJsonQuery({
         $let: { a: 1 },
@@ -179,20 +229,23 @@ describe('Jaren JSON Query normalizer', () => {
     });
   });
 
-  describe('JQ0099 - placeholders for TODO_05/TODO_06', () => {
-    it('should reject FLWOR clauses beyond {$let, $return}', () => {
-      failsWith({ $for: { b: '$.a[*]' }, $return: '$b' }, 'JQ0099', '');
-      failsWith({ $let: { b: 1 }, $where: true, $return: '$b' }, 'JQ0099', '');
-      failsWith({ $for: { b: '$.a[*]' }, $orderby: '$b', $return: '$b' }, 'JQ0099', '');
+  describe('JQ0099 - placeholders for TODO_06', () => {
+    it('should compile every FLWOR clause and quantifier phrase', () => {
+      assert.strictEqual(typeof compileJsonQuery({ $for: { b: '$.a[*]' }, $return: '$b' }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({ $let: { b: 1 }, $where: true, $return: '$b' }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({ $for: { b: '$.a[*]' }, $orderby: '$b', $return: '$b' }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({ $some: { b: '$.a[*]' }, $satisfies: true }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({ $every: { b: '$.a[*]' }, $satisfies: true }), 'function');
     });
 
-    it('should reject quantifier phrases', () => {
-      failsWith({ $some: { b: '$.a[*]' }, $satisfies: true }, 'JQ0099', '');
-      failsWith({ $every: { b: '$.a[*]' }, $satisfies: true }, 'JQ0099', '');
+    it('should compile the provisional aggregates $count/$sum/$avg', () => {
+      assert.strictEqual(typeof compileJsonQuery({ $count: '$.a[*]' }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({ $sum: '$.a[*]' }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({ $avg: '$.a[*]' }), 'function');
     });
 
     it('should reject the TODO_06 library operators', () => {
-      failsWith({ $count: '$.a[*]' }, 'JQ0099', '');
+      failsWith({ $min: '$.a[*]' }, 'JQ0099', '');
       failsWith({ $string: 12 }, 'JQ0099', '');
       failsWith({ $coalesce: ['$.missing', 1] }, 'JQ0099', '');
       failsWith({ $replace: ['abc', 'b', 'x'] }, 'JQ0099', '');
@@ -249,23 +302,12 @@ describe('Jaren JSON Query normalizer', () => {
   });
 
   describe('valid fixtures from TODO_03', () => {
-    // Every valid/ fixture that uses only this work order's constructs
-    // must compile; fixtures using FLWOR, quantifiers, or TODO_06 library
-    // operators must fail with the JQ0099 placeholder.
+    // Every valid/ fixture compiles except the ones using TODO_06 library
+    // operators, which fail with the JQ0099 placeholder.
     const NOT_YET = new Set([
-      'example-2-bookstore-flwor.json',
-      'example-3-join.json',
-      'example-4-group-aggregate.json',
-      'example-7-quantifier.json',
-      'example-8-external.json',
-      'flwor-at-count.json',
-      'flwor-nested-interleaving.json',
-      'flwor-orderby-keyspec.json',
-      'op-aggregates-sequences.json',
+      'op-aggregates-sequences.json', // $min/$max/$distinct/... (TODO_06)
       'op-strings.json',
       'op-types-casts.json',
-      'quantifier-every.json',
-      'two-dialects-where.json',
     ]);
 
     const names = fs.readdirSync(path.join(fixturesDir, 'valid')).filter((n) => n.endsWith('.json')).sort();

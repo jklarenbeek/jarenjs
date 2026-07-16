@@ -466,7 +466,9 @@ XQuery 3.1 group-by semantics:
   item equality, §8.4), with numbers compared mathematically.
 - Every other variable bound in the phrase is **rebound to the sequence** of
   its values across the group's tuples, in tuple order.
-- The tuple stream after `$groupby` has one tuple per group.
+- The tuple stream after `$groupby` has one tuple per group, in order of
+  **first appearance** of each group's key combination in the incoming
+  tuple stream.
 
 *name* MUST be a valid variable name, distinct from every other variable
 bound in the phrase (`JQ0007`).
