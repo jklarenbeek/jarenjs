@@ -589,15 +589,17 @@ compileJsltStylesheet(doc, options) -> transform
   transform(data, externals?)   // plain JSON out
   transform.externals           // user parameter names (§8.3)
   transform.doc                 // deeply frozen copy of the stylesheet
-transformJson(stylesheet, data, externals?)   // one-shot, WeakMap-cached
+transformJson(stylesheet, data, externals?, options?) // one-shot, WeakMap-cached
 ```
 
 Module: `@jarenjs/json/jslt`. `transform` returns plain JSON with the query
 API's sequence mapping: `undefined` for the empty sequence, the item itself
 for a singleton, an array of items for a longer sequence. `options` carries
-`compileTypeTest` (§9) and `maxDepth` (§5.4). `transformJson` is the
-one-shot counterpart of `queryJson`, caching compiled stylesheets by
-document identity in a WeakMap.
+`compileTypeTest` (§9) and `maxDepth` (§5.4), both for
+`compileJsltStylesheet` and as the optional fourth argument of
+`transformJson`. The one-shot function is the counterpart of `queryJson`,
+caching compiled stylesheets by document identity and compile-option
+values in a WeakMap.
 
 ---
 
