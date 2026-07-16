@@ -4,6 +4,8 @@ Format validators for the JSON Schema `format` keyword, built on the text valida
 
 The JSON addressing formats are grouped separately in `jsonFormats`: `json-pointer`, `json-pointer-uri-fragment` and `relative-json-pointer` (RFC 6901), and `json-path`, which validates query strings against the complete [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) grammar using the parser of the JSONPath compiler in `@jarenjs/json`.
 
+The name → predicate bindings live in one canonical table, exported as `formatTesters` (plus the per-group `stringFormatTesters`, `jsonFormatTesters`, `dateTimeFormatTesters`, `numberFormatTesters`): bare synchronous predicates without validator coupling. The format compilers above wrap these testers in the validator contract, and [`@jarenjs/forms`](../forms) merges its rendering hints over the same table for per-keystroke field validation — one registry, so the two layers can never drift apart.
+
 ## Usage
 
 ```javascript

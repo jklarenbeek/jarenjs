@@ -26,6 +26,7 @@
   ],
   "peerDependencies": {
     "@jarenjs/core": "*",
+    "@jarenjs/formats": "*",
     "@jarenjs/json": "*"
   }
 }

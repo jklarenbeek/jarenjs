@@ -1,11 +1,8 @@
 //@ts-check
 
-import {
-  isValidJSONPointer,
-  isValidJSONPointerUriFragment,
-  isValidRelativeJSONPointer,
-  isValidJSONPathStrict,
-} from '@jarenjs/json';
+// The name -> predicate bindings live in ONE place: testers.js. This
+// module only wraps them in the validator's compiler contract.
+import { jsonFormatTesters } from './testers.js';
 
 import { createStringFormatCompiler } from './string.js';
 
@@ -26,7 +23,7 @@ import { createStringFormatCompiler } from './string.js';
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileJsonPointerFormat = createStringFormatCompiler('json-pointer', isValidJSONPointer);
+export const compileJsonPointerFormat = createStringFormatCompiler('json-pointer', jsonFormatTesters['json-pointer']);
 
 /**
  * Compiles a validator for the 'json-pointer-uri-fragment' format.
@@ -36,7 +33,7 @@ export const compileJsonPointerFormat = createStringFormatCompiler('json-pointer
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileJsonPointerUriFragmentFormat = createStringFormatCompiler('json-pointer-uri-fragment', isValidJSONPointerUriFragment);
+export const compileJsonPointerUriFragmentFormat = createStringFormatCompiler('json-pointer-uri-fragment', jsonFormatTesters['json-pointer-uri-fragment']);
 
 /**
  * Compiles a validator for the 'relative-json-pointer' format.
@@ -46,7 +43,7 @@ export const compileJsonPointerUriFragmentFormat = createStringFormatCompiler('j
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileRelativeJsonPointerFormat = createStringFormatCompiler('relative-json-pointer', isValidRelativeJSONPointer);
+export const compileRelativeJsonPointerFormat = createStringFormatCompiler('relative-json-pointer', jsonFormatTesters['relative-json-pointer']);
 
 // =============================================================================
 // JSONPath Format Compiler (RFC 9535)
@@ -69,7 +66,7 @@ export const compileRelativeJsonPointerFormat = createStringFormatCompiler('rela
  * compileJsonPathFormat(schemaObj, { format: 'json-path' })('@.name'); // false (queries start at $)
  * compileJsonPathFormat(schemaObj, { format: 'json-path' })('$.foo '); // false (trailing whitespace)
  */
-export const compileJsonPathFormat = createStringFormatCompiler('json-path', isValidJSONPathStrict);
+export const compileJsonPathFormat = createStringFormatCompiler('json-path', jsonFormatTesters['json-path']);
 
 // =============================================================================
 // Aggregated Format Validators Object

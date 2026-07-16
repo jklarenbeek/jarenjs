@@ -5,45 +5,9 @@ import {
   isStringType,
 } from '@jarenjs/core';
 
-import {
-  isStringLowerCase,
-  isStringUpperCase,
-  isStringRegExp,
-} from '@jarenjs/core/string';
-
-import {
-  isValidUri,
-  isValidUriRef,
-  isValidUriTemplate,
-  isValidUrl,
-  isValidEmail,
-  isValidHostname,
-  isValidIdnEmail,
-  isValidIdnHostname,
-  isValidIPv4,
-  isValidIPv6,
-  isValidUUID,
-  isValidAlpha,
-  isValidAlphaNumeric,
-  isValidIdentifier,
-  isValidHtmlIdentifier,
-  isValidCssIdentifier,
-  isValidHexaDecimal,
-  isValidNumeric,
-  isValidIRI,
-  isValidIRIRef,
-  isValidHexColor,
-  isValidUriFull,
-  isValidUriRefFull,
-  isValidEmailFull,
-  isValidGUID,
-  isValidISBN10,
-  isValidISBN13,
-  isValidMACAddr,
-  isValidBase64,
-  isValidCountryAlpha2,
-  isValidIBAN,
-} from '@jarenjs/core/text';
+// The name -> predicate bindings live in ONE place: testers.js. This
+// module only wraps them in the validator's compiler contract.
+import { stringFormatTesters } from './testers.js';
 
 /**
  * @typedef {import('@jarenjs/validate').ValidationObject} ValidationObject
@@ -100,7 +64,7 @@ export function createStringFormatCompiler(formatName, isFormatTest) {
  * compileAlphaFormat(schemaObj, { format: 'alpha' })('HelloWorld'); // true
  * compileAlphaFormat(schemaObj, { format: 'alpha' })('Hello123'); // false (with error)
  */
-export const compileAlphaFormat = createStringFormatCompiler('alpha', isValidAlpha);
+export const compileAlphaFormat = createStringFormatCompiler('alpha', stringFormatTesters['alpha']);
 
 /**
  * Compiles a validator for the 'alphanumeric' format.
@@ -112,7 +76,7 @@ export const compileAlphaFormat = createStringFormatCompiler('alpha', isValidAlp
  * @example
  * compileAlphaNumericFormat(schemaObj, { format: 'alphanumeric' })('Hello123'); // true
  */
-export const compileAlphaNumericFormat = createStringFormatCompiler('alphanumeric', isValidAlphaNumeric);
+export const compileAlphaNumericFormat = createStringFormatCompiler('alphanumeric', stringFormatTesters['alphanumeric']);
 
 /**
  * Compiles a validator for the 'uppercase' format.
@@ -122,7 +86,7 @@ export const compileAlphaNumericFormat = createStringFormatCompiler('alphanumeri
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUppercaseFormat = createStringFormatCompiler('uppercase', isStringUpperCase);
+export const compileUppercaseFormat = createStringFormatCompiler('uppercase', stringFormatTesters['uppercase']);
 
 /**
  * Compiles a validator for the 'lowercase' format.
@@ -132,7 +96,7 @@ export const compileUppercaseFormat = createStringFormatCompiler('uppercase', is
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileLowercaseFormat = createStringFormatCompiler('lowercase', isStringLowerCase);
+export const compileLowercaseFormat = createStringFormatCompiler('lowercase', stringFormatTesters['lowercase']);
 
 // =============================================================================
 // Identifier Format Compilers
@@ -146,7 +110,7 @@ export const compileLowercaseFormat = createStringFormatCompiler('lowercase', is
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIdentifierFormat = createStringFormatCompiler('identifier', isValidIdentifier);
+export const compileIdentifierFormat = createStringFormatCompiler('identifier', stringFormatTesters['identifier']);
 
 /**
  * Compiles a validator for the 'html-identifier' format.
@@ -156,7 +120,7 @@ export const compileIdentifierFormat = createStringFormatCompiler('identifier', 
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileHtmlIdentifierFormat = createStringFormatCompiler('html-identifier', isValidHtmlIdentifier);
+export const compileHtmlIdentifierFormat = createStringFormatCompiler('html-identifier', stringFormatTesters['html-identifier']);
 
 /**
  * Compiles a validator for the 'css-identifier' format.
@@ -166,7 +130,7 @@ export const compileHtmlIdentifierFormat = createStringFormatCompiler('html-iden
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileCssIdentifierFormat = createStringFormatCompiler('css-identifier', isValidCssIdentifier);
+export const compileCssIdentifierFormat = createStringFormatCompiler('css-identifier', stringFormatTesters['css-identifier']);
 
 // =============================================================================
 // Numeric & Color Format Compilers
@@ -180,7 +144,7 @@ export const compileCssIdentifierFormat = createStringFormatCompiler('css-identi
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileHexadecimalFormat = createStringFormatCompiler('hexadecimal', isValidHexaDecimal);
+export const compileHexadecimalFormat = createStringFormatCompiler('hexadecimal', stringFormatTesters['hexadecimal']);
 
 /**
  * Compiles a validator for the 'numeric' format.
@@ -190,7 +154,7 @@ export const compileHexadecimalFormat = createStringFormatCompiler('hexadecimal'
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileNumericFormat = createStringFormatCompiler('numeric', isValidNumeric);
+export const compileNumericFormat = createStringFormatCompiler('numeric', stringFormatTesters['numeric']);
 
 /**
  * Compiles a validator for the 'color' format.
@@ -200,7 +164,7 @@ export const compileNumericFormat = createStringFormatCompiler('numeric', isVali
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileColorFormat = createStringFormatCompiler('color', isValidHexColor);
+export const compileColorFormat = createStringFormatCompiler('color', stringFormatTesters['color']);
 
 // =============================================================================
 // Regex Format Compiler
@@ -214,7 +178,7 @@ export const compileColorFormat = createStringFormatCompiler('color', isValidHex
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileRegexFormat = createStringFormatCompiler('regex', isStringRegExp);
+export const compileRegexFormat = createStringFormatCompiler('regex', stringFormatTesters['regex']);
 
 // =============================================================================
 // URI Format Compilers
@@ -230,7 +194,7 @@ export const compileRegexFormat = createStringFormatCompiler('regex', isStringRe
  * @example
  * compileUriFormat(schemaObj, { format: 'uri' })('https://example.com'); // true
  */
-export const compileUriFormat = createStringFormatCompiler('uri', isValidUri);
+export const compileUriFormat = createStringFormatCompiler('uri', stringFormatTesters['uri']);
 
 /**
  * Compiles a validator for the 'uri--full' format.
@@ -240,7 +204,7 @@ export const compileUriFormat = createStringFormatCompiler('uri', isValidUri);
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUriFullFormat = createStringFormatCompiler('uri--full', isValidUriFull);
+export const compileUriFullFormat = createStringFormatCompiler('uri--full', stringFormatTesters['uri--full']);
 
 /**
  * Compiles a validator for the 'uri-reference' format.
@@ -250,7 +214,7 @@ export const compileUriFullFormat = createStringFormatCompiler('uri--full', isVa
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUriReferenceFormat = createStringFormatCompiler('uri-reference', isValidUriRef);
+export const compileUriReferenceFormat = createStringFormatCompiler('uri-reference', stringFormatTesters['uri-reference']);
 
 /**
  * Compiles a validator for the 'uri-reference--full' format.
@@ -260,7 +224,7 @@ export const compileUriReferenceFormat = createStringFormatCompiler('uri-referen
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUriReferenceFullFormat = createStringFormatCompiler('uri-reference--full', isValidUriRefFull);
+export const compileUriReferenceFullFormat = createStringFormatCompiler('uri-reference--full', stringFormatTesters['uri-reference--full']);
 
 /**
  * Compiles a validator for the 'uri-template' format.
@@ -270,7 +234,7 @@ export const compileUriReferenceFullFormat = createStringFormatCompiler('uri-ref
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUriTemplateFormat = createStringFormatCompiler('uri-template', isValidUriTemplate);
+export const compileUriTemplateFormat = createStringFormatCompiler('uri-template', stringFormatTesters['uri-template']);
 
 /**
  * Compiles a validator for the 'url' format.
@@ -280,7 +244,7 @@ export const compileUriTemplateFormat = createStringFormatCompiler('uri-template
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUrlFormat = createStringFormatCompiler('url', isValidUrl);
+export const compileUrlFormat = createStringFormatCompiler('url', stringFormatTesters['url']);
 
 /**
  * Compiles a validator for the 'url--full' format.
@@ -290,7 +254,7 @@ export const compileUrlFormat = createStringFormatCompiler('url', isValidUrl);
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUrlFullFormat = createStringFormatCompiler('url--full', isValidUrl);
+export const compileUrlFullFormat = createStringFormatCompiler('url--full', stringFormatTesters['url--full']);
 
 // =============================================================================
 // IRI Format Compilers (Internationalized Resource Identifiers)
@@ -304,7 +268,7 @@ export const compileUrlFullFormat = createStringFormatCompiler('url--full', isVa
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIriFormat = createStringFormatCompiler('iri', isValidIRI);
+export const compileIriFormat = createStringFormatCompiler('iri', stringFormatTesters['iri']);
 
 /**
  * Compiles a validator for the 'iri-reference' format.
@@ -314,7 +278,7 @@ export const compileIriFormat = createStringFormatCompiler('iri', isValidIRI);
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIriReferenceFormat = createStringFormatCompiler('iri-reference', isValidIRIRef);
+export const compileIriReferenceFormat = createStringFormatCompiler('iri-reference', stringFormatTesters['iri-reference']);
 
 // =============================================================================
 // Email Format Compilers
@@ -330,7 +294,7 @@ export const compileIriReferenceFormat = createStringFormatCompiler('iri-referen
  * @example
  * compileEmailFormat(schemaObj, { format: 'email' })('user@example.com'); // true
  */
-export const compileEmailFormat = createStringFormatCompiler('email', isValidEmail);
+export const compileEmailFormat = createStringFormatCompiler('email', stringFormatTesters['email']);
 
 /**
  * Compiles a validator for the 'email--full' format.
@@ -340,7 +304,7 @@ export const compileEmailFormat = createStringFormatCompiler('email', isValidEma
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileEmailFullFormat = createStringFormatCompiler('email--full', isValidEmailFull);
+export const compileEmailFullFormat = createStringFormatCompiler('email--full', stringFormatTesters['email--full']);
 
 /**
  * Compiles a validator for the 'idn-email' format.
@@ -350,7 +314,7 @@ export const compileEmailFullFormat = createStringFormatCompiler('email--full', 
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIdnEmailFormat = createStringFormatCompiler('idn-email', isValidIdnEmail);
+export const compileIdnEmailFormat = createStringFormatCompiler('idn-email', stringFormatTesters['idn-email']);
 
 // =============================================================================
 // Hostname Format Compilers
@@ -364,7 +328,7 @@ export const compileIdnEmailFormat = createStringFormatCompiler('idn-email', isV
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileHostnameFormat = createStringFormatCompiler('hostname', isValidHostname);
+export const compileHostnameFormat = createStringFormatCompiler('hostname', stringFormatTesters['hostname']);
 
 /**
  * Compiles a validator for the 'idn-hostname' format.
@@ -374,7 +338,7 @@ export const compileHostnameFormat = createStringFormatCompiler('hostname', isVa
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIdnHostnameFormat = createStringFormatCompiler('idn-hostname', isValidIdnHostname);
+export const compileIdnHostnameFormat = createStringFormatCompiler('idn-hostname', stringFormatTesters['idn-hostname']);
 
 // =============================================================================
 // IP Address Format Compilers
@@ -390,7 +354,7 @@ export const compileIdnHostnameFormat = createStringFormatCompiler('idn-hostname
  * @example
  * compileIpv4Format(schemaObj, { format: 'ipv4' })('192.168.1.1'); // true
  */
-export const compileIpv4Format = createStringFormatCompiler('ipv4', isValidIPv4);
+export const compileIpv4Format = createStringFormatCompiler('ipv4', stringFormatTesters['ipv4']);
 
 /**
  * Compiles a validator for the 'ipv6' format.
@@ -400,7 +364,7 @@ export const compileIpv4Format = createStringFormatCompiler('ipv4', isValidIPv4)
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIpv6Format = createStringFormatCompiler('ipv6', isValidIPv6);
+export const compileIpv6Format = createStringFormatCompiler('ipv6', stringFormatTesters['ipv6']);
 
 // =============================================================================
 // UUID & GUID Format Compilers
@@ -416,7 +380,7 @@ export const compileIpv6Format = createStringFormatCompiler('ipv6', isValidIPv6)
  * @example
  * compileUuidFormat(schemaObj, { format: 'uuid' })('550e8400-e29b-41d4-a716-446655440000'); // true
  */
-export const compileUuidFormat = createStringFormatCompiler('uuid', isValidUUID);
+export const compileUuidFormat = createStringFormatCompiler('uuid', stringFormatTesters['uuid']);
 
 /**
  * Compiles a validator for the 'guid' format.
@@ -426,7 +390,7 @@ export const compileUuidFormat = createStringFormatCompiler('uuid', isValidUUID)
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileGuidFormat = createStringFormatCompiler('guid', isValidGUID);
+export const compileGuidFormat = createStringFormatCompiler('guid', stringFormatTesters['guid']);
 
 // =============================================================================
 // ISBN Format Compilers
@@ -440,7 +404,7 @@ export const compileGuidFormat = createStringFormatCompiler('guid', isValidGUID)
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIsbn10Format = createStringFormatCompiler('isbn10', isValidISBN10);
+export const compileIsbn10Format = createStringFormatCompiler('isbn10', stringFormatTesters['isbn10']);
 
 /**
  * Compiles a validator for the 'isbn13' format.
@@ -450,7 +414,7 @@ export const compileIsbn10Format = createStringFormatCompiler('isbn10', isValidI
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIsbn13Format = createStringFormatCompiler('isbn13', isValidISBN13);
+export const compileIsbn13Format = createStringFormatCompiler('isbn13', stringFormatTesters['isbn13']);
 
 // =============================================================================
 // Hardware Address Format Compilers
@@ -464,7 +428,7 @@ export const compileIsbn13Format = createStringFormatCompiler('isbn13', isValidI
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileMacFormat = createStringFormatCompiler('mac', isValidMACAddr);
+export const compileMacFormat = createStringFormatCompiler('mac', stringFormatTesters['mac']);
 
 // =============================================================================
 // Encoding Format Compilers
@@ -478,7 +442,7 @@ export const compileMacFormat = createStringFormatCompiler('mac', isValidMACAddr
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileBase64Format = createStringFormatCompiler('base64', isValidBase64);
+export const compileBase64Format = createStringFormatCompiler('base64', stringFormatTesters['base64']);
 
 /**
  * Compiles a validator for the 'byte' format.
@@ -488,7 +452,7 @@ export const compileBase64Format = createStringFormatCompiler('base64', isValidB
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileByteFormat = createStringFormatCompiler('byte', isValidBase64);
+export const compileByteFormat = createStringFormatCompiler('byte', stringFormatTesters['byte']);
 
 // =============================================================================
 // Country & Banking Format Compilers
@@ -505,7 +469,7 @@ export const compileByteFormat = createStringFormatCompiler('byte', isValidBase6
  * compileCountry2Format(schemaObj, { format: 'country2' })('US'); // true
  * compileCountry2Format(schemaObj, { format: 'country2' })('XX'); // false (with error)
  */
-export const compileCountry2Format = createStringFormatCompiler('country2', isValidCountryAlpha2);
+export const compileCountry2Format = createStringFormatCompiler('country2', stringFormatTesters['country2']);
 
 /**
  * Compiles a validator for the 'iban' format.
@@ -515,7 +479,7 @@ export const compileCountry2Format = createStringFormatCompiler('country2', isVa
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileIbanFormat = createStringFormatCompiler('iban', isValidIBAN);
+export const compileIbanFormat = createStringFormatCompiler('iban', stringFormatTesters['iban']);
 
 // =============================================================================
 // Aggregated Format Validators Object (Backward Compatibility)

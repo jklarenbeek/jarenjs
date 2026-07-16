@@ -11,6 +11,11 @@
  */
 
 import {
+  compileJSONPointer,
+  JSONPOINTER_NOTHING,
+} from '@jarenjs/json/pointer';
+
+import {
   getFormatInfo,
 } from './formats.js';
 
@@ -32,6 +37,7 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {any} defaultValue
  * @property {string|undefined} placeholder
  * @property {object} constraints - minLength/maxLength/pattern/minimum/... extracted for the UI
+ * @property {object|null} rules - The raw `x-form` rules annotation, if any (see rules.js)
  * @property {Array<FormField>|null} children - Child fields for object kinds
  * @property {FormField|null} item - Template field for array items
  * @property {Array<FormField>|null} tuple - Fixed prefix fields for tuple arrays
@@ -53,21 +59,24 @@ export function humanizeKey(key) {
 }
 
 /**
- * Resolve a local JSON pointer ('#/$defs/foo') inside the root document.
+ * Resolve a local JSON pointer ('#/$defs/foo') inside the root document
+ * through the shared @jarenjs/json pointer walk (RFC 6901: the URI
+ * fragment percent-decodes to the pointer text).
  * @param {string} ref
  * @param {object} rootSchema
  * @returns {object|boolean|null} The referenced schema or null when unresolvable
  */
 function resolveLocalRef(ref, rootSchema) {
   if (typeof ref !== 'string' || !ref.startsWith('#/')) return null;
-  const parts = ref.slice(2).split('/').map(
-    (p) => decodeURIComponent(p.replace(/~1/g, '/').replace(/~0/g, '~')));
-  let current = rootSchema;
-  for (const part of parts) {
-    if (current == null || typeof current !== 'object') return null;
-    current = current[part];
+  let pointer = ref.slice(1);
+  try {
+    if (pointer.indexOf('%') >= 0) pointer = decodeURIComponent(pointer);
+    const target = compileJSONPointer(pointer)(rootSchema);
+    return target === JSONPOINTER_NOTHING ? null : target;
   }
-  return current === undefined ? null : current;
+  catch (e) {
+    return null; // malformed fragment: same 'unresolvable' answer as a missing target
+  }
 }
 
 /**
@@ -234,6 +243,9 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth) {
       ? String(effective.examples[0])
       : formatInfo?.placeholder,
     constraints: getConstraints(effective),
+    // The raw `x-form` annotation only - compiling its query documents is
+    // rules.js territory, so model building stays query-engine-free.
+    rules: isRulesObject(effective['x-form']) ? effective['x-form'] : null,
     children: null,
     item: null,
     tuple: null,
@@ -273,7 +285,17 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth) {
   return field;
 }
 
-function escapePointerKey(key) {
+function isRulesObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Encode a property name as an RFC 6901 reference token (`~` -> `~0`,
+ * `/` -> `~1`), the write-side inverse of the shared parse.
+ * @param {string} key
+ * @returns {string}
+ */
+export function escapePointerKey(key) {
   return String(key).replace(/~/g, '~0').replace(/\//g, '~1');
 }
 

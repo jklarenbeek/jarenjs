@@ -634,7 +634,7 @@ The `@jarenjs/json` package implements the JSON addressing and query standards a
 
 ### 📝 Form Generation
 
-The `@jarenjs/forms` package turns a JSON Schema into a framework-agnostic form model: a tree of field descriptors with labels, input-control hints, constraints and enum options. Every field validates **preemptively** on each keystroke using `@jarenjs/core` primitives (grapheme-aware lengths, unicode patterns, 40+ format testers), before the complete schema validation with `@jarenjs/validate` runs. Use it with React, Vue or vanilla DOM — the [playground](https://jklarenbeek.github.io/jarenjs/#/playground) renders its "Generated Form" tab with it. See [packages/forms](packages/forms/README.md).
+The `@jarenjs/forms` package turns a JSON Schema into a framework-agnostic form model: a tree of field descriptors with labels, input-control hints, constraints and enum options. Every field validates **preemptively** on each keystroke using `@jarenjs/core` primitives (grapheme-aware lengths, unicode patterns, 40+ format testers), and an `x-form` rules annotation adds cross-field behavior — visibility, enablement, computed values, assertions — as `@jarenjs/json` query documents compiled once per model, before the complete schema validation with `@jarenjs/validate` runs. Use it with React, Vue or vanilla DOM — the [playground](https://jklarenbeek.github.io/jarenjs/#/playground) renders its "Generated Form" tab with it. See [packages/forms](packages/forms/README.md).
 
 ### 🤓 Javascript Type Extensions
 

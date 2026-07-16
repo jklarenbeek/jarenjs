@@ -6,17 +6,50 @@
  * Form data follows JSON semantics: a field that was never filled in is
  * ABSENT (undefined), not an empty string - so `required` and default
  * handling behave exactly like they will on the wire.
+ *
+ * Pointer parsing and reading go through the @jarenjs/json compiled
+ * pointer engine (one pointer implementation in the whole repo); field
+ * pointers are stable for a model's lifetime, so compiled getters are
+ * cached by pointer string and reads are allocation-free.
  */
 
+import {
+  parseJSONPointer,
+  compileJSONPointer,
+  JSONPOINTER_NOTHING,
+} from '@jarenjs/json/pointer';
+
 /**
- * Split a JSON pointer into decoded segments. '' -> [].
+ * Split a JSON pointer into decoded segments per RFC 6901. '' -> [].
  * @param {string} pointer
  * @returns {string[]}
+ * @throws {import('@jarenjs/json/pointer').JSONPointerSyntaxError}
+ *   When the pointer violates the RFC 6901 grammar
  */
 export function parsePointer(pointer) {
-  if (pointer === '' || pointer == null) return [];
-  return String(pointer).split('/').slice(1)
-    .map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  if (pointer == null) return [];
+  return parseJSONPointer(pointer);
+}
+
+const getterCache = new Map();
+const GETTER_CACHE_LIMIT = 512;
+
+/**
+ * Compiled getter for a pointer string, cached FIFO (the same pattern as
+ * the query engine's string cache): form field pointers are a small,
+ * stable set, so every keystroke after the first hits the cache.
+ * @param {string} pointer
+ * @returns {(root: any) => any}
+ */
+function getPointerGetter(pointer) {
+  let getter = getterCache.get(pointer);
+  if (getter === undefined) {
+    getter = compileJSONPointer(pointer);
+    if (getterCache.size >= GETTER_CACHE_LIMIT)
+      getterCache.delete(getterCache.keys().next().value);
+    getterCache.set(pointer, getter);
+  }
+  return getter;
 }
 
 /**
@@ -26,13 +59,15 @@ export function parsePointer(pointer) {
  * @returns {any} The value, or undefined when the path does not exist
  */
 export function getValueAtPointer(data, pointer) {
-  let current = data;
-  for (const key of parsePointer(pointer)) {
-    if (current == null || typeof current !== 'object') return undefined;
-    current = current[key];
-  }
-  return current;
+  const value = getPointerGetter(pointer)(data);
+  return value === JSONPOINTER_NOTHING ? undefined : value;
 }
+
+//#region roadmap
+// Immutable write ops (set/append/remove by pointer) are a @jarenjs/json
+// roadmap item (compiled setters beside the compiled getters, feeding the
+// JSON Patch work). Until that lands they live here; parsing already goes
+// through the shared parseJSONPointer above.
 
 /**
  * Return a copy of `data` with the value at `pointer` replaced.
@@ -102,6 +137,8 @@ export function appendItem(data, pointer, value) {
   const next = Array.isArray(arr) ? [...arr, value] : [value];
   return setValueAtPointer(data, pointer, next);
 }
+
+//#endregion
 
 /**
  * Create initial data for a form model: schema defaults and const values

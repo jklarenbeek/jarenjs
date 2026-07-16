@@ -1,21 +1,8 @@
 //@ts-check
 
-import {
-  isValidInt8,
-  isValidInt16,
-  isValidInt32,
-  isValidInt64,
-  isValidUInt8,
-  isValidUInt16,
-  isValidUInt32,
-  isValidUInt64,
-} from '@jarenjs/core/integer';
-
-import {
-  isValidFloat16,
-  isValidFloat32,
-  isValidFloat64,
-} from '@jarenjs/core/float';
+// The name -> predicate bindings live in ONE place: testers.js. This
+// module only wraps them in the validator's compiler contract.
+import { numberFormatTesters } from './testers.js';
 
 /**
  * @typedef {import('@jarenjs/validate').ValidationObject} ValidationObject
@@ -66,7 +53,7 @@ function createNumberFormatCompiler(formatName, isNumberTest) {
  * compileInt8Format(schemaObj, { format: 'int8' })(128); // false (with error)
  * compileInt8Format(schemaObj, { format: 'int8' })('64'); // true (coerced)
  */
-export const compileInt8Format = createNumberFormatCompiler('int8', isValidInt8);
+export const compileInt8Format = createNumberFormatCompiler('int8', numberFormatTesters['int8']);
 
 /**
  * Compiles a validator for the 'int16' format.
@@ -76,7 +63,7 @@ export const compileInt8Format = createNumberFormatCompiler('int8', isValidInt8)
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileInt16Format = createNumberFormatCompiler('int16', isValidInt16);
+export const compileInt16Format = createNumberFormatCompiler('int16', numberFormatTesters['int16']);
 
 /**
  * Compiles a validator for the 'int32' format.
@@ -86,7 +73,7 @@ export const compileInt16Format = createNumberFormatCompiler('int16', isValidInt
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileInt32Format = createNumberFormatCompiler('int32', isValidInt32);
+export const compileInt32Format = createNumberFormatCompiler('int32', numberFormatTesters['int32']);
 
 /**
  * Compiles a validator for the 'int64' format.
@@ -96,7 +83,7 @@ export const compileInt32Format = createNumberFormatCompiler('int32', isValidInt
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileInt64Format = createNumberFormatCompiler('int64', isValidInt64);
+export const compileInt64Format = createNumberFormatCompiler('int64', numberFormatTesters['int64']);
 
 // =============================================================================
 // Unsigned Integer Format Compilers
@@ -113,7 +100,7 @@ export const compileInt64Format = createNumberFormatCompiler('int64', isValidInt
  * compileUInt8Format(schemaObj, { format: 'uint8' })(255); // true
  * compileUInt8Format(schemaObj, { format: 'uint8' })(256); // false (with error)
  */
-export const compileUInt8Format = createNumberFormatCompiler('uint8', isValidUInt8);
+export const compileUInt8Format = createNumberFormatCompiler('uint8', numberFormatTesters['uint8']);
 
 /**
  * Compiles a validator for the 'uint16' format.
@@ -123,7 +110,7 @@ export const compileUInt8Format = createNumberFormatCompiler('uint8', isValidUIn
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUInt16Format = createNumberFormatCompiler('uint16', isValidUInt16);
+export const compileUInt16Format = createNumberFormatCompiler('uint16', numberFormatTesters['uint16']);
 
 /**
  * Compiles a validator for the 'uint32' format.
@@ -133,7 +120,7 @@ export const compileUInt16Format = createNumberFormatCompiler('uint16', isValidU
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUInt32Format = createNumberFormatCompiler('uint32', isValidUInt32);
+export const compileUInt32Format = createNumberFormatCompiler('uint32', numberFormatTesters['uint32']);
 
 /**
  * Compiles a validator for the 'uint64' format.
@@ -143,7 +130,7 @@ export const compileUInt32Format = createNumberFormatCompiler('uint32', isValidU
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileUInt64Format = createNumberFormatCompiler('uint64', isValidUInt64);
+export const compileUInt64Format = createNumberFormatCompiler('uint64', numberFormatTesters['uint64']);
 
 // =============================================================================
 // Floating Point Format Compilers
@@ -157,7 +144,7 @@ export const compileUInt64Format = createNumberFormatCompiler('uint64', isValidU
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileFloat16Format = createNumberFormatCompiler('float16', isValidFloat16);
+export const compileFloat16Format = createNumberFormatCompiler('float16', numberFormatTesters['float16']);
 
 /**
  * Compiles a validator for the 'float32' format.
@@ -167,7 +154,7 @@ export const compileFloat16Format = createNumberFormatCompiler('float16', isVali
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileFloat32Format = createNumberFormatCompiler('float32', isValidFloat32);
+export const compileFloat32Format = createNumberFormatCompiler('float32', numberFormatTesters['float32']);
 
 /**
  * Compiles a validator for the 'float64' format.
@@ -177,7 +164,7 @@ export const compileFloat32Format = createNumberFormatCompiler('float32', isVali
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileFloat64Format = createNumberFormatCompiler('float64', isValidFloat64);
+export const compileFloat64Format = createNumberFormatCompiler('float64', numberFormatTesters['float64']);
 
 /**
  * Compiles a validator for the 'float' format.
@@ -187,7 +174,7 @@ export const compileFloat64Format = createNumberFormatCompiler('float64', isVali
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileFloatFormat = createNumberFormatCompiler('float', isValidFloat32);
+export const compileFloatFormat = createNumberFormatCompiler('float', numberFormatTesters['float']);
 
 /**
  * Compiles a validator for the 'double' format.
@@ -197,7 +184,7 @@ export const compileFloatFormat = createNumberFormatCompiler('float', isValidFlo
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileDoubleFormat = createNumberFormatCompiler('double', isValidFloat64);
+export const compileDoubleFormat = createNumberFormatCompiler('double', numberFormatTesters['double']);
 
 // =============================================================================
 // Aggregated Format Validators Object (Backward Compatibility)

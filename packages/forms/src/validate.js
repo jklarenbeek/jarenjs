@@ -6,9 +6,10 @@
  * These checks run synchronously on every keystroke, powered directly by
  * @jarenjs/core primitives (grapheme-aware string length, unicode regexes,
  * format testers, deep equality). They give the user immediate feedback
- * per field BEFORE the complete schema validation with @jarenjs/validate
- * runs - which remains authoritative for cross-field rules (required
- * combinations, dependencies, unevaluatedProperties, ...).
+ * per field BEFORE the complete compiled schema validation runs - which
+ * remains authoritative for cross-field rules (required combinations,
+ * dependencies, unevaluatedProperties, ...). Cross-field feedback per
+ * keystroke is rules.js territory (the `x-form` annotation).
  */
 
 import {
