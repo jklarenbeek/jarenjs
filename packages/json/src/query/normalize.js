@@ -93,10 +93,13 @@ const ESCAPE_KEYS = new Set(['$const', '$map']);
 // The complete closed vocabulary decides JQ0002 (unknown key) versus
 // JQ0003 (known keys in an invalid combination) for phrase objects.
 // A function, not a precomputed set: the registry must never be read at
-// module evaluation time (import cycle with operators.js).
-function isVocabularyKey(key) {
+// module evaluation time (import cycle with operators.js). Host extension
+// operators (ctx.extensions, see validateExtensions) count as vocabulary
+// for the compile they were passed to.
+function isVocabularyKey(key, ctx) {
   return FLWOR_KEYS.has(key) || QUANTIFIER_KEYS.has(key)
-    || ESCAPE_KEYS.has(key) || hasOwn(OPERATORS, key);
+    || ESCAPE_KEYS.has(key) || hasOwn(OPERATORS, key)
+    || (ctx.extensions !== null && hasOwn(ctx.extensions, key));
 }
 
 //#endregion
@@ -277,8 +280,8 @@ function normalizePhrase(obj, keys, docPath, scope, ctx) {
 
   // multi-key object matching no phrase shape
   for (let i = 0; i < keys.length; i++) {
-    if (!isVocabularyKey(keys[i]))
-      return failUnknownOperator(keys[i], docPath);
+    if (!isVocabularyKey(keys[i], ctx))
+      return failUnknownOperator(keys[i], docPath, ctx);
   }
   return fail('JQ0003', `invalid phrase key combination (${keys.join(', ')})`, docPath);
 }
@@ -317,16 +320,21 @@ let VOCABULARY_NAMES = null;
 
 // JQ0002 for an unknown $-key, with a "did you mean" suggestion when a
 // vocabulary key is within Levenshtein distance 2 (compile-time only).
-function failUnknownOperator(key, docPath) {
+// With host extensions the candidate list is built per call (this is the
+// error path); the lazy global stays for the core-only case.
+function failUnknownOperator(key, docPath, ctx) {
   if (VOCABULARY_NAMES === null) {
     VOCABULARY_NAMES = [
       ...FLWOR_KEYS, ...QUANTIFIER_KEYS, ...ESCAPE_KEYS, ...Object.keys(OPERATORS),
     ];
   }
+  const candidates = ctx.extensions === null
+    ? VOCABULARY_NAMES
+    : [...VOCABULARY_NAMES, ...Object.keys(ctx.extensions)];
   let best = null;
   let bestDist = 3;
-  for (let i = 0; i < VOCABULARY_NAMES.length; i++) {
-    const name = VOCABULARY_NAMES[i];
+  for (let i = 0; i < candidates.length; i++) {
+    const name = candidates[i];
     const lenDiff = key.length - name.length;
     if (lenDiff > 2 || lenDiff < -2)
       continue;
@@ -385,6 +393,14 @@ function compileSchemaLiteral(value, schemaPath, opPath, ctx) {
   return { schema, test };
 }
 
+// The inert raw node: a verbatim JSON value captured as compile-time
+// data - deep-copied and frozen, walked by nothing, never compiled
+// (compileOp hands 'raw' positions a null getter). Also exposed to host
+// extension operators through the `normalize` override helpers.
+function makeRaw(value, docPath) {
+  return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath, value: deepFreezeCopy(value) });
+}
+
 // One argument position of a registry operator, per its declared kind:
 // 'expr' normalizes an ordinary expression; 'raw' captures the value
 // verbatim, unevaluated; 'schema' is 'raw' plus a compiled type-test
@@ -395,7 +411,7 @@ function normalizeArg(kind, value, argPath, scope, ctx, opPath) {
   if (kind === 'expr')
     return normalizeExpr(value, argPath, scope, ctx);
   if (kind === 'raw')
-    return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value: deepFreezeCopy(value) });
+    return makeRaw(value, argPath);
   if (kind === 'schema') {
     const { schema, test } = compileSchemaLiteral(value, argPath, opPath, ctx);
     return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value: schema, test });
@@ -406,30 +422,64 @@ function normalizeArg(kind, value, argPath, scope, ctx, opPath) {
   return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value });
 }
 
+// Argument list of an operator call, uniformly from its `params`
+// descriptor (arity and shape violations are JQ0003).
+function normalizeParams(key, params, arg, opPath, scope, ctx) {
+  if (typeof params === 'string') // the single form: the value IS the argument
+    return [normalizeArg(params, arg, opPath, scope, ctx, opPath)];
+  const kinds = params.kinds;
+  const max = params.variadic === true ? Infinity : kinds.length;
+  const list = requireExprArray(key, arg, params.min, max, opPath);
+  const args = new Array(list.length);
+  for (let i = 0; i < list.length; i++) {
+    const kind = kinds[i < kinds.length ? i : kinds.length - 1];
+    args[i] = normalizeArg(kind, list[i], opPath + '/' + i, scope, ctx, opPath);
+  }
+  return args;
+}
+
+function argCards(args) {
+  const cards = new Array(args.length);
+  for (let i = 0; i < args.length; i++)
+    cards[i] = args[i].card;
+  return cards;
+}
+
 // A registry operator call: arity and shape come uniformly from the
 // table's `params` descriptor (JQ0003), the static cardinality from its
 // `result` - individual operators never re-check structure.
 function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
-  const params = entry.params;
+  const args = normalizeParams(key, entry.params, arg, opPath, scope, ctx);
+  return Object.freeze({
+    kind: 'op', card: entry.result(argCards(args)), docPath, name: key, args: Object.freeze(args),
+  });
+}
+
+// Helpers handed to an extension entry's `normalize` override; see
+// normalizeExtensionCall. Function declarations hoist, so freezing at
+// module evaluation time is safe.
+const EXTENSION_HELPERS = Object.freeze({ normalizeExpr, fail, makeRaw });
+
+// A host extension operator call (options.extensions, package-internal):
+// the registry contract plus an optional `normalize(arg, docPath, opPath,
+// scope, ctx, helpers) -> { args, card? }` override for operators whose
+// value shape the uniform `params` descriptor cannot express. `helpers`
+// is `{ normalizeExpr, fail, makeRaw }`. The op node is built uniformly
+// from the returned args - `card = card ?? entry.result(argCards)` - and
+// carries the resolved entry so compileOp can dispatch without the table.
+function normalizeExtensionCall(key, entry, arg, docPath, opPath, scope, ctx) {
   let args;
-  if (typeof params === 'string') { // the single form: the value IS the argument
-    args = [normalizeArg(params, arg, opPath, scope, ctx, opPath)];
+  let card = null;
+  if (typeof entry.normalize === 'function') {
+    const out = entry.normalize(arg, docPath, opPath, scope, ctx, EXTENSION_HELPERS);
+    args = Object.freeze(out.args.slice());
+    card = out.card ?? null;
   }
   else {
-    const kinds = params.kinds;
-    const max = params.variadic === true ? Infinity : kinds.length;
-    const list = requireExprArray(key, arg, params.min, max, opPath);
-    args = new Array(list.length);
-    for (let i = 0; i < list.length; i++) {
-      const kind = kinds[i < kinds.length ? i : kinds.length - 1];
-      args[i] = normalizeArg(kind, list[i], opPath + '/' + i, scope, ctx, opPath);
-    }
+    args = Object.freeze(normalizeParams(key, entry.params, arg, opPath, scope, ctx));
   }
-  const cards = new Array(args.length);
-  for (let i = 0; i < args.length; i++)
-    cards[i] = args[i].card;
   return Object.freeze({
-    kind: 'op', card: entry.result(cards), docPath, name: key, args: Object.freeze(args),
+    kind: 'op', card: card ?? entry.result(argCards(args)), docPath, name: key, args, entry,
   });
 }
 
@@ -461,9 +511,12 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
       // object always reaches this lookup and is the operator
       if (hasOwn(OPERATORS, key))
         return normalizeOperatorCall(key, OPERATORS[key], arg, docPath, opPath, scope, ctx);
+      // host extension operators: after the core registry, before JQ0002
+      if (ctx.extensions !== null && hasOwn(ctx.extensions, key))
+        return normalizeExtensionCall(key, ctx.extensions[key], arg, docPath, opPath, scope, ctx);
       if (FLWOR_KEYS.has(key) || QUANTIFIER_KEYS.has(key))
         return fail('JQ0003', `'${key}' cannot form a phrase on its own`, docPath);
-      return failUnknownOperator(key, docPath);
+      return failUnknownOperator(key, docPath, ctx);
     }
   }
 }
@@ -886,6 +939,28 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
 
 //#region entry points
 
+// Validate `options.extensions` (package-internal, used by the JSLT
+// layer; not a public contract): a plain object of `name -> entry`.
+// Every name must start with '$' and must not collide with the core
+// vocabulary - the closed format is unchanged, extensions are host
+// machinery. Violations are host programming errors (TypeError), not
+// JQ0xxx document errors.
+function validateExtensions(extensions) {
+  if (!isPlainObject(extensions))
+    throw new TypeError('options.extensions must be a plain object of operator entries');
+  const names = Object.keys(extensions);
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (name.charCodeAt(0) !== 0x24) // '$'
+      throw new TypeError(`extension operator '${name}' must start with '$'`);
+    if (FLWOR_KEYS.has(name) || QUANTIFIER_KEYS.has(name) || ESCAPE_KEYS.has(name)
+      || ORDERBY_SPEC_KEYS.has(name) || name === '$in' || name === '$at'
+      || name === '$query' || name === '$expr' || hasOwn(OPERATORS, name))
+      throw new TypeError(`extension operator '${name}' collides with the core vocabulary`);
+  }
+  return extensions;
+}
+
 function normalizeExpr(value, docPath, scope, ctx) {
   switch (typeof value) {
     case 'string':
@@ -918,6 +993,17 @@ function normalizeExpr(value, docPath, scope, ctx) {
  *   into a boolean item predicate (QUERY-FORMAT.md section 8.11). Called
  *   once per schema literal, at query compile time. Without it, schema
  *   operators ($valid/$assert/$as) are compile error JQ0008.
+ * @param {object} [options.extensions] - package-internal operator
+ *   extension point, the operator analogue of `compileTypeTest` (used by
+ *   the JSLT layer; not a public contract). A plain object of
+ *   `name -> entry`, where entry follows the operator registry contract
+ *   (`params`/`result`/`compile`, operators.js header) plus an optional
+ *   `normalize(arg, docPath, opPath, scope, ctx, helpers) -> {args, card?}`
+ *   override for polymorphic value shapes. Names must start with '$' and
+ *   must not collide with the core vocabulary (TypeError - a host
+ *   programming error, not a JQ0xxx document error). The published format
+ *   and its schema are unchanged: without extensions, the same documents
+ *   fail JQ0002.
  * @returns {{ root: object, frameSize: number, externals: {name: string, slot: number}[] }}
  *   the AST root, the frame size, and the external parameters in order of
  *   first appearance (slot order)
@@ -927,7 +1013,8 @@ export function normalizeQuery(doc, options = {}) {
   const compileTypeTest = typeof options.compileTypeTest === 'function'
     ? options.compileTypeTest
     : null;
-  const ctx = { nextSlot: 1, externals: new Map(), compileTypeTest };
+  const extensions = options.extensions == null ? null : validateExtensions(options.extensions);
+  const ctx = { nextSlot: 1, externals: new Map(), compileTypeTest, extensions };
   let expr = doc;
   let rootPath = '';
   // the version envelope is only recognized at the top level (section 4)

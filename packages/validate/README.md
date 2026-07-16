@@ -84,6 +84,9 @@ jaren.compile({
 
 Two external parameters are bound on every evaluation: `root` — the instance
 root — and `path` — the current instance location as a JSON pointer string.
+(The JSLT template layer reserves the same two names with one twist: its
+matching language is JSONPath, so its `path` is an RFC 9535 *normalized
+path*, not a pointer — see [JSLT-FORMAT §8.2](../json/docs/JSLT-FORMAT.md).)
 So a subschema can reach across the document:
 
 ```javascript

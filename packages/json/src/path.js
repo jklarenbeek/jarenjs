@@ -29,8 +29,9 @@ import {
   isSingularSegments,
   compileSingularGetter,
   compileSegmentV,
-  compileLogicalExpr,
   runSegmentsV,
+  compileSegmentP,
+  runSegmentsP,
 } from './segments.js';
 import {
   CC_TAB,
@@ -70,8 +71,6 @@ import {
  * distinct from the JSON value `null`.
  */
 export const JSONPATH_NOTHING = NOTHING;
-
-const hasOwn = Object.hasOwn;
 
 function deepFreeze(value) {
   if (typeof value !== 'object' || value === null)
@@ -761,173 +760,10 @@ export function parseJSONPath(source) {
 
 //#endregion
 
-//#region segment compilation (nodes mode, normalized paths)
-
-// eslint-disable-next-line no-control-regex
-const RE_NAME_NEEDS_ESCAPE = /['\\\u0000-\u001f]/;
-
-/**
- * Escape a member name for use inside a normalized path name selector
- * (RFC 9535 section 2.7).
- */
-function escapeNormalizedName(name) {
-  if (!RE_NAME_NEEDS_ESCAPE.test(name))
-    return name;
-  let out = '';
-  for (let i = 0; i < name.length; i++) {
-    const c = name.charCodeAt(i);
-    if (c === CC_SQUOTE) out += "\\'";
-    else if (c === CC_BACKSLASH) out += '\\\\';
-    else if (c === 0x08) out += '\\b';
-    else if (c === CC_TAB) out += '\\t';
-    else if (c === CC_LF) out += '\\n';
-    else if (c === 0x0C) out += '\\f';
-    else if (c === CC_CR) out += '\\r';
-    else if (c < CC_SPACE) out += '\\u00' + (c < 0x10 ? '0' : '') + c.toString(16);
-    else out += name[i];
-  }
-  return out;
-}
-
-function appendName(path, name) {
-  return path + "['" + escapeNormalizedName(name) + "']";
-}
-
-// selector-node functions: (value, path, outValues, outPaths, root) => void
-
-function compileSelectorNodeP(sel) {
-  switch (sel.kind) {
-    case 'name': {
-      const name = sel.name;
-      const suffix = "['" + escapeNormalizedName(name) + "']";
-      return (v, p, outV, outP) => {
-        if (typeof v === 'object' && v !== null && !Array.isArray(v) && hasOwn(v, name)) {
-          outV.push(v[name]);
-          outP.push(p + suffix);
-        }
-      };
-    }
-    case 'index': {
-      const index = sel.index;
-      return (v, p, outV, outP) => {
-        if (!Array.isArray(v))
-          return;
-        const idx = index < 0 ? v.length + index : index;
-        if (idx >= 0 && idx < v.length) {
-          outV.push(v[idx]);
-          outP.push(p + '[' + idx + ']');
-        }
-      };
-    }
-    case 'wildcard':
-      return (v, p, outV, outP) => {
-        if (Array.isArray(v)) {
-          for (let i = 0; i < v.length; i++) {
-            outV.push(v[i]);
-            outP.push(p + '[' + i + ']');
-          }
-        }
-        else if (typeof v === 'object' && v !== null) {
-          for (const key in v) {
-            if (hasOwn(v, key)) {
-              outV.push(v[key]);
-              outP.push(appendName(p, key));
-            }
-          }
-        }
-      };
-    case 'slice': {
-      const start = sel.start;
-      const end = sel.end;
-      const step = sel.step === null ? 1 : sel.step;
-      if (step === 0)
-        return () => { };
-      return (v, p, outV, outP) => {
-        if (!Array.isArray(v))
-          return;
-        const len = v.length;
-        if (len === 0)
-          return;
-        const s = start === null ? (step > 0 ? 0 : len - 1) : (start < 0 ? len + start : start);
-        const e = end === null ? (step > 0 ? len : -1) : (end < 0 ? len + end : end);
-        if (step > 0) {
-          const lower = s < 0 ? 0 : (s > len ? len : s);
-          const upper = e < 0 ? 0 : (e > len ? len : e);
-          for (let i = lower; i < upper; i += step) {
-            outV.push(v[i]);
-            outP.push(p + '[' + i + ']');
-          }
-        }
-        else {
-          const upper = s < -1 ? -1 : (s > len - 1 ? len - 1 : s);
-          const lower = e < -1 ? -1 : (e > len - 1 ? len - 1 : e);
-          for (let i = upper; i > lower; i += step) {
-            outV.push(v[i]);
-            outP.push(p + '[' + i + ']');
-          }
-        }
-      };
-    }
-    default: { // 'filter'
-      const pred = compileLogicalExpr(sel.expr);
-      return (v, p, outV, outP, root) => {
-        if (Array.isArray(v)) {
-          for (let i = 0; i < v.length; i++) {
-            if (pred(v[i], root)) {
-              outV.push(v[i]);
-              outP.push(p + '[' + i + ']');
-            }
-          }
-        }
-        else if (typeof v === 'object' && v !== null) {
-          for (const key in v) {
-            if (hasOwn(v, key) && pred(v[key], root)) {
-              outV.push(v[key]);
-              outP.push(appendName(p, key));
-            }
-          }
-        }
-      };
-    }
-  }
-}
-
-function descendP(v, p, outV, outP, root, apply) {
-  apply(v, p, outV, outP, root);
-  if (Array.isArray(v)) {
-    for (let i = 0; i < v.length; i++)
-      descendP(v[i], p + '[' + i + ']', outV, outP, root, apply);
-  }
-  else if (typeof v === 'object' && v !== null) {
-    for (const key in v) {
-      if (hasOwn(v, key))
-        descendP(v[key], appendName(p, key), outV, outP, root, apply);
-    }
-  }
-}
-
-// segment functions: (inValues, inPaths, outValues, outPaths, root) => void
-function compileSegmentP(seg) {
-  const fns = seg.selectors.map(compileSelectorNodeP);
-  const apply = fns.length === 1
-    ? fns[0]
-    : (v, p, outV, outP, root) => {
-      for (let i = 0; i < fns.length; i++)
-        fns[i](v, p, outV, outP, root);
-    };
-  if (seg.descendant) {
-    return (inV, inP, outV, outP, root) => {
-      for (let i = 0; i < inV.length; i++)
-        descendP(inV[i], inP[i], outV, outP, root, apply);
-    };
-  }
-  return (inV, inP, outV, outP, root) => {
-    for (let i = 0; i < inV.length; i++)
-      apply(inV[i], inP[i], outV, outP, root);
-  };
-}
-
-//#endregion
+// The nodes-mode segment compilers (normalized paths, RFC 9535 section
+// 2.7) live in segments.js next to the values-mode ones; nodes mode is
+// still compiled lazily here (see compileJSONPath), so value-only
+// queries never pay for path-string building.
 
 //#region public API
 
@@ -987,18 +823,7 @@ export function compileJSONPath(source) {
   function runNodes(data) {
     if (segsP === null)
       segsP = segments.map(compileSegmentP);
-    let vals = [data];
-    let paths = ['$'];
-    for (let i = 0; i < segsP.length; i++) {
-      if (vals.length === 0)
-        break;
-      const outV = [];
-      const outP = [];
-      segsP[i](vals, paths, outV, outP, data);
-      vals = outV;
-      paths = outP;
-    }
-    return { vals, paths };
+    return runSegmentsP(segsP, data, '$', data);
   }
 
   const query = (data) => values(data);

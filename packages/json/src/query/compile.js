@@ -273,9 +273,10 @@ function compileArray(node) {
 // A registry operator call (normalize.js `op` node): compile the argument
 // getters, hand them - with the argument nodes, which carry `card` and
 // `docPath` - to the table entry's `compile`. Arguments declared 'raw' or
-// 'name' are compile-time data (`args[i].value`), not getters.
+// 'name' are compile-time data (`args[i].value`), not getters. Extension
+// op nodes (options.extensions) carry their resolved entry themselves.
 function compileOp(node) {
-  const entry = OPERATORS[node.name];
+  const entry = OPERATORS[node.name] ?? node.entry;
   const args = node.args;
   const gets = new Array(args.length);
   for (let i = 0; i < args.length; i++)

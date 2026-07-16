@@ -1,13 +1,23 @@
 //#region JSONPath segment engine (package-internal)
 // Runtime segment machinery shared by the JSONPath compiler (path.js) and
-// the query engine (query/). Extracted verbatim from path.js; the nodes/
-// paths-mode compilers stay in path.js (query mode does not need
-// normalized paths). This module is package-internal and is deliberately
-// not listed in the package exports.
+// the query engine (query/). Extracted verbatim from path.js, in two
+// installments: values mode first, then the nodes-mode (normalized paths,
+// RFC 9535 section 2.7) compilers - so consumers beyond path.js (the JSLT
+// dispatcher's positional matching) can run selectors producing
+// (value, normalized-path) pairs. This module is package-internal and is
+// deliberately not listed in the package exports.
 
 import { equalsJson } from '@jarenjs/core/object';
 import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
+import {
+  CC_TAB,
+  CC_LF,
+  CC_CR,
+  CC_SPACE,
+  CC_SQUOTE,
+  CC_BACKSLASH,
+} from '@jarenjs/core/scan';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
@@ -411,6 +421,205 @@ export function compileSegmentV(seg) {
     for (let i = 0; i < input.length; i++)
       apply(input[i], output, root);
   };
+}
+
+//#endregion
+
+//#region segment compilation (nodes mode, normalized paths)
+// Moved verbatim from path.js: the selector/segment compilers producing
+// (value, normalized-path) pairs per RFC 9535 section 2.7. path.js
+// imports them back for `query.nodes()`/`query.paths()`; nodes mode
+// stays lazily compiled there, so value-only queries never pay for it.
+
+// eslint-disable-next-line no-control-regex
+export const RE_NAME_NEEDS_ESCAPE = /['\\\u0000-\u001f]/;
+
+/**
+ * Escape a member name for use inside a normalized path name selector
+ * (RFC 9535 section 2.7).
+ */
+export function escapeNormalizedName(name) {
+  if (!RE_NAME_NEEDS_ESCAPE.test(name))
+    return name;
+  let out = '';
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c === CC_SQUOTE) out += "\\'";
+    else if (c === CC_BACKSLASH) out += '\\\\';
+    else if (c === 0x08) out += '\\b';
+    else if (c === CC_TAB) out += '\\t';
+    else if (c === CC_LF) out += '\\n';
+    else if (c === 0x0C) out += '\\f';
+    else if (c === CC_CR) out += '\\r';
+    else if (c < CC_SPACE) out += '\\u00' + (c < 0x10 ? '0' : '') + c.toString(16);
+    else out += name[i];
+  }
+  return out;
+}
+
+export function appendName(path, name) {
+  return path + "['" + escapeNormalizedName(name) + "']";
+}
+
+// selector-node functions: (value, path, outValues, outPaths, root) => void
+
+export function compileSelectorNodeP(sel) {
+  switch (sel.kind) {
+    case 'name': {
+      const name = sel.name;
+      const suffix = "['" + escapeNormalizedName(name) + "']";
+      return (v, p, outV, outP) => {
+        if (typeof v === 'object' && v !== null && !Array.isArray(v) && hasOwn(v, name)) {
+          outV.push(v[name]);
+          outP.push(p + suffix);
+        }
+      };
+    }
+    case 'index': {
+      const index = sel.index;
+      return (v, p, outV, outP) => {
+        if (!Array.isArray(v))
+          return;
+        const idx = index < 0 ? v.length + index : index;
+        if (idx >= 0 && idx < v.length) {
+          outV.push(v[idx]);
+          outP.push(p + '[' + idx + ']');
+        }
+      };
+    }
+    case 'wildcard':
+      return (v, p, outV, outP) => {
+        if (Array.isArray(v)) {
+          for (let i = 0; i < v.length; i++) {
+            outV.push(v[i]);
+            outP.push(p + '[' + i + ']');
+          }
+        }
+        else if (typeof v === 'object' && v !== null) {
+          for (const key in v) {
+            if (hasOwn(v, key)) {
+              outV.push(v[key]);
+              outP.push(appendName(p, key));
+            }
+          }
+        }
+      };
+    case 'slice': {
+      const start = sel.start;
+      const end = sel.end;
+      const step = sel.step === null ? 1 : sel.step;
+      if (step === 0)
+        return () => { };
+      return (v, p, outV, outP) => {
+        if (!Array.isArray(v))
+          return;
+        const len = v.length;
+        if (len === 0)
+          return;
+        const s = start === null ? (step > 0 ? 0 : len - 1) : (start < 0 ? len + start : start);
+        const e = end === null ? (step > 0 ? len : -1) : (end < 0 ? len + end : end);
+        if (step > 0) {
+          const lower = s < 0 ? 0 : (s > len ? len : s);
+          const upper = e < 0 ? 0 : (e > len ? len : e);
+          for (let i = lower; i < upper; i += step) {
+            outV.push(v[i]);
+            outP.push(p + '[' + i + ']');
+          }
+        }
+        else {
+          const upper = s < -1 ? -1 : (s > len - 1 ? len - 1 : s);
+          const lower = e < -1 ? -1 : (e > len - 1 ? len - 1 : e);
+          for (let i = upper; i > lower; i += step) {
+            outV.push(v[i]);
+            outP.push(p + '[' + i + ']');
+          }
+        }
+      };
+    }
+    default: { // 'filter'
+      const pred = compileLogicalExpr(sel.expr);
+      return (v, p, outV, outP, root) => {
+        if (Array.isArray(v)) {
+          for (let i = 0; i < v.length; i++) {
+            if (pred(v[i], root)) {
+              outV.push(v[i]);
+              outP.push(p + '[' + i + ']');
+            }
+          }
+        }
+        else if (typeof v === 'object' && v !== null) {
+          for (const key in v) {
+            if (hasOwn(v, key) && pred(v[key], root)) {
+              outV.push(v[key]);
+              outP.push(appendName(p, key));
+            }
+          }
+        }
+      };
+    }
+  }
+}
+
+export function descendP(v, p, outV, outP, root, apply) {
+  apply(v, p, outV, outP, root);
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++)
+      descendP(v[i], p + '[' + i + ']', outV, outP, root, apply);
+  }
+  else if (typeof v === 'object' && v !== null) {
+    for (const key in v) {
+      if (hasOwn(v, key))
+        descendP(v[key], appendName(p, key), outV, outP, root, apply);
+    }
+  }
+}
+
+// segment functions: (inValues, inPaths, outValues, outPaths, root) => void
+export function compileSegmentP(seg) {
+  const fns = seg.selectors.map(compileSelectorNodeP);
+  const apply = fns.length === 1
+    ? fns[0]
+    : (v, p, outV, outP, root) => {
+      for (let i = 0; i < fns.length; i++)
+        fns[i](v, p, outV, outP, root);
+    };
+  if (seg.descendant) {
+    return (inV, inP, outV, outP, root) => {
+      for (let i = 0; i < inV.length; i++)
+        descendP(inV[i], inP[i], outV, outP, root, apply);
+    };
+  }
+  return (inV, inP, outV, outP, root) => {
+    for (let i = 0; i < inV.length; i++)
+      apply(inV[i], inP[i], outV, outP, root);
+  };
+}
+
+/**
+ * Run a chain of compiled nodes-mode segment functions over a start
+ * value, threading normalized paths alongside values.
+ * @param {Function[]} segs - segment functions from compileSegmentP
+ * @param {any} startValue - the value the first segment applies to
+ * @param {string} startPath - the base normalized path of startValue
+ *   (`'$'` for the document root)
+ * @param {any} root - the query root (`$` inside embedded filters)
+ * @returns {{ vals: any[], paths: string[] }} parallel arrays of the
+ *   resulting nodelist's values and normalized paths
+ */
+export function runSegmentsP(segs, startValue, startPath, root) {
+  let vals = [startValue];
+  let paths = [startPath];
+  const slen = segs.length;
+  for (let i = 0; i < slen; i++) {
+    if (vals.length === 0)
+      break;
+    const outV = [];
+    const outP = [];
+    segs[i](vals, paths, outV, outP, root);
+    vals = outV;
+    paths = outP;
+  }
+  return { vals, paths };
 }
 
 //#endregion

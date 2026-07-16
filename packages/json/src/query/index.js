@@ -56,6 +56,13 @@ const hasOwn = Object.hasOwn;
  *   implementation works - this package never imports the validator.
  *   Without a hook, the schema operators `$valid`/`$assert`/`$as` are
  *   compile error JQ0008.
+ * @param {object} [options.extensions] - package-internal operator
+ *   extension point, the operator analogue of `compileTypeTest` (used by
+ *   the JSLT layer; not a public contract). A plain object of
+ *   `name -> entry` following the operator registry contract; see
+ *   normalizeQuery in normalize.js for the full shape. The published
+ *   format vocabulary is unchanged: without extensions, documents using
+ *   such operators fail JQ0002.
  * @returns {function} the compiled query function
  * @throws {JsonQueryCompileError} when the document violates the format
  * @example
