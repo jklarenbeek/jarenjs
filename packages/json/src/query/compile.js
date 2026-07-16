@@ -9,7 +9,6 @@
 // CARD_ONE compile to singleton-mode closures that skip every sequence
 // check - the main reason compiled queries are fast.
 
-import { equalsJson } from '@jarenjs/core/object';
 import { compareCodePoints } from '@jarenjs/core/string';
 import {
   NOTHING,
@@ -18,27 +17,18 @@ import {
   runSegmentsV,
 } from '../segments.js';
 import { JsonQueryRuntimeError } from './errors.js';
-import { EMPTY, Seq, seqOf, appendItem, ebv, itemCount, stableKeyString } from './runtime.js';
+import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, describeItem } from './runtime.js';
 import { CARD_ONE } from './normalize.js';
+// The operator registry: every section-8 operator compiles through its
+// table entry (compileOp). Only referenced inside functions, so the
+// import cycle compile.js <-> operators.js is initialization-safe.
+import { OPERATORS } from './operators.js';
 
 /**
  * Sentinel stored in the frame slot of an external parameter the caller
  * did not bind; evaluating a reference to it raises JQ2006.
  */
 export const UNBOUND = Symbol('JsonQuery.Unbound');
-
-function describeItem(v) {
-  if (v instanceof Seq)
-    return `a sequence of ${v.items.length} items`;
-  if (v === EMPTY)
-    return 'the empty sequence';
-  if (v === null)
-    return 'null';
-  if (Array.isArray(v))
-    return 'an array';
-  const t = typeof v;
-  return t === 'object' ? 'an object' : `a ${t}`;
-}
 
 //#region variables & paths
 
@@ -114,9 +104,16 @@ function compilePath(node) {
   };
 }
 
-// existence-only variant for $exists/$empty: paths never materialize a
-// result sequence (the analogue of path.js's compileExists)
-function compileExistsTest(node) {
+/**
+ * Existence-only compilation for `$exists`/`$empty` (and any future
+ * boolean context): paths never materialize a result sequence (the
+ * analogue of path.js's compileExists). Takes the operand AST node -
+ * this is why registry `compile` functions receive arg nodes, not just
+ * getters.
+ * @param {object} node - a frozen AST node from normalize.js
+ * @returns {(frame: any[]) => boolean}
+ */
+export function compileExistsTest(node) {
   if (node.kind === 'path') {
     const base = compileVarGetter(node.rootSlot, node.external, node.name, node.docPath);
     if (node.singular) {
@@ -269,342 +266,21 @@ function compileArray(node) {
   };
 }
 
-function compileSeq(node) {
-  if (node.elements.length === 0)
-    return () => EMPTY;
-  if (node.elements.length === 1) // {"$seq": [e]} is e
-    return compileNode(node.elements[0]);
-  const appliers = compileElementAppliers(node.elements);
-  const alen = appliers.length;
-  return (f) => {
-    const acc = [];
-    for (let i = 0; i < alen; i++)
-      appliers[i](f, acc);
-    return seqOf(acc);
-  };
-}
-
 //#endregion
 
-//#region comparisons
+//#region operators
 
-// item comparison rules (section 8.4): $eq/$ne deep structural JSON
-// equality (D2); ordering only between two numbers or two strings, any
-// other pair is simply false (no witness, no error)
-function itemEq(a, b) {
-  return equalsJson(a, b);
-}
-function itemNe(a, b) {
-  return !equalsJson(a, b);
-}
-function itemLt(a, b) {
-  if (typeof a === 'number')
-    return typeof b === 'number' && a < b;
-  if (typeof a === 'string')
-    return typeof b === 'string' && compareCodePoints(a, b) < 0;
-  return false;
-}
-function itemLe(a, b) {
-  if (typeof a === 'number')
-    return typeof b === 'number' && a <= b;
-  if (typeof a === 'string')
-    return typeof b === 'string' && compareCodePoints(a, b) <= 0;
-  return false;
-}
-function itemGt(a, b) {
-  return itemLt(b, a);
-}
-function itemGe(a, b) {
-  return itemLe(b, a);
-}
-
-const ITEM_COMPARATORS = {
-  eq: itemEq, ne: itemNe, lt: itemLt, le: itemLe, gt: itemGt, ge: itemGe,
-};
-
-function compileCmp(node) {
-  const itemCmp = ITEM_COMPARATORS[node.op];
-  const left = compileNode(node.left);
-  const right = compileNode(node.right);
-  if (node.left.card === CARD_ONE && node.right.card === CARD_ONE)
-    // the common case: two singletons, one direct item comparison
-    return (f) => itemCmp(left(f), right(f));
-  // existential general comparison: true iff some pair of items compares
-  // true; either side empty means no witnessing pair (contrast the path
-  // filter dialect where Nothing == Nothing holds - section 5.2)
-  return (f) => {
-    const lv = left(f);
-    if (lv === EMPTY)
-      return false;
-    const rv = right(f);
-    if (rv === EMPTY)
-      return false;
-    if (lv instanceof Seq) {
-      const li = lv.items;
-      if (rv instanceof Seq) {
-        const ri = rv.items;
-        for (let i = 0; i < li.length; i++) {
-          for (let j = 0; j < ri.length; j++) {
-            if (itemCmp(li[i], ri[j]))
-              return true;
-          }
-        }
-        return false;
-      }
-      for (let i = 0; i < li.length; i++) {
-        if (itemCmp(li[i], rv))
-          return true;
-      }
-      return false;
-    }
-    if (rv instanceof Seq) {
-      const ri = rv.items;
-      for (let j = 0; j < ri.length; j++) {
-        if (itemCmp(lv, ri[j]))
-          return true;
-      }
-      return false;
-    }
-    return itemCmp(lv, rv);
-  };
-}
-
-//#endregion
-
-//#region arithmetic
-
-function arithOperandError(v, docPath) {
-  return new JsonQueryRuntimeError('JQ2001',
-    `arithmetic requires a number operand, got ${describeItem(v)}`, docPath);
-}
-
-function compileArith(node) {
-  const left = compileNode(node.left);
-  const right = compileNode(node.right);
-  const docPath = node.docPath + '/$' + node.op;
-  let apply;
-  switch (node.op) {
-    case 'add':
-      apply = (a, b) => a + b;
-      break;
-    case 'sub':
-      apply = (a, b) => a - b;
-      break;
-    case 'mul':
-      apply = (a, b) => a * b;
-      break;
-    case 'div': // IEEE 754 double division: /0 is ±Infinity or NaN (D1)
-      apply = (a, b) => a / b;
-      break;
-    case 'idiv': // truncating division; zero divisor errors (section 8.5)
-      apply = (a, b) => {
-        if (b === 0)
-          throw new JsonQueryRuntimeError('JQ2002', "'$idiv' by zero", docPath);
-        return Math.trunc(a / b);
-      };
-      break;
-    default: // 'mod': XQuery double mod takes the sign of the dividend = JS %
-      apply = (a, b) => {
-        if (b === 0)
-          throw new JsonQueryRuntimeError('JQ2002', "'$mod' by zero", docPath);
-        return a % b;
-      };
-      break;
-  }
-  const leftPath = node.left.docPath;
-  const rightPath = node.right.docPath;
-  if (node.left.card === CARD_ONE && node.right.card === CARD_ONE) {
-    // singleton operands: type guard only, no sequence checks
-    return (f) => {
-      const a = left(f);
-      if (typeof a !== 'number')
-        throw arithOperandError(a, leftPath);
-      const b = right(f);
-      if (typeof b !== 'number')
-        throw arithOperandError(b, rightPath);
-      return apply(a, b);
-    };
-  }
-  return (f) => {
-    const a = left(f);
-    if (a === EMPTY) // empty propagation (XQuery)
-      return EMPTY;
-    if (typeof a !== 'number')
-      throw arithOperandError(a, leftPath);
-    const b = right(f);
-    if (b === EMPTY)
-      return EMPTY;
-    if (typeof b !== 'number')
-      throw arithOperandError(b, rightPath);
-    return apply(a, b);
-  };
-}
-
-function compileNeg(node) {
-  const get = compileNode(node.operand);
-  const docPath = node.operand.docPath;
-  if (node.operand.card === CARD_ONE) {
-    return (f) => {
-      const a = get(f);
-      if (typeof a !== 'number')
-        throw arithOperandError(a, docPath);
-      return -a;
-    };
-  }
-  return (f) => {
-    const a = get(f);
-    if (a === EMPTY)
-      return EMPTY;
-    if (typeof a !== 'number')
-      throw arithOperandError(a, docPath);
-    return -a;
-  };
-}
-
-//#endregion
-
-//#region logic & control
-
-function compileAnd(node) {
-  const operands = node.operands;
-  const fns = operands.map(compileNode);
-  const paths = operands.map((o) => o.docPath);
-  const flen = fns.length;
-  return (f) => {
-    for (let i = 0; i < flen; i++) {
-      if (!ebv(fns[i](f), paths[i]))
-        return false; // short-circuit: later operands are not evaluated
-    }
-    return true;
-  };
-}
-
-function compileOr(node) {
-  const operands = node.operands;
-  const fns = operands.map(compileNode);
-  const paths = operands.map((o) => o.docPath);
-  const flen = fns.length;
-  return (f) => {
-    for (let i = 0; i < flen; i++) {
-      if (ebv(fns[i](f), paths[i]))
-        return true; // short-circuit
-    }
-    return false;
-  };
-}
-
-function compileNot(node) {
-  const get = compileNode(node.operand);
-  const docPath = node.operand.docPath;
-  return (f) => !ebv(get(f), docPath);
-}
-
-function compileIf(node) {
-  const cond = compileNode(node.cond);
-  const condPath = node.cond.docPath;
-  const then = compileNode(node.then);
-  if (node.alt === null) // missing else means the empty sequence
-    return (f) => (ebv(cond(f), condPath) ? then(f) : EMPTY);
-  const alt = compileNode(node.alt);
-  return (f) => (ebv(cond(f), condPath) ? then(f) : alt(f));
-}
-
-function compileExistsOp(node) {
-  const test = compileExistsTest(node.operand);
-  if (node.negated) // $empty
-    return (f) => !test(f);
-  return test;
-}
-
-//#endregion
-
-//#region strings
-
-// cast one $concat operand item per the (provisional) $string rules:
-// an empty operand contributes '', a singleton casts, anything that
-// cannot cast (array, object, multi-item sequence) is JQ2001
-function concatItem(v, docPath) {
-  switch (typeof v) {
-    case 'string':
-      return v;
-    case 'number':
-      return String(v);
-    case 'boolean':
-      return v ? 'true' : 'false';
-    default:
-      if (v === EMPTY)
-        return '';
-      if (v === null)
-        return 'null';
-      throw new JsonQueryRuntimeError('JQ2001',
-        `cannot cast ${describeItem(v)} to a string`, docPath);
-  }
-}
-
-function compileConcat(node) {
-  const operands = node.operands;
-  if (operands.length === 0)
-    return () => '';
-  const fns = operands.map(compileNode);
-  const paths = operands.map((o) => o.docPath);
-  const flen = fns.length;
-  return (f) => {
-    let s = '';
-    for (let i = 0; i < flen; i++)
-      s += concatItem(fns[i](f), paths[i]);
-    return s;
-  };
-}
-
-//#endregion
-
-//#region aggregates
-
-// $count/$sum/$avg (section 8.8), implemented here so $groupby is
-// testable end-to-end. Non-number items in $sum/$avg are JQ2001; $sum of
-// the empty sequence is 0, $avg of the empty sequence is empty.
-function aggregateNumber(v, docPath) {
-  if (typeof v !== 'number')
-    throw new JsonQueryRuntimeError('JQ2001',
-      `aggregate items must be numbers, got ${describeItem(v)}`, docPath);
-  return v;
-}
-
-function compileAggregate(node) {
-  const get = compileNode(node.operand);
-  const docPath = node.operand.docPath;
-  switch (node.op) {
-    case 'count':
-      return (f) => itemCount(get(f));
-    case 'sum':
-      return (f) => {
-        const v = get(f);
-        if (v === EMPTY)
-          return 0;
-        if (v instanceof Seq) {
-          const items = v.items;
-          let sum = 0;
-          for (let i = 0; i < items.length; i++)
-            sum += aggregateNumber(items[i], docPath);
-          return sum;
-        }
-        return aggregateNumber(v, docPath);
-      };
-    default: // 'avg'
-      return (f) => {
-        const v = get(f);
-        if (v === EMPTY)
-          return EMPTY;
-        if (v instanceof Seq) {
-          const items = v.items;
-          let sum = 0;
-          for (let i = 0; i < items.length; i++)
-            sum += aggregateNumber(items[i], docPath);
-          return sum / items.length;
-        }
-        return aggregateNumber(v, docPath);
-      };
-  }
+// A registry operator call (normalize.js `op` node): compile the argument
+// getters, hand them - with the argument nodes, which carry `card` and
+// `docPath` - to the table entry's `compile`. Arguments declared 'raw' or
+// 'name' are compile-time data (`args[i].value`), not getters.
+function compileOp(node) {
+  const entry = OPERATORS[node.name];
+  const args = node.args;
+  const gets = new Array(args.length);
+  for (let i = 0; i < args.length; i++)
+    gets[i] = args[i].kind === 'raw' ? null : compileNode(args[i]);
+  return entry.compile(gets, args, node.docPath + '/' + node.name);
 }
 
 //#endregion
@@ -1085,28 +761,8 @@ export function compileNode(node) {
       return compileMap(node);
     case 'array':
       return compileArray(node);
-    case 'seq':
-      return compileSeq(node);
-    case 'cmp':
-      return compileCmp(node);
-    case 'arith':
-      return compileArith(node);
-    case 'neg':
-      return compileNeg(node);
-    case 'and':
-      return compileAnd(node);
-    case 'or':
-      return compileOr(node);
-    case 'not':
-      return compileNot(node);
-    case 'if':
-      return compileIf(node);
-    case 'exists':
-      return compileExistsOp(node);
-    case 'concat':
-      return compileConcat(node);
-    case 'aggregate':
-      return compileAggregate(node);
+    case 'op':
+      return compileOp(node);
     case 'let':
       return compileLet(node);
     case 'quant':

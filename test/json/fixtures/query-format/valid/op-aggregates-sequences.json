@@ -51,8 +51,8 @@
     },
     {
       "$get": [
-        "$.store.book[*]",
-        0
+        "$.store.bicycle",
+        "color"
       ]
     }
   ]

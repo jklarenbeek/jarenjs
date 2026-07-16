@@ -592,11 +592,11 @@ argument position accepts; argument positions are structurally always
 expressions (per-position runtime rules are enforced by the evaluator with
 `JQ2xxx` errors, not by the schema).
 
-Operators marked **(TODO_06)** are normatively *named and shaped* by this
-specification — their key, argument arity, and result kind are fixed here so
-the schema and vocabulary are stable — but their full semantic definitions
-land with the operator library work order. Their arities below are normative;
-semantic notes are provisional summaries.
+Unless a definition below says otherwise, an operator's result is exactly
+one item. Operators whose semantics come from XQuery 3.1 Functions and
+Operators keep that reference in their definition; F&O behavior is adapted
+to the JSON data model per the deviations of §11 (notably D1 numbers and
+D6 0-based positions).
 
 Reserved, undefined keys (rejected by v0.1 consumers and by the schema):
 `$valid`, `$assert`, `$as`. They are reserved for the JSON-Schema-as-type-
@@ -703,25 +703,40 @@ Example in §8.4.
 
 ### 8.7 Strings
 
-| Operator | Signature | Notes |
+**String parameters.** Every argument of the operators in this section
+(except where a definition says otherwise) MUST evaluate to the empty
+sequence — read as `""`, the F&O `xs:string?` convention — or to a single
+string; a singleton of any other type, or a sequence of two or more items,
+is runtime error `JQ2001`. `$concat` and `$string-join` additionally cast
+their *item* operands per the `$string` table (§8.10). All results are
+single items.
+
+| Operator | Signature | Definition |
 |---|---|---|
-| `$concat` | `{"$concat": [e, ...]}` (≥ 0) | Variadic concatenation. Each operand is cast to string per `$string`; an empty-sequence operand contributes `''`. `{"$concat": []}` is `""`. |
-| `$string-join` **(TODO_06)** | `[seq, sep?]` (1–2) | Join with separator, default `""`. |
-| `$substring` **(TODO_06)** | `[str, start, len?]` (2–3) | *start* 0-based (D6). |
-| `$contains` **(TODO_06)** | `[str, sub]` | Substring test. |
-| `$starts-with` **(TODO_06)** | `[str, prefix]` | |
-| `$ends-with` **(TODO_06)** | `[str, suffix]` | |
-| `$upper` **(TODO_06)** | `{"$upper": e}` | Unicode default uppercase. |
-| `$lower` **(TODO_06)** | `{"$lower": e}` | Unicode default lowercase. |
-| `$string-length` **(TODO_06)** | `{"$string-length": e}` | Length in Unicode scalar values. |
-| `$normalize-space` **(TODO_06)** | `{"$normalize-space": e}` | XQuery `fn:normalize-space`. |
-| `$match` **(TODO_06)** | `[input, pattern]` | Full-string regex match. |
-| `$search` **(TODO_06)** | `[input, pattern]` | Substring regex match (XQuery `fn:matches`). |
-| `$replace` **(TODO_06)** | `[input, pattern, replacement]` (exactly 3) | Replace all matches. |
+| `$concat` | `{"$concat": [e, ...]}` (≥ 0) | Variadic concatenation. Each operand is cast to string per `$string` (§8.10); an empty-sequence operand contributes `''`. `{"$concat": []}` is `""`. |
+| `$string-join` | `[seq, sep?]` (1–2) | Concatenates the items of *seq*, each cast to string per `$string`, separated by *sep* (a string parameter, default `""`). An empty *seq* yields `""` (F&O `fn:string-join`). |
+| `$substring` | `[str, start, len?]` (2–3) | The code points of *str* at 0-based (**D6** — deviation from F&O's 1-based positions) positions `p` with `round(start) ≤ p` and, when *len* is given, `p < round(start) + round(len)` (F&O `fn:substring` bounds; `round` rounds half toward +∞). *start*/*len* MUST each be a single number (`JQ2001`); a `NaN` bound selects nothing. |
+| `$contains` | `[str, sub]` | `true` iff *str* contains *sub* (`fn:contains`; every string contains `""`). |
+| `$starts-with` | `[str, prefix]` | `true` iff *str* starts with *prefix* (`fn:starts-with`). |
+| `$ends-with` | `[str, suffix]` | `true` iff *str* ends with *suffix* (`fn:ends-with`). |
+| `$upper` | `{"$upper": e}` | Unicode default uppercase (`fn:upper-case`). |
+| `$lower` | `{"$lower": e}` | Unicode default lowercase (`fn:lower-case`). |
+| `$string-length` | `{"$string-length": e}` | Length in Unicode scalar values (code points), `fn:string-length`. Empty → `0`. |
+| `$normalize-space` | `{"$normalize-space": e}` | Strips leading and trailing whitespace (space, tab, CR, LF) and collapses every internal whitespace run to one space (`fn:normalize-space`). |
+| `$match` | `[input, pattern]` | `true` iff *pattern* matches **all** of *input* (anchored, the RFC 9535 `match()` behavior). |
+| `$search` | `[input, pattern]` | `true` iff *pattern* matches a substring of *input* (RFC 9535 `search()`, XQuery `fn:matches`). |
+| `$replace` | `[input, pattern, replacement]` (exactly 3) | Replaces every non-overlapping match of *pattern* in *input* with *replacement* (`fn:replace`). *replacement* is inserted **literally** — there are no capture-group references (I-Regexp guarantees no capture semantics). |
 
 Regular expression operators use **I-Regexp (RFC 9485)** syntax — the same
 interoperable regex dialect RFC 9535 uses — not XSD regular expressions
 (**D5**). I-Regexp has no flags argument, hence `$replace`'s fixed arity 3.
+A *pattern* that is not a syntactically valid I-Regexp makes `$match` and
+`$search` evaluate to `false` (the RFC 9535 rule for nonconforming
+patterns), but is runtime error `JQ2001` in `$replace` (the F&O
+`err:FORX0002` condition — a replacement cannot silently do nothing). A
+`$replace` *pattern* that matches the zero-length string (e.g. `"a*"`) is
+also `JQ2001` (F&O `err:FORX0003`). Pattern *type* errors remain `JQ2001`
+in all three operators per the string-parameter rule above.
 
 ```json
 { "$seq": [ { "$concat": ["a", "b"] },
@@ -736,27 +751,36 @@ interoperable regex dialect RFC 9535 uses — not XSD regular expressions
             { "$replace": ["abc", "b", "x"] } ] }
 ```
 
-### 8.8 Aggregates **(TODO_06)** — `$count $sum $avg $min $max`
+### 8.8 Aggregates — `$count $sum $avg $min $max`
 
-Each is unary: `{"$count": e}` etc. Provisional semantics: `$count` returns
-the number of items in `e`'s result; `$sum` of an empty sequence is `0`;
-`$avg`, `$min`, `$max` of an empty sequence are the empty sequence; non-number
-items in `$sum $avg $min $max` are runtime error `JQ2001`. See §6.7 for the
-`$count` clause/operator collision note.
+Each is unary: `{"$count": e}` etc. Aggregates consume their operand
+sequence **as-is**: an item that is an array counts as *one* item — D4
+unpacking is a `$for`/quantifier binding rule, not a sequence rule. (So
+`{"$count": {"$const": [1, 2, 3]}}` is `1`, while iterating the same value
+with `$for` yields three tuples.) See §6.7 for the `$count`
+clause/operator collision note.
 
-### 8.9 Sequence operators **(TODO_06)** — `$distinct $reverse $sort $head $tail $subsequence $index-of $range $get`
-
-| Operator | Signature | Provisional semantics |
+| Operator | Empty sequence | Definition |
 |---|---|---|
-| `$distinct` | `{"$distinct": e}` | Distinct items by deep equality (D2), first occurrence order. |
-| `$reverse` | `{"$reverse": e}` | Reverse the sequence. |
-| `$sort` | `{"$sort": e}` | Sort ascending by item value; `$orderby` key-type rules apply (`JQ2005`). |
-| `$head` | `{"$head": e}` | First item, or empty. |
-| `$tail` | `{"$tail": e}` | All but the first item. |
-| `$subsequence` | `[seq, start, len?]` (2–3) | *start* 0-based (D6). |
-| `$index-of` | `[seq, item]` | 0-based (D6) positions of deep-equal items. |
-| `$range` | `[start, end]` | Integers from *start* to *end* inclusive (XQuery `to`); empty when *start* > *end*. |
-| `$get` | `[seq, index]` | Item at 0-based (D6) index, or empty. |
+| `$count` | `0` | The number of items in the operand's result (`fn:count`). |
+| `$sum` | `0` | The sum of the items (`fn:sum`). Every item MUST be a number (`JQ2001`). |
+| `$avg` | empty | The arithmetic mean of the items (`fn:avg`). Every item MUST be a number (`JQ2001`). |
+| `$min` | empty | The least item (`fn:min`). Items MUST be all numbers or all strings (`JQ2001` otherwise, including mixed); numbers compare mathematically, strings by Unicode scalar values. A `NaN` item makes the result `NaN` (F&O). |
+| `$max` | empty | The greatest item (`fn:max`), same rules as `$min`. |
+
+### 8.9 Sequence operators — `$distinct $reverse $sort $head $tail $subsequence $index-of $range $get`
+
+| Operator | Signature | Definition |
+|---|---|---|
+| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. |
+| `$reverse` | `{"$reverse": e}` | The operand's items in reverse order (`fn:reverse`). |
+| `$sort` | `{"$sort": e}` | The operand's items sorted ascending by value (`fn:sort`, natural order only — key-based sorting is `$orderby`'s job). Items MUST be all numbers or all strings; anything else, or a mix, is runtime error `JQ2005` (the `$orderby` key-type rules). `NaN` orders per §6.6: equal to itself, less than every other number. The sort is stable. |
+| `$head` | `{"$head": e}` | The first item, or empty (`fn:head`). |
+| `$tail` | `{"$tail": e}` | Every item but the first; empty for operands of one or zero items (`fn:tail`). |
+| `$subsequence` | `[seq, start, len?]` (2–3) | The items of *seq* at the 0-based (D6) positions selected by the `$substring` bound rules (§8.7, F&O `fn:subsequence`): `round(start) ≤ p`, and `p < round(start) + round(len)` when *len* is given. *start*/*len* MUST each be a single number (`JQ2001`). |
+| `$index-of` | `[seq, item]` | The 0-based (D6) positions in *seq* of the items deep-equal to *item*, as a sequence, in order (`fn:index-of`). Equality is the `$eq` item relation (D2) — `NaN` matches nothing. *item* MUST be exactly one item (`JQ2001`). |
+| `$range` | `[start, end]` | The integers from *start* to *end* **inclusive** (the XQuery `to` operator). Either operand empty → empty; *start* > *end* → empty. A non-integral or non-number operand is `JQ2001`. A result of more than 2³² items is runtime error `JQ2007` (resource guard). |
+| `$get` | `[target, key]` | Dynamic lookup, the runtime counterpart of a path leaf: an object *target* with a string *key* yields the member value or empty; an array *target* with an integer *key* yields the element at that 0-based (D6) index — a negative index counts from the end, like the RFC 9535 index selector — or empty. **Every other combination** (wrong type pairing, non-integral index, empty or multi-item operands) is simply the empty sequence, never an error. |
 
 Combined example (also exercises the aggregates of §8.8):
 
@@ -768,24 +792,32 @@ Combined example (also exercises the aggregates of §8.8):
             { "$head": "$.store.book[*]" }, { "$tail": "$.store.book[*]" },
             { "$subsequence": ["$.store.book[*]", 1, 2] },
             { "$index-of": ["$.store.book[*].category", "fiction"] },
-            { "$range": [1, 5] }, { "$get": ["$.store.book[*]", 0] } ] }
+            { "$range": [1, 5] }, { "$get": ["$.store.bicycle", "color"] } ] }
 ```
 
-### 8.10 Types and casts **(TODO_06)**
+### 8.10 Types and casts
 
-Unary predicates `{"$is-string": e}`, `$is-number`, `$is-boolean`, `$is-null`,
-`$is-array`, `$is-object` — `true` iff `e` is a singleton of that type
-(empty and multi-item sequences yield `false`).
+**Type predicates.** Unary `{"$is-string": e}`, `$is-number`,
+`$is-boolean`, `$is-null`, `$is-array`, `$is-object` — `true` iff `e`'s
+result is a **singleton** of that type. The empty sequence and sequences
+of two or more items yield `false`, never an error — these are cheap
+tests, not assertions.
 
-Unary casts `{"$string": e}`, `{"$number": e}`, `{"$boolean": e}` —
-provisional: XQuery-style casts to the JSON analogue types (`$boolean` is the
-EBV, `$number` parses strings and maps `true`/`false` to `1`/`0`, `$string`
-of the empty sequence is `""`); a cast that cannot succeed is `JQ2001`.
+**Casts.** Unary `{"$string": e}`, `{"$number": e}`, `{"$boolean": e}`.
+`$string` and `$number` propagate the empty sequence (empty → empty); a
+multi-item operand, or a singleton the cast table rejects, is runtime
+error `JQ2001`.
 
-| Operator | Signature | Provisional semantics |
+| Cast | Definition |
+|---|---|
+| `$string` | string → itself; number → its shortest JavaScript serialization (`String(n)`; `NaN`/`Infinity` serialize by name); `true`/`false` → `"true"`/`"false"`; `null` → `"null"`; array or object → `JQ2001`; empty → empty. (`$concat`/`$string-join` cast items by this table, with an explicit `''` for empty operands — §8.7.) |
+| `$number` | number → itself; string → the number it spells **iff** it is a syntactically valid JSON number (RFC 8259 grammar — no leading `+`, no bare or trailing `.`, no whitespace, no `Infinity`/`NaN`), else `JQ2001`; `true`/`false` → `1`/`0`; `null`, array, object → `JQ2001`; empty → empty. |
+| `$boolean` | The **EBV** (§2.2) as an operator: empty → `false`, singletons per the EBV table (D3 included), a sequence of two or more items → `JQ2003`. |
+
+| Operator | Signature | Definition |
 |---|---|---|
-| `$coalesce` | `{"$coalesce": [e, ...]}` (≥ 1) | Result of the first operand whose result is non-empty, else empty. Operands after it are not evaluated. |
-| `$default` | `[e, fallback]` | `e`'s result if non-empty, else *fallback*'s. |
+| `$coalesce` | `{"$coalesce": [e, ...]}` (≥ 1) | The result of the first operand whose result is non-empty, else empty. Evaluation is lazy: operands after the deciding one are **not evaluated** and cannot raise errors. |
+| `$default` | `[e, fallback]` | `e`'s result if non-empty, else *fallback*'s — sugar for `$coalesce` of exactly two. |
 
 ```json
 { "$seq": [ { "$is-string": "abc" }, { "$is-number": 1 }, { "$is-boolean": true },
@@ -857,8 +889,9 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2002` | `$idiv`/`$mod` by zero (§8.5) | FOAR0001 |
 | `JQ2003` | EBV of a multi-item sequence (§2.2) | FORG0006 |
 | `JQ2004` | `$map` key expression not a single string (§3.5.2) | XPTY0004 |
-| `JQ2005` | Incomparable `$orderby`/`$sort` keys (§6.6) | XPTY0004 |
+| `JQ2005` | Incomparable `$orderby`/`$sort` keys (§6.6, §8.9) | XPTY0004 |
 | `JQ2006` | Reference to an unbound external parameter (§9) | XPDY0002 |
+| `JQ2007` | Resource guard: an operator result exceeding an implementation limit (`$range` over 2³² items, §8.9) | XPDY0130 |
 
 ---
 

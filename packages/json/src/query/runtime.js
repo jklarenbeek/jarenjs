@@ -134,6 +134,25 @@ export function ebv(v, docPath) {
 }
 
 /**
+ * Describe a sequence value for a runtime error message (non-normative,
+ * human-readable).
+ * @param {any} v - a sequence value (EMPTY, item, or Seq)
+ * @returns {string}
+ */
+export function describeItem(v) {
+  if (v instanceof Seq)
+    return `a sequence of ${v.items.length} items`;
+  if (v === EMPTY)
+    return 'the empty sequence';
+  if (v === null)
+    return 'null';
+  if (Array.isArray(v))
+    return 'an array';
+  const t = typeof v;
+  return t === 'object' ? 'an object' : `a ${t}`;
+}
+
+/**
  * Deterministic serialization of one JSON item, for `$groupby` keys
  * (QUERY-FORMAT.md section 6.5) — **engine-internal**, not an interchange
  * format (related to the roadmap's canonical-JSON item). It exists solely

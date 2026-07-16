@@ -21,6 +21,10 @@
 import { parseJSONPath, JSONPathSyntaxError } from '../path.js';
 import { isSingularSegments } from '../segments.js';
 import { JsonQueryCompileError } from './errors.js';
+// The operator registry: `name -> { params, result, compile }`. Only
+// referenced inside functions (never at module evaluation time), so the
+// import cycle normalize.js <-> operators.js is initialization-safe.
+import { OPERATORS } from './operators.js';
 
 //#region cardinality
 
@@ -33,9 +37,14 @@ export const CARD_OPT = 2;
 /** Any number of items (the analysis top). */
 export const CARD_MANY = 3;
 
-// join = least upper bound over {ZERO, ONE, OPT, MANY}: the cardinality of
-// "one of the two branches" ($if).
-function joinCard(a, b) {
+/**
+ * join = least upper bound over {ZERO, ONE, OPT, MANY}: the cardinality
+ * of "one of the two branches" ($if).
+ * @param {number} a - a CARD_* value
+ * @param {number} b - a CARD_* value
+ * @returns {number}
+ */
+export function joinCard(a, b) {
   if (a === b)
     return a;
   if (a === CARD_MANY || b === CARD_MANY)
@@ -43,9 +52,14 @@ function joinCard(a, b) {
   return CARD_OPT;
 }
 
-// sum = cardinality of two concatenated sequences ($seq); two non-empty
-// contributions can exceed one item, which only MANY can express.
-function sumCard(a, b) {
+/**
+ * sum = cardinality of two concatenated sequences ($seq); two non-empty
+ * contributions can exceed one item, which only MANY can express.
+ * @param {number} a - a CARD_* value
+ * @param {number} b - a CARD_* value
+ * @returns {number}
+ */
+export function sumCard(a, b) {
   if (a === CARD_ZERO)
     return b;
   if (b === CARD_ZERO)
@@ -72,56 +86,22 @@ const QUANTIFIER_KEYS = new Set(['$some', '$every', '$satisfies']);
 // they are not operators and stay outside the KNOWN_KEYS vocabulary.
 const ORDERBY_SPEC_KEYS = new Set(['$key', '$dir', '$empty']);
 
-// Comparison and arithmetic operators implemented by this work order,
-// keyed to their AST op tag.
-const COMPARISON_OPS = new Map([
-  ['$eq', 'eq'], ['$ne', 'ne'], ['$lt', 'lt'], ['$le', 'le'], ['$gt', 'gt'], ['$ge', 'ge'],
-]);
-const ARITHMETIC_OPS = new Map([
-  ['$add', 'add'], ['$sub', 'sub'], ['$mul', 'mul'],
-  ['$div', 'div'], ['$idiv', 'idiv'], ['$mod', 'mod'],
-]);
-
-// Operators normatively named and shaped by the spec but whose semantics
-// land with the library work order (QUERY-FORMAT.md sections 8.7-8.10,
-// "(TODO_06)"). Compiling one raises the placeholder JQ0099 so TODO_06
-// can delete this table.
-const TODO_06_OPERATORS = new Set([
-  '$string-join', '$substring', '$contains', '$starts-with', '$ends-with',
-  '$upper', '$lower', '$string-length', '$normalize-space',
-  '$match', '$search', '$replace',
-  '$min', '$max',
-  '$distinct', '$reverse', '$sort', '$head', '$tail',
-  '$subsequence', '$index-of', '$range', '$get',
-  '$is-string', '$is-number', '$is-boolean', '$is-null', '$is-array', '$is-object',
-  '$string', '$number', '$boolean', '$coalesce', '$default',
-]);
-
-// Aggregates implemented provisionally by the FLWOR work order so that
-// $groupby is testable end-to-end ($avg because spec example A.4 uses it
-// verbatim); TODO_06 completes/confirms their semantics against the
-// full library definitions (section 8.8).
-const PROVISIONAL_AGGREGATES = new Set(['$count', '$sum', '$avg']);
-
 // Reserved, undefined keys (QUERY-FORMAT.md section 8.1): rejected by
 // v0.1 consumers.
 const RESERVED_KEYS = new Set(['$valid', '$assert', '$as']);
 
-// Operators of the engine-core work order that need no special normalizer
-// beyond an arity check (everything else has a dedicated case in
-// normalizePhrase).
-const TODO_04_OPERATORS = new Set([
-  '$const', '$map', '$seq', '$exists', '$empty', '$if',
-  '$and', '$or', '$not', '$neg', '$concat',
-  ...COMPARISON_OPS.keys(), ...ARITHMETIC_OPS.keys(),
-]);
+// Escape hatches (QUERY-FORMAT.md section 3.5): structural forms with
+// dedicated normalizer cases; every other operator lives in the registry.
+const ESCAPE_KEYS = new Set(['$const', '$map']);
 
-// The complete closed vocabulary: decides JQ0002 (unknown key) versus
+// The complete closed vocabulary decides JQ0002 (unknown key) versus
 // JQ0003 (known keys in an invalid combination) for phrase objects.
-const KNOWN_KEYS = new Set([
-  ...FLWOR_KEYS, ...QUANTIFIER_KEYS, ...TODO_06_OPERATORS,
-  ...PROVISIONAL_AGGREGATES, ...TODO_04_OPERATORS,
-]);
+// A function, not a precomputed set: the registry must never be read at
+// module evaluation time (import cycle with operators.js).
+function isVocabularyKey(key) {
+  return FLWOR_KEYS.has(key) || QUANTIFIER_KEYS.has(key)
+    || ESCAPE_KEYS.has(key) || hasOwn(OPERATORS, key);
+}
 
 //#endregion
 
@@ -301,10 +281,67 @@ function normalizePhrase(obj, keys, docPath, scope, ctx) {
 
   // multi-key object matching no phrase shape
   for (let i = 0; i < keys.length; i++) {
-    if (!KNOWN_KEYS.has(keys[i]))
-      return fail('JQ0002', `unknown operator '${keys[i]}'`, docPath);
+    if (!isVocabularyKey(keys[i]))
+      return failUnknownOperator(keys[i], docPath);
   }
   return fail('JQ0003', `invalid phrase key combination (${keys.join(', ')})`, docPath);
+}
+
+//#endregion
+
+//#region unknown operators ("did you mean")
+
+// Bounded Levenshtein distance (two-row DP); vocabulary keys are short,
+// and this only ever runs on the JQ0002 error path.
+function levenshtein(a, b) {
+  const alen = a.length;
+  const blen = b.length;
+  let prev = new Array(blen + 1);
+  let curr = new Array(blen + 1);
+  for (let j = 0; j <= blen; j++)
+    prev[j] = j;
+  for (let i = 1; i <= alen; i++) {
+    curr[0] = i;
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= blen; j++) {
+      const del = prev[j] + 1;
+      const ins = curr[j - 1] + 1;
+      const sub = prev[j - 1] + (ca === b.charCodeAt(j - 1) ? 0 : 1);
+      curr[j] = del < ins ? (del < sub ? del : sub) : (ins < sub ? ins : sub);
+    }
+    const t = prev;
+    prev = curr;
+    curr = t;
+  }
+  return prev[blen];
+}
+
+// suggestion candidates, built lazily (see the isVocabularyKey note)
+let VOCABULARY_NAMES = null;
+
+// JQ0002 for an unknown $-key, with a "did you mean" suggestion when a
+// vocabulary key is within Levenshtein distance 2 (compile-time only).
+function failUnknownOperator(key, docPath) {
+  if (VOCABULARY_NAMES === null) {
+    VOCABULARY_NAMES = [
+      ...FLWOR_KEYS, ...QUANTIFIER_KEYS, ...ESCAPE_KEYS, ...Object.keys(OPERATORS),
+    ];
+  }
+  let best = null;
+  let bestDist = 3;
+  for (let i = 0; i < VOCABULARY_NAMES.length; i++) {
+    const name = VOCABULARY_NAMES[i];
+    const lenDiff = key.length - name.length;
+    if (lenDiff > 2 || lenDiff < -2)
+      continue;
+    const d = levenshtein(key, name);
+    if (d < bestDist) {
+      bestDist = d;
+      best = name;
+    }
+  }
+  const hint = best === null ? '' : ` (did you mean '${best}'?)`;
+  return fail('JQ0002', `unknown operator '${key}'${hint}`, docPath);
 }
 
 //#endregion
@@ -326,6 +363,49 @@ function normalizeElements(arg, docPath, scope, ctx) {
   for (let i = 0; i < arg.length; i++)
     out[i] = normalizeExpr(arg[i], docPath + '/' + i, scope, ctx);
   return Object.freeze(out);
+}
+
+// One argument position of a registry operator, per its declared kind:
+// 'expr' normalizes an ordinary expression; 'raw' captures the value
+// verbatim, unevaluated (reserved for the type-system work order's schema
+// arguments); 'name' captures a validated variable name string. 'raw' and
+// 'name' produce inert `raw` nodes - compile-time data, never compiled.
+function normalizeArg(kind, value, argPath, scope, ctx) {
+  if (kind === 'expr')
+    return normalizeExpr(value, argPath, scope, ctx);
+  if (kind === 'raw')
+    return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value: deepFreezeCopy(value) });
+  // 'name'
+  if (typeof value !== 'string' || !VAR_NAME_RE.test(value))
+    fail('JQ0003', 'expected a variable name string', argPath);
+  return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value });
+}
+
+// A registry operator call: arity and shape come uniformly from the
+// table's `params` descriptor (JQ0003), the static cardinality from its
+// `result` - individual operators never re-check structure.
+function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
+  const params = entry.params;
+  let args;
+  if (typeof params === 'string') { // the single form: the value IS the argument
+    args = [normalizeArg(params, arg, opPath, scope, ctx)];
+  }
+  else {
+    const kinds = params.kinds;
+    const max = params.variadic === true ? Infinity : kinds.length;
+    const list = requireExprArray(key, arg, params.min, max, opPath);
+    args = new Array(list.length);
+    for (let i = 0; i < list.length; i++) {
+      const kind = kinds[i < kinds.length ? i : kinds.length - 1];
+      args[i] = normalizeArg(kind, list[i], opPath + '/' + i, scope, ctx);
+    }
+  }
+  const cards = new Array(args.length);
+  for (let i = 0; i < args.length; i++)
+    cards[i] = args[i].card;
+  return Object.freeze({
+    kind: 'op', card: entry.result(cards), docPath, name: key, args: Object.freeze(args),
+  });
 }
 
 function normalizeOperator(key, arg, docPath, scope, ctx) {
@@ -350,94 +430,17 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
       return Object.freeze({ kind: 'map', card: CARD_ONE, docPath, pairs: Object.freeze(pairs) });
     }
 
-    case '$seq': { // XQuery comma (section 8.2)
-      const elements = normalizeElements(requireExprArray(key, arg, 0, Infinity, opPath), opPath, scope, ctx);
-      let card = CARD_ZERO;
-      for (let i = 0; i < elements.length; i++)
-        card = sumCard(card, elements[i].card);
-      return Object.freeze({ kind: 'seq', card, docPath, elements });
-    }
-
-    case '$exists':
-    case '$empty': { // unary; the value is the operand expression itself
-      const operand = normalizeExpr(arg, opPath, scope, ctx);
-      return Object.freeze({ kind: 'exists', card: CARD_ONE, docPath, operand, negated: key === '$empty' });
-    }
-
-    case '$if': { // [cond, then, else?] (section 8.3)
-      const list = requireExprArray(key, arg, 2, 3, opPath);
-      const cond = normalizeExpr(list[0], opPath + '/0', scope, ctx);
-      const then = normalizeExpr(list[1], opPath + '/1', scope, ctx);
-      const alt = list.length === 3 ? normalizeExpr(list[2], opPath + '/2', scope, ctx) : null;
-      const card = joinCard(then.card, alt === null ? CARD_ZERO : alt.card);
-      return Object.freeze({ kind: 'if', card, docPath, cond, then, alt });
-    }
-
-    case '$and':
-    case '$or': { // variadic EBV logic, short-circuit (section 8.6)
-      const list = requireExprArray(key, arg, 1, Infinity, opPath);
-      return Object.freeze({
-        kind: key === '$and' ? 'and' : 'or', card: CARD_ONE, docPath,
-        operands: normalizeElements(list, opPath, scope, ctx),
-      });
-    }
-
-    case '$not':
-      return Object.freeze({
-        kind: 'not', card: CARD_ONE, docPath,
-        operand: normalizeExpr(arg, opPath, scope, ctx),
-      });
-
-    case '$neg': { // unary minus; empty propagates (section 8.5)
-      const operand = normalizeExpr(arg, opPath, scope, ctx);
-      return Object.freeze({
-        kind: 'neg', card: operand.card === CARD_ONE ? CARD_ONE : CARD_OPT, docPath, operand,
-      });
-    }
-
-    case '$concat': { // variadic string concatenation (section 8.7)
-      const list = requireExprArray(key, arg, 0, Infinity, opPath);
-      return Object.freeze({
-        kind: 'concat', card: CARD_ONE, docPath,
-        operands: normalizeElements(list, opPath, scope, ctx),
-      });
-    }
-
-    case '$count': // the operator (section 8.8), not the FLWOR clause: a
-    case '$sum': //   single-key object is always an operator (section 6.7)
-    case '$avg': { // provisional: completed in TODO_06 (see section 8.8)
-      const operand = normalizeExpr(arg, opPath, scope, ctx);
-      // $count/$sum always produce one number; $avg of an empty operand
-      // is the empty sequence
-      const card = key !== '$avg' || operand.card === CARD_ONE ? CARD_ONE : CARD_OPT;
-      return Object.freeze({ kind: 'aggregate', card, docPath, op: key.slice(1), operand });
-    }
-
     default: {
-      const cmp = COMPARISON_OPS.get(key);
-      if (cmp !== undefined) { // existential general comparisons (section 8.4)
-        const list = requireExprArray(key, arg, 2, 2, opPath);
-        return Object.freeze({
-          kind: 'cmp', card: CARD_ONE, docPath, op: cmp,
-          left: normalizeExpr(list[0], opPath + '/0', scope, ctx),
-          right: normalizeExpr(list[1], opPath + '/1', scope, ctx),
-        });
-      }
-      const arith = ARITHMETIC_OPS.get(key);
-      if (arith !== undefined) { // IEEE double arithmetic (section 8.5)
-        const list = requireExprArray(key, arg, 2, 2, opPath);
-        const left = normalizeExpr(list[0], opPath + '/0', scope, ctx);
-        const right = normalizeExpr(list[1], opPath + '/1', scope, ctx);
-        const card = left.card === CARD_ONE && right.card === CARD_ONE ? CARD_ONE : CARD_OPT;
-        return Object.freeze({ kind: 'arith', card, docPath, op: arith, left, right });
-      }
-      if (TODO_06_OPERATORS.has(key))
-        return fail('JQ0099', `operator '${key}' is not implemented until TODO_06`, docPath);
+      // the registry vocabulary (section 8); note the section 6.7
+      // collision rule holds by construction: a single-key {"$count": e}
+      // object always reaches this lookup and is the operator
+      if (hasOwn(OPERATORS, key))
+        return normalizeOperatorCall(key, OPERATORS[key], arg, docPath, opPath, scope, ctx);
       if (FLWOR_KEYS.has(key) || QUANTIFIER_KEYS.has(key))
         return fail('JQ0003', `'${key}' cannot form a phrase on its own`, docPath);
       if (RESERVED_KEYS.has(key))
         return fail('JQ0002', `'${key}' is reserved and not defined in this version`, docPath);
-      return fail('JQ0002', `unknown operator '${key}'`, docPath);
+      return failUnknownOperator(key, docPath);
     }
   }
 }
@@ -602,32 +605,14 @@ function collectReadSlots(node, out) {
       }
       return;
     case 'array':
-    case 'seq':
       for (let i = 0; i < node.elements.length; i++)
         collectReadSlots(node.elements[i], out);
       return;
-    case 'cmp':
-    case 'arith':
-      collectReadSlots(node.left, out);
-      collectReadSlots(node.right, out);
+    case 'raw': // compile-time data of a registry operator, never evaluated
       return;
-    case 'neg':
-    case 'not':
-    case 'exists':
-    case 'aggregate':
-      collectReadSlots(node.operand, out);
-      return;
-    case 'and':
-    case 'or':
-    case 'concat':
-      for (let i = 0; i < node.operands.length; i++)
-        collectReadSlots(node.operands[i], out);
-      return;
-    case 'if':
-      collectReadSlots(node.cond, out);
-      collectReadSlots(node.then, out);
-      if (node.alt !== null)
-        collectReadSlots(node.alt, out);
+    case 'op':
+      for (let i = 0; i < node.args.length; i++)
+        collectReadSlots(node.args[i], out);
       return;
     case 'let':
       for (let i = 0; i < node.bindings.length; i++)

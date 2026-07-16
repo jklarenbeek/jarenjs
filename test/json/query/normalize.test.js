@@ -229,7 +229,7 @@ describe('Jaren JSON Query normalizer', () => {
     });
   });
 
-  describe('JQ0099 - placeholders for TODO_06', () => {
+  describe('the operator registry vocabulary', () => {
     it('should compile every FLWOR clause and quantifier phrase', () => {
       assert.strictEqual(typeof compileJsonQuery({ $for: { b: '$.a[*]' }, $return: '$b' }), 'function');
       assert.strictEqual(typeof compileJsonQuery({ $let: { b: 1 }, $where: true, $return: '$b' }), 'function');
@@ -238,17 +238,77 @@ describe('Jaren JSON Query normalizer', () => {
       assert.strictEqual(typeof compileJsonQuery({ $every: { b: '$.a[*]' }, $satisfies: true }), 'function');
     });
 
-    it('should compile the provisional aggregates $count/$sum/$avg', () => {
-      assert.strictEqual(typeof compileJsonQuery({ $count: '$.a[*]' }), 'function');
-      assert.strictEqual(typeof compileJsonQuery({ $sum: '$.a[*]' }), 'function');
-      assert.strictEqual(typeof compileJsonQuery({ $avg: '$.a[*]' }), 'function');
+    it('should compile every operator of the section-8 vocabulary', () => {
+      // one document per operator family (full semantics are covered by
+      // operators.test.js); compiling proves the registry declares them all
+      assert.strictEqual(typeof compileJsonQuery({ $seq: [{ $count: 1 }, { $sum: 1 }, { $avg: 1 }, { $min: 1 }, { $max: 1 }] }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({
+        $seq: [
+          { '$string-join': [['a'], ','] }, { $substring: ['a', 0, 1] }, { $contains: ['a', 'a'] },
+          { '$starts-with': ['a', 'a'] }, { '$ends-with': ['a', 'a'] }, { $upper: 'a' }, { $lower: 'A' },
+          { '$string-length': 'a' }, { '$normalize-space': ' a ' },
+          { $match: ['a', 'a'] }, { $search: ['a', 'a'] }, { $replace: ['a', 'a', 'b'] },
+        ],
+      }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({
+        $seq: [
+          { $distinct: 1 }, { $reverse: 1 }, { $sort: 1 }, { $head: 1 }, { $tail: 1 },
+          { $subsequence: [1, 0] }, { '$index-of': [1, 1] }, { $range: [1, 2] }, { $get: [1, 0] },
+        ],
+      }), 'function');
+      assert.strictEqual(typeof compileJsonQuery({
+        $seq: [
+          { '$is-string': 1 }, { '$is-number': 1 }, { '$is-boolean': 1 }, { '$is-null': 1 },
+          { '$is-array': 1 }, { '$is-object': 1 },
+          { $string: 1 }, { $number: 1 }, { $boolean: 1 },
+          { $coalesce: [1] }, { $default: [1, 2] },
+        ],
+      }), 'function');
     });
 
-    it('should reject the TODO_06 library operators', () => {
-      failsWith({ $min: '$.a[*]' }, 'JQ0099', '');
-      failsWith({ $string: 12 }, 'JQ0099', '');
-      failsWith({ $coalesce: ['$.missing', 1] }, 'JQ0099', '');
-      failsWith({ $replace: ['abc', 'b', 'x'] }, 'JQ0099', '');
+    it('should enforce the registry arities (JQ0003)', () => {
+      failsWith({ '$string-join': [] }, 'JQ0003', '/$string-join');
+      failsWith({ '$string-join': [['a'], ',', '!'] }, 'JQ0003', '/$string-join');
+      failsWith({ $substring: ['a'] }, 'JQ0003', '/$substring');
+      failsWith({ $substring: ['a', 0, 1, 2] }, 'JQ0003', '/$substring');
+      failsWith({ $substring: 'a' }, 'JQ0003', '/$substring');
+      failsWith({ $replace: ['a', 'b'] }, 'JQ0003', '/$replace');
+      failsWith({ $contains: ['a'] }, 'JQ0003', '/$contains');
+      failsWith({ $subsequence: [1] }, 'JQ0003', '/$subsequence');
+      failsWith({ '$index-of': [1] }, 'JQ0003', '/$index-of');
+      failsWith({ $range: [1, 2, 3] }, 'JQ0003', '/$range');
+      failsWith({ $get: [1] }, 'JQ0003', '/$get');
+      failsWith({ $coalesce: [] }, 'JQ0003', '/$coalesce');
+      failsWith({ $coalesce: 1 }, 'JQ0003', '/$coalesce');
+      failsWith({ $default: [1] }, 'JQ0003', '/$default');
+      failsWith({ $default: [1, 2, 3] }, 'JQ0003', '/$default');
+    });
+
+    it('should suggest a near-miss operator on JQ0002 (Levenshtein <= 2)', () => {
+      assert.throws(() => compileJsonQuery({ $stirng: 1 }), (e) => {
+        assert.strictEqual(e.code, 'JQ0002');
+        assert.strictEqual(e.message.includes("did you mean '$string'?"), true, e.message);
+        return true;
+      });
+      assert.throws(() => compileJsonQuery({ $counts: 'x' }), (e) => {
+        assert.strictEqual(e.code, 'JQ0002');
+        assert.strictEqual(e.message.includes("did you mean '$count'?"), true, e.message);
+        return true;
+      });
+      // multi-key objects with an unknown key get the suggestion too
+      assert.throws(() => compileJsonQuery({ $fore: { b: '$.a[*]' }, $return: '$b' }), (e) => {
+        assert.strictEqual(e.code, 'JQ0002');
+        assert.strictEqual(e.message.includes("did you mean '$for'?"), true, e.message);
+        return true;
+      });
+    });
+
+    it('should not suggest anything for distant unknown keys', () => {
+      assert.throws(() => compileJsonQuery({ $frobnicate: 1 }), (e) => {
+        assert.strictEqual(e.code, 'JQ0002');
+        assert.strictEqual(e.message.includes('did you mean'), false, e.message);
+        return true;
+      });
     });
   });
 
@@ -301,28 +361,14 @@ describe('Jaren JSON Query normalizer', () => {
     });
   });
 
-  describe('valid fixtures from TODO_03', () => {
-    // Every valid/ fixture compiles except the ones using TODO_06 library
-    // operators, which fail with the JQ0099 placeholder.
-    const NOT_YET = new Set([
-      'op-aggregates-sequences.json', // $min/$max/$distinct/... (TODO_06)
-      'op-strings.json',
-      'op-types-casts.json',
-    ]);
-
+  describe('valid fixtures', () => {
+    // With the operator library complete, every valid/ fixture compiles.
     const names = fs.readdirSync(path.join(fixturesDir, 'valid')).filter((n) => n.endsWith('.json')).sort();
     for (const name of names) {
       const doc = JSON.parse(fs.readFileSync(path.join(fixturesDir, 'valid', name), 'utf8'));
-      if (NOT_YET.has(name)) {
-        it(`should fail ${name} with the JQ0099 placeholder`, () => {
-          failsWith(doc, 'JQ0099');
-        });
-      }
-      else {
-        it(`should compile ${name}`, () => {
-          assert.strictEqual(typeof compileJsonQuery(doc), 'function');
-        });
-      }
+      it(`should compile ${name}`, () => {
+        assert.strictEqual(typeof compileJsonQuery(doc), 'function');
+      });
     }
   });
 });

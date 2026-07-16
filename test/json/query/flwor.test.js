@@ -677,7 +677,7 @@ describe('Jaren JSON Query FLWOR phrases', () => {
     });
   });
 
-  describe('provisional aggregate operators ($count / $sum / $avg)', () => {
+  describe('aggregate operators in FLWOR context ($count / $sum / $avg)', () => {
     it('should count, sum, and average sequences', () => {
       assert.strictEqual(queryJson({ $count: '$.store.book[*]' }, bookstore), 4);
       assert.strictEqual(
