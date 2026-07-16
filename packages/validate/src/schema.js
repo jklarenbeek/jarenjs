@@ -40,6 +40,7 @@ import { compileArraySchema } from './array.js';
 import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
+import { compileQuerySchema } from './query-keyword.js';
 import { compileDollarDataSchema, hasDollarDataReferences } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { hasSchemaRef, hasSchemaRecursiveRef, hasSchemaDynamicRef } from './tools.js';
@@ -437,7 +438,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
       'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
       'then', 'else', 'propertyNames', 'format', 'contentEncoding', 'contentMediaType',
-      'unevaluatedProperties', 'unevaluatedItems'];
+      'unevaluatedProperties', 'unevaluatedItems', '$query'];
     const hasValidationSiblings = keys.some(k => validationKeywords.includes(k));
     // In draft 7 and earlier, $ref always overrides siblings regardless
     // In draft 2019-09+, $ref can have validation siblings
@@ -593,6 +594,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   addFunctionToArray(validators, compileCombineSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileConditionSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileDataSchema(schemaObj, jsonSchema));
+  addFunctionToArray(validators, compileQuerySchema(schemaObj, jsonSchema));
 
   // Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12)
   addFunctionToArray(validators, compileDynamicRef(schemaObj, jsonSchema));

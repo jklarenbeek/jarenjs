@@ -5,6 +5,7 @@ import {
   compileJsonQuery,
   queryJson,
   JsonQueryCompileError,
+  JsonQueryRuntimeError,
 } from '@jarenjs/json/query';
 
 // The bookstore example from RFC 9535, section 1.5
@@ -60,6 +61,50 @@ describe('Jaren JSON Query public API', () => {
       const q = compileJsonQuery({ $if: [{ $gt: ['$n', 0] }, '$n'] });
       assert.strictEqual(q.first(null, { n: 5 }), 5);
       assert.strictEqual(q.exists(null, { n: -1 }), false);
+    });
+  });
+
+  describe('ebv (effective boolean value, spec section 2.2)', () => {
+    it('should be false for the empty sequence', () => {
+      assert.strictEqual(compileJsonQuery('$.missing').ebv(bookstore), false);
+      assert.strictEqual(compileJsonQuery({ $seq: [] }).ebv(bookstore), false);
+    });
+
+    it('should follow the EBV table for scalar singletons', () => {
+      assert.strictEqual(compileJsonQuery(0).ebv(null), false);
+      assert.strictEqual(compileJsonQuery({ $neg: 0 }).ebv(null), false); // -0
+      assert.strictEqual(compileJsonQuery({ $div: [0, 0] }).ebv(null), false); // NaN
+      assert.strictEqual(compileJsonQuery('').ebv(null), false);
+      assert.strictEqual(compileJsonQuery(null).ebv(null), false);
+      assert.strictEqual(compileJsonQuery(false).ebv(null), false);
+      assert.strictEqual(compileJsonQuery(true).ebv(null), true);
+      assert.strictEqual(compileJsonQuery(42).ebv(null), true);
+      assert.strictEqual(compileJsonQuery('x').ebv(null), true);
+    });
+
+    it('should be true for a singleton array or object (D3)', () => {
+      // internal-representation check: one EMPTY array item is a truthy
+      // singleton, not the (falsy) empty sequence the mapped result
+      // resembles
+      assert.strictEqual(compileJsonQuery({ $const: [] }).ebv(null), true);
+      assert.strictEqual(compileJsonQuery({ $const: {} }).ebv(null), true);
+      assert.strictEqual(compileJsonQuery('$.store.bicycle').ebv(bookstore), true);
+    });
+
+    it('should raise JQ2003 on a sequence of two or more items', () => {
+      const q = compileJsonQuery('$.store.book[*]');
+      assert.throws(() => q.ebv(bookstore), (e) => {
+        assert.strictEqual(e instanceof JsonQueryRuntimeError, true);
+        assert.strictEqual(e.code, 'JQ2003');
+        assert.strictEqual(e.docPath, '');
+        return true;
+      });
+    });
+
+    it('should pass externals through', () => {
+      const q = compileJsonQuery({ $gt: ['$n', 0] });
+      assert.strictEqual(q.ebv(null, { n: 5 }), true);
+      assert.strictEqual(q.ebv(null, { n: -5 }), false);
     });
   });
 

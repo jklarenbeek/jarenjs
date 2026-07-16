@@ -273,13 +273,16 @@ export class ValidationRoot {
    * @param formats - Registered format validators
    * @param opts - Validation options
    * @param traverse - Schema traversal options
+   * @param owner - The owning JarenValidator instance; extension keywords
+   *   ('$query') compile embedded schema literals against it
    */
   constructor(
     origin: string,
     schemas: Map<string, JSONSchema | boolean>,
     formats: Record<string, FormatCompiler>,
     opts?: ValidationOptions,
-    traverse?: TraverseOptions
+    traverse?: TraverseOptions,
+    owner?: JarenValidator | null
   );
 
   /** The root schema origin/URI */
@@ -292,6 +295,8 @@ export class ValidationRoot {
   readonly formats: Record<string, FormatCompiler>;
   /** Array of validation errors */
   readonly errors: unknown[];
+  /** The owning JarenValidator instance, or null when constructed standalone */
+  readonly owner: JarenValidator | null;
 
   /**
    * Validates data against the root schema.

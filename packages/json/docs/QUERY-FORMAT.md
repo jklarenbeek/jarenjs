@@ -918,6 +918,13 @@ can implement the hook. A query using `$valid`/`$assert`/`$as` compiled
 **without** a hook is compile error `JQ0008`; a hook that rejects a schema
 literal (throws) is compile error `JQ0009` at the operator's `docPath`.
 
+The same package closes the loop in the other direction: its `$query`
+schema keyword embeds a query document inside a JSON Schema and asserts the
+query's EBV (§2.2) against each validated instance — schemas inside queries
+here, queries inside schemas there. Compiled queries expose `query.ebv`
+beside `first`/`exists` for exactly this. See the `@jarenjs/validate`
+README's "`$query` — cross-field assertions" section.
+
 ---
 
 ## 9. Variables, scoping, and external parameters

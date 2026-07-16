@@ -15,7 +15,7 @@
 
 import { normalizeQuery, deepFreezeCopy } from './normalize.js';
 import { compileNode, UNBOUND } from './compile.js';
-import { EMPTY, Seq } from './runtime.js';
+import { EMPTY, Seq, ebv } from './runtime.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 
@@ -32,6 +32,12 @@ const hasOwn = Object.hasOwn;
  * - `query(data, externals?)` - the query result as described above
  * - `query.first(data, externals?)` - first item of the result, or `undefined`
  * - `query.exists(data, externals?)` - true when the result is non-empty
+ * - `query.ebv(data, externals?)` - the effective boolean value of the
+ *   result per the EBV table (section 2.2): empty -> false, a singleton
+ *   per its type (array/object -> true, D3), two or more items ->
+ *   `JsonQueryRuntimeError` JQ2003. Computed on the internal sequence
+ *   value, before the plain-JSON mapping - the mapped result is ambiguous
+ *   there (an array is both a multi-item sequence and one array item).
  * - `query.externals` - names of the external parameters (section 9), in
  *   order of first appearance; bind them via the `externals` argument
  *   (`{ name: value, ... }`). Evaluating a reference to an unbound
@@ -88,6 +94,7 @@ export function compileJsonQuery(doc, options = {}) {
     return v instanceof Seq ? v.items[0] : v;
   };
   query.exists = (data, ext) => evaluate(data, ext) !== EMPTY;
+  query.ebv = (data, ext) => ebv(evaluate(data, ext), '');
   query.externals = Object.freeze(externals.map((e) => e.name));
   query.doc = deepFreezeCopy(doc);
   return query;

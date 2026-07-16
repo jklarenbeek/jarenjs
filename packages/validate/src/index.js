@@ -213,6 +213,8 @@ export class ValidationRoot {
   #usesUnevaluated = false;
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
   #evalLog = new EvalLog();
+  /** @type {object|null} The JarenValidator instance this compilation belongs to, or null when constructed standalone */
+  #owner = null;
 
   /** Keywords whose value is a map of arbitrary names to schemas; those
    * names must not be mistaken for keywords (e.g. a metaschema declaring
@@ -251,6 +253,15 @@ export class ValidationRoot {
         // against the data path at validation time, just like '$data'.
         if (key === '$data'
           || (key === 'data' && node[key] !== null && typeof node[key] === 'object')) flags.dollarData = true;
+        else if (key === '$query') {
+          // The '$query' keyword binds the instance path to its 'path'
+          // external at validation time, so it consumes data paths like
+          // '$data'. Its value is a query document, not a schema - the
+          // keys inside (operators, embedded schema literals) must not
+          // register as keywords of this compilation.
+          flags.dollarData = true;
+          continue;
+        }
         else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
         if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
           // The value is a name->schema map: its keys are names, its values schemas.
@@ -269,8 +280,11 @@ export class ValidationRoot {
    * @param {object} formats - Registered format validators
    * @param {ValidationOptions} [opts] - Validation options
    * @param {TraverseOptions} [traverse] - Schema traversal options
+   * @param {object|null} [owner] - The owning JarenValidator instance; extension
+   *   keywords ('$query') compile embedded schema literals against it so their
+   *   `$ref`s resolve to the owner's `addSchema` registrations
    */
-  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions) {
+  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions, owner = null) {
     const schema = schemas.get(origin);
     this.#rootOrigin = origin;
     this.#schemas = schemas;
@@ -278,6 +292,7 @@ export class ValidationRoot {
 
     this.#options = opts;
     this.#traverse = traverse;
+    this.#owner = owner;
 
     this.#objects = new Map();
     this.#errors = [];
@@ -338,6 +353,9 @@ export class ValidationRoot {
 
   /** @returns {EvalLog} The evaluation log for unevaluated* annotation tracking */
   get evalLog() { return this.#evalLog; }
+
+  /** @returns {object|null} The owning JarenValidator instance, or null when constructed standalone */
+  get owner() { return this.#owner; }
 
   /**
    * Creates a new ValidationObject for the given path and schema.
@@ -1246,6 +1264,14 @@ export class JarenValidator {
         params.pattern = err.expected?.source || err.expected;
       } else if (keyword === 'additionalProperties') {
         params.additionalProperty = err.dataKey;
+      } else if (keyword === '$query') {
+        // A '$query' runtime failure passes the JQ2xxx code and the query
+        // document pointer as extra meta arguments after the data path;
+        // a plain EBV-false failure passes neither.
+        if (err.rest != null && err.rest.length > 1) {
+          params.code = err.rest[1];
+          params.docPath = err.rest[2];
+        }
       }
 
       // Generate message
@@ -1308,6 +1334,10 @@ export class JarenValidator {
         message = 'must match "else" schema';
       } else if (keyword === 'false schema') {
         message = 'boolean schema false is always invalid';
+      } else if (keyword === '$query') {
+        message = params.code
+          ? `'$query' assertion raised ${params.code} at '${params.docPath}'`
+          : "must satisfy the '$query' assertion";
       }
 
       // Validators pass the data path as the first meta argument to the
@@ -1340,7 +1370,8 @@ export class JarenValidator {
       schemas,
       self.#formats,
       self.#options.validation,
-      self.#options.traverse);
+      self.#options.traverse,
+      self);
 
     const collectErrors = self.#options.validation?.collectErrors || false;
 
@@ -1682,7 +1713,8 @@ export class JarenValidator {
       map,
       this.#formats,
       validationOptions,
-      this.#options.traverse
+      this.#options.traverse,
+      this
     );
 
     // Pre-create validation objects for all refs
