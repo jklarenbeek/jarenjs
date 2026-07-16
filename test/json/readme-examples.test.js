@@ -3,8 +3,9 @@ import * as assert from 'node:assert';
 import { readFile } from 'node:fs/promises';
 
 import {
-  getValueByJsonPointer,
-  resolveRelativePointer,
+  compileJSONPointer,
+  compileRelativeJSONPointer,
+  JSONPOINTER_NOTHING,
   compileJSONPath,
   compileJsonQuery,
   queryJson,
@@ -39,15 +40,15 @@ describe('README examples: JSON Pointer', () => {
   it('resolves pointers and relative pointers as documented', () => {
     const doc = { limits: { min: 2, max: 9 }, value: 5 };
 
-    assert.deepStrictEqual(
-      getValueByJsonPointer(doc, '', '/limits/min'),
-      { value: 2, found: true });
-    assert.deepStrictEqual(
-      resolveRelativePointer(doc, '/value', '1/limits'),
-      { value: { min: 2, max: 9 }, found: true });
-    assert.deepStrictEqual(
-      resolveRelativePointer(doc, '/limits/min', '0#'),
-      { value: 'min', found: true });
+    const getMin = compileJSONPointer('/limits/min');
+    assert.strictEqual(getMin(doc), 2);
+    assert.strictEqual(getMin({}), JSONPOINTER_NOTHING);
+
+    const getLimits = compileRelativeJSONPointer('1/limits');
+    assert.deepStrictEqual(getLimits(doc, '/value'), { min: 2, max: 9 });
+
+    const getName = compileRelativeJSONPointer('0#');
+    assert.strictEqual(getName(doc, '/limits/min'), 'min');
   });
 });
 

@@ -34,6 +34,7 @@
   "devDependencies": {
     "fast-xml-parser": "^5.10.1",
     "fontoxpath": "^3.34.0",
-    "jsonata": "^2.2.1"
+    "jsonata": "^2.2.1",
+    "jsonpointer": "^5.0.1"
   }
 }

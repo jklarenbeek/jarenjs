@@ -32,8 +32,22 @@ import {
 } from '@jarenjs/core';
 
 import {
-  resolveDataRef,
+  compileDataRef,
+  JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
+
+// A ref that fails the strict compile keeps the lax keyword semantics:
+// it resolves as not-found and the keyword asserts nothing.
+const resolveNothing = () => JSONPOINTER_NOTHING;
+
+function compileRefResolver(ref) {
+  try {
+    return compileDataRef(ref);
+  }
+  catch {
+    return resolveNothing;
+  }
+}
 
 /**
  * Compile minimum constraint from data reference
@@ -43,12 +57,13 @@ import {
  */
 function compileDataMinimum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minimum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMinimum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: minValue, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minValue)) return true;
+    const minValue = resolveRef(dataRoot, dataPath);
+    if (minValue === JSONPOINTER_NOTHING || !isNumberType(minValue)) return true;
 
     return data >= minValue || addError(minValue, data, dataPath);
   };
@@ -62,12 +77,13 @@ function compileDataMinimum(schemaObj, ref) {
  */
 function compileDataMaximum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maximum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMaximum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: maxValue, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxValue)) return true;
+    const maxValue = resolveRef(dataRoot, dataPath);
+    if (maxValue === JSONPOINTER_NOTHING || !isNumberType(maxValue)) return true;
 
     return data <= maxValue || addError(maxValue, data, dataPath);
   };
@@ -81,12 +97,13 @@ function compileDataMaximum(schemaObj, ref) {
  */
 function compileDataExclusiveMinimum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'exclusiveMinimum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataExclusiveMinimum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: minValue, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minValue)) return true;
+    const minValue = resolveRef(dataRoot, dataPath);
+    if (minValue === JSONPOINTER_NOTHING || !isNumberType(minValue)) return true;
 
     return data > minValue || addError(minValue, data, dataPath);
   };
@@ -100,12 +117,13 @@ function compileDataExclusiveMinimum(schemaObj, ref) {
  */
 function compileDataExclusiveMaximum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'exclusiveMaximum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataExclusiveMaximum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: maxValue, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxValue)) return true;
+    const maxValue = resolveRef(dataRoot, dataPath);
+    if (maxValue === JSONPOINTER_NOTHING || !isNumberType(maxValue)) return true;
 
     return data < maxValue || addError(maxValue, data, dataPath);
   };
@@ -119,12 +137,13 @@ function compileDataExclusiveMaximum(schemaObj, ref) {
  */
 function compileDataEnum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'enum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataEnum(data, dataPath, dataRoot) {
     if (data === undefined) return true;
 
-    const { value: enumValues, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !Array.isArray(enumValues)) return true;
+    const enumValues = resolveRef(dataRoot, dataPath);
+    if (enumValues === JSONPOINTER_NOTHING || !Array.isArray(enumValues)) return true;
 
     return enumValues.includes(data) || addError(enumValues, data, dataPath);
   };
@@ -138,12 +157,13 @@ function compileDataEnum(schemaObj, ref) {
  */
 function compileDataConst(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'const');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataConst(data, dataPath, dataRoot) {
     if (data === undefined) return true;
 
-    const { value: constValue, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found) return true;
+    const constValue = resolveRef(dataRoot, dataPath);
+    if (constValue === JSONPOINTER_NOTHING) return true;
 
     return data === constValue || addError(constValue, data, dataPath);
   };
@@ -157,12 +177,13 @@ function compileDataConst(schemaObj, ref) {
  */
 function compileDataMinLength(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minLength');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMinLength(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: minLen, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minLen)) return true;
+    const minLen = resolveRef(dataRoot, dataPath);
+    if (minLen === JSONPOINTER_NOTHING || !isNumberType(minLen)) return true;
 
     return data.length >= minLen || addError(minLen, data, dataPath);
   };
@@ -176,12 +197,13 @@ function compileDataMinLength(schemaObj, ref) {
  */
 function compileDataMaxLength(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maxLength');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMaxLength(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: maxLen, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxLen)) return true;
+    const maxLen = resolveRef(dataRoot, dataPath);
+    if (maxLen === JSONPOINTER_NOTHING || !isNumberType(maxLen)) return true;
 
     return data.length <= maxLen || addError(maxLen, data, dataPath);
   };
@@ -195,12 +217,13 @@ function compileDataMaxLength(schemaObj, ref) {
  */
 function compileDataMinItems(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minItems');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMinItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
 
-    const { value: minItems, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minItems)) return true;
+    const minItems = resolveRef(dataRoot, dataPath);
+    if (minItems === JSONPOINTER_NOTHING || !isNumberType(minItems)) return true;
 
     return data.length >= minItems || addError(minItems, data, dataPath);
   };
@@ -214,12 +237,13 @@ function compileDataMinItems(schemaObj, ref) {
  */
 function compileDataMaxItems(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maxItems');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMaxItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
 
-    const { value: maxItems, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxItems)) return true;
+    const maxItems = resolveRef(dataRoot, dataPath);
+    if (maxItems === JSONPOINTER_NOTHING || !isNumberType(maxItems)) return true;
 
     return data.length <= maxItems || addError(maxItems, data, dataPath);
   };
@@ -233,12 +257,13 @@ function compileDataMaxItems(schemaObj, ref) {
  */
 function compileDataMinProperties(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minProperties');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMinProperties(data, dataPath, dataRoot) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
 
-    const { value: minProps, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minProps)) return true;
+    const minProps = resolveRef(dataRoot, dataPath);
+    if (minProps === JSONPOINTER_NOTHING || !isNumberType(minProps)) return true;
 
     const propCount = Object.keys(data).length;
     return propCount >= minProps || addError(minProps, data, dataPath);
@@ -253,12 +278,13 @@ function compileDataMinProperties(schemaObj, ref) {
  */
 function compileDataMaxProperties(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maxProperties');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMaxProperties(data, dataPath, dataRoot) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
 
-    const { value: maxProps, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxProps)) return true;
+    const maxProps = resolveRef(dataRoot, dataPath);
+    if (maxProps === JSONPOINTER_NOTHING || !isNumberType(maxProps)) return true;
 
     const propCount = Object.keys(data).length;
     return propCount <= maxProps || addError(maxProps, data, dataPath);
@@ -273,12 +299,13 @@ function compileDataMaxProperties(schemaObj, ref) {
  */
 function compileDataMultipleOf(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'multipleOf');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataMultipleOf(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: multipleOf, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(multipleOf)) return true;
+    const multipleOf = resolveRef(dataRoot, dataPath);
+    if (multipleOf === JSONPOINTER_NOTHING || !isNumberType(multipleOf)) return true;
 
     const q = data / multipleOf;
     return Math.abs(q - Math.round(q)) < 1e-6 || addError(multipleOf, data, dataPath);
@@ -293,12 +320,13 @@ function compileDataMultipleOf(schemaObj, ref) {
  */
 function compileDataPattern(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'pattern');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDataPattern(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: pattern, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isStringType(pattern)) return true;
+    const pattern = resolveRef(dataRoot, dataPath);
+    if (pattern === JSONPOINTER_NOTHING || !isStringType(pattern)) return true;
 
     const regex = new RegExp(pattern, 'u');
     return regex.test(data) || addError(pattern, data, dataPath);
@@ -316,6 +344,7 @@ function compileDataFormat(schemaObj, ref) {
   if (!formats) return undefined;
 
   const addError = schemaObj.createErrorHandler(ref, 'format');
+  const resolveRef = compileRefResolver(ref);
 
   // The registry holds format COMPILERS; compile (and cache) a validator
   // per referenced format name at validation time.
@@ -328,8 +357,8 @@ function compileDataFormat(schemaObj, ref) {
   return function validateDataFormat(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: formatName, found } = resolveDataRef(dataRoot, dataPath, ref);
-    if (!found || !isStringType(formatName)) return true;
+    const formatName = resolveRef(dataRoot, dataPath);
+    if (formatName === JSONPOINTER_NOTHING || !isStringType(formatName)) return true;
 
     let validator = compiled.get(formatName);
     if (validator === undefined) {

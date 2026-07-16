@@ -1,6 +1,6 @@
 # @jarenjs/json Architecture
 
-This document describes the internals of `@jarenjs/json` for contributors: the JSON Pointer resolvers, the RFC 9535 JSONPath compiler, and the Jaren JSON Query engine with its XQuery text front-end. The user-facing story is in the [README](./README.md); the query language contract is [docs/QUERY-FORMAT.md](./docs/QUERY-FORMAT.md).
+This document describes the internals of `@jarenjs/json` for contributors: the JSON Pointer compiler, the RFC 9535 JSONPath compiler, and the Jaren JSON Query engine with its XQuery text front-end. The user-facing story is in the [README](./README.md); the query language contract is [docs/QUERY-FORMAT.md](./docs/QUERY-FORMAT.md).
 
 Everything here follows the house architecture of the schema validator (see [`packages/validate/ARCHITECTURE.md`](../validate/ARCHITECTURE.md)): **two-stage compilers** — parse and normalize once into an AST, then compile the AST into specialized closures with every decidable decision made at compile time. No `eval`, no `new Function` (CSP-safe), no allocation on hot paths, monomorphic closures wherever the engine can arrange it.
 
@@ -9,7 +9,7 @@ Everything here follows the house architecture of the schema validator (see [`pa
 | File | Purpose |
 |------|---------|
 | `src/basic.js` | string validation for JSON, JSON Pointer, JSONPath (`isValidJSON`, `isValidJSONPointer`, `isValidJSONPathStrict`, ...) |
-| `src/pointer.js` | RFC 6901 + Relative JSON Pointer parsing and resolution (parse-and-walk; compiled pointers are roadmap) |
+| `src/pointer.js` | the RFC 6901 + Relative JSON Pointer compiler (`compileJSONPointer`, `compileRelativeJSONPointer`, `compileDataRef`) |
 | `src/path.js` | the JSONPath compiler: parser, nodes-mode compilers (normalized paths), public API |
 | `src/segments.js` | package-internal runtime segment machinery shared by `path.js` and the query engine (not exported) |
 | `src/query/errors.js` | `JsonQueryCompileError` / `JsonQueryRuntimeError` with `code` + `docPath` |
@@ -21,17 +21,21 @@ Everything here follows the house architecture of the schema validator (see [`pa
 | `src/xquery/parse.js` | the XQuery text front-end: `parseXQuery(text)` → query document |
 | `src/xquery/index.js` | `parseXQuery`, `compileXQuery`, `XQuerySyntaxError` |
 
-Dependency direction: `pointer.js`/`basic.js` stand alone; `path.js` builds on `segments.js`; the query engine builds on `segments.js` (paths) and `runtime.js`; the XQuery front-end emits query documents and depends only on the JSON format, never on engine internals. `@jarenjs/core` supplies char-code scanning, `equalsJson`, code-point helpers and I-Regexp compilation.
+Dependency direction: `basic.js` stands alone; `pointer.js` shares only the `NOTHING` sentinel from `segments.js`; `path.js` builds on `segments.js`; the query engine builds on `segments.js` (paths) and `runtime.js`; the XQuery front-end emits query documents and depends only on the JSON format, never on engine internals. `@jarenjs/core` supplies char-code scanning, `equalsJson`, code-point helpers and I-Regexp compilation.
 
 ## The two-stage pipeline
 
-Both compilers in this package have the same shape:
+All compilers in this package have the same shape:
 
 ```
 source ──[stage 1: parse / normalize]──► frozen AST ──[stage 2: compile]──► closure tree ──► run(data)
 ```
 
 Stage 1 owns *all* static errors: the JSONPath parser is a single-pass, character-level recursive-descent parser (the `fail(message, position)` idiom, `JSONPathSyntaxError`), and the query normalizer raises every `JQ0xxx` compile error with a `docPath`. Stage 2 never re-checks structure; it specializes: selector kinds, slice bound arithmetic, comparison operators, literal regexes, operator arities and cardinality fast paths are all resolved before the first document is seen. A compiled query closes over nothing mutable and is reusable across documents and calls.
+
+### JSON Pointer: segment-count specialization
+
+`pointer.js` follows the pipeline in miniature. The strict parsers (`parseJSONPointer`, `parseRelativeJSONPointer`) are single-pass char-code scanners with a lazy-decode fast path: an escape-free segment is a direct slice, and only segments containing `~` build a decoded string. The compilers pre-decode every member name and pre-parse every array index (one segment, two forms — RFC 6901 lets `"2"` address both a `"2"` member and array element 2), then specialize the getter by segment count (0 = identity, 1 and 2 = unrolled hops, N = a loop over parallel name/index arrays). A relative pointer trims its level count off the runtime location by scanning **backwards** for the N-th `/` — no split, no arrays — and resolution returns the `NOTHING` sentinel shared with `segments.js`, so pointer and JSONPath results compose. Nothing is allocated on any resolution path.
 
 ### JSONPath: parser, segments, two output modes
 

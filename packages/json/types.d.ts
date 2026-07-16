@@ -19,36 +19,45 @@ export function isValidJSONPath(str: string): boolean;
 // Pointer Module - JSON Pointer RFC 6901 (pointer.js)
 // =============================================================================
 
-/** Result of resolving a (relative) JSON Pointer against data */
-export interface JsonPointerResult {
-  value: any;
-  found: boolean;
+/**
+ * Sentinel for the absence of a value, as distinct from the JSON value
+ * `null`. Identical to `JSONPATH_NOTHING`.
+ */
+export const JSONPOINTER_NOTHING: unique symbol;
+
+export class JSONPointerSyntaxError extends SyntaxError {
+  constructor(message: string, source: string, position: number);
+  source: string;
+  position: number;
 }
 
 /** Parsed relative JSON Pointer */
 export interface RelativeJsonPointer {
   levels: number;
-  pointer: string;
   hash: boolean;
+  segments: string[];
 }
 
-/** Parse a JSON Pointer and return the decoded path segments */
-export function parseJsonPointer(pointer: string): string[];
+/** Compiled JSON Pointer: returns the addressed value or JSONPOINTER_NOTHING */
+export type JsonPointerGetter = (root: any) => any;
 
-/** Parse a relative JSON Pointer (`<non-negative-integer>("#"|<json-pointer>)`) */
-export function parseRelativeJsonPointer(pointer: string): RelativeJsonPointer;
+/** Compiled relative JSON Pointer / data ref: resolves against the RFC 6901 location `dataPath` in `dataRoot` */
+export type RelativeJsonPointerResolver = (dataRoot: any, dataPath: string) => any;
 
-/** Get a value from data using a JSON Pointer path */
-export function getValueByJsonPointer(dataRoot: any, dataPath: string, pointer: string): JsonPointerResult;
+/** Parse a JSON Pointer strictly per RFC 6901 into its decoded segments */
+export function parseJSONPointer(pointer: string): string[];
 
-/** Get a value from data using a relative JSON Pointer */
-export function getValueByRelativePointer(dataRoot: any, dataPath: string, relativePointer: string): JsonPointerResult;
+/** Parse a relative JSON Pointer strictly (`<non-negative-integer>("#"|<json-pointer>)`) */
+export function parseRelativeJSONPointer(pointer: string): RelativeJsonPointer;
 
-/** Resolve a data reference (either JSON Pointer or relative JSON Pointer) */
-export function resolveDataRef(dataRoot: any, dataPath: string, ref: string): JsonPointerResult;
+/** Compile a JSON Pointer into a specialized zero-allocation getter */
+export function compileJSONPointer(pointer: string): JsonPointerGetter;
 
-/** Get a value from data using a relative JSON Pointer */
-export function resolveRelativePointer(dataRoot: any, dataPath: string, relativePointer: string): JsonPointerResult;
+/** Compile a relative JSON Pointer into a specialized resolver */
+export function compileRelativeJSONPointer(pointer: string): RelativeJsonPointerResolver;
+
+/** Compile a data reference (`''`, JSON Pointer or relative JSON Pointer) into a resolver */
+export function compileDataRef(ref: string): RelativeJsonPointerResolver;
 
 // =============================================================================
 // Path Module - JSONPath RFC 9535 (path.js)

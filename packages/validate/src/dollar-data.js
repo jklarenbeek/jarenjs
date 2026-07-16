@@ -46,8 +46,22 @@ import {
 } from '@jarenjs/core/object';
 
 import {
-  resolveRelativePointer,
+  compileRelativeJSONPointer,
+  JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
+
+// A ref that fails the strict compile keeps the lax keyword semantics:
+// it resolves as not-found and the keyword asserts nothing.
+const resolveNothing = () => JSONPOINTER_NOTHING;
+
+function compileRefResolver(ref) {
+  try {
+    return compileRelativeJSONPointer(ref);
+  }
+  catch {
+    return resolveNothing;
+  }
+}
 
 /**
  * Check if a value is a $data reference object
@@ -69,12 +83,13 @@ function isDollarDataRef(value) {
  */
 function compileDollarDataMinimum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minimum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMinimum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: minValue, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minValue)) return true;
+    const minValue = resolveRef(dataRoot, dataPath);
+    if (minValue === JSONPOINTER_NOTHING || !isNumberType(minValue)) return true;
 
     return data >= minValue || addError(minValue, data, dataPath);
   };
@@ -88,12 +103,13 @@ function compileDollarDataMinimum(schemaObj, ref) {
  */
 function compileDollarDataMaximum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maximum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMaximum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: maxValue, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxValue)) return true;
+    const maxValue = resolveRef(dataRoot, dataPath);
+    if (maxValue === JSONPOINTER_NOTHING || !isNumberType(maxValue)) return true;
 
     return data <= maxValue || addError(maxValue, data, dataPath);
   };
@@ -107,12 +123,13 @@ function compileDollarDataMaximum(schemaObj, ref) {
  */
 function compileDollarDataExclusiveMinimum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'exclusiveMinimum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataExclusiveMinimum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: minValue, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minValue)) return true;
+    const minValue = resolveRef(dataRoot, dataPath);
+    if (minValue === JSONPOINTER_NOTHING || !isNumberType(minValue)) return true;
 
     return data > minValue || addError(minValue, data, dataPath);
   };
@@ -126,12 +143,13 @@ function compileDollarDataExclusiveMinimum(schemaObj, ref) {
  */
 function compileDollarDataExclusiveMaximum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'exclusiveMaximum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataExclusiveMaximum(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: maxValue, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxValue)) return true;
+    const maxValue = resolveRef(dataRoot, dataPath);
+    if (maxValue === JSONPOINTER_NOTHING || !isNumberType(maxValue)) return true;
 
     return data < maxValue || addError(maxValue, data, dataPath);
   };
@@ -145,12 +163,13 @@ function compileDollarDataExclusiveMaximum(schemaObj, ref) {
  */
 function compileDollarDataMultipleOf(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'multipleOf');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMultipleOf(data, dataPath, dataRoot) {
     if (!isNumberType(data)) return true;
 
-    const { value: multipleOf, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(multipleOf)) return true;
+    const multipleOf = resolveRef(dataRoot, dataPath);
+    if (multipleOf === JSONPOINTER_NOTHING || !isNumberType(multipleOf)) return true;
 
     const q = data / multipleOf;
     return Math.abs(q - Math.round(q)) < 1e-6 || addError(multipleOf, data, dataPath);
@@ -169,12 +188,13 @@ function compileDollarDataMultipleOf(schemaObj, ref) {
  */
 function compileDollarDataMinLength(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minLength');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMinLength(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: minLen, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minLen)) return true;
+    const minLen = resolveRef(dataRoot, dataPath);
+    if (minLen === JSONPOINTER_NOTHING || !isNumberType(minLen)) return true;
 
     return data.length >= minLen || addError(minLen, data, dataPath);
   };
@@ -188,12 +208,13 @@ function compileDollarDataMinLength(schemaObj, ref) {
  */
 function compileDollarDataMaxLength(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maxLength');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMaxLength(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: maxLen, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxLen)) return true;
+    const maxLen = resolveRef(dataRoot, dataPath);
+    if (maxLen === JSONPOINTER_NOTHING || !isNumberType(maxLen)) return true;
 
     return data.length <= maxLen || addError(maxLen, data, dataPath);
   };
@@ -207,12 +228,13 @@ function compileDollarDataMaxLength(schemaObj, ref) {
  */
 function compileDollarDataPattern(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'pattern');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataPattern(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: pattern, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isStringType(pattern)) return true;
+    const pattern = resolveRef(dataRoot, dataPath);
+    if (pattern === JSONPOINTER_NOTHING || !isStringType(pattern)) return true;
 
     const regex = new RegExp(pattern, 'u');
     return regex.test(data) || addError(pattern, data, dataPath);
@@ -230,12 +252,13 @@ function compileDollarDataFormat(schemaObj, ref) {
   if (!formats) return undefined;
 
   const addError = schemaObj.createErrorHandler(ref, 'format');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataFormat(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
-    const { value: formatName, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isStringType(formatName)) return true;
+    const formatName = resolveRef(dataRoot, dataPath);
+    if (formatName === JSONPOINTER_NOTHING || !isStringType(formatName)) return true;
 
     const formatCompiler = formats[formatName];
     if (!formatCompiler) return true;
@@ -272,12 +295,13 @@ function compileDollarDataFormat(schemaObj, ref) {
  */
 function compileDollarDataMinItems(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minItems');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMinItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
 
-    const { value: minItems, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minItems)) return true;
+    const minItems = resolveRef(dataRoot, dataPath);
+    if (minItems === JSONPOINTER_NOTHING || !isNumberType(minItems)) return true;
 
     return data.length >= minItems || addError(minItems, data, dataPath);
   };
@@ -291,12 +315,13 @@ function compileDollarDataMinItems(schemaObj, ref) {
  */
 function compileDollarDataMaxItems(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maxItems');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMaxItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
 
-    const { value: maxItems, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxItems)) return true;
+    const maxItems = resolveRef(dataRoot, dataPath);
+    if (maxItems === JSONPOINTER_NOTHING || !isNumberType(maxItems)) return true;
 
     return data.length <= maxItems || addError(maxItems, data, dataPath);
   };
@@ -310,12 +335,13 @@ function compileDollarDataMaxItems(schemaObj, ref) {
  */
 function compileDollarDataUniqueItems(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'uniqueItems');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataUniqueItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
 
-    const { value: shouldBeUnique, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !shouldBeUnique) return true;
+    const shouldBeUnique = resolveRef(dataRoot, dataPath);
+    if (shouldBeUnique === JSONPOINTER_NOTHING || !shouldBeUnique) return true;
 
     // Check for duplicates using deep equality
     for (let i = 0; i < data.length; i++) {
@@ -341,12 +367,13 @@ function compileDollarDataUniqueItems(schemaObj, ref) {
  */
 function compileDollarDataMinProperties(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'minProperties');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMinProperties(data, dataPath, dataRoot) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
 
-    const { value: minProps, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(minProps)) return true;
+    const minProps = resolveRef(dataRoot, dataPath);
+    if (minProps === JSONPOINTER_NOTHING || !isNumberType(minProps)) return true;
 
     const propCount = Object.keys(data).length;
     return propCount >= minProps || addError(minProps, data, dataPath);
@@ -361,12 +388,13 @@ function compileDollarDataMinProperties(schemaObj, ref) {
  */
 function compileDollarDataMaxProperties(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'maxProperties');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataMaxProperties(data, dataPath, dataRoot) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
 
-    const { value: maxProps, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !isNumberType(maxProps)) return true;
+    const maxProps = resolveRef(dataRoot, dataPath);
+    if (maxProps === JSONPOINTER_NOTHING || !isNumberType(maxProps)) return true;
 
     const propCount = Object.keys(data).length;
     return propCount <= maxProps || addError(maxProps, data, dataPath);
@@ -381,12 +409,13 @@ function compileDollarDataMaxProperties(schemaObj, ref) {
  */
 function compileDollarDataRequired(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'required');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataRequired(data, dataPath, dataRoot) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
 
-    const { value: requiredProps, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !Array.isArray(requiredProps)) return true;
+    const requiredProps = resolveRef(dataRoot, dataPath);
+    if (requiredProps === JSONPOINTER_NOTHING || !Array.isArray(requiredProps)) return true;
 
     for (const prop of requiredProps) {
       if (!(prop in data)) {
@@ -409,12 +438,13 @@ function compileDollarDataRequired(schemaObj, ref) {
  */
 function compileDollarDataEnum(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'enum');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataEnum(data, dataPath, dataRoot) {
     if (data === undefined) return true;
 
-    const { value: enumValues, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found || !Array.isArray(enumValues)) return true;
+    const enumValues = resolveRef(dataRoot, dataPath);
+    if (enumValues === JSONPOINTER_NOTHING || !Array.isArray(enumValues)) return true;
 
     return enumValues.includes(data) || addError(enumValues, data, dataPath);
   };
@@ -428,12 +458,13 @@ function compileDollarDataEnum(schemaObj, ref) {
  */
 function compileDollarDataConst(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'const');
+  const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataConst(data, dataPath, dataRoot) {
     if (data === undefined) return true;
 
-    const { value: constValue, found } = resolveRelativePointer(dataRoot, dataPath, ref);
-    if (!found) return true;
+    const constValue = resolveRef(dataRoot, dataPath);
+    if (constValue === JSONPOINTER_NOTHING) return true;
 
     return data === constValue || addError(constValue, data, dataPath);
   };

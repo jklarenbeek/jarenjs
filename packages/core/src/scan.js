@@ -13,7 +13,9 @@ export const CC_CR = 0x0D;
 export const CC_SPACE = 0x20;
 export const CC_BANG = 0x21;
 export const CC_DQUOTE = 0x22;
+export const CC_HASH = 0x23;
 export const CC_DOLLAR = 0x24;
+export const CC_PERCENT = 0x25;
 export const CC_AMP = 0x26;
 export const CC_SQUOTE = 0x27;
 export const CC_LPAREN = 0x28;
@@ -24,6 +26,7 @@ export const CC_MINUS = 0x2D;
 export const CC_DOT = 0x2E;
 export const CC_SLASH = 0x2F;
 export const CC_0 = 0x30;
+export const CC_1 = 0x31;
 export const CC_9 = 0x39;
 export const CC_COLON = 0x3A;
 export const CC_LT = 0x3C;
@@ -36,6 +39,7 @@ export const CC_BACKSLASH = 0x5C;
 export const CC_RBRACKET = 0x5D;
 export const CC_UNDERSCORE = 0x5F;
 export const CC_PIPE = 0x7C;
+export const CC_TILDE = 0x7E;
 
 //#endregion
 

@@ -1,3 +1,14 @@
+import {
+  CC_SLASH,
+  CC_HASH,
+  CC_PERCENT,
+  CC_TILDE,
+  CC_0,
+  CC_1,
+  isDigitCode,
+  isHexDigitCode,
+} from '@jarenjs/core/scan';
+
 //#region JSON validation
 // JSON whitespace characters: space, tab, newline, carriage return
 const JSON_WHITESPACE = new Set([0x20, 0x09, 0x0A, 0x0D]);
@@ -62,22 +73,107 @@ export function isValidJSON(data) {
 //#endregion
 
 //#region JPtr Tests
+// Single-pass char-code scanners (no regex, no allocation), shared by the
+// `json-pointer`/`relative-json-pointer` string formats.
+
+// scan the pointer body `str[pos..)`: '/'-delimited segments where every
+// '~' must be followed by '0' or '1' (RFC 6901 section 3)
+function isValidPointerBody(str, pos) {
+  const len = str.length;
+  for (; pos < len; pos++) {
+    if (str.charCodeAt(pos) === CC_TILDE) {
+      const d = pos + 1 < len ? str.charCodeAt(pos + 1) : -1;
+      if (d !== CC_0 && d !== CC_1)
+        return false;
+      pos++;
+    }
+  }
+  return true;
+}
+
 // JSON-pointer: https://tools.ietf.org/html/rfc6901
-const CONST_REGEXP_JSON_POINTER = /^(?:\/(?:[^~/]|~0|~1)*)*$/;
 export function isValidJSONPointer(str) {
-  return CONST_REGEXP_JSON_POINTER.test(str);
+  if (typeof str !== 'string')
+    return false;
+  if (str.length === 0)
+    return true;
+  if (str.charCodeAt(0) !== CC_SLASH)
+    return false;
+  return isValidPointerBody(str, 1);
+}
+
+// unreserved / sub-delims / ':' / '@' per RFC 3986 pchar, minus the
+// pointer-significant '~' and '/' handled by the caller
+function isFragmentPointerCode(c) {
+  return (c >= 0x61 && c <= 0x7A) // a-z
+    || (c >= 0x41 && c <= 0x5A) // A-Z
+    || isDigitCode(c)
+    || (c >= 0x26 && c <= 0x2E) // & ' ( ) * + , - .
+    || c === 0x21 // !
+    || c === 0x24 // $
+    || c === 0x3A // :
+    || c === 0x3B // ;
+    || c === 0x3D // =
+    || c === 0x40 // @
+    || c === 0x5F; // _
 }
 
 // uri fragment: https://tools.ietf.org/html/rfc3986#appendix-A
-const CONST_REGEXP_JSON_POINTER_URI_FRAGMENT = /^#(?:\/(?:[a-z0-9_\-.!$&'()*+,;:=@]|%[0-9a-f]{2}|~0|~1)*)*$/i;
 export function isValidJSONPointerUriFragment(str) {
-  return CONST_REGEXP_JSON_POINTER_URI_FRAGMENT.test(str);
+  if (typeof str !== 'string')
+    return false;
+  const len = str.length;
+  if (len === 0 || str.charCodeAt(0) !== CC_HASH)
+    return false;
+  if (len > 1 && str.charCodeAt(1) !== CC_SLASH)
+    return false;
+  for (let pos = 1; pos < len; pos++) {
+    const c = str.charCodeAt(pos);
+    if (c === CC_SLASH || isFragmentPointerCode(c))
+      continue;
+    if (c === CC_PERCENT) { // percent-encoded octet
+      if (pos + 2 >= len
+        || !isHexDigitCode(str.charCodeAt(pos + 1))
+        || !isHexDigitCode(str.charCodeAt(pos + 2)))
+        return false;
+      pos += 2;
+      continue;
+    }
+    if (c === CC_TILDE) {
+      const d = pos + 1 < len ? str.charCodeAt(pos + 1) : -1;
+      if (d !== CC_0 && d !== CC_1)
+        return false;
+      pos++;
+      continue;
+    }
+    return false;
+  }
+  return true;
 }
 
 // relative JSON-pointer: http://tools.ietf.org/html/draft-luff-relative-json-pointer-00
-const CONST_REGEXP_RELATIVE_JSON_POINTER = /^(?:0|[1-9][0-9]*)(?:#|(?:\/(?:[^~/]|~0|~1)*)*)$/;
 export function isValidRelativeJSONPointer(str) {
-  return CONST_REGEXP_RELATIVE_JSON_POINTER.test(str);
+  if (typeof str !== 'string')
+    return false;
+  const len = str.length;
+  if (len === 0)
+    return false;
+  const first = str.charCodeAt(0);
+  if (!isDigitCode(first))
+    return false;
+  let pos = 1;
+  if (first !== CC_0) {
+    while (pos < len && isDigitCode(str.charCodeAt(pos)))
+      pos++;
+  }
+  if (pos === len)
+    return true;
+  const c = str.charCodeAt(pos);
+  if (c === CC_HASH)
+    return pos + 1 === len;
+  if (c !== CC_SLASH)
+    return false;
+  return isValidPointerBody(str, pos + 1);
 }
 //#endregion
 

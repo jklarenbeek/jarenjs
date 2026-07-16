@@ -10,7 +10,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 |---|---|
 | `@jarenjs/json` | everything below |
 | `@jarenjs/json/basic` | JSON, JSON Pointer and JSONPath string validation |
-| `@jarenjs/json/pointer` | JSON Pointer and Relative JSON Pointer parsing and resolution |
+| `@jarenjs/json/pointer` | the JSON Pointer and Relative JSON Pointer compiler |
 | `@jarenjs/json/path` | the JSONPath compiler |
 | `@jarenjs/json/query` | the Jaren JSON Query engine |
 | `@jarenjs/json/xquery` | the XQuery text front-end for the query engine |
@@ -22,24 +22,38 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Standard | Functions |
 |---|---|
 | JSON validation | `isValidJSON`, `isValidJSONCheap` (a fast "definitely not JSON" pre-test) |
-| JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)) | `parseJsonPointer`, `getValueByJsonPointer`, `isValidJSONPointer`, `isValidJSONPointerUriFragment` |
-| Relative JSON Pointer | `parseRelativeJsonPointer`, `resolveRelativePointer`, `isValidRelativeJSONPointer`, `resolveDataRef` |
+| JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)) | `compileJSONPointer`, `parseJSONPointer`, `isValidJSONPointer`, `isValidJSONPointerUriFragment` |
+| Relative JSON Pointer | `compileRelativeJSONPointer`, `parseRelativeJSONPointer`, `compileDataRef`, `isValidRelativeJSONPointer` |
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 
 ### JSON Pointer
 
-Pointers resolve a single location; relative pointers resolve from a location inside the document (used by the validator's `data`/`$data` keywords):
+Pointers address a single location. Like every other engine in this package they are compiled, not interpreted: `compileJSONPointer(pointer)` parses once (strict RFC 6901, throwing a `JSONPointerSyntaxError` with `source` and `position` on bad input), pre-decodes every member name, pre-parses every array index, and returns a getter specialized by segment count. Resolving allocates nothing and returns `JSONPOINTER_NOTHING` — the same sentinel as `JSONPATH_NOTHING` — when the pointer addresses no location:
 
 ```javascript
-import { getValueByJsonPointer, resolveRelativePointer } from '@jarenjs/json';
+import { compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
 
 const doc = { limits: { min: 2, max: 9 }, value: 5 };
 
-getValueByJsonPointer(doc, '', '/limits/min');      // { value: 2, found: true }
-resolveRelativePointer(doc, '/value', '1/limits');  // { value: { min: 2, max: 9 }, found: true }
-resolveRelativePointer(doc, '/limits/min', '0#');   // { value: 'min', found: true } (member name)
+const getMin = compileJSONPointer('/limits/min');
+getMin(doc); // 2
+getMin({});  // JSONPOINTER_NOTHING
 ```
+
+Relative pointers resolve from a location inside the document, given as an RFC 6901 pointer string. The relative part (level count, `#` form, trailing segments) compiles once; per call only the location varies. This is the hot path of the validator's `data`/`$data` keywords, where the ref is a schema constant known at schema-compile time:
+
+```javascript
+import { compileRelativeJSONPointer } from '@jarenjs/json';
+
+const getLimits = compileRelativeJSONPointer('1/limits');
+getLimits(doc, '/value'); // { min: 2, max: 9 }
+
+const getName = compileRelativeJSONPointer('0#');
+getName(doc, '/limits/min'); // 'min' (the member name of the location)
+```
+
+`compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–19x faster than the interpretive resolver they replaced (`npm run benchmark:jsonpointer`).
 
 ## The JSONPath compiler
 
@@ -314,7 +328,7 @@ Ideas we consider interesting or necessary for this package, roughly in order of
 - [ ] **Filter optimizer / hash joins** — hoist `$`-absolute comparables out of filter loops, fuse adjacent singular segments, and turn `$where` equijoins into hash joins instead of nested loops (see the benchmark's join row).
 - [ ] **Write operations** — `set`/`insert`/`remove` at a pointer, a normalized path, or every node a JSONPath query selects, with a copy-on-write mode.
 - [ ] **JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396)** — apply and structural diff, built on compiled pointers; a diff that emits JSON Patch doubles as a change feed for [`@jarenjs/forms`](../forms).
-- [ ] **Compiled JSON Pointers** — give `pointer.js` the `path.js` treatment: `compileJSONPointer('/a/b')` returning a specialized getter. Would directly speed up the validator's `data`/`$data` keywords.
+- [x] **Compiled JSON Pointers** — `pointer.js` got the `path.js` treatment: `compileJSONPointer`/`compileRelativeJSONPointer`/`compileDataRef` return specialized zero-allocation getters over the shared `NOTHING` sentinel, and the validator's `data`/`$data` keywords compile their refs at schema-compile time.
 - [ ] **`$allowing-empty` and window clauses** — the two FLWOR constructs v0.1 leaves out (outer-join-style iteration and `tumbling`/`sliding` windows).
 - [ ] **Higher-order operators** — user-supplied functions for map/filter/fold shapes; requires a function-value story the JSON encoding deliberately does not have yet.
 - [ ] **XQuery front-end: `xs:*` constructor casts and more `fn:*` mappings** — the QT3 scorecard attributes the bulk of its `unsupported-syntax` bucket to these; a handful of numeric casts moves thousands of cases into the measurable buckets. Lazy `$range` evaluation belongs to the same batch (the eager materialization defeats the JQ2007 resource guard).
@@ -327,4 +341,4 @@ Ideas we consider interesting or necessary for this package, roughly in order of
 
 ## Development
 
-Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query tests from the spec's normative fixtures (which validate against both schema twins), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks: `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the validator-wide picture.
+Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query tests from the spec's normative fixtures (which validate against both schema twins), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks: `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the validator-wide picture.
