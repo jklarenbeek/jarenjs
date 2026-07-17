@@ -453,7 +453,7 @@ function writeResults(mode, engines, data, options) {
     if (mode === 'compliance') {
       lines.push(['group', ...engines.map((e) => e.name), 'total'].join(','));
       for (const [group, entry] of data.groups)
-        lines.push([JSON.stringify(group), ...engines.map((e) => entry.pass.get(e.key)), entry.total].join(','));
+        lines.push([JSON.stringify(group), ...engines.map((e) => entry.pass[e.key]), entry.total].join(','));
     }
     else {
       lines.push(['name', 'selector', ...engines.map((e) => `${e.name} ns/op`)].join(','));
@@ -565,7 +565,16 @@ async function main() {
 
   const { groups, failures } = runCompliance(engines, tests);
   printCompliance(engines, tests, groups, failures, options);
-  writeResults('compliance', engines, { groups: [...groups.entries()], failures }, options);
+  // entry.pass is a Map (fine for csv, which reads it in-process); JSON
+  // serialization needs plain objects.
+  writeResults('compliance', engines, {
+    total: tests.length,
+    groups: [...groups.entries()].map(([group, entry]) => [
+      group,
+      { total: entry.total, pass: Object.fromEntries(entry.pass) },
+    ]),
+    failures,
+  }, options);
 
   if (failures.some((f) => f.engine === 'jaren'))
     process.exit(1);

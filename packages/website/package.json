@@ -13,17 +13,19 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "benchmark:generate": "cd ../.. && node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12 --iterations 5000 --output json --filepath packages/website/public/results.json",
-    "benchmark:quick": "cd ../.. && node benchmark/profiler.js --profile-all --draft draft7 --iterations 100 --output json --filepath packages/website/public/results.json"
+    "benchmark:generate": "cd ../.. && node benchmark/website-data.js --iterations 1000",
+    "benchmark:quick": "cd ../.. && node benchmark/website-data.js --quick"
   },
   "dependencies": {
     "@jarenjs/core": "file:../core",
+    "@jarenjs/json": "file:../json",
     "@jarenjs/validate": "file:../validate",
     "@jarenjs/formats": "file:../formats",
     "@jarenjs/refs": "file:../refs",
     "clsx": "^2.1.1",
     "framer-motion": "^12.4.0",
     "lucide-react": "^0.474.0",
+    "prop-types": "^15.8.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.5",

@@ -56,6 +56,44 @@ export async function copyToClipboard(text) {
 }
 
 /**
+ * Formats a nanoseconds-per-operation value the way the benchmark tools do
+ * @param {number} ns - Nanoseconds per operation
+ * @returns {string} - Formatted duration
+ */
+export function formatNs(ns) {
+  if (ns == null) return 'n/a';
+  if (ns >= 1e9) return `${(ns / 1e9).toFixed(2)} s`;
+  if (ns >= 1e6) return `${(ns / 1e6).toFixed(2)} ms`;
+  if (ns >= 1e3) return `${(ns / 1e3).toFixed(2)} µs`;
+  return `${ns.toFixed(0)} ns`;
+}
+
+/**
+ * Formats an operations-per-second rate derived from ns/op
+ * @param {number} ns - Nanoseconds per operation
+ * @returns {string} - Formatted rate
+ */
+export function formatOps(ns) {
+  if (ns == null || ns <= 0) return '';
+  const ops = 1e9 / ns;
+  if (ops >= 1e6) return `${(ops / 1e6).toFixed(1)}M ops/s`;
+  if (ops >= 1e3) return `${(ops / 1e3).toFixed(1)}k ops/s`;
+  return `${ops.toFixed(0)} ops/s`;
+}
+
+/**
+ * Formats a speed ratio ("how many times faster/slower")
+ * @param {number} ratio
+ * @returns {string}
+ */
+export function formatRatio(ratio) {
+  if (ratio == null || !Number.isFinite(ratio)) return '—';
+  if (ratio >= 100) return `${Math.round(ratio)}x`;
+  if (ratio >= 10) return `${ratio.toFixed(1)}x`;
+  return `${ratio.toFixed(2)}x`;
+}
+
+/**
  * Formats a duration in milliseconds to a human-readable string
  * @param {number} ms - Duration in milliseconds
  * @returns {string} - Formatted duration

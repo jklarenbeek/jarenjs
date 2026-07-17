@@ -14,8 +14,10 @@
  * Usage:
  *   node benchmark/jsonpointer.js
  *   node benchmark/jsonpointer.js --iterations 5000000
+ *   node benchmark/jsonpointer.js --output json --filepath results.json
  */
 
+import * as fs from 'fs';
 import {
   compileJSONPointer,
   compileRelativeJSONPointer,
@@ -229,12 +231,37 @@ function printTable(title, columns, rows, iterations) {
 
 //#endregion
 
+function writeResults(tables, compile, options) {
+  if (options.output === 'console' || options.filepath === null)
+    return;
+
+  const content = JSON.stringify({
+    mode: 'pointer',
+    date: new Date().toISOString(),
+    node: process.version,
+    iterations: options.iterations,
+    tables,
+    compile,
+  }, null, 2);
+
+  fs.writeFileSync(options.filepath, content);
+  console.log(`Results written to ${options.filepath}`);
+}
+
 function main() {
   const args = process.argv.slice(2);
   let iterations = DEFAULT_ITERATIONS;
+  const options = { output: 'console', filepath: null, iterations: DEFAULT_ITERATIONS };
   const iterIdx = args.indexOf('--iterations');
   if (iterIdx >= 0)
     iterations = parseInt(args[iterIdx + 1], 10);
+  const outIdx = args.findIndex((a) => a === '--output' || a === '-o');
+  if (outIdx >= 0)
+    options.output = args[outIdx + 1];
+  const fileIdx = args.findIndex((a) => a === '--filepath' || a === '-f');
+  if (fileIdx >= 0)
+    options.filepath = args[fileIdx + 1];
+  options.iterations = iterations;
 
   let sink = 0; // defeat dead-code elimination
   const consume = (v) => { if (v !== JSONPOINTER_NOTHING) sink++; };
@@ -320,6 +347,34 @@ function main() {
     + `jsonpointer npm ${formatNs(npmCompileNs)} for ${allAbsolute.length - 1} pointers`);
 
   console.log(`\n(sink: ${sink > 0 ? 'ok' : 'ZERO - results were not consumed!'})\n`);
+
+  writeResults([
+    {
+      key: 'absolute',
+      title: 'Absolute JSON Pointer',
+      columns: ['jaren compiled', 'jaren legacy', 'npm compiled', 'npm interpret'],
+      rows: absoluteRows.map((r, i) => ({ ...r, pointer: ABSOLUTE_SCENARIOS[i].pointer })),
+    },
+    {
+      key: 'relative',
+      title: 'Relative JSON Pointer (the $data hot path)',
+      columns: ['jaren compiled', 'jaren legacy'],
+      rows: relativeRows.map((r, i) => ({
+        ...r,
+        pointer: RELATIVE_SCENARIOS[i].pointer,
+        dataPath: RELATIVE_SCENARIOS[i].dataPath,
+      })),
+    },
+    {
+      key: 'dataRef',
+      title: 'Data reference dispatch',
+      columns: ['jaren compiled', 'jaren legacy'],
+      rows: dataRefRows,
+    },
+  ], {
+    jaren: { ns: compileNs, pointers: allAbsolute.length + allRelative.length },
+    npm: { ns: npmCompileNs, pointers: allAbsolute.length - 1 },
+  }, options);
 }
 
 main();

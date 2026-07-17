@@ -28,7 +28,7 @@ export default defineConfig({
           // Separate vendor chunks for better caching
           react: ['react', 'react-dom', 'react-router-dom'],
           motion: ['framer-motion'],
-          jaren: ['@jarenjs/validate', '@jarenjs/core', '@jarenjs/formats', '@jarenjs/forms'],
+          jaren: ['@jarenjs/validate', '@jarenjs/core', '@jarenjs/formats', '@jarenjs/forms', '@jarenjs/json'],
         },
       },
     },

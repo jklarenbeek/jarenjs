@@ -62,6 +62,10 @@ const keywordCategories = [
     name: 'Instance data',
     keywords: ['data (data-ref)', '$data'],
   },
+  {
+    name: 'Extensions',
+    keywords: ['$query (cross-field assertions)'],
+  },
 ];
 
 function DraftSupport() {

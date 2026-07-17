@@ -17,8 +17,9 @@ function Footer() {
               <span className="text-xl font-bold">JarenJS</span>
             </Link>
             <p className="text-muted-foreground text-sm max-w-sm">
-              A modern JSON Schema validator for JavaScript with excellent performance, 
-              full draft support, and a developer-friendly API.
+              A high-performance JSON toolchain: schema validation, pointers, JSONPath,
+              an XQuery-class query language, JSLT stylesheets and form generation —
+              zero-dependency, eval-free, MIT.
             </p>
           </div>
           

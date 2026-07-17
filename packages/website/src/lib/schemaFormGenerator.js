@@ -173,7 +173,7 @@ export function validateField(value, schema) {
       break;
 
     case 'number':
-    case 'integer':
+    case 'integer': {
       const num = Number(value);
       if (isNaN(num)) {
         return 'Must be a number';
@@ -197,6 +197,7 @@ export function validateField(value, schema) {
         return `Must be a multiple of ${schema.multipleOf}`;
       }
       break;
+    }
 
     case 'array':
       if (!Array.isArray(value)) {

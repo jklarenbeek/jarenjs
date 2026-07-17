@@ -1,309 +1,233 @@
+import { useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import { Container } from '@components/layout/Container';
 import { CodeBlock } from '@components/ui/code-block';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@components/ui/tabs';
-import { Card, CardHeader, CardTitle, CardDescription } from '@components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@components/ui/card';
+import { Button } from '@components/ui/button';
+import { Play } from 'lucide-react';
+import {
+  pathExamples,
+  pointerExamples,
+  queryExamples,
+  jsltExamples,
+  xqueryExamples,
+} from '@lib/playgroundExamples';
+import { exampleSchemas } from '@lib/examples';
 
-const examples = {
-  basic: {
-    title: 'Basic Type Validation',
-    description: 'Simple type checking with string, number, and boolean',
-    schema: `{
-  "type": "object",
-  "properties": {
-    "name": { 
-      "type": "string",
-      "minLength": 1 
-    },
-    "age": { 
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 150
-    },
-    "active": { 
-      "type": "boolean" 
-    }
-  },
-  "required": ["name", "age"]
-}`,
-    data: `{
-  "name": "John Doe",
-  "age": 30,
-  "active": true
-}`,
-  },
-  formats: {
-    title: 'Format Validation',
-    description: 'Validate common formats like email, dates, and URIs',
-    schema: `{
-  "type": "object",
-  "properties": {
-    "email": { 
-      "type": "string",
-      "format": "email"
-    },
-    "website": { 
-      "type": "string",
-      "format": "uri"
-    },
-    "birthDate": { 
-      "type": "string",
-      "format": "date"
-    },
-    "phone": {
-      "type": "string",
-      "pattern": "^\\+?[1-9]\\d{1,14}$"
-    }
-  },
-  "required": ["email"]
-}`,
-    data: `{
-  "email": "user@example.com",
-  "website": "https://example.com",
-  "birthDate": "1990-05-15",
-  "phone": "+1234567890"
-}`,
-  },
-  nested: {
-    title: 'Nested Objects',
-    description: 'Validate complex nested object structures',
-    schema: `{
-  "type": "object",
-  "properties": {
-    "user": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "address": {
-          "type": "object",
-          "properties": {
-            "street": { "type": "string" },
-            "city": { "type": "string" },
-            "zipCode": { 
-              "type": "string",
-              "pattern": "^\\d{5}$"
-            }
-          },
-          "required": ["street", "city"]
-        }
-      },
-      "required": ["name"]
-    }
-  },
-  "required": ["user"]
-}`,
-    data: `{
-  "user": {
-    "name": "Jane Smith",
-    "address": {
-      "street": "123 Main St",
-      "city": "New York",
-      "zipCode": "10001"
-    }
-  }
-}`,
-  },
-  arrays: {
-    title: 'Array Validation',
-    description: 'Validate arrays with items, contains, and unique constraints',
-    schema: `{
-  "type": "object",
-  "properties": {
-    "tags": {
-      "type": "array",
-      "items": { "type": "string" },
-      "minItems": 1,
-      "uniqueItems": true
-    },
-    "scores": {
-      "type": "array",
-      "items": { 
-        "type": "number",
-        "minimum": 0,
-        "maximum": 100
-      }
-    },
-    "hasPremium": {
-      "type": "array",
-      "contains": { "const": "premium" }
-    }
-  }
-}`,
-    data: `{
-  "tags": ["javascript", "json-schema", "validation"],
-  "scores": [85, 92, 78, 95],
-  "hasPremium": ["basic", "premium", "pro"]
-}`,
-  },
-  conditional: {
-    title: 'Conditional Validation',
-    description: 'Use if/then/else for conditional schemas',
-    schema: `{
-  "type": "object",
-  "properties": {
-    "type": { 
-      "type": "string",
-      "enum": ["personal", "business"]
-    },
-    "name": { "type": "string" },
-    "company": { "type": "string" },
-    "taxId": { "type": "string" }
-  },
-  "required": ["type", "name"],
-  "if": {
-    "properties": {
-      "type": { "const": "business" }
-    }
-  },
-  "then": {
-    "required": ["company", "taxId"]
-  }
-}`,
-    data: `{
-  "type": "business",
-  "name": "John Doe",
-  "company": "Acme Corp",
-  "taxId": "123456789"
-}`,
-  },
-  combiners: {
-    title: 'Schema Combiners',
-    description: 'allOf, anyOf, oneOf, and not',
-    schema: `{
-  "type": "object",
-  "properties": {
-    "contact": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "email": { 
-              "type": "string", 
-              "format": "email" 
-            }
-          },
-          "required": ["email"]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "phone": { "type": "string" }
-          },
-          "required": ["phone"]
-        }
-      ]
-    }
-  }
-}`,
-    data: `{
-  "contact": {
-    "email": "user@example.com"
-  }
-}`,
-  },
-  ref: {
-    title: '$ref References',
-    description: 'Reference and reuse schema definitions',
-    schema: `{
-  "$defs": {
-    "address": {
-      "type": "object",
-      "properties": {
-        "street": { "type": "string" },
-        "city": { "type": "string" }
-      },
-      "required": ["street", "city"]
-    }
-  },
-  "type": "object",
-  "properties": {
-    "billingAddress": {
-      "$ref": "#/$defs/address"
-    },
-    "shippingAddress": {
-      "$ref": "#/$defs/address"
-    }
-  }
-}`,
-    data: `{
-  "billingAddress": {
-    "street": "123 Main St",
-    "city": "New York"
-  },
-  "shippingAddress": {
-    "street": "456 Oak Ave",
-    "city": "Los Angeles"
-  }
-}`,
-  },
-  metadata: {
-    title: 'Metadata Keywords',
-    description: 'Using title, description, default, and examples',
-    schema: `{
-  "title": "User Profile",
-  "description": "A user profile schema",
-  "type": "object",
-  "properties": {
-    "username": {
-      "title": "Username",
-      "description": "The user's unique identifier",
-      "type": "string",
-      "minLength": 3,
-      "maxLength": 20,
-      "examples": ["john_doe", "jane_smith"]
-    },
-    "role": {
-      "type": "string",
-      "enum": ["user", "admin"],
-      "default": "user"
-    },
-    "createdAt": {
-      "type": "string",
-      "format": "date-time",
-      "readOnly": true
-    }
-  }
-}`,
-    data: `{
-  "username": "john_doe",
-  "role": "user",
-  "createdAt": "2024-01-15T10:30:00Z"
-}`,
-  },
+const pretty = (value) => JSON.stringify(value, null, 2);
+
+const SECTIONS = [
+  { key: 'schema', label: 'JSON Schema' },
+  { key: 'jsonpath', label: 'JSONPath' },
+  { key: 'pointer', label: 'JSON Pointer' },
+  { key: 'query', label: 'JSON Query' },
+  { key: 'jslt', label: 'JSLT' },
+  { key: 'xquery', label: 'XQuery' },
+];
+
+function SectionIntro({ blurb, playground }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+      <p className="text-muted-foreground max-w-2xl">{blurb}</p>
+      <Link to={playground}>
+        <Button variant="outline" size="sm" className="gap-2">
+          <Play className="h-3.5 w-3.5" />
+          Run these live
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
+SectionIntro.propTypes = {
+  blurb: PropTypes.string.isRequired,
+  playground: PropTypes.string.isRequired,
 };
 
 function Examples() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sectionParam = searchParams.get('section');
+  const active = SECTIONS.some((s) => s.key === sectionParam) ? sectionParam : 'schema';
+
+  const setActive = useCallback((key) => {
+    setSearchParams(key === 'schema' ? {} : { section: key }, { replace: true });
+  }, [setSearchParams]);
+
   return (
     <div className="py-8">
       <Container>
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Examples</h1>
-          <p className="text-muted-foreground">
-            Explore common JSON Schema validation patterns and use cases.
+          <p className="text-muted-foreground max-w-3xl">
+            Copy-paste patterns for every engine in the suite. Each block is executable exactly as shown — the
+            same examples are one click away in the playground.
           </p>
         </div>
 
-        <div className="grid gap-6">
-          {Object.entries(examples).map(([key, example]) => (
-            <Card key={key} id={key}>
-              <CardHeader>
-                <CardTitle>{example.title}</CardTitle>
-                <CardDescription>{example.description}</CardDescription>
-              </CardHeader>
-              <Tabs defaultValue="schema" className="px-6 pb-6">
-                <TabsList>
-                  <TabsTrigger value="schema">Schema</TabsTrigger>
-                  <TabsTrigger value="data">Data</TabsTrigger>
-                </TabsList>
-                <TabsContent value="schema" className="mt-4">
-                  <CodeBlock showCopy>{example.schema}</CodeBlock>
-                </TabsContent>
-                <TabsContent value="data" className="mt-4">
-                  <CodeBlock showCopy>{example.data}</CodeBlock>
-                </TabsContent>
-              </Tabs>
+        <Tabs value={active} onValueChange={setActive}>
+          <TabsList className="mb-6 flex-wrap h-auto">
+            {SECTIONS.map((section) => (
+              <TabsTrigger key={section.key} value={section.key}>{section.label}</TabsTrigger>
+            ))}
+          </TabsList>
+
+          {/* JSON Schema */}
+          <TabsContent value="schema">
+            <SectionIntro
+              blurb="From basic types to unevaluatedProperties, $dynamicRef and the $query cross-field keyword — all compiled, all draft-accurate."
+              playground="/playground"
+            />
+            <div className="grid gap-6">
+              {Object.entries(exampleSchemas).map(([key, example]) => (
+                <Card key={key}>
+                  <CardHeader>
+                    <CardTitle>{example.name}</CardTitle>
+                    {example.schema.description && <CardDescription>{example.schema.description}</CardDescription>}
+                  </CardHeader>
+                  <Tabs defaultValue="schema" className="px-6 pb-6">
+                    <TabsList>
+                      <TabsTrigger value="schema">Schema</TabsTrigger>
+                      <TabsTrigger value="data">Valid data</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="schema" className="mt-4">
+                      <CodeBlock showCopy>{pretty(example.schema)}</CodeBlock>
+                    </TabsContent>
+                    <TabsContent value="data" className="mt-4">
+                      <CodeBlock showCopy>{pretty(example.data)}</CodeBlock>
+                    </TabsContent>
+                  </Tabs>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* JSONPath */}
+          <TabsContent value="jsonpath">
+            <SectionIntro
+              blurb="RFC 9535 selectors against the classic bookstore document — filters, slices, descendants and I-Regexp functions."
+              playground="/playground?engine=jsonpath"
+            />
+            <Card>
+              <CardContent className="pt-5">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="text-left py-2 font-medium">What</th>
+                      <th className="text-left py-2 font-medium">Selector</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pathExamples.map((example) => (
+                      <tr key={example.name} className="border-b last:border-0">
+                        <td className="py-2.5 pr-4">{example.name}</td>
+                        <td className="py-2.5"><code className="bg-muted px-1.5 py-0.5 rounded text-xs">{example.selector}</code></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
             </Card>
-          ))}
-        </div>
+          </TabsContent>
+
+          {/* JSON Pointer */}
+          <TabsContent value="pointer">
+            <SectionIntro
+              blurb="Absolute and relative pointers — including the relative forms the validator's $data keyword resolves per instance."
+              playground="/playground?engine=pointer"
+            />
+            <Card>
+              <CardContent className="pt-5">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="text-left py-2 font-medium">What</th>
+                      <th className="text-left py-2 font-medium">Pointer</th>
+                      <th className="text-left py-2 font-medium">From location</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pointerExamples.map((example) => (
+                      <tr key={example.name} className="border-b last:border-0">
+                        <td className="py-2.5 pr-4">{example.name}</td>
+                        <td className="py-2.5 pr-4"><code className="bg-muted px-1.5 py-0.5 rounded text-xs">{example.pointer === '' ? '"" (root)' : example.pointer}</code></td>
+                        <td className="py-2.5 text-muted-foreground">
+                          {example.mode === 'relative'
+                            ? <code className="text-xs">{example.location}</code>
+                            : <span className="text-xs">document root</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* JSON Query */}
+          <TabsContent value="query">
+            <SectionIntro
+              blurb="XQuery 3.1 semantics as JSON documents — filter, join, group, quantify, and type-check items with embedded JSON Schemas."
+              playground="/playground?engine=query"
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              {queryExamples.map((example) => (
+                <Card key={example.name}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{example.name}</CardTitle>
+                    {example.externals && (
+                      <CardDescription>externals: <code>{JSON.stringify(example.externals)}</code></CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    <CodeBlock showCopy>{pretty(example.query)}</CodeBlock>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* JSLT */}
+          <TabsContent value="jslt">
+            <SectionIntro
+              blurb="Recursive template dispatch: match by path or by schema, transform with query documents, share whatever didn't change."
+              playground="/playground?engine=jslt"
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              {jsltExamples.map((example) => (
+                <Card key={example.name}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{example.name}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CodeBlock showCopy>{pretty(example.stylesheet)}</CodeBlock>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* XQuery */}
+          <TabsContent value="xquery">
+            <SectionIntro
+              blurb="Real XQuery 3.1 text, parsed into query documents — the front-end that faces the 31,821-case W3C QT3 suite."
+              playground="/playground?engine=xquery"
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              {xqueryExamples.map((example) => (
+                <Card key={example.name}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{example.name}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CodeBlock showCopy>{example.text}</CodeBlock>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
       </Container>
     </div>
   );

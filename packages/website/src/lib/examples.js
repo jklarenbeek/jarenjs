@@ -167,6 +167,41 @@ export const exampleSchemas = {
     data: { street: 'Main St 1', city: 'London', type: 'business' },
   },
 
+  queryKeyword: {
+    name: '$query cross-field',
+    schema: {
+      type: 'object',
+      title: 'Invoice',
+      description: 'The $query keyword embeds a Jaren JSON Query as a cross-field assertion — the class of constraint (sums, ordering, quantification) JSON Schema is notoriously bad at.',
+      properties: {
+        lines: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', minLength: 1 },
+              amount: { type: 'number' },
+            },
+            required: ['description', 'amount'],
+          },
+        },
+        total: { type: 'number', description: 'Must equal the sum of the line amounts' },
+      },
+      required: ['lines', 'total'],
+      $query: {
+        $eq: ['$.total', { $sum: '$.lines[*].amount' }],
+      },
+    },
+    data: {
+      lines: [
+        { description: 'Rubber duck', amount: 9.99 },
+        { description: 'Duck house', amount: 40.01 },
+      ],
+      total: 50,
+    },
+  },
+
   dynamicRef: {
     name: '$dynamicRef (2020-12)',
     schema: {
