@@ -7,6 +7,7 @@ import { PathPlayground } from '@components/demo/PathPlayground';
 import { PointerPlayground } from '@components/demo/PointerPlayground';
 import { QueryPlayground } from '@components/demo/QueryPlayground';
 import { JsltPlayground } from '@components/demo/JsltPlayground';
+import { JtltPlayground } from '@components/demo/JtltPlayground';
 import { XQueryPlayground } from '@components/demo/XQueryPlayground';
 
 const ENGINES = [
@@ -34,6 +35,11 @@ const ENGINES = [
     key: 'jslt',
     label: 'JSLT',
     blurb: 'Recursive stylesheets: match by path or by schema, transform with query documents, share what did not change.',
+  },
+  {
+    key: 'jtlt',
+    label: 'JTLT',
+    blurb: 'The same dispatcher aimed at text: rule bodies are segments — render JSON to Markdown, XML or code, escaped where it counts.',
   },
   {
     key: 'xquery',
@@ -89,6 +95,9 @@ function Playground() {
           </TabsContent>
           <TabsContent value="jslt">
             <JsltPlayground />
+          </TabsContent>
+          <TabsContent value="jtlt">
+            <JtltPlayground />
           </TabsContent>
           <TabsContent value="xquery">
             <XQueryPlayground />

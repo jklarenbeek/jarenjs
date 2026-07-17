@@ -26,6 +26,7 @@
     "./path": "./src/path.js",
     "./query": "./src/query/index.js",
     "./jslt": "./src/jslt/index.js",
+    "./jtlt": "./src/jtlt/index.js",
     "./xquery": "./src/xquery/index.js"
   },
   "peerDependencies": {

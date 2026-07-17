@@ -12,6 +12,7 @@ import {
   pointerExamples,
   queryExamples,
   jsltExamples,
+  jtltExamples,
   xqueryExamples,
 } from '@lib/playgroundExamples';
 import { exampleSchemas } from '@lib/examples';
@@ -24,6 +25,7 @@ const SECTIONS = [
   { key: 'pointer', label: 'JSON Pointer' },
   { key: 'query', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
+  { key: 'jtlt', label: 'JTLT' },
   { key: 'xquery', label: 'XQuery' },
 ];
 
@@ -203,6 +205,35 @@ function Examples() {
                   <CardContent>
                     <CodeBlock showCopy>{pretty(example.stylesheet)}</CodeBlock>
                   </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* JTLT */}
+          <TabsContent value="jtlt">
+            <SectionIntro
+              blurb="Rule-driven text rendering: the JSLT dispatcher pointed at Markdown, XML and code — literal text raw, interpolated data escaped."
+              playground="/playground?engine=jtlt"
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              {jtltExamples.map((example) => (
+                <Card key={example.name}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{example.name}</CardTitle>
+                  </CardHeader>
+                  <Tabs defaultValue="template" className="px-6 pb-6">
+                    <TabsList>
+                      <TabsTrigger value="template">Template</TabsTrigger>
+                      <TabsTrigger value="input">Input</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="template" className="mt-4">
+                      <CodeBlock showCopy>{pretty(example.template)}</CodeBlock>
+                    </TabsContent>
+                    <TabsContent value="input" className="mt-4">
+                      <CodeBlock showCopy>{pretty(example.document)}</CodeBlock>
+                    </TabsContent>
+                  </Tabs>
                 </Card>
               ))}
             </div>

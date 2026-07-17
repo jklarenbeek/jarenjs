@@ -2,7 +2,8 @@
 
 The official GitHub Pages site for Jaren — a showcase for the complete toolchain: the JSON Schema
 validating compiler and the addressing/query/transformation stack around it (JSON Pointer, JSONPath,
-the Jaren JSON Query language, JSLT stylesheets, the XQuery front-end, formats and form generation).
+the Jaren JSON Query language, JSLT stylesheets, JTLT text templates, the XQuery front-end, formats
+and form generation).
 
 ## What's on it
 
@@ -14,6 +15,7 @@ the Jaren JSON Query language, JSLT stylesheets, the XQuery front-end, formats a
   - *JSON Pointer*: absolute + relative pointers (the `$data` hot path)
   - *JSON Query*: FLWOR/joins/grouping, externals, `$valid` with a real compiled schema
   - *JSLT*: stylesheets with the `=== input` shared-identity badge
+  - *JTLT*: templates rendering JSON to Markdown/XML/code, with the compiled JSLT stylesheet one click away
   - *XQuery*: text → emitted query document → result, in one pipeline
 - **Benchmarks** — five suites, each against the strongest competitor on its own turf, with
   drill-down to **every individual test case** (search, sort, winner filters, per-test ratio bars):

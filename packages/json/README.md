@@ -14,6 +14,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/json/path` | the JSONPath compiler |
 | `@jarenjs/json/query` | the Jaren JSON Query engine |
 | `@jarenjs/json/jslt` | the Jaren JSLT stylesheet compiler and dispatcher |
+| `@jarenjs/json/jtlt` | the Jaren JTLT template compiler — JSON to text/XML |
 | `@jarenjs/json/xquery` | the XQuery text front-end for the query engine |
 
 ## JSON utilities
@@ -28,6 +29,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
+| Jaren JTLT | `compileJtltStylesheet`, `renderText`, `JtltCompileError`, `JtltRuntimeError` |
 
 ### JSON Pointer
 
@@ -420,6 +422,45 @@ The complete stylesheet grammar is published for validators and LLM constrained 
 | compile, per stylesheet | 33.16 µs | n/a | 70.50 µs (2.1x) |
 
 The identity row is the sharing fast path: Jaren returns the input reference in O(1), while native and JSONata deep-copy. On actual transformations, hand-written JavaScript is 3.4–143x faster because it is bespoke code with no matcher, rank table, mode, schema, or error machinery—the honest cost of the abstraction. Jaren is 6.6–45x faster than JSONata where the transform operator can express the scenario; reshape+modes is `n/a`, not silently replaced by a different JSONata feature. JSONata 2.x timings include its required promise overhead and transform-copy cost. Scaled prices are rounded to cents because JSONata's copy normalizes long binary decimal tails and these scenarios do not sort. fontoxpath is excluded because it has XPath/XQuery but no XSLT dispatcher; Saxon-JS is excluded as a heavyweight SEF/XSLT toolchain for this benchmark workspace.
+
+## JTLT — template-driven text output
+
+JSLT transforms JSON into JSON. JTLT points the same dispatcher at **text**: a template is a JSLT-shaped rule document whose bodies are *segment lists* — literal text, interpolated queries, and `$apply` splices — and whose result is a string. It is the T4/XSLT-`method="text"` analogue of this stack, and like the XQuery module it is a **front-end, not a second engine**: `compileJtltStylesheet` desugars the template into an ordinary JSLT 0.1 stylesheet (inspectable as `render.stylesheet`) and serializes the dispatched result, so dispatch, modes, conflict resolution and schema matching are inherited, not reimplemented. The normative contract is [JTLT-FORMAT.md](./docs/JTLT-FORMAT.md); this section is the tour.
+
+```javascript
+import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
+
+const listBooks = compileJtltStylesheet([
+  { match: '$', body: ['# Books\n', { $apply: '$.store.book[*]' }] },
+  { match: '$.store.book[*]', body: ['- ', '$.title', ' (', '$.price', ')\n'] },
+]);
+
+listBooks(data);
+// '# Books\n' +
+// '- Sayings of the Century (8.95)\n' +
+// '- Sword of Honour (12.99)\n' + ...
+```
+
+Segments follow the query format's own string rules: a string is literal text unless it starts with `$` (a query expression, interpolated), and `"$$x"` escapes the literal text `"$x"`. Objects are operator phrases evaluated as expressions; three forms are special at segment level: `{ "$apply": ... }` splices the dispatched output of other rules in place, `{ "$raw": e }` interpolates without escaping, and `{ "$json": e }` embeds data as `JSON.stringify` text. Sequence-valued interpolations join with a single space (the XSLT `value-of` separator default), the empty sequence renders nothing, and interpolating an object or array is a runtime error that names the offending segment — dispatch into containers with `$apply` instead.
+
+The envelope's `output` member selects the serialization method. `"text"` (the default) writes everything raw; `"xml"` escapes interpolated data while literal template text stays raw markup — the XSLT/T4 contract exactly:
+
+```javascript
+const toXml = compileJtltStylesheet({
+  $jtlt: '0.1',
+  output: 'xml',
+  rules: [
+    { match: '$', body: ['<books>', { $apply: '$.store.book[*]' }, '</books>'] },
+    { match: '$.store.book[*]', body: ['<book title="', '$.title', '"/>'] },
+  ],
+});
+
+toXml(data);
+// '<books><book title="Sayings of the Century"/>...</books>'
+// interpolated data is XML-escaped; literal markup passes through raw
+```
+
+Unmatched nodes follow the XSLT built-in template rules, restated for JSON: containers apply templates to every child in document order, atoms emit their (method-escaped) string value — so `{ $apply: '$.title' }` doubles as a value-of with rule-override capability. A matchless rule replaces that default; `priority` conflicts resolve exactly as in JSLT, with the band at and below `-1e307` reserved for the built-ins. Modes, schema matches (via `options.compileTypeTest`), user externals and the reserved `$root`/`$path` parameters all work as in JSLT. Compile and runtime errors carry stable `TL`-prefixed codes and a `docPath` into the **template** document (engine errors are remapped from the compiled stylesheet back to the author's source). `renderText(template, data, externals?)` is the cached one-call form.
 
 ## Roadmap
 

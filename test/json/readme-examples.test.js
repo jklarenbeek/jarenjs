@@ -11,6 +11,7 @@ import {
   queryJson,
 } from '@jarenjs/json';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { compileXQuery } from '@jarenjs/json/xquery';
 import { JarenValidator } from '@jarenjs/validate';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
@@ -242,5 +243,40 @@ describe('README examples: JSLT declarative transformation', () => {
           byline: 'Moby Dick by Herman Melville',
         },
       });
+  });
+});
+
+describe('README examples: JTLT template-driven text output', () => {
+  it('renders the book list as markdown text', () => {
+    const listBooks = compileJtltStylesheet([
+      { match: '$', body: ['# Books\n', { $apply: '$.store.book[*]' }] },
+      { match: '$.store.book[*]', body: ['- ', '$.title', ' (', '$.price', ')\n'] },
+    ]);
+
+    assert.strictEqual(listBooks(data),
+      '# Books\n'
+      + '- Sayings of the Century (8.95)\n'
+      + '- Sword of Honour (12.99)\n'
+      + '- Moby Dick (8.99)\n'
+      + '- The Lord of the Rings (22.99)\n');
+  });
+
+  it('renders XML with escaped interpolation and raw literal markup', () => {
+    const toXml = compileJtltStylesheet({
+      $jtlt: '0.1',
+      output: 'xml',
+      rules: [
+        { match: '$', body: ['<books>', { $apply: '$.store.book[*]' }, '</books>'] },
+        { match: '$.store.book[*]', body: ['<book title="', '$.title', '"/>'] },
+      ],
+    });
+
+    assert.strictEqual(toXml(data),
+      '<books>'
+      + '<book title="Sayings of the Century"/>'
+      + '<book title="Sword of Honour"/>'
+      + '<book title="Moby Dick"/>'
+      + '<book title="The Lord of the Rings"/>'
+      + '</books>');
   });
 });

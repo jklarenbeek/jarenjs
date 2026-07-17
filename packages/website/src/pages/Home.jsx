@@ -143,6 +143,31 @@ transformJson([], data) === data; // true, in nanoseconds`,
     blurb: 'Ranked rules, template modes, share/fresh/error dispositions, and proof-of-no-change sharing: unchanged subtrees keep their identity instead of being deep-copied.',
   },
   {
+    key: 'jtlt',
+    label: 'JTLT',
+    title: 'Templates for text output',
+    perf: 'the JSLT dispatcher aimed at text · zero new operators',
+    playground: '/playground?engine=jtlt',
+    benchmarks: '/benchmarks',
+    code: `import { renderText } from '@jarenjs/json/jtlt';
+
+// JSLT rules whose bodies are text segments: literal strings,
+// interpolated queries, $apply splices — XSLT method="text"
+// with T4's ergonomics, written as JSON.
+renderText([
+  { match: '$', body: ['# Books\\n', { $apply: '$.store.book[*]' }] },
+  { match: '$.store.book[*]',
+    body: ['- ', '$.title', ' (', '$.price', ')\\n'] },
+], data);
+// '# Books
+//  - Sayings of the Century (8.95)
+//  - Sword of Honour (12.99)  ...'
+
+// "output": "xml" escapes interpolated data — literal markup
+// stays raw, exactly the XSLT/T4 contract`,
+    blurb: 'A JTLT template compiles down to an ordinary JSLT stylesheet — dispatch, modes, priorities and schema matching inherited, the compiled stylesheet inspectable — then a writer serializes the result as raw text or escaped XML. Markdown, config files, code: JSON in, string out.',
+  },
+  {
     key: 'xquery',
     label: 'XQuery',
     title: 'A real XQuery front-end',
@@ -241,7 +266,7 @@ const PACKAGES = [
   },
   {
     name: '@jarenjs/json',
-    description: 'The addressing & transformation stack: JSON Pointer, JSONPath (RFC 9535), the Jaren JSON Query language, JSLT stylesheets, and the XQuery text front-end.',
+    description: 'The addressing & transformation stack: JSON Pointer, JSONPath (RFC 9535), the Jaren JSON Query language, JSLT stylesheets, JTLT text templates, and the XQuery text front-end.',
   },
   {
     name: '@jarenjs/validate',
@@ -303,7 +328,7 @@ function Home() {
 
             <p className="text-xl md:text-2xl text-muted-foreground mb-4 text-balance">
               Jaren is a high-performance JSON toolchain: a schema validating compiler with
-              pointers, JSONPath, an XQuery-class query language, stylesheets and form generation around it.
+              pointers, JSONPath, an XQuery-class query language, stylesheets, text templates and form generation around it.
             </p>
             <p className="text-muted-foreground mb-10">
               One philosophy everywhere: <strong className="text-foreground">parse and decide everything once at compile time,
@@ -368,10 +393,10 @@ function Home() {
       <section className="py-20">
         <Container>
           <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold mb-3">Seven tools, one stack</h2>
+            <h2 className="text-3xl font-bold mb-3">Eight tools, one stack</h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
               Each layer is a compiler over the same primitives — pointers feed the validator,
-              JSONPath feeds the query language, queries power stylesheets, schemas and forms.
+              JSONPath feeds the query language, queries power stylesheets, templates, schemas and forms.
             </p>
           </div>
           <EngineShowcase />
@@ -486,7 +511,8 @@ function Home() {
             <h2 className="text-3xl font-bold mb-4">See it run</h2>
             <p className="text-primary-foreground/80 mb-8">
               Every compiler in this suite runs live in your browser — validate a schema, join two arrays with a
-              query, transform a document with a stylesheet, or type XQuery and watch it become JSON.
+              query, transform a document with a stylesheet, render it to Markdown with a template, or type
+              XQuery and watch it become JSON.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Link to="/playground">

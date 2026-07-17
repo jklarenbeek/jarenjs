@@ -221,6 +221,64 @@ export const jsltExamples = [
   },
 ];
 
+export const jtltExamples = [
+  {
+    name: 'Markdown book list',
+    template: [
+      { match: '$', body: ['# Books\n\n', { $apply: '$.store.book[*]' }] },
+      { match: '$.store.book[*]', body: ['- **', '$.title', '** — ', '$.price', '\n'] },
+    ],
+    document: BOOKSTORE,
+  },
+  {
+    name: 'XML: escaping + $raw',
+    template: {
+      $jtlt: '0.1',
+      output: 'xml',
+      rules: [
+        { match: '$', body: ['<notes>\n', { $apply: '$.notes[*]' }, '</notes>'] },
+        {
+          match: '$.notes[*]',
+          body: ['  <note title="', '$.title', '">', { $raw: '$.markup' }, '</note>\n'],
+        },
+      ],
+    },
+    document: {
+      notes: [
+        { title: 'Q&A', markup: '<b>escaped attribute, raw body</b>' },
+        { title: "Rock 'n' roll", markup: '<i>quotes too</i>' },
+      ],
+    },
+  },
+  {
+    name: 'Two modes: TOC + body',
+    template: {
+      $jtlt: '0.1',
+      rules: [
+        {
+          match: '$',
+          body: ['TOC\n', { $apply: ['$.sections[*]', 'toc'] }, '\n', { $apply: '$.sections[*]' }],
+        },
+        { mode: 'toc', match: '$.sections[*]', body: ['- ', '$.heading', '\n'] },
+        { match: '$.sections[*]', body: ['== ', '$.heading', ' ==\n', '$.text', '\n\n'] },
+      ],
+    },
+    document: {
+      sections: [
+        { heading: 'Introduction', text: 'Start here.' },
+        { heading: 'Usage', text: 'Then this.' },
+      ],
+    },
+  },
+  {
+    name: 'Codegen with $json',
+    template: [
+      { match: '$', body: ['export const config = ', { $json: '$' }, ';\n'] },
+    ],
+    document: { threshold: 10, labels: ['alpha', 'beta'] },
+  },
+];
+
 export const xqueryExamples = [
   {
     name: 'FLWOR: cheap books',
