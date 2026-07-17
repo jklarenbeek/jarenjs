@@ -191,4 +191,6 @@ Form data keeps plain JSON semantics — an untouched field is *absent*, not an 
 - `getValueAtPointer` / `setValueAtPointer` / `appendItem` / `removeItemAt` — immutable updates addressed by JSON pointer
 - `createItemValue(field.item)` — starter value for a new array item
 
-See the repository [README](../../README.md) for the full Jaren documentation.
+## Development
+
+Unit tests live in `test/forms/` at the repository root. See the repository [README](../../README.md) for the full Jaren documentation, and the [ROADMAP](../../ROADMAP.md) for planned forms work (rule dependency memoization, hidden-field pruning on submit, computed views through JSLT).

@@ -65,4 +65,4 @@ The JSON addressing and query standards — JSON validation helpers, JSON Pointe
 
 ## Development
 
-Unit tests live in `test/core/` at the repository root (`npm run test:core`). This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document; see the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the validator-wide picture.
+Unit tests live in `test/core/` at the repository root (`npm run test:core`). This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document; see the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the monorepo picture, and the [ROADMAP](../../ROADMAP.md) for planned work.

@@ -1,0 +1,346 @@
+# Jaren benchmark & tooling workspace
+
+Everything for measuring, debugging and verifying the Jaren packages lives in
+this directory: the official conformance suites (as git submodules), the
+performance profilers, a test-failure debugger, code-coverage and call-graph
+analysis, and the W3C QT3 scorecard harness. All tools run from the repository
+root with plain `node`; none of them are needed to *use* the packages.
+
+Every claim in the repository documentation is reproducible from here — each
+number in a README performance table names the command that produced it.
+
+## Contents
+
+| Tool | Purpose | Use when |
+|------|---------|----------|
+| [`profiler.js`](./profiler.js) | JSON Schema performance vs Ajv over the official test suite | Measuring Jaren vs Ajv speed |
+| [`debug.js`](./debug.js) | Test inspection and assertion-level debugging | Investigating specific test failures |
+| [`coverage.js`](./coverage.js) | Merged code-coverage analysis (suite + unit tests) | Finding untested code paths and dead code |
+| [`callgraph.js`](./callgraph.js) | Call-graph generation via the Node.js profiler | Analyzing hot paths and call chains |
+| [`jsonpath.js`](./jsonpath.js) | JSONPath RFC 9535 compliance + performance vs json-p3 | Verifying/benchmarking the JSONPath compiler |
+| [`jsonpointer.js`](./jsonpointer.js) | Compiled JSON Pointer performance | Benchmarking pointer/`$data` resolution |
+| [`jsonquery.js`](./jsonquery.js) | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking FLWOR joins, grouping, reshaping |
+| [`jslt.js`](./jslt.js) | JSLT performance vs native JS/JSONata | Benchmarking identity sharing, recursive dispatch, modes |
+| [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
+| [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
+
+## Test suites (git submodules)
+
+Three official suites are vendored as submodules. After cloning, initialize
+the ones you need:
+
+```bash
+git submodule update --init benchmark/suite            # JSON-Schema-Test-Suite
+git submodule update --init benchmark/jsonpath-suite   # JSONPath Compliance Test Suite
+git submodule update --init benchmark/qt3tests         # W3C QT3 (XQuery/XPath 3.1), ~60 MB
+```
+
+| Path | Suite |
+|------|-------|
+| `benchmark/suite/` | [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) — drives `profiler.js`, `debug.js`, `coverage.js`, `callgraph.js` |
+| `benchmark/jsonpath-suite/` | [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) — drives `jsonpath.js` (703 tests, normalized paths included) |
+| `benchmark/qt3tests/` | [W3C QT3 tests](https://github.com/w3c/qt3tests) — drives `qt3-runner.js` (31,821 cases; convert once with `npm run qt3:convert`) |
+
+## Running the unit tests
+
+Unit tests live in `test/` at the repository root, organized per package:
+
+```bash
+# Run all tests
+npm test
+
+# Run all tests with coverage (c8, lcov report)
+npm run cover
+
+# Run a single package's tests
+npm run test:core
+npm run test:json
+npm run test:validate
+```
+
+## profiler.js — JSON Schema performance vs Ajv
+
+Runs Jaren against the official JSON Schema Test Suite and compares results
+and timings with Ajv.
+
+```bash
+# Profile a specific test suite with draft selection
+node benchmark/profiler.js '/ref.json' --profile --draft 2019 --iterations 1000
+
+# Profile all tests for multiple drafts
+node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12
+
+# Export results to JSON with custom file path
+node benchmark/profiler.js --profile-all --output json --filepath results.json
+
+# Show only top 10 slowest tests
+node benchmark/profiler.js '/ref.json' --profile --top 10
+
+# Only include tests where all engines succeed
+node benchmark/profiler.js '/ref.json' --profile --success-only
+
+# Full options
+Options:
+  --profile              Profile a specific test file
+  --profile-all          Profile all test files
+  --iterations, -i N     Number of iterations (default: 1000)
+  --output, -o FORMAT    Output format: console, csv, json (default: console)
+  --draft, -d VERSION    JSON Schema draft version(s), comma-separated
+                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020
+  --filepath, -f PATH    Output file path for csv/json
+  --top N                Show only top N slowest tests
+  --success-only         Only include tests where all agents succeed
+  --verbose, -v          Verbose output
+```
+
+The conformance table in the repository [README](../README.md) is produced by
+`node benchmark/profiler.js --profile-all --draft draft2020-12` (and the other
+drafts). `npm run benchmark` runs the simpler suite pass in `index.js`; its
+results are written to `benchmark/results/results.html`.
+
+## debug.js — investigating test failures
+
+A debugging utility for investigating test failures and understanding schema
+validation behavior, test case by test case, assertion by assertion.
+
+```bash
+# List all test files for a draft
+node benchmark/debug.js --list-files --draft 2019
+
+# List all test cases in a file with keyword summaries
+node benchmark/debug.js '/anchor.json' --list --draft 2019
+
+# Run a specific test suite with draft selection
+node benchmark/debug.js '/anchor.json' --draft 2019
+
+# Run a specific test by description (partial match)
+node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019
+
+# Run a specific test by index
+node benchmark/debug.js '/anchor.json' --index 3 --draft 2019
+
+# Export test suite to JSON
+node benchmark/debug.js '/anchor.json' --export anchor-tests.json --draft 2019
+
+# Export specific test case
+node benchmark/debug.js '/anchor.json' --index 3 --export-test test.json --draft 2019
+
+# Dry run - show schema and assertions without validating
+node benchmark/debug.js '/anchor.json' --dry-run --draft 2019
+
+# Show detailed validation errors
+node benchmark/debug.js '/ref.json' 'nested refs' --show-errors
+
+# Interactive mode - step through assertions
+node benchmark/debug.js '/ref.json' 'nested refs' --interactive
+
+# Detailed comparison between Jaren and AJV
+node benchmark/debug.js '/ref.json' 'nested refs' --compare
+
+# Run only Jaren (skip AJV comparison)
+node benchmark/debug.js '/ref.json' 'nested refs' --jaren-only
+
+# Verbose output with full schema and data
+node benchmark/debug.js '/ref.json' 'nested refs' --verbose
+
+# Minimal output (errors only)
+node benchmark/debug.js '/ref.json' --silent
+```
+
+A typical failure investigation: find the test with `--list`, run it with
+`--verbose`, compare engines with `--compare`, then `--export-test` for an
+isolated reproduction. Validator-internal troubleshooting (ref resolution,
+annotation tracking) is covered in the
+[validate ARCHITECTURE debugging guide](../packages/validate/ARCHITECTURE.md#debugging-guide).
+
+## coverage.js — code coverage analysis
+
+Analyzes which functions are touched — and which are not — when running the
+official test suite and/or the repository unit tests. Coverage from every run
+is merged into a single report, so you get one complete picture to decide
+where tests are missing and what might be dead code:
+
+```bash
+# The full picture: every draft of the official suite PLUS the unit tests
+node benchmark/coverage.js --all --unit-tests
+
+# Complete official suite (draft7, 2019-09, 2020-12) with per-function detail
+node benchmark/coverage.js --all --functions
+
+# Machine readable output for diffing between runs
+node benchmark/coverage.js --all --unit-tests --json coverage/analysis.json
+
+# What does a single suite file touch?
+node benchmark/coverage.js '/required.json' --threshold 25
+
+# Show TOUCHED and NOT touched functions with hit counts
+node benchmark/coverage.js '/required.json' --functions
+
+# Full options
+What to run (combine freely; at least one is required):
+  <testfile.json>    Cover a single official-suite file (e.g. '/ref.json')
+  --all              Cover the COMPLETE official suite (all drafts)
+  --unit-tests       Cover the repository unit tests (node --test test/)
+
+Options:
+  --draft <list>     Draft(s) to run, comma separated
+                     (default for --all: draft7,draft2019-09,draft2020-12)
+  --iterations <n>   Profiling iterations (default: 1 with --all, 1000 single file)
+  --threshold <n>    Only show files with function coverage > n% (default: 0)
+  --functions        Show TOUCHED and NOT touched functions
+  --touched-only     Show only TOUCHED functions
+  --json <path>      Write the full analysis as JSON
+  --temp-dir <dir>   Temporary directory for V8 coverage data
+```
+
+The report ends with three actionable sections: **untouched functions**
+(add tests or consider removal), **files with 0% function coverage**, and
+**files never loaded at all** — the strongest dead-code candidates.
+
+## callgraph.js — call graph analysis
+
+Call graph analysis using the Node.js built-in `--prof` profiler. Generates
+text-based call graphs showing hot paths and call chains.
+
+```bash
+# Generate call graph for a test suite
+node benchmark/callgraph.js '/ref.json'
+
+# More iterations for better accuracy
+node benchmark/callgraph.js '/ref.json' --iterations 5000 --top-functions=30
+
+# Show deeper call chains
+node benchmark/callgraph.js '/ref.json' --max-depth=15
+
+# Include Node.js internal functions
+node benchmark/callgraph.js '/ref.json' --include-internals
+
+# Filter by pattern
+node benchmark/callgraph.js '/ref.json' --filter 'validate'
+
+# Full options
+Options:
+  --iterations, -i N       Number of iterations (default: 1000)
+  --top-functions N        Show top N hottest functions (default: 20)
+  --max-depth N            Maximum call chain depth (default: 10)
+  --filter <pattern>       Filter functions by pattern (default: jaren)
+  --include-internals      Include Node.js internal functions
+  --verbose, -v            Show detailed output
+```
+
+## jsonpath.js — JSONPath compliance and performance
+
+Compliance and performance benchmark for the RFC 9535 JSONPath compiler in
+`packages/json/src/path.js`. Runs the official compliance suite (including
+normalized-path verification) against Jaren and the RFC 9535-conformant
+contender [json-p3](https://www.npmjs.com/package/json-p3). This is a separate
+tool from `profiler.js` because the schema-draft/remotes machinery does not
+apply to JSONPath queries.
+
+```bash
+# Compliance run over all engines (exit code 1 when Jaren fails a test)
+node benchmark/jsonpath.js
+
+# Only tests whose name contains a string, with failure details
+node benchmark/jsonpath.js 'functions, match' --verbose
+
+# Performance comparison per CTS query, plus synthetic 1000-item scenarios
+node benchmark/jsonpath.js --profile --scale
+
+# Full options
+Options:
+  --profile              Profile query performance instead of checking compliance
+  --verbose, -v          Show every compliance failure in detail
+  --iterations, -i N     Iterations per profiled query (default: 1000)
+  --top N                Show top N slowest queries in profile mode (default: 15)
+  --scale                Add synthetic 1000-item document scenarios to the profile
+  --engines a,b          Engines to run (default: jaren,json-p3)
+  --output, -o FORMAT    Output format: console, csv, json (default: console)
+  --filepath, -f PATH    Output file path for csv/json
+```
+
+npm shortcuts: `npm run benchmark:jsonpath`, `npm run benchmark:jsonpath:profile`.
+
+## jsonpointer.js — compiled JSON Pointer performance
+
+Benchmarks the compiled JSON Pointer / Relative JSON Pointer engine of
+`@jarenjs/json` against the interpretive resolver it replaced (inlined
+verbatim as the baseline) and the [`jsonpointer`](https://www.npmjs.com/package/jsonpointer)
+npm package, over absolute pointers, relative pointers (the `$data` hot path)
+and the `compileDataRef` dispatch.
+
+```bash
+npm run benchmark:jsonpointer
+```
+
+## jsonquery.js — Jaren JSON Query vs fontoxpath/jsonata
+
+Performance benchmark for the Jaren JSON Query engine in
+`packages/json/src/query/` against
+[fontoxpath](https://www.npmjs.com/package/fontoxpath) (XQuery 3.1 in
+JavaScript) and [jsonata](https://www.npmjs.com/package/jsonata). Runs a
+scenario matrix (singular access, filter + project, join, group + aggregate,
+deep reshape, compile time) over a scalable bookstore document, asserting
+result equivalence across engines before timing anything; the per-engine
+queries and fairness notes live in [`adaptors/jsonquery/`](./adaptors/jsonquery/).
+
+```bash
+# Equivalence check over all engines (exit code 1 on any semantic mismatch)
+node benchmark/jsonquery.js
+
+# Performance comparison, plus 1000- and 10000-book documents
+node benchmark/jsonquery.js --profile --scale
+```
+
+npm shortcuts: `npm run benchmark:jsonquery`, `npm run benchmark:jsonquery:profile`.
+
+## jslt.js — JSLT vs native JS/JSONata
+
+Performance benchmark for the JSLT stylesheet dispatcher in
+`packages/json/src/jslt/` against hand-written recursive JavaScript and
+JSONata's transform operator. It checks identity sharing, a surgical price
+override, a two-mode reshape, schema-based fresh annotation and compile time
+over the same scalable bookstore family as `jsonquery.js`
+([`fixtures/bookstore.js`](./fixtures/bookstore.js)); every expressible result
+is compared before timing, and unsupported JSONata mode dispatch is printed as
+`n/a`, never silently substituted.
+
+```bash
+# Equivalence check over all engines
+node benchmark/jslt.js
+
+# Performance comparison, plus 1000- and 10000-book documents
+node benchmark/jslt.js --profile --scale
+```
+
+npm shortcuts: `npm run benchmark:jslt`, `npm run benchmark:jslt:profile`.
+
+## qt3-runner.js — the W3C QT3 scorecard
+
+Runs the complete W3C QT3 suite (31,821 XQuery/XPath 3.1 test cases) against
+the query engine through the XQuery text front-end, classifying every case
+into a tier and attributing every failure to a documented deviation — a
+committed baseline (`qt3-baseline.json`) makes any behavioral change visible
+and fails CI on regressions.
+
+```bash
+git submodule update --init benchmark/qt3tests   # once
+npm run qt3:convert                              # XML -> benchmark/qt3-json/
+npm run benchmark:qt3                            # the scorecard (~0.7 s)
+```
+
+The tier definitions, deviation-id registry and baseline workflow are
+documented in [qt3-README.md](./qt3-README.md).
+
+## Workspace notes
+
+- Competitor engines (`ajv`, `json-p3`, `fontoxpath`, `jsonata`,
+  `jsonpointer`, `fast-xml-parser`) are devDependencies of this benchmark
+  workspace only — the `packages/*` workspaces stay zero-dependency.
+- Adaptor files under [`adaptors/`](./adaptors/) express each scenario
+  idiomatically per engine and document the fairness decisions (e.g.
+  fontoxpath's one-time XDM pre-conversion, jsonata's awaited async
+  `evaluate()`).
+- All profile numbers in package READMEs state the date and Node version they
+  were measured with; run-to-run spread on micro-timings is real, so treat
+  pass/fail counts as the invariant and ratios as indicative.

@@ -55,7 +55,7 @@ const getName = compileRelativeJSONPointer('0#');
 getName(doc, '/limits/min'); // 'min' (the member name of the location)
 ```
 
-`compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–19x faster than the interpretive resolver they replaced (`npm run benchmark:jsonpointer`).
+`compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
 
 ## The JSONPath compiler
 
@@ -117,18 +117,18 @@ The parser is strict about everything the RFC is strict about: leading zeros, `-
 
 Conformance: **all 703 tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass, including the normalized-path assertions (the suite is a git submodule at `benchmark/jsonpath-suite/`).
 
-Measured with `node benchmark/jsonpath.js --profile --scale` (2026-07-16, Node v24.14.0, 1000-item synthetic document, vs [json-p3](https://www.npmjs.com/package/json-p3)):
+Measured with `node benchmark/jsonpath.js --profile --scale -i 3000` (2026-07-17, Node v24.14.0, 1000-item synthetic document, vs [json-p3](https://www.npmjs.com/package/json-p3) 2.2.2):
 
 | Query shape | Jaren | vs json-p3 |
 |---|---|---|
-| singular `$.items[42].name` | 191 ns (~5M queries/s) | 4.0x |
-| wildcard `$.items[*].id` | 26.6 µs | 12.9x |
-| slice `$.items[100:200].id` | 4.4 µs | 8.0x |
-| filter `$.items[?@.price < 10].name` | 31.6 µs | 9.9x |
-| regexp filter `$.items[?match(@.name, "item-1.*")].id` | 37.1 µs | 14.2x |
-| descendant `$..value` | 187.6 µs | 86.0x |
-| mean over all 456 CTS queries | 133 ns | 20.2x |
-| compile | ~2.7 µs per query | — |
+| singular `$.items[42].name` | 189 ns (~5M queries/s) | 4.9x |
+| wildcard `$.items[*].id` | 31.2 µs | 12.1x |
+| slice `$.items[100:200].id` | 4.4 µs | 9.5x |
+| filter `$.items[?@.price < 10].name` | 38.9 µs | 8.7x |
+| regexp filter `$.items[?match(@.name, "item-1.*")].id` | 38.8 µs | 14.3x |
+| descendant `$..value` | 210.0 µs | 81.8x |
+| mean over all 456 CTS queries | 151 ns | 18.7x |
+| compile | ~2.4 µs per query | — |
 
 ## The Jaren JSON Query language
 
@@ -296,23 +296,23 @@ q(null, { doc: data }); // [ 'Sayings of the Century', 'Moby Dick' ]
 
 `npm run benchmark:jsonquery` runs the scenario matrix against [fontoxpath](https://www.npmjs.com/package/fontoxpath) (a real XQuery 3.1 engine in JavaScript — the closest honest comparison) and [jsonata](https://www.npmjs.com/package/jsonata) (the popular practical alternative), asserting result equivalence on every document before timing anything. Each engine runs the same scenario written idiomatically in its own language (`benchmark/adaptors/jsonquery/`).
 
-Measured with `npm run benchmark:jsonquery:profile` (2026-07-16, Node v24.14.0; ratios are that engine's time over Jaren's):
+Measured with `npm run benchmark:jsonquery:profile` (2026-07-17, Node v24.14.0; ratios are that engine's time over Jaren's):
 
 | Scenario | Jaren | fontoxpath 3.34 | jsonata 2.2 |
 |---|---|---|---|
 | **4-book bookstore** | | | |
-| singular access `$b.title` | 377 ns (2.7M/s) | 6.9 µs (18x) | 4.8 µs (13x) |
-| filter + project (spec A.2) | 1.8 µs (551k/s) | 33.6 µs (18x) | 24.6 µs (14x) |
-| join (spec A.3) | 3.3 µs (305k/s) | 69.8 µs (21x) | 82.8 µs (25x) |
-| group + aggregate (spec A.4) | 2.7 µs (371k/s) | n/a | 41.0 µs (15x) |
-| deep reshape | 2.5 µs (401k/s) | 132.0 µs (53x) | 60.7 µs (24x) |
+| singular access `$b.title` | 382 ns (2.6M/s) | 7.3 µs (19x) | 5.7 µs (15x) |
+| filter + project (spec A.2) | 1.9 µs (527k/s) | 36.1 µs (19x) | 27.0 µs (14x) |
+| join (spec A.3) | 5.6 µs (178k/s) | 77.5 µs (14x) | 111.7 µs (20x) |
+| group + aggregate (spec A.4) | 4.3 µs (234k/s) | n/a | 47.7 µs (11x) |
+| deep reshape | 2.6 µs (393k/s) | 190.5 µs (75x) | 82.9 µs (33x) |
 | **10,000-book bookstore** | | | |
-| singular access | 306 ns (3.3M/s) | 14.9 µs (49x) | 4.0 µs (13x) |
-| filter + project | 1.5 ms | 305.5 ms (210x) | 62.9 ms (43x) |
-| join (measured at 1,000 books) | 29.5 ms | 1.33 s (45x) | 1.55 s (53x) |
-| group + aggregate | 2.3 ms | n/a | 37.0 ms (16x) |
-| deep reshape | 3.7 ms | 357.1 ms (98x) | 110.4 ms (30x) |
-| **compile, µs per query** | 23.1 µs | 483.5 µs (21x) | 65.6 µs (2.8x) |
+| singular access | 299 ns (3.3M/s) | 16.6 µs (56x) | 4.2 µs (14x) |
+| filter + project | 1.5 ms | 328.3 ms (215x) | 68.0 ms (45x) |
+| join (measured at 1,000 books) | 27.8 ms | 1.57 s (57x) | 1.75 s (63x) |
+| group + aggregate | 2.5 ms | n/a | 39.9 ms (16x) |
+| deep reshape | 3.6 ms | 422.0 ms (118x) | 119.0 ms (33x) |
+| **compile, µs per query** | 24.3 µs | 460.7 µs (19x) | 66.1 µs (2.7x) |
 
 Honest caveats — what each competitor is optimized for:
 
@@ -402,49 +402,29 @@ The complete stylesheet grammar is published for validators and LLM constrained 
 
 ### JSLT benchmark
 
-`npm run benchmark:jslt` asserts result equivalence before timing Jaren against a hand-written recursive JavaScript transform and JSONata's transform operator. Measured with `npm run benchmark:jslt:profile` (2026-07-16, Node v24.14.0; competitor ratios are competitor time over Jaren):
+`npm run benchmark:jslt` asserts result equivalence before timing Jaren against a hand-written recursive JavaScript transform and JSONata's transform operator. Measured with `npm run benchmark:jslt:profile` (2026-07-17, Node v24.14.0; competitor ratios are competitor time over Jaren):
 
 | Scenario | Jaren JSLT | native JS | jsonata 2.2 |
 |---|---:|---:|---:|
 | **4-book bookstore** | | | |
-| identity (`share`) | 83 ns | 1.83 µs (22.0x) | 14.60 µs (176x) |
-| surgical prices | 10.89 µs | 1.12 µs (0.10x) | 89.61 µs (8.2x) |
-| reshape + modes | 8.14 µs | 381 ns (0.047x) | n/a |
-| fresh schema annotation | 3.46 µs | 928 ns (0.27x) | 135.22 µs (39.1x) |
+| identity (`share`) | 81 ns | 2.04 µs (25.3x) | 14.60 µs (180x) |
+| surgical prices | 9.15 µs | 1.09 µs (0.12x) | 90.13 µs (9.8x) |
+| reshape + modes | 8.70 µs | 431 ns (0.050x) | n/a |
+| fresh schema annotation | 3.50 µs | 911 ns (0.26x) | 136.92 µs (39.1x) |
 | **10,000-book bookstore** | | | |
-| identity (`share`) | 27 ns | 3.24 ms (119,274x) | 13.20 ms (485,954x) |
-| surgical prices | 27.78 ms | 1.96 ms (0.071x) | 146.12 ms (5.3x) |
-| reshape + modes | 18.27 ms | 131.08 µs (0.007x) | n/a |
-| fresh schema annotation | 5.75 ms | 1.70 ms (0.30x) | 251.27 ms (43.7x) |
+| identity (`share`) | 24 ns | 3.41 ms (143,482x) | 13.52 ms (569,663x) |
+| surgical prices | 23.17 ms | 2.00 ms (0.086x) | 152.48 ms (6.6x) |
+| reshape + modes | 20.01 ms | 137.36 µs (0.007x) | n/a |
+| fresh schema annotation | 6.40 ms | 1.73 ms (0.27x) | 277.33 ms (43.4x) |
 | **document-independent** | | | |
-| compile, per stylesheet | 35.63 µs | n/a | 59.03 µs (1.7x) |
+| compile, per stylesheet | 33.16 µs | n/a | 70.50 µs (2.1x) |
 
-The identity row is the sharing fast path: Jaren returns the input reference in O(1), while native and JSONata deep-copy. On actual transformations, hand-written JavaScript is 3.3–139x faster because it is bespoke code with no matcher, rank table, mode, schema, or error machinery—the honest cost of the abstraction. Jaren is 5–44x faster than JSONata where the transform operator can express the scenario; reshape+modes is `n/a`, not silently replaced by a different JSONata feature. JSONata 2.x timings include its required promise overhead and transform-copy cost. Scaled prices are rounded to cents because JSONata's copy normalizes long binary decimal tails and these scenarios do not sort. fontoxpath is excluded because it has XPath/XQuery but no XSLT dispatcher; Saxon-JS is excluded as a heavyweight SEF/XSLT toolchain for this benchmark workspace.
+The identity row is the sharing fast path: Jaren returns the input reference in O(1), while native and JSONata deep-copy. On actual transformations, hand-written JavaScript is 3.4–143x faster because it is bespoke code with no matcher, rank table, mode, schema, or error machinery—the honest cost of the abstraction. Jaren is 6.6–45x faster than JSONata where the transform operator can express the scenario; reshape+modes is `n/a`, not silently replaced by a different JSONata feature. JSONata 2.x timings include its required promise overhead and transform-copy cost. Scaled prices are rounded to cents because JSONata's copy normalizes long binary decimal tails and these scenarios do not sort. fontoxpath is excluded because it has XPath/XQuery but no XSLT dispatcher; Saxon-JS is excluded as a heavyweight SEF/XSLT toolchain for this benchmark workspace.
 
 ## Roadmap
 
-Ideas we consider interesting or necessary for this package, roughly in order of appetite:
-
-- [x] **JSON Schema as the query type system** — the `$valid`/`$assert` operators and the `$as` FLWOR clause embed JSON Schema literals in query documents ([QUERY-FORMAT §8.11](./docs/QUERY-FORMAT.md)), compiled through the dependency-free `compileTypeTest` hook; [`@jarenjs/validate/query`](../validate) supplies the reference hook (`createTypeTestCompiler`).
-- [x] **Queries inside schemas — the `$query` keyword** — the inverse arrow of the entry above: [`@jarenjs/validate`](../validate/README.md) gained a `$query` extension keyword whose value is a query document, compiled once at schema compile time and asserted by effective boolean value per validation (compiled queries expose `query.ebv` beside `first`/`exists` for exactly this). Cross-field arithmetic, ordering and quantification land in JSON Schema through the engine that already exists.
-- [x] **JSLT template layer** — the XSLT-derivative stylesheet language on top of the query engine: [`@jarenjs/json/jslt`](./docs/JSLT-FORMAT.md) compiles positional JSONPath matches, JSON Schema shape matches, ranked modes, `$apply`, and the `share`/`fresh`/`error` built-in rules.
-- [ ] **Standalone `@jarenjs/jslt` package** — publish the stylesheet layer as its own package only when the query-engine internals it needs have a deliberate public boundary; today the module stays colocated to avoid exposing compiler internals.
-- [ ] **Forms computed views through JSLT** — generalize `x-form.computed` from one query per field into schema-dispatched view-model stylesheets, while keeping forms validator-independent.
-- [ ] **JSLT matcher optimizer** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules.
-- [ ] **Filter optimizer / hash joins** — hoist `$`-absolute comparables out of filter loops, fuse adjacent singular segments, and turn `$where` equijoins into hash joins instead of nested loops (see the benchmark's join row).
-- [ ] **Write operations** — `set`/`insert`/`remove` at a pointer, a normalized path, or every node a JSONPath query selects, with a copy-on-write mode.
-- [ ] **JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396)** — apply and structural diff, built on compiled pointers; a diff that emits JSON Patch doubles as a change feed for [`@jarenjs/forms`](../forms).
-- [x] **Compiled JSON Pointers** — `pointer.js` got the `path.js` treatment: `compileJSONPointer`/`compileRelativeJSONPointer`/`compileDataRef` return specialized zero-allocation getters over the shared `NOTHING` sentinel, and the validator's `data`/`$data` keywords compile their refs at schema-compile time.
-- [ ] **`$allowing-empty` and window clauses** — the two FLWOR constructs v0.1 leaves out (outer-join-style iteration and `tumbling`/`sliding` windows).
-- [ ] **Higher-order operators** — user-supplied functions for map/filter/fold shapes; requires a function-value story the JSON encoding deliberately does not have yet.
-- [ ] **XQuery front-end: `xs:*` constructor casts and more `fn:*` mappings** — the QT3 scorecard attributes the bulk of its `unsupported-syntax` bucket to these; a handful of numeric casts moves thousands of cases into the measurable buckets. Lazy `$range` evaluation belongs to the same batch (the eager materialization defeats the JQ2007 resource guard).
-- [ ] **Custom JSONPath function extensions** — a registry per RFC 9535 §2.4 with declared parameter/return types, so user functions get the same compile-time well-typedness checks as the built-ins.
-- [ ] **Lazy iteration** — `query.iterate(data)` as a generator yielding nodes on demand, plus early-exit `first()`/`exists()` for non-singular JSONPath queries.
-- [ ] **Normalized path ↔ JSON Pointer bridge** — convert singular queries and normalized paths to RFC 6901 pointers and back, so the addressing standards compose.
-- [ ] **Canonical JSON (RFC 8785 / JCS)** — deterministic serialization for hashing and signing; `stableKeyString` in the query runtime is a starting point.
-- [ ] **Optional codegen backend** — compile hot queries to source via `new Function` where CSP allows, reusing the same AST and semantics; the closure compiler stays the default.
-- [ ] **Date/time operators** — `@jarenjs/core/dates` exists as the foundation; the operator registry makes the addition mechanical.
+This package's roadmap lives in the repository-wide [ROADMAP](../../ROADMAP.md), under its `@jarenjs/json` sections: the query filter optimizer and hash joins, lazy sequences, the JSLT single-walk matcher, write operations and JSON Patch, custom JSONPath function extensions, canonical JSON, XQuery front-end `xs:*` casts, and more. Recently landed from that list: JSON Schema as the query type system (`$valid`/`$assert`/`$as`), the inverse [`$query` keyword](../validate/README.md) in the validator, compiled JSON Pointers, and the complete JSLT template layer.
 
 ## Development
 
-Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks: `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the validator-wide picture.
+Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks (all documented in the [benchmark workspace README](../../benchmark/README.md)): `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the monorepo picture.

@@ -1,10 +1,11 @@
 # JarenJS Architecture
 
-This document describes the internal architecture of JarenJS, a high-performance JSON Schema validator for JavaScript.
+This document describes the architecture of the JarenJS monorepo: how the packages fit together, the compile-to-closures design philosophy they all share, and the internal architecture of the JSON Schema validating compiler at the center of it. Deeper per-package internals live in each package's own ARCHITECTURE document (linked below); the user-facing stories are the package READMEs.
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Monorepo Layout](#monorepo-layout)
 - [Core Design Principles](#core-design-principles)
 - [Four-Phase Architecture](#four-phase-architecture)
   - [Phase 1: Schema Registration](#phase-1-schema-registration)
@@ -22,17 +23,57 @@ This document describes the internal architecture of JarenJS, a high-performance
 - [Data Structures](#data-structures)
 - [Performance Optimizations](#performance-optimizations)
 - [Error Handling](#error-handling)
-- [Debugging Guide](#debugging-guide)
+- [Testing, Benchmarks and Debugging](#testing-benchmarks-and-debugging)
 
 ---
 
 ## Overview
 
-JarenJS is a JSON Schema validator that compiles schemas into optimized validation functions. The architecture separates schema loading (URI resolution), compilation (validator creation), and validation (data checking) into distinct phases to enable compile-time optimizations and fast runtime performance.
+JarenJS is a JSON toolchain built around a JSON Schema validator that compiles schemas into optimized validation functions. The architecture separates schema loading (URI resolution), compilation (validator creation), and validation (data checking) into distinct phases to enable compile-time optimizations and fast runtime performance.
 
-The monorepo splits into `@jarenjs/core` (zero-dependency foundation: type guards, Unicode strings, text validators, math), `@jarenjs/json` (the JSON addressing and transformation stack: JSON Pointer, the RFC 9535 JSONPath compiler, the Jaren JSON Query engine with its XQuery text front-end, and the JSLT stylesheet dispatcher — documented in its own [ARCHITECTURE](packages/json/ARCHITECTURE.md)), `@jarenjs/validate` (this document's subject), `@jarenjs/formats`, `@jarenjs/refs` and `@jarenjs/forms`. This document describes the validator; the compile-to-closures philosophy it lays out is shared by every compiler in the repository.
+The sections from [Core Design Principles](#core-design-principles) onward describe the validator (`@jarenjs/validate`); the compile-to-closures philosophy laid out there is shared by every compiler in the repository — the JSONPath, pointer, query and JSLT engines apply the same two-stage split.
 
-### Key Files
+## Monorepo Layout
+
+The workspace is a dependency chain; every `packages/*` workspace declares its Jaren dependencies as peer dependencies and carries **zero runtime dependencies** outside the repository:
+
+```mermaid
+flowchart BT
+    CORE["@jarenjs/core<br/>type guards, Unicode strings,<br/>text validators, scan, math"]
+    JSON["@jarenjs/json<br/>Pointer, JSONPath, Query, JSLT"]
+    VALIDATE["@jarenjs/validate<br/>the JSON Schema compiler"]
+    FORMATS["@jarenjs/formats<br/>format keyword validators"]
+    REFS["@jarenjs/refs<br/>bundled meta-schemas"]
+    FORMS["@jarenjs/forms<br/>form model + x-form rules"]
+
+    JSON --> CORE
+    VALIDATE --> CORE
+    VALIDATE --> JSON
+    FORMATS --> CORE
+    FORMATS --> JSON
+    FORMS --> CORE
+    FORMS --> JSON
+    FORMS --> FORMATS
+```
+
+| Package | Role | Internals documented in |
+|---|---|---|
+| [`@jarenjs/core`](packages/core) | Zero-dependency foundation; no JSON Schema knowledge | [core ARCHITECTURE](packages/core/ARCHITECTURE.md) |
+| [`@jarenjs/json`](packages/json) | The addressing/query/stylesheet compilers; no JSON Schema dependency (schema *literals* compile through a host-supplied `compileTypeTest` hook) | [json ARCHITECTURE](packages/json/ARCHITECTURE.md) |
+| [`@jarenjs/validate`](packages/validate) | The validating compiler; consumes core primitives and json's compiled pointers/queries | [validate ARCHITECTURE](packages/validate/ARCHITECTURE.md) |
+| [`@jarenjs/formats`](packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](packages/formats/README.md)) |
+| [`@jarenjs/refs`](packages/refs) | Data-only meta-schema bundle | — |
+| [`@jarenjs/forms`](packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](packages/forms/README.md)) |
+| [`@jarenjs/website`](packages/website) | The GitHub Pages site and playground (not part of the library chain) | [website ARCHITECTURE](packages/website/ARCHITECTURE.md) |
+
+Two deliberate inversions keep the graph acyclic while letting the layers cooperate:
+
+- **JSON Schema as the query type system**: `@jarenjs/json`'s `$valid`/`$assert`/`$as` and JSLT schema matches accept schema literals but compile them through an injected `compileTypeTest` hook; [`@jarenjs/validate/query`](packages/validate/src/query.js) supplies the reference hook. Dependency direction stays validate → json.
+- **Queries inside schemas**: `@jarenjs/validate`'s `$query` keyword compiles a Jaren JSON Query per schema location — validate consumes json, never the other way around.
+
+### Key Files of the validator
+
+The rest of this document describes `@jarenjs/validate`. Its main source files:
 
 | File | Purpose |
 |------|---------|
@@ -532,283 +573,18 @@ createErrorHandler(expected, key) {
 
 ---
 
-## Debugging Guide
+## Testing, Benchmarks and Debugging
 
-### Using the Debug Tool
+Unit tests live in `test/` at the repository root, organized per package (`npm test`, or `npm run test:core` / `test:json` / `test:validate`). The conformance suites, performance profilers and analysis tools all live in the benchmark workspace and are documented in [benchmark/README.md](benchmark/README.md):
 
-The `benchmark/debug.js` tool is the primary way to investigate test failures:
+- `profiler.js` — JSON Schema performance vs Ajv over the official test suite (the source of the README's conformance table);
+- `debug.js` — inspect, run, export and step through individual suite test cases, with Jaren-vs-Ajv comparison;
+- `coverage.js` — merged function-coverage analysis over the suite and/or unit tests (untouched-function and dead-code reports);
+- `callgraph.js` — hot-path call graphs via the Node.js profiler;
+- `jsonpath.js`, `jsonpointer.js`, `jsonquery.js`, `jslt.js` — compliance and performance for the `@jarenjs/json` engines;
+- `qt3-runner.js` — the tiered W3C QT3 scorecard (see [benchmark/qt3-README.md](benchmark/qt3-README.md)).
 
-```bash
-# Find the failing test
-node benchmark/debug.js '/anchor.json' --list --draft 2019
-
-# Run the specific failing test with verbose output
-node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019 --verbose
-
-# Compare Jaren vs AJV behavior
-node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019 --compare
-
-# Export the test case for isolated debugging
-node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019 --export-test debug.json
-```
-
-### "Can not resolve schema for 'X'"
-
-**Cause**: The ref `X` is not in schemasMap
-
-**Check**:
-- Was the schema containing `X` added via `addSchema()`?
-- Is the ref path correct in the schema?
-- After `restoreSchemaRefsInMap`, all refs should have non-null values
-
-### Performance Degradation on First Validation
-
-**Cause**: Refs being resolved at validation time instead of compile time
-
-**Check**:
-- Is `#precompileRefs` being called in `compile()`?
-- Are ValidationObjects being created for all refs?
-- Verify: `compileValidator` should find targets immediately without fallback
-
-### Test Interference (tests pass individually but fail together)
-
-**Cause**: Global shared state between validators
-
-**Check**:
-- Are you using a global cache? (Don't)
-- Solution: All state should be per-ValidationRoot or per-JarenValidator
-
-### Debugging Ref Resolution
-
-Enable debug logging in traverse.js:
-
-```javascript
-// In packages/validate/src/traverse.js
-console.log('Resolving ref:', ref, 'against baseUri:', baseUri);
-```
-
-Performance comparison between Jaren and AJV.
-
-```bash
-# Profile specific test suite with draft selection
-node benchmark/profiler.js '/ref.json' --profile --draft 2019 --iterations 1000
-
-# Profile all tests for multiple drafts
-node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12
-
-# Export results to JSON with custom file path
-node benchmark/profiler.js --profile-all --output json --filepath results.json
-
-# Show only top 10 slowest tests
-node benchmark/profiler.js '/ref.json' --profile --top 10
-
-# Only include tests where all engines succeed
-node benchmark/profiler.js '/ref.json' --profile --success-only
-
-# Full options
-Options:
-  --profile              Profile a specific test file
-  --profile-all          Profile all test files
-  --iterations, -i N     Number of iterations (default: 1000)
-  --output, -o FORMAT    Output format: console, csv, json (default: console)
-  --draft, -d VERSION    JSON Schema draft version(s), comma-separated
-                         Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020
-  --filepath, -f PATH    Output file path for csv/json
-  --top N                Show only top N slowest tests
-  --success-only         Only include tests where all agents succeed
-  --verbose, -v          Verbose output
-```
-
-### coverage.js
-
-Code coverage analysis using c8 to find which functions are touched during test execution.
-
-```bash
-# Show files with >25% function coverage
-node benchmark/coverage.js '/required.json' --threshold 25
-
-# Show touched vs NOT touched functions
-node benchmark/coverage.js '/required.json' --threshold 25 --functions
-
-# Show only touched functions
-node benchmark/coverage.js '/required.json' --threshold 25 --touched-only
-
-# Adjust iterations for better coverage data
-node benchmark/coverage.js '/required.json' --iterations 5000
-
-# Full options
-Options:
-  --threshold <n>    Filter files with coverage <= n% (default: 0)
-  --functions        Show TOUCHED and NOT touched functions with hit counts
-  --touched-only     Show only TOUCHED functions
-  --iterations <n>   Number of profiling iterations (default: 1000)
-  --temp-dir <dir>   Temporary directory for c8 coverage data
-```
-
-### callgraph.js
-
-Call graph analysis using Node.js built-in `--prof` profiler. Generates text-based call graphs showing hot paths and call chains.
-
-```bash
-# Generate call graph for a test suite
-node benchmark/callgraph.js '/ref.json'
-
-# More iterations for better accuracy
-node benchmark/callgraph.js '/ref.json' --iterations 5000 --top-functions=30
-
-# Show deeper call chains
-node benchmark/callgraph.js '/ref.json' --max-depth=15
-
-# Include Node.js internal functions
-node benchmark/callgraph.js '/ref.json' --include-internals
-
-# Filter by specific pattern
-node benchmark/callgraph.js '/ref.json' --filter 'validate'
-
-# Full options
-Options:
-  --iterations, -i N       Number of iterations (default: 1000)
-  --top-functions N        Show top N hottest functions (default: 20)
-  --max-depth N            Maximum call chain depth (default: 10)
-  --filter <pattern>       Filter functions by pattern (default: jaren)
-  --include-internals      Include Node.js internal functions
-  --verbose, -v            Show detailed output
-```
-
-### debug.js
-
-Powerful debugging utility for investigating test failures and understanding schema validation behavior.
-
-```bash
-# List all test files for a draft
-node benchmark/debug.js --list-files --draft 2019
-
-# List all test cases in a file with keyword summaries
-node benchmark/debug.js '/anchor.json' --list --draft 2019
-
-# Run a specific test suite with draft selection
-node benchmark/debug.js '/anchor.json' --draft 2019
-
-# Run a specific test by description (partial match)
-node benchmark/debug.js '/anchor.json' 'same $anchor' --draft 2019
-
-# Run a specific test by index
-node benchmark/debug.js '/anchor.json' --index 3 --draft 2019
-
-# Export test suite to JSON
-node benchmark/debug.js '/anchor.json' --export anchor-tests.json --draft 2019
-
-# Export specific test case
-node benchmark/debug.js '/anchor.json' --index 3 --export-test test.json --draft 2019
-
-# Dry run - show schema and assertions without validating
-node benchmark/debug.js '/anchor.json' --dry-run --draft 2019
-
-# Show detailed validation errors
-node benchmark/debug.js '/ref.json' 'nested refs' --show-errors
-
-# Interactive mode - step through assertions
-node benchmark/debug.js '/ref.json' 'nested refs' --interactive
-
-# Detailed comparison between Jaren and AJV
-node benchmark/debug.js '/ref.json' 'nested refs' --compare
-
-# Run only Jaren (skip AJV comparison)
-node benchmark/debug.js '/ref.json' 'nested refs' --jaren-only
-
-# Minimal output (errors only)
-node benchmark/debug.js '/ref.json' --silent
-```
-
-### jsonpath.js
-
-Compliance and performance benchmark for the JSONPath (RFC 9535) compiler in
-`packages/json/src/path.js`. It runs the official [JSONPath Compliance
-Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite)
-(a git submodule at `benchmark/jsonpath-suite/`, like the JSON-Schema-Test-Suite
-at `benchmark/suite/`; including normalized-path verification) against Jaren
-and the RFC 9535-conformant contender
-[json-p3](https://www.npmjs.com/package/json-p3). This is a separate tool from
-`profiler.js` because the schema-draft/remotes machinery does not apply to
-JSONPath queries.
-
-```bash
-# after cloning, or when the suite is missing:
-git submodule update --init benchmark/jsonpath-suite
-```
-
-```bash
-# Compliance run over all engines (exit code 1 when Jaren fails a test)
-node benchmark/jsonpath.js
-
-# Only tests whose name contains a string, with failure details
-node benchmark/jsonpath.js 'functions, match' --verbose
-
-# Performance comparison per CTS query, plus synthetic 1000-item scenarios
-node benchmark/jsonpath.js --profile --scale
-
-# Full options
-Options:
-  --profile              Profile query performance instead of checking compliance
-  --verbose, -v          Show every compliance failure in detail
-  --iterations, -i N     Iterations per profiled query (default: 1000)
-  --top N                Show top N slowest queries in profile mode (default: 15)
-  --scale                Add synthetic 1000-item document scenarios to the profile
-  --engines a,b          Engines to run (default: jaren,json-p3)
-  --output, -o FORMAT    Output format: console, csv, json (default: console)
-  --filepath, -f PATH    Output file path for csv/json
-```
-
-### jsonquery.js
-
-Performance benchmark for the Jaren JSON Query engine in
-`packages/json/src/query/` against [fontoxpath](https://www.npmjs.com/package/fontoxpath)
-(XQuery 3.1 in JavaScript) and [jsonata](https://www.npmjs.com/package/jsonata).
-Runs a scenario matrix (singular access, filter + project, join, group +
-aggregate, deep reshape, compile time) over a scalable bookstore document,
-asserting result equivalence across engines before timing anything; the
-per-engine queries and fairness notes live in `benchmark/adaptors/jsonquery/`.
-
-```bash
-# Equivalence check over all engines (exit code 1 on any semantic mismatch)
-node benchmark/jsonquery.js
-
-# Performance comparison, plus 1000- and 10000-book documents
-node benchmark/jsonquery.js --profile --scale
-```
-
-### jslt.js
-
-Performance benchmark for the JSLT stylesheet dispatcher in
-`packages/json/src/jslt/` against hand-written recursive JavaScript and
-JSONata's transform operator. It checks identity sharing, a surgical price
-override, a two-mode reshape, schema-based fresh annotation and compile
-time over the same scalable bookstore family as `jsonquery.js`; every
-expressible result is compared before timing, and unsupported JSONata mode
-dispatch is printed as `n/a`.
-
-```bash
-# Equivalence check over all engines
-node benchmark/jslt.js
-
-# Performance comparison, plus 1000- and 10000-book documents
-node benchmark/jslt.js --profile --scale
-```
-
-### Tool Separation
-
-Each benchmark tool has a distinct purpose:
-
-| Tool | Purpose | Use When |
-|------|---------|----------|
-| `debug.js` | Test inspection and assertion-level debugging | Investigating specific test failures |
-| `profiler.js` | Performance measurement and comparison | Measuring Jaren vs AJV speed |
-| `coverage.js` | Code coverage analysis | Finding untested code paths |
-| `callgraph.js` | Call graph generation | Analyzing hot paths and call chains |
-| `jsonpath.js` | JSONPath RFC 9535 compliance and performance | Verifying/benchmarking the JSONPath compiler vs json-p3 |
-| `jsonquery.js` | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking the query engine against XQuery/JSONata alternatives |
-| `jslt.js` | JSLT performance vs native JS/JSONata | Benchmarking identity sharing, recursive dispatch, modes and schema matching |
-| `qt3-runner.js` | W3C QT3 suite scorecard through the XQuery front-end | Checking query-engine compliance against the XQuery test suite |
+Validator-specific troubleshooting recipes — "Can not resolve schema for 'X'", first-validation slowness, test interference, ref-resolution logging — are collected in the [validate ARCHITECTURE debugging guide](packages/validate/ARCHITECTURE.md#debugging-guide).
 
 ---
 
