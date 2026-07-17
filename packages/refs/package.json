@@ -1,22 +1,30 @@
 {
   "name": "@jarenjs/refs",
   "private": false,
-  "version": "0.8.4",
+  "version": "0.9.2",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./types.d.ts",
+  "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
   "files": [
-    "dist/",
+    "dist/types/",
     "src/"
   ],
   "description": "Jaren JSON Schema Draft Specifications",
   "author": "joham",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
     "directory": "packages/refs"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "keywords": [
     "jaren",
     "draft-06",
@@ -28,19 +36,28 @@
     "json"
   ],
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
     "./draft-06": "./src/json-schema-draft-06.json",
     "./draft-07": "./src/json-schema-draft-07.json",
-    "./draft-2019-09": "./src/json-schema-draft-2019-09/index.js",
-    "./draft-2020-12": "./src/json-schema-draft-2020-12/index.js"
+    "./draft-2019-09": {
+      "types": "./dist/types/json-schema-2019-09/index.d.ts",
+      "default": "./src/json-schema-2019-09/index.js"
+    },
+    "./draft-2020-12": {
+      "types": "./dist/types/json-schema-2020-12/index.d.ts",
+      "default": "./src/json-schema-2020-12/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "node esbuild.config.js"
+    "build": "node esbuild.config.js && npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
   },
-  "peerDependencies": {
-    "@jarenjs/core": "*"
-  },
-  "devDependencies": {
-    "esbuild": "^0.23.1"
+  "dependencies": {
+    "@jarenjs/core": "^0.9.2"
   }
 }

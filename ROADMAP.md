@@ -45,7 +45,7 @@ motivates them where one exists.
 - [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
 - [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.
 - [ ] **`data` next to `$ref` in 2019-09+** — `$query` was added to the `$ref`-sibling keyword list; `data` has the same latent gap and still relies on pre-existing behavior.
-- [ ] **Type declarations for `@jarenjs/validate/query`** — `createTypeTestCompiler` is untyped in `types.d.ts`; worth a sweep together with the `@jarenjs/json` subpath typings below.
+- [x] **Type declarations for `@jarenjs/validate/query`** — declarations are generated from JSDoc for every public subpath.
 
 ## @jarenjs/json
 
@@ -89,7 +89,7 @@ motivates them where one exists.
 
 ### Typing & packaging
 
-- [ ] **Type declarations for the `query`/`jslt`/`xquery` subpaths** — `packages/json/types.d.ts` covers basic/pointer/path but declares no `compileJsonQuery`, `compileJsltStylesheet` or `parseXQuery` surface.
+- [x] **Type declarations for the `query`/`jslt`/`jtlt`/`xquery` subpaths** — declarations are generated from JSDoc for every public subpath.
 
 ## @jarenjs/formats
 

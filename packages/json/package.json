@@ -1,18 +1,33 @@
 {
   "name": "@jarenjs/json",
-  "private": true,
-  "version": "0.8.4",
+  "private": false,
+  "version": "0.9.2",
   "type": "module",
   "main": "./src/index.js",
-  "types": "./types.d.ts",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "src/",
+    "dist/types/",
+    "docs/",
+    "schemas/",
+    "ARCHITECTURE.md"
+  ],
   "description": "Jaren JSON Addressing Standards",
   "author": "joham",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
     "directory": "packages/json"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "keywords": [
     "jaren",
     "json",
@@ -20,16 +35,47 @@
     "jsonpath"
   ],
   "exports": {
-    ".": "./src/index.js",
-    "./basic": "./src/basic.js",
-    "./pointer": "./src/pointer.js",
-    "./path": "./src/path.js",
-    "./query": "./src/query/index.js",
-    "./jslt": "./src/jslt/index.js",
-    "./jtlt": "./src/jtlt/index.js",
-    "./xquery": "./src/xquery/index.js"
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./basic": {
+      "types": "./dist/types/basic.d.ts",
+      "default": "./src/basic.js"
+    },
+    "./pointer": {
+      "types": "./dist/types/pointer.d.ts",
+      "default": "./src/pointer.js"
+    },
+    "./path": {
+      "types": "./dist/types/path.d.ts",
+      "default": "./src/path.js"
+    },
+    "./query": {
+      "types": "./dist/types/query/index.d.ts",
+      "default": "./src/query/index.js"
+    },
+    "./jslt": {
+      "types": "./dist/types/jslt/index.d.ts",
+      "default": "./src/jslt/index.js"
+    },
+    "./jtlt": {
+      "types": "./dist/types/jtlt/index.d.ts",
+      "default": "./src/jtlt/index.js"
+    },
+    "./xquery": {
+      "types": "./dist/types/xquery/index.d.ts",
+      "default": "./src/xquery/index.js"
+    },
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
   },
-  "peerDependencies": {
-    "@jarenjs/core": "*"
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  },
+  "dependencies": {
+    "@jarenjs/core": "^0.9.2"
   }
 }

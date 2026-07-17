@@ -1,37 +1,101 @@
 {
   "name": "@jarenjs/core",
-  "private": true,
-  "version": "0.8.4",
+  "private": false,
+  "version": "0.9.2",
   "type": "module",
   "main": "./src/index.js",
-  "types": "./types.d.ts",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "src/",
+    "dist/types/",
+    "ARCHITECTURE.md"
+  ],
   "description": "Jaren Core Functions",
   "author": "joham",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
     "directory": "packages/core"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "keywords": [
     "jaren",
     "core"
   ],
   "exports": {
-    ".": "./src/index.js",
-    "./array": "./src/array.js",
-    "./bigint": "./src/bigint.js",
-    "./dates": "./src/dates.js",
-    "./float": "./src/float.js",
-    "./function": "./src/function.js",
-    "./integer": "./src/integer.js",
-    "./number": "./src/number.js",
-    "./object": "./src/object.js",
-    "./scan": "./src/scan.js",
-    "./string": "./src/string.js",
-    "./text": "./src/text/index.js",
-    "./text/*": "./src/text/*.js",
-    "./math": "./src/math/index.js",
-    "./math/*": "./src/math/*.js"
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./array": {
+      "types": "./dist/types/array.d.ts",
+      "default": "./src/array.js"
+    },
+    "./bigint": {
+      "types": "./dist/types/bigint.d.ts",
+      "default": "./src/bigint.js"
+    },
+    "./dates": {
+      "types": "./dist/types/dates.d.ts",
+      "default": "./src/dates.js"
+    },
+    "./float": {
+      "types": "./dist/types/float.d.ts",
+      "default": "./src/float.js"
+    },
+    "./function": {
+      "types": "./dist/types/function.d.ts",
+      "default": "./src/function.js"
+    },
+    "./integer": {
+      "types": "./dist/types/integer.d.ts",
+      "default": "./src/integer.js"
+    },
+    "./number": {
+      "types": "./dist/types/number.d.ts",
+      "default": "./src/number.js"
+    },
+    "./object": {
+      "types": "./dist/types/object.d.ts",
+      "default": "./src/object.js"
+    },
+    "./scan": {
+      "types": "./dist/types/scan.d.ts",
+      "default": "./src/scan.js"
+    },
+    "./string": {
+      "types": "./dist/types/string.d.ts",
+      "default": "./src/string.js"
+    },
+    "./text": {
+      "types": "./dist/types/text/index.d.ts",
+      "default": "./src/text/index.js"
+    },
+    "./text/*": {
+      "types": "./dist/types/text/*.d.ts",
+      "default": "./src/text/*.js"
+    },
+    "./math": {
+      "types": "./dist/types/math/index.d.ts",
+      "default": "./src/math/index.js"
+    },
+    "./math/*": {
+      "types": "./dist/types/math/*.d.ts",
+      "default": "./src/math/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
   }
 }

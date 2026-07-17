@@ -8,9 +8,6 @@ yarn-error.log*
 #turbo
 .turbo
 
-#npm
-package-lock.json
-
 # Runtime data
 pids
 *.pid

@@ -1,5 +1,6 @@
 {
   "name": "jarenjs-benchmark",
+  "private": true,
   "version": "0.0.1",
   "description": "a benchmark to test the speed of jarenjs against ajv",
   "type": "module",

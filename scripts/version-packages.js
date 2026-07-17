@@ -1,0 +1,66 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const packageFiles = [
+  'packages/core/package.json',
+  'packages/json/package.json',
+  'packages/validate/package.json',
+  'packages/formats/package.json',
+  'packages/refs/package.json',
+  'packages/forms/package.json',
+];
+
+const rootFile = 'package.json';
+const rootPackage = readPackage(rootFile);
+const requested = process.argv[2];
+const nextVersion = resolveVersion(rootPackage.version, requested);
+const packageNames = new Set(packageFiles.map((file) => readPackage(file).name));
+
+for (const file of [rootFile, ...packageFiles]) {
+  const manifest = readPackage(file);
+  manifest.version = nextVersion;
+  updateInternalRanges(manifest.dependencies);
+  updateInternalRanges(manifest.devDependencies);
+  updateInternalRanges(manifest.peerDependencies);
+  writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+console.log(`Set all publishable Jaren packages to ${nextVersion}.`);
+
+function readPackage(file) {
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+function updateInternalRanges(dependencies) {
+  if (dependencies == null) return;
+  for (const name of Object.keys(dependencies)) {
+    if (packageNames.has(name))
+      dependencies[name] = `^${nextVersion}`;
+  }
+}
+
+function resolveVersion(current, value) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(current);
+  if (match == null)
+    throw new Error(`Cannot increment non-standard version '${current}'.`);
+
+  const [, majorText, minorText, patchText] = match;
+  let major = Number(majorText);
+  let minor = Number(minorText);
+  let patch = Number(patchText);
+
+  switch (value) {
+    case 'patch':
+      patch += 1;
+      return `${major}.${minor}.${patch}`;
+    case 'minor':
+      minor += 1;
+      return `${major}.${minor}.0`;
+    case 'major':
+      major += 1;
+      return `${major}.0.0`;
+    default:
+      if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value ?? ''))
+        return value;
+      throw new Error('Usage: node scripts/version-packages.js patch|minor|major|<version>');
+  }
+}

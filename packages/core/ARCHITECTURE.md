@@ -44,7 +44,7 @@ The core package has **zero external dependencies**. This ensures:
 - Easy auditing and maintenance
 
 ### 2. Vanilla JavaScript with TypeScript Support
-While implemented in vanilla JavaScript, the package provides comprehensive TypeScript type definitions (`types.d.ts`). This approach:
+While implemented in vanilla JavaScript, the package generates TypeScript declarations from its JSDoc into `dist/types` during the build. This approach:
 - Avoids transpilation overhead
 - Provides direct control over JIT optimization hints
 - Maintains readability without TypeScript boilerplate
@@ -717,16 +717,12 @@ const CONST_REGEXP_UUID = /^(?:urn:uuid:)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f
 
 ### TypeScript Definitions
 
-The `types.d.ts` file provides comprehensive type definitions:
+The build generates declarations for the root entry point and every exported subpath:
 
 ```typescript
-// Branded types for type-safe numeric validation
-type Int8 = number & { __brand: 'int8' };
-type Float32 = number & { __brand: 'float32' };
-
 // Type guards
 export function isStringType(data: unknown): data is string;
-export function isValidInt8(value: number): value is Int8;
+export function isValidInt8(value: number): boolean;
 
 // Vector classes with full type support
 export class Vec2F64 {
@@ -761,7 +757,7 @@ export function isNumberType(data) {
 
 1. Add the `isXxxType()` function to `index.js`
 2. Add the corresponding `getXxxType()` function
-3. Export from `types.d.ts` with proper type guard
+3. Add accurate JSDoc so the generated declaration contains the proper type guard
 4. Add tests in `test/core/`
 
 ### Adding New Format Validators
@@ -770,7 +766,7 @@ export function isNumberType(data) {
 2. Define the regex/pattern as a `CONST_` at module level
 3. Export the `isValidXxx()` function
 4. Update `text/index.js` exports
-5. Add TypeScript definition in `types.d.ts`
+5. Add accurate JSDoc and run `npm run build:types --workspace=@jarenjs/core`
 
 ### Adding Math Operations
 

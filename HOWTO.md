@@ -229,13 +229,13 @@ const validate = jaren.compile({
 To reduce bundle size, load only the formats you need:
 
 ```javascript
-import { formatValidators } from '@jarenjs/formats';
+import { stringFormats } from '@jarenjs/formats';
 
 const jaren = new JarenValidator()
   .addFormats({
-    'email': formatValidators.email,
-    'uri': formatValidators.uri,
-    'ipv4': formatValidators.ipv4
+    'email': stringFormats.email,
+    'uri': stringFormats.uri,
+    'ipv4': stringFormats.ipv4
   });
 ```
 
@@ -496,12 +496,12 @@ const jaren = new JarenValidator({ useGrapheme: false });
 
 ```javascript
 // Load only needed formats
-import { formatValidators } from '@jarenjs/formats';
+import { stringFormats } from '@jarenjs/formats';
 
 const jaren = new JarenValidator()
   .addFormats({
-    'email': formatValidators.email,
-    'uri': formatValidators.uri
+    'email': stringFormats.email,
+    'uri': stringFormats.uri
   });
 ```
 

@@ -1,36 +1,49 @@
 {
   "name": "@jarenjs/formats",
   "private": false,
-  "version": "0.8.4",
+  "version": "0.9.2",
   "type": "module",
   "main": "./src/index.js",
-  "types": "./types.d.ts",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
-    "dist/",
-    "src/",
-    "types.d.ts"
+    "dist/types/",
+    "src/"
   ],
   "description": "Jaren Formats for JSON Schema Validation",
   "author": "joham",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jklarenbeek/jarenjs.git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
     "directory": "packages/formats"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "keywords": [
     "jaren",
     "json-schema",
     "formats"
   ],
   "scripts": {
-    "build": "node esbuild.config.js"
+    "build": "node esbuild.config.js && npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
   },
-  "peerDependencies": {
-    "@jarenjs/core": "*",
-    "@jarenjs/json": "*"
-  },
-  "devDependencies": {
-    "esbuild": "^0.23.1"
+  "dependencies": {
+    "@jarenjs/core": "^0.9.2",
+    "@jarenjs/json": "^0.9.2"
   }
 }

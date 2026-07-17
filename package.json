@@ -1,31 +1,34 @@
 {
   "name": "jarenjs",
-  "private": false,
+  "private": true,
   "version": "0.9.2",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
   "type": "module",
-  "module": "./dist/index.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jklarenbeek/jarenjs.git"
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git"
   },
-  "files": [
-    "./dist",
-    "./src"
-  ],
   "workspaces": [
-    "./packages/*",
+    "./packages/core",
+    "./packages/json",
+    "./packages/validate",
+    "./packages/formats",
+    "./packages/refs",
+    "./packages/forms",
+    "./packages/website",
     "./benchmark"
   ],
   "scripts": {
-    "clean": "rimraf --glob ./packages/**/dist/*.{js,map}",
+    "clean": "rimraf ./dist ./packages/core/dist ./packages/json/dist ./packages/validate/dist ./packages/formats/dist ./packages/refs/dist ./packages/forms/dist",
     "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
     "test:core": "node --no-warnings=ExperimentalWarning --test \"test/core/**/*.test.js\"",
     "test:json": "node --no-warnings=ExperimentalWarning --test \"test/json/**/*.test.js\"",
     "test:validate": "node --no-warnings=ExperimentalWarning --test \"test/validate/**/*.test.js\"",
+    "test:types": "tsc --noEmit -p test/consumer/tsconfig.json",
+    "test:tree-shaking": "node ./scripts/check-tree-shaking.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
     "cover:core": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test \"test/core/**/*.test.js\"",
     "cover:json": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test \"test/json/**/*.test.js\"",
@@ -33,9 +36,12 @@
     "cover:profiler": "npx c8 --reporter=lcov --all --exclude packages/_ --exclude test/ --exclude coverage/ node benchmark/profiler.js --profile-all --iterations 1000",
     "build": "npm run build --workspaces --if-present",
     "build:jaren": "node esbuild.config.js",
-    "version:patch": "npm version patch --no-git-tag-version --ws --include-workspace-root",
-    "version:minor": "npm version minor --no-git-tag-version --ws --include-workspace-root",
-    "version:major": "npm version major --no-git-tag-version --ws --include-workspace-root",
+    "release:check": "npm run clean && npm run lint && npm test && npm run build && npm run test:types && npm run test:tree-shaking && npm run pack:check",
+    "pack:check": "npm pack --dry-run --workspace=@jarenjs/core --workspace=@jarenjs/json --workspace=@jarenjs/validate --workspace=@jarenjs/formats --workspace=@jarenjs/refs --workspace=@jarenjs/forms",
+    "publish": "npm run release:check && npm publish --workspace=@jarenjs/core --workspace=@jarenjs/json --workspace=@jarenjs/validate --workspace=@jarenjs/formats --workspace=@jarenjs/refs --workspace=@jarenjs/forms",
+    "version:patch": "node ./scripts/version-packages.js patch",
+    "version:minor": "node ./scripts/version-packages.js minor",
+    "version:major": "node ./scripts/version-packages.js major",
     "commit:linux": "git commit -am v$npm_package_version && git tag v$npm_package_version",
     "commit:win32": "git commit -am v%npm_package_version% && git tag v%npm_package_version%",
     "push": "git push && git push --tags",
@@ -67,7 +73,7 @@
     "typechecking"
   ],
   "engines": {
-    "node": ">=21.3.0"
+    "node": ">=22"
   },
   "browserslist": [
     "last 1 chrome version",
@@ -76,21 +82,27 @@
   ],
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@types/node": "^22.5.5",
     "c8": "^10.1.2",
-    "esbuild": "0.23.1",
+    "esbuild": "^0.28.1",
     "eslint": "^9.9.1",
     "eslint-plugin-json": "^4.0.1",
     "globals": "^15.9.0",
     "lefthook": "^1.7.14",
     "rimraf": "^6.0.1",
-    "turbo": "^2.1.1"
+    "turbo": "^2.1.1",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@types/node": "^22.5.5",
-    "@jarenjs/core": "*",
-    "@jarenjs/json": "*",
-    "@jarenjs/validate": "*",
-    "@jarenjs/formats": "*",
-    "@jarenjs/refs": "*"
-  }
+    "@jarenjs/core": "^0.9.2",
+    "@jarenjs/json": "^0.9.2",
+    "@jarenjs/validate": "^0.9.2",
+    "@jarenjs/formats": "^0.9.2",
+    "@jarenjs/refs": "^0.9.2",
+    "@jarenjs/forms": "^0.9.2"
+  },
+  "bugs": {
+    "url": "https://github.com/jklarenbeek/jarenjs/issues"
+  },
+  "homepage": "https://github.com/jklarenbeek/jarenjs#readme"
 }

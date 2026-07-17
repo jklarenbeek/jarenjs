@@ -10,8 +10,11 @@ import {
 import { stringFormatTesters } from './testers.js';
 
 /**
- * @typedef {import('@jarenjs/validate').ValidationObject} ValidationObject
- * @typedef {import('@jarenjs/validate').JSONSchema} JSONSchema
+ * @typedef {{format?: string, formatMinimum?: string, formatExclusiveMinimum?: string, formatMaximum?: string, formatExclusiveMaximum?: string}} JSONSchema
+ * @typedef {{
+ *   options: {skipErrors: boolean},
+ *   createErrorHandler: (expected: any, key: string, ...details: any[]) => (data: any, dataPath?: string) => boolean
+ * }} ValidationObject
  */
 
 /**
