@@ -12,6 +12,7 @@
 
 import {
   compileJSONPointer,
+  encodeJSONPointerSegment,
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json/pointer';
 
@@ -291,12 +292,14 @@ function isRulesObject(value) {
 
 /**
  * Encode a property name as an RFC 6901 reference token (`~` -> `~0`,
- * `/` -> `~1`), the write-side inverse of the shared parse.
+ * `/` -> `~1`), the write-side inverse of the shared parse. An alias of
+ * `encodeJSONPointerSegment` from `@jarenjs/json/pointer`, kept for
+ * compatibility.
  * @param {string} key
  * @returns {string}
  */
 export function escapePointerKey(key) {
-  return String(key).replace(/~/g, '~0').replace(/\//g, '~1');
+  return encodeJSONPointerSegment(key);
 }
 
 /**

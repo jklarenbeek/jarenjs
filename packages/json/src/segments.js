@@ -17,6 +17,8 @@ import {
   CC_SPACE,
   CC_SQUOTE,
   CC_BACKSLASH,
+  CC_0,
+  isDigitCode,
 } from '@jarenjs/core/scan';
 
 /**
@@ -27,6 +29,35 @@ import {
 export const NOTHING = Symbol('JSONPath.Nothing');
 
 const hasOwn = Object.hasOwn;
+
+// Array indexes are bounded by the maximum array length (2^32 - 1), so a
+// valid index has at most 10 digits and is strictly below 2^32 - 1.
+const MAX_ARRAY_INDEX = 4294967294;
+
+/**
+ * Scan `source[start..end)` as an RFC 6901 array index: `0`, or a digit
+ * sequence without leading zeros. Returns -1 when the range is not a
+ * valid index (`-` is never a valid read index). Shared by the JSON
+ * Pointer compiler (pointer.js) and the JSON Patch engine (patch.js).
+ */
+export function scanArrayIndex(source, start, end) {
+  const digits = end - start;
+  if (digits === 0 || digits > 10)
+    return -1;
+  const first = source.charCodeAt(start);
+  if (!isDigitCode(first))
+    return -1;
+  if (first === CC_0)
+    return digits === 1 ? 0 : -1;
+  let index = first - CC_0;
+  for (let i = start + 1; i < end; i++) {
+    const c = source.charCodeAt(i);
+    if (!isDigitCode(c))
+      return -1;
+    index = index * 10 + (c - CC_0);
+  }
+  return index <= MAX_ARRAY_INDEX ? index : -1;
+}
 
 /**
  * Returns true when every segment is a child segment with exactly one

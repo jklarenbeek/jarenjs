@@ -32,7 +32,9 @@
     "jaren",
     "json",
     "json-pointer",
-    "jsonpath"
+    "jsonpath",
+    "json-patch",
+    "merge-patch"
   ],
   "exports": {
     ".": {
@@ -50,6 +52,10 @@
     "./path": {
       "types": "./dist/types/path.d.ts",
       "default": "./src/path.js"
+    },
+    "./patch": {
+      "types": "./dist/types/patch.d.ts",
+      "default": "./src/patch.js"
     },
     "./query": {
       "types": "./dist/types/query/index.d.ts",

@@ -11,6 +11,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/json` | everything below |
 | `@jarenjs/json/basic` | JSON, JSON Pointer and JSONPath string validation |
 | `@jarenjs/json/pointer` | the JSON Pointer and Relative JSON Pointer compiler |
+| `@jarenjs/json/patch` | JSON Patch and JSON Merge Patch: compiled apply + structural diff |
 | `@jarenjs/json/path` | the JSONPath compiler |
 | `@jarenjs/json/query` | the Jaren JSON Query engine |
 | `@jarenjs/json/jslt` | the Jaren JSLT stylesheet compiler and dispatcher |
@@ -26,6 +27,8 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | JSON validation | `isValidJSON`, `isValidJSONCheap` (a fast "definitely not JSON" pre-test) |
 | JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)) | `compileJSONPointer`, `parseJSONPointer`, `isValidJSONPointer`, `isValidJSONPointerUriFragment` |
 | Relative JSON Pointer | `compileRelativeJSONPointer`, `parseRelativeJSONPointer`, `compileDataRef`, `isValidRelativeJSONPointer` |
+| JSON Patch ([RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902)) | `compileJSONPatch`, `applyJSONPatch`, `createJSONPatch`, `isValidJSONPatch`, `JsonPatchCompileError`, `JsonPatchRuntimeError` |
+| JSON Merge Patch ([RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396)) | `compileMergePatch`, `applyMergePatch`, `createMergePatch` |
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
@@ -58,6 +61,34 @@ getName(doc, '/limits/min'); // 'min' (the member name of the location)
 ```
 
 `compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
+
+The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`) and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.
+
+### JSON Patch and JSON Merge Patch
+
+Partial updates follow the same compile-once discipline. `compileJSONPatch(patch)` validates an [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) patch document once (`JsonPatchCompileError`, `JP0xxx`, with a `docPath` pointing into the *patch* document), pre-parses every `path`/`from` through the RFC 6901 parser and specializes one closure per operation. Applying is **copy-on-write**: the input document is never mutated, untouched subtrees are shared by reference with the result, and application is atomic — a failing operation (`JsonPatchRuntimeError`, `JP2xxx`, carrying both the patch `docPath` and the target `dataPath`) leaves nothing behind, exactly as RFC 6902 section 5 requires. The engine passes the complete official [json-patch-tests](https://github.com/json-patch/json-patch-tests) suite:
+
+```javascript
+import { compileJSONPatch, applyJSONPatch, createJSONPatch } from '@jarenjs/json';
+
+// compile once, apply many times (hot path)
+const apply = compileJSONPatch([
+  { op: 'test', path: '/version', value: 5 },
+  { op: 'replace', path: '/user/name', value: 'Bob' },
+  { op: 'add', path: '/user/tags/-', value: 'admin' },
+]);
+const next = apply(doc); // doc is untouched; unchanged subtrees are shared
+
+// one-shot
+applyJSONPatch(doc, patch);
+
+// structural diff: a change feed for @jarenjs/forms and friends
+applyJSONPatch(a, createJSONPatch(a, b)); // deep-equals b
+```
+
+Because an application only clones the spine it writes through — and clones it once, no matter how many operations touch the same region — the compiled applier beats the usual clone-and-interpret shape by 5–170x depending on document size (`npm run benchmark:jsonpatch`). Two options tune the copy discipline, mirroring JSLT's `share`/`fresh` dispositions: `values: 'fresh'` deep-copies inserted operation values per application (the default `'share'` inserts them by reference, so treat results as immutable), and `mutate: true` patches in place for the last bit of speed at the cost of atomicity.
+
+[RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396) merge patches ride the same machinery: `compileMergePatch(patch)` pre-splits the patch into remove/set/merge plans, and applying is identity-preserving — a merge that changes nothing returns the target by reference, so it doubles as a cheap change detector. `createMergePatch(source, target)` emits the merge patch (with the RFC's documented `null`-member representability caveat), and `applyMergePatch(doc, patch)` is the one-shot form.
 
 ## The JSONPath compiler
 

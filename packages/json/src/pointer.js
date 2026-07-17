@@ -24,7 +24,7 @@ import {
   isDigitCode,
 } from '@jarenjs/core/scan';
 
-import { NOTHING } from './segments.js';
+import { NOTHING, scanArrayIndex } from './segments.js';
 
 /**
  * Sentinel for the absence of a value, as distinct from the JSON value
@@ -171,37 +171,45 @@ export function parseRelativeJSONPointer(pointer) {
   return { levels, hash: false, segments: scanSegments(pointer, pos) };
 }
 
+const RE_TILDE = /~/g;
+const RE_SLASH = /\//g;
+
+/**
+ * Encode a single reference token for use inside an RFC 6901 JSON
+ * Pointer: `~` becomes `~0` and `/` becomes `~1` (RFC 6901 section 3).
+ * The write-side inverse of the parser's decode; the escape-free common
+ * case returns the input unchanged.
+ * @param {string|number} segment - The raw member name or array index
+ * @returns {string} The encoded reference token
+ * @example
+ * encodeJSONPointerSegment('a/b'); // 'a~1b'
+ */
+export function encodeJSONPointerSegment(segment) {
+  const s = String(segment);
+  return (s.indexOf('~') < 0 && s.indexOf('/') < 0)
+    ? s
+    : s.replace(RE_TILDE, '~0').replace(RE_SLASH, '~1');
+}
+
+/**
+ * Format decoded reference tokens as an RFC 6901 JSON Pointer; the
+ * inverse of `parseJSONPointer`. An empty array formats as the empty
+ * (whole-document) pointer.
+ * @param {(string|number)[]} segments - Decoded reference tokens
+ * @returns {string} The JSON Pointer
+ * @example
+ * formatJSONPointer(['a/b', 0]); // '/a~1b/0'
+ */
+export function formatJSONPointer(segments) {
+  let out = '';
+  for (let i = 0; i < segments.length; i++)
+    out += '/' + encodeJSONPointerSegment(segments[i]);
+  return out;
+}
+
 //#endregion
 
 //#region compiler
-
-// Array indexes are bounded by the maximum array length (2^32 - 1), so a
-// valid index has at most 10 digits and is strictly below 2^32 - 1.
-const MAX_ARRAY_INDEX = 4294967294;
-
-/**
- * Scan `source[start..end)` as an RFC 6901 array index: `0`, or a digit
- * sequence without leading zeros. Returns -1 when the range is not a
- * valid index (`-` is never a valid read index).
- */
-function scanArrayIndex(source, start, end) {
-  const digits = end - start;
-  if (digits === 0 || digits > 10)
-    return -1;
-  const first = source.charCodeAt(start);
-  if (!isDigitCode(first))
-    return -1;
-  if (first === CC_0)
-    return digits === 1 ? 0 : -1;
-  let index = first - CC_0;
-  for (let i = start + 1; i < end; i++) {
-    const c = source.charCodeAt(i);
-    if (!isDigitCode(c))
-      return -1;
-    index = index * 10 + (c - CC_0);
-  }
-  return index <= MAX_ARRAY_INDEX ? index : -1;
-}
 
 /**
  * One pointer hop: an array is addressed by the pre-parsed index, an

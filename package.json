@@ -49,6 +49,7 @@
     "benchmark:jsonpath": "node ./benchmark/jsonpath.js",
     "benchmark:jsonpath:profile": "node ./benchmark/jsonpath.js --profile --scale",
     "benchmark:jsonpointer": "node ./benchmark/jsonpointer.js",
+    "benchmark:jsonpatch": "node ./benchmark/jsonpatch.js",
     "benchmark:jsonquery": "node ./benchmark/jsonquery.js",
     "benchmark:jsonquery:profile": "node ./benchmark/jsonquery.js --profile --scale",
     "benchmark:jslt": "node ./benchmark/jslt.js",

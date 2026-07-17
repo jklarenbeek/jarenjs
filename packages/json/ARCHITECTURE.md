@@ -9,7 +9,8 @@ Everything here follows the house architecture of the schema validator (see [`pa
 | File | Purpose |
 |------|---------|
 | `src/basic.js` | string validation for JSON, JSON Pointer, JSONPath (`isValidJSON`, `isValidJSONPointer`, `isValidJSONPathStrict`, ...) |
-| `src/pointer.js` | the RFC 6901 + Relative JSON Pointer compiler (`compileJSONPointer`, `compileRelativeJSONPointer`, `compileDataRef`) |
+| `src/pointer.js` | the RFC 6901 + Relative JSON Pointer compiler (`compileJSONPointer`, `compileRelativeJSONPointer`, `compileDataRef`) and the write-side encode (`encodeJSONPointerSegment`, `formatJSONPointer`) |
+| `src/patch.js` | JSON Patch (RFC 6902) + JSON Merge Patch (RFC 7396): compiled copy-on-write appliers and the structural diffs |
 | `src/path.js` | the JSONPath compiler: parser, nodes-mode compilers (normalized paths), public API |
 | `src/segments.js` | package-internal runtime segment machinery shared by `path.js` and the query engine (not exported) |
 | `src/query/errors.js` | `JsonQueryCompileError` / `JsonQueryRuntimeError` with `code` + `docPath` |
@@ -25,7 +26,7 @@ Everything here follows the house architecture of the schema validator (see [`pa
 | `src/xquery/parse.js` | the XQuery text front-end: `parseXQuery(text)` → query document |
 | `src/xquery/index.js` | `parseXQuery`, `compileXQuery`, `XQuerySyntaxError` |
 
-Dependency direction: `basic.js` stands alone; `pointer.js` shares only the `NOTHING` sentinel from `segments.js`; `path.js` builds on `segments.js`; the query engine builds on `segments.js` (paths) and `runtime.js`; JSLT consumes the query normalizer/compiler through its package-internal extension point and the nodes-mode segment runner; the XQuery front-end emits query documents and depends only on the JSON format, never on engine internals. `@jarenjs/core` supplies char-code scanning, `equalsJson`, code-point helpers and I-Regexp compilation. JSON Schema remains an injected predicate hook: `@jarenjs/validate/query` may wire into query/JSLT, but this package never imports the validator.
+Dependency direction: `basic.js` stands alone; `pointer.js` shares only the `NOTHING` sentinel and the array-index scanner from `segments.js`; `patch.js` builds on the pointer parser and the same two segment helpers; `path.js` builds on `segments.js`; the query engine builds on `segments.js` (paths) and `runtime.js`; JSLT consumes the query normalizer/compiler through its package-internal extension point and the nodes-mode segment runner; the XQuery front-end emits query documents and depends only on the JSON format, never on engine internals. `@jarenjs/core` supplies char-code scanning, `equalsJson`, code-point helpers and I-Regexp compilation. JSON Schema remains an injected predicate hook: `@jarenjs/validate/query` may wire into query/JSLT, but this package never imports the validator.
 
 ## The two-stage pipeline
 
@@ -40,6 +41,14 @@ Stage 1 owns *all* static errors: the JSONPath parser is a single-pass, characte
 ### JSON Pointer: segment-count specialization
 
 `pointer.js` follows the pipeline in miniature. The strict parsers (`parseJSONPointer`, `parseRelativeJSONPointer`) are single-pass char-code scanners with a lazy-decode fast path: an escape-free segment is a direct slice, and only segments containing `~` build a decoded string. The compilers pre-decode every member name and pre-parse every array index (one segment, two forms — RFC 6901 lets `"2"` address both a `"2"` member and array element 2), then specialize the getter by segment count (0 = identity, 1 and 2 = unrolled hops, N = a loop over parallel name/index arrays). A relative pointer trims its level count off the runtime location by scanning **backwards** for the N-th `/` — no split, no arrays — and resolution returns the `NOTHING` sentinel shared with `segments.js`, so pointer and JSONPath results compose. Nothing is allocated on any resolution path.
+
+### JSON Patch: compiled operations over copy-on-write
+
+`patch.js` runs the pipeline over *two* documents: the patch compiles once, the data document is what varies per call. Stage 1 (`compileJSONPatch`) owns all `JP0xxx` errors — operation shapes, unknown ops, pointer syntax (wrapping the `JSONPointerSyntaxError` as `cause`), the move `from`-is-prefix-of-`path` rule — each with a `docPath` into the patch document. Every `path`/`from` is pre-parsed into decoded member names alongside pre-scanned array indexes (the pointer compiler's one-token-two-forms rule), with the last token split off for the mutating operations, and each operation becomes one closure with its error strings pre-bound.
+
+Stage 2 is a copy-on-write interpreter of those closures. An application carries `{root, owned}` where `owned` is the set of nodes this application created: the first write along a path shallow-clones the spine from the root and registers the clones; later writes find the spine in the set and mutate in place. Consequences: the input is never touched (RFC 6902's atomic-application requirement costs nothing — a failing op just abandons the state), untouched subtrees are shared with the result (the JSLT `share` discipline), and k operations through one region cost one spine copy. `copy` deep-clones its source only when the subtree contains owned nodes (otherwise the inserted alias could be mutated through by a later operation); `mutate: true` sets `owned = null` (everything owned, nothing cloned) and then forces per-application deep copies of inserted values, since in-place results must not share structure with the patch document. Object member writes go through the `setMember`/`__proto__` discipline of the query engine, and the object shallow clone relies on spread's `CreateDataProperty` semantics for the same reason.
+
+`test` and `copy`-reads never clone — they run a plain pre-compiled walk against the current root. The merge-patch side (`compileMergePatch`) pre-splits each patch level into remove/set/merge plans and applies them identity-preservingly: a level that changes nothing returns its target by reference, which makes a no-op merge return the input document itself. The structural diffs (`createJSONPatch`, `createMergePatch`) share `equalsJson`; the array diff trims the deep-equal common prefix/suffix and recurses index-wise over the overlap — linear and minimal for in-place edits and head/tail insertions, correct-but-larger for mid-array reorderings (an LCS mode is future work).
 
 ### JSONPath: parser, segments, two output modes
 
