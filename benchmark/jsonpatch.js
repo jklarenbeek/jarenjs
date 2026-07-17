@@ -8,17 +8,26 @@
  * shape most JSON Patch libraries ship: structuredClone the document, then
  * re-parse every pointer and dispatch every operation per application).
  *
- * Columns:
- *   compiled     - compile once, apply per iteration (copy-on-write)
- *   mutate       - compiled applier with { mutate: true } (in place)
- *   one-shot     - applyJSONPatch (compile + apply per iteration)
- *   naive        - structuredClone + interpretive apply per iteration
+ * Before timing anything the tool replays the official json-patch-tests
+ * vectors (vendored under test/json/fixtures/json-patch/) through
+ * applyJSONPatch - correctness first, then speed.
+ *
+ * Columns (RFC 6902 table):
+ *   jaren compiled - compile once, apply per iteration (copy-on-write)
+ *   jaren mutate   - compiled applier with { mutate: true } (in place)
+ *   jaren one-shot - applyJSONPatch (compile + apply per iteration)
+ *   naive          - structuredClone + interpretive apply per iteration
  *
  * Usage:
  *   node benchmark/jsonpatch.js
  *   node benchmark/jsonpatch.js --iterations 500000
+ *   node benchmark/jsonpatch.js --output json --filepath results.json
  */
 
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
+
+import { equalsJson } from '@jarenjs/core/object';
 import {
   compileJSONPatch,
   applyJSONPatch,
@@ -30,6 +39,41 @@ import {
 
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP_ITERATIONS = 5_000;
+
+//#region official test vectors (correctness gate)
+
+const FIXTURES_DIR = fileURLToPath(new URL('../test/json/fixtures/json-patch/', import.meta.url));
+
+function runConformance() {
+  const files = {};
+  let total = 0;
+  let pass = 0;
+  for (const name of ['spec_tests.json', 'tests.json']) {
+    const cases = JSON.parse(fs.readFileSync(FIXTURES_DIR + name, 'utf8'));
+    let fileTotal = 0;
+    let filePass = 0;
+    for (const test of cases) {
+      if (test.disabled)
+        continue;
+      fileTotal++;
+      try {
+        const result = applyJSONPatch(test.doc, test.patch);
+        if (test.error === undefined && (test.expected === undefined || equalsJson(result, test.expected)))
+          filePass++;
+      }
+      catch {
+        if (test.error !== undefined)
+          filePass++;
+      }
+    }
+    files[name] = { total: fileTotal, pass: filePass };
+    total += fileTotal;
+    pass += filePass;
+  }
+  return { total, pass, files };
+}
+
+//#endregion
 
 //#region naive interpretive implementation (typical library shape)
 
@@ -127,7 +171,7 @@ function makeOrder(lines) {
 
 const PATCH_SCENARIOS = [
   {
-    name: 'proposal example (4 ops, small doc)',
+    name: 'small update (4 ops, small doc)',
     doc: { baz: 'qux', foo: 'bar', numbers: [1, 2, 3] },
     patch: [
       { op: 'replace', path: '/baz', value: 'boo' },
@@ -179,30 +223,20 @@ const MERGE_SCENARIOS = [
     doc: makeOrder(200),
     patch: { customer: { address: { zip: '10999' } }, version: 8 },
   },
+  {
+    name: 'no-op merge (identity, 200-line order)',
+    doc: makeOrder(200),
+    patch: { customer: { tier: 'gold' } },
+  },
 ];
 
-const DIFF_SCENARIOS = [
-  {
-    name: 'createJSONPatch (small change, 200-line order)',
-    run: () => {
-      const source = makeOrder(200);
-      const target = structuredClone(source);
-      target.lines[100].qty = 9;
-      target.customer.tier = 'platinum';
-      return () => createJSONPatch(source, target);
-    },
-  },
-  {
-    name: 'createMergePatch (small change, 200-line order)',
-    run: () => {
-      const source = makeOrder(200);
-      const target = structuredClone(source);
-      target.lines[100].qty = 9;
-      target.customer.tier = 'platinum';
-      return () => createMergePatch(source, target);
-    },
-  },
-];
+function makeDiffPair() {
+  const source = makeOrder(200);
+  const target = structuredClone(source);
+  target.lines[100].qty = 9;
+  target.customer.tier = 'platinum';
+  return { source, target };
+}
 
 //#endregion
 
@@ -232,70 +266,130 @@ function padLeft(str, width) {
   return String(str).padStart(width);
 }
 
-function printTable(title, columns, rows, iterations) {
-  const nameWidth = Math.max(30, ...rows.map((r) => r.name.length + 2));
-  const colWidth = 14;
-  console.log(`\n${title} (${iterations.toLocaleString()} iterations, ns/op lower is better)\n`);
-  console.log(pad('scenario', nameWidth) + columns.map((c) => padLeft(c, colWidth)).join('') + padLeft('speedup', 10));
-  console.log('-'.repeat(nameWidth + colWidth * columns.length + 10));
-  for (const row of rows) {
+function printTable(table, iterations) {
+  const nameWidth = Math.max(30, ...table.rows.map((r) => r.name.length + 2));
+  const colWidth = 16;
+  console.log(`\n${table.title} (${iterations.toLocaleString()} iterations, ns/op lower is better)\n`);
+  console.log(pad('scenario', nameWidth) + table.columns.map((c) => padLeft(c, colWidth)).join('') + padLeft('speedup', 10));
+  console.log('-'.repeat(nameWidth + colWidth * table.columns.length + 10));
+  for (const row of table.rows) {
     const cols = row.results.map((ns) => padLeft(ns === null ? 'n/a' : formatNs(ns), colWidth));
-    // speedup of the compiled applier (first column) over the naive baseline (last column)
+    // speedup of the first column over the last (the naive baseline)
     const naive = row.results[row.results.length - 1];
-    const speedup = naive !== null ? `${(naive / row.results[0]).toFixed(1)}x` : '-';
+    const speedup = (naive !== null && row.results.length > 1) ? `${(naive / row.results[0]).toFixed(1)}x` : '-';
     console.log(pad(row.name, nameWidth) + cols.join('') + padLeft(speedup, 10));
   }
 }
 
 //#endregion
 
+function collectTables(iterations) {
+  const patchTable = {
+    key: 'patch',
+    title: 'JSON Patch (RFC 6902) apply',
+    columns: ['jaren compiled', 'jaren mutate', 'jaren one-shot', 'naive'],
+    rows: PATCH_SCENARIOS.map(({ name, doc, patch }) => {
+      const compiled = compileJSONPatch(patch);
+      const mutating = compileJSONPatch(patch, { mutate: true });
+      // in-place application consumes its input: patch a fresh clone each
+      // iteration and subtract the clone cost measured separately
+      const cloneNs = measureNsPerOp(() => structuredClone(doc), iterations / 10);
+      const mutateNs = measureNsPerOp(() => mutating(structuredClone(doc)), iterations / 10) - cloneNs;
+      return {
+        name,
+        ops: patch.length,
+        results: [
+          measureNsPerOp(() => compiled(doc), iterations),
+          Math.max(0, mutateNs),
+          measureNsPerOp(() => applyJSONPatch(doc, patch), iterations),
+          measureNsPerOp(() => naiveApplyPatch(doc, patch), iterations / 10),
+        ],
+      };
+    }),
+  };
+
+  const mergeTable = {
+    key: 'merge',
+    title: 'JSON Merge Patch (RFC 7396) apply',
+    columns: ['jaren compiled', 'naive'],
+    rows: MERGE_SCENARIOS.map(({ name, doc, patch }) => {
+      const compiled = compileMergePatch(patch);
+      return {
+        name,
+        results: [
+          measureNsPerOp(() => compiled(doc), iterations),
+          measureNsPerOp(() => naiveMergePatch(doc, patch), iterations / 10),
+        ],
+      };
+    }),
+  };
+
+  const { source, target } = makeDiffPair();
+  const diffTable = {
+    key: 'diff',
+    title: 'Structural diff (small change, 200-line order)',
+    columns: ['jaren'],
+    rows: [
+      { name: 'createJSONPatch', results: [measureNsPerOp(() => createJSONPatch(source, target), iterations / 10)] },
+      { name: 'createMergePatch', results: [measureNsPerOp(() => createMergePatch(source, target), iterations / 10)] },
+    ],
+  };
+
+  return [patchTable, mergeTable, diffTable];
+}
+
+function measureCompile(iterations) {
+  const patches = PATCH_SCENARIOS.map((s) => s.patch);
+  const ops = patches.reduce((sum, p) => sum + p.length, 0);
+  const ns = measureNsPerOp(() => {
+    for (const patch of patches)
+      compileJSONPatch(patch);
+  }, Math.min(iterations, 100_000));
+  return { jaren: { ns, patches: patches.length, ops } };
+}
+
 function main() {
   const args = process.argv.slice(2);
-  let iterations = DEFAULT_ITERATIONS;
+  const options = { iterations: DEFAULT_ITERATIONS, output: 'console', filepath: null };
   const iterIdx = args.indexOf('--iterations');
   if (iterIdx >= 0)
-    iterations = parseInt(args[iterIdx + 1], 10);
+    options.iterations = parseInt(args[iterIdx + 1], 10);
+  const outIdx = args.findIndex((a) => a === '--output' || a === '-o');
+  if (outIdx >= 0)
+    options.output = args[outIdx + 1];
+  const fileIdx = args.indexOf('--filepath');
+  if (fileIdx >= 0)
+    options.filepath = args[fileIdx + 1];
 
   console.log(`JSON Patch benchmark - node ${process.version}`);
 
-  const patchRows = PATCH_SCENARIOS.map(({ name, doc, patch }) => {
-    const compiled = compileJSONPatch(patch);
-    const mutating = compileJSONPatch(patch, { mutate: true });
-    // in-place application consumes its input: patch a fresh clone each
-    // iteration and subtract the clone cost measured separately
-    const cloneNs = measureNsPerOp(() => structuredClone(doc), iterations / 10);
-    const mutateNs = measureNsPerOp(() => mutating(structuredClone(doc)), iterations / 10) - cloneNs;
-    return {
-      name,
-      results: [
-        measureNsPerOp(() => compiled(doc), iterations),
-        Math.max(0, mutateNs),
-        measureNsPerOp(() => applyJSONPatch(doc, patch), iterations),
-        measureNsPerOp(() => naiveApplyPatch(doc, patch), iterations / 10),
-      ],
-    };
-  });
-  printTable('JSON Patch (RFC 6902) apply', ['compiled', 'mutate', 'one-shot', 'naive'], patchRows, iterations);
+  const conformance = runConformance();
+  console.log(`\njson-patch-tests conformance: ${conformance.pass}/${conformance.total} `
+    + `(${Object.entries(conformance.files).map(([f, s]) => `${f}: ${s.pass}/${s.total}`).join(', ')})`);
+  if (conformance.pass !== conformance.total)
+    throw new Error('conformance failures - fix the engine before benchmarking it');
 
-  const mergeRows = MERGE_SCENARIOS.map(({ name, doc, patch }) => {
-    const compiled = compileMergePatch(patch);
-    return {
-      name,
-      results: [
-        measureNsPerOp(() => compiled(doc), iterations),
-        null,
-        null,
-        measureNsPerOp(() => naiveMergePatch(doc, patch), iterations / 10),
-      ],
-    };
-  });
-  printTable('JSON Merge Patch (RFC 7396) apply', ['compiled', '', '', 'naive'], mergeRows, iterations);
+  const tables = collectTables(options.iterations);
+  const compile = measureCompile(options.iterations);
 
-  const diffRows = DIFF_SCENARIOS.map(({ name, run }) => {
-    const fn = run();
-    return { name, results: [measureNsPerOp(fn, iterations / 10)] };
-  });
-  printTable('Structural diff', ['jaren'], diffRows, iterations);
+  for (const table of tables)
+    printTable(table, options.iterations);
+  console.log(`\ncompile cost: ${formatNs(compile.jaren.ns / compile.jaren.patches)} per patch `
+    + `(${compile.jaren.patches} patches, ${compile.jaren.ops} ops in ${formatNs(compile.jaren.ns)})`);
+
+  if (options.output === 'json' && options.filepath !== null) {
+    const content = JSON.stringify({
+      mode: 'patch',
+      date: new Date().toISOString(),
+      node: process.version,
+      iterations: options.iterations,
+      conformance,
+      tables,
+      compile,
+    }, null, 2);
+    fs.writeFileSync(options.filepath, content);
+    console.log(`Results written to ${options.filepath}`);
+  }
 }
 
 main();

@@ -13,6 +13,7 @@
  *   jsonquery.json    jsonquery.js      — scenario matrix vs fontoxpath/jsonata (+ sources)
  *   jslt.json         jslt.js           — scenario matrix vs native JS/JSONata (+ sources)
  *   jsonpointer.json  jsonpointer.js    — compiled vs legacy vs jsonpointer npm
+ *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -43,7 +44,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, qt3');
         process.exit(0);
         break;
       default:
@@ -317,6 +318,26 @@ function generateJsonPointer(tmp, options) {
   };
 }
 
+function generateJsonPatch(tmp, options) {
+  const file = path.join(tmp, 'jsonpatch.json');
+  runTool([
+    'benchmark/jsonpatch.js',
+    '--iterations', String(options.quick ? 5_000 : 200_000),
+    '--output', 'json', '--filepath', file,
+  ]);
+  const raw = readJson(file);
+  return {
+    ...raw,
+    tables: raw.tables.map((table) => ({
+      ...table,
+      rows: table.rows.map((row) => ({ ...row, results: row.results.map(sig4) })),
+    })),
+    compile: {
+      jaren: { ...raw.compile.jaren, ns: sig4(raw.compile.jaren.ns) },
+    },
+  };
+}
+
 function generateQt3() {
   let stdout;
   try {
@@ -372,8 +393,20 @@ async function main() {
     generated.jslt = await generateJslt(tmp, options);
   if (!options.skip.has('jsonpointer'))
     generated.jsonpointer = generateJsonPointer(tmp, options);
+  if (!options.skip.has('jsonpatch'))
+    generated.jsonpatch = generateJsonPatch(tmp, options);
 
-  const qt3 = options.skip.has('qt3') ? null : generateQt3();
+  // Skipped suites keep their previous meta entries (when a meta.json
+  // exists), so partial regeneration never clobbers the overview.
+  let previousMeta = null;
+  try {
+    previousMeta = readJson(path.join(OUT_DIR, 'meta.json'));
+  }
+  catch {
+    previousMeta = null;
+  }
+
+  const qt3 = options.skip.has('qt3') ? (previousMeta?.qt3 ?? null) : generateQt3();
 
   console.log('\nAssembling website data files...');
   for (const [name, data] of Object.entries(generated))
@@ -388,22 +421,36 @@ async function main() {
     platform: `${os.type()} ${os.arch()}`,
     version: rootPkg.version,
     quick: options.quick,
-    iterations: { validate: options.iterations },
+    iterations: {
+      validate: generated.validate === undefined
+        ? (previousMeta?.iterations?.validate ?? options.iterations)
+        : options.iterations,
+    },
     qt3,
     conformance: {
-      jsonSchema: generated.validate === undefined ? null : {
-        engineStats: generated.validate.summary.engineStats,
-        drafts: generated.validate.metadata.drafts,
-      },
-      jsonpath: generated.jsonpath === undefined ? null : {
-        total: generated.jsonpath.compliance.total,
-        pass: Object.fromEntries(
-          ['jaren', 'json-p3'].map((engine) => [
-            engine,
-            generated.jsonpath.compliance.groups
-              .reduce((sum, [, entry]) => sum + (entry.pass[engine] ?? 0), 0),
-          ])),
-      },
+      jsonSchema: generated.validate === undefined
+        ? (previousMeta?.conformance?.jsonSchema ?? null)
+        : {
+          engineStats: generated.validate.summary.engineStats,
+          drafts: generated.validate.metadata.drafts,
+        },
+      jsonpath: generated.jsonpath === undefined
+        ? (previousMeta?.conformance?.jsonpath ?? null)
+        : {
+          total: generated.jsonpath.compliance.total,
+          pass: Object.fromEntries(
+            ['jaren', 'json-p3'].map((engine) => [
+              engine,
+              generated.jsonpath.compliance.groups
+                .reduce((sum, [, entry]) => sum + (entry.pass[engine] ?? 0), 0),
+            ])),
+        },
+      jsonPatch: generated.jsonpatch === undefined
+        ? (previousMeta?.conformance?.jsonPatch ?? null)
+        : {
+          total: generated.jsonpatch.conformance.total,
+          pass: generated.jsonpatch.conformance.pass,
+        },
     },
   };
   writeJson('meta.json', meta);

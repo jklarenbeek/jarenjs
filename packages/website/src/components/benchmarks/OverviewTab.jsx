@@ -25,6 +25,7 @@ function OverviewTab({ onSelect }) {
   const { data: jsonquery } = useBenchmarkFile('jsonquery');
   const { data: jslt } = useBenchmarkFile('jslt');
   const { data: jsonpointer } = useBenchmarkFile('jsonpointer');
+  const { data: jsonpatch } = useBenchmarkFile('jsonpatch');
 
   const suiteCards = useMemo(() => {
     const cards = [];
@@ -90,13 +91,28 @@ function OverviewTab({ onSelect }) {
         sub: 'compiled getters on the $data hot path',
       });
     }
+    if (jsonpatch) {
+      const speedups = jsonpatch.tables
+        .filter((t) => t.columns.length > 1)
+        .flatMap((t) => t.rows
+          .filter((r) => r.results[0] != null && r.results[r.results.length - 1] != null)
+          .map((r) => r.results[r.results.length - 1] / r.results[0]));
+      cards.push({
+        key: 'jsonpatch',
+        title: 'JSON Patch & Merge Patch (RFC 6902/7396)',
+        rival: 'vs naive clone-and-interpret',
+        headline: `${formatRatio(Math.min(...speedups))}–${formatRatio(Math.max(...speedups))} faster`,
+        sub: 'copy-on-write appliers: clone the written spine once, share the rest',
+      });
+    }
     return cards;
-  }, [validate, jsonpath, jsonquery, jslt, jsonpointer]);
+  }, [validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch]);
 
   if (!meta) return <BenchmarkFallback loading={loading} name="meta" />;
 
   const stats = meta.conformance?.jsonSchema?.engineStats;
   const cts = meta.conformance?.jsonpath;
+  const patchConformance = meta.conformance?.jsonPatch;
 
   return (
     <div className="space-y-6">
@@ -108,7 +124,7 @@ function OverviewTab({ onSelect }) {
             Conformance — checked before a single nanosecond is measured
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid md:grid-cols-3 gap-4">
+        <CardContent className={`grid md:grid-cols-2 gap-4 ${patchConformance ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
           <div className="rounded-lg border p-4">
             <p className="text-sm font-semibold mb-2">Official JSON-Schema-Test-Suite</p>
             {stats && Object.entries(stats.jaren).map(([draft, s]) => (
@@ -138,6 +154,17 @@ function OverviewTab({ onSelect }) {
               comparison is between two fully compliant engines.
             </p>
           </div>
+
+          {patchConformance && (
+            <div className="rounded-lg border p-4">
+              <p className="text-sm font-semibold mb-2">json-patch-tests (RFC 6902)</p>
+              <p className="text-3xl font-bold font-mono">{patchConformance.pass}/{patchConformance.total}</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                The official JSON Patch vectors — spec examples and community edge cases — replayed through the
+                copy-on-write applier before it is timed.
+              </p>
+            </div>
+          )}
 
           <div className="rounded-lg border p-4">
             <p className="text-sm font-semibold mb-2">W3C QT3 (XQuery/XPath 3.1)</p>

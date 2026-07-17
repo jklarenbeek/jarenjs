@@ -89,6 +89,94 @@ export const pointerExamples = [
   },
 ];
 
+export const patchExamples = [
+  {
+    name: 'RFC 6902 basics',
+    mode: 'patch',
+    document: { baz: 'qux', foo: 'bar', numbers: [1, 2, 3] },
+    patch: [
+      { op: 'replace', path: '/baz', value: 'boo' },
+      { op: 'add', path: '/hello', value: ['world'] },
+      { op: 'remove', path: '/foo' },
+      { op: 'add', path: '/numbers/-', value: 4 },
+    ],
+  },
+  {
+    name: 'Guarded update (test op)',
+    mode: 'patch',
+    document: {
+      version: 5,
+      user: { name: 'Alice', tags: ['reader'] },
+    },
+    patch: [
+      { op: 'test', path: '/version', value: 5 },
+      { op: 'replace', path: '/user/name', value: 'Bob' },
+      { op: 'add', path: '/user/tags/-', value: 'admin' },
+      { op: 'replace', path: '/version', value: 6 },
+    ],
+  },
+  {
+    name: 'Move & copy',
+    mode: 'patch',
+    document: {
+      draft: { title: 'Sayings of the Century', price: 8.95 },
+      published: [],
+      template: { reviewed: false },
+    },
+    patch: [
+      { op: 'copy', from: '/template/reviewed', path: '/draft/reviewed' },
+      { op: 'move', from: '/draft', path: '/published/-' },
+    ],
+  },
+  {
+    name: 'Atomic abort (failing test)',
+    mode: 'patch',
+    document: { version: 5, user: { name: 'Alice' } },
+    patch: [
+      { op: 'replace', path: '/user/name', value: 'Mallory' },
+      { op: 'test', path: '/version', value: 99 },
+    ],
+  },
+  {
+    name: 'Merge: RFC 7396 example',
+    mode: 'merge',
+    document: {
+      name: 'Alice',
+      age: 30,
+      address: { city: 'Berlin', zip: '10115' },
+      temp: 'delete-me',
+    },
+    patch: {
+      age: 31,
+      address: { zip: '10999' },
+      temp: null,
+      newField: 'hello',
+    },
+  },
+  {
+    name: 'Merge: no-op (shared)',
+    mode: 'merge',
+    document: BOOKSTORE,
+    patch: { store: { bicycle: { color: 'red' } } },
+  },
+  {
+    name: 'Diff two documents',
+    mode: 'diff',
+    document: BOOKSTORE,
+    target: {
+      store: {
+        book: [
+          { category: 'reference', author: 'Nigel Rees', title: 'Sayings of the Century', price: 9.95 },
+          { category: 'fiction', author: 'Evelyn Waugh', title: 'Sword of Honour', price: 12.99 },
+          { category: 'fiction', author: 'Herman Melville', title: 'Moby Dick', isbn: '0-553-21311-3', price: 8.99 },
+        ],
+        bicycle: { color: 'black', price: 399, onSale: true },
+      },
+      ratings: BOOKSTORE.ratings,
+    },
+  },
+];
+
 export const queryExamples = [
   {
     name: 'Filter + order (spec A.2)',

@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@components/ui/tabs';
 import { LiveValidator } from '@components/demo/LiveValidator';
 import { PathPlayground } from '@components/demo/PathPlayground';
 import { PointerPlayground } from '@components/demo/PointerPlayground';
+import { PatchPlayground } from '@components/demo/PatchPlayground';
 import { QueryPlayground } from '@components/demo/QueryPlayground';
 import { JsltPlayground } from '@components/demo/JsltPlayground';
 import { JtltPlayground } from '@components/demo/JtltPlayground';
@@ -25,6 +26,11 @@ const ENGINES = [
     key: 'pointer',
     label: 'JSON Pointer',
     blurb: 'RFC 6901 absolute and relative pointers — the compiled getters behind the $data keyword.',
+  },
+  {
+    key: 'patch',
+    label: 'JSON Patch',
+    blurb: 'RFC 6902 and RFC 7396 partial updates, applied copy-on-write — plus a structural diff that writes the patches for you.',
   },
   {
     key: 'query',
@@ -89,6 +95,9 @@ function Playground() {
           </TabsContent>
           <TabsContent value="pointer">
             <PointerPlayground />
+          </TabsContent>
+          <TabsContent value="patch">
+            <PatchPlayground />
           </TabsContent>
           <TabsContent value="query">
             <QueryPlayground />

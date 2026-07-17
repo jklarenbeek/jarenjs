@@ -26,7 +26,7 @@ async function fetchBenchmarkFile(name) {
 /**
  * Loads one benchmark data file from public/benchmarks/.
  * @param {string} name - File basename: 'meta', 'validate', 'jsonpath',
- *   'jsonquery', 'jslt' or 'jsonpointer'
+ *   'jsonquery', 'jslt', 'jsonpointer' or 'jsonpatch'
  * @returns {{ data: Object|null, loading: boolean }}
  */
 export function useBenchmarkFile(name) {

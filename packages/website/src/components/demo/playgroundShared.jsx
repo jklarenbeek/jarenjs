@@ -110,6 +110,7 @@ function describeEngineError(err, fallbackTitle) {
   const parts = [];
   if (err.code) parts.push(`code: ${err.code}`);
   if (err.docPath !== undefined && err.docPath !== null) parts.push(`docPath: ${err.docPath === '' ? '"" (document root)' : err.docPath}`);
+  if (err.dataPath !== undefined && err.dataPath !== null) parts.push(`dataPath: ${err.dataPath === '' ? '"" (document root)' : err.dataPath}`);
   if (typeof err.position === 'number') parts.push(`position: ${err.position}`);
   return {
     title: err.code ?? fallbackTitle ?? err.name ?? 'Error',

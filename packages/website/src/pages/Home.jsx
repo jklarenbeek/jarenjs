@@ -98,6 +98,34 @@ price({}) === JSONPOINTER_NOTHING; // misses are a sentinel, not a throw`,
     blurb: 'Pointers compile to getters specialized by segment count. Misses return a shared sentinel — the zero-allocation path the validator’s $data keyword runs per instance.',
   },
   {
+    key: 'patch',
+    label: 'Patch',
+    title: 'RFC 6902 + Merge Patch, copy-on-write',
+    perf: '108/108 official vectors · 5–170x vs clone-and-interpret',
+    playground: '/playground?engine=patch',
+    benchmarks: '/benchmarks?suite=jsonpatch',
+    code: `import {
+  compileJSONPatch,
+  createJSONPatch,
+  applyMergePatch,
+} from '@jarenjs/json';
+
+// compile once — every pointer parsed, every op a closure
+const apply = compileJSONPatch([
+  { op: 'test', path: '/version', value: 5 },
+  { op: 'replace', path: '/user/name', value: 'Bob' },
+  { op: 'add', path: '/user/tags/-', value: 'admin' },
+]);
+
+const next = apply(doc);
+// doc is untouched: only the written spine is cloned, the rest
+// is SHARED — and a failing op aborts atomically (RFC 6902 §5)
+
+createJSONPatch(doc, next); // the diff writes the patch for you
+applyMergePatch(doc, { user: { name: 'Bob' }, temp: null });`,
+    blurb: 'Partial updates as standards: JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396), applied copy-on-write so the input is never touched and atomic abort costs nothing. Structural diffs emit either format — a ready-made change feed for forms, HTTP PATCH endpoints and optimistic concurrency.',
+  },
+  {
     key: 'query',
     label: 'Query',
     title: 'XQuery 3.1 semantics, JSON syntax',
@@ -266,7 +294,7 @@ const PACKAGES = [
   },
   {
     name: '@jarenjs/json',
-    description: 'The addressing & transformation stack: JSON Pointer, JSONPath (RFC 9535), the Jaren JSON Query language, JSLT stylesheets, JTLT text templates, and the XQuery text front-end.',
+    description: 'The addressing & transformation stack: JSON Pointer, JSON Patch & Merge Patch, JSONPath (RFC 9535), the Jaren JSON Query language, JSLT stylesheets, JTLT text templates, and the XQuery text front-end.',
   },
   {
     name: '@jarenjs/validate',
@@ -393,7 +421,7 @@ function Home() {
       <section className="py-20">
         <Container>
           <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold mb-3">Eight tools, one stack</h2>
+            <h2 className="text-3xl font-bold mb-3">Nine tools, one stack</h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
               Each layer is a compiler over the same primitives — pointers feed the validator,
               JSONPath feeds the query language, queries power stylesheets, templates, schemas and forms.
@@ -432,6 +460,7 @@ function Home() {
                 { label: 'JSON Query', vs: 'vs fontoxpath / JSONata', num: '14–215x / 10–63x faster' },
                 { label: 'JSLT identity', vs: 'vs deep-copying engines', num: 'nanoseconds at any document size' },
                 { label: 'JSON Pointer', vs: 'vs interpretive resolution', num: '12–16x faster, zero allocation' },
+                { label: 'JSON Patch & Merge Patch', vs: 'vs clone-and-interpret patching', num: '5–170x faster, atomic for free' },
               ].map((row) => (
                 <div key={row.label} className="flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3">
                   <div>
@@ -510,9 +539,9 @@ function Home() {
           <div className="text-center max-w-2xl mx-auto">
             <h2 className="text-3xl font-bold mb-4">See it run</h2>
             <p className="text-primary-foreground/80 mb-8">
-              Every compiler in this suite runs live in your browser — validate a schema, join two arrays with a
-              query, transform a document with a stylesheet, render it to Markdown with a template, or type
-              XQuery and watch it become JSON.
+              Every compiler in this suite runs live in your browser — validate a schema, patch a document and
+              diff it back, join two arrays with a query, transform a document with a stylesheet, render it to
+              Markdown with a template, or type XQuery and watch it become JSON.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Link to="/playground">

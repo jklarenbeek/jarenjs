@@ -10,6 +10,7 @@ import { Play } from 'lucide-react';
 import {
   pathExamples,
   pointerExamples,
+  patchExamples,
   queryExamples,
   jsltExamples,
   jtltExamples,
@@ -23,6 +24,7 @@ const SECTIONS = [
   { key: 'schema', label: 'JSON Schema' },
   { key: 'jsonpath', label: 'JSONPath' },
   { key: 'pointer', label: 'JSON Pointer' },
+  { key: 'patch', label: 'JSON Patch' },
   { key: 'query', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
   { key: 'jtlt', label: 'JTLT' },
@@ -165,6 +167,42 @@ function Examples() {
                 </table>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* JSON Patch */}
+          <TabsContent value="patch">
+            <SectionIntro
+              blurb="Partial updates both ways: precise RFC 6902 operations (with test preconditions, moves and copies), document-shaped RFC 7396 merges, and structural diffs that write either format from two documents."
+              playground="/playground?engine=patch"
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              {patchExamples.map((example) => (
+                <Card key={example.name}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{example.name}</CardTitle>
+                    <CardDescription>
+                      {example.mode === 'patch' && 'JSON Patch (RFC 6902) — applied copy-on-write, atomically'}
+                      {example.mode === 'merge' && 'JSON Merge Patch (RFC 7396) — the patch looks like the document'}
+                      {example.mode === 'diff' && 'Structural diff — createJSONPatch / createMergePatch emit the patch'}
+                    </CardDescription>
+                  </CardHeader>
+                  <Tabs defaultValue="patch" className="px-6 pb-6">
+                    <TabsList>
+                      <TabsTrigger value="patch">
+                        {example.mode === 'diff' ? 'Target' : example.mode === 'merge' ? 'Merge patch' : 'Patch'}
+                      </TabsTrigger>
+                      <TabsTrigger value="document">{example.mode === 'diff' ? 'Source' : 'Document'}</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="patch" className="mt-4">
+                      <CodeBlock showCopy>{pretty(example.mode === 'diff' ? example.target : example.patch)}</CodeBlock>
+                    </TabsContent>
+                    <TabsContent value="document" className="mt-4">
+                      <CodeBlock showCopy>{pretty(example.document)}</CodeBlock>
+                    </TabsContent>
+                  </Tabs>
+                </Card>
+              ))}
+            </div>
           </TabsContent>
 
           {/* JSON Query */}

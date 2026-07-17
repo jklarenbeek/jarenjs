@@ -10,6 +10,7 @@ import { PathBenchmark } from '@components/benchmarks/PathBenchmark';
 import { QueryBenchmark } from '@components/benchmarks/QueryBenchmark';
 import { JsltBenchmark } from '@components/benchmarks/JsltBenchmark';
 import { PointerBenchmark } from '@components/benchmarks/PointerBenchmark';
+import { PatchBenchmark } from '@components/benchmarks/PatchBenchmark';
 
 const SUITES = [
   { key: 'overview', label: 'Overview' },
@@ -18,6 +19,7 @@ const SUITES = [
   { key: 'jsonquery', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
   { key: 'jsonpointer', label: 'JSON Pointer' },
+  { key: 'jsonpatch', label: 'JSON Patch' },
 ];
 
 function Benchmarks() {
@@ -36,7 +38,7 @@ function Benchmarks() {
         <div className="mb-6">
           <h1 className="text-3xl font-bold mb-2">Benchmarks</h1>
           <p className="text-muted-foreground max-w-3xl">
-            Five engines, each measured against the strongest competitor on its own turf — down to the individual
+            Six engines, each measured against the strongest competitor on its own turf — down to the individual
             test case. Correctness first: every suite asserts conformance or result equivalence before timing anything.
           </p>
           <div className="mt-3">
@@ -68,6 +70,9 @@ function Benchmarks() {
           </TabsContent>
           <TabsContent value="jsonpointer">
             <PointerBenchmark />
+          </TabsContent>
+          <TabsContent value="jsonpatch">
+            <PatchBenchmark />
           </TabsContent>
         </Tabs>
       </Container>

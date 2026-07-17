@@ -1,9 +1,9 @@
 # JarenJS Website
 
 The official GitHub Pages site for Jaren — a showcase for the complete toolchain: the JSON Schema
-validating compiler and the addressing/query/transformation stack around it (JSON Pointer, JSONPath,
-the Jaren JSON Query language, JSLT stylesheets, JTLT text templates, the XQuery front-end, formats
-and form generation).
+validating compiler and the addressing/query/transformation stack around it (JSON Pointer, JSON Patch
+& Merge Patch, JSONPath, the Jaren JSON Query language, JSLT stylesheets, JTLT text templates, the
+XQuery front-end, formats and form generation).
 
 ## What's on it
 
@@ -13,17 +13,21 @@ and form generation).
   - *JSON Schema*: compile + validate per keystroke, with the `@jarenjs/forms` generated-form tab
   - *JSONPath*: values and RFC 9535 normalized paths per keystroke
   - *JSON Pointer*: absolute + relative pointers (the `$data` hot path)
+  - *JSON Patch*: RFC 6902 + RFC 7396 applied copy-on-write per keystroke, with error `docPath`/`dataPath`,
+    the `=== input` shared badge on no-op merges, and a diff mode that writes both patch formats
   - *JSON Query*: FLWOR/joins/grouping, externals, `$valid` with a real compiled schema
   - *JSLT*: stylesheets with the `=== input` shared-identity badge
   - *JTLT*: templates rendering JSON to Markdown/XML/code, with the compiled JSLT stylesheet one click away
   - *XQuery*: text → emitted query document → result, in one pipeline
-- **Benchmarks** — five suites, each against the strongest competitor on its own turf, with
+- **Benchmarks** — six suites, each against the strongest competitor on its own turf, with
   drill-down to **every individual test case** (search, sort, winner filters, per-test ratio bars):
   - JSON Schema vs Ajv (per-test, the official suite)
   - JSONPath vs json-p3 (all 456 timed CTS queries + synthetic scale scenarios)
   - JSON Query vs fontoxpath/JSONata (scenario matrix with the actual programs viewable)
   - JSLT vs hand-written JS/JSONata (including the honest "native wins transforms" analysis)
   - JSON Pointer vs the legacy resolver and the `jsonpointer` npm package
+  - JSON Patch & Merge Patch vs a naive clone-and-interpret baseline (conformance gate: all 108
+    official json-patch-tests vectors replayed before timing)
 - **Docs** — the whole suite in one pass, each section linking the deeper spec in the repo.
 - **Examples** — copy-paste patterns per engine, mirrored by the playground example chips.
 
@@ -41,6 +45,10 @@ npm run benchmark:quick      # fast smoke run for wiring/dev — numbers are NOT
 # or from the repository root
 node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]
 ```
+
+Skipped suites keep their existing data files *and* their `meta.json` entries (conformance,
+QT3 scorecard), so regenerating a single suite — e.g. `--skip validate,jsonpath,jsonquery,jslt,jsonpointer,qt3`
+to refresh only the JSON Patch numbers — never clobbers the overview.
 
 Generate on a quiet machine: the suites measure real timings. The QT3 scorecard needs the
 `benchmark/qt3tests` submodule converted once (`npm run qt3:convert`); without it the scorecard

@@ -82,6 +82,23 @@ get({}) === JSONPOINTER_NOTHING; // misses return a sentinel, never throw
 const sibling = compileRelativeJSONPointer('1/price');
 sibling(data, '/store/book/0/title'); // 8.95`;
 
+const patchExample = `import {
+  compileJSONPatch, applyJSONPatch, createJSONPatch,
+  applyMergePatch, createMergePatch,
+} from '@jarenjs/json';
+
+// compile once, apply many times — copy-on-write, atomic
+const apply = compileJSONPatch([
+  { op: 'test', path: '/version', value: 5 },      // precondition
+  { op: 'replace', path: '/user/name', value: 'Bob' },
+  { op: 'add', path: '/user/tags/-', value: 'admin' },
+]);
+const next = apply(doc);   // doc untouched; unchanged subtrees shared
+
+createJSONPatch(doc, next);            // the diff emits RFC 6902 ops
+applyMergePatch(doc, { temp: null });  // RFC 7396: null deletes
+createMergePatch(doc, next);           // ...and the merge-patch diff`;
+
 const pathExample = `import { compileJSONPath, queryJSONPath } from '@jarenjs/json';
 
 const query = compileJSONPath('$..book[?@.price < 10].title');
@@ -177,6 +194,7 @@ const NAV = [
     title: '@jarenjs/json',
     items: [
       ['json-pointer', 'JSON Pointer'],
+      ['json-patch', 'JSON Patch & Merge Patch'],
       ['jsonpath', 'JSONPath'],
       ['json-query', 'Jaren JSON Query'],
       ['jslt', 'JSLT stylesheets'],
@@ -354,6 +372,28 @@ npm install @jarenjs/forms`}</CodeBlock>
                 <code className="bg-muted px-1 rounded">JSONPOINTER_NOTHING</code> sentinel.
               </p>
               <CodeBlock showCopy>{pointerExample}</CodeBlock>
+            </section>
+
+            <section>
+              <SectionHeading id="json-patch" pkg="@jarenjs/json">JSON Patch & Merge Patch</SectionHeading>
+              <p className="text-muted-foreground mb-4">
+                Partial updates as IETF standards, on the compiled-pointer foundation. JSON Patch (RFC 6902) is the
+                precise, operation-based format — <code className="bg-muted px-1 rounded">add</code>,{' '}
+                <code className="bg-muted px-1 rounded">remove</code>, <code className="bg-muted px-1 rounded">replace</code>,{' '}
+                <code className="bg-muted px-1 rounded">move</code>, <code className="bg-muted px-1 rounded">copy</code> and the{' '}
+                <code className="bg-muted px-1 rounded">test</code> precondition for optimistic concurrency — ideal for HTTP{' '}
+                <code className="bg-muted px-1 rounded">PATCH</code> endpoints and array surgery. JSON Merge Patch (RFC 7396)
+                is the simple, document-shaped format: the patch looks like the document, <code className="bg-muted px-1 rounded">null</code>{' '}
+                deletes. <code className="bg-muted px-1 rounded">compileJSONPatch</code> validates the patch once and applies it{' '}
+                <em>copy-on-write</em>: the input is never mutated, only the written spine is cloned (once, however many
+                operations touch it), everything else is shared with the result — so atomic abort on failure is free, exactly
+                as RFC 6902 §5 requires. The diffs (<code className="bg-muted px-1 rounded">createJSONPatch</code>,{' '}
+                <code className="bg-muted px-1 rounded">createMergePatch</code>) turn two documents into either format — a
+                ready-made change feed. All 108 official json-patch-tests vectors pass; errors carry a stable{' '}
+                <code className="bg-muted px-1 rounded">code</code>, a <code className="bg-muted px-1 rounded">docPath</code> into
+                the patch and a <code className="bg-muted px-1 rounded">dataPath</code> into the document.
+              </p>
+              <CodeBlock showCopy>{patchExample}</CodeBlock>
             </section>
 
             <section>
