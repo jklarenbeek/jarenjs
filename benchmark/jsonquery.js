@@ -31,6 +31,7 @@
  */
 
 import * as fs from 'fs';
+import { makeBookstoreDocuments } from './fixtures/bookstore.js';
 
 const DEFAULT_ITERATIONS = 1000;
 const WARMUP_ITERATIONS = 100;
@@ -51,66 +52,6 @@ const SCENARIOS = [
   { key: 'group', title: 'group + aggregate (A.4)' },
   { key: 'reshape', title: 'deep reshape' },
 ];
-
-// The RFC 9535 bookstore (section 1.5) plus the ratings array the spec's
-// join example iterates (appendix A.3) — same fixture as the unit tests.
-function makeBookstore() {
-  return {
-    store: {
-      book: [
-        { category: 'reference', author: 'Nigel Rees', title: 'Sayings of the Century', price: 8.95 },
-        { category: 'fiction', author: 'Evelyn Waugh', title: 'Sword of Honour', price: 12.99 },
-        { category: 'fiction', author: 'Herman Melville', title: 'Moby Dick', isbn: '0-553-21311-3', price: 8.99 },
-        { category: 'fiction', author: 'J. R. R. Tolkien', title: 'The Lord of the Rings', isbn: '0-395-19395-8', price: 22.99 },
-      ],
-      bicycle: { color: 'red', price: 399 },
-    },
-    ratings: [
-      { isbn: '0-395-19395-8', stars: 5 },
-      { isbn: '0-553-21311-3', stars: 4 },
-      { isbn: '0-000-00000-0', stars: 1 },
-    ],
-  };
-}
-
-// Same family, scaled: n books over 7 categories; 2 of 3 books carry an
-// isbn, half of those are rated, plus n/10 dangling ratings. Prices are
-// unique (the i/1e5 epsilon) so every engine's sort is deterministic and
-// order normalization never hides a real mismatch.
-function makeScaledBookstore(n) {
-  const categories = ['reference', 'fiction', 'science', 'history', 'poetry', 'travel', 'cooking'];
-  const book = [];
-  const ratings = [];
-  for (let i = 0; i < n; i++) {
-    const b = {
-      category: categories[i % 7],
-      author: `Author ${i % 97}`,
-      title: `Book ${i}`,
-      price: (i * 7919) % 4000 / 100 + i / 1e5,
-    };
-    if (i % 3 !== 0) {
-      b.isbn = `isbn-${i}`;
-      if (i % 2 === 0)
-        ratings.push({ isbn: b.isbn, stars: i % 5 + 1 });
-    }
-    book.push(b);
-  }
-  for (let i = 0; i < n / 10; i++)
-    ratings.push({ isbn: `dangling-${i}`, stars: 3 });
-  return { store: { book, bicycle: { color: 'red', price: 399 } }, ratings };
-}
-
-function makeDocuments(scale) {
-  const base = makeBookstore();
-  const documents = [{ label: 'bookstore (4 books, 3 ratings)', books: 4, data: base }];
-  if (scale) {
-    for (const n of SCALE_SIZES) {
-      const data = makeScaledBookstore(n);
-      documents.push({ label: `bookstore (${n} books, ${data.ratings.length} ratings)`, books: n, data });
-    }
-  }
-  return documents;
-}
 
 //#endregion
 
@@ -531,7 +472,7 @@ async function main() {
   }
 
   const engines = await loadEngines(options.engines);
-  const documents = makeDocuments(options.scale);
+  const documents = makeBookstoreDocuments(options.scale, SCALE_SIZES);
 
   // equivalence is always asserted, before any timing (fail loud)
   const failures = [];

@@ -1,6 +1,8 @@
 # JSLT Prelude — a template layer over Jaren JSON Query
 
-**Status: design prelude, superseded by [JSLT-FORMAT.md](./JSLT-FORMAT.md).**
+**Status: design prelude, superseded; implemented by the
+[`jslt` module](../src/jslt/) under the contract in
+[JSLT-FORMAT.md](./JSLT-FORMAT.md).**
 This document is kept as design history: it recorded the design direction
 for the JSLT layer so that the decisions taken in the query engine and its
 type system (QUERY-FORMAT.md §6.8, §8.11) could be judged against what they

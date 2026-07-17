@@ -1,0 +1,13 @@
+{
+  "$jslt": "0.1",
+  "unmatched": "fresh",
+  "modes": {
+    "render": {
+      "unmatched": "share"
+    },
+    "strict": {
+      "unmatched": "error"
+    }
+  },
+  "rules": []
+}

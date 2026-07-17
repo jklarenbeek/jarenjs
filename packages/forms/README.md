@@ -139,7 +139,7 @@ These two externals are the whole vocabulary: any other free name in a rule is a
 
 ### Array item templates
 
-A rule on an array item template (`/lines/-/amount`) compiles **once** and evaluates **per element** of the actual array, binding `$value`/`$pointer` per index — results are keyed by the expanded pointer (`/lines/2/amount`). This compiled-once/dispatch-per-node mechanism is deliberately the embryo of the JSLT template layer's `$apply` dispatch ([JSLT-PRELUDE.md §7](../json/docs/JSLT-PRELUDE.md)): computed views generalize `x-form.computed`, and template dispatch on schema shape is how a form renderer picks widgets.
+A rule on an array item template (`/lines/-/amount`) compiles **once** and evaluates **per element** of the actual array, binding `$value`/`$pointer` per index — results are keyed by the expanded pointer (`/lines/2/amount`). That compiled-once/dispatch-per-node generalization now exists as the [`@jarenjs/json/jslt`](../json/docs/JSLT-FORMAT.md) `$apply` engine: a future forms computed-view layer can generalize `x-form.computed` into schema-dispatched view-model stylesheets without changing forms' validator-independent boundary.
 
 ### Schema literals in rules
 

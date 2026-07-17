@@ -1,0 +1,37 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "toc": [
+          {
+            "$apply": ["$.sections[*]", "toc"]
+          }
+        ],
+        "body": [
+          {
+            "$apply": ["$.sections[*]", "render"]
+          }
+        ]
+      }
+    },
+    {
+      "mode": "toc",
+      "match": "$.sections[*]",
+      "body": {
+        "ref": "$.id",
+        "label": "$.heading"
+      }
+    },
+    {
+      "mode": "render",
+      "match": "$.sections[*]",
+      "body": {
+        "anchor": "$.id",
+        "heading": "$.heading",
+        "text": "$.text"
+      }
+    }
+  ]
+}

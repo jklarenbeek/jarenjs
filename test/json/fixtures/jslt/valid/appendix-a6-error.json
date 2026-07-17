@@ -1,0 +1,43 @@
+{
+  "$jslt": "0.1",
+  "unmatched": "error",
+  "rules": [
+    {
+      "match": "$",
+      "body": [
+        {
+          "$apply": "$.events[*]"
+        }
+      ]
+    },
+    {
+      "match": {
+        "schema": {
+          "type": "object",
+          "required": ["error"]
+        }
+      },
+      "body": {
+        "level": "fatal",
+        "message": "$.error"
+      }
+    },
+    {
+      "match": {
+        "schema": {
+          "type": "object",
+          "required": ["info"]
+        }
+      },
+      "body": {
+        "level": "note",
+        "message": "$.info"
+      }
+    },
+    {
+      "body": {
+        "level": "unknown"
+      }
+    }
+  ]
+}

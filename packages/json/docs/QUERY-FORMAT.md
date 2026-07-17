@@ -1214,3 +1214,8 @@ Because query documents are plain JSON, they also travel well through the
 rest of an LLM toolchain: function-call arguments, retrieval filters, and
 audit logs all speak JSON already, and a generated query can be validated,
 diffed, stored, and replayed without ever touching a parser.
+
+The same constrained-decoding model applies to complete recursive
+stylesheets; see
+[JSLT-FORMAT Appendix B](./JSLT-FORMAT.md#appendix-b-llm-structured-output-non-normative)
+and its mechanically query-derived schema twins.

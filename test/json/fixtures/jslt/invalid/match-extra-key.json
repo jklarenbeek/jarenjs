@@ -1,0 +1,9 @@
+[
+  {
+    "match": {
+      "path": "$",
+      "note": true
+    },
+    "body": "$"
+  }
+]

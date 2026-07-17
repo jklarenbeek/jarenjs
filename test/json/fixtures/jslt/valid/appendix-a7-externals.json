@@ -1,0 +1,12 @@
+[
+  {
+    "match": "$..price",
+    "body": {
+      "amount": {
+        "$mul": ["$", "$rate"]
+      },
+      "currency": "$root.currency",
+      "at": "$path"
+    }
+  }
+]

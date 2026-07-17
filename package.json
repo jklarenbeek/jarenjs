@@ -45,6 +45,8 @@
     "benchmark:jsonpointer": "node ./benchmark/jsonpointer.js",
     "benchmark:jsonquery": "node ./benchmark/jsonquery.js",
     "benchmark:jsonquery:profile": "node ./benchmark/jsonquery.js --profile --scale",
+    "benchmark:jslt": "node ./benchmark/jslt.js",
+    "benchmark:jslt:profile": "node ./benchmark/jslt.js --profile --scale",
     "qt3:convert": "node ./benchmark/tools/qt3-convert.js --quiet",
     "benchmark:qt3": "node ./benchmark/qt3-runner.js",
     "benchmark:generate": "npm run benchmark:generate --workspace=@jarenjs/website",

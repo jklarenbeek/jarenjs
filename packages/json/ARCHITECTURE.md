@@ -1,6 +1,6 @@
 # @jarenjs/json Architecture
 
-This document describes the internals of `@jarenjs/json` for contributors: the JSON Pointer compiler, the RFC 9535 JSONPath compiler, and the Jaren JSON Query engine with its XQuery text front-end. The user-facing story is in the [README](./README.md); the query language contract is [docs/QUERY-FORMAT.md](./docs/QUERY-FORMAT.md).
+This document describes the internals of `@jarenjs/json` for contributors: the JSON Pointer compiler, the RFC 9535 JSONPath compiler, the Jaren JSON Query engine with its XQuery text front-end, and the JSLT stylesheet dispatcher layered over the query compiler. The user-facing story is in the [README](./README.md); the language contracts are [docs/QUERY-FORMAT.md](./docs/QUERY-FORMAT.md) and [docs/JSLT-FORMAT.md](./docs/JSLT-FORMAT.md).
 
 Everything here follows the house architecture of the schema validator (see [`packages/validate/ARCHITECTURE.md`](../validate/ARCHITECTURE.md)): **two-stage compilers** — parse and normalize once into an AST, then compile the AST into specialized closures with every decidable decision made at compile time. No `eval`, no `new Function` (CSP-safe), no allocation on hot paths, monomorphic closures wherever the engine can arrange it.
 
@@ -18,10 +18,14 @@ Everything here follows the house architecture of the schema validator (see [`pa
 | `src/query/compile.js` | AST → closures: expressions, FLWOR tuple streams, quantifiers |
 | `src/query/operators.js` | the operator registry: all §8 operators as one `name → {params, result, compile}` table |
 | `src/query/index.js` | public API: `compileJsonQuery`, `queryJson`, result unwrapping, caches |
+| `src/jslt/stylesheet.js` | frozen stylesheet normalization: closed shapes, modes, dispositions, priorities |
+| `src/jslt/dispatch.js` | match/body compilation, lazy path pre-passes, ranked dispatch, built-in rules |
+| `src/jslt/errors.js` | `JsltCompileError` / `JsltRuntimeError` with `code` + stylesheet `docPath` |
+| `src/jslt/index.js` | public API: `compileJsltStylesheet`, `transformJson`, result unwrapping, cache variants |
 | `src/xquery/parse.js` | the XQuery text front-end: `parseXQuery(text)` → query document |
 | `src/xquery/index.js` | `parseXQuery`, `compileXQuery`, `XQuerySyntaxError` |
 
-Dependency direction: `basic.js` stands alone; `pointer.js` shares only the `NOTHING` sentinel from `segments.js`; `path.js` builds on `segments.js`; the query engine builds on `segments.js` (paths) and `runtime.js`; the XQuery front-end emits query documents and depends only on the JSON format, never on engine internals. `@jarenjs/core` supplies char-code scanning, `equalsJson`, code-point helpers and I-Regexp compilation.
+Dependency direction: `basic.js` stands alone; `pointer.js` shares only the `NOTHING` sentinel from `segments.js`; `path.js` builds on `segments.js`; the query engine builds on `segments.js` (paths) and `runtime.js`; JSLT consumes the query normalizer/compiler through its package-internal extension point and the nodes-mode segment runner; the XQuery front-end emits query documents and depends only on the JSON format, never on engine internals. `@jarenjs/core` supplies char-code scanning, `equalsJson`, code-point helpers and I-Regexp compilation. JSON Schema remains an injected predicate hook: `@jarenjs/validate/query` may wire into query/JSLT, but this package never imports the validator.
 
 ## The two-stage pipeline
 
@@ -128,6 +132,34 @@ The performance culture is the same as the JSONPath compiler's — specializatio
 
 Known non-fast-path: the `$where` equijoin is a naive nested loop (see the `//#region roadmap: FLWOR optimizer` note in `compile.js` — hash joins and filter hoisting are future work, and the benchmark's join scenario tracks it honestly).
 
+## The JSLT dispatcher
+
+### Stylesheet model and rank tables
+
+`compileJsltStylesheet` first makes an independent deep-frozen copy, then `stylesheet.js` normalizes the two top-level forms into closure-free data. Every rule has its document pointer, mode, body, normalized match record and resolved numeric priority; absent priorities become the three fixed defaults (path+schema `1`, one condition `0`, unconditional `-1`). Rules partition into modes and sort once by `(priority descending, source index descending)`, so later equal-ranked rules win without runtime comparison logic. Envelope and rule vocabularies are closed here, before path/schema/body compilation starts.
+
+`dispatch.js` compiles each source rule once, then builds each runtime mode as parallel ranked arrays: path bit/ordinal, schema predicate, body evaluator and source rule index. Modes with at most 32 path rules use one signed bit mask per location (ordinal 31 is valid); larger modes use `Set` membership. The arrays keep the hot scan monomorphic and avoid allocating match records per dispatched value.
+
+### Lazy per-mode path pre-pass
+
+Path matching is positional, so each mode evaluates its compiled match paths against the immutable input root at most once per transform call, and only if that mode is reached with a located value (location-less dispatch can never match a path rule, so it never pays for a pre-pass). Rules sharing one match-path string share one compiled query, and each distinct query enumerates the input once per transform call however many modes reference it (the TOC/render idiom). The pre-pass is one map from normalized path to a match entry: matched locations hold their rule bits/ordinals directly, and every proper ancestor of a match holds a spine entry carrying both its own match and the set of child keys (decoded member names / element indexes) that continue toward a deeper match. Pre-passes live in the transform context by mode id—never on the compiled stylesheet—so repeated calls observe mutated/replaced input data and cannot leak document state across calls.
+
+That one entry is also the pruning index: a single hash lookup answers "does a rule match here", "can one match below", and "through which children". In `share` mode, a mode containing only path rules returns any located subtree without an entry immediately, and the built-in rebuild at a spine location dispatches only the children in the entry's key set—every other child is copied by reference without even constructing its normalized path string.
+
+### Query frames and `$apply`
+
+Rule bodies use the ordinary query normalizer/compiler with one injected extension entry, `$apply`; the core registry and published query schema remain unchanged. The extension normalizes the selector as an expression, freezes the static target mode, records every referenced mode for table construction, and compiles through the query engine's own cardinality/sequence machinery.
+
+Every compiled body extends the query frame by exactly three numeric slots after `normalized.frameSize`: current normalized location, dispatch depth, and the transform context — keeping every frame access an indexed element load. The transform context carries the root, per-rule external arrays and the lazy mode pre-passes without consuming query-visible slots; the all-unbound external resolution is precomputed at compile time, so calls without user bindings allocate nothing per transformation. Reserved externals `root` and `path` are detected among the normalizer's external records and populated per dispatch; user externals are deduplicated globally, resolved once per transformation, then projected into each rule's frame slots.
+
+When an `$apply` selector is a path rooted at the current item or reserved `root`, its compiled AST exposes that fact. The extension runs the shared nodes-mode segments from the current normalized location, preserving paths into nested dispatch; every other selector evaluates through its ordinary getter and produces location-less items. Result sequences concatenate through `appendItem`/`seqOf`, exactly like every query operator.
+
+### Built-in rules, sharing and error boundaries
+
+The built-in `share`/`fresh` walkers implement query constructor semantics: empty child results omit object members/array elements, multi-item array children splice, and a multi-item object member raises JT2002. `share` tracks whether any child changed and returns the original container when none did; `fresh` always returns the rebuilt container. Empty `share` stylesheets specialize further to `(data) => data`, which is the O(1) identity row in `benchmark/jslt.js`. Rebuilding defines an own `__proto__` member explicitly, avoiding prototype mutation.
+
+Compilation wraps only errors crossing a language boundary: invalid match paths become JT0003 with the JSONPath cause, a missing type-test hook is JT0006 while hook rejection or a non-function result is JT0005, and `JsonQueryCompileError` from a body becomes JT0007 with the inner pointer composed under `/body`. At runtime, a rule body wraps `JsonQueryRuntimeError` once as JT2004; an existing `JsltRuntimeError` from nested `$apply` passes through unchanged. Dispatch depth is checked before each recursive call, and a host `RangeError` from a deep synchronous chain is converted to JT2001 so the public API never leaks an engine stack overflow.
+
 ## The XQuery text front-end
 
 `xquery/parse.js` is a char-code recursive-descent parser for a defined subset of XQuery 3.1 *text* syntax that emits query documents — it is a **front-end, not a second engine**. Design rules:
@@ -138,6 +170,6 @@ Known non-fast-path: the `$where` equijoin is a naive nested loop (see the `//#r
 
 ## Testing and benchmarks
 
-Unit tests live in `test/json/` at the repository root (`npm run test:json`): `path.test.js` from the RFC's own examples, `query/` per engine layer (normalize, expressions, FLWOR, operators, API), `query-format.test.js` validating every normative fixture against **both** schema twins plus asserting the mechanical draft-07 derivation, `xquery/` for the front-end, and `readme-examples.test.js` executing the README's examples verbatim.
+Unit tests live in `test/json/` at the repository root (`npm run test:json`): `path.test.js` from the RFC's own examples, `query/` per engine layer (normalize, expressions, FLWOR, operators, API), `query-format.test.js` and `jslt-format.test.js` validating every fixture against **both** schema twins plus asserting both mechanical derivations, `jslt/` for stylesheet/dispatch behavior and the normative examples, `xquery/` for the front-end, and `readme-examples.test.js` executing the README's examples verbatim.
 
-Benchmarks (all in `benchmark/`, competitor libraries are devDependencies of that workspace only): `jsonpath.js` runs the official JSONPath compliance suite (703/703) and per-query profiles vs json-p3; `jsonquery.js` runs the query scenario matrix vs fontoxpath and jsonata with result equivalence asserted before timing; `qt3-runner.js` scores the W3C QT3 suite through the XQuery front-end against a committed baseline with zero unattributed failures. House rule: when touching hot code, run the relevant benchmark before and after, and report the numbers.
+Benchmarks (all in `benchmark/`, competitor libraries are devDependencies of that workspace only): `jsonpath.js` runs the official JSONPath compliance suite (703/703) and per-query profiles vs json-p3; `jsonquery.js` runs the query scenario matrix vs fontoxpath and jsonata; `jslt.js` runs identity/surgical/modes/schema-annotation transforms vs native JS and JSONata; both transformation tools assert result equivalence before timing; `qt3-runner.js` scores the W3C QT3 suite through the XQuery front-end against a committed baseline with zero unattributed failures. House rule: when touching hot code, run the relevant benchmark before and after, and report the numbers.

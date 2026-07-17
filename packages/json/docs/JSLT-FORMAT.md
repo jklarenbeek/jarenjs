@@ -810,3 +810,52 @@ Output:
 root from a deep rule; `$path` is the matched value's normalized path
 (§8.2). Calling `transform(input)` without `rate` raises JT2004 wrapping
 the body's JQ2006.
+
+---
+
+## Appendix B. LLM structured output (non-normative)
+
+The complete stylesheet language is published as JSON Schema twins:
+
+- [`../schemas/jaren-jslt.schema.json`](../schemas/jaren-jslt.schema.json) —
+  canonical draft 2020-12, `$id`
+  `https://jarenjs.dev/schemas/jaren-jslt/0.1`;
+- [`../schemas/jaren-jslt.draft-07.schema.json`](../schemas/jaren-jslt.draft-07.schema.json) —
+  the mechanically derived draft-07 twin.
+
+This extends the query format's
+[structured-output story](./QUERY-FORMAT.md#appendix-b-llm-structured-output-non-normative)
+to complete stylesheets. Constrained decoding against either artifact can
+prevent unknown envelope/rule members, missing bodies, malformed match
+objects, bad dispositions and versions, unknown body operators, and wrong
+structurally expressible `$apply` arities before any compiler runs.
+
+The rule-body grammar is not a hand-maintained copy. The canonical
+stylesheet artifact deep-copies the committed query artifact's definition
+map, adds the single body-local `applyPhrase`, and appends that phrase to
+`objectExpression.oneOf`. Tests pin that derivation and separately pin the
+canonical-to-draft-07 transform. A query-schema refactor therefore fails
+the artifact test loudly instead of letting the stylesheet grammar drift;
+the published query artifacts themselves remain unchanged.
+
+As with generated queries, schema-valid does not mean semantically complete.
+The compiler remains authoritative for rule ranking, reserved externals,
+type-test hook availability and schema compilation, plus the positional
+fact that the second item of `{"$apply": [selector, mode]}` is a literal
+string. That last fact cannot be represented without tuple validation,
+which the draft-neutral artifact policy deliberately excludes. The
+remaining failures are the JT0xxx/JT2xxx errors of §10, carrying a
+`docPath` into the stylesheet for a repair loop.
+
+Provider "structured output" implementations also support different JSON
+Schema subsets regardless of the draft they advertise. In particular,
+recursive references, `patternProperties`, `propertyNames`, `format`, and
+some composition keywords may be restricted or treated as annotations.
+Always validate a generated stylesheet locally against the full artifact
+before calling `compileJsltStylesheet`. A simplified lowest-common-
+denominator LLM profile could trade precision for broader provider support,
+but no such third artifact is defined in version 0.1.
+
+Stylesheets remain ordinary JSON throughout the toolchain: they can be
+function-call arguments, retrieved rule sets, reviewed diffs, audit-log
+entries, and replayable transformation programs without a text parser.

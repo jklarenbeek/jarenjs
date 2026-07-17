@@ -1,0 +1,21 @@
+{
+  "$jslt": "0.1",
+  "unmatched": "fresh",
+  "rules": [
+    {
+      "match": {
+        "schema": {
+          "type": "object",
+          "required": ["price"]
+        }
+      },
+      "body": {
+        "title": "$.title",
+        "price": "$.price",
+        "taxed": {
+          "$mul": ["$.price", 1.21]
+        }
+      }
+    }
+  ]
+}

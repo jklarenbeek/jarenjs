@@ -1,0 +1,12 @@
+[
+  {
+    "match": {
+      "path": "$.store.book[*]",
+      "schema": {
+        "type": "object",
+        "required": ["title"]
+      }
+    },
+    "body": "$"
+  }
+]

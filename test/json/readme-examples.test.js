@@ -10,8 +10,10 @@ import {
   compileJsonQuery,
   queryJson,
 } from '@jarenjs/json';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileXQuery } from '@jarenjs/json/xquery';
 import { JarenValidator } from '@jarenjs/validate';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 // Every code example in packages/json/README.md runs here, verbatim where
 // the example is self-contained, with the README's implied context (the
@@ -164,5 +166,81 @@ describe('README examples: the XQuery text front-end', () => {
     assert.deepStrictEqual(
       q(null, { doc: data }),
       ['Sayings of the Century', 'Moby Dick']);
+  });
+});
+
+describe('README examples: JSLT declarative transformation', () => {
+  it('performs the surgical VAT override and shares untouched subtrees', () => {
+    const applyVat = compileJsltStylesheet([
+      { match: '$..price', body: { $mul: ['$', 1.21] } },
+    ]);
+
+    const input = {
+      catalog: { books: [{ title: 'A', price: 10 }] },
+      meta: { publisher: 'N' },
+    };
+    const output = applyVat(input);
+
+    assert.strictEqual(output.catalog.books[0].price, 12.1);
+    assert.strictEqual(output.meta, input.meta);
+  });
+
+  it('renders the same sections through two modes', () => {
+    const renderGuide = compileJsltStylesheet({
+      $jslt: '0.1',
+      rules: [
+        {
+          match: '$',
+          body: {
+            toc: [{ $apply: ['$.sections[*]', 'toc'] }],
+            body: [{ $apply: ['$.sections[*]', 'render'] }],
+          },
+        },
+        {
+          mode: 'toc',
+          match: '$.sections[*]',
+          body: { ref: '$.id', label: '$.heading' },
+        },
+        {
+          mode: 'render',
+          match: '$.sections[*]',
+          body: { anchor: '$.id', text: '$.text' },
+        },
+      ],
+    });
+
+    assert.deepStrictEqual(renderGuide({
+      sections: [{
+        id: 'intro',
+        heading: 'Introduction',
+        text: 'Start here.',
+      }],
+    }), {
+      toc: [{ ref: 'intro', label: 'Introduction' }],
+      body: [{ anchor: 'intro', text: 'Start here.' }],
+    });
+  });
+
+  it('wires schema matches through the validator type-test bridge', () => {
+    const annotateBooks = compileJsltStylesheet([
+      {
+        match: {
+          schema: { type: 'object', required: ['title', 'author'] },
+        },
+        body: {
+          title: '$.title',
+          byline: { $concat: ['$.title', ' by ', '$.author'] },
+        },
+      },
+    ], { compileTypeTest: createTypeTestCompiler() });
+
+    assert.deepStrictEqual(
+      annotateBooks({ book: { title: 'Moby Dick', author: 'Herman Melville' } }),
+      {
+        book: {
+          title: 'Moby Dick',
+          byline: 'Moby Dick by Herman Melville',
+        },
+      });
   });
 });

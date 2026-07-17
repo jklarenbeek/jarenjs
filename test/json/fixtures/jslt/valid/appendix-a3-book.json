@@ -1,0 +1,32 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": {
+        "schema": {
+          "type": "object",
+          "required": ["isbn"]
+        }
+      },
+      "body": {
+        "title": "$.title",
+        "children": [
+          {
+            "$apply": "$.chapters[*]"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "schema": {
+          "type": "object",
+          "required": ["heading"]
+        }
+      },
+      "body": {
+        "name": "$.heading"
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # @jarenjs/json
 
-The JSON addressing and query standards of [Jaren](https://github.com/jklarenbeek/jarenjs), compiled: JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)), a JSONPath engine ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) that passes the complete official compliance suite, and the **Jaren JSON Query format** — a declarative query-and-transformation language with XQuery 3.1 semantics whose queries are themselves JSON documents. Everything follows the same architecture: parse and decide once, then run a specialized closure. No `eval`, no `new Function`, CSP-safe, zero runtime dependencies beyond the [`@jarenjs/core`](../core) foundation.
+The JSON addressing, query, and stylesheet standards of [Jaren](https://github.com/jklarenbeek/jarenjs), compiled: JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)), a JSONPath engine ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) that passes the complete official compliance suite, the **Jaren JSON Query format** — a declarative query-and-transformation language with XQuery 3.1 semantics whose queries are themselves JSON documents — and **JSLT**, a recursive template-dispatch layer over that same stack. Everything follows the same architecture: parse and decide once, then run a specialized closure. No `eval`, no `new Function`, CSP-safe, zero runtime dependencies beyond the [`@jarenjs/core`](../core) foundation.
 
 None of it depends on JSON Schema: every module can be used standalone in any JavaScript project.
 
@@ -13,6 +13,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/json/pointer` | the JSON Pointer and Relative JSON Pointer compiler |
 | `@jarenjs/json/path` | the JSONPath compiler |
 | `@jarenjs/json/query` | the Jaren JSON Query engine |
+| `@jarenjs/json/jslt` | the Jaren JSLT stylesheet compiler and dispatcher |
 | `@jarenjs/json/xquery` | the XQuery text front-end for the query engine |
 
 ## JSON utilities
@@ -26,6 +27,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Relative JSON Pointer | `compileRelativeJSONPointer`, `parseRelativeJSONPointer`, `compileDataRef`, `isValidRelativeJSONPointer` |
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
+| Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
 
 ### JSON Pointer
 
@@ -319,13 +321,116 @@ Honest caveats — what each competitor is optimized for:
 - **Jaren**'s compile number includes `JSON.parse` of the query text, since the competitors parse text too.
 - The join is a naive O(books × ratings) nested loop in **all three** engines (Jaren's hash-join optimizer is roadmap); it is measured at 1,000 books.
 
+## JSLT — declarative JSON transformation
+
+JSLT adds XSLT-style recursive template dispatch without adding another data language: **match = JSONPath, type = JSON Schema, produce = Jaren queries**. A rule can select by position, by shape, or by both; a schema is therefore a pattern, compiled through the same type-test hook as `$valid`/`$assert`/`$as`. The normative contract is [JSLT-FORMAT.md](./docs/JSLT-FORMAT.md).
+
+The small-but-important use case is a surgical override. Unmatched containers recurse into their children and return the original object when every child is unchanged, so unrelated subtrees remain shared:
+
+```javascript
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+
+const applyVat = compileJsltStylesheet([
+  { match: '$..price', body: { $mul: ['$', 1.21] } },
+]);
+
+const input = {
+  catalog: { books: [{ title: 'A', price: 10 }] },
+  meta: { publisher: 'N' },
+};
+const output = applyVat(input);
+// output.catalog.books[0].price === 12.1
+// output.meta === input.meta
+```
+
+Modes walk the same source through independent rule sets. Here the root applies the section list once as a table of contents and once as rendered body content:
+
+```javascript
+const renderGuide = compileJsltStylesheet({
+  $jslt: '0.1',
+  rules: [
+    {
+      match: '$',
+      body: {
+        toc: [{ $apply: ['$.sections[*]', 'toc'] }],
+        body: [{ $apply: ['$.sections[*]', 'render'] }],
+      },
+    },
+    {
+      mode: 'toc',
+      match: '$.sections[*]',
+      body: { ref: '$.id', label: '$.heading' },
+    },
+    {
+      mode: 'render',
+      match: '$.sections[*]',
+      body: { anchor: '$.id', text: '$.text' },
+    },
+  ],
+});
+
+renderGuide({
+  sections: [{ id: 'intro', heading: 'Introduction', text: 'Start here.' }],
+});
+// { toc: [{ ref: 'intro', label: 'Introduction' }],
+//   body: [{ anchor: 'intro', text: 'Start here.' }] }
+```
+
+The brackets around each `$apply` are deliberate: an object member holds one value, while `$apply` returns a sequence. `children: [{ $apply: '$.children[*]' }]` uses the query array-constructor rule to collect that sequence into an array; the bare member form fails when two or more children are produced.
+
+The default unmatched disposition is `share`: unchanged containers retain `===` identity with the input. Use envelope-level `"unmatched": "fresh"` when the caller needs an independently mutable tree; use `"error"` for exhaustive dispatch. Rule-body outputs and path results still follow query-engine sharing semantics.
+
+Shape matches and schema operators need the validator bridge at application wiring time—the JSON package itself remains validator-independent:
+
+```javascript
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
+
+const annotateBooks = compileJsltStylesheet([
+  {
+    match: {
+      schema: { type: 'object', required: ['title', 'author'] },
+    },
+    body: {
+      title: '$.title',
+      byline: { $concat: ['$.title', ' by ', '$.author'] },
+    },
+  },
+], { compileTypeTest: createTypeTestCompiler() });
+```
+
+The complete stylesheet grammar is published for validators and LLM constrained decoding as [`jaren-jslt.schema.json`](./schemas/jaren-jslt.schema.json) (draft 2020-12) and its mechanically derived [`jaren-jslt.draft-07.schema.json`](./schemas/jaren-jslt.draft-07.schema.json) twin. Rule-body definitions are mechanically copied from the query artifact and extended only with `$apply`, so the query vocabulary stays closed. Provider structured-output implementations still support uneven schema subsets; validate the generated document locally before compiling it, as described in [JSLT-FORMAT Appendix B](./docs/JSLT-FORMAT.md#appendix-b-llm-structured-output-non-normative).
+
+### JSLT benchmark
+
+`npm run benchmark:jslt` asserts result equivalence before timing Jaren against a hand-written recursive JavaScript transform and JSONata's transform operator. Measured with `npm run benchmark:jslt:profile` (2026-07-16, Node v24.14.0; competitor ratios are competitor time over Jaren):
+
+| Scenario | Jaren JSLT | native JS | jsonata 2.2 |
+|---|---:|---:|---:|
+| **4-book bookstore** | | | |
+| identity (`share`) | 83 ns | 1.83 µs (22.0x) | 14.60 µs (176x) |
+| surgical prices | 10.89 µs | 1.12 µs (0.10x) | 89.61 µs (8.2x) |
+| reshape + modes | 8.14 µs | 381 ns (0.047x) | n/a |
+| fresh schema annotation | 3.46 µs | 928 ns (0.27x) | 135.22 µs (39.1x) |
+| **10,000-book bookstore** | | | |
+| identity (`share`) | 27 ns | 3.24 ms (119,274x) | 13.20 ms (485,954x) |
+| surgical prices | 27.78 ms | 1.96 ms (0.071x) | 146.12 ms (5.3x) |
+| reshape + modes | 18.27 ms | 131.08 µs (0.007x) | n/a |
+| fresh schema annotation | 5.75 ms | 1.70 ms (0.30x) | 251.27 ms (43.7x) |
+| **document-independent** | | | |
+| compile, per stylesheet | 35.63 µs | n/a | 59.03 µs (1.7x) |
+
+The identity row is the sharing fast path: Jaren returns the input reference in O(1), while native and JSONata deep-copy. On actual transformations, hand-written JavaScript is 3.3–139x faster because it is bespoke code with no matcher, rank table, mode, schema, or error machinery—the honest cost of the abstraction. Jaren is 5–44x faster than JSONata where the transform operator can express the scenario; reshape+modes is `n/a`, not silently replaced by a different JSONata feature. JSONata 2.x timings include its required promise overhead and transform-copy cost. Scaled prices are rounded to cents because JSONata's copy normalizes long binary decimal tails and these scenarios do not sort. fontoxpath is excluded because it has XPath/XQuery but no XSLT dispatcher; Saxon-JS is excluded as a heavyweight SEF/XSLT toolchain for this benchmark workspace.
+
 ## Roadmap
 
 Ideas we consider interesting or necessary for this package, roughly in order of appetite:
 
 - [x] **JSON Schema as the query type system** — the `$valid`/`$assert` operators and the `$as` FLWOR clause embed JSON Schema literals in query documents ([QUERY-FORMAT §8.11](./docs/QUERY-FORMAT.md)), compiled through the dependency-free `compileTypeTest` hook; [`@jarenjs/validate/query`](../validate) supplies the reference hook (`createTypeTestCompiler`).
 - [x] **Queries inside schemas — the `$query` keyword** — the inverse arrow of the entry above: [`@jarenjs/validate`](../validate/README.md) gained a `$query` extension keyword whose value is a query document, compiled once at schema compile time and asserted by effective boolean value per validation (compiled queries expose `query.ebv` beside `first`/`exists` for exactly this). Cross-field arithmetic, ordering and quantification land in JSON Schema through the engine that already exists.
-- [ ] **JSLT template layer** — the XSLT-derivative stylesheet language on top of the query engine, where template matching and typing share the JSON Schema vocabulary. Design prelude: [docs/JSLT-PRELUDE.md](./docs/JSLT-PRELUDE.md). Consumer #1 is live: the [`@jarenjs/forms`](../forms) `x-form` rules compile query documents once per form model and dispatch item-template rules per array element — the compiled-once/evaluate-per-node shape `$apply` needs.
+- [x] **JSLT template layer** — the XSLT-derivative stylesheet language on top of the query engine: [`@jarenjs/json/jslt`](./docs/JSLT-FORMAT.md) compiles positional JSONPath matches, JSON Schema shape matches, ranked modes, `$apply`, and the `share`/`fresh`/`error` built-in rules.
+- [ ] **Standalone `@jarenjs/jslt` package** — publish the stylesheet layer as its own package only when the query-engine internals it needs have a deliberate public boundary; today the module stays colocated to avoid exposing compiler internals.
+- [ ] **Forms computed views through JSLT** — generalize `x-form.computed` from one query per field into schema-dispatched view-model stylesheets, while keeping forms validator-independent.
+- [ ] **JSLT matcher optimizer** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules.
 - [ ] **Filter optimizer / hash joins** — hoist `$`-absolute comparables out of filter loops, fuse adjacent singular segments, and turn `$where` equijoins into hash joins instead of nested loops (see the benchmark's join row).
 - [ ] **Write operations** — `set`/`insert`/`remove` at a pointer, a normalized path, or every node a JSONPath query selects, with a copy-on-write mode.
 - [ ] **JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396)** — apply and structural diff, built on compiled pointers; a diff that emits JSON Patch doubles as a change feed for [`@jarenjs/forms`](../forms).
@@ -342,4 +447,4 @@ Ideas we consider interesting or necessary for this package, roughly in order of
 
 ## Development
 
-Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query tests from the spec's normative fixtures (which validate against both schema twins), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks: `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the validator-wide picture.
+Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks: `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the validator-wide picture.

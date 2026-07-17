@@ -30,7 +30,7 @@ This document describes the internal architecture of JarenJS, a high-performance
 
 JarenJS is a JSON Schema validator that compiles schemas into optimized validation functions. The architecture separates schema loading (URI resolution), compilation (validator creation), and validation (data checking) into distinct phases to enable compile-time optimizations and fast runtime performance.
 
-The monorepo splits into `@jarenjs/core` (zero-dependency foundation: type guards, Unicode strings, text validators, math), `@jarenjs/json` (the JSON addressing and query standards: JSON Pointer, the RFC 9535 JSONPath compiler, and the Jaren JSON Query engine with its XQuery text front-end — documented in its own [ARCHITECTURE](packages/json/ARCHITECTURE.md)), `@jarenjs/validate` (this document's subject), `@jarenjs/formats`, `@jarenjs/refs` and `@jarenjs/forms`. This document describes the validator; the compile-to-closures philosophy it lays out is shared by every compiler in the repository.
+The monorepo splits into `@jarenjs/core` (zero-dependency foundation: type guards, Unicode strings, text validators, math), `@jarenjs/json` (the JSON addressing and transformation stack: JSON Pointer, the RFC 9535 JSONPath compiler, the Jaren JSON Query engine with its XQuery text front-end, and the JSLT stylesheet dispatcher — documented in its own [ARCHITECTURE](packages/json/ARCHITECTURE.md)), `@jarenjs/validate` (this document's subject), `@jarenjs/formats`, `@jarenjs/refs` and `@jarenjs/forms`. This document describes the validator; the compile-to-closures philosophy it lays out is shared by every compiler in the repository.
 
 ### Key Files
 
@@ -777,6 +777,24 @@ node benchmark/jsonquery.js
 node benchmark/jsonquery.js --profile --scale
 ```
 
+### jslt.js
+
+Performance benchmark for the JSLT stylesheet dispatcher in
+`packages/json/src/jslt/` against hand-written recursive JavaScript and
+JSONata's transform operator. It checks identity sharing, a surgical price
+override, a two-mode reshape, schema-based fresh annotation and compile
+time over the same scalable bookstore family as `jsonquery.js`; every
+expressible result is compared before timing, and unsupported JSONata mode
+dispatch is printed as `n/a`.
+
+```bash
+# Equivalence check over all engines
+node benchmark/jslt.js
+
+# Performance comparison, plus 1000- and 10000-book documents
+node benchmark/jslt.js --profile --scale
+```
+
 ### Tool Separation
 
 Each benchmark tool has a distinct purpose:
@@ -789,6 +807,7 @@ Each benchmark tool has a distinct purpose:
 | `callgraph.js` | Call graph generation | Analyzing hot paths and call chains |
 | `jsonpath.js` | JSONPath RFC 9535 compliance and performance | Verifying/benchmarking the JSONPath compiler vs json-p3 |
 | `jsonquery.js` | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking the query engine against XQuery/JSONata alternatives |
+| `jslt.js` | JSLT performance vs native JS/JSONata | Benchmarking identity sharing, recursive dispatch, modes and schema matching |
 | `qt3-runner.js` | W3C QT3 suite scorecard through the XQuery front-end | Checking query-engine compliance against the XQuery test suite |
 
 ---
