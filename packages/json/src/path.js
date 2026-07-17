@@ -121,9 +121,92 @@ function isNameCharCode(c) {
 }
 
 /**
+ * Selects a named object member (RFC 9535 name selector).
+ * @typedef {Object} JSONPathNameSelector
+ * @property {'name'} kind - Discriminator
+ * @property {string} name - The member name to select
+ */
+
+/**
+ * Selects all members of an object / all elements of an array
+ * (RFC 9535 wildcard selector).
+ * @typedef {Object} JSONPathWildcardSelector
+ * @property {'wildcard'} kind - Discriminator
+ */
+
+/**
+ * Selects an array element by index; negative indexes count from the end
+ * (RFC 9535 index selector).
+ * @typedef {Object} JSONPathIndexSelector
+ * @property {'index'} kind - Discriminator
+ * @property {number} index - The array index to select
+ */
+
+/**
+ * Selects a range of array elements (RFC 9535 array slice selector).
+ * `null` means the bound was omitted in the query.
+ * @typedef {Object} JSONPathSliceSelector
+ * @property {'slice'} kind - Discriminator
+ * @property {number | null} start - Slice start, or null when omitted
+ * @property {number | null} end - Slice end (exclusive), or null when omitted
+ * @property {number | null} step - Slice step, or null when omitted
+ */
+
+/**
+ * Selects children for which a filter expression yields a truthy result
+ * (RFC 9535 filter selector).
+ * @typedef {Object} JSONPathFilterSelector
+ * @property {'filter'} kind - Discriminator
+ * @property {object} expr - The parsed filter expression tree
+ */
+
+/**
+ * Any RFC 9535 selector, discriminated by its `kind` property.
+ * @typedef {JSONPathNameSelector | JSONPathWildcardSelector | JSONPathIndexSelector | JSONPathSliceSelector | JSONPathFilterSelector} JSONPathSelector
+ */
+
+/**
+ * One segment of a JSONPath query: a child (`.` / `[...]`) or descendant
+ * (`..`) step holding one or more selectors.
+ * @typedef {Object} JSONPathSegment
+ * @property {boolean} descendant - True for a descendant (`..`) segment
+ * @property {JSONPathSelector[]} selectors - The segment's selectors
+ */
+
+/**
+ * The parsed AST of a JSONPath query.
+ * @typedef {Object} JSONPathAst
+ * @property {boolean} relative - True for a relative query (`@`), false for a root query (`$`)
+ * @property {JSONPathSegment[]} segments - The query's segments in order
+ */
+
+/**
+ * One result of a JSONPath query in nodes mode: the matched value together
+ * with its normalized path (RFC 9535 section 2.7).
+ * @typedef {Object} JSONPathNode
+ * @property {string} path - The normalized path (e.g. `$['store']['book'][0]`)
+ * @property {any} value - The matched value
+ */
+
+/**
+ * A compiled JSONPath query. Calling it returns the matched values; the
+ * attached methods expose the other result modes, and `source`/`ast`
+ * expose the original query string and its parsed (deeply frozen) AST.
+ * @typedef {((data: any) => any[]) & {
+ *   values: (data: any) => any[],
+ *   first: (data: any) => any,
+ *   exists: (data: any) => boolean,
+ *   nodes: (data: any) => JSONPathNode[],
+ *   paths: (data: any) => string[],
+ *   source: string,
+ *   ast: JSONPathAst,
+ * }} JSONPathQuery
+ */
+
+/**
  * Parse a JSONPath query string into an AST.
  * @param {string} source - The JSONPath expression (e.g. `$.store.book[?@.price < 10].title`)
- * @returns {{ relative: boolean, segments: object[] }} The parsed query AST
+ * @returns {JSONPathAst} The parsed query AST
  * @throws {JSONPathSyntaxError} When the query violates the RFC 9535 grammar
  */
 export function parseJSONPath(source) {
@@ -784,7 +867,7 @@ export function parseJSONPath(source) {
  *   compiled path mode must agree with the eagerly compiled value mode)
  *
  * @param {string} source - The JSONPath expression
- * @returns {function} The compiled query function
+ * @returns {JSONPathQuery} The compiled query function
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
  * @example
  * const q = compileJSONPath('$.store.book[?@.price < 10].title');

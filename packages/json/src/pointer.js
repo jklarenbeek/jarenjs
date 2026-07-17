@@ -109,11 +109,32 @@ export function parseJSONPointer(pointer) {
 }
 
 /**
+ * A parsed Relative JSON Pointer (draft-luff-relative-json-pointer).
+ * @typedef {Object} RelativeJsonPointer
+ * @property {number} levels - Number of levels to ascend from the current location
+ * @property {boolean} hash - True for the `#` form, which addresses the member name or array index itself
+ * @property {string[]} segments - Decoded reference tokens applied after ascending
+ */
+
+/**
+ * A compiled JSON Pointer: returns the value addressed in `root`, or the
+ * `JSONPOINTER_NOTHING` sentinel when the pointer does not address a location.
+ * @typedef {(root: any) => any} JsonPointerGetter
+ */
+
+/**
+ * A compiled Relative JSON Pointer / data reference: resolves against the
+ * RFC 6901 location `dataPath` inside `dataRoot`, returning the addressed
+ * value or the `JSONPOINTER_NOTHING` sentinel.
+ * @typedef {(dataRoot: any, dataPath: string) => any} RelativeJsonPointerResolver
+ */
+
+/**
  * Parse a Relative JSON Pointer strictly per
  * draft-luff-relative-json-pointer: a non-negative integer without
  * leading zeros, followed by `#` or a JSON Pointer.
  * @param {string} pointer - The relative pointer (e.g. `1/sibling`, `0#`)
- * @returns {{ levels: number, hash: boolean, segments: string[] }}
+ * @returns {RelativeJsonPointer} The parsed relative pointer
  * @throws {JSONPointerSyntaxError} When the pointer violates the grammar
  */
 export function parseRelativeJSONPointer(pointer) {
@@ -249,7 +270,7 @@ function compileSegmentsGetter(segments) {
  * count. Resolution allocates nothing.
  *
  * @param {string} pointer - The JSON Pointer (e.g. `/store/book/0`)
- * @returns {(root: any) => any} getter returning the addressed value, or
+ * @returns {JsonPointerGetter} getter returning the addressed value, or
  *   `JSONPOINTER_NOTHING` when the pointer does not address a location
  * @throws {JSONPointerSyntaxError} When the pointer is not valid RFC 6901
  * @example
@@ -367,7 +388,7 @@ function walkPointerPrefix(root, path, end) {
  * keyword.
  *
  * @param {string} pointer - The relative pointer (e.g. `1/sibling`, `0#`)
- * @returns {(dataRoot: any, dataPath: string) => any} resolver returning
+ * @returns {RelativeJsonPointerResolver} resolver returning
  *   the addressed value, or `JSONPOINTER_NOTHING`
  * @throws {JSONPointerSyntaxError} When the pointer is not valid
  * @example
@@ -409,7 +430,7 @@ export function compileRelativeJSONPointer(pointer) {
  * Pointer, a leading `/` an absolute JSON Pointer, and `''` the root.
  *
  * @param {string} ref - The reference string
- * @returns {(dataRoot: any, dataPath: string) => any} resolver returning
+ * @returns {RelativeJsonPointerResolver} resolver returning
  *   the addressed value, or `JSONPOINTER_NOTHING`
  * @throws {JSONPointerSyntaxError} When the reference is none of the
  *   accepted forms

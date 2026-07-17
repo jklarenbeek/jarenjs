@@ -17,9 +17,20 @@ const schemaDrafts = {
 };
 
 /**
- * 
- * @param {number} version 
- * @returns {{draft:string, schema: object[]}}
+ * A JSON Schema draft specification bundle: the draft's canonical URI and
+ * the meta-schema document(s) that define it. For draft 2019-09 and
+ * 2020-12 the `schema` array holds the main meta-schema followed by its
+ * vocabulary meta-schemas; for draft-06/07 it holds the single meta-schema.
+ * @typedef {Object} SchemaDraftInfo
+ * @property {string} draft - The draft's canonical URI (e.g. 'http://json-schema.org/draft-07/schema')
+ * @property {object[]} schema - The meta-schema document(s) of the draft
+ */
+
+/**
+ * Gets a schema draft bundle by version number.
+ * @param {6 | 7 | 2019 | 2020} version - The draft version
+ * @returns {SchemaDraftInfo} The draft URI and its meta-schema document(s)
+ * @throws {Error} When the version is unknown
  */
 export function getSchemaDraftByVersion(version) {
   if (version in schemaDrafts)
@@ -28,6 +39,16 @@ export function getSchemaDraftByVersion(version) {
     throw new Error('Unknown reference schema version');
 }
 
+/**
+ * Gets a schema draft bundle by name. Accepts the common spellings of
+ * each draft name (e.g. 'draft-07', '2019-09', 'draft2020-12').
+ * @param {'6'|'draft6'|'draft-6'|'draft06'|'draft-06'
+ *   |'7'|'draft7'|'draft-7'|'draft07'|'draft-07'
+ *   |'draft2019'|'draft-2019'|'draft2019-09'|'2019'|'2019-09'
+ *   |'draft2020'|'draft-2020'|'draft2020-12'|'2020'|'2020-12'} name - The draft name variant
+ * @returns {SchemaDraftInfo} The draft URI and its meta-schema document(s)
+ * @throws {Error} When the name is unknown
+ */
 export function getSchemaDraftByName(name) {
   switch (name) {
     case '6': case 'draft6': case 'draft-6': case 'draft06': case 'draft-06':
@@ -44,9 +65,10 @@ export function getSchemaDraftByName(name) {
 }
 
 /**
- * 
- * @param {string} schemaId
- * @returns {{draft:string, schema: object[]}}
+ * Gets a schema draft bundle by its canonical $id URI (case-insensitive).
+ * @param {string} schemaId - The schema $id URI
+ * @returns {SchemaDraftInfo} The draft URI and its meta-schema document(s)
+ * @throws {Error} When the schema id is not a string or not found
  */
 export function getSchemaDraftById(schemaId) {
   if (!isStringType(schemaId))

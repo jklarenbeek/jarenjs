@@ -34,6 +34,134 @@ export {
 
 export { TraverseOptions };
 
+/**
+ * Ajv-style $data reference object.
+ * The value is a Relative JSON Pointer that resolves from the current data location.
+ * Format: `<non-negative-integer>("#"|<json-pointer>)`
+ * - "0" - The current value itself
+ * - "0#" - The property name/index of the current value
+ * - "0/foo" - The "foo" property of the current value
+ * - "1" - The parent value
+ * - "1/foo" - The "foo" property of the parent value
+ * @see https://github.com/ajv-validator/ajv/tree/master/spec/extras/%24data
+ * @typedef {Object} DollarDataRef
+ * @property {string} $data - Relative JSON Pointer resolved from the current data location
+ */
+
+/**
+ * Data keyword schema for referencing instance data (json-everything style).
+ * Allows constraints to reference values from other parts of the instance;
+ * every property value is a (relative) JSON Pointer to the constraint's value.
+ * @see https://docs.json-everything.net/schema/examples/data-ref/
+ * @typedef {Object} DataKeywordSchema
+ * @property {string} [minimum] - JSON Pointer to the minimum value
+ * @property {string} [maximum] - JSON Pointer to the maximum value
+ * @property {string} [exclusiveMinimum] - JSON Pointer to the exclusive minimum value
+ * @property {string} [exclusiveMaximum] - JSON Pointer to the exclusive maximum value
+ * @property {string} [multipleOf] - JSON Pointer to the multipleOf value
+ * @property {string} [minLength] - JSON Pointer to the minLength value
+ * @property {string} [maxLength] - JSON Pointer to the maxLength value
+ * @property {string} [pattern] - JSON Pointer to the pattern string
+ * @property {string} [format] - JSON Pointer to the format name
+ * @property {string} [enum] - JSON Pointer to an array of valid values
+ * @property {string} [const] - JSON Pointer to the constant value
+ * @property {string} [minItems] - JSON Pointer to the minItems value
+ * @property {string} [maxItems] - JSON Pointer to the maxItems value
+ * @property {string} [minProperties] - JSON Pointer to the minProperties value
+ * @property {string} [maxProperties] - JSON Pointer to the maxProperties value
+ */
+
+/**
+ * The standard JSON Schema keywords understood by Jaren
+ * (draft-06 through draft 2020-12). See {@link JSONSchema} for the full
+ * schema object type that also permits custom keywords.
+ * @typedef {Object} JSONSchemaKeywords
+ * @property {string} [$id] - Schema resource identifier (URI)
+ * @property {string} [$schema] - Meta-schema URI declaring the draft dialect
+ * @property {string} [$ref] - Reference to another schema (URI reference)
+ * @property {string} [$anchor] - Plain-name fragment identifier (2019-09+)
+ * @property {string} [$dynamicRef] - Dynamic reference (2020-12)
+ * @property {string} [$dynamicAnchor] - Dynamic anchor (2020-12)
+ * @property {Record<string, boolean>} [$vocabulary] - Vocabulary declarations of a meta-schema
+ * @property {string} [$comment] - Comment for schema maintainers; not used in validation
+ * @property {Record<string, JSONSchema>} [$defs] - Reusable subschema definitions (2019-09+)
+ * @property {Record<string, JSONSchema>} [definitions] - Reusable subschema definitions (draft-07 and earlier)
+ * @property {string | string[]} [type] - Expected JSON type(s): 'null', 'boolean', 'object', 'array', 'number', 'string' or 'integer'
+ * @property {unknown[] | DollarDataRef} [enum] - Exhaustive list of valid values
+ * @property {unknown | DollarDataRef} [const] - Single valid value
+ * @property {number | DollarDataRef} [minLength] - Minimum string length (in graphemes by default)
+ * @property {number | DollarDataRef} [maxLength] - Maximum string length (in graphemes by default)
+ * @property {string | DollarDataRef} [pattern] - ECMA-262 regular expression the string must match
+ * @property {string} [contentEncoding] - Encoding of a string-embedded document (e.g. 'base64')
+ * @property {string} [contentMediaType] - Media type of a string-embedded document
+ * @property {JSONSchema} [contentSchema] - Schema for the decoded string-embedded document
+ * @property {number | DollarDataRef} [multipleOf] - Number must be a multiple of this value
+ * @property {number | DollarDataRef} [minimum] - Inclusive lower bound
+ * @property {number | DollarDataRef} [maximum] - Inclusive upper bound
+ * @property {number | boolean | DollarDataRef} [exclusiveMinimum] - Exclusive lower bound (boolean form in draft-04 style schemas)
+ * @property {number | boolean | DollarDataRef} [exclusiveMaximum] - Exclusive upper bound (boolean form in draft-04 style schemas)
+ * @property {Record<string, JSONSchema>} [properties] - Schemas for named object members
+ * @property {Record<string, JSONSchema>} [patternProperties] - Schemas for members whose name matches a regular expression
+ * @property {boolean | JSONSchema} [additionalProperties] - Schema for members not matched by properties/patternProperties
+ * @property {boolean | JSONSchema} [unevaluatedProperties] - Schema for members not evaluated by any subschema (2019-09+)
+ * @property {string[] | DollarDataRef} [required] - Member names that must be present
+ * @property {JSONSchema} [propertyNames] - Schema every member name must validate against
+ * @property {number | DollarDataRef} [minProperties] - Minimum number of members
+ * @property {number | DollarDataRef} [maxProperties] - Maximum number of members
+ * @property {JSONSchema | JSONSchema[]} [items] - Schema for array elements (array form is the draft-07 tuple syntax)
+ * @property {JSONSchema[]} [prefixItems] - Tuple element schemas (2020-12)
+ * @property {boolean | JSONSchema} [additionalItems] - Schema for elements beyond the tuple prefix (draft-07 and earlier)
+ * @property {boolean | JSONSchema} [unevaluatedItems] - Schema for elements not evaluated by any subschema (2019-09+)
+ * @property {JSONSchema} [contains] - At least one element must validate against this schema
+ * @property {number | DollarDataRef} [minItems] - Minimum number of elements
+ * @property {number | DollarDataRef} [maxItems] - Maximum number of elements
+ * @property {boolean | DollarDataRef} [uniqueItems] - Whether all elements must be unique
+ * @property {number} [minContains] - Minimum number of elements matching 'contains' (2019-09+)
+ * @property {number} [maxContains] - Maximum number of elements matching 'contains' (2019-09+)
+ * @property {JSONSchema[]} [allOf] - Value must validate against all of these schemas
+ * @property {JSONSchema[]} [anyOf] - Value must validate against at least one of these schemas
+ * @property {JSONSchema[]} [oneOf] - Value must validate against exactly one of these schemas
+ * @property {JSONSchema} [not] - Value must NOT validate against this schema
+ * @property {JSONSchema} [if] - Condition schema selecting between 'then' and 'else'
+ * @property {JSONSchema} [then] - Applied when 'if' validates
+ * @property {JSONSchema} [else] - Applied when 'if' does not validate
+ * @property {Record<string, JSONSchema>} [dependentSchemas] - Schemas applied when a member is present (2019-09+)
+ * @property {Record<string, string[]>} [dependentRequired] - Members required when a member is present (2019-09+)
+ * @property {string} [title] - Short descriptive title
+ * @property {string} [description] - Explanation of the schema's purpose
+ * @property {unknown} [default] - Default value annotation
+ * @property {unknown[]} [examples] - Example values annotation
+ * @property {boolean} [readOnly] - Value is managed by the receiving authority
+ * @property {boolean} [writeOnly] - Value is never returned by the receiving authority
+ * @property {boolean} [deprecated] - Value is deprecated
+ * @property {string | DollarDataRef} [format] - Named semantic format (e.g. 'email', 'uri', 'date-time')
+ * @property {string} [formatMinimum] - Format-aware inclusive lower bound (non-standard, Ajv-style)
+ * @property {string} [formatMaximum] - Format-aware inclusive upper bound (non-standard, Ajv-style)
+ * @property {string} [formatExclusiveMinimum] - Format-aware exclusive lower bound (non-standard, Ajv-style)
+ * @property {string} [formatExclusiveMaximum] - Format-aware exclusive upper bound (non-standard, Ajv-style)
+ * @property {DataKeywordSchema} [data] - Data keyword referencing instance data (json-everything style)
+ */
+
+/**
+ * Represents a JSON Schema object.
+ * Covers the standard keywords of drafts 06, 07, 2019-09 and 2020-12
+ * (see {@link JSONSchemaKeywords}) while remaining open for custom
+ * keywords: any property outside the standard set is permitted.
+ * Note that a complete schema is `JSONSchema | boolean` - the boolean
+ * forms accept everything (`true`) or nothing (`false`).
+ * @typedef {JSONSchemaKeywords & Record<string, unknown>} JSONSchema
+ */
+
+/**
+ * A format compiler function.
+ * Called once per schema location at compile time with the compiling
+ * ValidationObject and the schema that declares the format; returns the
+ * format validator that is invoked for each instance value, or undefined
+ * when the format does not apply to the schema location. Compilers are
+ * only invoked for schemas whose `format` member is a plain string.
+ * @typedef {(schemaObj: ValidationObject, jsonSchema: JSONSchema & {format?: string}) => ((data: unknown, dataPath?: string) => boolean) | undefined} FormatCompiler
+ */
+
 export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-06/schema#'
 
 /**
@@ -277,7 +405,7 @@ export class ValidationRoot {
    * Creates a new ValidationRoot.
    * @param {string} origin - The root schema origin/URI
    * @param {Map} schemas - Map of schema paths to schema objects
-   * @param {object} formats - Registered format validators
+   * @param {Record<string, FormatCompiler>} formats - Registered format validators
    * @param {ValidationOptions} [opts] - Validation options
    * @param {TraverseOptions} [traverse] - Schema traversal options
    * @param {object|null} [owner] - The owning JarenValidator instance; extension
@@ -903,7 +1031,7 @@ export class ValidationObject {
    * Creates an error handler function for validation failures.
    * @param {any} expected - The expected value that failed validation
    * @param {string | string[]} key - The keyword or keywords that failed
-   * @returns {function(unknown, ...any): boolean} A function that adds an error and returns false
+   * @returns {(data: unknown, ...meta: any[]) => boolean} A function that adds an error and returns false
    */
   createErrorHandler(expected, key) {
     const self = this;
@@ -942,7 +1070,7 @@ export class ValidationObject {
   /**
    * Creates a validator function for a child schema.
    * This is used when compiling nested schemas (e.g., array items, object properties).
-   * @param {object|boolean} schema - The child schema to compile
+   * @param {JSONSchema | boolean} schema - The child schema to compile
    * @param {string} key - The property key where the schema is located
    * @param {number} [index] - Optional array index for tuple items
    * @returns {function|undefined} The compiled validator function, or undefined if schema is invalid
@@ -1094,7 +1222,7 @@ export class JarenValidator {
   /**
    * Adds a format validator.
    * @param {string} name - The format name (e.g., 'email', 'uri', 'date-time')
-   * @param {Function} formatCompiler - A function that compiles format validators
+   * @param {FormatCompiler} formatCompiler - A function that compiles format validators
    * @returns {JarenValidator} This validator instance for chaining
    * @example
    * validator.addFormat('custom', (schemaObj, schema) => {
@@ -1111,7 +1239,7 @@ export class JarenValidator {
 
   /**
    * Adds multiple format validators at once.
-   * @param {object} formatCompilers - Object mapping format names to compiler functions
+   * @param {Record<string, FormatCompiler>} formatCompilers - Object mapping format names to compiler functions
    * @returns {JarenValidator} This validator instance for chaining
    */
   addFormats(formatCompilers) {
@@ -1156,7 +1284,7 @@ export class JarenValidator {
    * Adds schema(s) to the validator instance.
    * This method does not compile schemas - it only registers them for reference.
    * Dependencies can be added in any order, and circular dependencies are supported.
-   * @param {boolean | object | object[]} schema - The schema(s) to add
+   * @param {JSONSchema | boolean | (JSONSchema | boolean)[]} schema - The schema(s) to add
    * @param {string} [key] - Optional key/URI to register the schema under
    * @returns {JarenValidator} This validator instance for chaining
    * @example
@@ -1429,7 +1557,7 @@ export class JarenValidator {
   /**
    * Adds meta-schema(s) that can be used to validate schemas.
    * Meta-schemas are schemas that describe the structure of valid JSON schemas.
-   * @param {boolean | object | object[]} schema - The meta-schema(s) to add
+   * @param {JSONSchema | boolean | (JSONSchema | boolean)[]} schema - The meta-schema(s) to add
    * @param {string} [key] - Optional key/URI for the meta-schema
    * @returns {JarenValidator} This validator instance for chaining
    * @example
@@ -1456,7 +1584,7 @@ export class JarenValidator {
   /**
    * Retrieves a registered schema by its key/URI.
    * @param {string} key - The schema URI/key
-   * @returns {object|null} The registered schema, or null if not found
+   * @returns {JSONSchema | boolean | null} The registered schema, or null if not found
    */
   getSchema(key) {
     key = JarenValidator.normalizeUriKey(key)
@@ -1466,7 +1594,7 @@ export class JarenValidator {
   /**
    * Validates a schema against a registered meta-schema.
    * This is used to ensure schemas are valid according to the JSON Schema specification.
-   * @param {boolean | object} schema - The schema to validate
+   * @param {JSONSchema | boolean} schema - The schema to validate
    * @returns {boolean} True if the schema is valid
    * @example
    * validator.addMetaSchema(draft7MetaSchema);
@@ -1642,8 +1770,8 @@ export class JarenValidator {
    * Compiles a schema into a validation function.
    * This is the main method for creating validators. It resolves all $ref references,
    * compiles the schema structure, and returns a function that validates data.
-   * @param {boolean | object} schema - The schema to compile
-   * @param {object[]} [schemas] - Additional schemas to reference during compilation
+   * @param {JSONSchema | boolean} schema - The schema to compile
+   * @param {(JSONSchema | boolean)[]} [schemas] - Additional schemas to reference during compilation
    * @returns {(data: any) => boolean | {valid: boolean, errors: ValidationError[]}} A validation function
    * @example
    * const validate = validator.compile({
