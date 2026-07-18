@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-app/0.1/draft-07",
+  "title": "Jaren app document 0.1",
+  "description": "Structural grammar of a complete Jaren application document (see packages/app/docs/APP-FORMAT.md): initial state, a JSLT view stylesheet, named action documents and subscription entries. Composes the published Jaren query and JSLT grammars by reference — register those artifacts alongside this one. The view's OUTPUT vocabulary (vnodes) is published separately as the jaren-vnode schema in @jarenjs/view. This schema is structural validation only: the runtime remains authoritative for semantic rules it cannot express — the transition-object shape an action RETURNS ({state?, patch?, effects?}) is the action's runtime result, not its document form; unknown top-level members are ignored for forward compatibility (APP-FORMAT section 2).",
+  "type": "object",
+  "properties": {
+    "$app": {
+      "description": "The app format version; absent implies 0.1.",
+      "const": "0.1"
+    },
+    "state": {
+      "description": "The initial state: any JSON value, treated as immutable by every boundary."
+    },
+    "view": {
+      "description": "The view: a JSLT stylesheet document (bare rule array or envelope form) whose evaluation against the state must produce a single vnode.",
+      "allOf": [
+        {
+          "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07"
+        }
+      ]
+    },
+    "actions": {
+      "description": "Named action documents: Jaren JSON Query documents evaluated with $ bound to the state and the externals $event and $payload.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+      }
+    },
+    "subs": {
+      "description": "Subscription entries reconciled against the state after every transition.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "description": "The registered subscription handler name.",
+            "type": "string",
+            "minLength": 1
+          },
+          "with": {
+            "description": "Handler props, passed verbatim."
+          },
+          "when": {
+            "description": "Liveness query, asserted by effective boolean value against the state; absent means always live.",
+            "allOf": [
+              {
+                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run"
+        ]
+      }
+    }
+  },
+  "required": [
+    "view"
+  ]
+}

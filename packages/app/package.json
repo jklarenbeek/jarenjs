@@ -11,12 +11,14 @@
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
+    "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/types/",
     "src/",
-    "docs/"
+    "docs/",
+    "schemas/"
   ],
   "description": "Applications as JSON documents: hyperapp's dispatch loop rebuilt on the Jaren suite — JSLT views, query-document actions, JSON Patch transitions",
   "author": "joham",

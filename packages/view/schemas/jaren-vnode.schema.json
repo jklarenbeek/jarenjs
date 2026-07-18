@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/jklarenbeek/jarenjs/packages/view/schemas/jaren-vnode.schema.json",
+  "$id": "https://jarenjs.dev/schemas/jaren-vnode/0.1",
   "title": "Jaren vnode document",
   "description": "The Jaren view vocabulary: a user interface as a JSON value. Text is a string or number; an element is an array [tag, props?, ...children]; an array whose first item is not a string is a list spliced into its parent; null and booleans render nothing. See docs/VIEW-FORMAT.md for the normative contract.",
   "$ref": "#/$defs/vnode",

@@ -232,9 +232,13 @@ feedback shape a repair loop needs.
 
 ## 9. Open items (roadmap, non-normative)
 
-- **The app-document meta-schema** — publish `jaren-app.schema.json`
-  composing the query, JSLT and vnode schemas, closing the loop for
-  constrained decoding of whole applications.
+- ~~The app-document meta-schema~~ — **shipped**:
+  [`schemas/jaren-app.schema.json`](../schemas/jaren-app.schema.json)
+  (draft 2020-12, with a mechanically derived draft-07 twin) composes
+  the published query and JSLT grammars by `$ref`; register those
+  artifacts alongside it. A constrained decoder held to it cannot emit
+  a structurally invalid application — and the test suite validates
+  the production website's own app document against it.
 - **The standard forms stylesheet** — render any `@jarenjs/forms`
   model through one shipped rule set; generalize `x-form`'s derivation
   vocabulary (`computed`/`visible`) to app-level derived state.
