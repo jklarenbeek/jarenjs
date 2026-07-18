@@ -52,7 +52,7 @@ describe('josl: toml strings', () => {
   });
   it('rejects unterminated and control-char strings', () => {
     bad('a = "no end');
-    bad('a = "ctrl "');
+    bad('a = "ctrl \u0001"');
     bad('a = "bad \\q escape"');
   });
 });
@@ -250,9 +250,12 @@ describe('josl: extensions', () => {
     throws(() => parseToml('a = 123n'), JoslSyntaxError);
     bad('a = 1.5n');
   });
-  it('auto-promotes unsafe integers to bigint', () => {
+  it('auto-promotes unsafe integers to bigint in both modes', () => {
     deepStrictEqual(parseJosl('a = 9007199254740993'), { a: 9007199254740993n });
-    throws(() => parseToml('a = 9007199254740993'), JoslSyntaxError);
+    deepStrictEqual(parseToml('a = 9223372036854775807'), { a: 9223372036854775807n });
+    // strict TOML enforces the spec's 64-bit range; JOSL has no limit
+    throws(() => parseToml('a = 9223372036854775808'), JoslSyntaxError);
+    deepStrictEqual(parseJosl('a = 9223372036854775808'), { a: 9223372036854775808n });
   });
   it('parses regexp literals', () => {
     deepStrictEqual(

@@ -26,7 +26,7 @@ describe('josl: stringify', () => {
   });
   it('round-trips every scalar type', () => {
     roundtrip({
-      s: 'esc "q" \\ \n \t  tail',
+      s: 'esc "q" \\ \n \t \u0001 tail',
       i: 42,
       f: 3.1415,
       neg: -0.01,

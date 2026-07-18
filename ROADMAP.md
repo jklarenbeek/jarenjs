@@ -106,6 +106,13 @@ motivates them where one exists.
 
 - [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.
 
+## @jarenjs/josl (research experiment)
+
+- [ ] **Single-walk scanner** — fold the chunk cutter and the logical-line parser into one pass; the cutter's second scan over every character is the main share of smol-toml's remaining ~1.9x parse-speed edge (`npm run benchmark:toml`).
+- [ ] **CST mode** — preserve comments, key order aesthetics and formatting for faithful document rewriting, not just data round-trips.
+- [ ] **JOSL/JSONX grammar as JSON Schema** — publish the language surface as a schema twin for LLM constrained decoding, like the query/JSLT grammars.
+- [ ] **Graduation decision** — if the experiment earns its keep, drop `private: true`, add typed `dist/types` builds and join the release train; otherwise salvage the strict-TOML engine as a standalone package.
+
 ## Benchmarks, tooling & website
 
 - [ ] **Shared benchmark harness library** — `jsonquery.js` and `jslt.js` duplicate ~250 lines of harness (option parsing, adaptive iterations, table rendering); extract it, and backport `jslt.js`'s `--filter` alias and stricter option validation either way.

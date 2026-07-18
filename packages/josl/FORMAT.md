@@ -48,8 +48,9 @@ mask = 0xffff_ffff_ffff_ffffn
 JavaScript bigint literal syntax: an integer in any TOML radix with an
 `n` suffix. A fraction or exponent with `n` is an error. Additionally, a
 *plain* integer that exceeds JavaScript's safe-integer range
-auto-promotes to bigint in JOSL mode (strict TOML mode errors instead,
-with a hint to append `n`).
+auto-promotes to bigint in both modes, so integers always parse
+losslessly; strict TOML mode additionally enforces the spec's signed
+64-bit range, while the `n` literal syntax itself stays JOSL-only.
 
 ### 3. regexp
 
@@ -134,6 +135,11 @@ This is the deliberate opposite of `JSON.parse(text, reviver)`, which
 visits leaves bottom-up, only after the full text has arrived, and never
 tells you where you are.
 
+The write side mirrors this: `createStreamWriter` emits text chunks
+event by event (`pair`, `table`, `tableArray`, `rootItem`), and
+`stringifyJoslChunks` streams an existing value one `[[]]` record at a
+time — byte-identical to `stringifyJosl` output.
+
 ## JSONX
 
 JSONX is the same set of first-class citizens grafted onto JSON, for
@@ -154,12 +160,18 @@ absolute paths.
 
 ## Compliance notes
 
-- The parser enforces TOML 1.0's table rules (duplicate keys, table
-  redefinition, dotted-key/table interactions, inline-table
-  immutability, static-array vs array-of-tables), string escapes and
-  control-character rules, and number/datetime validity.
-- Not yet validated against the official `toml-test` suite; that is the
-  first follow-up if the experiment graduates.
+- Strict TOML mode passes the complete official
+  [toml-test](https://github.com/toml-lang/toml-test) 1.0.0 suite
+  (the git submodule at `benchmark/toml-test-suite/`): all valid cases with
+  typed value verification, all invalid cases rejected. The only skips
+  are eight byte-level UTF-8 encoding cases, unreachable once input is
+  a JS string. `npm run test:josl` runs the suite;
+  `npm run benchmark:toml` compares compliance and speed against other
+  JS TOML parsers.
+- Integers parse losslessly: plain integers beyond JavaScript's safe
+  range promote to bigint in both modes, and strict TOML mode enforces
+  the spec's signed 64-bit **range** (the `n` literal *syntax* remains
+  JOSL-only).
 - `__proto__` keys are stored as own properties (no prototype
   pollution) in both JOSL and JSONX.
 - Round-trips are faithful for data, not formatting: comments and key

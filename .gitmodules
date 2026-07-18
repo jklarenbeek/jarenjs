@@ -7,3 +7,6 @@
 [submodule "benchmark/qt3tests"]
 	path = benchmark/qt3tests
 	url = https://github.com/w3c/qt3tests.git
+[submodule "benchmark/toml-test-suite"]
+	path = benchmark/toml-test-suite
+	url = https://github.com/toml-lang/toml-test.git

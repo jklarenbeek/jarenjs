@@ -34,6 +34,7 @@ import {
   CC_MINUS,
   CC_DOT,
   CC_SLASH,
+  CC_COLON,
   CC_EQ,
   CC_LBRACKET,
   CC_BACKSLASH,
@@ -77,14 +78,24 @@ const S_ML_BASIC = 3; // """..."""
 const S_ML_LITERAL = 4; // '''...'''
 const S_COMMENT = 5;
 
-// Datetime / number token patterns, tried against the remainder of the
-// logical line. Slice-based for clarity; char-scanning is the perf roadmap.
-const RE_DATETIME = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/;
-const RE_TIMEONLY = /^(\d{2}):(\d{2}):(\d{2})(\.\d+)?/;
-const RE_HEX = /^0x[0-9a-fA-F](?:_?[0-9a-fA-F])*(n?)/;
-const RE_OCT = /^0o[0-7](?:_?[0-7])*(n?)/;
-const RE_BIN = /^0b[01](?:_?[01])*(n?)/;
-const RE_NUM = /^[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?(n?)/;
+// Datetime / number token patterns. Sticky (y) so they match in place at
+// the current position without slicing the logical line.
+const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/y;
+const RE_TIMEONLY = /(\d{2}):(\d{2}):(\d{2})(\.\d+)?/y;
+const RE_HEX = /0x[0-9a-fA-F](?:_?[0-9a-fA-F])*(n?)/y;
+const RE_OCT = /0o[0-7](?:_?[0-7])*(n?)/y;
+const RE_BIN = /0b[01](?:_?[01])*(n?)/y;
+const RE_NUM = /[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?(n?)/y;
+
+function stickyExec(re, line, pos) {
+  re.lastIndex = pos;
+  return re.exec(line);
+}
+
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+const SAFE_MIN = BigInt(Number.MIN_SAFE_INTEGER);
+const SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
 
 export class JoslMachine {
   /**
@@ -102,6 +113,7 @@ export class JoslMachine {
     this.scanState = S_NONE;
     this.scanDepth = 0;
     this.startLine = 1; // physical line where the current logical line begins
+    this.started = false;
     this.ended = false;
     // document state
     this.rootValue = undefined;
@@ -123,6 +135,11 @@ export class JoslMachine {
   feed(chunk) {
     if (this.ended)
       throw new Error('cannot feed after end()');
+    if (!this.started && chunk.length !== 0) {
+      this.started = true;
+      if (chunk.charCodeAt(0) === 0xFEFF)
+        chunk = chunk.slice(1); // strip a leading BOM
+    }
     if (chunk.length !== 0) {
       this.buf += chunk;
       this.scan();
@@ -140,11 +157,13 @@ export class JoslMachine {
     this.ended = true;
     this.scan();
     if (this.buf.length !== 0) {
-      const line = this.buf.endsWith('\r') ? this.buf.slice(0, -1) : this.buf;
+      // no trailing-\r strip here: a \r not followed by \n is a bare
+      // carriage return, which the grammar forbids (consumeLine handles
+      // the \r\n case)
+      const line = this.buf;
       this.buf = '';
       this.scanPos = 0;
-      if (line.length !== 0)
-        this.parseLine(line);
+      this.parseLine(line);
     }
     return this.root();
   }
@@ -164,36 +183,35 @@ export class JoslMachine {
 
   //#region chunk cutter
 
-  // Scan the buffered text for the newline that terminates the current
-  // logical line; everything before it goes to parseLine(). Stalls (saves
-  // position and returns) when a decision needs lookahead that has not
-  // arrived yet — e.g. a quote that may open a triple delimiter.
+  // Scan the buffered text for the newlines that terminate logical
+  // lines; each completed line goes to parseLine(). Stalls (saves
+  // position and exits) when a decision needs lookahead that has not
+  // arrived yet — e.g. a quote that may open a triple delimiter. The
+  // consumed prefix is compacted once per call, not per line, so whole-
+  // document parses stay linear in document size.
   scan() {
-    let buf = this.buf;
+    const buf = this.buf;
     let pos = this.scanPos;
+    let lineStart = 0;
     let state = this.scanState;
     let depth = this.scanDepth;
     const ended = this.ended;
+    outer:
     while (pos < buf.length) {
       const c = buf.charCodeAt(pos);
       switch (state) {
         case S_NONE:
           if (c === CC_LF) {
             if (depth === 0) {
-              this.consumeLine(buf, pos);
-              buf = this.buf;
-              pos = 0;
-              break;
+              this.cutLine(buf, lineStart, pos);
+              lineStart = pos + 1;
             }
             pos++;
             break;
           }
           if (c === CC_DQUOTE || c === CC_SQUOTE) {
-            if (pos + 2 >= buf.length && !ended) {
-              // may be a triple delimiter split across chunks
-              this.save(pos, state, depth);
-              return;
-            }
+            if (pos + 2 >= buf.length && !ended)
+              break outer; // may be a triple delimiter split across chunks
             if (buf.charCodeAt(pos + 1) === c && buf.charCodeAt(pos + 2) === c) {
               state = c === CC_DQUOTE ? S_ML_BASIC : S_ML_LITERAL;
               pos += 3;
@@ -218,11 +236,8 @@ export class JoslMachine {
         case S_COMMENT:
           if (c === CC_LF) {
             if (depth === 0) {
-              this.consumeLine(buf, pos);
-              buf = this.buf;
-              pos = 0;
-              state = S_NONE;
-              break;
+              this.cutLine(buf, lineStart, pos);
+              lineStart = pos + 1;
             }
             state = S_NONE;
           }
@@ -234,19 +249,15 @@ export class JoslMachine {
             // unterminated single-line string: the line parser reports it
             state = S_NONE;
             if (depth === 0) {
-              this.consumeLine(buf, pos);
-              buf = this.buf;
-              pos = 0;
-              break;
+              this.cutLine(buf, lineStart, pos);
+              lineStart = pos + 1;
             }
             pos++;
             break;
           }
           if (state === S_BASIC && c === CC_BACKSLASH) {
-            if (pos + 1 >= buf.length && !ended) {
-              this.save(pos, state, depth);
-              return;
-            }
+            if (pos + 1 >= buf.length && !ended)
+              break outer;
             pos += 2;
             break;
           }
@@ -257,10 +268,8 @@ export class JoslMachine {
         case S_ML_BASIC:
         case S_ML_LITERAL: {
           if (state === S_ML_BASIC && c === CC_BACKSLASH) {
-            if (pos + 1 >= buf.length && !ended) {
-              this.save(pos, state, depth);
-              return;
-            }
+            if (pos + 1 >= buf.length && !ended)
+              break outer;
             pos += 2;
             break;
           }
@@ -269,11 +278,8 @@ export class JoslMachine {
             let run = pos;
             while (run < buf.length && buf.charCodeAt(run) === q)
               run++;
-            if (run === buf.length && run - pos < 3 && !ended) {
-              // quote run may continue in the next chunk
-              this.save(pos, state, depth);
-              return;
-            }
+            if (run === buf.length && run - pos < 3 && !ended)
+              break outer; // quote run may continue in the next chunk
             if (run - pos >= 3)
               state = S_NONE;
             pos = run;
@@ -284,21 +290,20 @@ export class JoslMachine {
         }
       }
     }
-    this.save(pos, state, depth);
-  }
-
-  save(pos, state, depth) {
-    this.scanPos = pos;
+    if (lineStart !== 0) {
+      this.buf = buf.slice(lineStart);
+      this.scanPos = pos - lineStart;
+    }
+    else
+      this.scanPos = pos;
     this.scanState = state;
     this.scanDepth = depth;
   }
 
-  consumeLine(buf, nlPos) {
-    let line = buf.slice(0, nlPos);
+  cutLine(buf, start, nlPos) {
+    let line = buf.slice(start, nlPos);
     if (line.endsWith('\r'))
       line = line.slice(0, -1);
-    this.buf = buf.slice(nlPos + 1);
-    this.scanPos = 0;
     const lines = countNewlines(line) + 1;
     if (line.length !== 0)
       this.parseLine(line);
@@ -333,8 +338,10 @@ export class JoslMachine {
     if (pos >= line.length)
       return;
     const c = line.charCodeAt(pos);
-    if (c === CC_HASH)
+    if (c === CC_HASH) {
+      this.checkComment(line, pos);
       return;
+    }
     if (c === CC_LBRACKET)
       this.parseHeader(line, pos);
     else
@@ -360,8 +367,7 @@ export class JoslMachine {
         continue;
       }
       if (c === CC_HASH) {
-        const nl = line.indexOf('\n', pos);
-        pos = nl === -1 ? line.length : nl;
+        pos = this.checkComment(line, pos);
         continue;
       }
       break;
@@ -371,8 +377,28 @@ export class JoslMachine {
 
   expectLineEnd(line, pos) {
     pos = this.skipWs(line, pos);
-    if (pos < line.length && line.charCodeAt(pos) !== CC_HASH)
-      this.err(pos, 'unexpected content after expression');
+    if (pos < line.length) {
+      if (line.charCodeAt(pos) !== CC_HASH)
+        this.err(pos, 'unexpected content after expression');
+      this.checkComment(line, pos);
+    }
+  }
+
+  // pos sits on '#'; validates comment content and returns the position
+  // of the terminating newline (or end of line)
+  checkComment(line, pos) {
+    pos++;
+    while (pos < line.length) {
+      const c = line.charCodeAt(pos);
+      if (c === CC_LF)
+        return pos;
+      if (c === CC_CR && line.charCodeAt(pos + 1) === CC_LF)
+        return pos + 1;
+      if ((c < 0x20 && c !== CC_TAB) || c === CC_DEL)
+        this.err(pos, 'control characters are not allowed in comments');
+      pos++;
+    }
+    return pos;
   }
 
   //#endregion
@@ -443,8 +469,8 @@ export class JoslMachine {
         const m = this.meta.get(ex);
         if (m !== undefined && m.inline === true)
           this.err(pos, `cannot extend inline table '${k}'`);
-        if (m !== undefined && m.dotted === true)
-          this.err(pos, `cannot open table '${k}' defined by dotted keys`);
+        // dotted-defined tables may be traversed as intermediates; only
+        // opening one as a header's final key is forbidden (spec 1.0)
         t = ex;
         path = path.concat(k);
         continue;
@@ -539,13 +565,14 @@ export class JoslMachine {
     p = this.skipWs(line, p + 1);
     const [value, afterValue] = this.parseValue(line, p);
     this.assignPair(keys, value, pos);
-    this.emit({
-      type: 'pair',
-      path: this.currentPath.concat(keys),
-      key: keys[keys.length - 1],
-      value,
-      line: this.startLine,
-    });
+    if (this.onEvent !== null)
+      this.emit({
+        type: 'pair',
+        path: this.currentPath.concat(keys),
+        key: keys[keys.length - 1],
+        value,
+        line: this.startLine,
+      });
     this.expectLineEnd(line, afterValue);
   }
 
@@ -731,7 +758,9 @@ export class JoslMachine {
     const c = line.charCodeAt(pos);
     if (c === CC_TAB)
       return;
-    if (multiline && (c === CC_LF || c === CC_CR))
+    if (multiline && c === CC_LF)
+      return;
+    if (multiline && c === CC_CR && line.charCodeAt(pos + 1) === CC_LF)
       return;
     if (c < 0x20 || c === CC_DEL)
       this.err(pos, 'control characters must be escaped in strings');
@@ -994,8 +1023,11 @@ export class JoslMachine {
   }
 
   parseDateTimeOrNumber(line, pos) {
-    const s = line.slice(pos);
-    let m = RE_DATETIME.exec(s);
+    // a datetime needs ':' at pos+2 (time) or '-' at pos+4 (date);
+    // everything else goes straight to the number path
+    if (line.charCodeAt(pos + 2) !== CC_COLON && line.charCodeAt(pos + 4) !== CC_MINUS)
+      return this.parseNumber(line, pos);
+    let m = stickyExec(RE_DATETIME, line, pos);
     if (m !== null) {
       const year = Number(m[1]);
       const month = Number(m[2]);
@@ -1020,7 +1052,7 @@ export class JoslMachine {
         this.err(pos, `invalid date-time '${m[0]}'`);
       return [instant, end];
     }
-    m = RE_TIMEONLY.exec(s);
+    m = stickyExec(RE_TIMEONLY, line, pos);
     if (m !== null) {
       const hour = Number(m[1]);
       const minute = Number(m[2]);
@@ -1042,24 +1074,33 @@ export class JoslMachine {
     return suffix === 'n';
   }
 
+  // Integers parse exactly via BigInt, then downgrade to Number when safe.
+  // Strict TOML mode enforces the spec's signed 64-bit range ("should be
+  // accepted and handled losslessly"); JOSL mode has no range limit.
+  // Tokens of 15 digits or fewer are always safe, so the common case
+  // never touches BigInt.
+  intValue(pos, source, big, m0) {
+    if (!big && source.length <= (source.charCodeAt(0) === CC_MINUS ? 16 : 15))
+      return Number(source);
+    const value = BigInt(source);
+    if (this.mode === 'toml' && (value < INT64_MIN || value > INT64_MAX))
+      this.err(pos, `integer '${m0}' exceeds the TOML 64-bit integer range`);
+    if (big)
+      return value;
+    return value >= SAFE_MIN && value <= SAFE_MAX ? Number(value) : value;
+  }
+
   parseNumber(line, pos) {
-    const s = line.slice(pos);
-    let m = RE_HEX.exec(s) ?? RE_OCT.exec(s) ?? RE_BIN.exec(s);
+    let m = stickyExec(RE_HEX, line, pos)
+      ?? stickyExec(RE_OCT, line, pos)
+      ?? stickyExec(RE_BIN, line, pos);
     if (m !== null) {
       const big = this.bigIntCheck(pos, m[1]);
-      const stripped = m[0].replace(/_/g, '');
+      const stripped = (big ? m[0].slice(0, -1) : m[0]).replace(/_/g, '');
       const end = this.checkValueEnd(line, pos + m[0].length);
-      if (big)
-        return [BigInt(stripped.slice(0, -1)), end];
-      const value = Number(stripped);
-      if (!Number.isSafeInteger(value)) {
-        if (this.mode === 'toml')
-          this.err(pos, `integer '${m[0]}' exceeds the safe integer range`);
-        return [BigInt(stripped), end];
-      }
-      return [value, end];
+      return [this.intValue(pos, stripped, big, m[0]), end];
     }
-    m = RE_NUM.exec(s);
+    m = stickyExec(RE_NUM, line, pos);
     if (m === null)
       this.err(pos, 'invalid number');
     const big = this.bigIntCheck(pos, m[1]);
@@ -1071,17 +1112,7 @@ export class JoslMachine {
         this.err(pos, 'bigint literals cannot have a fraction or exponent');
       return [Number(token.replace(/_/g, '')), end];
     }
-    const stripped = token.replace(/[_+]/g, '');
-    if (big)
-      return [BigInt(stripped), end];
-    const value = Number(stripped);
-    if (!Number.isSafeInteger(value)) {
-      if (this.mode === 'toml')
-        this.err(pos, `integer '${m[0]}' exceeds the safe integer range`,
-          'append the n suffix for a JOSL bigint');
-      return [BigInt(stripped), end];
-    }
-    return [value, end];
+    return [this.intValue(pos, token.replace(/[_+]/g, ''), big, m[0]), end];
   }
 
   //#endregion

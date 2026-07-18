@@ -72,6 +72,30 @@ Each `[[]]` completes the previous record — `reader.root()` exposes the
 partial array at any time, so record *N* can be processed while the
 model is still emitting record *N+1*.
 
+## Streaming writer
+
+The write-side mirror of the reader — build a document event by event and
+ship each chunk as it is produced:
+
+```js
+import { createStreamWriter, stringifyJoslChunks } from '@jarenjs/josl/write';
+
+const w = createStreamWriter({ onChunk: (c) => response.write(c) });
+w.pair('title', 'run 42')
+  .table('server')
+  .pair('host', 'localhost');
+// root-array documents: w.rootItem(record) per completed record
+const text = w.end();
+
+// or stream an existing value, one chunk per [[]] record:
+for (const chunk of stringifyJoslChunks(records))
+  response.write(chunk);
+```
+
+The writer validates what the reader would reject (duplicate keys and
+headers, root table/array mixing, TOML downleveling) and shares its
+serialization with `stringifyJosl`, so both produce identical text.
+
 ## JSONX
 
 ```js
@@ -92,12 +116,39 @@ stringifyJsonx(v, { mode: 'json' });     // delegates to JSON.stringify
 | --- | --- |
 | `@jarenjs/josl/parse` | `parseJosl`, `parseToml` |
 | `@jarenjs/josl/stream` | `createStreamReader`, `parseJoslStream` |
-| `@jarenjs/josl/stringify` | `stringifyJosl`, `stringifyToml` |
+| `@jarenjs/josl/stringify` | `stringifyJosl`, `stringifyToml`, `formatValue`, `formatSection` |
+| `@jarenjs/josl/write` | `createStreamWriter`, `stringifyJoslChunks` |
 | `@jarenjs/josl/jsonx` | `parseJsonx`, `stringifyJsonx` |
 | `@jarenjs/josl/values` | `LocalDate`, `LocalTime`, `LocalDateTime` |
 
+## Compliance & speed
+
+Strict TOML mode is validated against the complete official
+[toml-test](https://github.com/toml-lang/toml-test) 1.0.0 suite
+(the git submodule at `benchmark/toml-test-suite/`) — every valid case with full
+typed value verification (`npm run test:josl`), every invalid case
+rejected. The only skips are eight byte-level UTF-8 encoding cases that
+cannot be expressed once input is already a JS string.
+
+`npm run benchmark:toml` runs the suite plus a parse/stringify profile
+against `smol-toml`, `@iarna/toml` and `toml`. Representative run
+(accept/reject compliance, 694 cases; Node 22):
+
+| engine | compliance | parse, 1k-record doc | parse, suite corpus |
+| --- | --- | --- | --- |
+| **jaren** | **100.0%** | 10.8 ms | 1.33 ms |
+| smol-toml | 96.8% | 5.6 ms | 0.80 ms |
+| @iarna/toml | 93.4% | 11.3 ms | 2.20 ms |
+| toml | 98.6% | 37.3 ms | 4.76 ms |
+
+jaren is the only engine at 100% and the only one that parses chunk
+streams; smol-toml's remaining speed edge is the price of the streaming
+cutter's second pass (a single-walk scanner is the roadmap).
+
 ## Status
 
-Experimental and unpublished (`private: true`). Follow-ups if it
-graduates: official `toml-test` suite validation, char-scanning hot
-paths, a streaming writer, and benchmarks against `smol-toml`.
+Experimental and unpublished (`private: true`). Remaining roadmap if it
+graduates: single-walk char scanning (fold the cutter and the line
+parser into one pass), a CST mode that preserves comments and
+formatting, and a JOSL grammar published as a JSON Schema for LLM
+constrained decoding, like the query/JSLT grammars.

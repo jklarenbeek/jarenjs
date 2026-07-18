@@ -114,6 +114,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/formats`](packages/formats) | Format validators for the `format` keyword | [README](packages/formats/README.md) |
 | [`@jarenjs/refs`](packages/refs) | The official JSON Schema meta-schemas, bundled for offline use | [README](packages/refs/README.md) |
 | [`@jarenjs/forms`](packages/forms) | Framework-agnostic form generation from JSON Schema | [README](packages/forms/README.md) |
+| [`@jarenjs/josl`](packages/josl) | 🧪 Research: JOSL, a streaming TOML superset, and JSONX (unpublished) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
 
 ### 🤓 @jarenjs/core — the foundation
 
@@ -138,6 +139,10 @@ The official JSON Schema meta-schemas for all supported drafts, bundled so draft
 ### 📝 @jarenjs/forms — form generation
 
 Turns a JSON Schema into a framework-agnostic form model: a tree of field descriptors with labels, input-control hints, constraints and enum options. Validation happens in three layers on one stack — per-field on every keystroke (core primitives + the shared format registry), cross-field on every keystroke (`x-form` rules written as query documents: visibility, enablement, computed values, assertions), and authoritatively on submit (the compiled schema, optionally with the same rules copied into a `$query` keyword). Use it with React, Vue or vanilla DOM — the [playground](https://jklarenbeek.github.io/jarenjs/#/playground) renders its "Generated Form" tab with it. See [packages/forms](packages/forms/README.md).
+
+### 🧪 @jarenjs/josl — JOSL & JSONX (research experiment)
+
+**JOSL** (*JavaScript Obvious Streaming Language*) is a strict superset of TOML 1.0 that makes JavaScript's obvious value types first-class citizens — `null`, bigint (`123n`), regexp (`/^ok$/i`), all four TOML datetime flavours — and adds a streamable `[[]]` root array for the most common LLM output shape: a list of records. The parser passes the complete official [toml-test](https://github.com/toml-lang/toml-test) 1.0.0 suite in strict TOML mode (the only engine in our benchmark that does), consumes chunk streams that may split *any* token, and reports document-order events with JSON-Pointer-able paths — the deliberate opposite of `JSON.parse`'s bottom-up reviver. **JSONX** is the same set of extensions over JSON, with a bit-compatible strict-JSON mode. A streaming writer mirrors the reader for record-by-record output. Experimental and unpublished; run `npm run benchmark:toml` for the compliance and speed comparison. See [packages/josl](packages/josl/README.md) and the [FORMAT.md](packages/josl/FORMAT.md) language definition.
 
 ## 🤖 Why Jaren matters for AI
 

@@ -15,6 +15,15 @@ const RE_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 const TOML_INT_MIN = -(2n ** 63n);
 const TOML_INT_MAX = 2n ** 63n - 1n;
 
+/**
+ * Whether a value serializes as a table (a plain object).
+ * @param {*} v - The value
+ * @returns {boolean} True for plain objects
+ */
+export function isPlainTable(v) {
+  return isPlainObject(v);
+}
+
 function isPlainObject(v) {
   if (v === null || typeof v !== 'object' || Array.isArray(v))
     return false;
@@ -22,7 +31,12 @@ function isPlainObject(v) {
   return proto === Object.prototype || proto === null;
 }
 
+// eslint-disable-next-line no-control-regex
+const RE_NEEDS_ESCAPE = /["\\\u0000-\u001F\u007F]/;
+
 function quoteString(s) {
+  if (!RE_NEEDS_ESCAPE.test(s))
+    return `"${s}"`;
   let out = '"';
   for (let i = 0; i < s.length; ++i) {
     const c = s.charCodeAt(i);
@@ -174,6 +188,61 @@ function emitTable(ctx, headerPath, errPath, obj) {
   ctx.seen.delete(obj);
 }
 
+function makeCtx(options) {
+  return {
+    mode: options.mode === 'toml' ? 'toml' : 'josl',
+    onNull: options.onNull === 'omit' ? 'omit' : 'error',
+    onRegExp: options.onRegExp === 'string' ? 'string' : 'error',
+    out: [],
+    seen: new Set(),
+  };
+}
+
+/**
+ * Format a single key (bare when possible, quoted otherwise).
+ * @param {string} key - The key
+ * @returns {string} JOSL/TOML key text
+ */
+export function formatKey(key) {
+  return fmtKey(key);
+}
+
+/**
+ * Format a dotted key path.
+ * @param {string[]} path - Key path segments
+ * @returns {string} Dotted key path text
+ */
+export function formatKeyPath(path) {
+  return fmtPath(path);
+}
+
+/**
+ * Format a single value (scalars, inline arrays, inline tables).
+ * @param {*} value - The value
+ * @param {object} [options] - Writer options; see `stringifyJosl`
+ * @param {(string|number)[]} [path] - Error-reporting path
+ * @returns {string} JOSL/TOML value text
+ * @throws {JoslStringifyError} When the value cannot be represented
+ */
+export function formatValue(value, options = {}, path = []) {
+  return fmtValue(makeCtx(options), value, path);
+}
+
+/**
+ * Format a table body: its pairs followed by nested `[header]` /
+ * `[[header]]` sections, with headers made relative to `headerPath`.
+ * @param {object} obj - A plain object table
+ * @param {object} [options] - Writer options; see `stringifyJosl`
+ * @param {string[]} [headerPath] - Prefix for nested section headers
+ * @returns {string} Section text (newline terminated, may be empty)
+ * @throws {JoslStringifyError} When a value cannot be represented
+ */
+export function formatSection(obj, options = {}, headerPath = []) {
+  const ctx = makeCtx(options);
+  emitTable(ctx, headerPath, [], obj);
+  return ctx.out.length === 0 ? '' : ctx.out.join('\n') + '\n';
+}
+
 /**
  * Serialize a value to JOSL (or strict TOML) text.
  * @param {object|Array} value - A plain object root, or (JOSL mode only)
@@ -188,13 +257,7 @@ function emitTable(ctx, headerPath, errPath, obj) {
  * @throws {JoslStringifyError} When the value cannot be represented
  */
 export function stringifyJosl(value, options = {}) {
-  const ctx = {
-    mode: options.mode === 'toml' ? 'toml' : 'josl',
-    onNull: options.onNull === 'omit' ? 'omit' : 'error',
-    onRegExp: options.onRegExp === 'string' ? 'string' : 'error',
-    out: [],
-    seen: new Set(),
-  };
+  const ctx = makeCtx(options);
   if (Array.isArray(value)) {
     if (ctx.mode === 'toml')
       throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');

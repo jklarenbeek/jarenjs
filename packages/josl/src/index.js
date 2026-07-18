@@ -8,7 +8,15 @@
 
 export { parseJosl, parseToml } from './parse.js';
 export { createStreamReader, parseJoslStream } from './stream.js';
-export { stringifyJosl, stringifyToml } from './stringify.js';
+export {
+  stringifyJosl,
+  stringifyToml,
+  formatKey,
+  formatKeyPath,
+  formatValue,
+  formatSection,
+} from './stringify.js';
+export { createStreamWriter, stringifyJoslChunks } from './write.js';
 export { parseJsonx, stringifyJsonx } from './jsonx.js';
 export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError } from './errors.js';
 export {

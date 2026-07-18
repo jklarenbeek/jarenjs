@@ -33,9 +33,12 @@
     "json-p3": "^2.2.2"
   },
   "devDependencies": {
+    "@iarna/toml": "^2.2.5",
     "fast-xml-parser": "^5.10.1",
     "fontoxpath": "^3.34.0",
     "jsonata": "^2.2.1",
-    "jsonpointer": "^5.0.1"
+    "jsonpointer": "^5.0.1",
+    "smol-toml": "^1.7.0",
+    "toml": "^5.0.0"
   }
 }

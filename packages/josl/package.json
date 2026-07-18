@@ -38,6 +38,9 @@
     "./stringify": {
       "default": "./src/stringify.js"
     },
+    "./write": {
+      "default": "./src/write.js"
+    },
     "./jsonx": {
       "default": "./src/jsonx.js"
     },

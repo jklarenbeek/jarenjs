@@ -26,13 +26,14 @@ number in a README performance table names the command that produced it.
 
 ## Test suites (git submodules)
 
-Three official suites are vendored as submodules. After cloning, initialize
+Four official suites are vendored as submodules. After cloning, initialize
 the ones you need:
 
 ```bash
 git submodule update --init benchmark/suite            # JSON-Schema-Test-Suite
 git submodule update --init benchmark/jsonpath-suite   # JSONPath Compliance Test Suite
 git submodule update --init benchmark/qt3tests         # W3C QT3 (XQuery/XPath 3.1), ~60 MB
+git submodule update --init benchmark/toml-test-suite  # toml-test (TOML 1.0.0)
 ```
 
 | Path | Suite |
@@ -40,6 +41,7 @@ git submodule update --init benchmark/qt3tests         # W3C QT3 (XQuery/XPath 3
 | `benchmark/suite/` | [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) — drives `profiler.js`, `debug.js`, `coverage.js`, `callgraph.js` |
 | `benchmark/jsonpath-suite/` | [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) — drives `jsonpath.js` (703 tests, normalized paths included) |
 | `benchmark/qt3tests/` | [W3C QT3 tests](https://github.com/w3c/qt3tests) — drives `qt3-runner.js` (31,821 cases; convert once with `npm run qt3:convert`) |
+| `benchmark/toml-test-suite/` | [toml-test](https://github.com/toml-lang/toml-test) — drives `toml.js` and `test/josl/compliance.test.js` (709 TOML 1.0.0 cases via `tests/files-toml-1.0.0`) |
 
 ## Running the unit tests
 
