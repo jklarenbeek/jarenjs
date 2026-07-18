@@ -18,6 +18,11 @@ import {
   compileJSONPointer,
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json/pointer';
+import {
+  compileJSONPointerSetter,
+  compileJSONPointerRemover,
+  JsonWriteError,
+} from '@jarenjs/json/write';
 
 /**
  * Split a JSON pointer into decoded segments per RFC 6901. '' -> [].
@@ -63,49 +68,62 @@ export function getValueAtPointer(data, pointer) {
   return value === JSONPOINTER_NOTHING ? undefined : value;
 }
 
-//#region roadmap
-// Immutable write ops (set/append/remove by pointer) are a @jarenjs/json
-// roadmap item (compiled setters beside the compiled getters, feeding the
-// JSON Patch work). Until that lands they live here; parsing already goes
-// through the shared parseJSONPointer above.
+//#region write operations
+// One write engine in the whole repo: the copy-on-write kernel behind
+// @jarenjs/json's patch and write modules. Forms adds only its two
+// data disciplines - missing parents are CREATED (a rendered field may
+// be the first write into an untouched branch) and setting `undefined`
+// deletes (parseFieldInput maps a cleared input to undefined).
+
+const setterCache = new Map();
+const removerCache = new Map();
+
+function getPointerSetter(pointer) {
+  let setter = setterCache.get(pointer);
+  if (setter === undefined) {
+    setter = compileJSONPointerSetter(pointer, { parents: 'create' });
+    if (setterCache.size >= GETTER_CACHE_LIMIT)
+      setterCache.delete(setterCache.keys().next().value);
+    setterCache.set(pointer, setter);
+  }
+  return setter;
+}
+
+function getPointerRemover(pointer) {
+  let remover = removerCache.get(pointer);
+  if (remover === undefined) {
+    remover = compileJSONPointerRemover(pointer);
+    if (removerCache.size >= GETTER_CACHE_LIMIT)
+      removerCache.delete(removerCache.keys().next().value);
+    removerCache.set(pointer, remover);
+  }
+  return remover;
+}
 
 /**
  * Return a copy of `data` with the value at `pointer` replaced.
- * Setting `undefined` REMOVES the property (array items become undefined
- * holes only when explicitly set; use removeItemAt to delete them).
- * Missing intermediate containers are created (objects for name segments,
- * arrays for numeric segments).
+ * Setting `undefined` REMOVES the location (deleting something that does
+ * not exist is a no-op returning `data` unchanged). Missing intermediate
+ * containers are created (objects for name segments, arrays for numeric
+ * segments), and untouched siblings are shared by reference — the same
+ * copy-on-write engine as `@jarenjs/json`'s patch and write modules.
  * @param {any} data
  * @param {string} pointer
  * @param {any} value
  * @returns {any} The new root value
  */
 export function setValueAtPointer(data, pointer, value) {
-  const keys = parsePointer(pointer);
-  if (keys.length === 0) return value;
-
-  const root = cloneContainer(data, keys[0]);
-  let current = root;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const key = keys[i];
-    current[key] = cloneContainer(current[key], keys[i + 1]);
-    current = current[key];
+  if (value === undefined) {
+    if (pointer === '') return undefined;
+    try {
+      return getPointerRemover(pointer)(data);
+    }
+    catch (error) {
+      if (error instanceof JsonWriteError) return data;
+      throw error;
+    }
   }
-
-  const last = keys[keys.length - 1];
-  if (value === undefined && !Array.isArray(current)) {
-    delete current[last];
-  }
-  else {
-    current[last] = value;
-  }
-  return root;
-}
-
-function cloneContainer(value, nextKey) {
-  if (Array.isArray(value)) return value.slice();
-  if (value != null && typeof value === 'object') return { ...value };
-  return /^\d+$/.test(String(nextKey)) ? [] : {};
+  return getPointerSetter(pointer)(data, value);
 }
 
 /**

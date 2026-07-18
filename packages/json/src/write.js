@@ -119,6 +119,16 @@ function parseMutate(options) {
   return options !== undefined && options !== null && options.mutate === true;
 }
 
+function parseParents(options) {
+  if (options === undefined || options === null || options.parents === undefined)
+    return false;
+  if (options.parents === 'reject')
+    return false;
+  if (options.parents === 'create')
+    return true;
+  throw new TypeError(`unknown 'parents' option '${options.parents}'`);
+}
+
 //#endregion
 
 //#region walk and leaf operations
@@ -150,6 +160,66 @@ function walkOwnedParent(state, names, indexes, plen, dataPath) {
 /** A value may be an updater function `(oldValue, location) => next`. */
 function resolveValue(value, oldValue, location) {
   return typeof value === 'function' ? value(oldValue, location) : value;
+}
+
+// The container a created step should hold, decided by the FOLLOWING
+// step: an array for index-shaped steps ('-', a typed index, or a
+// numeric token), an object otherwise - the same inference schema-less
+// form data uses (@jarenjs/forms).
+function createdContainer(names, indexes, step) {
+  return names[step] === null || names[step] === '-' || indexes[step] >= 0
+    ? []
+    : {};
+}
+
+// walkOwnedParent with `parents: 'create'` semantics: missing members
+// and one-past-the-end array slots grow fresh containers; a scalar (or
+// null) on the spine is REPLACED by a fresh container. Fresh containers
+// are owned by construction, so later writes mutate them in place.
+function walkCreateParent(state, names, indexes, plen, dataPath) {
+  let v = ownedRoot(state);
+  if (v === null || typeof v !== 'object') {
+    const fresh = createdContainer(names, indexes, 0);
+    if (state.owned !== null)
+      state.owned.add(fresh);
+    state.root = fresh;
+    v = fresh;
+  }
+  for (let i = 0; i < plen; i++) {
+    if (Array.isArray(v)) {
+      const idx = names[i] === '-' ? v.length : stepArrayIndex(v, names[i], indexes[i]);
+      if (idx < 0 || idx > v.length)
+        throw writeError('JW2002', `invalid array position '${names[i] === null ? indexes[i] : names[i]}'`, dataPath);
+      const child = idx === v.length ? undefined : v[idx];
+      if (child !== null && typeof child === 'object') {
+        v = ownedChild(state, v, child, idx);
+      }
+      else {
+        const fresh = createdContainer(names, indexes, i + 1);
+        if (state.owned !== null)
+          state.owned.add(fresh);
+        v[idx] = fresh;
+        v = fresh;
+      }
+    }
+    else {
+      const name = names[i];
+      if (name === null)
+        throw writeError('JW2001', 'a typed index step cannot address an object member', dataPath);
+      const child = hasOwn(v, name) ? v[name] : undefined;
+      if (child !== null && typeof child === 'object') {
+        v = ownedChild(state, v, child, name);
+      }
+      else {
+        const fresh = createdContainer(names, indexes, i + 1);
+        if (state.owned !== null)
+          state.owned.add(fresh);
+        setObjectMember(v, name, fresh);
+        v = fresh;
+      }
+    }
+  }
+  return v;
 }
 
 // set semantics: replace the element / member, create the member when
@@ -230,6 +300,13 @@ function leafRemove(parent, name, index, dataPath, lenient) {
  * Options for the compiled write operations.
  * @typedef {Object} JsonWriteOptions
  * @property {boolean} [mutate] - Apply in place instead of copy-on-write.
+ * @property {'reject'|'create'} [parents] - What a missing spine means
+ *   for setters and inserters: `'reject'` (default) raises `JW2001`;
+ *   `'create'` grows fresh containers along the way — an array when the
+ *   following step is index-shaped (`-`, a typed index, or a numeric
+ *   token), an object otherwise — and REPLACES a scalar or `null` found
+ *   on the spine. The schema-less form-data discipline (@jarenjs/forms
+ *   `setValueAtPointer` is this option plus undefined-deletes).
  */
 
 /**
@@ -266,12 +343,14 @@ function leafRemove(parent, name, index, dataPath, lenient) {
 export function compileJSONPointerSetter(target, options = undefined) {
   const t = parseWriteTarget(target);
   const mutate = parseMutate(options);
+  const create = parseParents(options);
   if (t.len === 0)
     return (root, value) => resolveValue(value, root, t.pointer);
   const plen = t.len - 1;
+  const walk = create ? walkCreateParent : walkOwnedParent;
   return function setAt(root, value) {
     const state = makeState(root, mutate ? null : new Set());
-    const parent = walkOwnedParent(state, t.names, t.indexes, plen, t.pointer);
+    const parent = walk(state, t.names, t.indexes, plen, t.pointer);
     leafSet(parent, t.names[plen], t.indexes[plen], value, t.pointer);
     return state.root;
   };
@@ -291,12 +370,14 @@ export function compileJSONPointerSetter(target, options = undefined) {
 export function compileJSONPointerInserter(target, options = undefined) {
   const t = parseWriteTarget(target);
   const mutate = parseMutate(options);
+  const create = parseParents(options);
   if (t.len === 0)
     return (root, value) => value;
   const plen = t.len - 1;
+  const walk = create ? walkCreateParent : walkOwnedParent;
   return function insertAt(root, value) {
     const state = makeState(root, mutate ? null : new Set());
-    const parent = walkOwnedParent(state, t.names, t.indexes, plen, t.pointer);
+    const parent = walk(state, t.names, t.indexes, plen, t.pointer);
     leafInsert(parent, t.names[plen], t.indexes[plen], value, t.pointer);
     return state.root;
   };

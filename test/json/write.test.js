@@ -337,3 +337,54 @@ describe('copy-on-write discipline', () => {
 });
 
 //#endregion
+
+//#region parents: 'create'
+
+describe("the parents: 'create' option", () => {
+  it('grows missing containers along the spine, copy-on-write', () => {
+    const set = compileJSONPointerSetter('/user/address/street', { parents: 'create' });
+    const doc = { user: { name: 'Ada' }, other: { shared: true } };
+    const next = set(doc, 'Main St 1');
+    deepStrictEqual(next, {
+      user: { name: 'Ada', address: { street: 'Main St 1' } },
+      other: { shared: true },
+    });
+    deepStrictEqual(doc, { user: { name: 'Ada' }, other: { shared: true } }, 'input untouched');
+    strictEqual(next.other, doc.other, 'untouched siblings shared');
+  });
+
+  it('infers arrays from index-shaped steps and objects otherwise', () => {
+    const set = compileJSONPointerSetter('/lines/0/amount', { parents: 'create' });
+    deepStrictEqual(set({}, 12), { lines: [{ amount: 12 }] });
+    const deep = compileJSONPointerSetter('/a/0/b/0/c', { parents: 'create' });
+    deepStrictEqual(deep({}, 'x'), { a: [{ b: [{ c: 'x' }] }] });
+  });
+
+  it('replaces scalars and null found on the spine', () => {
+    const set = compileJSONPointerSetter('/a/b', { parents: 'create' });
+    deepStrictEqual(set({ a: 5 }, 1), { a: { b: 1 } });
+    deepStrictEqual(set({ a: null }, 1), { a: { b: 1 } });
+    deepStrictEqual(set(42, 1), { a: { b: 1 } }, 'a scalar root is replaced');
+  });
+
+  it('still rejects sparse array creation past the end', () => {
+    const set = compileJSONPointerSetter('/list/5/x', { parents: 'create' });
+    assert.throws(() => set({ list: [] }, 1), JsonWriteError);
+  });
+
+  it('composes with mutate and the inserter', () => {
+    const doc = { a: 1 };
+    const set = compileJSONPointerSetter('/b/c', { parents: 'create', mutate: true });
+    strictEqual(set(doc, 2), doc);
+    deepStrictEqual(doc, { a: 1, b: { c: 2 } });
+    const insert = compileJSONPointerInserter('/queue/-', { parents: 'create' });
+    deepStrictEqual(insert({}, 'first'), { queue: ['first'] });
+  });
+
+  it('rejects unknown parents values and defaults to JW2001', () => {
+    assert.throws(() => compileJSONPointerSetter('/a/b', { parents: 'grow' }), TypeError);
+    assert.throws(() => compileJSONPointerSetter('/a/b')({}, 1), JsonWriteError);
+  });
+});
+
+//#endregion

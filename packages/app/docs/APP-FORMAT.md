@@ -242,12 +242,12 @@ feedback shape a repair loop needs.
 - **The standard forms stylesheet** — render any `@jarenjs/forms`
   model through one shipped rule set; generalize `x-form`'s derivation
   vocabulary (`computed`/`visible`) to app-level derived state.
-- **Dirty-path-pruned re-rendering** — surface the patch engine's
-  changed paths and re-dispatch only intersecting view rules; with
-  memoized rule outputs this turns re-render cost from O(page) into
-  O(change).
-- **Unifying the write path** — `@jarenjs/forms` `setValueAtPointer`
-  over the same copy-on-write kernel as `patch`, so keystrokes and
-  transitions share one change-tracking story.
+- ~~Dirty-path-pruned re-rendering~~ — largely **shipped** through the
+  other side: the JSLT `memo` option makes unchanged subtrees return
+  reference-equal vnodes the renderer skips in O(1); prepass-level
+  pruning of match evaluation remains open (see ROADMAP).
+- ~~Unifying the write path~~ — **shipped**: `@jarenjs/json/write`
+  `parents: 'create'` + undefined-deletes is now exactly forms'
+  `setValueAtPointer`, on the shared copy-on-write kernel.
 - **Async action documents** — a disposition for actions that await an
   effect before transitioning (today: effect → dispatch).

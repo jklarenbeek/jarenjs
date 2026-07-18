@@ -262,7 +262,7 @@ enum with per-option titles) or `String(value)`, each through
 
 ## Data helpers
 
-Form data keeps plain JSON semantics — an untouched field is *absent*, not an empty string. Pointers parse and read through the [`@jarenjs/json`](../json) compiled pointer engine (RFC 6901, one implementation repo-wide); reads hit a compiled-getter cache and allocate nothing:
+Form data keeps plain JSON semantics — an untouched field is *absent*, not an empty string. Pointers parse, read AND write through the [`@jarenjs/json`](../json) engines (RFC 6901, one implementation repo-wide): reads hit a compiled-getter cache and allocate nothing, and writes run on the same copy-on-write kernel as the patch module (`compileJSONPointerSetter` with `parents: 'create'`), so untouched siblings are shared by reference on every keystroke — which feeds the JSLT memo and the view patcher's reference-equality fast path downstream:
 
 - `createInitialData(model)` — defaults and `const` values filled in, everything else absent
 - `parseFieldInput(field, raw)` — input coercion (`''` → undefined, numeric strings → numbers, enum options → typed values)
