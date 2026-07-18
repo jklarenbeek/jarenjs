@@ -14,7 +14,8 @@ XQuery front-end, formats and form generation).
   - *JSONPath*: values and RFC 9535 normalized paths per keystroke
   - *JSON Pointer*: absolute + relative pointers (the `$data` hot path)
   - *JSON Patch*: RFC 6902 + RFC 7396 applied copy-on-write per keystroke, with error `docPath`/`dataPath`,
-    the `=== input` shared badge on no-op merges, and a diff mode that writes both patch formats
+    the `=== input` shared badge on no-op merges, a write-ops mode (set/insert/remove at a pointer,
+    normalized path, or every JSONPath match), and a diff mode that writes both patch formats
   - *JSON Query*: FLWOR/joins/grouping, externals, `$valid` with a real compiled schema
   - *JSLT*: stylesheets with the `=== input` shared-identity badge
   - *JTLT*: templates rendering JSON to Markdown/XML/code, with the compiled JSLT stylesheet one click away

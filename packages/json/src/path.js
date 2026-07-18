@@ -32,7 +32,13 @@ import {
   runSegmentsV,
   compileSegmentP,
   runSegmentsP,
+  scanArrayIndex,
+  appendName,
 } from './segments.js';
+import {
+  parseJSONPointer,
+  encodeJSONPointerSegment,
+} from './pointer.js';
 import {
   CC_TAB,
   CC_LF,
@@ -970,6 +976,74 @@ export function isValidJSONPathStrict(str) {
   catch {
     return false;
   }
+}
+
+//#endregion
+
+//#region normalized path <-> JSON Pointer bridge
+
+/**
+ * Convert a singular JSONPath query - which includes every RFC 9535
+ * normalized path - to an RFC 6901 JSON Pointer, so the two addressing
+ * standards compose.
+ *
+ * Any singular form is accepted (`$['store']['book'][0]`, `$.store.book[0]`);
+ * non-singular queries and negative (from-the-end) indexes are rejected,
+ * because a pointer cannot express them.
+ *
+ * @param {string} source - A singular JSONPath query
+ * @returns {string} The equivalent JSON Pointer
+ * @throws {JSONPathSyntaxError} When the query is invalid, not singular,
+ *   or uses a negative index
+ * @example
+ * jsonPointerFromJSONPath("$['store']['book'][0]['a/b']"); // '/store/book/0/a~1b'
+ */
+export function jsonPointerFromJSONPath(source) {
+  const { segments } = parseJSONPath(source);
+  if (!isSingularSegments(segments))
+    throw new JSONPathSyntaxError('only a singular query converts to a JSON Pointer', source, 0);
+  let pointer = '';
+  for (let i = 0; i < segments.length; i++) {
+    const sel = segments[i].selectors[0];
+    if (sel.kind === 'name') {
+      pointer += '/' + encodeJSONPointerSegment(sel.name);
+    }
+    else {
+      if (sel.index < 0)
+        throw new JSONPathSyntaxError('a negative index has no JSON Pointer form', source, 0);
+      pointer += '/' + sel.index;
+    }
+  }
+  return pointer;
+}
+
+/**
+ * Convert an RFC 6901 JSON Pointer to an RFC 9535 normalized path.
+ *
+ * A pointer token is one text with two readings (RFC 6901 lets `"2"`
+ * address both a `"2"` member and array element 2); a normalized path
+ * must pick one. Convention: a token that is a valid array index (digits,
+ * no leading zeros) becomes an index selector `[2]`, everything else a
+ * name selector `['name']`. A pointer addressing an object member that
+ * merely looks like an index is therefore converted to the index form -
+ * convert with the document in hand (e.g. via `query.paths`) when that
+ * distinction matters.
+ *
+ * @param {string} pointer - The JSON Pointer (e.g. `/store/book/0`)
+ * @returns {string} The normalized path (e.g. `$['store']['book'][0]`)
+ * @throws {JSONPointerSyntaxError} When the pointer is not valid RFC 6901
+ * @example
+ * jsonPathFromJSONPointer('/store/book/0'); // "$['store']['book'][0]"
+ */
+export function jsonPathFromJSONPointer(pointer) {
+  const segments = parseJSONPointer(pointer);
+  let path = '$';
+  for (let i = 0; i < segments.length; i++) {
+    const name = segments[i];
+    const index = scanArrayIndex(name, 0, name.length);
+    path = index >= 0 ? path + '[' + index + ']' : appendName(path, name);
+  }
+  return path;
 }
 
 //#endregion

@@ -172,7 +172,7 @@ function Examples() {
           {/* JSON Patch */}
           <TabsContent value="patch">
             <SectionIntro
-              blurb="Partial updates both ways: precise RFC 6902 operations (with test preconditions, moves and copies), document-shaped RFC 7396 merges, and structural diffs that write either format from two documents."
+              blurb="Partial updates every way: precise RFC 6902 operations (with test preconditions, moves and copies), document-shaped RFC 7396 merges, standalone set/insert/remove writes at pointers or every JSONPath match, and structural diffs that write either patch format from two documents."
               playground="/playground?engine=patch"
             />
             <div className="grid md:grid-cols-2 gap-6">
@@ -183,18 +183,24 @@ function Examples() {
                     <CardDescription>
                       {example.mode === 'patch' && 'JSON Patch (RFC 6902) — applied copy-on-write, atomically'}
                       {example.mode === 'merge' && 'JSON Merge Patch (RFC 7396) — the patch looks like the document'}
+                      {example.mode === 'write' && 'Write operation — one compiled set/insert/remove on the copy-on-write core'}
                       {example.mode === 'diff' && 'Structural diff — createJSONPatch / createMergePatch emit the patch'}
                     </CardDescription>
                   </CardHeader>
                   <Tabs defaultValue="patch" className="px-6 pb-6">
                     <TabsList>
                       <TabsTrigger value="patch">
-                        {example.mode === 'diff' ? 'Target' : example.mode === 'merge' ? 'Merge patch' : 'Patch'}
+                        {example.mode === 'diff' ? 'Target' : example.mode === 'merge' ? 'Merge patch'
+                          : example.mode === 'write' ? 'Write' : 'Patch'}
                       </TabsTrigger>
                       <TabsTrigger value="document">{example.mode === 'diff' ? 'Source' : 'Document'}</TabsTrigger>
                     </TabsList>
                     <TabsContent value="patch" className="mt-4">
-                      <CodeBlock showCopy>{pretty(example.mode === 'diff' ? example.target : example.patch)}</CodeBlock>
+                      <CodeBlock showCopy>
+                        {example.mode === 'write'
+                          ? pretty({ op: example.writeOp, target: example.target, ...(example.value !== undefined && { value: example.value }) })
+                          : pretty(example.mode === 'diff' ? example.target : example.patch)}
+                      </CodeBlock>
                     </TabsContent>
                     <TabsContent value="document" className="mt-4">
                       <CodeBlock showCopy>{pretty(example.document)}</CodeBlock>

@@ -99,6 +99,27 @@ createJSONPatch(doc, next);            // the diff emits RFC 6902 ops
 applyMergePatch(doc, { temp: null });  // RFC 7396: null deletes
 createMergePatch(doc, next);           // ...and the merge-patch diff`;
 
+const writeExample = `import {
+  compileJSONPointerSetter, removeAtJSONPointer,
+  compileJSONPathSetter, removeAtJSONPath,
+  jsonPointerFromJSONPath, jsonPathFromJSONPointer,
+} from '@jarenjs/json';
+
+// a target is a pointer, a normalized path, or any singular query
+const setZip = compileJSONPointerSetter('/address/zip');
+setZip(doc, '10999');                 // copy-on-write: doc untouched
+setZip(doc, (old) => old ?? '10115'); // setters take updater functions
+removeAtJSONPointer(doc, '$.store.book[-1]'); // negative = from the end
+
+// ...or write at EVERY node a query selects (reverse document order,
+// so array shifts and nested matches compose)
+compileJSONPathSetter('$..price')(doc, (p) => p * 1.21);
+removeAtJSONPath(doc, '$.store.book[?@.price > 20]');
+
+// the addressing bridge, for when locations cross API boundaries
+jsonPointerFromJSONPath("$['store']['book'][0]"); // '/store/book/0'
+jsonPathFromJSONPointer('/store/book/0'); // "$['store']['book'][0]"`;
+
 const pathExample = `import { compileJSONPath, queryJSONPath } from '@jarenjs/json';
 
 const query = compileJSONPath('$..book[?@.price < 10].title');
@@ -195,6 +216,7 @@ const NAV = [
     items: [
       ['json-pointer', 'JSON Pointer'],
       ['json-patch', 'JSON Patch & Merge Patch'],
+      ['json-write', 'Write operations'],
       ['jsonpath', 'JSONPath'],
       ['json-query', 'Jaren JSON Query'],
       ['jslt', 'JSLT stylesheets'],
@@ -394,6 +416,24 @@ npm install @jarenjs/forms`}</CodeBlock>
                 the patch and a <code className="bg-muted px-1 rounded">dataPath</code> into the document.
               </p>
               <CodeBlock showCopy>{patchExample}</CodeBlock>
+            </section>
+
+            <section>
+              <SectionHeading id="json-write" pkg="@jarenjs/json">Write operations</SectionHeading>
+              <p className="text-muted-foreground mb-4">
+                When a whole patch document is more ceremony than the job needs: standalone{' '}
+                <code className="bg-muted px-1 rounded">set</code> / <code className="bg-muted px-1 rounded">insert</code> /{' '}
+                <code className="bg-muted px-1 rounded">remove</code>, compiled once per target on the same copy-on-write
+                core. A target is an RFC 6901 pointer, an RFC 9535 normalized path, or <em>any</em> singular JSONPath
+                query — including negative (from-the-end) indexes and <code className="bg-muted px-1 rounded">/arr/-</code>{' '}
+                append. The <code className="bg-muted px-1 rounded">compileJSONPath*</code> variants write at{' '}
+                <em>every</em> node an arbitrary query selects, applying matched locations in reverse document order so
+                multiple removals or inserts in one array — and nested matches — compose without index bookkeeping.
+                Setters accept updater functions; failures (<code className="bg-muted px-1 rounded">JsonWriteError</code>,
+                stable codes, target as <code className="bg-muted px-1 rounded">dataPath</code>) leave the input
+                untouched, and <code className="bg-muted px-1 rounded">{'{ mutate: true }'}</code> patches in place.
+              </p>
+              <CodeBlock showCopy>{writeExample}</CodeBlock>
             </section>
 
             <section>

@@ -57,6 +57,10 @@
       "types": "./dist/types/patch.d.ts",
       "default": "./src/patch.js"
     },
+    "./write": {
+      "types": "./dist/types/write.d.ts",
+      "default": "./src/write.js"
+    },
     "./query": {
       "types": "./dist/types/query/index.d.ts",
       "default": "./src/query/index.js"

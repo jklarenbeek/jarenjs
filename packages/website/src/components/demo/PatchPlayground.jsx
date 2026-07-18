@@ -4,29 +4,66 @@ import {
   applyMergePatch,
   createJSONPatch,
   createMergePatch,
+  compileJSONPointerSetter,
+  compileJSONPointerInserter,
+  compileJSONPointerRemover,
+  compileJSONPathSetter,
+  compileJSONPathInserter,
+  compileJSONPathRemover,
+  JsonWriteError,
 } from '@jarenjs/json';
 import { equalsJson } from '@jarenjs/core/object';
 import { JsonEditor } from './JsonEditor';
 import { ExampleChips, TimingBadges, ResultCard, describeEngineError } from './playgroundShared';
 import { Badge } from '@components/ui/badge';
+import { Input } from '@components/ui/input';
 import { cn } from '@lib/utils';
 import { patchExamples } from '@lib/playgroundExamples';
 
 const MODES = [
   { key: 'patch', label: 'JSON Patch' },
   { key: 'merge', label: 'Merge Patch' },
+  { key: 'write', label: 'Write ops' },
   { key: 'diff', label: 'Diff' },
 ];
 
 const MODE_HINTS = {
   patch: 'RFC 6902: an array of operations (add, remove, replace, move, copy, test), each addressing a JSON Pointer. Compiled once, applied copy-on-write — the input document is never touched, and a failing operation aborts the whole patch.',
   merge: 'RFC 7396: the patch looks like the document. Objects merge recursively, null deletes a member, anything else replaces. A merge that changes nothing returns the input itself — watch the badge.',
+  write: 'Standalone set / insert / remove on the same copy-on-write core. The target is a JSON Pointer, a normalized path, or any JSONPath — a singular target addresses one location, anything else writes at every matched node (in reverse document order, so shifts compose). In code, setters also take updater functions like (price) => price * 1.21.',
   diff: 'Structural diff: edit the two documents and read both patch formats off the difference. The JSON Patch round-trips by construction; the merge patch cannot represent a null-valued member (RFC 7396’s documented blind spot).',
 };
 
+const WRITE_OPS = ['set', 'insert', 'remove'];
+
+const POINTER_WRITERS = {
+  set: compileJSONPointerSetter,
+  insert: compileJSONPointerInserter,
+  remove: compileJSONPointerRemover,
+};
+
+const PATH_WRITERS = {
+  set: compileJSONPathSetter,
+  insert: compileJSONPathInserter,
+  remove: compileJSONPathRemover,
+};
+
+// Compile a writer for the target: pointer / singular form first; a
+// non-singular JSONPath (JW0001) falls back to the every-match writers.
+function compileWriter(op, target) {
+  try {
+    return { writer: POINTER_WRITERS[op](target), multi: false };
+  } catch (err) {
+    if (err instanceof JsonWriteError && err.code === 'JW0001' && target.startsWith('$'))
+      return { writer: PATH_WRITERS[op](target), multi: true };
+    throw err;
+  }
+}
+
 /**
- * JSON Patch (RFC 6902) + JSON Merge Patch (RFC 7396) playground:
- * apply either format copy-on-write, or diff two documents into both.
+ * JSON Patch (RFC 6902) + JSON Merge Patch (RFC 7396) playground, plus
+ * the standalone write operations: apply either patch format or a
+ * single set/insert/remove copy-on-write, or diff two documents.
  */
 function PatchPlayground() {
   const first = patchExamples[0];
@@ -34,6 +71,10 @@ function PatchPlayground() {
   const [document, setDocument] = useState(first.document);
   const [patch, setPatch] = useState(first.patch);
   const [target, setTarget] = useState(patchExamples.find((e) => e.mode === 'diff').target);
+  const firstWrite = patchExamples.find((e) => e.mode === 'write');
+  const [writeOp, setWriteOp] = useState(firstWrite.writeOp);
+  const [writeTarget, setWriteTarget] = useState(firstWrite.target);
+  const [writeValue, setWriteValue] = useState(firstWrite.value);
   const [revision, setRevision] = useState(0);
 
   const outcome = useMemo(() => {
@@ -52,6 +93,15 @@ function PatchPlayground() {
         const runMs = performance.now() - start;
         return { value, compileMs: null, runMs, shared: value === document, error: null };
       }
+      if (mode === 'write') {
+        const start = performance.now();
+        const { writer, multi } = compileWriter(writeOp, writeTarget);
+        const compileMs = performance.now() - start;
+        const runStart = performance.now();
+        const value = writeOp === 'remove' ? writer(document) : writer(document, writeValue);
+        const runMs = performance.now() - runStart;
+        return { value, compileMs, runMs, multi, shared: value === document, error: null };
+      }
       const start = performance.now();
       const apply = compileJSONPatch(patch);
       const compileMs = performance.now() - start;
@@ -62,13 +112,20 @@ function PatchPlayground() {
     } catch (err) {
       return { value: undefined, compileMs: null, runMs: null, error: err };
     }
-  }, [mode, document, patch, target]);
+  }, [mode, document, patch, target, writeOp, writeTarget, writeValue]);
 
   const loadExample = (example) => {
     setMode(example.mode);
     setDocument(example.document);
-    if (example.patch !== undefined) setPatch(example.patch);
-    if (example.target !== undefined) setTarget(example.target);
+    if (example.mode === 'write') {
+      setWriteOp(example.writeOp);
+      setWriteTarget(example.target);
+      if (example.value !== undefined) setWriteValue(example.value);
+    }
+    else {
+      if (example.patch !== undefined) setPatch(example.patch);
+      if (example.target !== undefined) setTarget(example.target);
+    }
     setRevision((r) => r + 1);
   };
 
@@ -106,7 +163,7 @@ function PatchPlayground() {
           minHeight={360}
         />
 
-        {mode === 'diff' ? (
+        {mode === 'diff' && (
           <JsonEditor
             title="Target document"
             value={target}
@@ -114,7 +171,8 @@ function PatchPlayground() {
             onChange={setTarget}
             minHeight={360}
           />
-        ) : (
+        )}
+        {(mode === 'patch' || mode === 'merge') && (
           <JsonEditor
             title={mode === 'merge' ? 'Merge patch (RFC 7396)' : 'Patch (RFC 6902)'}
             value={patch}
@@ -123,16 +181,64 @@ function PatchPlayground() {
             minHeight={360}
           />
         )}
+        {mode === 'write' && (
+          <div className="space-y-4">
+            <div className="flex rounded-lg border overflow-hidden w-fit">
+              {WRITE_OPS.map((op) => (
+                <button
+                  key={op}
+                  onClick={() => setWriteOp(op)}
+                  className={cn(
+                    'px-3 py-1.5 text-sm font-medium transition-colors',
+                    writeOp === op ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
+                  )}
+                >
+                  {op}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="write-target" className="text-xs font-medium text-muted-foreground">
+                Target — JSON Pointer, normalized path, or JSONPath
+              </label>
+              <Input
+                id="write-target"
+                value={writeTarget}
+                onChange={(e) => setWriteTarget(e.target.value)}
+                className="font-mono"
+                placeholder="/store/bicycle/color or $..price"
+                spellCheck={false}
+              />
+            </div>
+            {writeOp !== 'remove' && (
+              <JsonEditor
+                title="Value"
+                value={writeValue}
+                revision={revision}
+                onChange={setWriteValue}
+                minHeight={180}
+              />
+            )}
+          </div>
+        )}
 
         <ResultCard
-          title={mode === 'diff' ? 'Generated patches' : 'Patched document'}
+          title={mode === 'diff' ? 'Generated patches' : mode === 'write' ? 'New document' : 'Patched document'}
           error={error}
           badges={(
             <div className="flex items-center gap-2">
-              {mode === 'merge' && outcome.shared && (
+              {mode === 'write' && outcome.multi && !error && (
+                <Badge
+                  variant="secondary"
+                  title="The target is not a singular query, so the write applies at every matched node — in reverse document order, so array shifts and nested matches compose"
+                >
+                  every match
+                </Badge>
+              )}
+              {(mode === 'merge' || mode === 'write') && outcome.shared && (
                 <Badge
                   variant="success"
-                  title="The merge proved nothing changed and returned the input object itself (output === input) — no copy was made"
+                  title="Nothing changed (for writes: the query matched nothing), so the input object itself came back (output === input) — no copy was made"
                 >
                   === input (shared)
                 </Badge>
@@ -162,11 +268,24 @@ function PatchPlayground() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        <code className="bg-muted px-1 rounded">compileJSONPatch</code> validates the patch once, pre-parses every
-        pointer and specializes one closure per operation; applying clones only the spine it writes through — and
-        clones it once, no matter how many operations touch the same region. Untouched subtrees are shared with the
-        result, which is why applying is 5–170× faster than the usual clone-and-interpret shape. The engine passes all
-        108 official json-patch-tests vectors; see the Benchmarks tab for the numbers.
+        {mode === 'write' ? (
+          <>
+            <code className="bg-muted px-1 rounded">compileJSONPointerSetter</code> and friends compile the target once —
+            an RFC 6901 pointer, an RFC 9535 normalized path, or any singular query (negative indexes included) all
+            work, and non-singular queries switch to the every-match writers. Application is the same copy-on-write core
+            as JSON Patch: only the written spine is cloned, everything else is shared, and failures
+            (<code className="bg-muted px-1 rounded">JsonWriteError</code> with a stable code and{' '}
+            <code className="bg-muted px-1 rounded">dataPath</code>) leave the input untouched.
+          </>
+        ) : (
+          <>
+            <code className="bg-muted px-1 rounded">compileJSONPatch</code> validates the patch once, pre-parses every
+            pointer and specializes one closure per operation; applying clones only the spine it writes through — and
+            clones it once, no matter how many operations touch the same region. Untouched subtrees are shared with the
+            result, which is why applying is 5–170× faster than the usual clone-and-interpret shape. The engine passes all
+            108 official json-patch-tests vectors; see the Benchmarks tab for the numbers.
+          </>
+        )}
       </p>
     </div>
   );

@@ -123,7 +123,7 @@ const next = apply(doc);
 
 createJSONPatch(doc, next); // the diff writes the patch for you
 applyMergePatch(doc, { user: { name: 'Bob' }, temp: null });`,
-    blurb: 'Partial updates as standards: JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396), applied copy-on-write so the input is never touched and atomic abort costs nothing. Structural diffs emit either format — a ready-made change feed for forms, HTTP PATCH endpoints and optimistic concurrency.',
+    blurb: 'Partial updates as standards: JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396), applied copy-on-write so the input is never touched and atomic abort costs nothing. Structural diffs emit either format, and standalone write operations (set/insert/remove at a pointer, a normalized path, or every JSONPath match) expose the same core without the patch-document ceremony.',
   },
   {
     key: 'query',

@@ -34,8 +34,31 @@ describe('PatchPlayground', () => {
     expect(screen.getByText(/"mergePatch"/)).toBeInTheDocument();
   });
 
-  it('has examples covering all three modes', () => {
+  it('write mode sets at a pointer target', () => {
+    render(<PatchPlayground />);
+    fireEvent.click(screen.getByText('Write: set at a pointer'));
+    expect(screen.getByText(/"color": "blue"/)).toBeInTheDocument();
+    expect(screen.getByText('OK')).toBeInTheDocument();
+  });
+
+  it('write mode falls back to every-match writers for non-singular queries', () => {
+    const { container } = render(<PatchPlayground />);
+    fireEvent.click(screen.getByText('Write: remove every match'));
+    expect(screen.getByText('every match')).toBeInTheDocument();
+    // the only book above 20 is The Lord of the Rings — gone from the result
+    const result = container.querySelector('pre code');
+    expect(result.textContent).not.toContain('Lord of the Rings');
+    expect(result.textContent).toContain('Moby Dick');
+  });
+
+  it('write mode accepts a normalized path target', () => {
+    const { container } = render(<PatchPlayground />);
+    fireEvent.click(screen.getByText('Write: normalized path'));
+    expect(container.querySelector('pre code').textContent).toContain('Sayings, 2nd Edition');
+  });
+
+  it('has examples covering all four modes', () => {
     const modes = new Set(patchExamples.map((e) => e.mode));
-    expect(modes).toEqual(new Set(['patch', 'merge', 'diff']));
+    expect(modes).toEqual(new Set(['patch', 'merge', 'write', 'diff']));
   });
 });

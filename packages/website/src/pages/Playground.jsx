@@ -30,7 +30,7 @@ const ENGINES = [
   {
     key: 'patch',
     label: 'JSON Patch',
-    blurb: 'RFC 6902 and RFC 7396 partial updates, applied copy-on-write — plus a structural diff that writes the patches for you.',
+    blurb: 'RFC 6902 and RFC 7396 partial updates plus standalone write operations, all copy-on-write — and a structural diff that writes the patches for you.',
   },
   {
     key: 'query',

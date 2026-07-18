@@ -44,6 +44,17 @@ import {
 
 import { NOTHING, scanArrayIndex } from './segments.js';
 
+import {
+  isJsonObject,
+  isContainer,
+  setObjectMember,
+  cloneJson,
+  makeState,
+  ownedRoot,
+  ownedChild,
+  readSteps,
+} from './cow.js';
+
 const hasOwn = Object.hasOwn;
 
 //#region errors
@@ -83,89 +94,11 @@ export class JsonPatchRuntimeError extends Error {
 //#endregion
 
 //#region copy-on-write machinery
-
-function isJsonObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function isContainer(v) {
-  return typeof v === 'object' && v !== null;
-}
-
-// A member named '__proto__' must become an own data property, never a
-// prototype assignment (the setMember discipline of the query engine).
-function setObjectMember(out, name, value) {
-  if (name === '__proto__') {
-    Object.defineProperty(out, name, {
-      value,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
-  }
-  else {
-    out[name] = value;
-  }
-}
-
-// Object spread copies an own '__proto__' data property as an own
-// property (CreateDataProperty semantics), so it is pollution-safe here.
-function shallowCloneNode(v) {
-  return Array.isArray(v) ? v.slice() : { ...v };
-}
-
-function cloneJson(value) {
-  if (!isContainer(value))
-    return value;
-  if (Array.isArray(value)) {
-    const len = value.length;
-    const out = new Array(len);
-    for (let i = 0; i < len; i++)
-      out[i] = cloneJson(value[i]);
-    return out;
-  }
-  const out = {};
-  for (const key in value) {
-    if (hasOwn(value, key))
-      setObjectMember(out, key, cloneJson(value[key]));
-  }
-  return out;
-}
-
-/**
- * The mutable state of one patch application. `owned` is the set of
- * nodes this application created and may mutate freely; `null` means
- * in-place mode (every node is owned).
- */
-function makeState(root, owned) {
-  return { root, owned };
-}
-
-// Ensure the root is owned before the first write into it.
-function ownedRoot(state) {
-  const root = state.root;
-  const owned = state.owned;
-  if (owned === null || !isContainer(root) || owned.has(root))
-    return root;
-  const clone = shallowCloneNode(root);
-  owned.add(clone);
-  state.root = clone;
-  return clone;
-}
-
-// Return an owned version of `child`, writing the clone back into the
-// (already owned) parent slot when one is taken.
-function ownedChild(state, parent, child, key) {
-  const owned = state.owned;
-  if (owned === null || !isContainer(child) || owned.has(child))
-    return child;
-  const clone = shallowCloneNode(child);
-  owned.add(clone);
-  // the slot was just read through hasOwn/index, so plain assignment
-  // never reaches a prototype '__proto__' setter
-  parent[key] = clone;
-  return clone;
-}
+// The generic pieces (owned-set state, spine cloning, step reads) live
+// in the package-internal cow.js, shared with the standalone write
+// operations (write.js). This region keeps only what is specific to the
+// patch engine: the walk that raises JsonPatchRuntimeError with both a
+// patch docPath and a target dataPath.
 
 function pathError(code, message, docPath, dataPath) {
   return new JsonPatchRuntimeError(code, message, docPath, dataPath);
@@ -200,28 +133,7 @@ function walkOwnedParent(state, t, docPath) {
 
 // Read the full target location without cloning anything.
 function readTarget(root, t) {
-  const names = t.names;
-  const indexes = t.indexes;
-  const len = t.len;
-  let v = root;
-  for (let i = 0; i < len; i++) {
-    if (Array.isArray(v)) {
-      const idx = indexes[i];
-      if (idx < 0 || idx >= v.length)
-        return NOTHING;
-      v = v[idx];
-    }
-    else if (typeof v === 'object' && v !== null) {
-      const name = names[i];
-      if (!hasOwn(v, name))
-        return NOTHING;
-      v = v[name];
-    }
-    else {
-      return NOTHING;
-    }
-  }
-  return v;
+  return readSteps(root, t.names, t.indexes, t.len, NOTHING);
 }
 
 function containsOwned(v, owned) {

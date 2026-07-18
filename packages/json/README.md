@@ -12,6 +12,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/json/basic` | JSON, JSON Pointer and JSONPath string validation |
 | `@jarenjs/json/pointer` | the JSON Pointer and Relative JSON Pointer compiler |
 | `@jarenjs/json/patch` | JSON Patch and JSON Merge Patch: compiled apply + structural diff |
+| `@jarenjs/json/write` | compiled write operations: set/insert/remove at pointers, normalized paths, or every JSONPath match |
 | `@jarenjs/json/path` | the JSONPath compiler |
 | `@jarenjs/json/query` | the Jaren JSON Query engine |
 | `@jarenjs/json/jslt` | the Jaren JSLT stylesheet compiler and dispatcher |
@@ -29,6 +30,8 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Relative JSON Pointer | `compileRelativeJSONPointer`, `parseRelativeJSONPointer`, `compileDataRef`, `isValidRelativeJSONPointer` |
 | JSON Patch ([RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902)) | `compileJSONPatch`, `applyJSONPatch`, `createJSONPatch`, `isValidJSONPatch`, `JsonPatchCompileError`, `JsonPatchRuntimeError` |
 | JSON Merge Patch ([RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396)) | `compileMergePatch`, `applyMergePatch`, `createMergePatch` |
+| Write operations | `compileJSONPointerSetter`/`Inserter`/`Remover`, `compileJSONPathSetter`/`Inserter`/`Remover`, one-shot `setAtJSONPointer`, `removeAtJSONPath`, ..., `JsonWriteError` |
+| Addressing bridge | `jsonPointerFromJSONPath`, `jsonPathFromJSONPointer` |
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
@@ -89,6 +92,34 @@ applyJSONPatch(a, createJSONPatch(a, b)); // deep-equals b
 Because an application only clones the spine it writes through — and clones it once, no matter how many operations touch the same region — the compiled applier beats the usual clone-and-interpret shape by 5–170x depending on document size (`npm run benchmark:jsonpatch`). Two options tune the copy discipline, mirroring JSLT's `share`/`fresh` dispositions: `values: 'fresh'` deep-copies inserted operation values per application (the default `'share'` inserts them by reference, so treat results as immutable), and `mutate: true` patches in place for the last bit of speed at the cost of atomicity.
 
 [RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396) merge patches ride the same machinery: `compileMergePatch(patch)` pre-splits the patch into remove/set/merge plans, and applying is identity-preserving — a merge that changes nothing returns the target by reference, so it doubles as a cheap change detector. `createMergePatch(source, target)` emits the merge patch (with the RFC's documented `null`-member representability caveat), and `applyMergePatch(doc, patch)` is the one-shot form.
+
+### Write operations
+
+When a whole patch document is more ceremony than the job needs, the standalone write operations expose the same copy-on-write core directly — `set`, `insert` and `remove`, compiled once per target:
+
+```javascript
+import {
+  compileJSONPointerSetter, removeAtJSONPointer,
+  compileJSONPathSetter, removeAtJSONPath,
+} from '@jarenjs/json';
+
+// a target is an RFC 6901 pointer, a normalized path, or ANY singular
+// query — '/store/book/0/title', "$['store']['book'][0]['title']" and
+// '$.store.book[-1].title' (negative = from the end) all compile
+const setZip = compileJSONPointerSetter('/address/zip');
+const next = setZip(doc, '10999');   // doc untouched, spine cloned once
+
+setZip(doc, (old) => old ?? '10115'); // setters take updater functions
+
+// ...or write at EVERY node a JSONPath query selects
+const addVat = compileJSONPathSetter('$..price');
+addVat(doc, (price) => price * 1.21);
+removeAtJSONPath(doc, '$.store.book[?@.price > 20]');
+```
+
+Set replaces (creating a missing final member; `/arr/-` appends), insert has RFC 6902 `add` semantics (array elements shift right), remove deletes with shift. The query-selected writers apply matched locations in **reverse document order**, so multiple removals or inserts in one array — and nested matches — compose without index bookkeeping, and matching nothing is a no-op that returns the input. Everything is copy-on-write with an in-place `{ mutate: true }` escape hatch; failures (`JsonWriteError`, `JW0001`/`JW2xxx` with the target as `dataPath`) leave the input untouched.
+
+The addressing bridge rounds this out: `jsonPointerFromJSONPath(singularQuery)` and `jsonPathFromJSONPointer(pointer)` convert between the two location languages (digit tokens become index selectors — RFC 6901's one-token-two-forms ambiguity, resolved by convention), so pointers, normalized paths and query results compose freely.
 
 ## The JSONPath compiler
 
