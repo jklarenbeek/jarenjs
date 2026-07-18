@@ -1,0 +1,16 @@
+{
+  "name": "Jaren — JSON all the way down",
+  "short_name": "Jaren",
+  "description": "The Jaren JSON toolchain playground and IDE: schema validation, JSONPath, JSON query, JSLT and forms — live, offline-capable, no server.",
+  "id": "/jarenjs/",
+  "start_url": "/jarenjs/",
+  "scope": "/jarenjs/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e1220",
+  "theme_color": "#5646d6",
+  "icons": [
+    { "src": "/jarenjs/jaren.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/jarenjs/jaren.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
