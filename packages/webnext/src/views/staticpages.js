@@ -1,33 +1,63 @@
 //@ts-check
 /**
- * Docs and Examples — placeholder modes until their content documents
- * are ported; each cross-references the current site so nothing is
- * lost during the side-by-side phase.
+ * Docs — a sectioned reference rendered from the DOCS_SECTIONS content
+ * document (one section at a time, deep-linkable via ?s=). Examples —
+ * every engine's example gallery with one-click "Open in playground".
  */
 
-const OLD_SITE = 'https://jklarenbeek.github.io/jarenjs/';
-
-const placeholder = (title, text, href) =>
-  ['div', { class: 'page container' },
-    ['h1', {}, title],
-    ['div', { class: 'callout wide' },
-      ['h3', {}, 'Not yet ported to webnext'],
-      ['p', {}, text],
-      ['a', { href, class: 'btn' }, 'Open in the current website'],
-    ],
-  ];
-
 export const STATIC_RULES = [
+  // ---- docs ----
   {
     match: '$.ui.docs', mode: 'docs',
-    body: placeholder('Documentation',
-      'The documentation page (19 sections, from installation to JOSL) is being converted into a content document rendered by this stylesheet. Until then it lives on the current site.',
-      `${OLD_SITE}#/docs`),
+    body: ['div', { class: 'page container docs-grid' },
+      ['nav', { class: 'docs-nav' },
+        ['h1', {}, 'Docs'],
+        [{ $apply: '$.sections[*]' }],
+      ],
+      ['article', { class: 'docs-article' },
+        ['h2', {}, '$.section.title'],
+        [{ $apply: ['$.section.blocks[*]', 'ui'] }],
+      ],
+    ],
   },
   {
+    match: '$.ui.docs.sections[*]', mode: 'docs',
+    body: ['a', {
+      href: '$.href',
+      class: { $if: ['$.active', 'docs-link active', 'docs-link'] },
+    }, '$.title'],
+  },
+
+  // ---- examples ----
+  {
     match: '$.ui.examples', mode: 'examples',
-    body: placeholder('Examples',
-      'The per-engine example gallery is being converted next. Until then it lives on the current site.',
-      `${OLD_SITE}#/examples`),
+    body: ['div', { class: 'page container' },
+      ['h1', {}, 'Examples'],
+      ['p', { class: 'page-lead' },
+        'Copy-paste starting points for every engine. Open any of them live in the playground with one click.'],
+      ['nav', { class: 'tabs' }, [{ $apply: '$.tabs[*]' }]],
+      ['div', { class: 'example-grid' }, [{ $apply: '$.items[*]' }]],
+    ],
+  },
+  {
+    match: '$.ui.examples.tabs[*]', mode: 'examples',
+    body: ['a', {
+      href: '$.href',
+      class: { $if: ['$.active', 'tab active', 'tab'] },
+    }, '$.label'],
+  },
+  {
+    match: '$.ui.examples.items[*]', mode: 'examples',
+    body: ['article', { class: 'card example-card' },
+      ['div', { class: 'card-head' },
+        ['h3', {}, '$.label'],
+        ['button', {
+          type: 'button',
+          class: 'btn small',
+          on: { click: { action: 'ex/open', with: '$.payload' } },
+        }, 'Open in playground'],
+      ],
+      ['pre', { class: 'code-block clamp' }, ['code', {}, '$.preview']],
+    ],
   },
 ];

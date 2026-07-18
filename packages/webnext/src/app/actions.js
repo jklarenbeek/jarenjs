@@ -13,7 +13,10 @@ export const ACTIONS = {
   // hash changed: store the parsed route and fetch what the page needs
   // (the fetch-bench handler dedupes, so repeat visits are free)
   'route/set': {
-    patch: [{ op: 'replace', path: '/route', value: '$payload' }],
+    patch: [
+      { op: 'replace', path: '/route', value: '$payload' },
+      { op: 'replace', path: '/menu', value: false },
+    ],
     effects: {
       $if: [
         { $eq: ['$payload.page', 'benchmarks'] },
@@ -99,6 +102,61 @@ export const ACTIONS = {
       { op: 'replace', path: '/pg/dataError', value: null },
     ],
   },
+
+  // the generic engine playgrounds: one input action for every field of
+  // every engine, one loader for example chips and experiments
+  'eng/input': {
+    patch: [{
+      op: 'add',
+      path: { $concat: ['/eng/', '$payload.engine', '/', '$payload.key'] },
+      value: '$event.value',
+    }],
+  },
+  'eng/load': {
+    patch: [{
+      op: 'replace',
+      path: { $concat: ['/eng/', '$payload.engine'] },
+      value: '$payload.inputs',
+    }],
+  },
+  'eng/result': {
+    patch: [{
+      op: 'add',
+      path: { $concat: ['/engResults/', '$payload.engine'] },
+      value: '$payload.result',
+    }],
+  },
+
+  // benchmark deep-dive controls
+  'bench/search': {
+    patch: [
+      { op: 'replace', path: '/benchUi/search', value: '$event.value' },
+      { op: 'replace', path: '/benchUi/limit', value: 40 },
+    ],
+  },
+  'bench/more': {
+    patch: [{ op: 'replace', path: '/benchUi/limit', value: { $add: ['$.benchUi.limit', 80] } }],
+  },
+
+  // the mobile navigation drawer
+  'menu/toggle': {
+    patch: [{ op: 'replace', path: '/menu', value: { $not: '$.menu' } }],
+  },
+
+  // the experiment store (the IDE): state holds names only; the
+  // snapshots live in localStorage behind the ide-* effects
+  'ide/name': {
+    patch: [{ op: 'replace', path: '/ide/name', value: '$event.value' }],
+  },
+  'ide/names': {
+    patch: [{ op: 'replace', path: '/ide/names', value: '$payload' }],
+  },
+  'ide/save': { effects: [{ run: 'ide-save' }] },
+  'ide/load': { effects: [{ run: 'ide-load', with: { name: '$payload' } }] },
+  'ide/delete': { effects: [{ run: 'ide-delete', with: { name: '$payload' } }] },
+
+  // examples page: load an example into the playground and go there
+  'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },
 
   // the generated form writes through the standard form actions
   ...createFormActions({ dataPointer: '/pg/data' }),

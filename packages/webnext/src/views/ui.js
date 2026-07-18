@@ -1,12 +1,17 @@
 //@ts-check
 /**
- * The generic render-node vocabulary — mode 'ui'. The benchmark
- * boundary (and anything else) emits kind-tagged JSON nodes; these
- * three-and-a-half rules turn them into vnodes. Adding a page section
- * becomes a data transformation, not new markup code.
+ * The generic render-node vocabulary — mode 'ui'. Boundaries (and the
+ * docs content) emit kind-tagged JSON nodes; one rule per kind turns
+ * them into vnodes. This is the site's component library, as data:
+ * cards, tables, callouts, code blocks, error blocks, bar charts,
+ * collapsibles, a search box and a show-more button.
  */
 
 export const UI_RULES = [
+  {
+    match: "$..[?@.kind == 'p']", mode: 'ui',
+    body: ['p', { class: 'doc-p' }, '$.text'],
+  },
   {
     match: "$..[?@.kind == 'cards']", mode: 'ui',
     body: ['div', { class: 'cards' }, [{ $apply: '$.items[*]' }]],
@@ -50,6 +55,68 @@ export const UI_RULES = [
       ['h3', {}, '$.title'],
       ['p', {}, '$.text'],
       { $if: ['$.href', ['a', { href: '$.href', class: 'btn' }, '$.link']] },
+    ],
+  },
+  {
+    match: "$..[?@.kind == 'code']", mode: 'ui',
+    body: ['div', { class: 'code-card' },
+      { $if: [{ $or: ['$.title', '$.badge'] },
+        ['div', { class: 'code-head' },
+          { $if: ['$.title', ['span', { class: 'code-title' }, '$.title']] },
+          { $if: ['$.badge', ['span', { class: 'code-badge' }, '$.badge']] },
+        ]] },
+      ['pre', { class: 'code-block' }, ['code', {}, '$.text']],
+    ],
+  },
+  {
+    match: "$..[?@.kind == 'error']", mode: 'ui',
+    body: ['div', { class: 'error-card' },
+      ['p', { class: 'error-title' }, '$.title'],
+      ['p', { class: 'error-message' }, '$.message'],
+      { $if: ['$.detail', ['p', { class: 'error-detail' }, '$.detail']] },
+    ],
+  },
+  {
+    match: "$..[?@.kind == 'details']", mode: 'ui',
+    body: ['details', { class: 'details-card' },
+      ['summary', {}, '$.summary'],
+      [{ $apply: '$.items[*]' }],
+    ],
+  },
+  {
+    match: "$..[?@.kind == 'bars']", mode: 'ui',
+    body: ['div', { class: 'bars-card' },
+      ['h3', {}, '$.title'],
+      [{ $apply: '$.items[*]' }],
+      { $if: ['$.note', ['p', { class: 'table-note' }, '$.note']] },
+    ],
+  },
+  {
+    match: "$..[?@.kind == 'bar']", mode: 'ui',
+    body: ['div', { class: 'bar-row' },
+      ['span', { class: 'bar-label' }, '$.label'],
+      ['div', { class: 'bar-track' },
+        ['div', {
+          class: { $if: [{ $eq: ['$.tone', 'loss'] }, 'bar-fill loss', 'bar-fill'] },
+          style: '$.style',
+        }]],
+      ['span', { class: 'bar-text' }, '$.text'],
+    ],
+  },
+  {
+    match: "$..[?@.kind == 'search']", mode: 'ui',
+    body: ['input', {
+      type: 'search',
+      class: 'search-input',
+      placeholder: '$.placeholder',
+      value: '$.value',
+      on: { input: '$.action' },
+    }],
+  },
+  {
+    match: "$..[?@.kind == 'more']", mode: 'ui',
+    body: ['div', { class: 'more-row' },
+      ['button', { type: 'button', class: 'btn', on: { click: '$.action' } }, '$.label'],
     ],
   },
 ];

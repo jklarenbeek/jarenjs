@@ -28,13 +28,21 @@ export const DEFAULT_DATA = {
   tags: ['compiler'],
 };
 
-/** @returns {any} a fresh initial state */
-export function createInitialState(theme = 'light') {
+import { initialEngineInputs } from '../boundaries/engines.js';
+
+/**
+ * @param {string} [theme]
+ * @param {string[]} [ideNames] - saved experiment names from storage
+ * @returns {any} a fresh initial state
+ */
+export function createInitialState(theme = 'light', ideNames = []) {
   return {
     route: { page: 'home', params: {} },
     theme,
+    menu: false,      // the mobile navigation drawer
     bench: {},        // file name -> parsed benchmark JSON
     benchStatus: {},  // file name -> 'loading' | 'ready' | 'error'
+    benchUi: { search: '', limit: 40 },
     pg: {
       schemaText: DEFAULT_SCHEMA_TEXT,
       data: DEFAULT_DATA,
@@ -43,5 +51,8 @@ export function createInitialState(theme = 'light') {
       locale: 'en',          // error-message locale: 'en' | 'nl'
       result: null,          // validation result JSON from the boundary
     },
+    eng: initialEngineInputs(),  // engine key -> text inputs
+    engResults: {},              // engine key -> render nodes
+    ide: { name: '', names: ideNames },
   };
 }

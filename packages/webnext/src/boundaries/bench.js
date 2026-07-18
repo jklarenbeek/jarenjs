@@ -2,39 +2,27 @@
 /**
  * The benchmark derivation boundary: raw generated JSON (from
  * `benchmark/website-data.js`, synced out of the website package) in,
- * **kind-tagged render nodes** out. The `ui` view mode has one generic
- * rule per kind (`cards`, `table`, `callout`) — so a whole benchmark
- * suite renders through three rules, and adding a suite is a pure data
- * transformation here.
+ * kind-tagged render nodes out (lib/nodes.js). Every suite renders
+ * through the generic 'ui' rules; adding or reshaping a suite is a
+ * pure data transformation here.
  *
  * The suite-wide ratio convention holds everywhere: ratio > 1 means
  * "Jaren is N× faster".
  */
 
+import { cards, table, callout, bars, search, more, details, code } from '../lib/nodes.js';
 import { formatNs, formatMs, formatRatio } from '../lib/format.js';
-
-const OLD_SITE = 'https://jklarenbeek.github.io/jarenjs/';
 
 export const SUITES = [
   { key: 'overview', label: 'Overview' },
   { key: 'validate', label: 'JSON Schema' },
-  { key: 'jsonpointer', label: 'JSON Pointer' },
-  { key: 'jsonpatch', label: 'JSON Patch' },
-  { key: 'toml', label: 'JOSL / TOML' },
   { key: 'jsonpath', label: 'JSONPath' },
   { key: 'jsonquery', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
+  { key: 'jsonpointer', label: 'JSON Pointer' },
+  { key: 'jsonpatch', label: 'JSON Patch' },
+  { key: 'toml', label: 'JOSL / TOML' },
 ];
-
-// every render node carries a `kind`; the `ui` view mode has one
-// generic rule per kind
-const cards = (items) => ({ kind: 'cards', items: items.map((i) => ({ kind: 'card', ...i, note: i.note ?? null })) });
-const table = (title, head, rows, note) => ({
-  kind: 'table', title, head, note: note ?? null,
-  rows: rows.map((r) => ({ kind: 'row', ...r })),
-});
-const callout = (title, text, href, link) =>
-  ({ kind: 'callout', title, text, href: href ?? null, link: link ?? null });
 
 /** The render nodes for the current benchmarks suite. */
 export function deriveSuite(state, suite) {
@@ -49,16 +37,14 @@ export function deriveSuite(state, suite) {
   }
   switch (suite) {
     case 'overview': return overview(data);
-    case 'validate': return validate(data);
-    case 'jsonpointer': return genericTables(data, formatNs, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
+    case 'validate': return validate(data, state.benchUi);
+    case 'jsonpath': return jsonpath(data, state.benchUi);
+    case 'jsonquery': return scenarioMatrix(data, 'query documents');
+    case 'jslt': return scenarioMatrix(data, 'stylesheets');
+    case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
     case 'toml': return toml(data);
-    default:
-      return [callout(
-        'Not yet ported to webnext',
-        'This suite\'s deep-dive (histograms, per-test drill-down, program sources) still lives on the current site.',
-        `${OLD_SITE}#/benchmarks?suite=${suite}`,
-        'Open in the current website')];
+    default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
 
@@ -75,12 +61,7 @@ function overview(meta) {
       'JSON Schema conformance — official test suite',
       ['Draft', 'Jaren', 'Ajv'],
       drafts.map((draft) => ({
-        cells: [
-          draft,
-          summary(stats.jaren?.[draft]),
-          summary(stats.ajv?.[draft]),
-        ],
-        strong: false,
+        cells: [draft, passFail(stats.jaren?.[draft]), passFail(stats.ajv?.[draft])],
       })),
       'passed / failed / errors, optional format suites included'));
   }
@@ -95,14 +76,24 @@ function overview(meta) {
   return out;
 }
 
-function summary(s) {
+function passFail(s) {
   if (s === undefined || s === null) return '—';
   return `${s.passed} / ${s.failed} / ${s.errors}`;
 }
 
-function validate(data) {
-  const overall = data.summary?.overall;
+//#region validate
+
+const RATIO_BUCKETS = [
+  { label: '> 10× faster', test: (r) => r > 10 },
+  { label: '2–10× faster', test: (r) => r > 2 },
+  { label: '1–2× faster', test: (r) => r >= 1 },
+  { label: '1–2× slower', test: (r) => r >= 0.5 },
+  { label: '> 2× slower', test: (r) => r < 0.5 },
+];
+
+function validate(data, benchUi) {
   const out = [];
+  const overall = data.summary?.overall;
   if (overall !== undefined) {
     out.push(cards([
       { title: 'Success-only totals', value: `${Math.round(overall.jarenSuccessTime)} ms vs ${Math.round(overall.ajvSuccessTime)} ms`, note: 'Jaren vs Ajv, tests both can run' },
@@ -111,27 +102,156 @@ function validate(data) {
     ]));
   }
   const results = Array.isArray(data.results) ? data.results : [];
-  const ranked = results
-    .filter((r) => r.ratio !== null && r.isSuccessTest)
-    .sort((a, b) => b.ratio - a.ratio);
-  const row = (r) => ({
-    cells: [r.draft, r.description, formatRatio(r.ratio), formatNs(r.jarenTime * 1e6), formatNs(r.ajvTime * 1e6)],
-    strong: false,
-  });
-  out.push(table('Biggest Jaren wins', ['Draft', 'Test', 'Ratio', 'Jaren', 'Ajv'],
-    ranked.slice(0, 10).map(row)));
-  out.push(table('Biggest Ajv wins', ['Draft', 'Test', 'Ratio', 'Jaren', 'Ajv'],
-    ranked.slice(-10).reverse().map(row),
-    'The full searchable per-test table is still on the current site.'));
+  const success = results.filter((r) => r.ratio !== null && r.isSuccessTest);
+
+  // ratio distribution
+  const counts = RATIO_BUCKETS.map(() => 0);
+  for (const r of success) {
+    const index = RATIO_BUCKETS.findIndex((b) => b.test(r.ratio));
+    if (index >= 0) counts[index] += 1;
+  }
+  const maxCount = Math.max(1, ...counts);
+  out.push(bars('Ratio distribution (success-only tests)',
+    RATIO_BUCKETS.map((bucket, i) => ({
+      label: bucket.label,
+      style: `width:${Math.round((counts[i] / maxCount) * 100)}%`,
+      text: String(counts[i]),
+      tone: i < 3 ? 'win' : 'loss',
+    }))));
+
+  // the searchable per-test table
+  const needle = benchUi.search.trim().toLowerCase();
+  const filtered = needle === ''
+    ? success
+    : success.filter((r) =>
+      r.description.toLowerCase().includes(needle)
+      || r.suite.toLowerCase().includes(needle)
+      || r.draft.toLowerCase().includes(needle));
+  const sorted = [...filtered].sort((a, b) => b.ratio - a.ratio);
+  const shown = sorted.slice(0, benchUi.limit);
+  out.push(search('bench/search', benchUi.search, 'Search tests… (description, suite, draft)'));
+  out.push(table(
+    `Per-test results — ${shown.length} of ${sorted.length} shown, fastest ratios first`,
+    ['Draft', 'Suite', 'Test', 'Ratio', 'Jaren', 'Ajv'],
+    shown.map((r) => ({
+      cells: [r.draft, r.suite, r.description, formatRatio(r.ratio),
+        formatNs(r.jarenTime * 1e6), formatNs(r.ajvTime * 1e6)],
+      strong: r.ratio > 10,
+    }))));
+  if (sorted.length > shown.length) out.push(more('bench/more', `Show more (${sorted.length - shown.length} remaining)`));
   return out;
 }
 
+//#endregion
+
+//#region jsonpath
+
+function jsonpath(data, benchUi) {
+  const out = [];
+  const groups = data.compliance?.groups ?? [];
+  out.push(cards([
+    { title: 'Compliance', value: `${data.compliance?.total ?? '—'} / ${data.compliance?.total ?? '—'}`, note: 'official RFC 9535 CTS, both engines' },
+    { title: 'Compile all selectors', value: formatNs(data.profile?.compileRow?.engines?.jaren), note: `json-p3: ${formatNs(data.profile?.compileRow?.engines?.['json-p3'])}` },
+  ]));
+  out.push(table('Compliance by group', ['Group', 'Tests', 'Jaren', 'json-p3'],
+    groups.map(([name, g]) => ({
+      cells: [name, String(g.total), String(g.pass?.jaren ?? '—'), String(g.pass?.['json-p3'] ?? '—')],
+    }))));
+
+  const rows = data.profile?.rows ?? [];
+  const needle = benchUi.search.trim().toLowerCase();
+  const filtered = needle === ''
+    ? rows
+    : rows.filter((r) => r.name.toLowerCase().includes(needle) || r.selector.toLowerCase().includes(needle));
+  const shown = filtered.slice(0, benchUi.limit);
+  out.push(search('bench/search', benchUi.search, 'Search queries… (name, selector)'));
+  out.push(table(
+    `Per-query profile — ${shown.length} of ${filtered.length} shown (${data.profile?.iterations} iterations)`,
+    ['Query', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
+    shown.map((r) => ({
+      cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
+        formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
+    }))));
+  if (filtered.length > shown.length) out.push(more('bench/more', `Show more (${filtered.length - shown.length} remaining)`));
+
+  const scale = data.profile?.scaleRows ?? [];
+  if (scale.length > 0) {
+    out.push(table('Synthetic scale scenarios (1000 items)', ['Scenario', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
+      scale.map((r) => ({
+        cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
+          formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
+      }))));
+  }
+  return out;
+}
+
+//#endregion
+
+//#region scenario matrices (jsonquery, jslt)
+
+function scenarioMatrix(data, programsWord) {
+  const engineKeys = collectEngineKeys(data.rows);
+  const out = [];
+  out.push(table(
+    `Scenario matrix (per-operation time; ratio vs the fastest rival)`,
+    ['Scenario', 'Document', ...engineKeys, 'Ratio'],
+    (data.rows ?? []).map((row) => {
+      const jaren = row.engines.jaren;
+      const rivals = engineKeys.filter((k) => k !== 'jaren').map((k) => row.engines[k]).filter((v) => v > 0);
+      const best = rivals.length > 0 ? Math.min(...rivals) : null;
+      return {
+        cells: [
+          row.title ?? row.scenario,
+          row.document ?? '',
+          ...engineKeys.map((k) => formatNs(row.engines[k])),
+          formatRatio(best !== null && jaren > 0 ? best / jaren : null),
+        ],
+      };
+    })));
+  if (data.compile !== undefined) {
+    out.push(cards(Object.entries(data.compile.results ?? {}).map(([key, value]) => ({
+      title: `Compile — ${key}`,
+      value: formatNs(value),
+      note: `${data.compile.sources?.length ?? '?'} programs, ${data.compile.iterations} iterations`,
+    }))));
+  }
+  for (const scenario of data.scenarios ?? []) {
+    out.push(details(`${scenario.title ?? scenario.key} — the ${programsWord}`, [
+      { kind: 'p', text: scenario.description ?? '' },
+      ...Object.entries(scenario.sources ?? {}).map(([engine, source]) =>
+        code(engine, typeof source === 'string' ? prettyMaybeJson(source) : String(source))),
+    ]));
+  }
+  return out;
+}
+
+function collectEngineKeys(rows) {
+  const keys = [];
+  for (const row of rows ?? []) {
+    for (const key of Object.keys(row.engines ?? {})) {
+      if (!keys.includes(key)) keys.push(key);
+    }
+  }
+  return keys.sort((a, b) => (a === 'jaren' ? -1 : b === 'jaren' ? 1 : 0));
+}
+
+function prettyMaybeJson(source) {
+  try {
+    return JSON.stringify(JSON.parse(source), null, 2);
+  }
+  catch {
+    return source;
+  }
+}
+
+//#endregion
+
 /** pointer-style payloads: `{ tables: [{ title, columns, rows: [{ name, results[] }] }] }` */
-function genericTables(data, fmt, note) {
+function genericTables(data, note) {
   return (data.tables ?? []).map((t) => table(
     t.title,
     ['Scenario', ...t.columns],
-    t.rows.map((r) => ({ cells: [r.name, ...r.results.map(fmt)], strong: false })),
+    t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
     note));
 }
 
@@ -144,7 +264,7 @@ function patch(data) {
       note: 'official json-patch-tests suite',
     }]));
   }
-  out.push(...genericTables(data, formatNs, 'Per-application nanoseconds; lower is better.'));
+  out.push(...genericTables(data, 'Per-application nanoseconds; lower is better.'));
   return out;
 }
 
@@ -166,7 +286,6 @@ function toml(data) {
       ['Document', ...(data.engines ?? [])],
       (profile.parse ?? []).map((p) => ({
         cells: [p.name, ...(data.engines ?? []).map((e) => formatMs(p.results[e]))],
-        strong: false,
       })),
       'smol-toml keeps a raw-throughput edge; Jaren is the only engine passing the complete suite while streaming.'));
   }

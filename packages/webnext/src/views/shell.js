@@ -15,13 +15,20 @@ const header =
         ['span', { class: 'brand-name' }, 'Jaren'],
         ['span', { class: 'brand-tag' }, 'webnext'],
       ],
-      ['nav', { class: 'nav' }, [{ $apply: '$.ui.nav[*]' }]],
+      ['nav', { class: { $if: ['$.menu', 'nav open', 'nav'] } }, [{ $apply: '$.ui.nav[*]' }]],
       ['button', {
         class: 'theme-toggle',
         type: 'button',
         title: 'Toggle color theme',
         on: { click: 'theme/toggle' },
       }, { $if: [{ $eq: ['$.theme', 'dark'] }, '☀', '☾'] }],
+      ['button', {
+        class: 'menu-toggle',
+        type: 'button',
+        title: 'Menu',
+        'aria-label': 'Toggle navigation',
+        on: { click: 'menu/toggle' },
+      }, { $if: ['$.menu', '✕', '☰'] }],
     ],
   ];
 

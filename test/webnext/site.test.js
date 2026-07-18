@@ -26,11 +26,13 @@ const FIXTURES = {
 };
 
 /** A full headless site over the stub DOM with a controllable route. */
-function mountSite({ fixtures = FIXTURES, hash = '#/' } = {}) {
+function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelContext } = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
   const themes = [];
+  const hashes = [];
+  let storeData = stored;
   const app = createSiteApp({
     node: container,
     document,
@@ -41,10 +43,16 @@ function mountSite({ fixtures = FIXTURES, hash = '#/' } = {}) {
       : Promise.reject(new Error('404'))),
     applyTheme: (t) => themes.push(t),
     listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
+    navigate: (h) => { hashes.push(h); routeCb(parseHash(h)); },
+    storage: {
+      read: () => storeData,
+      write: (data) => { storeData = JSON.parse(JSON.stringify(data)); },
+    },
+    modelContext,
     onError: (err) => { throw err; },
   });
   const go = (h) => routeCb(parseHash(h));
-  return { app, container, go, themes };
+  return { app, container, go, themes, hashes, storage: () => storeData };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -70,7 +78,7 @@ describe('webnext — the site as one app document', function () {
   it('routes by hash: pages are modes, tabs are links', function () {
     const { container, go } = mountSite();
     go('#/docs');
-    assert.match(serialize(container), /Documentation/);
+    assert.match(serialize(container), /Installation/);
     go('#/playground');
     assert.match(serialize(container), /Playground/);
     go('#/nonsense');
@@ -156,6 +164,40 @@ describe('webnext — the site as one app document', function () {
     const html = renderToString(app.getVnode());
     assert.match(html, /<h1>Playground<\/h1>/);
     assert.match(html, /class="jaren-form/);
+  });
+
+  it('deep-dive suites render from the real generated data', async function () {
+    const { readFileSync } = await import('node:fs');
+    const load = (name) => JSON.parse(readFileSync(
+      new URL(`../../packages/website/public/benchmarks/${name}.json`, import.meta.url), 'utf8'));
+    const fixtures = {
+      meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
+      jsonquery: load('jsonquery'), jslt: load('jslt'),
+    };
+    const { container, go } = mountSite({ fixtures });
+
+    go('#/benchmarks?suite=validate');
+    await tick();
+    let html = serialize(container);
+    assert.match(html, /Ratio distribution/);
+    assert.match(html, /Per-test results/);
+
+    // the search box narrows the table
+    const searchBox = find(container, (n) => n.attributes?.get('class') === 'search-input');
+    fire(searchBox, 'input', { target: { value: 'unevaluated' } });
+    html = serialize(container);
+    assert.match(html, /unevaluated/i);
+    assert.doesNotMatch(html, /of 1090 shown/, 'filtered below the full success set');
+
+    go('#/benchmarks?suite=jsonquery');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /Scenario matrix/);
+    assert.match(html, /the query documents/, 'program sources are unfoldable');
+
+    go('#/benchmarks?suite=jsonpath');
+    await tick();
+    assert.match(serialize(container), /Compliance by group/);
   });
 
   it('parseHash covers the route grammar', function () {

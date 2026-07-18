@@ -7,6 +7,7 @@ import { parseHash } from './lib/route.js';
 
 const BASE = import.meta.env.BASE_URL;
 const THEME_KEY = 'jaren-theme';
+const IDE_KEY = 'jaren-webnext-ide';
 
 const stored = localStorage.getItem(THEME_KEY);
 const theme = stored === 'dark' || stored === 'light'
@@ -32,4 +33,32 @@ createSiteApp({
     fire();
     return () => removeEventListener('hashchange', fire);
   },
+  navigate: (hash) => { location.hash = hash; },
+  storage: {
+    read: () => {
+      try {
+        const raw = localStorage.getItem(IDE_KEY);
+        return raw === null ? null : JSON.parse(raw);
+      }
+      catch {
+        return null;
+      }
+    },
+    write: (data) => {
+      try {
+        localStorage.setItem(IDE_KEY, JSON.stringify(data));
+      }
+      catch {
+        // storage full or unavailable: the session keeps working
+      }
+    },
+  },
+  modelContext: /** @type {any} */ (navigator).modelContext,
 });
+
+// PWA: register the service worker in production builds
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  addEventListener('load', () => {
+    navigator.serviceWorker.register(`${BASE}sw.js`, { scope: BASE }).catch(() => {});
+  });
+}

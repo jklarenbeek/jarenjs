@@ -1,15 +1,25 @@
 //@ts-check
 /**
  * The playground — mode 'playground', dispatched with `$.ui.pg` as the
- * current node. The JSON Schema tab is fully live: schema edits
- * recompile per keystroke (debounced through the wire() subscriber),
- * the data pane is a generated form rendered by the STANDARD FORMS
- * STYLESHEET (mode 'form') or a raw JSON editor, and errors localize
- * at report time (EN/NL). The other engine tabs cross-reference the
- * current site until they're ported.
+ * current node. Nine live engines: the JSON Schema tab (special-cased:
+ * generated form + report-time i18n) and eight generic engines driven
+ * entirely by the ENGINE_DEFS descriptors — the rules below render ANY
+ * engine's fields and results. The IDE bar saves and recalls
+ * experiments through the localStorage-backed ide-* effects.
  */
 
-const OLD_SITE = 'https://jklarenbeek.github.io/jarenjs/';
+const ideBar =
+  ['div', { class: 'ide-bar' },
+    ['input', {
+      type: 'text',
+      class: 'ide-name',
+      placeholder: 'Experiment name…',
+      value: '$.ide.name',
+      on: { input: 'ide/name' },
+    }],
+    ['button', { type: 'button', class: 'btn small', on: { click: 'ide/save' } }, 'Save'],
+    ['div', { class: 'ide-list' }, [{ $apply: '$.ide.names[*]' }]],
+  ];
 
 const schemaCard =
   ['div', { class: 'card pg-card' },
@@ -98,24 +108,12 @@ export const PLAYGROUND_RULES = [
     body: ['div', { class: 'page container' },
       ['h1', {}, 'Playground'],
       ['p', { class: 'page-lead' },
-        'Every engine runs live in your browser with the real shipped compilers — no server, no eval.'],
+        'Every engine runs live in your browser with the real shipped compilers — no server, no eval. Save any state of an engine as a named experiment and recall it later.'],
       ['nav', { class: 'tabs' }, [{ $apply: '$.engines[*]' }]],
-      { $if: [{ $ne: ['$.validate', null] },
-        { $apply: '$.validate' },
-        ['div', { class: 'callout wide' },
-          ['h3', {}, 'Not yet ported to webnext'],
-          ['p', {}, 'This engine playground still lives on the current site while webnext is built out.'],
-          ['a', {
-            href: { $concat: [`${OLD_SITE}#/playground?engine=`, '$.engine'] },
-            class: 'btn',
-          }, 'Open in the current website'],
-        ],
-      ] },
+      ideBar,
+      { $apply: '$.validate' },
+      { $apply: '$.generic' },
     ],
-  },
-  {
-    match: '$.ui.pg.validate', mode: 'playground',
-    body: ['div', { class: 'pg-grid' }, schemaCard, dataCard, resultCard],
   },
   {
     match: '$.ui.pg.engines[*]', mode: 'playground',
@@ -123,6 +121,25 @@ export const PLAYGROUND_RULES = [
       href: '$.href',
       class: { $if: ['$.active', 'tab active', 'tab'] },
     }, '$.label'],
+  },
+  {
+    match: '$.ui.pg.ide.names[*]', mode: 'playground',
+    body: ['span', { class: 'ide-chip' },
+      ['button', {
+        type: 'button', class: 'ide-load', title: 'Load this experiment',
+        on: { click: { action: 'ide/load', with: '$.name' } },
+      }, '$.name'],
+      ['button', {
+        type: 'button', class: 'ide-delete', title: 'Delete this experiment',
+        on: { click: { action: 'ide/delete', with: '$.name' } },
+      }, '×'],
+    ],
+  },
+
+  // ---- the validate engine (special-cased: forms + i18n) ----
+  {
+    match: '$.ui.pg.validate', mode: 'playground',
+    body: ['div', { class: 'pg-grid' }, schemaCard, dataCard, resultCard],
   },
   {
     match: '$.ui.pg.validate.examples[*]', mode: 'playground',
@@ -138,5 +155,69 @@ export const PLAYGROUND_RULES = [
       ['code', {}, '$.path'],
       ['span', {}, ' — ', '$.message'],
     ],
+  },
+
+  // ---- the generic engines: fields + results, all from descriptors ----
+  {
+    match: '$.ui.pg.generic', mode: 'playground',
+    body: ['div', {},
+      ['p', { class: 'page-lead' }, '$.lead'],
+      ['div', { class: 'chips' }, [{ $apply: '$.examples[*]' }]],
+      ['div', { class: 'pg-grid two' },
+        ['div', { class: 'card pg-card' },
+          ['h3', {}, '$.label'],
+          [{ $apply: '$.fields[*]' }],
+        ],
+        ['div', { class: 'pg-results' }, [{ $apply: ['$.results[*]', 'ui'] }]],
+      ],
+    ],
+  },
+  {
+    match: '$.ui.pg.generic.examples[*]', mode: 'playground',
+    body: ['button', {
+      type: 'button',
+      class: 'chip',
+      on: { click: { action: 'eng/load', with: { engine: '$.engine', inputs: '$.inputs' } } },
+    }, '$.label'],
+  },
+  {
+    match: "$.ui.pg.generic.fields[?@.control == 'json' || @.control == 'code']", mode: 'playground',
+    body: ['label', { class: 'field' },
+      ['span', { class: 'field-title' }, '$.title'],
+      ['textarea', {
+        class: 'editor',
+        rows: '$.rows',
+        spellcheck: 'false',
+        value: '$.value',
+        on: { input: { action: 'eng/input', with: { engine: '$.engine', key: '$.key' } } },
+      }],
+    ],
+  },
+  {
+    match: "$.ui.pg.generic.fields[?@.control == 'text']", mode: 'playground',
+    body: ['label', { class: 'field' },
+      ['span', { class: 'field-title' }, '$.title'],
+      ['input', {
+        type: 'text',
+        class: 'editor line',
+        spellcheck: 'false',
+        value: '$.value',
+        on: { input: { action: 'eng/input', with: { engine: '$.engine', key: '$.key' } } },
+      }],
+    ],
+  },
+  {
+    match: "$.ui.pg.generic.fields[?@.control == 'select']", mode: 'playground',
+    body: ['label', { class: 'field' },
+      ['span', { class: 'field-title' }, '$.title'],
+      ['select', {
+        class: 'select',
+        on: { change: { action: 'eng/input', with: { engine: '$.engine', key: '$.key' } } },
+      }, [{ $apply: '$.options[*]' }]],
+    ],
+  },
+  {
+    match: '$.ui.pg.generic.fields[*].options[*]', mode: 'playground',
+    body: ['option', { value: '$.value', selected: '$.selected' }, '$.value'],
   },
 ];
