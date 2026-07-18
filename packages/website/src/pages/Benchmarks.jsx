@@ -11,6 +11,7 @@ import { QueryBenchmark } from '@components/benchmarks/QueryBenchmark';
 import { JsltBenchmark } from '@components/benchmarks/JsltBenchmark';
 import { PointerBenchmark } from '@components/benchmarks/PointerBenchmark';
 import { PatchBenchmark } from '@components/benchmarks/PatchBenchmark';
+import { TomlBenchmark } from '@components/benchmarks/TomlBenchmark';
 
 const SUITES = [
   { key: 'overview', label: 'Overview' },
@@ -20,6 +21,7 @@ const SUITES = [
   { key: 'jslt', label: 'JSLT' },
   { key: 'jsonpointer', label: 'JSON Pointer' },
   { key: 'jsonpatch', label: 'JSON Patch' },
+  { key: 'toml', label: 'JOSL / TOML' },
 ];
 
 function Benchmarks() {
@@ -73,6 +75,9 @@ function Benchmarks() {
           </TabsContent>
           <TabsContent value="jsonpatch">
             <PatchBenchmark />
+          </TabsContent>
+          <TabsContent value="toml">
+            <TomlBenchmark />
           </TabsContent>
         </Tabs>
       </Container>

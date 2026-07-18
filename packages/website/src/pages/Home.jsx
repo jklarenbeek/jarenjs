@@ -216,6 +216,27 @@ const doc = parseXQuery(\`
     blurb: 'Type XQuery, get a query document. The same parser faces the W3C QT3 suite — every failure attributed to a documented deviation, none unexplained.',
   },
   {
+    key: 'josl',
+    label: 'JOSL',
+    title: 'A streaming TOML superset — research',
+    perf: '100% of toml-test 1.0.0 · the only engine in our bench that passes it all',
+    playground: '/playground?engine=josl',
+    benchmarks: '/benchmarks?suite=toml',
+    code: `import { createStreamReader } from '@jarenjs/josl/stream';
+
+// TOML 1.0 + JavaScript's obvious types: null, 123n,
+// /regexp/i, real dates — and a streamable [[]] root array:
+const reader = createStreamReader({
+  onEvent: (e) => e.type === 'root-item'
+    && process(reader.root()[e.index - 1]),  // record N, while the
+});                                          // LLM emits record N+1
+
+for await (const chunk of llmTokenStream)
+  reader.feed(chunk);   // chunks may split ANY token
+const records = reader.end();`,
+    blurb: 'JOSL is a strict TOML 1.0 superset built for LLM-to-LLM pipelines: line-oriented streaming (a truncated document is valid up to the last complete line), document-order events with JSON-Pointer paths, machine-repairable errors with hints — plus JSONX, the same extensions over JSON.',
+  },
+  {
     key: 'forms',
     label: 'Forms',
     title: 'Schemas that render themselves',

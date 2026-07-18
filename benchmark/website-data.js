@@ -14,6 +14,7 @@
  *   jslt.json         jslt.js           — scenario matrix vs native JS/JSONata (+ sources)
  *   jsonpointer.json  jsonpointer.js    — compiled vs legacy vs jsonpointer npm
  *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
+ *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -44,7 +45,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml, qt3');
         process.exit(0);
         break;
       default:
@@ -338,6 +339,34 @@ function generateJsonPatch(tmp, options) {
   };
 }
 
+function generateToml(tmp, options) {
+  const file = path.join(tmp, 'toml.json');
+  try {
+    runTool([
+      'benchmark/toml.js', '--profile',
+      '--iterations', String(options.quick ? 30 : 150),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: toml run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the suite needs: git submodule update --init benchmark/toml-test-suite)');
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    ...raw,
+    profile: raw.profile === null ? null : {
+      iterations: raw.profile.iterations,
+      parse: raw.profile.parse.map((row) => ({
+        name: row.name,
+        results: Object.fromEntries(Object.entries(row.results).map(([k, v]) => [k, sig4(v)])),
+      })),
+      stringify: Object.fromEntries(Object.entries(raw.profile.stringify).map(([k, v]) => [k, sig4(v)])),
+    },
+  };
+}
+
 function generateQt3() {
   let stdout;
   try {
@@ -395,6 +424,11 @@ async function main() {
     generated.jsonpointer = generateJsonPointer(tmp, options);
   if (!options.skip.has('jsonpatch'))
     generated.jsonpatch = generateJsonPatch(tmp, options);
+  if (!options.skip.has('toml')) {
+    const toml = generateToml(tmp, options);
+    if (toml !== null)
+      generated.toml = toml;
+  }
 
   // Skipped suites keep their previous meta entries (when a meta.json
   // exists), so partial regeneration never clobbers the overview.
@@ -451,6 +485,9 @@ async function main() {
           total: generated.jsonpatch.conformance.total,
           pass: generated.jsonpatch.conformance.pass,
         },
+      toml: generated.toml === undefined
+        ? (previousMeta?.conformance?.toml ?? null)
+        : generated.toml.compliance,
     },
   };
   writeJson('meta.json', meta);

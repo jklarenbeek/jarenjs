@@ -10,6 +10,7 @@ import { QueryPlayground } from '@components/demo/QueryPlayground';
 import { JsltPlayground } from '@components/demo/JsltPlayground';
 import { JtltPlayground } from '@components/demo/JtltPlayground';
 import { XQueryPlayground } from '@components/demo/XQueryPlayground';
+import { JoslPlayground } from '@components/demo/JoslPlayground';
 
 const ENGINES = [
   {
@@ -51,6 +52,11 @@ const ENGINES = [
     key: 'xquery',
     label: 'XQuery',
     blurb: 'Type XQuery text, watch it become a query document, run it — the same front-end that faces the W3C QT3 suite.',
+  },
+  {
+    key: 'josl',
+    label: 'JOSL',
+    blurb: 'Research: TOML 1.0 plus JavaScript’s obvious types — null, bigint, regexp, real dates, streamable [[]] records — parsed in document order.',
   },
 ];
 
@@ -110,6 +116,9 @@ function Playground() {
           </TabsContent>
           <TabsContent value="xquery">
             <XQueryPlayground />
+          </TabsContent>
+          <TabsContent value="josl">
+            <JoslPlayground />
           </TabsContent>
         </Tabs>
       </Container>

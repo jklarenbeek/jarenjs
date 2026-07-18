@@ -120,6 +120,27 @@ removeAtJSONPath(doc, '$.store.book[?@.price > 20]');
 jsonPointerFromJSONPath("$['store']['book'][0]"); // '/store/book/0'
 jsonPathFromJSONPointer('/store/book/0'); // "$['store']['book'][0]"`;
 
+const joslExample = `import { parseJosl, parseToml, stringifyToml } from '@jarenjs/josl';
+import { createStreamReader } from '@jarenjs/josl/stream';
+import { parseJsonx } from '@jarenjs/josl/jsonx';
+
+// TOML 1.0 + JavaScript's obvious types:
+// null, 123n, /regexp/i, real dates, [[]] root arrays
+const doc = parseJosl(joslText);
+parseToml(tomlText);                    // strict: passes all of toml-test 1.0.0
+stringifyToml(doc, { onNull: 'omit' }); // downlevel JOSL -> TOML
+
+// streaming reader: document-order events with JSON-Pointer paths;
+// chunks may split ANY token — built for LLM output
+const reader = createStreamReader({
+  onEvent: (e) => console.log(e.type, e.path.join('/')),
+});
+for (const chunk of chunks) reader.feed(chunk);
+const value = reader.end();
+
+// JSONX: the same first-class types over JSON
+parseJsonx('{"big": 123n, "re": /a+/g, "when": 2026-07-18}');`;
+
 const pathExample = `import { compileJSONPath, queryJSONPath } from '@jarenjs/json';
 
 const query = compileJSONPath('$..book[?@.price < 10].title');
@@ -229,6 +250,7 @@ const NAV = [
       ['formats', '@jarenjs/formats'],
       ['forms', '@jarenjs/forms'],
       ['core-refs', 'core & refs'],
+      ['josl', 'JOSL & JSONX (research)'],
       ['further-reading', 'Further reading'],
     ],
   },
@@ -548,6 +570,21 @@ npm install @jarenjs/forms`}</CodeBlock>
             </section>
 
             <section>
+              <SectionHeading id="josl" pkg="@jarenjs/josl">JOSL & JSONX (research)</SectionHeading>
+              <p className="text-muted-foreground mb-4">
+                A research experiment, unpublished: <strong>JOSL</strong> is a strict TOML 1.0 superset that makes
+                JavaScript&apos;s obvious value types first-class — <code className="bg-muted px-1 rounded">null</code>,
+                bigint, regexp, all four TOML datetime flavours — and adds a streamable{' '}
+                <code className="bg-muted px-1 rounded">[[]]</code> root array for LLM record streams.{' '}
+                <strong>JSONX</strong> is the same set of extensions over JSON with a bit-compatible strict mode.
+                Strict TOML mode passes the complete official toml-test 1.0.0 suite — see the{' '}
+                <Link className="underline" to="/benchmarks?suite=toml">benchmark</Link> and the{' '}
+                <Link className="underline" to="/playground?engine=josl">playground</Link>.
+              </p>
+              <CodeBlock showCopy>{joslExample}</CodeBlock>
+            </section>
+
+            <section>
               <SectionHeading id="further-reading">Further reading</SectionHeading>
               <ul className="space-y-2 text-sm">
                 {[
@@ -557,6 +594,7 @@ npm install @jarenjs/forms`}</CodeBlock>
                   ['packages/json/docs/QUERY-FORMAT.md', 'QUERY-FORMAT.md', 'the Jaren JSON Query language specification'],
                   ['packages/json/docs/JSLT-FORMAT.md', 'JSLT-FORMAT.md', 'the JSLT stylesheet specification'],
                   ['packages/json/docs/XQUERY-FRONTEND.md', 'XQUERY-FRONTEND.md', 'the XQuery text subset and its mapping'],
+                  ['packages/josl/FORMAT.md', 'JOSL FORMAT.md', 'the JOSL/JSONX language definition and design rationale'],
                   ['ROADMAP.md', 'ROADMAP.md', 'release milestones and everything still to come'],
                 ].map(([path, label, blurb]) => (
                   <li key={path} className="flex items-start gap-2">

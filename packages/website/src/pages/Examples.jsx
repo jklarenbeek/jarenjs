@@ -15,6 +15,7 @@ import {
   jsltExamples,
   jtltExamples,
   xqueryExamples,
+  joslExamples,
 } from '@lib/playgroundExamples';
 import { exampleSchemas } from '@lib/examples';
 
@@ -29,6 +30,7 @@ const SECTIONS = [
   { key: 'jslt', label: 'JSLT' },
   { key: 'jtlt', label: 'JTLT' },
   { key: 'xquery', label: 'XQuery' },
+  { key: 'josl', label: 'JOSL' },
 ];
 
 function SectionIntro({ blurb, playground }) {
@@ -294,6 +296,29 @@ function Examples() {
                 <Card key={example.name}>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">{example.name}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <CodeBlock showCopy>{example.text}</CodeBlock>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* JOSL */}
+          <TabsContent value="josl">
+            <SectionIntro
+              blurb="Research: a strict TOML 1.0 superset with JavaScript's obvious types — null, bigint, regexp, real dates — and a streamable [[]] root array for LLM record streams. Strict mode passes the complete official toml-test 1.0.0 suite."
+              playground="/playground?engine=josl"
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              {joslExamples.map((example) => (
+                <Card key={example.name}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">
+                      {example.name}
+                      <span className="ml-2 text-xs font-normal text-muted-foreground font-mono">mode: {example.mode}</span>
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <CodeBlock showCopy>{example.text}</CodeBlock>

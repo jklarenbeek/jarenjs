@@ -26,6 +26,7 @@ function OverviewTab({ onSelect }) {
   const { data: jslt } = useBenchmarkFile('jslt');
   const { data: jsonpointer } = useBenchmarkFile('jsonpointer');
   const { data: jsonpatch } = useBenchmarkFile('jsonpatch');
+  const { data: toml } = useBenchmarkFile('toml');
 
   const suiteCards = useMemo(() => {
     const cards = [];
@@ -105,8 +106,17 @@ function OverviewTab({ onSelect }) {
         sub: 'copy-on-write appliers: clone the written spine once, share the rest',
       });
     }
+    if (toml?.compliance?.jaren) {
+      cards.push({
+        key: 'toml',
+        title: 'JOSL / strict TOML (research)',
+        rival: 'vs smol-toml, @iarna/toml & toml',
+        headline: `${toml.compliance.jaren.pass}/${toml.compliance.jaren.total} compliant`,
+        sub: 'the only engine passing all of toml-test 1.0.0 — and the only streaming one',
+      });
+    }
     return cards;
-  }, [validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch]);
+  }, [validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml]);
 
   if (!meta) return <BenchmarkFallback loading={loading} name="meta" />;
 

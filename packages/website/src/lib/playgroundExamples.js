@@ -462,3 +462,69 @@ export const querySchemaExample = {
     total: 50,
   },
 };
+
+/**
+ * JOSL playground examples. `text` is JOSL/TOML source (not JSON), `mode`
+ * selects the reader dialect: 'josl' (superset) or 'toml' (strict 1.0).
+ */
+export const joslExamples = [
+  {
+    name: 'First-class citizens',
+    mode: 'josl',
+    text: `# JOSL: TOML 1.0 + JavaScript's obvious types
+title = "kitchen sink"
+middle-name = null            # TOML has no null; JOSL does
+big = 9007199254740993        # promotes to bigint, losslessly
+mask = 0xffn                  # bigint literal, any radix
+match = /^ok[!.]?$/i          # a real RegExp, validated at parse time
+when = 2026-07-18T12:00:00Z   # offset date-time -> Date
+day = 2026-07-18              # local date -> LocalDate
+
+[server]
+host = "localhost"
+ports = [ 8080, 8443 ]
+`,
+  },
+  {
+    name: 'Record stream [[]]',
+    mode: 'josl',
+    text: `# The most common LLM output shape: a list of records.
+# Each [[]] completes the previous record -- streamable.
+[[]]
+name = "first"
+score = 0.92
+[meta]
+source = "model-a"
+
+[[]]
+name = "second"
+score = 0.87
+tags = [ "draft" ]
+`,
+  },
+  {
+    name: 'Strict TOML mode',
+    mode: 'toml',
+    text: `# mode: 'toml' -- the same engine, extensions rejected.
+# This dialect passes the complete official toml-test 1.0.0 suite.
+title = "TOML Example"
+
+[owner]
+name = "Tom Preston-Werner"
+dob = 1979-05-27T07:32:00-08:00
+
+[[products]]
+name = "Hammer"
+sku = 738594937
+`,
+  },
+  {
+    name: 'Repairable error',
+    mode: 'toml',
+    text: `# Machine-repairable errors: line, column and a hint an LLM
+# can act on. 'null' is a JOSL extension -- strict TOML rejects it:
+name = "incomplete record"
+middle-name = null
+`,
+  },
+];

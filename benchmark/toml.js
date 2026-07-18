@@ -23,6 +23,7 @@
  *   node benchmark/toml.js --profile            # performance comparison
  *   node benchmark/toml.js --profile --iterations 200
  *   node benchmark/toml.js --engines jaren,smol-toml
+ *   node benchmark/toml.js --profile --output json --filepath results.json
  *
  * Exit code is non-zero when jaren fails a compliance test; contender
  * failures never affect the exit code.
@@ -30,7 +31,7 @@
 
 /* eslint-disable no-console */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -84,6 +85,8 @@ const flags = {
   engines: args.includes('--engines')
     ? args[args.indexOf('--engines') + 1].split(',')
     : null,
+  output: args.includes('--output') ? args[args.indexOf('--output') + 1] : null,
+  filepath: args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null,
 };
 const engines = flags.engines === null
   ? ENGINES
@@ -110,6 +113,7 @@ const invalidCases = listCases('invalid').filter((c) => !SKIP.test(c.file));
 
 function runCompliance() {
   console.log(`toml-test 1.0.0: ${validCases.length} valid, ${invalidCases.length} invalid cases\n`);
+  const compliance = {};
   let jarenFailed = 0;
   for (const engine of engines) {
     const failures = [];
@@ -139,10 +143,11 @@ function runCompliance() {
     if (flags.verbose)
       for (const f of failures)
         console.log(`      ${f}`);
+    compliance[engine.name] = { pass, total };
     if (engine.name === 'jaren')
       jarenFailed = failures.length;
   }
-  return jarenFailed;
+  return { jarenFailed, compliance };
 }
 
 //#endregion
@@ -186,8 +191,10 @@ function timeIt(fn, iterations) {
 
 function runProfile() {
   console.log(`\nparse profile (${flags.iterations} iterations, ms per pass; ratio vs jaren)\n`);
+  const parse = [];
   for (const corpus of corpora) {
     console.log(`  ${corpus.name}`);
+    const results = {};
     let base = null;
     for (const engine of engines) {
       let ms;
@@ -208,17 +215,21 @@ function runProfile() {
       }
       catch {
         console.log(`    ${engine.name.padEnd(14)} error`);
+        results[engine.name] = null;
         continue;
       }
       if (engine.name === 'jaren')
         base = ms;
+      results[engine.name] = ms;
       const ratio = base !== null ? ` (${(ms / base).toFixed(2)}x)` : '';
       console.log(`    ${engine.name.padEnd(14)} ${ms.toFixed(3).padStart(9)} ms${ratio}`);
     }
+    parse.push({ name: corpus.name, results });
   }
 
   console.log(`\nstringify profile (${flags.iterations} iterations, ms per pass; ratio vs jaren)\n`);
   const value = parseJosl(buildRecords(1000));
+  const stringify = {};
   let base = null;
   for (const engine of engines) {
     if (engine.stringify === null)
@@ -229,18 +240,38 @@ function runProfile() {
     }
     catch (e) {
       console.log(`  ${engine.name.padEnd(14)} error (${String(e.message).split('\n')[0]})`);
+      stringify[engine.name] = null;
       continue;
     }
     if (engine.name === 'jaren')
       base = ms;
+    stringify[engine.name] = ms;
     const ratio = base !== null ? ` (${(ms / base).toFixed(2)}x)` : '';
     console.log(`  ${engine.name.padEnd(14)} ${ms.toFixed(3).padStart(9)} ms${ratio}`);
   }
+  return { parse, stringify };
 }
 
 //#endregion
 
-const jarenFailed = runCompliance();
-if (flags.profile)
-  runProfile();
+const { jarenFailed, compliance } = runCompliance();
+const profile = flags.profile ? runProfile() : null;
+
+if (flags.output === 'json') {
+  const data = {
+    date: new Date().toISOString(),
+    node: process.version,
+    engines: engines.map((e) => e.name),
+    cases: { valid: validCases.length, invalid: invalidCases.length },
+    compliance,
+    profile: profile === null ? null : { iterations: flags.iterations, ...profile },
+  };
+  const json = JSON.stringify(data, null, 2);
+  if (flags.filepath !== null) {
+    writeFileSync(flags.filepath, json);
+    console.log(`\nwrote ${flags.filepath}`);
+  }
+  else
+    console.log(json);
+}
 process.exit(jarenFailed === 0 ? 0 : 1);
