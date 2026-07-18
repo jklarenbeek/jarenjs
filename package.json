@@ -18,18 +18,22 @@
     "./packages/refs",
     "./packages/forms",
     "./packages/locales",
+    "./packages/view",
+    "./packages/app",
     "./packages/josl",
     "./packages/website",
     "./benchmark"
   ],
   "scripts": {
-    "clean": "rimraf ./dist ./packages/core/dist ./packages/json/dist ./packages/validate/dist ./packages/formats/dist ./packages/refs/dist ./packages/forms/dist ./packages/locales/dist",
+    "clean": "rimraf ./dist ./packages/core/dist ./packages/json/dist ./packages/validate/dist ./packages/formats/dist ./packages/refs/dist ./packages/forms/dist ./packages/locales/dist ./packages/view/dist ./packages/app/dist",
     "lint": "eslint ./packages/**/*.js",
     "test": "node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
     "test:core": "node --no-warnings=ExperimentalWarning --test \"test/core/**/*.test.js\"",
     "test:json": "node --no-warnings=ExperimentalWarning --test \"test/json/**/*.test.js\"",
     "test:validate": "node --no-warnings=ExperimentalWarning --test \"test/validate/**/*.test.js\"",
     "test:josl": "node --no-warnings=ExperimentalWarning --test \"test/josl/**/*.test.js\"",
+    "test:view": "node --no-warnings=ExperimentalWarning --test \"test/view/**/*.test.js\"",
+    "test:app": "node --no-warnings=ExperimentalWarning --test \"test/app/**/*.test.js\"",
     "test:types": "tsc --noEmit -p test/consumer/tsconfig.json",
     "test:tree-shaking": "node ./scripts/check-tree-shaking.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
@@ -104,7 +108,9 @@
     "@jarenjs/validate": "^0.10.0",
     "@jarenjs/formats": "^0.10.0",
     "@jarenjs/refs": "^0.10.0",
-    "@jarenjs/forms": "^0.10.0"
+    "@jarenjs/forms": "^0.10.0",
+    "@jarenjs/view": "^0.10.0",
+    "@jarenjs/app": "^0.10.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

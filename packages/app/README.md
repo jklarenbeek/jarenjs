@@ -1,0 +1,113 @@
+# @jarenjs/app
+
+Applications as JSON documents. This package rebuilds [hyperapp](https://github.com/jorgebucaran/hyperapp)'s dispatch loop on the Jaren suite and pushes its philosophy — *everything is data* — the rest of the way: hyperapp made effects and subscriptions data but kept actions and views as JavaScript functions; here **the whole application is one JSON value**:
+
+| Slot | Written as | Compiled by |
+|---|---|---|
+| `state` | a JSON document | — |
+| `view` | a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) producing [vnodes](../view/docs/VIEW-FORMAT.md) | `@jarenjs/json/jslt` |
+| `actions` | named [query documents](../json/docs/QUERY-FORMAT.md) producing transitions | `@jarenjs/json/query` |
+| transitions | next state, or an RFC 6902 **JSON Patch** | `@jarenjs/json/patch` |
+| `subs` | entries with an EBV `when` query deciding liveness | `@jarenjs/json/query` |
+
+Everything compiles **once** at `createApp` time; the running loop only calls specialized closures — the same design contract as every other Jaren engine. JavaScript enters at named, registered boundaries only: effect and subscription handlers, the `compileTypeTest` hook, the `validateState` invariant hook. No `eval`, CSP-safe, and the entire app is serializable: snapshot it, diff it, ship it over the wire, or have a constrained decoder generate it — an LLM cannot emit a syntactically invalid program in this framework.
+
+The document contract is [docs/APP-FORMAT.md](docs/APP-FORMAT.md).
+
+## A complete app
+
+```javascript
+import { createApp } from '@jarenjs/app';
+
+const app = createApp({
+  "$app": "0.1",
+  "state": { "count": 0 },
+
+  "view": [
+    { "match": "$", "body":
+      ["main", {},
+        ["h1", {}, "Count: ", "$.count"],
+        ["button", { "on": { "click": "inc" } }, "+"],
+        ["button", { "on": { "click": { "action": "add", "with": 10 } } }, "+10"]] }
+  ],
+
+  "actions": {
+    "inc": { "patch": [{ "op": "replace", "path": "/count",
+                         "value": { "$add": ["$.count", 1] } }] },
+    "add": { "patch": [{ "op": "replace", "path": "/count",
+                         "value": { "$add": ["$.count", "$payload"] } }] }
+  }
+}, { node: document.getElementById('app') });
+```
+
+The view is a JSLT stylesheet: rules match state by location (JSONPath) and shape (JSON Schema, via `compileTypeTest`), bodies are query documents producing vnodes, and `$path`/`$root` are in scope — a rule rendering `/todos/3` can embed its own pointer in an event binding, which is why there are no payload-creator functions anywhere.
+
+## Actions and transitions
+
+An action document is evaluated with `$` bound to the current state, `$event` bound to serializable event data (`{ type, value, checked, key }`) and `$payload` bound to the binding's `with` value. It returns a **transition**:
+
+```json
+{ "state":   "the next state, whole — optional",
+  "patch":   "an RFC 6902 patch applied copy-on-write — optional",
+  "effects": [{ "run": "http", "with": { "url": "/api" } }] }
+```
+
+Returning nothing is a no-op. State updates are immutable and structure-sharing (the patch engine's copy-on-write), which feeds the renderer's `oldVnode === newVnode` fast path.
+
+## Effects and subscriptions
+
+Side effects stay at the edges, as registered handlers:
+
+```javascript
+createApp(doc, {
+  node,
+  effects: {
+    http: (props, dispatch) =>
+      fetch(props.url).then((r) => r.json()).then((data) => dispatch(props.done, data)),
+  },
+  subs: {
+    interval: (props, dispatch) => {
+      const id = setInterval(() => dispatch(props.tick), props.ms);
+      return () => clearInterval(id);       // cleanup
+    },
+  },
+});
+```
+
+Subscription entries in the document carry a `when` query; after every state change the loop starts and stops handlers to match (`{ "run": "interval", "with": { "ms": 1000, "tick": "tick" }, "when": "$.running" }`). A broken `when` fails **closed** — a broken rule must never keep side effects alive — and is reported through `onError`.
+
+## Invariants the model can't cheat
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
+
+const validate = new JarenValidator().compile(stateSchema);   // may carry $query assertions
+
+createApp(doc, {
+  node,
+  compileTypeTest: createTypeTestCompiler(),   // enables schema matches & $valid/$assert/$as
+  validateState: (state) => validate(state),   // every transition checked; rejected = not applied
+});
+```
+
+`validateState` runs against every candidate next state; a rejection blocks the transition (fail closed) and surfaces as a `JA2005` error with the validator's structured errors in `detail`. The app package itself never imports the validator — the same boundary discipline as `@jarenjs/forms`.
+
+## Headless and server-side
+
+Without a `node`, the app runs headless: `getVnode()` returns the current view output for any renderer, and SSR is one composition:
+
+```javascript
+import { renderToString } from '@jarenjs/view';
+renderToString(createApp(doc).getVnode());
+```
+
+## API
+
+`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), stop() }`
+
+Options: `node`, `document`, `effects`, `subs`, `compileTypeTest`, `validateState`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §8.
+
+## Development
+
+Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../ROADMAP.md) for what's next: the standard forms stylesheet (render any `@jarenjs/forms` model through one shipped rule set), dirty-path-pruned re-rendering, time-travel tooling over the action log, and the app-document meta-schema.

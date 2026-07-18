@@ -115,6 +115,8 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/refs`](packages/refs) | The official JSON Schema meta-schemas, bundled for offline use | [README](packages/refs/README.md) |
 | [`@jarenjs/forms`](packages/forms) | Framework-agnostic form generation from JSON Schema | [README](packages/forms/README.md) |
 | [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms error messages | [README](packages/locales/README.md) |
+| [`@jarenjs/view`](packages/view) | The vnode format: UIs as JSON, with a keyed DOM patcher and SSR | [README](packages/view/README.md) · [FORMAT](packages/view/docs/VIEW-FORMAT.md) |
+| [`@jarenjs/app`](packages/app) | Applications as JSON documents: the compiled dispatch loop | [README](packages/app/README.md) · [FORMAT](packages/app/docs/APP-FORMAT.md) |
 | [`@jarenjs/josl`](packages/josl) | 🧪 Research: JOSL, a streaming TOML superset, and JSONX (unpublished) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
 
 ### 🤓 @jarenjs/core — the foundation
@@ -145,6 +147,14 @@ Locale packs for the structured error messages of `@jarenjs/validate` and `@jare
 
 Turns a JSON Schema into a framework-agnostic form model: a tree of field descriptors with labels, input-control hints, constraints and enum options. Validation happens in three layers on one stack — per-field on every keystroke (core primitives + the shared format registry), cross-field on every keystroke (`x-form` rules written as query documents: visibility, enablement, computed values, assertions), and authoritatively on submit (the compiled schema, optionally with the same rules copied into a `$query` keyword). Use it with React, Vue or vanilla DOM — the [playground](https://jklarenbeek.github.io/jarenjs/#/playground) renders its "Generated Form" tab with it. See [packages/forms](packages/forms/README.md).
 
+### 🖼 @jarenjs/view — user interfaces as JSON
+
+The Jaren vnode format — text, `[tag, props?, ...children]` elements, spliced lists, data-only event bindings — published as a JSON Schema like the query and JSLT grammars, plus the two renderers that consume it: a keyed DOM patcher whose `oldVnode === newVnode` fast path is designed around the JSLT engine's structural sharing, and a pure `renderToString` for SSR. The only DOM-touching package in the suite; zero dependencies. The contract lives in [VIEW-FORMAT.md](packages/view/docs/VIEW-FORMAT.md). See [packages/view](packages/view/README.md).
+
+### 🌀 @jarenjs/app — applications as JSON documents
+
+[Hyperapp](https://github.com/jorgebucaran/hyperapp)'s dispatch loop rebuilt on the suite, with every slot a compiled Jaren document: the view is a JSLT stylesheet producing vnodes, actions are query documents producing transitions (next state or an RFC 6902 patch, computed from `$`, `$event`, `$payload`), subscriptions carry EBV `when` queries, and JavaScript enters only at named registries (effects, subscriptions, `compileTypeTest`, `validateState`). The whole app — state, view, actions — is one serializable JSON value: snapshot it, replay it, validate it, or generate it under constrained decoding. The contract lives in [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md). See [packages/app](packages/app/README.md).
+
 ### 🧪 @jarenjs/josl — JOSL & JSONX (research experiment)
 
 **JOSL** (*JavaScript Obvious Streaming Language*) is a strict superset of TOML 1.0 that makes JavaScript's obvious value types first-class citizens — `null`, bigint (`123n`), regexp (`/^ok$/i`), all four TOML datetime flavours — and adds a streamable `[[]]` root array for the most common LLM output shape: a list of records. The parser passes the complete official [toml-test](https://github.com/toml-lang/toml-test) 1.0.0 suite in strict TOML mode (the only engine in our benchmark that does), consumes chunk streams that may split *any* token, and reports document-order events with JSON-Pointer-able paths — the deliberate opposite of `JSON.parse`'s bottom-up reviver. **JSONX** is the same set of extensions over JSON, with a bit-compatible strict-JSON mode. A streaming writer mirrors the reader for record-by-record output. Experimental and unpublished; run `npm run benchmark:toml` for the compliance and speed comparison. See [packages/josl](packages/josl/README.md) and the [FORMAT.md](packages/josl/FORMAT.md) language definition.
@@ -174,7 +184,7 @@ I will look up what that means, later...
 - [ROADMAP.md](ROADMAP.md) — release milestones and everything still to be done or optimized, per package.
 - [PUBLISHING.md](PUBLISHING.md) — npm authentication, synchronized versioning, release checks and publishing the six public workspaces.
 - [benchmark/README.md](benchmark/README.md) — the complete measuring and debugging toolbox: conformance suites, profilers, the test-failure debugger, code coverage, call graphs, and the QT3 scorecard.
-- Language specifications: [QUERY-FORMAT.md](packages/json/docs/QUERY-FORMAT.md) (the Jaren JSON Query format), [JSLT-FORMAT.md](packages/json/docs/JSLT-FORMAT.md) (the JSLT stylesheet format), [XQUERY-FRONTEND.md](packages/json/docs/XQUERY-FRONTEND.md) (the XQuery text subset).
+- Language specifications: [QUERY-FORMAT.md](packages/json/docs/QUERY-FORMAT.md) (the Jaren JSON Query format), [JSLT-FORMAT.md](packages/json/docs/JSLT-FORMAT.md) (the JSLT stylesheet format), [XQUERY-FRONTEND.md](packages/json/docs/XQUERY-FRONTEND.md) (the XQuery text subset), [VIEW-FORMAT.md](packages/view/docs/VIEW-FORMAT.md) (the vnode format), [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md) (the app document format).
 
 For detailed API documentation beyond that, visit our official documentation. Which is the code itself — every public function carries JSDoc.
 

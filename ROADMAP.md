@@ -106,6 +106,18 @@ motivates them where one exists.
 - [ ] **Pruning hidden fields before submit** — `visible: false` fields keep their values in the data; whether submit should drop them (and whether `formRulesToQueryAssertions` should guard asserts on their own `visible`) is an open product decision.
 - [ ] **Computed views through JSLT** — generalize `x-form.computed` from one query per field into schema-dispatched view-model stylesheets, while keeping forms validator-independent (the `$apply` dispatcher was designed as this seed).
 
+## @jarenjs/view & @jarenjs/app (new — 0.1 formats)
+
+- [ ] **The standard forms stylesheet** — one shipped JSLT rule set that renders any `@jarenjs/forms` field model to vnodes (`control: "select"` → `<select>`, ...), so schema-driven forms and hand-written views flow through one dispatcher; the marquee demo of the whole suite.
+- [ ] **Rebuild the website on view + app** — the conformance test for both formats: docs pages as JSLT transforms over content documents, benchmark pages as query documents over `website-data.js` output, the playground as an app document editing app documents.
+- [ ] **The app-document meta-schema** — publish `jaren-app.schema.json` composing the query, JSLT and vnode schemas; closes the constrained-decoding loop for whole applications.
+- [ ] **Dirty-path-pruned re-rendering** — surface the patch engine's copy-on-write owned-set (today internal to `json/patch`) as changed paths, re-dispatch only intersecting view rules; with memoized rule outputs (cache keyed by rule × state-node reference) unchanged branches yield reference-equal vnodes and the renderer's `===` fast path skips them across frames.
+- [ ] **Unify the write path** — reimplement forms' `setValueAtPointer`/`appendItem`/`removeItemAt` over the `json/patch` copy-on-write kernel so keystrokes and app transitions share one immutable-update and change-tracking story (forms' `data.js` header already points here).
+- [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§7: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
+- [ ] **Component escape hatch** — a registered-widget vocabulary (mirroring the effect registry) for irreducibly imperative islands: canvas, maps, third-party controls.
+- [ ] **Benchmark: view + app vs hyperapp/preact** — a `benchmark/view.js` scenario matrix (large list patch, keyed shuffle, deep tree, SSR throughput) in the honest style of the JSLT benchmarks, including the cost of the generic dispatcher.
+- [ ] **Join the release train** — add both packages to `pack:check`/`publish` once the 0.1 formats survive the website rewrite.
+
 ## LLM & structured-output profile
 
 - [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.

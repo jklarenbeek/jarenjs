@@ -1,0 +1,52 @@
+{
+  "name": "@jarenjs/view",
+  "private": false,
+  "version": "0.10.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/types/",
+    "src/",
+    "docs/",
+    "schemas/"
+  ],
+  "description": "The Jaren vnode format: user interfaces as JSON documents, with a keyed DOM patcher and an SSR string renderer",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/view"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "jaren",
+    "json",
+    "vnode",
+    "vdom",
+    "view",
+    "renderer",
+    "ssr"
+  ],
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  }
+}

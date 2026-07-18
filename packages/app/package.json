@@ -1,0 +1,54 @@
+{
+  "name": "@jarenjs/app",
+  "private": false,
+  "version": "0.10.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/types/",
+    "src/",
+    "docs/"
+  ],
+  "description": "Applications as JSON documents: hyperapp's dispatch loop rebuilt on the Jaren suite — JSLT views, query-document actions, JSON Patch transitions",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/app"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "jaren",
+    "json",
+    "app",
+    "framework",
+    "hyperapp",
+    "jslt",
+    "state"
+  ],
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  },
+  "dependencies": {
+    "@jarenjs/json": "^0.10.0",
+    "@jarenjs/view": "^0.10.0"
+  }
+}
