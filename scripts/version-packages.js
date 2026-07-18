@@ -7,6 +7,16 @@ const packageFiles = [
   'packages/formats/package.json',
   'packages/refs/package.json',
   'packages/forms/package.json',
+  'packages/locales/package.json',
+  'packages/view/package.json',
+  'packages/app/package.json',
+];
+
+// private workspaces that are never versioned but whose semver ranges on
+// the publishable packages must keep tracking the release (website and
+// benchmark use file:/absent ranges and need no updating)
+const rangeOnlyFiles = [
+  'packages/josl/package.json',
 ];
 
 const rootFile = 'package.json';
@@ -18,6 +28,14 @@ const packageNames = new Set(packageFiles.map((file) => readPackage(file).name))
 for (const file of [rootFile, ...packageFiles]) {
   const manifest = readPackage(file);
   manifest.version = nextVersion;
+  updateInternalRanges(manifest.dependencies);
+  updateInternalRanges(manifest.devDependencies);
+  updateInternalRanges(manifest.peerDependencies);
+  writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+for (const file of rangeOnlyFiles) {
+  const manifest = readPackage(file);
   updateInternalRanges(manifest.dependencies);
   updateInternalRanges(manifest.devDependencies);
   updateInternalRanges(manifest.peerDependencies);
