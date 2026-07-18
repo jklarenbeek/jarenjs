@@ -76,7 +76,11 @@ export function createApp(appDoc, options = {}) {
 
   let view;
   try {
-    view = compileJsltStylesheet(appDoc.view, queryOptions);
+    // memoized rule outputs: unchanged state subtrees yield reference-
+    // equal vnodes frame over frame, so the renderer's === fast path
+    // skips them (VIEW-FORMAT §5.1). Vnodes are immutable by contract,
+    // which is exactly the discipline memoization needs.
+    view = compileJsltStylesheet(appDoc.view, { ...queryOptions, memo: true });
   }
   catch (err) {
     throw new AppCompileError('JA0002',

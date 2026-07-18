@@ -198,6 +198,28 @@ describe('createApp', function () {
     assert.deepStrictEqual(seen, [[1, ['/count']], [0, null]]);
   });
 
+  it('unchanged state subtrees yield reference-equal vnodes across frames', function () {
+    const doc = {
+      state: { title: 'todos', items: [{ id: 1, label: 'a' }, { id: 2, label: 'b' }] },
+      view: [
+        { match: '$', body: ['main', {}, ['h1', {}, '$.title'], ['ul', {}, [{ $apply: '$.items[*]' }]]] },
+        { match: '$.items[*]', body: ['li', { key: '$.id' }, '$.label'] },
+      ],
+      actions: {
+        relabel: { patch: [{ op: 'replace', path: '/items/1/label', value: '$payload' }] },
+      },
+    };
+    const app = createApp(doc, { schedule: sync });
+    const before = app.getVnode();
+    app.dispatch('relabel', 'B');
+    const after = app.getVnode();
+    const items = (v) => v[3][2];
+    assert.strictEqual(items(after)[0], items(before)[0],
+      'the untouched item vnode is the SAME object — the renderer skips it in O(1)');
+    assert.notStrictEqual(items(after)[1], items(before)[1]);
+    assert.strictEqual(items(after)[1][2], 'B');
+  });
+
   it('stop() ignores further dispatches', function () {
     const { app } = mount(counterDoc());
     app.dispatch('inc');

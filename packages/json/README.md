@@ -464,6 +464,8 @@ const annotateBooks = compileJsltStylesheet([
 ], { compileTypeTest: createTypeTestCompiler() });
 ```
 
+For render-loop consumers there is one more lever: `compileJsltStylesheet(doc, { memo: true })` memoizes rule outputs by (location, value reference). A compile-time analysis marks every rule whose output provably depends on nothing but the matched value (no `$root`/`$path`/user externals, transitively through `$apply`, and no root references inside match-path filters); those rules return their previous output **by reference** when the same subtree reference shows up at the same location. Across copy-on-write updates an unchanged document transforms in O(1) and a one-field change re-evaluates one spine — the fuel for the `@jarenjs/view` patcher's reference-equality fast path, which is why `@jarenjs/app` compiles every view with it. The cache is two-generational (entries unused for one transform retire), and memoized outputs must be treated as immutable.
+
 The complete stylesheet grammar is published for validators and LLM constrained decoding as [`jaren-jslt.schema.json`](./schemas/jaren-jslt.schema.json) (draft 2020-12) and its mechanically derived [`jaren-jslt.draft-07.schema.json`](./schemas/jaren-jslt.draft-07.schema.json) twin. Rule-body definitions are mechanically copied from the query artifact and extended only with `$apply`, so the query vocabulary stays closed. Provider structured-output implementations still support uneven schema subsets; validate the generated document locally before compiling it, as described in [JSLT-FORMAT Appendix B](./docs/JSLT-FORMAT.md#appendix-b-llm-structured-output-non-normative).
 
 ### JSLT benchmark

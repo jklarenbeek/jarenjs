@@ -14,7 +14,7 @@ import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
 import { exampleSchemas } from '../content/schemas.js';
 import { callout } from '../lib/nodes.js';
-import { formatMs } from '../lib/format.js';
+import { formatMs, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
 
 const NAV = [
@@ -56,92 +56,112 @@ const PG_EXAMPLES = [
 export function viewModel(state) {
   const page = state.route.page;
   /** @type {any} */
-  const ui = {
-    nav: NAV.map((item) => ({ ...item, active: item.page === page })),
-  };
+  const ui = { nav: deriveNav(page) };
 
   if (page === 'home') ui.home = HOME_CONTENT;
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'playground') ui.pg = playgroundPage(state);
-  if (page === 'docs') ui.docs = docsPage(state);
-  if (page === 'examples') ui.examples = examplesPage(state);
+  if (page === 'docs') ui.docs = docsPage(state.route.params.s);
+  if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
 
   return { ...state, ui };
 }
 
+const deriveNav = memo1((page) =>
+  NAV.map((item) => ({ ...item, active: item.page === page })));
+
+const benchTabs = memo1((suite) => SUITES.map((s) => ({
+  ...s,
+  active: s.key === suite,
+  href: `#/benchmarks?suite=${s.key}`,
+})));
+
+const benchNodes = memo1((suite, data, status, benchUi, state) =>
+  deriveSuite(state, suite));
+
+const composeBench = memo1((suites, nodes) => ({ suites, nodes }));
+
 function benchPage(state) {
   const suite = state.route.params.suite ?? 'overview';
-  return {
-    suites: SUITES.map((s) => ({
-      ...s,
-      active: s.key === suite,
-      href: `#/benchmarks?suite=${s.key}`,
-    })),
-    nodes: deriveSuite(state, suite),
-  };
+  const need = suite === 'overview' ? 'meta' : suite;
+  return composeBench(
+    benchTabs(suite),
+    benchNodes(suite, state.bench[need], state.benchStatus[need], state.benchUi, state));
 }
+
+const pgTabs = memo1((engine) => PG_ENGINES.map((e) => ({
+  ...e,
+  active: e.key === engine,
+  href: `#/playground?engine=${e.key}`,
+})));
+
+const pgIde = memo1((name, names) => ({
+  name,
+  names: names.map((n) => ({ name: n })),
+}));
+
+const validateNode = memo1((schemaText, data, dataTab, dataError, locale, result) => ({
+  examples: PG_EXAMPLES,
+  schemaText,
+  dataTab,
+  dataJson: JSON.stringify(data, null, 2),
+  dataError,
+  locale,
+  form: dataTab === 'form' ? formViewFor(schemaText, data) : null,
+  result: deriveResult(result, locale),
+}));
+
+const genericNode = memo1((engine, inputs, engineResults) => {
+  const def = ENGINE_DEFS[engine];
+  return {
+    key: engine,
+    label: def.label,
+    lead: def.lead,
+    fields: def.inputs
+      .filter((field) => matchesWhen(field.when, inputs))
+      .map((field) => ({
+        engine,
+        key: field.key,
+        title: field.title,
+        control: field.control,
+        rows: field.rows ?? 4,
+        value: inputs[field.key] ?? '',
+        options: field.options?.map((option) => ({
+          value: option,
+          selected: option === inputs[field.key],
+        })) ?? null,
+      })),
+    examples: (ENGINE_EXAMPLES[engine] ?? []).map((example) => ({
+      label: example.label,
+      engine,
+      inputs: withAllFields(engine, example.inputs),
+    })),
+    results: engineResults
+      ?? [callout('Ready', 'Edit any input to run — results appear live.')],
+  };
+});
+
+const composePg = memo1((engine, engines, ide, validate, generic) => {
+  /** @type {any} */
+  const page = { engine, engines, ide };
+  // exactly one of `validate` / `generic` is set; the other stays
+  // ABSENT so its $apply selects nothing
+  if (validate !== null) page.validate = validate;
+  if (generic !== null) page.generic = generic;
+  return page;
+});
 
 function playgroundPage(state) {
   const engine = state.route.params.engine ?? 'validate';
-  const page = {
-    engine,
-    engines: PG_ENGINES.map((e) => ({
-      ...e,
-      active: e.key === engine,
-      href: `#/playground?engine=${e.key}`,
-    })),
-    ide: {
-      name: state.ide.name,
-      names: state.ide.names.map((name) => ({ name })),
-    },
-    // exactly one of `validate` / `generic` is set below; the other
-    // stays ABSENT so its $apply selects nothing
-  };
-  if (engine === 'validate') {
-    page.validate = {
-      examples: PG_EXAMPLES,
-      schemaText: state.pg.schemaText,
-      dataTab: state.pg.dataTab,
-      dataJson: JSON.stringify(state.pg.data, null, 2),
-      dataError: state.pg.dataError,
-      locale: state.pg.locale,
-      form: state.pg.dataTab === 'form'
-        ? formViewFor(state.pg.schemaText, state.pg.data)
-        : null,
-      result: deriveResult(state.pg),
-    };
-  }
-  else if (ENGINE_DEFS[engine] !== undefined) {
-    const def = ENGINE_DEFS[engine];
-    const inputs = state.eng[engine] ?? {};
-    page.generic = {
-      key: engine,
-      label: def.label,
-      lead: def.lead,
-      fields: def.inputs
-        .filter((field) => matchesWhen(field.when, inputs))
-        .map((field) => ({
-          engine,
-          key: field.key,
-          title: field.title,
-          control: field.control,
-          rows: field.rows ?? 4,
-          value: inputs[field.key] ?? '',
-          options: field.options?.map((option) => ({
-            value: option,
-            selected: option === inputs[field.key],
-          })) ?? null,
-        })),
-      examples: (ENGINE_EXAMPLES[engine] ?? []).map((example) => ({
-        label: example.label,
-        engine,
-        inputs: withAllFields(engine, example.inputs),
-      })),
-      results: state.engResults[engine]
-        ?? [callout('Ready', 'Edit any input to run — results appear live.')],
-    };
-  }
-  return page;
+  const validate = engine === 'validate'
+    ? validateNode(state.pg.schemaText, state.pg.data, state.pg.dataTab,
+      state.pg.dataError, state.pg.locale, state.pg.result)
+    : null;
+  const generic = engine !== 'validate' && ENGINE_DEFS[engine] !== undefined
+    ? genericNode(engine, state.eng[engine] ?? {}, state.engResults[engine] ?? null)
+    : null;
+  return composePg(engine, pgTabs(engine), pgIde(state.ide.name, state.ide.names),
+    validate, generic);
 }
 
 function matchesWhen(when, inputs) {
@@ -159,8 +179,7 @@ function withAllFields(engine, inputs) {
   return out;
 }
 
-function deriveResult(pg) {
-  const r = pg.result;
+function deriveResult(r, locale) {
   if (r === null) return { status: 'idle' };
   if (r.schemaError !== null) {
     return { status: 'schema-error', schemaError: r.schemaError };
@@ -169,15 +188,15 @@ function deriveResult(pg) {
     status: r.valid ? 'valid' : 'invalid',
     draft: r.draft,
     timing: `compile ${formatMs(r.compileMs)} · validate ${formatMs(r.validateMs)}`,
-    errors: localizeErrors(r.errors, pg.locale).map((e) => ({
+    errors: localizeErrors(r.errors, locale).map((e) => ({
       path: e.instancePath === '' ? '(root)' : e.instancePath,
       message: e.message,
     })),
   };
 }
 
-function docsPage(state) {
-  const current = state.route.params.s ?? DOCS_SECTIONS[0].id;
+const docsPage = memo1((param) => {
+  const current = param ?? DOCS_SECTIONS[0].id;
   const section = DOCS_SECTIONS.find((s) => s.id === current) ?? DOCS_SECTIONS[0];
   return {
     sections: DOCS_SECTIONS.map((s) => ({
@@ -188,7 +207,7 @@ function docsPage(state) {
     })),
     section: { title: section.title, blocks: section.blocks },
   };
-}
+});
 
 const J = (value) => JSON.stringify(value, null, 2);
 
@@ -198,8 +217,8 @@ const PREVIEW_FIELD = {
   jslt: 'stylesheet', jtlt: 'template', xquery: 'text', josl: 'text',
 };
 
-function examplesPage(state) {
-  const engine = state.route.params.engine ?? 'validate';
+const examplesPage = memo1((param) => {
+  const engine = param ?? 'validate';
   const tabs = PG_ENGINES.map((e) => ({
     ...e,
     active: e.key === engine,
@@ -224,4 +243,4 @@ function examplesPage(state) {
     }));
   }
   return { tabs, items };
-}
+});

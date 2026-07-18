@@ -182,10 +182,11 @@ roadmap item, not part of this contract.
 
 - **Fragment / multi-root documents** — a list at the root.
 - **DOM-adopting hydration** (§6).
-- **Memoized rule outputs** — a cache keyed by (rule, state-node
-  reference) in the layer above, so unchanged *state* yields
-  reference-equal *vnodes* across frames and §5.1 fires for whole
-  branches; today §5.1 fires for shared/embedded subtrees.
+- ~~Memoized rule outputs~~ — **shipped**: the JSLT engine's `memo`
+  option (on by default in `@jarenjs/app`) caches rule outputs by
+  (location, value reference) with compile-time eligibility analysis,
+  so unchanged *state* yields reference-equal *vnodes* across frames
+  and §5.1 fires for whole branches.
 - **Component escape hatch** — a registered-widget vocabulary for
   irreducibly imperative islands (canvas, third-party controls),
   mirroring the effect registry of APP-FORMAT.

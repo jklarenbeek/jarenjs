@@ -28,6 +28,16 @@ export { JsltCompileError, JsltRuntimeError } from './errors.js';
  *   [options.compileTypeTest] - validator-agnostic hook compiling schema
  *   match conditions and schema literals inside query bodies
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
+ * @param {boolean} [options.memo=false] - memoize rule outputs by
+ *   (location, value reference): across repeated transforms of
+ *   copy-on-write-updated documents, unchanged subtrees return the
+ *   PREVIOUS output by reference — the fuel for reference-equality
+ *   fast paths downstream (the @jarenjs/view patcher). Only rules whose
+ *   output provably depends on nothing but the matched value are cached
+ *   (no $root/$path/user externals, transitively through $apply, and no
+ *   root references inside match-path filters); everything else runs
+ *   normally. Memoized outputs MUST be treated as immutable, and the
+ *   cache retains the previous transform's outputs (two generations).
  * @returns {function} reusable `transform(data, externals?)` function
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @example

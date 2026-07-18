@@ -130,6 +130,7 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
         }
       }
       targetModes.add(targetMode);
+      ruleBox.targets.add(targetMode);
       const args = [selector];
       if (Array.isArray(arg) && arg.length === 2) // the explicit-mode form
         args.push(helpers.makeRaw(targetMode, opPath + '/1'));
@@ -192,6 +193,7 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes) {
     locSlot: -1,
     depthSlot: -1,
     tctxSlot: -1,
+    targets: new Set(), // the modes this body's $apply calls dispatch into
   };
   const applyEntry = createApplyEntry(ruleBox, tableBox, targetModes);
   let normalized;
@@ -241,8 +243,129 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes) {
     pathSlot,
     readsPath,
     userExternals,
+    targets: ruleBox.targets,
   };
 }
+
+//#region body memoization (the `memo` option)
+
+// Ref-keyed body memoization: for an eligible rule, the same (location,
+// value reference) pair MUST produce the same output, so the previous
+// output can be returned by reference. Combined with copy-on-write state
+// updates upstream and a reference-equality fast path downstream (the
+// @jarenjs/view patcher), unchanged subtrees render in O(1) frame over
+// frame. Eligibility is decided entirely at compile time:
+//
+//  - the body reads neither $root, $path nor user externals (those make
+//    output depend on more than the matched value), and
+//  - every mode reachable through the body's $apply calls is STABLE: all
+//    of its rules are themselves body-clean, and their match paths do
+//    not reference the root inside a filter (a second '$' in the path
+//    source) - selection there depends only on (location, value), so
+//    the child dispatches frozen inside a cached output stay correct.
+//
+// The cache is generational (two maps, swapped per transform call):
+// entries unused for one full transform are dropped, bounding retention
+// to the size of the live output.
+
+function computeMemoEligibility(temporary) {
+  const modeRules = new Map();
+  for (let i = 0; i < temporary.length; i++) {
+    const mode = temporary[i].rule.mode;
+    const list = modeRules.get(mode);
+    if (list === undefined)
+      modeRules.set(mode, [i]);
+    else
+      list.push(i);
+  }
+
+  const bodyClean = new Array(temporary.length);
+  const selectionStable = new Array(temporary.length);
+  for (let i = 0; i < temporary.length; i++) {
+    const body = temporary[i].body;
+    bodyClean[i] = body.rootSlot < 0 && !body.readsPath && body.userExternals.length === 0;
+    const match = temporary[i].rule.match;
+    const path = match === null ? null : match.path;
+    selectionStable[i] = path === null || path.indexOf('$', 1) === -1;
+  }
+
+  // modes with no rules fall to the built-in dispositions, which depend
+  // only on (location, value): vacuously stable
+  const modeOk = new Map();
+  for (const name of modeRules.keys())
+    modeOk.set(name, true);
+  const ok = (name) => modeOk.get(name) !== false;
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, indexes] of modeRules) {
+      if (modeOk.get(name) === false)
+        continue;
+      let good = true;
+      for (let j = 0; j < indexes.length && good; j++) {
+        const i = indexes[j];
+        if (!bodyClean[i] || !selectionStable[i]) {
+          good = false;
+          break;
+        }
+        for (const target of temporary[i].body.targets) {
+          if (!ok(target)) {
+            good = false;
+            break;
+          }
+        }
+      }
+      if (!good) {
+        modeOk.set(name, false);
+        changed = true;
+      }
+    }
+  }
+
+  const eligible = new Array(temporary.length);
+  for (let i = 0; i < temporary.length; i++) {
+    let good = bodyClean[i];
+    if (good) {
+      for (const target of temporary[i].body.targets) {
+        if (!ok(target)) {
+          good = false;
+          break;
+        }
+      }
+    }
+    eligible[i] = good;
+  }
+  return eligible;
+}
+
+function memoizeBodyEvaluator(evaluate, memoCaches) {
+  const box = { current: new Map(), previous: new Map() };
+  memoCaches.push(box);
+  return (value, loc, depth, tctx) => {
+    if (loc === null)
+      return evaluate(value, loc, depth, tctx);
+    let entry = box.current.get(loc);
+    if (entry === undefined) {
+      entry = box.previous.get(loc);
+      if (entry !== undefined)
+        box.current.set(loc, entry);
+    }
+    if (entry !== undefined && entry.value === value)
+      return entry.output;
+    const output = evaluate(value, loc, depth, tctx);
+    if (entry !== undefined) {
+      entry.value = value;
+      entry.output = output;
+    }
+    else {
+      box.current.set(loc, { value, output });
+    }
+    return output;
+  };
+}
+
+//#endregion
 
 function makeBodyEvaluator(rule, body, userSlots) {
   const {
@@ -290,7 +413,7 @@ function makeBodyEvaluator(rule, body, userSlots) {
   };
 }
 
-function compileRules(model, compileTypeTest, tableBox, targetModes) {
+function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled) {
   const rules = model.rules;
   const temporary = new Array(rules.length);
   const externalNames = [];
@@ -322,6 +445,9 @@ function compileRules(model, compileTypeTest, tableBox, targetModes) {
   for (let i = 0; i < externalNames.length; i++)
     externalIndexes.set(externalNames[i], i);
 
+  const memoEligible = memoEnabled ? computeMemoEligibility(temporary) : null;
+  const memoCaches = [];
+
   const compiled = new Array(rules.length);
   for (let i = 0; i < temporary.length; i++) {
     const item = temporary[i];
@@ -334,11 +460,14 @@ function compileRules(model, compileTypeTest, tableBox, targetModes) {
     }
     const frozenSlots = Object.freeze(userSlots);
     const frozenIndexes = Object.freeze(userIndexes);
+    let bodyEval = makeBodyEvaluator(item.rule, item.body, frozenSlots);
+    if (memoEligible !== null && memoEligible[i])
+      bodyEval = memoizeBodyEvaluator(bodyEval, memoCaches);
     compiled[i] = Object.freeze({
       index: item.rule.index,
       pathQuery: item.pathQuery,
       test: item.test,
-      bodyEval: makeBodyEvaluator(item.rule, item.body, frozenSlots),
+      bodyEval,
       userSlots: frozenSlots,
       userIndexes: frozenIndexes,
     });
@@ -348,6 +477,7 @@ function compileRules(model, compileTypeTest, tableBox, targetModes) {
     rules: Object.freeze(compiled),
     externals: Object.freeze(externalNames),
     readsPath,
+    memoCaches,
     // rules sharing one match path (across modes, the TOC/render idiom)
     // enumerate it once per transform call through tctx.queryPaths
     sharedQueries: pathRuleCount > pathQueryCache.size,
@@ -813,13 +943,14 @@ export function compileJsltDispatch(model, options = {}) {
   const maxDepth = options.maxDepth === undefined ? 1024 : options.maxDepth;
   if (!Number.isInteger(maxDepth) || maxDepth < 0)
     throw new TypeError('options.maxDepth must be a non-negative integer');
+  const memoEnabled = options.memo === true;
 
   const tableBox = {
     dispatch: null,
     needsLoc: false,
   };
   const targetModes = new Set();
-  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes);
+  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled);
   tableBox.needsLoc = model.anyPathRule || compiled.readsPath;
   const built = buildModes(model, compiled.rules, targetModes);
   const modes = built.modes;
@@ -896,12 +1027,21 @@ export function compileJsltDispatch(model, options = {}) {
   const externalNames = compiled.externals;
   const compiledRules = compiled.rules;
   const sharedQueries = compiled.sharedQueries;
+  const memoCaches = compiled.memoCaches;
   const rootLoc = tableBox.needsLoc ? '$' : null;
   // the all-unbound resolution is a compile-time constant; calls without
   // user bindings (the common case) share it instead of re-resolving
   const unboundRuleValues = resolveExternalValues(externalNames, compiledRules, null);
   return Object.freeze({
     evaluate(data, ext) {
+      // generation swap: entries unused for one full transform retire
+      for (let i = 0; i < memoCaches.length; i++) {
+        const box = memoCaches[i];
+        const retired = box.previous;
+        box.previous = box.current;
+        retired.clear();
+        box.current = retired;
+      }
       const tctx = {
         root: data,
         ruleExternalValues: ext == null || externalNames.length === 0

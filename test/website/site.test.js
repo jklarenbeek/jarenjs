@@ -200,6 +200,20 @@ describe('website — the site as one app document', function () {
     assert.match(serialize(container), /Compliance by group/);
   });
 
+  it('O(change) rendering: an unrelated state change leaves page vnodes reference-equal', function () {
+    const { app, container } = mountSite();
+    const before = app.getVnode();
+    // toggling the theme changes state.theme and nothing the home page reads
+    fire(find(container, (n) => n.attributes?.get('class') === 'theme-toggle'), 'click');
+    const after = app.getVnode();
+    assert.notStrictEqual(after, before, 'the shell re-renders (theme button label)');
+    // site > main is child index 2 of the shell body; the home page node
+    // inside it comes back BY REFERENCE through viewModel memo1 + JSLT memo
+    const main = (v) => v.find((c) => Array.isArray(c) && c[0] === 'main');
+    assert.strictEqual(main(after)[2], main(before)[2],
+      'the entire home page subtree is === — the DOM patcher skips it in O(1)');
+  });
+
   it('parseHash covers the route grammar', function () {
     assert.deepStrictEqual(parseHash('#/'), { page: 'home', params: {} });
     assert.deepStrictEqual(parseHash(''), { page: 'home', params: {} });
