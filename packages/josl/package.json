@@ -1,0 +1,52 @@
+{
+  "name": "@jarenjs/josl",
+  "private": true,
+  "version": "0.10.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "sideEffects": false,
+  "description": "JOSL - JavaScript Obvious Streaming Language. A TOML 1.0 backward-compatible data language with null, bigint, regexp, datetimes and root arrays as first class citizens, plus JSONX, the same extensions over JSON. Experimental.",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/josl"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "jaren",
+    "josl",
+    "toml",
+    "jsonx",
+    "streaming",
+    "parser",
+    "llm"
+  ],
+  "exports": {
+    ".": {
+      "default": "./src/index.js"
+    },
+    "./parse": {
+      "default": "./src/parse.js"
+    },
+    "./stream": {
+      "default": "./src/stream.js"
+    },
+    "./stringify": {
+      "default": "./src/stringify.js"
+    },
+    "./jsonx": {
+      "default": "./src/jsonx.js"
+    },
+    "./values": {
+      "default": "./src/values.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@jarenjs/core": "^0.10.0"
+  }
+}

@@ -17,6 +17,7 @@
     "./packages/formats",
     "./packages/refs",
     "./packages/forms",
+    "./packages/josl",
     "./packages/website",
     "./benchmark"
   ],
@@ -27,6 +28,7 @@
     "test:core": "node --no-warnings=ExperimentalWarning --test \"test/core/**/*.test.js\"",
     "test:json": "node --no-warnings=ExperimentalWarning --test \"test/json/**/*.test.js\"",
     "test:validate": "node --no-warnings=ExperimentalWarning --test \"test/validate/**/*.test.js\"",
+    "test:josl": "node --no-warnings=ExperimentalWarning --test \"test/josl/**/*.test.js\"",
     "test:types": "tsc --noEmit -p test/consumer/tsconfig.json",
     "test:tree-shaking": "node ./scripts/check-tree-shaking.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
