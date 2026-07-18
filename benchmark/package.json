@@ -36,8 +36,11 @@
     "@iarna/toml": "^2.2.5",
     "fast-xml-parser": "^5.10.1",
     "fontoxpath": "^3.34.0",
+    "hyperapp": "^2.0.22",
     "jsonata": "^2.2.1",
     "jsonpointer": "^5.0.1",
+    "preact": "^10.29.7",
+    "preact-render-to-string": "^6.7.0",
     "smol-toml": "^1.7.0",
     "toml": "^5.0.0"
   }

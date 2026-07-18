@@ -115,7 +115,7 @@ motivates them where one exists.
 - [ ] **Unify the write path** — reimplement forms' `setValueAtPointer`/`appendItem`/`removeItemAt` over the `json/patch` copy-on-write kernel so keystrokes and app transitions share one immutable-update and change-tracking story (forms' `data.js` header already points here).
 - [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§7: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
 - [ ] **Component escape hatch** — a registered-widget vocabulary (mirroring the effect registry) for irreducibly imperative islands: canvas, maps, third-party controls.
-- [ ] **Benchmark: view + app vs hyperapp/preact** — a `benchmark/view.js` scenario matrix (large list patch, keyed shuffle, deep tree, SSR throughput) in the honest style of the JSLT benchmarks, including the cost of the generic dispatcher.
+- [x] **Benchmark: view + app vs hyperapp/preact** — `benchmark/view.js` (`npm run benchmark:view`): SSR-equality-gated comparison of view production and SSR vs hyperapp and preact, plus the jaren-only frame-cost row on the stub DOM. Headlines (1000 rows, Node v22): unchanged document = O(1) frame; memo cuts a one-row frame 1.7×; the generic dispatcher is ~9× preact's `h()` on full builds — the abstraction's honest price, to be attacked by prepass pruning.
 - [x] **Join the release train** — `@jarenjs/view` and `@jarenjs/app` are in `pack:check`/`publish`; the 0.1 formats earned it by powering the deployed website.
 
 ## LLM & structured-output profile
