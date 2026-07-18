@@ -1,0 +1,52 @@
+{
+  "name": "@jarenjs/locales",
+  "private": false,
+  "version": "0.10.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./nl": {
+      "types": "./dist/types/nl.d.ts",
+      "default": "./src/nl.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/types/",
+    "src/"
+  ],
+  "description": "Locale packs (message catalogs) for @jarenjs/validate and @jarenjs/forms error messages",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/locales"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "jaren",
+    "json-schema",
+    "i18n",
+    "l10n",
+    "locales",
+    "error-messages"
+  ],
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  }
+}

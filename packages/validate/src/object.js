@@ -84,8 +84,10 @@ function compilePropertyNames(schemaObj, jsonSchema) {
   if (propNames == null) return undefined;
 
   const propertyNamesValidator = schemaObj.createValidator(propNames, 'propertyNames');
-  return function validatePropertyNames(dataKey) {
-    return propertyNamesValidator(dataKey);
+  // The property NAME is the validated data; the object's data path is
+  // threaded through so name failures report a usable instancePath.
+  return function validatePropertyNames(dataKey, dataPath) {
+    return propertyNamesValidator(dataKey, dataPath);
   }
 }
 
@@ -185,7 +187,7 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
     const addError = schemaObj.createErrorHandler(false, ['additionalProperties']);
 
     return function validateNoAdditionalProperties(data, dataPath, dataRoot, dataKey) {
-      return addError(dataKey, data);
+      return addError(dataKey, data, dataPath);
     };
   }
 
@@ -216,13 +218,15 @@ function compileDependentRequired(schemaObj, jsonSchema) {
   if (Object.keys(dependentRequired).length === 0)
     return undefined;
 
-  const addError = schemaObj.createErrorHandler(false, 'dependentRequired');
+  // Keyed handler: addError(dataKey, data, dataPath) - dataKey names the
+  // triggering property, rest[0] is the instance data path.
+  const addError = schemaObj.createErrorHandler(false, ['dependentRequired']);
 
   return function validateDependentRequiredItem(data, dataPath, dataRoot, dataKey) {
     if (dataKey in dependentRequired) {
       const required = dependentRequired[dataKey];
       return includesAll(Object.keys(data), required)
-        || addError(data, dataKey, dataPath);
+        || addError(dataKey, data, dataPath);
     }
     return true;
   };
@@ -320,7 +324,7 @@ function compileDependencies(schemaObj, jsonSchema) {
         const dataKeys = Object.keys(data);
         for (let i = 0; i < rlen; i++) {
           if (!dataKeys.includes(required[i])) {
-            return addError(data, dataKey, dataPath);
+            return addError(dataKey, data, dataPath);
           }
         }
       }
@@ -350,7 +354,7 @@ function compileDependencies(schemaObj, jsonSchema) {
     if (reqDep != null) {
       const { required, addError } = reqDep;
       return includesAll(Object.keys(data), required)
-        || addError(data, dataKey, dataPath);
+        || addError(dataKey, data, dataPath);
     }
     return true;
   };
@@ -521,7 +525,7 @@ function compileObjectProperty(schemaObj, jsonSchema) {
     // Build the child dataPath by appending the property key
     const newPath = dataPath ? `${dataPath}/${dataKey}` : `/${dataKey}`;
 
-    result.addValid(validateName(dataKey))
+    result.addValid(validateName(dataKey, dataPath))
       .addResult(validateProperty(data, newPath, dataRoot, dataKey))
       .addResult(validatePattern(data, newPath, dataRoot, dataKey))
       .addValid(validateDepRequired(data, newPath, dataRoot, dataKey))
@@ -584,7 +588,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
     const len = dataKeys.length;
     for (let i = 0; i < len; ++i) {
       const dataKey = dataKeys[i];
-      if (validateName != null && validateName(dataKey) === false)
+      if (validateName != null && validateName(dataKey, dataPath) === false)
         return false;
 
       let matched = false;

@@ -29,6 +29,7 @@ import {
   getSegmenter,
 } from '@jarenjs/core/string';
 
+import { compileErrorMessageSpec } from './messages.js';
 import { compileFormatBasic } from './format.js';
 import { compileEnumBasic } from './enum.js';
 import { compileNumberBasic } from './number.js';
@@ -414,6 +415,20 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     throw new Error('JSON Schema MUST be a boolean or Object Type');
 
   const keys = Object.keys(jsonSchema);
+
+  // 'errorMessage' is report-time metadata: compile its spec once and
+  // register it on the root - NO validator closure is emitted (the keyword
+  // contributes zero validation-time work), and the key is excluded from
+  // the single-keyword counts so it cannot knock a node off the fast
+  // paths below.
+  let keyCount = keys.length;
+  if (jsonSchema.errorMessage !== undefined) {
+    schemaObj.root.registerErrorMessage(
+      schemaObj.path,
+      compileErrorMessageSpec(jsonSchema.errorMessage, schemaObj.path));
+    keyCount -= 1;
+  }
+
   if (keys.length === 0)
     return trueThat;
 
@@ -461,7 +476,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // These inline the validation to reduce function call overhead
 
   // Fast path: type-only schema (most common case: {"type": "string"})
-  if (vocabValidation && keys.length === 1 && jsonSchema.type !== undefined) {
+  if (vocabValidation && keyCount === 1 && jsonSchema.type !== undefined) {
     const type = jsonSchema.type;
     // Only handle single type strings here (not arrays of types)
     if (typeof type === 'string') {
@@ -502,7 +517,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   }
 
   // Fast path: required-only schema (common case: {"required": ["foo", "bar"]})
-  if (vocabValidation && keys.length === 1 && jsonSchema.required !== undefined) {
+  if (vocabValidation && keyCount === 1 && jsonSchema.required !== undefined) {
     const required = jsonSchema.required;
     if (Array.isArray(required) && required.length > 0) {
       const addError = schemaObj.createErrorHandler(required, ['required']);
@@ -524,7 +539,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   // Fast path: minLength-only schema (common case: {"minLength": 2})
   // This avoids the overhead of compileStringBasic for simple cases
-  if (vocabValidation && keys.length === 1 && jsonSchema.minLength !== undefined) {
+  if (vocabValidation && keyCount === 1 && jsonSchema.minLength !== undefined) {
     const min = jsonSchema.minLength;
     if (typeof min === 'number' && min > 0 && Number.isFinite(min)) {
       const addError = schemaObj.createErrorHandler(min, 'minLength');
@@ -548,7 +563,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   }
 
   // Fast path: maxLength-only schema (common case: {"maxLength": 10})
-  if (vocabValidation && keys.length === 1 && jsonSchema.maxLength !== undefined) {
+  if (vocabValidation && keyCount === 1 && jsonSchema.maxLength !== undefined) {
     const max = jsonSchema.maxLength;
     if (typeof max === 'number' && max >= 0 && Number.isFinite(max)) {
       const addError = schemaObj.createErrorHandler(max, 'maxLength');

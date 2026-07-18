@@ -123,7 +123,7 @@ graph TB
             LiveValidator["LiveValidator<br/>Schema + Data + Results"]
             SchemaEditor["SchemaEditor<br/>JSON Schema Input"]
             DataInput["DataInput<br/>JSON Data Input"]
-            ValidationResult["ValidationResult<br/>Error Display"]
+            ValidationResult["ValidationResult<br/>Error Display + EN/NL locale toggle"]
             SchemaForm["SchemaForm<br/>Auto-generated Form"]
         end
 

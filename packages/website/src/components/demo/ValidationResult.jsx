@@ -1,10 +1,41 @@
+import { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@components/ui/card';
 import { Badge } from '@components/ui/badge';
 import { AlertCircle, CheckCircle, Info, FileWarning } from 'lucide-react';
 import { cn } from '@lib/utils';
+import { renderErrorMessage, compileMessageCatalog } from '@jarenjs/validate';
+import { nl } from '@jarenjs/locales';
+
+// Locale packs render at REPORT time from each error's msgid + params -
+// switching locale never revalidates, let alone recompiles (see
+// packages/validate/docs/ERROR-MESSAGES.md). English is the built-in
+// catalog the errors already carry.
+const LOCALES = [
+  { key: 'en', label: 'EN', catalog: undefined },
+  { key: 'nl', label: 'NL', catalog: compileMessageCatalog(nl) },
+];
+
+/**
+ * The message to display for an error under the selected locale, without
+ * mutating the error (the localizeErrors contract, applied per render):
+ * inline schema-authored text (no $msgid) is single-language and kept;
+ * a msgid no catalog resolves keeps its current (fallback) text.
+ */
+function displayMessage(error, catalog) {
+  if (catalog === undefined || error.inlineMessage) {
+    return error.message || `validation failed for keyword '${error.keyword}'`;
+  }
+  const key = error.msgid || error.keyword;
+  if (error.message && catalog[key] === undefined && catalog[error.keyword] === undefined) {
+    return error.message;
+  }
+  return renderErrorMessage(error, catalog);
+}
 
 function ValidationResult({ isValid, errors, compileError, className }) {
   const hasResult = isValid !== null;
+  const [localeKey, setLocaleKey] = useState('en');
+  const locale = LOCALES.find((entry) => entry.key === localeKey) ?? LOCALES[0];
 
   return (
     <Card className={cn('h-full', className)}>
@@ -18,6 +49,30 @@ function ValidationResult({ isValid, errors, compileError, className }) {
             >
               {isValid ? 'Valid' : 'Invalid'}
             </Badge>
+          )}
+          {hasResult && !compileError && !isValid && (
+            <div
+              className="ml-auto flex items-center rounded-full bg-muted p-0.5"
+              role="group"
+              aria-label="Error message language"
+              title="Error message language - rendered from msgid + params through a locale catalog"
+            >
+              {LOCALES.map((entry) => (
+                <button
+                  key={entry.key}
+                  onClick={() => setLocaleKey(entry.key)}
+                  className={cn(
+                    'text-xs px-2.5 py-0.5 rounded-full transition-colors',
+                    entry.key === localeKey
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  aria-pressed={entry.key === localeKey}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </div>
           )}
         </CardTitle>
       </CardHeader>
@@ -57,7 +112,7 @@ function ValidationResult({ isValid, errors, compileError, className }) {
             {errors && errors.length > 0 && (
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
                 {errors.map((error, index) => (
-                  <ErrorItem key={index} error={error} />
+                  <ErrorItem key={index} error={error} catalog={locale.catalog} />
                 ))}
               </div>
             )}
@@ -68,9 +123,10 @@ function ValidationResult({ isValid, errors, compileError, className }) {
   );
 }
 
-function ErrorItem({ error }) {
-  const { keyword, instancePath, message, params } = error;
+function ErrorItem({ error, catalog }) {
+  const { keyword, instancePath, params } = error;
   const paramEntries = params ? Object.entries(params) : [];
+  const message = displayMessage(error, catalog);
 
   return (
     <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
@@ -82,7 +138,7 @@ function ErrorItem({ error }) {
               {instancePath || '(root)'}
             </code>
             <p className="font-medium text-destructive">
-              {message || `validation failed for keyword '${keyword}'`}
+              {message}
             </p>
           </div>
 

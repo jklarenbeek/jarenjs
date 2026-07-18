@@ -32,6 +32,20 @@ export {
   registerFormatCompilers
 } from './format.js';
 
+import {
+  ValidationError,
+  convertInternalErrors,
+} from './messages.js';
+
+export {
+  ValidationError,
+  messagesEn,
+  compileMessageTemplate,
+  compileMessageCatalog,
+  renderErrorMessage,
+  localizeErrors,
+} from './messages.js';
+
 export { TraverseOptions };
 
 /**
@@ -207,43 +221,6 @@ class InternalValidationError {
 }
 
 /**
- * JSON Schema Validation Error
- * Represents a validation error according to the JSON Schema specification.
- * @see https://json-schema.org/draft/2020-12/json-schema-core.html#output
- */
-export class ValidationError {
-  /**
-   * @param {object} options - Error options
-   * @param {string} options.keyword - The keyword that failed validation
-   * @param {string} options.instancePath - JSON Pointer to the data location
-   * @param {string} options.schemaPath - JSON Pointer to the schema location
-   * @param {object} options.params - Keyword-specific parameters
-   * @param {string} [options.message] - Human-readable error message
-   */
-  constructor(options) {
-    this.keyword = options.keyword;
-    this.instancePath = options.instancePath || '';
-    this.schemaPath = options.schemaPath || '';
-    this.params = options.params || {};
-    this.message = options.message || '';
-  }
-
-  /**
-   * Convert error to a plain object
-   * @returns {object} Plain object representation
-   */
-  toJSON() {
-    return {
-      keyword: this.keyword,
-      instancePath: this.instancePath,
-      schemaPath: this.schemaPath,
-      params: this.params,
-      message: this.message,
-    };
-  }
-}
-
-/**
  * ValidationOptions configures the behavior of the validation process.
  * @class
  */
@@ -257,6 +234,7 @@ export class ValidationOptions {
    * @param {number} [draftVersion=7] - The JSON Schema draft version (6, 7, 2019, or 2020)
    * @param {boolean} [vocabValidation=true] - Whether the validation vocabulary is enabled (false when the schema's metaschema omits it via $vocabulary)
    * @param {boolean|null} [formatAssertion=null] - Whether format asserts (null = auto: asserts below draft 2020-12, annotation-only from 2020-12 on)
+   * @param {boolean} [messages=true] - Whether collected errors carry rendered message text; false skips rendering (message: '', params/msgid still set)
    */
   constructor(
     skipErrors = true,
@@ -265,7 +243,8 @@ export class ValidationOptions {
     contentValidation = null,
     draftVersion = 7,
     vocabValidation = true,
-    formatAssertion = null
+    formatAssertion = null,
+    messages = true
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -281,6 +260,8 @@ export class ValidationOptions {
     this.vocabValidation = vocabValidation;
     /** @type {boolean|null} Whether the format keyword asserts (null = auto by draft) */
     this.formatAssertion = formatAssertion;
+    /** @type {boolean} Whether collected errors carry rendered message text */
+    this.messages = messages;
   }
 }
 
@@ -343,6 +324,8 @@ export class ValidationRoot {
   #evalLog = new EvalLog();
   /** @type {object|null} The JarenValidator instance this compilation belongs to, or null when constructed standalone */
   #owner = null;
+  /** @type {Map<string, object>|null} Compiled 'errorMessage' specs by schema path; null when the schema set has none */
+  #errorMessages = null;
 
   /** Keywords whose value is a map of arbitrary names to schemas; those
    * names must not be mistaken for keywords (e.g. a metaschema declaring
@@ -388,6 +371,12 @@ export class ValidationRoot {
           // keys inside (operators, embedded schema literals) must not
           // register as keywords of this compilation.
           flags.dollarData = true;
+          continue;
+        }
+        else if (key === 'errorMessage') {
+          // 'errorMessage' is report-time metadata; its value is a message
+          // spec whose map form may spell keys like '$query' that must not
+          // register as keywords of this compilation.
           continue;
         }
         else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
@@ -484,6 +473,21 @@ export class ValidationRoot {
 
   /** @returns {object|null} The owning JarenValidator instance, or null when constructed standalone */
   get owner() { return this.#owner; }
+
+  /** @returns {Map<string, object>|null} Compiled 'errorMessage' specs by schema path, or null when the schema set has none */
+  get errorMessages() { return this.#errorMessages; }
+
+  /**
+   * Register a compiled 'errorMessage' spec for a schema location.
+   * Called at schema compile time (see compileSchemaObject); the registry
+   * is only consulted at report time, over the already-failed set.
+   * @param {string} path - The schema path (ValidationObject.path)
+   * @param {object} spec - The compiled spec (see messages.js compileErrorMessageSpec)
+   */
+  registerErrorMessage(path, spec) {
+    if (this.#errorMessages === null) this.#errorMessages = new Map();
+    this.#errorMessages.set(path, spec);
+  }
 
   /**
    * Creates a new ValidationObject for the given path and schema.
@@ -1156,7 +1160,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1166,7 +1170,8 @@ export class ValidatorOptions {
           opts.contentValidation ?? false,
           opts.draftVersion ?? 7,
           true,
-          opts.formatAssertion ?? null
+          opts.formatAssertion ?? null,
+          opts.messages ?? true
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1361,131 +1366,6 @@ export class JarenValidator {
   }
 
   /**
-   * Convert internal validation errors to public ValidationError format
-   * @param {InternalValidationError[]} internalErrors
-   * @returns {ValidationError[]}
-   */
-  static #convertErrors(internalErrors) {
-    return internalErrors.map(err => {
-      const keyword = Array.isArray(err.key) ? err.key[err.key.length - 1] : err.key;
-
-      // Build params based on error type
-      const params = {};
-      if (keyword === 'required') {
-        params.missingProperty = err.dataKey;
-      } else if (keyword === 'type') {
-        if (Array.isArray(err.expected)) {
-          params.types = err.expected;
-        } else {
-          params.type = err.expected;
-        }
-      } else if (['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minProperties', 'maxProperties', 'minItems', 'maxItems'].includes(keyword)) {
-        params.limit = err.expected;
-        if (keyword === 'minimum' || keyword === 'maximum') {
-          params.comparison = keyword === 'minimum' ? '>=' : '<=';
-        } else if (keyword === 'exclusiveMinimum' || keyword === 'exclusiveMaximum') {
-          params.comparison = keyword === 'exclusiveMinimum' ? '>' : '<';
-        }
-      } else if (keyword === 'multipleOf') {
-        params.multipleOf = err.expected;
-      } else if (keyword === 'pattern') {
-        params.pattern = err.expected?.source || err.expected;
-      } else if (keyword === 'additionalProperties') {
-        params.additionalProperty = err.dataKey;
-      } else if (keyword === '$query') {
-        // A '$query' runtime failure passes the JQ2xxx code and the query
-        // document pointer as extra meta arguments after the data path;
-        // a plain EBV-false failure passes neither.
-        if (err.rest != null && err.rest.length > 1) {
-          params.code = err.rest[1];
-          params.docPath = err.rest[2];
-        }
-      }
-
-      // Generate message
-      let message = `validation failed for keyword '${keyword}'`;
-      if (keyword === 'required') {
-        message = params.missingProperty
-          ? `must have required property '${params.missingProperty}'`
-          : 'must have required properties';
-      } else if (keyword === 'type') {
-        message = params.types
-          ? `must be one of the following types: ${params.types.join(', ')}`
-          : `must be ${params.type === 'integer' ? 'an' : 'a'} ${params.type}`;
-      } else if (keyword === 'minimum' || keyword === 'maximum') {
-        message = `must be ${params.comparison} ${params.limit}`;
-      } else if (keyword === 'exclusiveMinimum' || keyword === 'exclusiveMaximum') {
-        message = `must be ${params.comparison} ${params.limit}`;
-      } else if (keyword === 'multipleOf') {
-        message = `must be multiple of ${params.multipleOf}`;
-      } else if (keyword === 'minLength') {
-        message = `must NOT have fewer than ${params.limit} characters`;
-      } else if (keyword === 'maxLength') {
-        message = `must NOT have more than ${params.limit} characters`;
-      } else if (keyword === 'pattern') {
-        message = `must match pattern "${params.pattern}"`;
-      } else if (keyword === 'additionalProperties') {
-        message = params.additionalProperty
-          ? `must NOT have additional property '${params.additionalProperty}'`
-          : 'must NOT have additional properties';
-      } else if (keyword === 'minProperties') {
-        message = `must NOT have fewer than ${params.limit} properties`;
-      } else if (keyword === 'maxProperties') {
-        message = `must NOT have more than ${params.limit} properties`;
-      } else if (keyword === 'minItems') {
-        message = `must NOT have fewer than ${params.limit} items`;
-      } else if (keyword === 'maxItems') {
-        message = `must NOT have more than ${params.limit} items`;
-      } else if (keyword === 'uniqueItems') {
-        message = 'must NOT have duplicate items';
-      } else if (keyword === 'contains') {
-        message = 'must contain at least one valid item';
-      } else if (keyword === 'items') {
-        message = 'array items are invalid';
-      } else if (keyword === 'allOf') {
-        message = 'must match all of the subschemas';
-      } else if (keyword === 'anyOf') {
-        message = 'must match a subschema in anyOf';
-      } else if (keyword === 'oneOf') {
-        message = 'must match exactly one subschema in oneOf';
-      } else if (keyword === 'not') {
-        message = 'must NOT match the subschema';
-      } else if (keyword === 'format') {
-        const formatName = err.expected || err.value;
-        params.format = formatName;
-        message = `must match format "${formatName}"`;
-      } else if (keyword === 'if') {
-        message = 'must match "if" schema';
-      } else if (keyword === 'then') {
-        message = 'must match "then" schema';
-      } else if (keyword === 'else') {
-        message = 'must match "else" schema';
-      } else if (keyword === 'false schema') {
-        message = 'boolean schema false is always invalid';
-      } else if (keyword === '$query') {
-        message = params.code
-          ? `'$query' assertion raised ${params.code} at '${params.docPath}'`
-          : "must satisfy the '$query' assertion";
-      }
-
-      // Validators pass the data path as the first meta argument to the
-      // error handler; use it when it looks like a JSON pointer.
-      const meta0 = err.rest?.[0];
-      const instancePath = (typeof meta0 === 'string' && (meta0 === '' || meta0.charCodeAt(0) === 0x2f))
-        ? meta0
-        : '';
-
-      return new ValidationError({
-        keyword,
-        instancePath,
-        schemaPath: err.object?.path || '',
-        params,
-        message,
-      });
-    });
-  }
-
-  /**
    *
    * @param {JarenValidator} self
    * @param {string} origin
@@ -1508,7 +1388,7 @@ export class JarenValidator {
       if (collectErrors) {
         return {
           valid,
-          errors: valid ? [] : JarenValidator.#convertErrors(root.errors)
+          errors: valid ? [] : convertInternalErrors(root.errors)
         };
       }
       return valid;
@@ -1537,7 +1417,7 @@ export class JarenValidator {
       if (collectErrors) {
         return {
           valid,
-          errors: valid ? [] : JarenValidator.#convertErrors(root.errors)
+          errors: valid ? [] : convertInternalErrors(root.errors)
         };
       }
       return valid;
@@ -1831,7 +1711,8 @@ export class JarenValidator {
       existingValidation.contentValidation ?? contentValidationDefault,
       draftVersion,
       vocabValidation,
-      formatAssertion
+      formatAssertion,
+      existingValidation.messages ?? true
     );
 
     // Pre-compile all refs before returning the validator

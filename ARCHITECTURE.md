@@ -45,6 +45,7 @@ flowchart BT
     FORMATS["@jarenjs/formats<br/>format keyword validators"]
     REFS["@jarenjs/refs<br/>bundled meta-schemas"]
     FORMS["@jarenjs/forms<br/>form model + x-form rules"]
+    LOCALES["@jarenjs/locales<br/>error-message locale packs<br/>(zero deps, platform Intl only)"]
 
     JSON --> CORE
     VALIDATE --> CORE
@@ -64,6 +65,7 @@ flowchart BT
 | [`@jarenjs/formats`](packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](packages/formats/README.md)) |
 | [`@jarenjs/refs`](packages/refs) | Data-only meta-schema bundle | — |
 | [`@jarenjs/forms`](packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](packages/forms/README.md)) |
+| [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately dependency-free — key parity with the built-in English catalogs is enforced by repo tests, not imports | — (see its [README](packages/locales/README.md) and [ERROR-MESSAGES](packages/validate/docs/ERROR-MESSAGES.md)) |
 | [`@jarenjs/website`](packages/website) | The GitHub Pages site and playground (not part of the library chain) | [website ARCHITECTURE](packages/website/ARCHITECTURE.md) |
 
 Two deliberate inversions keep the graph acyclic while letting the layers cooperate:
@@ -80,6 +82,8 @@ The rest of this document describes `@jarenjs/validate`. Its main source files:
 | `packages/validate/src/index.js` | Main validator classes (`JarenValidator`, `ValidationRoot`, `ValidationObject`) |
 | `packages/validate/src/traverse.js` | Schema traversal and ref resolution (`storeSchemaIdsInMap`, `restoreSchemaRefsInMap`) |
 | `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`), `$recursiveRef`/`$dynamicRef` |
+| `packages/validate/src/messages.js` | Report-time error conversion, message catalogs & the `errorMessage` keyword (`ValidationError`, `messagesEn`, `localizeErrors`) |
+| `packages/validate/src/query-keyword.js` | The `$query` extension keyword (Jaren JSON Query assertions inside schemas) |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |

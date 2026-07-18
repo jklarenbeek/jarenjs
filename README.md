@@ -114,6 +114,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/formats`](packages/formats) | Format validators for the `format` keyword | [README](packages/formats/README.md) |
 | [`@jarenjs/refs`](packages/refs) | The official JSON Schema meta-schemas, bundled for offline use | [README](packages/refs/README.md) |
 | [`@jarenjs/forms`](packages/forms) | Framework-agnostic form generation from JSON Schema | [README](packages/forms/README.md) |
+| [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms error messages | [README](packages/locales/README.md) |
 | [`@jarenjs/josl`](packages/josl) | 🧪 Research: JOSL, a streaming TOML superset, and JSONX (unpublished) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
 
 ### 🤓 @jarenjs/core — the foundation
@@ -126,7 +127,7 @@ The JSON addressing and transformation stack as compilers: JSON Pointer ([RFC 69
 
 ### ⚙️ @jarenjs/validate — the validating compiler
 
-The heart of the repository: compiles JSON Schemas into optimized validation functions, with annotation-based `unevaluatedProperties`/`unevaluatedItems`, spec-compliant dynamic references, per-document draft handling, `$vocabulary` support, instance-data references (`data`/`$data`), and the `$query` extension keyword that embeds a Jaren JSON Query as a cross-field assertion — the class of constraint (arithmetic, ordering, aggregates, quantification) JSON Schema is notoriously bad at. The complete keyword list and capability walkthroughs are in the package README. See [packages/validate](packages/validate/README.md).
+The heart of the repository: compiles JSON Schemas into optimized validation functions, with annotation-based `unevaluatedProperties`/`unevaluatedItems`, spec-compliant dynamic references, per-document draft handling, `$vocabulary` support, instance-data references (`data`/`$data`), the `$query` extension keyword that embeds a Jaren JSON Query as a cross-field assertion — the class of constraint (arithmetic, ordering, aggregates, quantification) JSON Schema is notoriously bad at — and structured error messages (stable `msgid` + raw params on every error, the `errorMessage` keyword, report-time i18n through `@jarenjs/locales`). The complete keyword list and capability walkthroughs are in the package README. See [packages/validate](packages/validate/README.md).
 
 ### ✍ @jarenjs/formats — format validators
 
@@ -135,6 +136,10 @@ All standard JSON Schema string formats (`date-time`, `email`, `idn-hostname`, `
 ### 🔗 @jarenjs/refs — bundled meta-schemas
 
 The official JSON Schema meta-schemas for all supported drafts, bundled so draft detection, `$vocabulary` processing and meta-validation work offline. See [packages/refs](packages/refs/README.md).
+
+### 🌍 @jarenjs/locales — error messages in your language
+
+Locale packs for the structured error messages of `@jarenjs/validate` and `@jarenjs/forms`: every failure carries a stable message key plus raw params, and human text renders at report time through a catalog of plain closures — `localizeErrors(result.errors, catalog)` is the whole post-hoc i18n story, with the `errorMessage` keyword and `$msgid` indirection keeping schema-authored messages translatable too. Packs are zero-dependency and lean on the platform's `Intl` (plural rules, number and list formatting). Ships Dutch (`nl`); the [pack-authoring guide](packages/locales/README.md) and the normative [ERROR-MESSAGES](packages/validate/docs/ERROR-MESSAGES.md) spec show how to add more. See [packages/locales](packages/locales/README.md).
 
 ### 📝 @jarenjs/forms — form generation
 

@@ -91,7 +91,7 @@ function compileDollarDataMinimum(schemaObj, ref) {
     const minValue = resolveRef(dataRoot, dataPath);
     if (minValue === JSONPOINTER_NOTHING || !isNumberType(minValue)) return true;
 
-    return data >= minValue || addError(minValue, data, dataPath);
+    return data >= minValue || addError(data, dataPath, minValue);
   };
 }
 
@@ -111,7 +111,7 @@ function compileDollarDataMaximum(schemaObj, ref) {
     const maxValue = resolveRef(dataRoot, dataPath);
     if (maxValue === JSONPOINTER_NOTHING || !isNumberType(maxValue)) return true;
 
-    return data <= maxValue || addError(maxValue, data, dataPath);
+    return data <= maxValue || addError(data, dataPath, maxValue);
   };
 }
 
@@ -131,7 +131,7 @@ function compileDollarDataExclusiveMinimum(schemaObj, ref) {
     const minValue = resolveRef(dataRoot, dataPath);
     if (minValue === JSONPOINTER_NOTHING || !isNumberType(minValue)) return true;
 
-    return data > minValue || addError(minValue, data, dataPath);
+    return data > minValue || addError(data, dataPath, minValue);
   };
 }
 
@@ -151,7 +151,7 @@ function compileDollarDataExclusiveMaximum(schemaObj, ref) {
     const maxValue = resolveRef(dataRoot, dataPath);
     if (maxValue === JSONPOINTER_NOTHING || !isNumberType(maxValue)) return true;
 
-    return data < maxValue || addError(maxValue, data, dataPath);
+    return data < maxValue || addError(data, dataPath, maxValue);
   };
 }
 
@@ -172,7 +172,7 @@ function compileDollarDataMultipleOf(schemaObj, ref) {
     if (multipleOf === JSONPOINTER_NOTHING || !isNumberType(multipleOf)) return true;
 
     const q = data / multipleOf;
-    return Math.abs(q - Math.round(q)) < 1e-6 || addError(multipleOf, data, dataPath);
+    return Math.abs(q - Math.round(q)) < 1e-6 || addError(data, dataPath, multipleOf);
   };
 }
 
@@ -196,7 +196,7 @@ function compileDollarDataMinLength(schemaObj, ref) {
     const minLen = resolveRef(dataRoot, dataPath);
     if (minLen === JSONPOINTER_NOTHING || !isNumberType(minLen)) return true;
 
-    return data.length >= minLen || addError(minLen, data, dataPath);
+    return data.length >= minLen || addError(data, dataPath, minLen);
   };
 }
 
@@ -216,7 +216,7 @@ function compileDollarDataMaxLength(schemaObj, ref) {
     const maxLen = resolveRef(dataRoot, dataPath);
     if (maxLen === JSONPOINTER_NOTHING || !isNumberType(maxLen)) return true;
 
-    return data.length <= maxLen || addError(maxLen, data, dataPath);
+    return data.length <= maxLen || addError(data, dataPath, maxLen);
   };
 }
 
@@ -237,7 +237,7 @@ function compileDollarDataPattern(schemaObj, ref) {
     if (pattern === JSONPOINTER_NOTHING || !isStringType(pattern)) return true;
 
     const regex = new RegExp(pattern, 'u');
-    return regex.test(data) || addError(pattern, data, dataPath);
+    return regex.test(data) || addError(data, dataPath, pattern);
   };
 }
 
@@ -275,7 +275,7 @@ function compileDollarDataFormat(schemaObj, ref) {
       const validator = formatCompiler(mockSchemaObj, { format: formatName });
       if (typeof validator !== 'function') return true;
 
-      return validator(data, dataPath) || addError(formatName, data, dataPath);
+      return validator(data, dataPath) || addError(data, dataPath, formatName);
     } catch (e) {
       // If compilation fails, skip validation
       return true;
@@ -303,7 +303,7 @@ function compileDollarDataMinItems(schemaObj, ref) {
     const minItems = resolveRef(dataRoot, dataPath);
     if (minItems === JSONPOINTER_NOTHING || !isNumberType(minItems)) return true;
 
-    return data.length >= minItems || addError(minItems, data, dataPath);
+    return data.length >= minItems || addError(data, dataPath, minItems);
   };
 }
 
@@ -323,7 +323,7 @@ function compileDollarDataMaxItems(schemaObj, ref) {
     const maxItems = resolveRef(dataRoot, dataPath);
     if (maxItems === JSONPOINTER_NOTHING || !isNumberType(maxItems)) return true;
 
-    return data.length <= maxItems || addError(maxItems, data, dataPath);
+    return data.length <= maxItems || addError(data, dataPath, maxItems);
   };
 }
 
@@ -347,7 +347,7 @@ function compileDollarDataUniqueItems(schemaObj, ref) {
     for (let i = 0; i < data.length; i++) {
       for (let j = i + 1; j < data.length; j++) {
         if (equalsDeep(data[i], data[j])) {
-          return addError(true, data, dataPath);
+          return addError(data, dataPath);
         }
       }
     }
@@ -376,7 +376,7 @@ function compileDollarDataMinProperties(schemaObj, ref) {
     if (minProps === JSONPOINTER_NOTHING || !isNumberType(minProps)) return true;
 
     const propCount = Object.keys(data).length;
-    return propCount >= minProps || addError(minProps, data, dataPath);
+    return propCount >= minProps || addError(data, dataPath, minProps);
   };
 }
 
@@ -397,7 +397,7 @@ function compileDollarDataMaxProperties(schemaObj, ref) {
     if (maxProps === JSONPOINTER_NOTHING || !isNumberType(maxProps)) return true;
 
     const propCount = Object.keys(data).length;
-    return propCount <= maxProps || addError(maxProps, data, dataPath);
+    return propCount <= maxProps || addError(data, dataPath, maxProps);
   };
 }
 
@@ -408,7 +408,9 @@ function compileDollarDataMaxProperties(schemaObj, ref) {
  * @returns {function|undefined} The compiled validator function
  */
 function compileDollarDataRequired(schemaObj, ref) {
-  const addError = schemaObj.createErrorHandler(ref, 'required');
+  // Keyed handler: the missing property name travels as the dataKey, so
+  // error conversion extracts params.missingProperty like static required.
+  const addError = schemaObj.createErrorHandler(ref, ['required']);
   const resolveRef = compileRefResolver(ref);
 
   return function validateDollarDataRequired(data, dataPath, dataRoot) {
@@ -446,7 +448,7 @@ function compileDollarDataEnum(schemaObj, ref) {
     const enumValues = resolveRef(dataRoot, dataPath);
     if (enumValues === JSONPOINTER_NOTHING || !Array.isArray(enumValues)) return true;
 
-    return enumValues.includes(data) || addError(enumValues, data, dataPath);
+    return enumValues.includes(data) || addError(data, dataPath, enumValues);
   };
 }
 
@@ -466,7 +468,7 @@ function compileDollarDataConst(schemaObj, ref) {
     const constValue = resolveRef(dataRoot, dataPath);
     if (constValue === JSONPOINTER_NOTHING) return true;
 
-    return data === constValue || addError(constValue, data, dataPath);
+    return data === constValue || addError(data, dataPath, constValue);
   };
 }
 

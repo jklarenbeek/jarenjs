@@ -11,7 +11,9 @@
  *   enabled  - EBV query: should the field accept input?
  *   assert   - EBV query: cross-field preemptive validation
  *   computed - query whose plain-JSON result is the field's derived value
- *   message  - string shown when `assert` fails
+ *   message  - MessageSpec shown when `assert` fails: an inline template
+ *              string, or `{ "$msgid": ..., "message"?: ..., "params"?: ... }`
+ *              resolving through a message catalog (see messages.js)
  *
  * Unknown members are ignored (forward compatibility). Every rule kind
  * shares one query context: the input document `$` is the WHOLE form data
@@ -51,10 +53,18 @@ import {
 
 import { escapePointerKey } from './model.js';
 
+import {
+  compileMessageTemplate,
+  renderFormsMessage,
+  formsMessages,
+} from './messages.js';
+
 /** The externals every rule query may reference, and no others. */
 const ALLOWED_EXTERNALS = ['value', 'pointer'];
 
-const DEFAULT_ASSERT_MESSAGE = 'Invalid value';
+/** The msgid of the default assert failure text ('Invalid value'), in the
+ * built-in English catalog (messages.js). */
+const DEFAULT_ASSERT_MSGID = 'x-form/assert';
 
 /**
  * @typedef {object} RuleResult
@@ -62,8 +72,9 @@ const DEFAULT_ASSERT_MESSAGE = 'Invalid value';
  * @property {boolean} [enabled] - EBV of the field's `enabled` rule
  * @property {any} [computed] - Plain-JSON result of the `computed` rule
  * @property {Array<import('./validate.js').FieldError>} [errors]
- *   `[{ keyword: 'x-form/assert', message }]` when the `assert` rule fails
- *   (the validateField error shape, so error rendering works unchanged)
+ *   `[{ keyword: 'x-form/assert', params, msgid, message }]` when the
+ *   `assert` rule fails (the validateField error shape, so error
+ *   rendering works unchanged; `params` always carries the `pointer`)
  */
 
 /**
@@ -97,6 +108,17 @@ function compileRuleQuery(doc, fieldPointer, member, options) {
 }
 
 /**
+ * A compiled `x-form.message` MessageSpec: inline text compiles into a
+ * render closure; a `$msgid` form resolves through the active catalog at
+ * failure time (English fallback), with the inline `message` template as
+ * the catalog-miss fallback.
+ * @typedef {object} CompiledRuleMessage
+ * @property {string|null} msgid - Catalog key, or null for a plain inline message
+ * @property {((params: object) => string)|null} render - Compiled inline template
+ * @property {object|null} params - Author params, merged into the error's params
+ */
+
+/**
  * @typedef {object} CompiledFieldRules
  * @property {string} pointer - The field's data pointer (template pointers keep `-`)
  * @property {Array<string|symbol>} parts - Decoded segments; ITEM marks an array-item slot
@@ -106,8 +128,38 @@ function compileRuleQuery(doc, fieldPointer, member, options) {
  * @property {function|null} enabled
  * @property {function|null} assert
  * @property {function|null} computed
- * @property {string|null} message
+ * @property {CompiledRuleMessage|null} message
  */
+
+/**
+ * Compile the `message` member of an `x-form` rule. A plain string stays
+ * valid (backward compatible: it is the inline-template MessageSpec);
+ * the object form carries `$msgid`/`message`/`params`.
+ * @param {unknown} raw - The rule's `message` value
+ * @param {string} fieldPointer - The field's data pointer, for compile errors
+ * @returns {CompiledRuleMessage|null} The compiled spec, or null when absent
+ */
+function compileRuleMessageSpec(raw, fieldPointer) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === 'string')
+    return { msgid: null, render: compileMessageTemplate(raw), params: null };
+  if (typeof raw !== 'object' || Array.isArray(raw))
+    throw new Error(`${fieldPointer} x-form/message: must be a string or a MessageSpec object`);
+  const spec = /** @type {any} */ (raw);
+  if (spec.$msgid !== undefined && typeof spec.$msgid !== 'string')
+    throw new Error(`${fieldPointer} x-form/message: '$msgid' must be a string`);
+  if (spec.message !== undefined && typeof spec.message !== 'string')
+    throw new Error(`${fieldPointer} x-form/message: 'message' must be a string`);
+  if (spec.$msgid === undefined && spec.message === undefined)
+    throw new Error(`${fieldPointer} x-form/message: needs '$msgid' and/or 'message'`);
+  if (spec.params !== undefined && (spec.params === null || typeof spec.params !== 'object' || Array.isArray(spec.params)))
+    throw new Error(`${fieldPointer} x-form/message: 'params' must be an object`);
+  return {
+    msgid: spec.$msgid !== undefined ? spec.$msgid : null,
+    render: spec.message !== undefined ? compileMessageTemplate(spec.message) : null,
+    params: spec.params !== undefined ? spec.params : null,
+  };
+}
 
 /**
  * @typedef {object} CompiledRules
@@ -167,7 +219,7 @@ function walkField(field, parts, rules, queryOptions) {
         ? compileRuleQuery(raw.assert, pointer, 'assert', queryOptions) : null,
       computed: raw.computed !== undefined
         ? compileRuleQuery(raw.computed, pointer, 'computed', queryOptions) : null,
-      message: typeof raw.message === 'string' ? raw.message : null,
+      message: compileRuleMessageSpec(raw.message, pointer),
     });
   }
 
@@ -189,7 +241,7 @@ function walkField(field, parts, rules, queryOptions) {
  * externals into its frame before evaluating (see the query engine), so
  * mutation between calls is safe and allocation-free.
  */
-function evaluateOne(rule, data, value, pointer, ext, results) {
+function evaluateOne(rule, data, value, pointer, ext, results, catalog) {
   ext.value = value === undefined ? null : value;
   ext.pointer = pointer;
 
@@ -218,10 +270,30 @@ function evaluateOne(rule, data, value, pointer, ext, results) {
       ok = false; // fail closed: an uncomputable assertion is not satisfied
     }
     if (!ok) {
-      result.errors = [{
-        keyword: 'x-form/assert',
-        message: rule.message !== null ? rule.message : DEFAULT_ASSERT_MESSAGE,
-      }];
+      const spec = rule.message;
+      const msgid = spec !== null && spec.msgid !== null ? spec.msgid : DEFAULT_ASSERT_MSGID;
+      const params = spec !== null && spec.params !== null
+        ? { ...spec.params, pointer }
+        : { pointer };
+      let message;
+      if (spec !== null) {
+        if (spec.msgid !== null) {
+          // D-M5 chain: active catalog, then built-in English, then the
+          // spec's inline template, then the assert default text
+          let render = catalog !== undefined ? catalog[spec.msgid] : undefined;
+          if (render === undefined) render = formsMessages[spec.msgid];
+          if (render !== undefined) message = render(params);
+          else if (spec.render !== null) message = spec.render(params);
+          else message = renderFormsMessage(catalog, DEFAULT_ASSERT_MSGID, params);
+        }
+        else {
+          message = /** @type {(params: object) => string} */ (spec.render)(params);
+        }
+      }
+      else {
+        message = renderFormsMessage(catalog, DEFAULT_ASSERT_MSGID, params);
+      }
+      result.errors = [{ keyword: 'x-form/assert', params, msgid, message }];
     }
   }
   results[pointer] = result;
@@ -247,14 +319,14 @@ function ebvFailOpen(query, data, ext) {
  * dispatcher deciding per node what it applies to. Keep the mechanism in
  * this function.
  */
-function expandItemRule(rule, data, node, partIndex, pointer, ext, results) {
+function expandItemRule(rule, data, node, partIndex, pointer, ext, results, catalog) {
   const parts = rule.parts;
   for (let i = partIndex; i < parts.length; i++) {
     const part = parts[i];
     if (part === ITEM) {
       if (!Array.isArray(node)) return; // nothing to expand into
       for (let index = 0; index < node.length; index++)
-        expandItemRule(rule, data, node[index], i + 1, `${pointer}/${index}`, ext, results);
+        expandItemRule(rule, data, node[index], i + 1, `${pointer}/${index}`, ext, results, catalog);
       return;
     }
     pointer = `${pointer}/${escapePointerKey(part)}`;
@@ -262,7 +334,7 @@ function expandItemRule(rule, data, node, partIndex, pointer, ext, results) {
       ? node[/** @type {string} */ (part)]
       : undefined;
   }
-  evaluateOne(rule, data, node, pointer, ext, results);
+  evaluateOne(rule, data, node, pointer, ext, results, catalog);
 }
 
 /**
@@ -274,12 +346,13 @@ function expandItemRule(rule, data, node, partIndex, pointer, ext, results) {
  *
  * @param {CompiledRules} compiled - From compileFormRules
  * @param {any} data - The form data root (the query input `$`)
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - Optional compiled message catalog (see messages.js), default English
  * @returns {Record<string, RuleResult>}
  * @example
  * const results = evaluateFormRules(compiled, { company: 'ACME', vatId: '' });
  * results['/vatId'].errors; // [{ keyword: 'x-form/assert', message: '...' }]
  */
-export function evaluateFormRules(compiled, data) {
+export function evaluateFormRules(compiled, data, catalog = undefined) {
   /** @type {Record<string, RuleResult>} */
   const results = {};
   const ext = { value: null, pointer: '' };
@@ -287,11 +360,11 @@ export function evaluateFormRules(compiled, data) {
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i];
     if (rule.templated) {
-      expandItemRule(rule, data, data, 0, '', ext, results);
+      expandItemRule(rule, data, data, 0, '', ext, results, catalog);
     }
     else {
       const value = rule.getValue(data);
-      evaluateOne(rule, data, value === JSONPOINTER_NOTHING ? undefined : value, rule.pointer, ext, results);
+      evaluateOne(rule, data, value === JSONPOINTER_NOTHING ? undefined : value, rule.pointer, ext, results, catalog);
     }
   }
   return results;
@@ -324,14 +397,24 @@ function pathNameSelector(key) {
  * Pure schema-to-schema transform - no validator import; the output only
  * spells the keyword.
  *
- * The `$query` lands on the ROOT schema (where the query input `$` is the
- * instance root, matching the rule context), with each assert wrapped to
- * rebuild its bindings: `value` binds to the field's location, `pointer`
- * to its pointer string. An assert on an array item template quantifies
- * with `$every` over the actual elements (`pointer` then stays the
- * template pointer - element indexes are a render-time notion). Multiple
- * asserts conjoin under `$and`; an existing root `$query` is preserved by
- * wrapping the new one in an `allOf` branch.
+ * The asserts land on the ROOT schema (where the query input `$` is the
+ * instance root, matching the rule context), each as its OWN `allOf`
+ * branch `{ "$query": <wrapped>, "errorMessage": { "$query": <spec> } }`
+ * so per-assert identity - and the rule's authored message - survives
+ * into submit validation. Each assert is wrapped to rebuild its bindings:
+ * `value` binds to the field's location, `pointer` to its pointer string.
+ * An assert on an array item template quantifies with `$every` over the
+ * actual elements (`pointer` then stays the template pointer - element
+ * indexes are a render-time notion). An existing root `$query` is left
+ * untouched on the root itself.
+ *
+ * The carried message spec is the rule's `x-form.message` - inline string
+ * as an inline `message`, `$msgid` form passed through - with `params`
+ * merged over `{ pointer: <field pointer> }`; a rule with no message gets
+ * `{ "$msgid": "x-form/assert", "params": { "pointer": ... } }`. EVERY
+ * submit-time `$query` failure therefore carries the owning field's
+ * pointer in `params`, which lets UIs map root-level `$query` errors onto
+ * fields.
  *
  * The transform follows the same structural spine as buildFormModel
  * (`properties`, `items`, `prefixItems`, `allOf`) but does not resolve
@@ -339,8 +422,8 @@ function pathNameSelector(key) {
  *
  * @param {object|boolean} schema - The root JSON schema
  * @returns {object|boolean} A new root schema (input is not mutated;
- *   untouched subtrees are shared) with the collected `$query`, or the
- *   input itself when there is nothing to copy
+ *   untouched subtrees are shared) with the collected `$query` branches,
+ *   or the input itself when there is nothing to copy
  * @example
  * const submitSchema = formRulesToQueryAssertions(schema);
  * const validate = new JarenValidator().compile(submitSchema); // caller-side
@@ -349,18 +432,36 @@ export function formRulesToQueryAssertions(schema) {
   if (schema == null || typeof schema !== 'object' || Array.isArray(schema))
     return schema;
 
-  /** @type {any[]} */
+  /** @type {Array<{query: any, pointer: string, message: unknown}>} */
   const assertions = [];
   collectAsserts(schema, '', '$', 0, assertions);
   if (assertions.length === 0)
     return schema;
 
-  const queryDoc = assertions.length === 1 ? assertions[0] : { $and: assertions };
-  if (schema.$query !== undefined) {
-    const allOf = Array.isArray(schema.allOf) ? schema.allOf : [];
-    return { ...schema, allOf: [...allOf, { $query: queryDoc }] };
+  const branches = assertions.map(assert => ({
+    $query: assert.query,
+    errorMessage: { $query: assertMessageSpec(assert.message, assert.pointer) },
+  }));
+  const allOf = Array.isArray(schema.allOf) ? schema.allOf : [];
+  return { ...schema, allOf: [...allOf, ...branches] };
+}
+
+/**
+ * Build the `errorMessage.$query` MessageSpec carried into the submit
+ * schema for one assert: the rule's message with `params` merged over
+ * `{ pointer }`, or the `x-form/assert` catalog default.
+ * @param {unknown} message - The rule's raw `x-form.message`, if any
+ * @param {string} pointer - The owning field's data pointer
+ * @returns {object} The MessageSpec for the transformed schema
+ */
+function assertMessageSpec(message, pointer) {
+  if (typeof message === 'string')
+    return { message, params: { pointer } };
+  if (message != null && typeof message === 'object' && !Array.isArray(message)) {
+    const spec = /** @type {any} */ (message);
+    return { ...spec, params: { pointer, ...(spec.params || {}) } };
   }
-  return { ...schema, $query: queryDoc };
+  return { $msgid: 'x-form/assert', params: { pointer } };
 }
 
 /**
@@ -377,10 +478,11 @@ function collectAsserts(schema, pointer, path, itemDepth, out) {
   if (rules != null && typeof rules === 'object' && !Array.isArray(rules)
       && rules.assert !== undefined) {
     const bindPointer = { $const: pointer };
-    out.push(itemDepth === 0
+    const query = itemDepth === 0
       ? { $let: { value: path, pointer: bindPointer }, $return: rules.assert }
       : { $every: { value: path },
-          $satisfies: { $let: { pointer: bindPointer }, $return: rules.assert } });
+          $satisfies: { $let: { pointer: bindPointer }, $return: rules.assert } };
+    out.push({ query, pointer, message: rules.message });
   }
 
   if (schema.properties != null && typeof schema.properties === 'object') {

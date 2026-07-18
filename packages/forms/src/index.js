@@ -33,6 +33,12 @@ export {
 } from './validate.js';
 
 export {
+  formsMessagesEn,
+  compileMessageTemplate,
+  compileMessageCatalog,
+} from './messages.js';
+
+export {
   createInitialData,
   createItemValue,
   parseFieldInput,

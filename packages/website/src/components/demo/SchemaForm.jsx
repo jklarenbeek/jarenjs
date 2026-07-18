@@ -270,9 +270,10 @@ function FieldControl({ field, value, invalid, onChange }) {
           className={cn(invalidCls)}
         >
           <option value="">Select…</option>
-          {field.enumValues?.map((option) => (
+          {field.enumValues?.map((option, index) => (
             <option key={String(option)} value={String(option)}>
-              {typeof option === 'string' ? option : JSON.stringify(option)}
+              {field.enumLabels?.[index]
+                ?? (typeof option === 'string' ? option : JSON.stringify(option))}
             </option>
           ))}
         </Select>

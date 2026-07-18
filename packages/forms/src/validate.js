@@ -10,6 +10,11 @@
  * remains authoritative for cross-field rules (required combinations,
  * dependencies, unevaluatedProperties, ...). Cross-field feedback per
  * keystroke is rules.js territory (the `x-form` annotation).
+ *
+ * Every failure is structured (TODO_17): a stable `msgid`
+ * (`form/<keyword>`) plus raw `params`, with `message` rendered eagerly -
+ * failure-only, cheap - through a catalog (messages.js), so consumers can
+ * re-render in another locale from `msgid` + `params`.
  */
 
 import {
@@ -26,10 +31,16 @@ import {
   getFormatInfo,
 } from './formats.js';
 
+import {
+  renderFormsMessage,
+} from './messages.js';
+
 /**
  * @typedef {object} FieldError
  * @property {string} keyword - The JSON Schema keyword that failed
- * @property {string} message - Human readable message
+ * @property {object} params - Structured, keyword-specific parameters
+ * @property {string} msgid - Stable message key (`form/<keyword>` or `x-form/assert`)
+ * @property {string} message - Human readable message (rendered through a catalog)
  */
 
 const regexCache = new Map();
@@ -48,8 +59,22 @@ function getPattern(source) {
   return regex;
 }
 
-function formatValue(value) {
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+/**
+ * Push one structured field error, rendering its message through the
+ * catalog (built-in English fallback). Failure-only path.
+ * @param {FieldError[]} errors - The output array
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>|undefined} catalog - Compiled catalog or undefined for English
+ * @param {string} keyword - The failed keyword
+ * @param {object} params - The structured params
+ */
+function pushError(errors, catalog, keyword, params) {
+  const msgid = `form/${keyword}`;
+  errors.push({
+    keyword,
+    params,
+    msgid,
+    message: renderFormsMessage(catalog, msgid, params),
+  });
 }
 
 /**
@@ -57,12 +82,14 @@ function formatValue(value) {
  *
  * @param {import('./model.js').FormField} field - Field from buildFormModel
  * @param {any} value - The TYPED value (see parseFieldInput); undefined = absent
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - Optional compiled message catalog (see messages.js), default English
  * @returns {FieldError[]} Empty when the value passes every per-field check
  * @example
  * const errors = validateField(emailField, 'not-an-email');
- * // [{ keyword: 'format', message: 'Must be a valid email' }]
+ * // [{ keyword: 'format', params: { format: 'email' },
+ * //    msgid: 'form/format', message: 'Must be a valid email' }]
  */
-export function validateField(field, value) {
+export function validateField(field, value, catalog = undefined) {
   /** @type {FieldError[]} */
   const errors = [];
   if (field == null) return errors;
@@ -70,7 +97,7 @@ export function validateField(field, value) {
   // Absent value: only `required` applies
   if (value === undefined || value === null) {
     if (field.required && field.kind !== 'boolean') {
-      errors.push({ keyword: 'required', message: 'This field is required' });
+      pushError(errors, catalog, 'required', {});
     }
     return errors;
   }
@@ -80,24 +107,21 @@ export function validateField(field, value) {
   switch (field.kind) {
     case 'const': {
       if (!equalsDeep(value, field.constValue)) {
-        errors.push({ keyword: 'const', message: `Must be ${formatValue(field.constValue)}` });
+        pushError(errors, catalog, 'const', { constValue: field.constValue });
       }
       return errors;
     }
 
     case 'enum': {
       if (!field.enumValues?.some((option) => equalsDeep(value, option))) {
-        errors.push({
-          keyword: 'enum',
-          message: `Must be one of: ${field.enumValues?.map(formatValue).join(', ')}`,
-        });
+        pushError(errors, catalog, 'enum', { enumValues: field.enumValues });
       }
       return errors;
     }
 
     case 'string': {
       if (typeof value !== 'string') {
-        errors.push({ keyword: 'type', message: 'Must be a string' });
+        pushError(errors, catalog, 'type', { type: 'string' });
         return errors;
       }
       let len = -1;
@@ -105,27 +129,21 @@ export function validateField(field, value) {
         len = getStringLength(value, true); // grapheme-aware, like the validator
       }
       if (c.minLength !== undefined && len < c.minLength) {
-        errors.push({
-          keyword: 'minLength',
-          message: `Must be at least ${c.minLength} character${c.minLength === 1 ? '' : 's'} (currently ${len})`,
-        });
+        pushError(errors, catalog, 'minLength', { limit: c.minLength, len });
       }
       if (c.maxLength !== undefined && len > c.maxLength) {
-        errors.push({
-          keyword: 'maxLength',
-          message: `Must be at most ${c.maxLength} character${c.maxLength === 1 ? '' : 's'} (currently ${len})`,
-        });
+        pushError(errors, catalog, 'maxLength', { limit: c.maxLength, len });
       }
       if (c.pattern !== undefined) {
         const regex = getPattern(c.pattern);
         if (regex != null && !regex.test(value)) {
-          errors.push({ keyword: 'pattern', message: `Must match pattern ${c.pattern}` });
+          pushError(errors, catalog, 'pattern', { pattern: c.pattern });
         }
       }
       if (c.format !== undefined && value !== '') {
         const info = getFormatInfo(c.format);
         if (info != null && !info.test(value)) {
-          errors.push({ keyword: 'format', message: `Must be a valid ${c.format}` });
+          pushError(errors, catalog, 'format', { format: c.format });
         }
       }
       return errors;
@@ -135,28 +153,28 @@ export function validateField(field, value) {
     case 'integer': {
       const num = typeof value === 'number' ? value : Number(value);
       if (typeof value === 'boolean' || Number.isNaN(num)) {
-        errors.push({ keyword: 'type', message: 'Must be a number' });
+        pushError(errors, catalog, 'type', { type: 'number' });
         return errors;
       }
       if (field.kind === 'integer' && !Number.isInteger(num)) {
-        errors.push({ keyword: 'type', message: 'Must be an integer' });
+        pushError(errors, catalog, 'type', { type: 'integer' });
       }
       if (c.minimum !== undefined && num < c.minimum) {
-        errors.push({ keyword: 'minimum', message: `Must be at least ${c.minimum}` });
+        pushError(errors, catalog, 'minimum', { limit: c.minimum });
       }
       if (c.maximum !== undefined && num > c.maximum) {
-        errors.push({ keyword: 'maximum', message: `Must be at most ${c.maximum}` });
+        pushError(errors, catalog, 'maximum', { limit: c.maximum });
       }
       if (c.exclusiveMinimum !== undefined && num <= c.exclusiveMinimum) {
-        errors.push({ keyword: 'exclusiveMinimum', message: `Must be greater than ${c.exclusiveMinimum}` });
+        pushError(errors, catalog, 'exclusiveMinimum', { limit: c.exclusiveMinimum });
       }
       if (c.exclusiveMaximum !== undefined && num >= c.exclusiveMaximum) {
-        errors.push({ keyword: 'exclusiveMaximum', message: `Must be less than ${c.exclusiveMaximum}` });
+        pushError(errors, catalog, 'exclusiveMaximum', { limit: c.exclusiveMaximum });
       }
       if (c.multipleOf !== undefined) {
         const quotient = num / c.multipleOf;
         if (Math.abs(quotient - Math.round(quotient)) >= 1e-6) {
-          errors.push({ keyword: 'multipleOf', message: `Must be a multiple of ${c.multipleOf}` });
+          pushError(errors, catalog, 'multipleOf', { multipleOf: c.multipleOf });
         }
       }
       return errors;
@@ -164,45 +182,39 @@ export function validateField(field, value) {
 
     case 'boolean': {
       if (typeof value !== 'boolean') {
-        errors.push({ keyword: 'type', message: 'Must be a boolean' });
+        pushError(errors, catalog, 'type', { type: 'boolean' });
       }
       return errors;
     }
 
     case 'array': {
       if (!Array.isArray(value)) {
-        errors.push({ keyword: 'type', message: 'Must be an array' });
+        pushError(errors, catalog, 'type', { type: 'array' });
         return errors;
       }
       if (c.minItems !== undefined && value.length < c.minItems) {
-        errors.push({
-          keyword: 'minItems',
-          message: `Must have at least ${c.minItems} item${c.minItems === 1 ? '' : 's'}`,
-        });
+        pushError(errors, catalog, 'minItems', { limit: c.minItems });
       }
       if (c.maxItems !== undefined && value.length > c.maxItems) {
-        errors.push({
-          keyword: 'maxItems',
-          message: `Must have at most ${c.maxItems} item${c.maxItems === 1 ? '' : 's'}`,
-        });
+        pushError(errors, catalog, 'maxItems', { limit: c.maxItems });
       }
       if (c.uniqueItems === true && !isUniqueDeepArray(value)) {
-        errors.push({ keyword: 'uniqueItems', message: 'Items must be unique' });
+        pushError(errors, catalog, 'uniqueItems', {});
       }
       return errors;
     }
 
     case 'object': {
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        errors.push({ keyword: 'type', message: 'Must be an object' });
+        pushError(errors, catalog, 'type', { type: 'object' });
         return errors;
       }
       const size = Object.keys(value).length;
       if (c.minProperties !== undefined && size < c.minProperties) {
-        errors.push({ keyword: 'minProperties', message: `Must have at least ${c.minProperties} properties` });
+        pushError(errors, catalog, 'minProperties', { limit: c.minProperties });
       }
       if (c.maxProperties !== undefined && size > c.maxProperties) {
-        errors.push({ keyword: 'maxProperties', message: `Must have at most ${c.maxProperties} properties` });
+        pushError(errors, catalog, 'maxProperties', { limit: c.maxProperties });
       }
       return errors;
     }
@@ -217,28 +229,29 @@ export function validateField(field, value) {
  * Returns a map of data-pointer -> FieldError[] for fields that fail.
  * @param {import('./model.js').FormField} model - Root field from buildFormModel
  * @param {any} data - Current form data
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - Optional compiled message catalog, default English
  * @returns {Record<string, FieldError[]>}
  */
-export function validateAllFields(model, data) {
+export function validateAllFields(model, data, catalog = undefined) {
   /** @type {Record<string, FieldError[]>} */
   const result = {};
-  walkFields(model, data, '', result);
+  walkFields(model, data, '', result, catalog);
   return result;
 }
 
-function walkFields(field, value, pointer, result) {
-  const errors = validateField(field, value);
+function walkFields(field, value, pointer, result, catalog) {
+  const errors = validateField(field, value, catalog);
   if (errors.length > 0) result[pointer] = errors;
 
   if (field.kind === 'object' && field.children && value != null && typeof value === 'object') {
     for (const child of field.children) {
-      walkFields(child, value[child.key], `${pointer}/${child.key}`, result);
+      walkFields(child, value[child.key], `${pointer}/${child.key}`, result, catalog);
     }
   }
   else if (field.kind === 'array' && Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
       const itemField = field.tuple?.[i] ?? field.item;
-      if (itemField) walkFields(itemField, value[i], `${pointer}/${i}`, result);
+      if (itemField) walkFields(itemField, value[i], `${pointer}/${i}`, result, catalog);
     }
   }
 }

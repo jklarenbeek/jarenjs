@@ -117,7 +117,8 @@ describe('Form Rules (x-form)', function () {
 
       const failing = evaluateFormRules(compiled, { company: 'ACME', vatId: '' });
       assert.deepEqual(failing['/vatId'].errors,
-        [{ keyword: 'x-form/assert', message: 'VAT id is required for companies' }]);
+        [{ keyword: 'x-form/assert', params: { pointer: '/vatId' }, msgid: 'x-form/assert',
+          message: 'VAT id is required for companies' }]);
 
       assert.isTrue(evaluateFormRules(compiled, { company: '', vatId: '' })['/vatId'].errors === undefined);
       assert.isTrue(evaluateFormRules(compiled, { company: 'ACME', vatId: 'NL1' })['/vatId'].errors === undefined);
@@ -219,7 +220,8 @@ describe('Form Rules (x-form)', function () {
 
       assert.isTrue(result['/lines/0/amount'].errors === undefined);
       assert.deepEqual(result['/lines/1/amount'].errors,
-        [{ keyword: 'x-form/assert', message: 'Amount must be positive' }]);
+        [{ keyword: 'x-form/assert', params: { pointer: '/lines/1/amount' }, msgid: 'x-form/assert',
+          message: 'Amount must be positive' }]);
       assert.isTrue(result['/lines/2/amount'].errors === undefined);
       assert.isTrue(result['/lines/3'] === undefined, 'expansion follows the actual array length');
     });
@@ -288,17 +290,26 @@ describe('Form Rules (x-form)', function () {
   });
 
   describe('#formRulesToQueryAssertions()', function () {
-    it('should copy a single assert into a root $query with rebound value/pointer', function () {
+    it('should copy a single assert into its own allOf branch with rebound value/pointer and message', function () {
       const out = formRulesToQueryAssertions(signupSchema);
-      assert.deepEqual(out.$query, {
-        $let: { value: "$['vatId']", pointer: { $const: '/vatId' } },
-        $return: signupSchema.properties.vatId['x-form'].assert,
+      assert.isTrue(out.allOf.length === 1);
+      assert.deepEqual(out.allOf[0], {
+        $query: {
+          $let: { value: "$['vatId']", pointer: { $const: '/vatId' } },
+          $return: signupSchema.properties.vatId['x-form'].assert,
+        },
+        errorMessage: {
+          $query: {
+            message: 'VAT id is required for companies',
+            params: { pointer: '/vatId' },
+          },
+        },
       });
-      assert.isTrue(signupSchema.$query === undefined, 'input schema is not mutated');
+      assert.isTrue(signupSchema.allOf === undefined, 'input schema is not mutated');
       assert.isTrue(out.properties === signupSchema.properties, 'untouched subtrees are shared');
     });
 
-    it('should conjoin multiple asserts under $and', function () {
+    it('should emit one allOf branch per assert, each carrying its pointer', function () {
       const out = formRulesToQueryAssertions({
         type: 'object',
         properties: {
@@ -306,9 +317,12 @@ describe('Form Rules (x-form)', function () {
           b: { 'x-form': { assert: { $ne: ['$value', 2] } } },
         },
       });
-      assert.isTrue(Array.isArray(out.$query.$and));
-      assert.isTrue(out.$query.$and.length === 2);
-      assert.deepEqual(out.$query.$and[0].$let.pointer, { $const: '/a' });
+      assert.isTrue(out.allOf.length === 2);
+      assert.deepEqual(out.allOf[0].$query.$let.pointer, { $const: '/a' });
+      assert.deepEqual(out.allOf[1].$query.$let.pointer, { $const: '/b' });
+      // a rule without a message gets the catalog default, pointer included
+      assert.deepEqual(out.allOf[0].errorMessage,
+        { $query: { $msgid: 'x-form/assert', params: { pointer: '/a' } } });
     });
 
     it('should quantify item-template asserts with $every', function () {
@@ -326,16 +340,17 @@ describe('Form Rules (x-form)', function () {
           },
         },
       });
-      assert.deepEqual(out.$query, {
+      assert.deepEqual(out.allOf[0].$query, {
         $every: { value: "$['lines'][*]['amount']" },
         $satisfies: {
           $let: { pointer: { $const: '/lines/-/amount' } },
           $return: { $gt: ['$value', 0] },
         },
       });
+      assert.deepEqual(out.allOf[0].errorMessage.$query.params, { pointer: '/lines/-/amount' });
     });
 
-    it('should preserve an existing root $query in an allOf branch', function () {
+    it('should preserve an existing root $query untouched', function () {
       const out = formRulesToQueryAssertions({
         type: 'object',
         $query: '$.approved',
@@ -359,8 +374,8 @@ describe('Form Rules (x-form)', function () {
           "a/b's": { 'x-form': { assert: { $ne: ['$value', ''] } } },
         },
       });
-      assert.isTrue(out.$query.$let.value === "$['a/b\\'s']");
-      assert.deepEqual(out.$query.$let.pointer, { $const: '/a~1b\'s' });
+      assert.isTrue(out.allOf[0].$query.$let.value === "$['a/b\\'s']");
+      assert.deepEqual(out.allOf[0].$query.$let.pointer, { $const: '/a~1b\'s' });
     });
   });
 });

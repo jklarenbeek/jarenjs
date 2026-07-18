@@ -170,9 +170,9 @@ The same constraint can be spelled twice — `x-form.assert` for keystroke feedb
 ```javascript
 import { formRulesToQueryAssertions } from '@jarenjs/forms';
 
-// pure schema-to-schema transform: every x-form.assert is copied into a
-// root-level $query (joined to an existing one through allOf), with
-// value/pointer rebound to the field's location
+// pure schema-to-schema transform: every x-form.assert becomes its own
+// allOf branch { $query, errorMessage } on the root, with value/pointer
+// rebound to the field's location and the rule's message carried along
 const submitSchema = formRulesToQueryAssertions(schema);
 
 import { JarenValidator } from '@jarenjs/validate';                // app-side
@@ -180,7 +180,85 @@ const validate = new JarenValidator().compile(submitSchema);
 validate({ company: 'ACME', vatId: '' }); // false - the vatId assert, now authoritative
 ```
 
+Each branch's `errorMessage` carries the rule's `message` (inline string
+or `$msgid` form) with `params` merged over `{ pointer: <field pointer> }`
+— so every submit-time `$query` failure names its owning field in
+`params.pointer`, letting the UI place root-level `$query` errors onto
+fields, and renders the **same text** as the keystroke path (see below).
+
 Item-template asserts quantify with `$every` over the actual elements. Two divergences from the keystroke path are inherent to the copy: on submit an absent field binds `$value` to the empty sequence (not `null`), and `$pointer` for template elements stays the template pointer (element indexes are a render-time notion).
+
+## Messages & i18n
+
+Every `FieldError` is structured: `{ keyword, params, msgid, message }`.
+The `msgid` is `form/<keyword>` (field checks) or `x-form/assert` /
+the author's `$msgid` (rules); `message` is rendered eagerly —
+failure-only, cheap — through a **catalog** (see
+[ERROR-MESSAGES.md](../validate/docs/ERROR-MESSAGES.md) for the shared
+contract). `validateField`, `validateAllFields` and `evaluateFormRules`
+take an optional compiled catalog, default English:
+
+```javascript
+import { validateAllFields, compileMessageCatalog } from '@jarenjs/forms';
+import { nl } from '@jarenjs/locales';
+
+const catalog = compileMessageCatalog(nl);
+const errors = validateAllFields(model, data, catalog);
+// errors['/name'][0].message === 'Dit veld is verplicht'
+```
+
+### MessageSpec in `x-form.message`
+
+A rule's `message` may be a plain string (backward compatible — an inline
+template, `{pointer}` etc. interpolated) or a `$msgid` spec resolving
+through the catalog:
+
+```javascript
+{ "x-form": {
+    "assert": { "$or": [{ "$eq": ["$.company", ""] }, { "$ne": ["$.vatId", ""] }] },
+    "message": { "$msgid": "checkout.vat-required",
+                 "message": "A VAT id is required for companies" } } }
+```
+
+### One rule, one message — keystroke and submit
+
+The same rule renders the **identical string** per keystroke
+(`evaluateFormRules`) and at submit (the transformed schema's `$query`
+failure through the validator), in every locale:
+
+```javascript
+const compiled = compileFormRules(buildFormModel(schema));
+evaluateFormRules(compiled, data, catalog);      // keystroke: Dutch text
+
+const validate = new JarenValidator({ collectErrors: true })
+  .compile(formRulesToQueryAssertions(schema));  // app-side
+const result = validate(data);
+localizeErrors(result.errors, catalog);          // submit: the same Dutch text
+```
+
+### Static text — the l10n surface everyone forgets
+
+Labels, descriptions, placeholders and enum option labels resolve once at
+model-build time; `buildFormModel` takes a `t` hook (default: identity)
+receiving role-qualified message ids built from each field's base — its
+`x-msgid` annotation or its data pointer:
+
+```javascript
+const staticNl = {
+  '/firstName#label': 'Voornaam',
+  'account.country#label': 'Land',
+  'account.country#enum/nl': 'Nederland',
+};
+const model = buildFormModel(schema, {
+  t: (msgid, fallback) => staticNl[msgid] ?? fallback,
+});
+```
+
+Enum option labels come from the JSON Schema idiom
+`oneOf: [{ "const": "nl", "title": "Netherlands" }, ...]` (treated as an
+enum with per-option titles) or `String(value)`, each through
+`t('<base>#enum/<value>', fallback)`; the labels land on
+`field.enumLabels`, parallel to `field.enumValues`.
 
 ## Data helpers
 

@@ -26,7 +26,8 @@ const DEFAULT_MAX_DEPTH = 24;
  * @typedef {object} FormField
  * @property {string} pointer - JSON pointer into the DATA (e.g. '/user/name')
  * @property {string} key - Property name (or '-' for an array item template)
- * @property {string} label - Human friendly label (schema title or humanized key)
+ * @property {string} msgid - The field's message-id base: `x-msgid` annotation or the pointer (the root field's base is the empty pointer '')
+ * @property {string} label - Human friendly label (schema title or humanized key), through the `t` hook
  * @property {string|undefined} description
  * @property {object} schema - The resolved subschema for this field
  * @property {string} kind - 'string'|'number'|'integer'|'boolean'|'enum'|'const'|'object'|'array'|'unknown'
@@ -34,6 +35,7 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {boolean} required - Whether the parent object requires this property
  * @property {boolean} readOnly
  * @property {Array<any>|null} enumValues - Options for a select control
+ * @property {Array<string>|null} enumLabels - Display labels parallel to enumValues (oneOf const/title idiom, through the `t` hook)
  * @property {any} constValue - Fixed value when the schema is a const
  * @property {any} defaultValue
  * @property {string|undefined} placeholder
@@ -45,7 +47,21 @@ const DEFAULT_MAX_DEPTH = 24;
  */
 
 /**
+ * The static-text translation hook: receives a role-qualified message id
+ * (`<base>#label`, `<base>#description`, `<base>#placeholder`,
+ * `<base>#enum/<value>`) and the schema-derived fallback text; returns
+ * the text to display.
+ * @typedef {(msgid: string, fallback: string|undefined, params?: object) => string|undefined} TranslateHook
+ */
+
+/** @type {TranslateHook} The zero-cost identity hook. */
+const identityT = (msgid, fallback) => fallback;
+
+/**
  * Convert 'firstName' / 'first_name' / 'first-name' to 'First Name'.
+ * Latin-script-oriented (word splitting on case/underscore/hyphen and
+ * ASCII capitalization); the `t` hook of buildFormModel is the override
+ * point for anything it mangles.
  * @param {string} key
  * @returns {string}
  */
@@ -132,6 +148,21 @@ export function resolveSchema(schema, rootSchema, depth = 0) {
 }
 
 /**
+ * The `oneOf: [{const, title}, ...]` idiom: every branch an object with a
+ * `const`. Returns the branches, or null when the idiom does not apply.
+ * @param {object} schema
+ * @returns {Array<{const: any, title?: string}>|null}
+ */
+function getOneOfConstBranches(schema) {
+  if (!Array.isArray(schema.oneOf) || schema.oneOf.length === 0) return null;
+  for (const branch of schema.oneOf) {
+    if (branch == null || typeof branch !== 'object' || Array.isArray(branch)
+      || branch.const === undefined) return null;
+  }
+  return schema.oneOf;
+}
+
+/**
  * Derive the field kind from a resolved schema.
  * @param {object|boolean} schema
  * @returns {string}
@@ -140,6 +171,8 @@ export function getFieldKind(schema) {
   if (schema == null || typeof schema !== 'object') return 'unknown';
   if (schema.const !== undefined) return 'const';
   if (Array.isArray(schema.enum)) return 'enum';
+  // The oneOf const/title idiom is an enum with per-option labels
+  if (getOneOfConstBranches(schema) !== null) return 'enum';
 
   let type = schema.type;
   if (Array.isArray(type)) {
@@ -217,32 +250,55 @@ function getConstraints(schema) {
  * @param {string} key - Property name or '-' for an item template
  * @param {boolean} required
  * @param {number} depth
+ * @param {TranslateHook} t - The static-text translation hook
  * @returns {FormField}
  */
-function buildField(rawSchema, rootSchema, pointer, key, required, depth) {
+function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
   const schema = resolveSchema(rawSchema, rootSchema, depth);
   const effective = (schema != null && typeof schema === 'object') ? schema : {};
   const kind = getFieldKind(schema);
   const control = getControl(kind, effective);
   const formatInfo = getFormatInfo(effective.format);
 
+  // The message-id base for static text: the x-msgid annotation, or the
+  // data pointer (the root field's base is the empty pointer '').
+  const base = typeof effective['x-msgid'] === 'string' ? effective['x-msgid'] : pointer;
+
+  const oneOfBranches = kind === 'enum' ? getOneOfConstBranches(effective) : null;
+  const enumValues = kind === 'enum'
+    ? (Array.isArray(effective.enum)
+      ? effective.enum
+      : oneOfBranches.map((branch) => branch.const))
+    : null;
+  const enumLabels = enumValues !== null
+    ? enumValues.map((value, i) => t(
+      `${base}#enum/${String(value)}`,
+      oneOfBranches !== null && typeof oneOfBranches[i].title === 'string'
+        ? oneOfBranches[i].title
+        : String(value)))
+    : null;
+
+  const placeholder = effective.examples?.[0] !== undefined
+    ? String(effective.examples[0])
+    : formatInfo?.placeholder;
+
   /** @type {FormField} */
   const field = {
     pointer,
     key,
-    label: effective.title || humanizeKey(key),
-    description: effective.description,
+    msgid: base,
+    label: t(`${base}#label`, effective.title || humanizeKey(key)),
+    description: t(`${base}#description`, effective.description),
     schema: effective,
     kind,
     control,
     required,
     readOnly: effective.readOnly === true,
-    enumValues: kind === 'enum' ? effective.enum : null,
+    enumValues,
+    enumLabels,
     constValue: kind === 'const' ? effective.const : undefined,
     defaultValue: effective.default,
-    placeholder: effective.examples?.[0] !== undefined
-      ? String(effective.examples[0])
-      : formatInfo?.placeholder,
+    placeholder: t(`${base}#placeholder`, placeholder),
     constraints: getConstraints(effective),
     // The raw `x-form` annotation only - compiling its query documents is
     // rules.js territory, so model building stays query-engine-free.
@@ -260,7 +316,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth) {
       buildField(
         propSchema, rootSchema,
         `${pointer}/${escapePointerKey(name)}`, name,
-        requiredSet.has(name), depth + 1));
+        requiredSet.has(name), depth + 1, t));
   }
 
   if (kind === 'array') {
@@ -269,17 +325,17 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth) {
       : (Array.isArray(effective.items) ? effective.items : null);
     if (prefix) {
       field.tuple = prefix.map((itemSchema, i) =>
-        buildField(itemSchema, rootSchema, `${pointer}/${i}`, String(i), false, depth + 1));
+        buildField(itemSchema, rootSchema, `${pointer}/${i}`, String(i), false, depth + 1, t));
       const rest = Array.isArray(effective.items) ? effective.additionalItems : effective.items;
       if (rest != null && typeof rest === 'object') {
-        field.item = buildField(rest, rootSchema, `${pointer}/-`, '-', false, depth + 1);
+        field.item = buildField(rest, rootSchema, `${pointer}/-`, '-', false, depth + 1, t);
       }
     }
     else if (effective.items != null && typeof effective.items === 'object') {
-      field.item = buildField(effective.items, rootSchema, `${pointer}/-`, '-', false, depth + 1);
+      field.item = buildField(effective.items, rootSchema, `${pointer}/-`, '-', false, depth + 1, t);
     }
     else {
-      field.item = buildField({}, rootSchema, `${pointer}/-`, '-', false, depth + 1);
+      field.item = buildField({}, rootSchema, `${pointer}/-`, '-', false, depth + 1, t);
     }
   }
 
@@ -305,7 +361,16 @@ export function escapePointerKey(key) {
 /**
  * Build the form model for a JSON schema.
  *
+ * Static text (labels, descriptions, placeholders, enum option labels) is
+ * resolved ONCE here, at model-build time - the right place for
+ * translation. The optional `t` hook receives role-qualified message ids
+ * built from each field's base (`x-msgid` annotation or data pointer):
+ * `<base>#label`, `<base>#description`, `<base>#placeholder`,
+ * `<base>#enum/<String(value)>` - and the schema-derived fallback text.
+ *
  * @param {object|boolean} schema - The root JSON schema
+ * @param {object} [options]
+ * @param {TranslateHook} [options.t] - Static-text translation hook, default the zero-cost identity `(id, fb) => fb`
  * @returns {FormField} The root field descriptor (kind 'object' for object schemas)
  * @example
  * const model = buildFormModel({
@@ -314,8 +379,14 @@ export function escapePointerKey(key) {
  *   required: ['email'],
  * });
  * model.children[0].control; // 'email'
+ * @example
+ * // static-text i18n
+ * const nlModel = buildFormModel(schema, {
+ *   t: (msgid, fallback) => staticTextNl[msgid] ?? fallback,
+ * });
  */
-export function buildFormModel(schema) {
+export function buildFormModel(schema, options = undefined) {
   const rootSchema = (schema != null && typeof schema === 'object') ? schema : {};
-  return buildField(schema, rootSchema, '', '', false, 0);
+  const t = options != null && typeof options.t === 'function' ? options.t : identityT;
+  return buildField(schema, rootSchema, '', '', false, 0, t);
 }

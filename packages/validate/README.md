@@ -333,6 +333,87 @@ Semantics and composition:
   QUERY-FORMAT §8.11) compile against the **same validator instance**, so
   their `$ref`s resolve to your `addSchema` registrations.
 
+## Error messages & i18n
+
+Every collected error carries a stable message key (`msgid`) and raw
+structured `params` next to its rendered `message` — prose is produced at
+report time from a **catalog** (a plain object of closures), never on the
+validation hot path. The normative spec is
+[ERROR-MESSAGES.md](./docs/ERROR-MESSAGES.md).
+
+### The `errorMessage` keyword
+
+Author-supplied messages that override *text*, never structure (no error
+aggregation or removal — the deliberate divergence from ajv-errors, whose
+two official plugins are mutually incompatible). Registered at schema
+compile time, resolved only over the failed set at report time — zero
+validation-time cost.
+
+```javascript
+// string form: covers the node AND its subtree (quiet oneOf noise)
+{ "type": "string", "minLength": 8, "errorMessage": "Use at least 8 characters" }
+
+// map form: per failing keyword, '_' as the node catch-all
+{ "type": "integer", "minimum": 18,
+  "errorMessage": { "minimum": "Must be an adult", "_": "Invalid age" } }
+
+// required: per missing property
+{ "required": ["vatId", "name"],
+  "errorMessage": { "required": { "vatId": "VAT id is required for business accounts" } } }
+
+// $query: EBV-false default and per runtime code
+{ "$query": { "$le": ["$.start", "$.end"] },
+  "errorMessage": { "$query": {
+    "default": "start must not be after end",
+    "JQ2003": "start/end must be single values" } } }
+```
+
+Templates interpolate params: `"errorMessage": "needs {limit} characters"`.
+
+### `$msgid` — translatable authored messages
+
+An `errorMessage` (or forms `x-form.message`) may be a **MessageSpec**
+object pointing into the catalog space instead of inline text — that keeps
+schema-authored messages translatable:
+
+```javascript
+{ "type": "number",
+  "errorMessage": { "type": {
+    "$msgid": "checkout.total-invalid",       // catalog key
+    "message": "Total must be a number"       // fallback when no catalog covers it
+  } } }
+```
+
+### Locale packs
+
+```javascript
+import { JarenValidator, compileMessageCatalog, localizeErrors } from '@jarenjs/validate';
+import { nl } from '@jarenjs/locales';
+
+const catalog = compileMessageCatalog(nl);
+const validator = new JarenValidator({ collectErrors: true });
+const validate = validator.compile({ type: 'string', minLength: 2 });
+
+const result = validate('x');                 // English messages
+localizeErrors(result.errors, catalog);       // Dutch, re-rendered from msgid + params
+// 'mag niet minder dan 2 tekens bevatten'
+```
+
+The locale is chosen at **report time**; switching locale never recompiles
+anything. Catalog entries are plain functions, so packs use the platform's
+`Intl.PluralRules`/`Intl.NumberFormat` — see
+[`@jarenjs/locales`](../locales/README.md) for the pack-authoring guide.
+
+### `messages: false`
+
+For applications that render exclusively through `localizeErrors` (or
+their own resolver), skip English rendering entirely:
+
+```javascript
+const validator = new JarenValidator({ collectErrors: true, messages: false });
+// errors arrive with message: '', params and msgid still set
+```
+
 ## Development
 
 Unit tests live in `test/validate/` at the repository root (`npm run test:validate`). Performance against Ajv is measured over the official test suite with the [benchmark workspace](../../benchmark/README.md) (`node benchmark/profiler.js --profile-all`), which also houses the test-failure debugger, coverage and call-graph tools.

@@ -22,6 +22,7 @@
     "@jarenjs/forms": "file:../forms",
     "@jarenjs/josl": "file:../josl",
     "@jarenjs/json": "file:../json",
+    "@jarenjs/locales": "file:../locales",
     "@jarenjs/refs": "file:../refs",
     "@jarenjs/validate": "file:../validate",
     "clsx": "^2.1.1",

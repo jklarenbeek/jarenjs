@@ -27,6 +27,7 @@ The validator embraces these architectural principles:
 | `packages/validate/src/index.js` | Main validator classes (`JarenValidator`, `ValidationRoot`, `ValidationObject`) |
 | `packages/validate/src/traverse.js` | Schema traversal and ref resolution (`storeSchemaIdsInMap`, `restoreSchemaRefsInMap`) |
 | `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`) |
+| `packages/validate/src/messages.js` | Error conversion, message catalogs, the `errorMessage` keyword specs (`ValidationError`, `messagesEn`, `localizeErrors`) |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |
@@ -593,16 +594,39 @@ flowchart LR
     F --> G[All validators complete]
     G --> H{collectErrors?}
 
-    H -->|true| I[Convert to ValidationError]
+    H -->|true| I[convertInternalErrors - messages.js]
     H -->|false| J[Return boolean only]
 
-    I --> K[Add human-readable messages]
+    I --> K[Extract params, resolve msgid,<br/>match errorMessage registry,<br/>render through catalog]
     K --> L[Return {valid, errors}]
 
     style C fill:#9f9
     style J fill:#9f9
     style L fill:#9f9
 ```
+
+### Report-Time Messages (messages.js)
+
+Conversion is structured-first, render-late (the normative spec is
+[docs/ERROR-MESSAGES.md](./docs/ERROR-MESSAGES.md)):
+
+- Every public `ValidationError` carries a stable `msgid` (the matched
+  `errorMessage` spec's `$msgid`, else the `$query` runtime code, else the
+  keyword) plus raw `params`; `instancePath` is a straight read of the
+  first meta argument every handler call site passes (the
+  handler-contract invariant), behind a charCode guard that yields `''`
+  rather than ever a wrong path.
+- The `errorMessage` keyword compiles at schema compile time into a
+  registry on `ValidationRoot` (`registerErrorMessage`) — no validator
+  closure is emitted and the single-keyword fast paths stay eligible (the
+  key count excludes it). Matching happens only over the failed set:
+  nearest registered ancestor by segment-aware prefix; map-form entries
+  and `_` apply at the node itself, the string form covers the subtree.
+- Human text renders through catalogs — plain objects of closures /
+  template strings (`messagesEn` built in; packs in `@jarenjs/locales`).
+  `localizeErrors(errors, catalog)` re-renders post hoc from
+  `msgid` + `params`; the `messages: false` option skips rendering
+  entirely (`message: ''`).
 
 ### Error Handler Creation
 
@@ -983,7 +1007,8 @@ For broader context on how this package fits into the JarenJS ecosystem:
 
 | File | Purpose | Key Exports |
 |------|---------|-------------|
-| `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions`, `ValidationError` |
+| `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions` |
+| `messages.js` | Error conversion & i18n | `ValidationError`, `convertInternalErrors`, `messagesEn`, `compileMessageTemplate`, `compileMessageCatalog`, `renderErrorMessage`, `localizeErrors`, `compileErrorMessageSpec` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaRef`, `createIsSchemaTypeHandler` |
@@ -1001,6 +1026,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `dollar-data.js` | $data keyword | `compileDollarDataSchema` |
 | `unevaluated.js` | unevaluated* keywords | `wrapUnevaluated` |
 | `dynamic-ref.js` | Dynamic scope helpers | `collectDynamicAnchorsDeep`, `hasRecursiveAnchor`, `getDynamicAnchorName` |
+| `query-keyword.js` | `$query` extension keyword | `compileQuerySchema` |
 
 ---
 
@@ -1028,12 +1054,19 @@ For broader context on how this package fits into the JarenJS ecosystem:
 
 ### 3. Lazy Error Generation
 
-**Decision**: Only create error objects when `skipErrors` is false.
+**Decision**: Only create error objects when `skipErrors` is false, and
+only produce human-readable text at report time (`convertInternalErrors`
+in messages.js), over the already-failed set, from a `msgid` + `params`
+pair through a message catalog.
 
 **Rationale**:
 - Most production use cases only need boolean results
 - Error object creation is expensive
 - Reduces GC pressure during high-throughput validation
+- Structured-first errors make locale a report-time choice: switching
+  language (`localizeErrors`, `@jarenjs/locales`) never recompiles a
+  validator, and the `errorMessage` keyword resolves against a registry
+  with zero validation-time cost (see docs/ERROR-MESSAGES.md)
 
 ### 4. Dual Data Reference Systems
 

@@ -30,17 +30,21 @@ motivates them where one exists.
 - 🎉 1.0 Stable release
   - [ ] add AI bot workflow and bootstrap prompt
   - [ ] add a website to github pages with typescript and react
-  - [ ] add i18n — translations of errors should be available!
+  - [x] add i18n — every error carries `msgid` + structured params; catalogs render at report time (`localizeErrors`), locale packs live in `@jarenjs/locales` (Dutch shipped)
 - 1.1
   - [ ] [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md) proposal
-  - [ ] `errorMessage` keyword ([Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output))
+  - [x] `errorMessage` keyword — text overrides with `$msgid`/catalog indirection, registered at compile time, resolved at report time, zero validation-time cost ([ERROR-MESSAGES.md](packages/validate/docs/ERROR-MESSAGES.md))
+  - [ ] JSON Schema standard output formats (`list`/`hierarchical` wrappers, `evaluationPath`/`schemaLocation` renames) — the remaining half of [Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output); the structured params + keyed messages are exactly what that format wants
 - 1.2
   - [ ] compileAsync for asynchronous schema loading
   - [ ] JSON.parse reviver / JSON.stringify replacer integration
 
 ## @jarenjs/validate
 
-- [ ] **`messages` companion keyword for `$query`** — author-supplied error text per query assertion, ajv-errors-style.
+- [x] **`messages` companion keyword for `$query`** — DELIVERED as `errorMessage`'s `$query` entry (per-code map with an EBV-false `default`); no separate keyword needed.
+- [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
+- [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
+- [ ] **Additional locale packs** — the catalog contract and key-parity tests make each pack mechanical; `nl` is the reference implementation.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
 - [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.
