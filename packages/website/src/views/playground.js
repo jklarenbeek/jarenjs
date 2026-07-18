@@ -18,6 +18,11 @@ const ideBar =
       on: { input: 'ide/name' },
     }],
     ['button', { type: 'button', class: 'btn small', on: { click: 'ide/save' } }, 'Save'],
+    ['button', {
+      type: 'button', class: 'btn small', title: 'Copy a link that restores this experiment',
+      on: { click: 'ide/share' },
+    }, 'Share'],
+    { $if: ['$.ide.shared', ['span', { class: 'muted' }, '$.ide.shared']] },
     ['div', { class: 'ide-list' }, [{ $apply: '$.ide.names[*]' }]],
   ];
 

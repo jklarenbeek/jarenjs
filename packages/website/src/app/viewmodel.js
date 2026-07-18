@@ -95,8 +95,9 @@ const pgTabs = memo1((engine) => PG_ENGINES.map((e) => ({
   href: `#/playground?engine=${e.key}`,
 })));
 
-const pgIde = memo1((name, names) => ({
+const pgIde = memo1((name, names, shared) => ({
   name,
+  shared,
   names: names.map((n) => ({ name: n })),
 }));
 
@@ -160,7 +161,8 @@ function playgroundPage(state) {
   const generic = engine !== 'validate' && ENGINE_DEFS[engine] !== undefined
     ? genericNode(engine, state.eng[engine] ?? {}, state.engResults[engine] ?? null)
     : null;
-  return composePg(engine, pgTabs(engine), pgIde(state.ide.name, state.ide.names),
+  return composePg(engine, pgTabs(engine),
+    pgIde(state.ide.name, state.ide.names, state.ide.shared),
     validate, generic);
 }
 

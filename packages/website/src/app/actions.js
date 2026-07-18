@@ -154,6 +154,10 @@ export const ACTIONS = {
   'ide/save': { effects: [{ run: 'ide-save' }] },
   'ide/load': { effects: [{ run: 'ide-load', with: { name: '$payload' } }] },
   'ide/delete': { effects: [{ run: 'ide-delete', with: { name: '$payload' } }] },
+  'ide/share': { effects: [{ run: 'ide-share' }] },
+  'ide/shared': {
+    patch: [{ op: 'replace', path: '/ide/shared', value: '$payload' }],
+  },
 
   // examples page: load an example into the playground and go there
   'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },

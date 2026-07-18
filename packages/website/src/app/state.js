@@ -53,6 +53,6 @@ export function createInitialState(theme = 'light', ideNames = []) {
     },
     eng: initialEngineInputs(),  // engine key -> text inputs
     engResults: {},              // engine key -> render nodes
-    ide: { name: '', names: ideNames },
+    ide: { name: '', names: ideNames, shared: null },
   };
 }

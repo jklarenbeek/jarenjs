@@ -6,7 +6,7 @@ import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
-function mountSite({ hash = '#/playground', stored = null, modelContext } = {}) {
+function mountSite({ hash = '#/playground', stored = null, modelContext, share } = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
@@ -25,6 +25,7 @@ function mountSite({ hash = '#/playground', stored = null, modelContext } = {}) 
       write: (data) => { storeData = JSON.parse(JSON.stringify(data)); },
     },
     modelContext,
+    share,
     onError: (err) => { throw err; },
   });
   return { app, container, go: (h) => routeCb(parseHash(h)), hashes, storage: () => storeData };
@@ -142,6 +143,35 @@ describe('website — the experiment IDE', function () {
     assert.deepStrictEqual(app.getState().ide.names, ['demo']);
     fire(find(container, (n) => n.attributes?.get('class') === 'ide-load'), 'click');
     assert.strictEqual(app.getState().pg.schemaText, '{"type":"object"}');
+  });
+});
+
+describe('website — share links', function () {
+  it('round-trips an engine experiment through a share URL', async function () {
+    const { encodeShare, decodeShare } = await import('../../packages/website/src/lib/share.js');
+    // outbound: the Share button builds a token of the current engine state
+    const sharedHashes = [];
+    const site1 = mountSite({ share: (h) => { sharedHashes.push(h); return 'https://x/' + h; } });
+    site1.go('#/playground?engine=path');
+    const sel1 = find(site1.container, (n) =>
+      n.tagName === 'input' && n.attributes?.get('class') === 'editor line');
+    fire(sel1, 'input', { target: { value: '$..price' } });
+    fire(find(site1.container, (n) => n.attributes?.get('title')?.startsWith('Copy a link')), 'click');
+    assert.strictEqual(sharedHashes.length, 1);
+    const token = new URLSearchParams(sharedHashes[0].split('?')[1]).get('s');
+    assert.strictEqual(decodeShare(token).e, 'path');
+    assert.match(serialize(site1.container), /link copied/);
+
+    // inbound: opening that URL restores the experiment
+    const site2 = mountSite({ hash: `#/playground?engine=path&s=${token}` });
+    assert.strictEqual(site2.app.getState().eng.path.selector, '$..price',
+      'the shared snapshot loaded on entry');
+
+    // corrupt tokens are ignored, unicode survives
+    const site3 = mountSite({ hash: '#/playground?engine=path&s=%%%bogus' });
+    assert.notStrictEqual(site3.app.getState().eng.path.selector, '$..price');
+    assert.deepStrictEqual(decodeShare(encodeShare({ e: 'josl', i: { text: 'naïve = "日本語"' } })),
+      { e: 'josl', i: { text: 'naïve = "日本語"' } });
   });
 });
 

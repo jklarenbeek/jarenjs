@@ -34,6 +34,11 @@ createSiteApp({
     return () => removeEventListener('hashchange', fire);
   },
   navigate: (hash) => { location.hash = hash; },
+  share: (hash) => {
+    const url = `${location.origin}${location.pathname}${hash}`;
+    navigator.clipboard?.writeText(url).catch(() => {});
+    return url;
+  },
   storage: {
     read: () => {
       try {

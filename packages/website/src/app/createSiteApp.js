@@ -22,6 +22,7 @@ import { STYLESHEET } from '../views/index.js';
 import { runValidation } from '../boundaries/validator.js';
 import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
 import { registerWebMcpTools } from '../boundaries/webmcp.js';
+import { encodeShare, decodeShare } from '../lib/share.js';
 
 /**
  * @typedef {Object} SiteEnv
@@ -35,6 +36,8 @@ import { registerWebMcpTools } from '../boundaries/webmcp.js';
  *   Must call `cb` once immediately with the current route, then on
  *   every change; returns a cleanup.
  * @property {(hash: string) => void} [navigate] - Set the location hash.
+ * @property {(hash: string) => string | undefined} [share] - Build the
+ *   absolute URL for a hash and put it on the clipboard; returns the URL.
  * @property {{ read: () => any, write: (data: any) => void }} [storage]
  *   The experiment store (localStorage in the browser).
  * @property {any} [modelContext] - A WebMCP `navigator.modelContext`
@@ -112,6 +115,18 @@ export function createSiteApp(env) {
       delete store.experiments[props.name];
       storage.write(store);
       dispatch('ide/names', ideNames());
+    },
+    'ide-share': (props, dispatch) => {
+      const state = app.getState();
+      const engine = state.route.page === 'playground'
+        ? (state.route.params.engine ?? 'validate')
+        : 'validate';
+      const inputs = engine === 'validate'
+        ? { schemaText: state.pg.schemaText, data: state.pg.data }
+        : state.eng[engine];
+      const token = encodeShare({ e: engine, i: inputs });
+      const url = env.share?.(`#/playground?engine=${engine}&s=${token}`);
+      dispatch('ide/shared', url === undefined ? 'link ready' : 'link copied');
     },
     'open-example': (props, dispatch) => {
       if (props.validate === true) {
@@ -208,7 +223,28 @@ function wireBoundaries(app, debounceMs) {
         && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
         runEng(engine);
       }
+      applyShareToken(s);
     }
   });
+
+  /** Inbound share links: `?s=<token>` loads the shared snapshot once. */
+  let appliedToken = null;
+  function applyShareToken(state) {
+    const token = state.route.params.s;
+    if (state.route.page !== 'playground' || token === undefined || token === appliedToken)
+      return;
+    appliedToken = token;
+    const snapshot = decodeShare(token);
+    if (snapshot === null || typeof snapshot.e !== 'string' || snapshot.i === undefined)
+      return;
+    if (snapshot.e === 'validate') {
+      app.dispatch('pg/example', { schemaText: snapshot.i.schemaText, data: snapshot.i.data });
+    }
+    else if (ENGINE_DEFS[snapshot.e] !== undefined) {
+      app.dispatch('eng/load', { engine: snapshot.e, inputs: snapshot.i });
+    }
+  }
+
   runValidate(); // the initial document validates immediately
+  applyShareToken(app.getState()); // a share link may be the entry URL
 }

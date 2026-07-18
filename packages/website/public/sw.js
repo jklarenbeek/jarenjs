@@ -3,13 +3,19 @@
    - hashed assets (/assets/): cache-first (immutable by construction)
    - benchmark data: stale-while-revalidate */
 
-const CACHE = 'jaren-website-v1';
+const CACHE = 'jaren-website-v2';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE)
-      .then((cache) => cache.addAll([BASE, `${BASE}manifest.webmanifest`, `${BASE}jaren.svg`]))
+      .then((cache) => cache.addAll([
+        BASE,
+        `${BASE}manifest.webmanifest`,
+        `${BASE}jaren.svg`,
+        `${BASE}icon-192.png`,
+        `${BASE}icon-512.png`,
+      ]))
       .then(() => self.skipWaiting()));
 });
 
