@@ -34,6 +34,13 @@ export default [
     }
   },
   {
+    // webnext runs in the browser: allow DOM globals there
+    files: ['packages/webnext/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+  {
     ignores: ['**/dist', 'build', '**/_*', '**/*.no-lint.*'],
   },
 ];

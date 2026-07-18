@@ -22,6 +22,7 @@
     "./packages/app",
     "./packages/josl",
     "./packages/website",
+    "./packages/webnext",
     "./benchmark"
   ],
   "scripts": {
@@ -34,6 +35,7 @@
     "test:josl": "node --no-warnings=ExperimentalWarning --test \"test/josl/**/*.test.js\"",
     "test:view": "node --no-warnings=ExperimentalWarning --test \"test/view/**/*.test.js\"",
     "test:app": "node --no-warnings=ExperimentalWarning --test \"test/app/**/*.test.js\"",
+    "test:webnext": "node --no-warnings=ExperimentalWarning --test \"test/webnext/**/*.test.js\"",
     "test:types": "tsc --noEmit -p test/consumer/tsconfig.json",
     "test:tree-shaking": "node ./scripts/check-tree-shaking.js",
     "cover": "c8 --reporter=lcov node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
@@ -65,7 +67,9 @@
     "qt3:convert": "node ./benchmark/tools/qt3-convert.js --quiet",
     "benchmark:qt3": "node ./benchmark/qt3-runner.js",
     "benchmark:generate": "npm run benchmark:generate --workspace=@jarenjs/website",
-    "website:deploy": "npm run deploy --workspace=@jarenjs/website"
+    "website:deploy": "npm run deploy --workspace=@jarenjs/website",
+    "webnext:dev": "npm run dev --workspace=@jarenjs/webnext",
+    "webnext:build": "npm run build --workspace=@jarenjs/webnext"
   },
   "keywords": [
     "JSON",

@@ -1,0 +1,29 @@
+//@ts-check
+/** Number formatting for benchmark displays (ported from the website's utils). */
+
+/** Nanoseconds to a friendly unit string. */
+export function formatNs(ns) {
+  if (ns === null || ns === undefined || Number.isNaN(ns)) return '—';
+  if (ns < 1000) return `${round3(ns)} ns`;
+  if (ns < 1e6) return `${round3(ns / 1000)} µs`;
+  return `${round3(ns / 1e6)} ms`;
+}
+
+/** Milliseconds to a friendly string. */
+export function formatMs(ms) {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return '—';
+  if (ms < 0.001) return `${round3(ms * 1e6)} ns`;
+  if (ms < 1) return `${round3(ms * 1000)} µs`;
+  return `${round3(ms)} ms`;
+}
+
+/** A speed ratio: `>1` always means "Jaren is N× faster". */
+export function formatRatio(ratio) {
+  if (ratio === null || ratio === undefined || Number.isNaN(ratio)) return '—';
+  if (ratio >= 1) return `${round3(ratio)}× faster`;
+  return `${round3(1 / ratio)}× slower`;
+}
+
+function round3(value) {
+  return Number(value.toPrecision(3));
+}
