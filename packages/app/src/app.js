@@ -40,6 +40,11 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  *   Invariant hook, called with every candidate next state. A rejection
  *   (`false` or `{ valid: false }`) blocks the transition (fail closed)
  *   and reports `JA2005` through `onError`.
+ * @property {(state: any) => any} [viewModel] - The derivation boundary:
+ *   maps the state to the view stylesheet's input document before every
+ *   render (default identity). This is where JS-computed derivations —
+ *   `buildFormViewModel` from `@jarenjs/forms`, aggregations, joins —
+ *   enter the render path without ever entering the state.
  * @property {(error: Error) => void} [onError] - Runtime error sink;
  *   default rethrows.
  * @property {(flush: () => void) => void} [schedule] - Render scheduler;
@@ -159,10 +164,16 @@ export function createApp(appDoc, options = {}) {
       return;
     }
     let next = state;
+    // changed paths for this transition: an array of JSON Pointers when
+    // the transition was patch-only (the engine's tracked writes), else
+    // null = "unknown, treat everything as changed"
+    let changes = null;
     if ('state' in transition) next = transition.state;
     if (transition.patch !== undefined) {
       try {
-        next = applyJSONPatch(next, transition.patch);
+        const tracked = applyJSONPatch(next, transition.patch, { changes: true });
+        next = tracked.doc;
+        if (!('state' in transition)) changes = tracked.changes;
       }
       catch (err) {
         onError(new AppRuntimeError('JA2004',
@@ -186,7 +197,7 @@ export function createApp(appDoc, options = {}) {
     state = next;
     if (transition.effects !== undefined) runEffects(name, transition.effects);
     if (changed) {
-      for (const listener of stateListeners) listener(state);
+      for (const listener of stateListeners) listener(state, changes);
       refreshSubs();
       scheduleRender();
     }
@@ -270,9 +281,16 @@ export function createApp(appDoc, options = {}) {
     });
   }
 
+  const viewModel = options.viewModel ?? null;
+
+  /** The current view output (through the viewModel derivation). */
+  function vnode() {
+    return view(viewModel !== null ? viewModel(state) : state);
+  }
+
   /** Render synchronously, now. */
   function render() {
-    if (renderer !== null) renderer(view(state));
+    if (renderer !== null) renderer(vnode());
   }
 
   // boot: subscriptions against the initial state, then the first frame
@@ -284,11 +302,15 @@ export function createApp(appDoc, options = {}) {
     /** The current state (treat as immutable). */
     getState: () => state,
     /** The current view output — for SSR or custom renderers. */
-    getVnode: () => view(state),
+    getVnode: vnode,
     render,
     /**
-     * Observe state changes.
-     * @param {(state: any) => void} listener
+     * Observe state changes. The listener receives the new state and the
+     * transition's changed paths: an array of JSON Pointers when the
+     * transition was patch-only (see the patch engine's `changes` option
+     * for the invalidation-sound semantics), or `null` when the whole
+     * state was replaced — treat everything as changed.
+     * @param {(state: any, changes: string[] | null) => void} listener
      * @returns {() => void} unsubscribe
      */
     subscribe(listener) {

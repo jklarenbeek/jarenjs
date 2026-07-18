@@ -189,6 +189,15 @@ describe('createApp', function () {
       '<main><span id="count">Count: 12</span><button>+</button></main>');
   });
 
+  it('reports changed paths to subscribers: pointers for patches, null for state swaps', function () {
+    const seen = [];
+    const { app } = mount(counterDoc());
+    app.subscribe((state, changes) => seen.push([state.count, changes]));
+    app.dispatch('inc');
+    app.dispatch('reset');
+    assert.deepStrictEqual(seen, [[1, ['/count']], [0, null]]);
+  });
+
   it('stop() ignores further dispatches', function () {
     const { app } = mount(counterDoc());
     app.dispatch('inc');

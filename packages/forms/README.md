@@ -269,6 +269,20 @@ Form data keeps plain JSON semantics — an untouched field is *absent*, not an 
 - `getValueAtPointer` / `setValueAtPointer` / `appendItem` / `removeItemAt` — immutable updates addressed by JSON pointer
 - `createItemValue(field.item)` — starter value for a new array item
 
+## The view model — one render tree per instant
+
+`buildFormViewModel(model, data, options)` composes everything above — the field tree, the current data, per-field validation and `x-form` rule state — into **one plain-JSON render tree**: the "computed view" layer this README promised. Each node carries `pointer`, `label`, `control`, `value` (`x-form.computed` wins, `null` when absent), precomputed select `options` (with `selected`), localized `errors`, `enabled`, and the write discipline flags (`element`: array elements must be written with RFC 6902 `replace`, since `add` inserts; `removable`; `addValue` from `createItemValue`). Rule-hidden fields are *excluded* — a renderer cannot leak hidden data by accident. Array item templates expand per data element with concrete pointers (`/lines/2/amount`), matching the pointer keys of `evaluateFormRules` and `validateAllFields`.
+
+```javascript
+const model = buildFormModel(schema);
+const rules = compileFormRules(model);
+const tree = buildFormViewModel(model, data, { rules, validateFields: true, catalog });
+// tree.children[0] -> { pointer: '/email', control: 'email', value: 'a@b',
+//                       errors: ['Must be a valid email'], ... }
+```
+
+Render it with anything — a React component walking the tree, or **no framework at all**: the standard form rules of [`@jarenjs/app`](../app) are a shipped JSLT rule set that dispatches over exactly this shape and produces [`@jarenjs/view`](../view) vnodes, closing the loop from JSON Schema to live DOM without a single hand-written render function.
+
 ## Development
 
 Unit tests live in `test/forms/` at the repository root. See the repository [README](../../README.md) for the full Jaren documentation, and the [ROADMAP](../../ROADMAP.md) for planned forms work (rule dependency memoization, hidden-field pruning on submit, computed views through JSLT).

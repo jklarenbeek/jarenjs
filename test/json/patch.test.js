@@ -567,6 +567,97 @@ describe('createMergePatch', () => {
 
 //#endregion
 
+//#region change tracking
+
+describe('compileJSONPatch changes option', () => {
+  it('reports precise pointers for object writes and array replaces', () => {
+    const apply = compileJSONPatch([
+      { op: 'replace', path: '/user/name', value: 'Bob' },
+      { op: 'add', path: '/user/role', value: 'admin' },
+      { op: 'replace', path: '/tags/1', value: 'y' },
+      { op: 'remove', path: '/user/tmp' },
+    ], { changes: true });
+    const { doc, changes } = apply({
+      user: { name: 'Al', tmp: 1 }, tags: ['a', 'b'],
+    });
+    deepStrictEqual(changes, ['/user/name', '/user/role', '/tags/1', '/user/tmp']);
+    deepStrictEqual(doc, { user: { name: 'Bob', role: 'admin' }, tags: ['a', 'y'] });
+  });
+
+  it('reports the array append location precisely, - resolved', () => {
+    const { changes } = applyJSONPatch({ tags: ['a'] }, [
+      { op: 'add', path: '/tags/-', value: 'b' },
+      { op: 'add', path: '/tags/2', value: 'c' },
+    ], { changes: true });
+    deepStrictEqual(changes, ['/tags/1', '/tags/2']);
+  });
+
+  it('reports the parent array for shifting inserts and removes', () => {
+    const { changes } = applyJSONPatch({ tags: ['a', 'b', 'c'] }, [
+      { op: 'add', path: '/tags/0', value: 'x' },
+      { op: 'remove', path: '/tags/2' },
+    ], { changes: true });
+    deepStrictEqual(changes, ['/tags', '/tags']);
+  });
+
+  it('reports both sides of a move', () => {
+    const { changes } = applyJSONPatch({ a: { v: 1 }, b: {} }, [
+      { op: 'move', from: '/a/v', path: '/b/v' },
+    ], { changes: true });
+    deepStrictEqual(changes, ['/a/v', '/b/v']);
+  });
+
+  it('reports the empty pointer for root writes', () => {
+    const { changes } = applyJSONPatch({ a: 1 }, [
+      { op: 'replace', path: '', value: { b: 2 } },
+    ], { changes: true });
+    deepStrictEqual(changes, ['']);
+  });
+
+  it('reports nothing for test operations', () => {
+    const { doc, changes } = applyJSONPatch({ a: 1 }, [
+      { op: 'test', path: '/a', value: 1 },
+    ], { changes: true });
+    deepStrictEqual(changes, []);
+    deepStrictEqual(doc, { a: 1 });
+  });
+
+  it('keeps copy-on-write semantics: input untouched, siblings shared', () => {
+    const doc = { a: { deep: [1] }, b: { v: 1 } };
+    const apply = compileJSONPatch(
+      [{ op: 'replace', path: '/b/v', value: 2 }], { changes: true });
+    const result = apply(doc);
+    strictEqual(doc.b.v, 1);
+    strictEqual(result.doc.a, doc.a, 'untouched sibling shared');
+    notStrictEqual(result.doc.b, doc.b);
+    deepStrictEqual(result.changes, ['/b/v']);
+  });
+
+  it('composes with mutate mode', () => {
+    const doc = { a: 1 };
+    const { doc: out, changes } = applyJSONPatch(doc,
+      [{ op: 'replace', path: '/a', value: 2 }],
+      { changes: true, mutate: true });
+    strictEqual(out, doc, 'mutated in place');
+    strictEqual(doc.a, 2);
+    deepStrictEqual(changes, ['/a']);
+  });
+
+  it('returns the plain document when the option is off', () => {
+    const result = applyJSONPatch({ a: 1 }, [{ op: 'replace', path: '/a', value: 2 }]);
+    deepStrictEqual(result, { a: 2 });
+  });
+
+  it('escaped member names stay encoded in reported pointers', () => {
+    const { changes } = applyJSONPatch({ 'a/b': { 'm~n': 1 } }, [
+      { op: 'replace', path: '/a~1b/m~0n', value: 2 },
+    ], { changes: true });
+    deepStrictEqual(changes, ['/a~1b/m~0n']);
+  });
+});
+
+//#endregion
+
 //#region pointer encode helpers
 
 describe('encodeJSONPointerSegment / formatJSONPointer', () => {

@@ -93,6 +93,34 @@ createApp(doc, {
 
 `validateState` runs against every candidate next state; a rejection blocks the transition (fail closed) and surfaces as a `JA2005` error with the validator's structured errors in `detail`. The app package itself never imports the validator — the same boundary discipline as `@jarenjs/forms`.
 
+## The standard forms stylesheet
+
+The marquee integration: render any [`@jarenjs/forms`](../forms) model with **zero hand-written render code**. `createFormView()` returns a plain-JSON JSLT rule set that dispatches over a `buildFormViewModel` tree by *shape* (JSONPath filter selectors on each node's `control`), and `createFormActions()` returns the matching action documents that write keystrokes back into the state — choosing the correct RFC 6902 op per node (`replace` for array elements, where `add` would insert; `add` for object members, where it means set-or-replace).
+
+```javascript
+import { createApp, createFormView, createFormActions } from '@jarenjs/app';
+import { buildFormModel, compileFormRules, createInitialData, buildFormViewModel } from '@jarenjs/forms';
+
+const model = buildFormModel(schema);
+const rules = compileFormRules(model);
+
+const app = createApp({
+  state: { data: createInitialData(model) },
+  view: [
+    ...createFormView(),                                  // the shipped rule set
+    { match: '$', body: ['main', {}, { $apply: '$.form' }] },
+  ],
+  actions: createFormActions({ dataPointer: '/data' }),
+}, {
+  node: document.getElementById('app'),
+  viewModel: (state) => ({                                // the derivation boundary
+    form: buildFormViewModel(model, state.data, { rules, validateFields: true }),
+  }),
+});
+```
+
+Schema in, live form out: text/email/number/date/color inputs, textareas, checkboxes, selects with precomputed options, nested object fieldsets, arrays with add/remove buttons, inline errors, and `x-form` visibility/enablement/computed reacting per keystroke. The `viewModel` option is the general **derivation boundary**: it maps state to the view stylesheet's input before every render, so JS-computed derivations enter the render path without ever entering the state. Known 0.1 limits (documented in `src/forms.js`): selects write string values, a cleared number input writes `null`, arrays need to exist in the data (give them `default: []` in the schema), and the `json` fallback control renders a placeholder.
+
 ## Headless and server-side
 
 Without a `node`, the app runs headless: `getVnode()` returns the current view output for any renderer, and SSR is one composition:

@@ -7,4 +7,5 @@
 
 export { createApp } from './app.js';
 export { compileActions, compileSubs } from './actions.js';
+export { createFormView, createFormActions } from './forms.js';
 export { AppCompileError, AppRuntimeError } from './errors.js';

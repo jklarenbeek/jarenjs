@@ -104,6 +104,15 @@ copy-on-write patch engine and JSLT's structural sharing make reference
 inequality mean real change, end to end — this is the same contract
 VIEW-FORMAT §5.1 builds its fast path on.
 
+A patch-only transition additionally yields its **changed paths**: the
+runtime applies the patch with the engine's `changes` option and hands
+the resulting JSON Pointers (invalidation-sound semantics, see the
+`@jarenjs/json/patch` documentation) to state subscribers —
+`listener(state, changes)` — with `changes = null` for whole-state
+transitions, meaning "treat everything as changed". Dirty-path-pruned
+re-rendering builds on this feed (roadmap); today the runtime itself
+still re-runs the full view stylesheet per frame.
+
 ## 4. Event bindings
 
 A vnode `on` binding (opaque to the view layer) is interpreted by this
@@ -133,7 +142,18 @@ completion re-enters through `dispatch`. An unregistered name is
 `JA2006`; a throwing handler is `JA2007`; neither aborts the loop or
 the remaining effects.
 
-### 5.2 Subscriptions
+### 5.2 The derivation boundary
+
+`options.viewModel` (OPTIONAL) maps the state to the view stylesheet's
+input document before every render; default identity. It MUST be pure
+(state in, document out, no dispatching) and is where JS-computed
+derivations — `buildFormViewModel` from `@jarenjs/forms`, aggregations
+the query language cannot express, memoized joins — enter the render
+path without entering the state. This is the app-level generalization
+of forms' layer-2 rule evaluation, kept at a boundary for the same
+reason: derivations are recomputed, never dispatched.
+
+### 5.3 Subscriptions
 
 A subscription entry is `{ "run": name, "with"?: props, "when"?:
 query }`. After boot and after every state change, the runtime

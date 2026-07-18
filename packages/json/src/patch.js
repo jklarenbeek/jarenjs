@@ -173,6 +173,14 @@ function copyForInsert(value, owned) {
 
 //#region operation primitives
 
+// Change tracking (`changes` option): one pointer per successful write,
+// pushed by the operation primitives below. `state.changes` is `null`
+// when tracking is off - a single monomorphic null check per write.
+function recordChange(state, pointer) {
+  if (state.changes !== null)
+    state.changes.push(pointer);
+}
+
 // add semantics at a non-root target: array insert (with shift, `-`
 // appends), object member set-or-replace (RFC 6902 section 4.1).
 function insertAt(state, t, value, docPath) {
@@ -182,14 +190,21 @@ function insertAt(state, t, value, docPath) {
     const idx = t.lastName === '-' ? len : t.lastIndex;
     if (idx < 0 || idx > len)
       throw pathError('JP2002', `invalid array position '${t.lastName}' in '${t.pointer}'`, docPath, t.pointer);
-    if (idx === len)
+    if (idx === len) {
       parent.push(value);
-    else
+      // append shifts nothing: the new element's location is precise
+      recordChange(state, t.parentPointer + '/' + idx);
+    }
+    else {
       parent.splice(idx, 0, value);
+      // insert shifts every later element: the whole array changed
+      recordChange(state, t.parentPointer);
+    }
     return;
   }
   if (isJsonObject(parent)) {
     setObjectMember(parent, t.lastName, value);
+    recordChange(state, t.pointer);
     return;
   }
   throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
@@ -207,6 +222,8 @@ function extractAt(state, t, docPath) {
       throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
     const value = parent[idx];
     parent.splice(idx, 1);
+    // removal shifts every later element: the whole array changed
+    recordChange(state, t.parentPointer);
     return value;
   }
   if (isJsonObject(parent)) {
@@ -215,6 +232,7 @@ function extractAt(state, t, docPath) {
       throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
     const value = parent[name];
     delete parent[name];
+    recordChange(state, t.pointer);
     return value;
   }
   throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
@@ -231,6 +249,7 @@ function replaceAt(state, t, value, docPath) {
     if (idx >= parent.length)
       throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
     parent[idx] = value;
+    recordChange(state, t.pointer);
     return;
   }
   if (isJsonObject(parent)) {
@@ -238,6 +257,7 @@ function replaceAt(state, t, value, docPath) {
     if (!hasOwn(parent, name))
       throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
     setObjectMember(parent, name, value);
+    recordChange(state, t.pointer);
     return;
   }
   throw pathError('JP2001', `the path '${t.pointer}' does not exist`, docPath, t.pointer);
@@ -260,6 +280,13 @@ function replaceAt(state, t, value, docPath) {
  */
 
 /**
+ * A compiled JSON Patch with change tracking (`changes: true`): applies
+ * the patch and returns the patched document together with the changed
+ * locations (see `JsonPatchOptions`).
+ * @typedef {(doc: any) => { doc: any, changes: string[] }} JsonPatchChangesApplier
+ */
+
+/**
  * Options for `compileJSONPatch` / `applyJSONPatch`.
  * @typedef {Object} JsonPatchOptions
  * @property {boolean} [mutate] - Apply in place instead of copy-on-write.
@@ -270,6 +297,16 @@ function replaceAt(state, t, value, docPath) {
  *   repeated applications share structure with the patch document and
  *   must be treated as immutable; `'fresh'` deep-copies per application.
  *   In-place mode always behaves as `'fresh'`.
+ * @property {boolean} [changes] - Track changed locations: the applier
+ *   returns `{ doc, changes }` where `changes` is an array of JSON
+ *   Pointers, one per successful write, in application order and not
+ *   deduplicated. The reported pointer is chosen to be *sound for
+ *   invalidation* — everything at or below it (plus the identity of its
+ *   ancestors) may have changed, and nothing outside the reported set
+ *   did: object writes, array replaces and array appends report the
+ *   written location itself; array inserts and removes that shift later
+ *   elements report the parent array's pointer; a root write reports
+ *   `''`. `test` operations report nothing.
  */
 
 function compileError(code, message, docPath, cause) {
@@ -302,6 +339,9 @@ function parseTarget(op, index, member) {
     len,
     lastName: len === 0 ? '' : names[len - 1],
     lastIndex: len === 0 ? -1 : indexes[len - 1],
+    // the parent location, for shift-style change reports (tokens never
+    // contain a raw '/', so the last separator bounds the last token)
+    parentPointer: len === 0 ? '' : pointer.slice(0, pointer.lastIndexOf('/')),
   };
 }
 
@@ -350,6 +390,7 @@ function compileOperation(op, index, fresh) {
       if (t.len === 0) {
         return (state) => {
           state.root = getValue();
+          recordChange(state, '');
         };
       }
       return (state) => {
@@ -373,6 +414,7 @@ function compileOperation(op, index, fresh) {
       if (t.len === 0) {
         return (state) => {
           state.root = getValue();
+          recordChange(state, '');
         };
       }
       return (state) => {
@@ -389,6 +431,7 @@ function compileOperation(op, index, fresh) {
       if (t.len === 0) {
         return (state) => {
           state.root = extractAt(state, from, docPath);
+          recordChange(state, '');
         };
       }
       return (state) => {
@@ -401,6 +444,7 @@ function compileOperation(op, index, fresh) {
       if (t.len === 0) {
         return (state) => {
           state.root = copyForInsert(readSource(state, from, docPath), state.owned);
+          recordChange(state, '');
         };
       }
       return (state) => {
@@ -436,9 +480,18 @@ function compileOperation(op, index, fresh) {
  * failing operation (`JsonPatchRuntimeError`, `JP2xxx`) leaves nothing
  * behind.
  *
+ * With `changes: true` the applier is specialized at compile time to
+ * also report the changed locations: it returns `{ doc, changes }`,
+ * where `changes` holds one JSON Pointer per successful write with the
+ * invalidation-sound semantics documented on `JsonPatchOptions` — the
+ * primitive dirty-path consumers (view re-rendering, rule dependency
+ * memoization) build on.
+ *
  * @param {JsonPatchOperation[]} patch - The RFC 6902 patch document
  * @param {JsonPatchOptions} [options] - Application options
- * @returns {JsonPatchApplier} applier returning the patched document
+ * @returns {JsonPatchApplier | JsonPatchChangesApplier} applier
+ *   returning the patched document (or `{ doc, changes }` with the
+ *   `changes` option)
  * @throws {JsonPatchCompileError} When the patch document is invalid
  * @example
  * const apply = compileJSONPatch([
@@ -447,10 +500,17 @@ function compileOperation(op, index, fresh) {
  *   { op: 'add', path: '/user/tags/-', value: 'admin' },
  * ]);
  * const next = apply(doc); // doc is untouched
+ * @example
+ * const applyTracked = compileJSONPatch(
+ *   [{ op: 'replace', path: '/user/name', value: 'Bob' }],
+ *   { changes: true });
+ * const { doc: next2, changes } = applyTracked(doc);
+ * // changes: ['/user/name']
  */
 export function compileJSONPatch(patch, options = undefined) {
   let mutate = false;
   let values = 'share';
+  let changes = false;
   if (options !== undefined && options !== null) {
     mutate = options.mutate === true;
     if (options.values !== undefined) {
@@ -458,6 +518,7 @@ export function compileJSONPatch(patch, options = undefined) {
         throw new TypeError(`compileJSONPatch: unknown 'values' option '${options.values}'`);
       values = options.values;
     }
+    changes = options.changes === true;
   }
   const fresh = mutate || values === 'fresh';
   if (!Array.isArray(patch))
@@ -466,9 +527,20 @@ export function compileJSONPatch(patch, options = undefined) {
   const ops = new Array(plen);
   for (let i = 0; i < plen; i++)
     ops[i] = compileOperation(patch[i], i, fresh);
+  if (changes) {
+    const owned = mutate ? null : undefined;
+    return function applyJsonPatchTracked(doc) {
+      const state = makeState(doc, owned === null ? null : new Set());
+      state.changes = [];
+      for (let i = 0; i < plen; i++)
+        ops[i](state);
+      return { doc: state.root, changes: state.changes };
+    };
+  }
   if (mutate) {
     return function applyJsonPatchInPlace(doc) {
       const state = makeState(doc, null);
+      state.changes = null;
       for (let i = 0; i < plen; i++)
         ops[i](state);
       return state.root;
@@ -476,6 +548,7 @@ export function compileJSONPatch(patch, options = undefined) {
   }
   return function applyJsonPatchCow(doc) {
     const state = makeState(doc, new Set());
+    state.changes = null;
     for (let i = 0; i < plen; i++)
       ops[i](state);
     return state.root;
@@ -491,7 +564,8 @@ export function compileJSONPatch(patch, options = undefined) {
  *   `options.mutate` is set)
  * @param {JsonPatchOperation[]} patch - The RFC 6902 patch document
  * @param {JsonPatchOptions} [options] - Application options
- * @returns {any} The patched document
+ * @returns {any} The patched document, or `{ doc, changes }` when
+ *   `options.changes` is set
  * @throws {JsonPatchCompileError} When the patch document is invalid
  * @throws {JsonPatchRuntimeError} When an operation fails to apply
  */

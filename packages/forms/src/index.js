@@ -53,3 +53,7 @@ export {
   FORM_FORMATS,
   getFormatInfo,
 } from './formats.js';
+
+export {
+  buildFormViewModel,
+} from './viewmodel.js';
