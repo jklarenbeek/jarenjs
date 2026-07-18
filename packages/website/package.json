@@ -1,57 +1,33 @@
 {
   "name": "@jarenjs/website",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.10.0",
   "type": "module",
+  "description": "The jarenjs website: the whole site is one JSON app document running on @jarenjs/view + @jarenjs/app — nine live playground engines, an experiment IDE, WebMCP agent tools and offline PWA support.",
+  "author": "joham",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "dev:benchmark": "npm run benchmark:generate && npm run dev",
     "build": "vite build",
     "preview": "vite preview",
-    "predeploy": "npm run benchmark:generate && npm run build",
-    "deploy": "gh-pages -d dist",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "eslint .",
+    "lint": "eslint src",
     "benchmark:generate": "cd ../.. && node benchmark/website-data.js --iterations 1000",
-    "benchmark:quick": "cd ../.. && node benchmark/website-data.js --quick"
+    "predeploy": "npm run benchmark:generate && npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@jarenjs/app": "file:../app",
     "@jarenjs/core": "file:../core",
     "@jarenjs/formats": "file:../formats",
     "@jarenjs/forms": "file:../forms",
-    "@jarenjs/josl": "file:../josl",
     "@jarenjs/json": "file:../json",
     "@jarenjs/locales": "file:../locales",
     "@jarenjs/refs": "file:../refs",
     "@jarenjs/validate": "file:../validate",
-    "clsx": "^2.1.1",
-    "framer-motion": "^12.4.0",
-    "lucide-react": "^0.474.0",
-    "prop-types": "^15.8.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.5",
-    "tailwind-merge": "^3.0.1"
+    "@jarenjs/view": "file:../view"
   },
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
-    "@tailwindcss/vite": "^4.0.6",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.2.0",
-    "@types/react": "^19.0.8",
-    "@types/react-dom": "^19.0.3",
-    "@vitejs/plugin-react-swc": "^3.8.0",
-    "eslint": "^9.20.0",
-    "eslint-plugin-react": "^7.37.4",
-    "eslint-plugin-react-hooks": "^5.1.0",
-    "eslint-plugin-react-refresh": "^0.4.18",
     "gh-pages": "^6.3.0",
-    "globals": "^15.14.0",
-    "jsdom": "^26.0.0",
-    "prettier": "^3.5.0",
-    "tailwindcss": "^4.0.6",
-    "vite": "^6.1.0",
-    "vitest": "^3.0.5"
+    "vite": "^6.1.0"
   }
 }

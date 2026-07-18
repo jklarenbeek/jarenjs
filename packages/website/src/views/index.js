@@ -16,8 +16,8 @@ import { UI_RULES } from './ui.js';
 
 export const STYLESHEET = {
   $jslt: '0.1',
-  // every mode fails LOUDLY on an unmatched node while webnext is in
-  // its side-by-side phase — a dispatch miss is a bug, not content
+  // every mode fails LOUDLY on an unmatched node — a dispatch miss is
+  // a bug, not content
   modes: {
     home: { unmatched: 'error' },
     playground: { unmatched: 'error' },

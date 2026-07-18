@@ -13,7 +13,6 @@ const header =
       ['a', { href: '#/', class: 'brand' },
         ['img', { src: `${BASE}jaren.svg`, alt: '', class: 'brand-logo' }],
         ['span', { class: 'brand-name' }, 'Jaren'],
-        ['span', { class: 'brand-tag' }, 'webnext'],
       ],
       ['nav', { class: { $if: ['$.menu', 'nav open', 'nav'] } }, [{ $apply: '$.ui.nav[*]' }]],
       ['button', {
@@ -39,7 +38,6 @@ const footer =
       ['nav', { class: 'footer-links' },
         ['a', { href: 'https://github.com/jklarenbeek/jarenjs' }, 'GitHub'],
         ['a', { href: 'https://www.npmjs.com/package/@jarenjs/validate' }, 'npm'],
-        ['a', { href: 'https://jklarenbeek.github.io/jarenjs/' }, 'current website'],
       ],
     ],
   ];

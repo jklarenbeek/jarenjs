@@ -34,8 +34,8 @@ export default [
     }
   },
   {
-    // webnext runs in the browser: allow DOM globals there
-    files: ['packages/webnext/**/*.js'],
+    // the website runs in the browser: allow DOM globals there
+    files: ['packages/website/**/*.js'],
     languageOptions: {
       globals: { ...globals.node, ...globals.browser },
     },

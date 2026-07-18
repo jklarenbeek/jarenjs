@@ -2,8 +2,8 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { createSiteApp } from '../../packages/webnext/src/app/createSiteApp.js';
-import { parseHash } from '../../packages/webnext/src/lib/route.js';
+import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
+import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
 function mountSite({ hash = '#/playground', stored = null, modelContext } = {}) {
@@ -40,7 +40,7 @@ function find(node, pred) {
 }
 const byClass = (container, cls) => find(container, (n) => n.attributes?.get('class') === cls);
 
-describe('webnext — the generic engine playgrounds', function () {
+describe('website — the generic engine playgrounds', function () {
   it('renders every engine tab live from its descriptor', function () {
     const { container, go } = mountSite();
     for (const engine of ['path', 'pointer', 'patch', 'query', 'jslt', 'jtlt', 'xquery', 'josl']) {
@@ -104,7 +104,7 @@ describe('webnext — the generic engine playgrounds', function () {
   });
 });
 
-describe('webnext — the experiment IDE', function () {
+describe('website — the experiment IDE', function () {
   it('saves, persists, lists, loads and deletes experiments', function () {
     const { app, container, go, storage, hashes } = mountSite();
     go('#/playground?engine=path');
@@ -145,7 +145,7 @@ describe('webnext — the experiment IDE', function () {
   });
 });
 
-describe('webnext — docs, examples, menu', function () {
+describe('website — docs, examples, menu', function () {
   it('docs render sections from the content document, deep-linkable', function () {
     const { container, go } = mountSite();
     go('#/docs');
@@ -176,7 +176,7 @@ describe('webnext — docs, examples, menu', function () {
   });
 });
 
-describe('webnext — WebMCP', function () {
+describe('website — WebMCP', function () {
   it('registers tools on a provided modelContext and they execute', function () {
     /** @type {any[]} */
     let registered = [];

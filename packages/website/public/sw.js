@@ -1,9 +1,9 @@
-/* The webnext service worker: offline-capable playground.
+/* The jarenjs website service worker: offline-capable playground.
    - navigation requests: network-first, falling back to the cached shell
    - hashed assets (/assets/): cache-first (immutable by construction)
    - benchmark data: stale-while-revalidate */
 
-const CACHE = 'jaren-webnext-v1';
+const CACHE = 'jaren-website-v1';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 
 self.addEventListener('install', (event) => {

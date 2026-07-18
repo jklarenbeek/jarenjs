@@ -1,5 +1,4 @@
-/* webnext — hand-rolled stylesheet, no framework.
-   Tokens mirror the current site's shadcn-flavored palette. */
+/* The jarenjs website — hand-rolled stylesheet, no framework. */
 
 :root {
   --bg: hsl(0 0% 100%);

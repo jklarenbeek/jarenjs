@@ -3,28 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/jarenjs/jaren.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="JarenJS - A modern JSON Schema validator for JavaScript with excellent performance and full draft support" />
-    <meta name="theme-color" content="#3b82f6" />
-    <title>JarenJS - JSON Schema Validator</title>
-    <script type="text/javascript">
-      // Single Page Apps for GitHub Pages
-      // MIT License
-      // https://github.com/rafgraph/spa-github-pages
-      (function(l) {
-        if (l.search[1] === '/' ) {
-          var decoded = l.search.slice(1).split('&').map(function(s) { 
-            return s.replace(/~and~/g, '&')
-          }).join('?');
-          window.history.replaceState(null, null,
-              l.pathname.slice(0, -1) + decoded + l.hash
-          );
-        }
-      }(window.location))
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Jaren — a high-performance JSON toolchain: schema validation, JSONPath, JSON query, JSLT and forms, compiled to closures." />
+    <meta name="theme-color" content="#5646d6" />
+    <link rel="manifest" href="/jarenjs/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/jarenjs/jaren.svg" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Jaren — JSON all the way down</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>

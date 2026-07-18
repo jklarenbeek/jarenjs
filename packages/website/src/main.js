@@ -7,7 +7,7 @@ import { parseHash } from './lib/route.js';
 
 const BASE = import.meta.env.BASE_URL;
 const THEME_KEY = 'jaren-theme';
-const IDE_KEY = 'jaren-webnext-ide';
+const IDE_KEY = 'jaren-ide';
 
 const stored = localStorage.getItem(THEME_KEY);
 const theme = stored === 'dark' || stored === 'light'

@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { renderToString } from '@jarenjs/view';
-import { createSiteApp } from '../../packages/webnext/src/app/createSiteApp.js';
-import { parseHash } from '../../packages/webnext/src/lib/route.js';
+import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
+import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
 /** Fixture benchmark payloads, shaped like website-data.js output. */
@@ -66,7 +66,7 @@ function find(node, pred) {
   return undefined;
 }
 
-describe('webnext — the site as one app document', function () {
+describe('website — the site as one app document', function () {
   it('renders the home page through the shell', function () {
     const { container } = mountSite();
     const html = serialize(container);
