@@ -15,6 +15,7 @@
  *   jsonpointer.json  jsonpointer.js    — compiled vs legacy vs jsonpointer npm
  *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
  *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
+ *   markdown.json     markdown.js       — @jarenjs/md vs marked/markdown-it/micromark (CommonMark spec)
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -45,7 +46,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml, markdown, qt3');
         process.exit(0);
         break;
       default:
@@ -367,6 +368,39 @@ function generateToml(tmp, options) {
   };
 }
 
+function generateMarkdown(tmp, options) {
+  const file = path.join(tmp, 'markdown.json');
+  try {
+    runTool([
+      'benchmark/markdown.js', '--profile',
+      '--iterations', String(options.quick ? 20 : 100),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: markdown run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the suite needs: git submodule update --init benchmark/commonmark-spec');
+    console.warn('   and the marked/markdown-it/micromark benchmark devDependencies)');
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    ...raw,
+    profile: raw.profile === null ? null : {
+      iterations: raw.profile.iterations,
+      render: raw.profile.render.map((row) => ({
+        name: row.name,
+        results: Object.fromEntries(Object.entries(row.results).map(([k, v]) => [k, sig4(v)])),
+      })),
+      jaren: raw.profile.jaren.map((row) => ({
+        name: row.name,
+        parseMs: sig4(row.parseMs),
+        vnodeNs: Math.round(row.vnodeNs),
+      })),
+    },
+  };
+}
+
 function generateQt3() {
   let stdout;
   try {
@@ -429,6 +463,11 @@ async function main() {
     if (toml !== null)
       generated.toml = toml;
   }
+  if (!options.skip.has('markdown')) {
+    const markdown = generateMarkdown(tmp, options);
+    if (markdown !== null)
+      generated.markdown = markdown;
+  }
 
   // Skipped suites keep their previous meta entries (when a meta.json
   // exists), so partial regeneration never clobbers the overview.
@@ -488,6 +527,9 @@ async function main() {
       toml: generated.toml === undefined
         ? (previousMeta?.conformance?.toml ?? null)
         : generated.toml.compliance,
+      markdown: generated.markdown === undefined
+        ? (previousMeta?.conformance?.markdown ?? null)
+        : { examples: generated.markdown.examples, scorecard: generated.markdown.scorecard },
     },
   };
   writeJson('meta.json', meta);

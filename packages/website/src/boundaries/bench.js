@@ -22,6 +22,7 @@ export const SUITES = [
   { key: 'jsonpointer', label: 'JSON Pointer' },
   { key: 'jsonpatch', label: 'JSON Patch' },
   { key: 'toml', label: 'JOSL / TOML' },
+  { key: 'markdown', label: 'Markdown' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -44,6 +45,7 @@ export function deriveSuite(state, suite) {
     case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
     case 'toml': return toml(data);
+    case 'markdown': return markdown(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -288,6 +290,41 @@ function toml(data) {
         cells: [p.name, ...(data.engines ?? []).map((e) => formatMs(p.results[e]))],
       })),
       'smol-toml keeps a raw-throughput edge; Jaren is the only engine passing the complete suite while streaming.'));
+  }
+  return out;
+}
+
+function markdown(data) {
+  const engines = data.engines ?? [];
+  const out = [];
+  if (data.scorecard !== undefined) {
+    out.push(table(
+      `CommonMark scorecard (${data.examples ?? '?'} official spec examples, whitespace-normalized)`,
+      ['Engine', 'Passing'],
+      engines.map((engine) => ({
+        cells: [engine, `${data.scorecard[engine]?.pass} / ${data.scorecard[engine]?.total}`],
+        strong: engine === 'jaren-md',
+      })),
+      'Jaren renders Markdown to JSON vnodes with no unescaped HTML by design, so raw-HTML pass-through examples cannot pass — its score is honest dialect coverage, not a compliance claim.'));
+  }
+  const profile = data.profile;
+  if (profile !== undefined && profile !== null) {
+    out.push(table(
+      `Parse + render to HTML (${profile.iterations} iterations, ms/op; lower is better)`,
+      ['Document', ...engines],
+      (profile.render ?? []).map((p) => ({
+        cells: [p.name, ...engines.map((e) => formatMs(p.results[e]))],
+      })),
+      'marked and markdown-it are the mainstream one-shot parsers; Jaren stays within ~1.1–1.5× while producing a JSON AST and keyed vnodes, not just an HTML string.'));
+    if (Array.isArray(profile.jaren)) {
+      out.push(table(
+        'Jaren-only: the compiled pipeline',
+        ['Document', 'parse → AST', 'cached vnode'],
+        profile.jaren.map((p) => ({
+          cells: [p.name, formatMs(p.parseMs), `${p.vnodeNs} ns`],
+        })),
+        'Once compiled, the vnode projection is reference-stable: the view patcher skips an unchanged article in O(1) (~30 ns) — the re-render path the whole suite is built for.'));
+    }
   }
   return out;
 }

@@ -173,7 +173,7 @@ describe('website — the site as one app document', function () {
       new URL(`../../packages/website/public/benchmarks/${name}.json`, import.meta.url), 'utf8'));
     const fixtures = {
       meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
-      jsonquery: load('jsonquery'), jslt: load('jslt'),
+      jsonquery: load('jsonquery'), jslt: load('jslt'), markdown: load('markdown'),
     };
     const { container, go } = mountSite({ fixtures });
 
@@ -195,6 +195,14 @@ describe('website — the site as one app document', function () {
     html = serialize(container);
     assert.match(html, /Scenario matrix/);
     assert.match(html, /the query documents/, 'program sources are unfoldable');
+
+    go('#/benchmarks?suite=markdown');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /CommonMark scorecard/, 'the markdown scorecard renders');
+    assert.match(html, /Parse \+ render to HTML/, 'the perf table renders');
+    assert.match(html, /compiled pipeline/, 'the jaren-only pipeline table renders');
+    assert.match(html, /marked/, 'contenders are listed');
 
     go('#/benchmarks?suite=jsonpath');
     await tick();

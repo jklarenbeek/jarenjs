@@ -25,7 +25,7 @@
  *   node ./benchmark/markdown.js --engines jaren,marked
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, compileMarkdown, mdToVnode } from '@jarenjs/md';
@@ -45,6 +45,8 @@ const flags = {
   verbose: args.includes('--verbose'),
   iterations: Number(args[args.indexOf('--iterations') + 1]) || 200,
   engines: args.includes('--engines') ? args[args.indexOf('--engines') + 1].split(',') : null,
+  output: args.includes('--output') ? args[args.indexOf('--output') + 1] : null,
+  filepath: args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null,
 };
 
 // ------------------------------------------------------------------
@@ -121,13 +123,18 @@ function normalizeHtml(html) {
     .trim();
 }
 
-function runScorecard() {
+/**
+ * Score every engine against the CommonMark spec examples.
+ * @returns {{ examples: number, scorecard: Record<string, { pass: number, total: number, failures: number[] }> }}
+ */
+function computeScorecard() {
   if (!existsSync(SPEC)) {
     console.error('commonmark-spec submodule missing; run: git submodule update --init benchmark/commonmark-spec');
     process.exit(1);
   }
   const examples = extractExamples(readFileSync(SPEC, 'utf8'));
-  console.log(`\nCommonMark scorecard — ${examples.length} spec examples, whitespace-normalized comparison`);
+  /** @type {Record<string, any>} */
+  const scorecard = {};
   for (const engine of ENGINES) {
     let pass = 0;
     const failures = [];
@@ -143,10 +150,20 @@ function runScorecard() {
       if (ok) pass++;
       else failures.push(example.number);
     }
-    const pct = ((100 * pass) / examples.length).toFixed(1);
-    console.log(`  ${engine.name.padEnd(14)} ${String(pass).padStart(4)} / ${examples.length}  (${pct}%)`);
-    if (flags.verbose && failures.length > 0) {
-      console.log(`    failing examples: ${failures.slice(0, 40).join(', ')}${failures.length > 40 ? ', …' : ''}`);
+    scorecard[engine.name] = { pass, total: examples.length, failures };
+  }
+  return { examples: examples.length, scorecard };
+}
+
+function runScorecard() {
+  const { examples, scorecard } = computeScorecard();
+  console.log(`\nCommonMark scorecard — ${examples} spec examples, whitespace-normalized comparison`);
+  for (const engine of ENGINES) {
+    const s = scorecard[engine.name];
+    const pct = ((100 * s.pass) / examples).toFixed(1);
+    console.log(`  ${engine.name.padEnd(14)} ${String(s.pass).padStart(4)} / ${examples}  (${pct}%)`);
+    if (flags.verbose && s.failures.length > 0) {
+      console.log(`    failing examples: ${s.failures.slice(0, 40).join(', ')}${s.failures.length > 40 ? ', …' : ''}`);
     }
   }
 }
@@ -188,32 +205,84 @@ function timeIt(fn, iterations) {
   return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
 }
 
-function runPerformance() {
-  const docs = [
-    ['~2 kB', buildDocument(3)],
-    ['~10 kB', buildDocument(16)],
-    ['~100 kB', buildDocument(160)],
-  ];
-  const iterations = flags.iterations;
-  console.log(`\nPerformance — parse + render to HTML, ${iterations} iterations (ms/op)`);
-  for (const [label, src] of docs) {
-    console.log(`  ${label} (${src.length} chars)`);
-    let base = null;
+const PERF_DOCS = [
+  ['~2 kB', buildDocument(3)],
+  ['~10 kB', buildDocument(16)],
+  ['~100 kB', buildDocument(160)],
+];
+
+/**
+ * Measure parse+render across engines and Jaren's compiled pipeline.
+ * @param {number} iterations
+ * @returns {{ iterations: number, render: any[], jaren: any[] }}
+ */
+function measurePerformance(iterations) {
+  const render = [];
+  const jaren = [];
+  for (const [label, src] of PERF_DOCS) {
+    /** @type {Record<string, number>} */
+    const results = {};
     for (const engine of ENGINES) {
-      const ms = timeIt(() => engine.renderPerf(src), iterations);
-      if (base === null) base = ms;
+      results[engine.name] = timeIt(() => engine.renderPerf(src), iterations);
+    }
+    render.push({ name: label, chars: src.length, results });
+    const parseMs = timeIt(() => parseMarkdown(src), iterations);
+    const compiled = compileMarkdown(src);
+    const vnodeNs = timeIt(() => compiled.toVnode(), iterations) * 1e6;
+    jaren.push({ name: label, parseMs, vnodeNs });
+  }
+  return { iterations, render, jaren };
+}
+
+function runPerformance() {
+  const perf = measurePerformance(flags.iterations);
+  console.log(`\nPerformance — parse + render to HTML, ${perf.iterations} iterations (ms/op)`);
+  for (let i = 0; i < perf.render.length; i++) {
+    const row = perf.render[i];
+    console.log(`  ${row.name} (${row.chars} chars)`);
+    const base = row.results['jaren-md'];
+    for (const engine of ENGINES) {
+      const ms = row.results[engine.name];
       const ratio = engine.name === 'jaren-md' ? '' : ` (${(ms / base).toFixed(2)}x)`;
       console.log(`    ${engine.name.padEnd(14)} ${ms.toFixed(4).padStart(9)} ms${ratio}`);
     }
     if (flags.profile) {
-      const parseMs = timeIt(() => parseMarkdown(src), iterations);
-      const compiled = compileMarkdown(src);
-      const rerenderMs = timeIt(() => compiled.toVnode(), iterations);
-      console.log(`    ${'· parse→AST'.padEnd(14)} ${parseMs.toFixed(4).padStart(9)} ms`);
-      console.log(`    ${'· cached vnode'.padEnd(14)} ${(rerenderMs * 1e6).toFixed(0).padStart(9)} ns (compiled fast path)`);
+      const j = perf.jaren[i];
+      console.log(`    ${'· parse→AST'.padEnd(14)} ${j.parseMs.toFixed(4).padStart(9)} ms`);
+      console.log(`    ${'· cached vnode'.padEnd(14)} ${j.vnodeNs.toFixed(0).padStart(9)} ns (compiled fast path)`);
     }
   }
 }
 
-if (!flags.perfOnly) runScorecard();
-if (!flags.scoreOnly) runPerformance();
+if (flags.output === 'json') {
+  // The website-data shape (benchmark/website-data.js → markdown.json):
+  // an engine list, the CommonMark scorecard, and the perf profile with
+  // Jaren's compiled-pipeline rows.
+  const { examples, scorecard } = computeScorecard();
+  const perf = measurePerformance(flags.iterations);
+  const data = {
+    date: new Date().toISOString(),
+    node: process.version,
+    engines: ENGINES.map((e) => e.name),
+    examples,
+    scorecard: Object.fromEntries(
+      Object.entries(scorecard).map(([name, s]) => [name, { pass: s.pass, total: s.total }])),
+    profile: {
+      iterations: perf.iterations,
+      render: perf.render.map((row) => ({ name: row.name, results: row.results })),
+      jaren: perf.jaren,
+    },
+  };
+  const json = JSON.stringify(data, null, 2);
+  if (flags.filepath !== null) {
+    writeFileSync(flags.filepath, json);
+    console.log(`\nwrote ${flags.filepath}`);
+  }
+  else {
+    console.log(json);
+  }
+}
+else {
+  if (!flags.perfOnly) runScorecard();
+  if (!flags.scoreOnly) runPerformance();
+}

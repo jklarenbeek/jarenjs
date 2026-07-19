@@ -147,10 +147,11 @@ export const DOCS_SECTIONS = [
       code("import { parseMarkdown, toMarkdown } from '@jarenjs/md';\nconst doc = parseMarkdown('# Hi *there*');\ndoc.ast[0].type;          // 'heading'\ntoMarkdown(doc);          // '# Hi *there*\\n' — a fixed point"),
       p('Part two is the visual component (@jarenjs/md/component): a memoized view() projection for app viewModels, md-load / md-parse entries for the effect registry, a hydrate pass for plugins like mermaid, and the styles/md.css stylesheet. The playground Markdown tab on this site is that component, live.'),
       code("import { createMdComponent } from '@jarenjs/md/component';\nconst md = createMdComponent();\ncreateApp(appDoc, {\n  effects: { ...md.effects },\n  viewModel: (state) => ({ ...state, article: md.view(state.source) }),\n});"),
+      p('Measured like every other engine: the Markdown benchmark scores @jarenjs/md against marked, markdown-it and micromark over the official CommonMark spec examples (npm run benchmark:markdown), and the results are on the Benchmarks page.'),
       {
         kind: 'callout',
         title: 'Try it',
-        text: 'The Markdown tab in the playground parses as you type — the preview, AST, canonical print and frontmatter all come from one compiled document.',
+        text: 'The Markdown tab in the playground parses as you type — the preview, AST, canonical print and frontmatter all come from one compiled document. The Benchmarks page has its scorecard and timings against the mainstream parsers.',
         href: '#/playground?engine=markdown',
         link: 'Open the playground',
       },
