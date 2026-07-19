@@ -129,20 +129,50 @@ default `console.error`).
 Both ship from `@jarenjs/md/plugins` and are the canonical templates
 for third-party plugins (math, callouts/admonitions, footnotes, embeds).
 
-### 6.1 mermaidPlugin({ mermaid, theme })
+### 6.1 mermaidPlugin({ theme })
 
-The **caller supplies the mermaid instance** (dynamic import, CDN
-global — the plugin never imports it, preserving zero dependencies).
+The **native** plugin, re-exported from `@jarenjs/mermaid/plugin`
+(TODO_18). It parses the fence source with the in-house headless
+Mermaid engine and emits **pure-vnode SVG** synchronously — no injected
+`mermaid` instance, no CDN global, no `innerHTML`.
 
-- `render` emits a stable placeholder:
-  `div.md-mermaid > pre` containing the diagram source, keyed by
-  content hash — SSR output is deterministic and content-visible
-  without JavaScript.
-- `hydrate` calls `mermaid.render(id, source)` and swaps the SVG into
-  the element. Rendered SVG is cached by content hash, so re-patches
-  and repeated diagrams are O(1).
-- Without a `mermaid` instance the plugin still claims the fence and
-  renders the placeholder (progressive enhancement stays honest).
+- `render` claims `mermaid`/`mmd` fences and returns
+  `div.md-mermaid.mermaid-block > svg`, keyed by content hash. Because it
+  is pure and synchronous, a Markdown document containing a `mermaid`
+  fence renders to a full SVG string through **SSR with no browser** —
+  something the old injection wrapper could not do. Text and attribute
+  values are escaped by the view serializer, and only `http(s)`/relative
+  link `href`s survive, so the SVG-injection surface the old `innerHTML`
+  path carried is gone.
+- There is **no `hydrate`** — the render is already complete (mermaid
+  design decision D2). Optional client-only enhancements (pan/zoom) are
+  reserved for a future interactivity plugin.
+- The dependency arrow is **md → mermaid** (mermaid decision D9):
+  `@jarenjs/mermaid/plugin` returns a self-frozen `MdPlugin`-shaped
+  object *without* importing `definePlugin`, so there is no cycle;
+  `@jarenjs/md` re-exports it and adds `@jarenjs/mermaid` to its
+  dependencies. Consumers who never use it tree-shake it away
+  (`sideEffects:false`). Mermaid stays **opt-in** — it is not in
+  `DEFAULT_PLUGINS`.
+
+**Transformed-diagram round-trip.** There is no per-plugin `toMarkdown`
+hook; a `mermaid` fence round-trips through `toMarkdown` generically as
+long as its source lives in `node.value` (which it does). So a JSLT
+transform that *rewrites* a diagram must refresh the fence source with
+the canonical printer. `@jarenjs/mermaid/plugin` exports the primitive
+for exactly this:
+
+```js
+import { parseMermaid, toMermaid } from '@jarenjs/mermaid';
+import { refreshMermaidFence } from '@jarenjs/mermaid/plugin';
+
+const doc = parseMermaid(fenceNode.value);
+const edited = transform(doc);                 // JSLT / hand edit of the AST
+const fresh = refreshMermaidFence(fenceNode, edited);  // { type:'mermaid', value: toMermaid(edited) }
+```
+
+The refreshed `value` re-emits through the core fence printer
+(`to-md.js`), so `toMarkdown` prints the new diagram.
 
 ### 6.2 highlightPlugin({ grammars, adapter })
 

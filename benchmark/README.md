@@ -351,6 +351,55 @@ node benchmark/markdown.js --engines jaren,markdown-it
 
 npm shortcut: `npm run benchmark:markdown`.
 
+## mermaid.js — @jarenjs/mermaid coverage + parse speed
+
+Coverage scorecard and parse-speed comparisons for the headless Mermaid
+engine in `components/mermaid/`. Three measurements, each labeled for
+what it fairly compares:
+
+1. **Coverage scorecard** over a curated corpus
+   (`benchmark/fixtures/mermaid.js`): the fraction of each diagram type
+   `@jarenjs/mermaid` parses *and* renders to SVG without error.
+   Secondary types (mindmap, gitGraph, …) parse-accept into a placeholder
+   and are counted honestly as "parsed, not laid out".
+
+2. **Parse-speed head-to-head, two competitors** — and this is the part
+   worth understanding, because Mermaid has *two* parsers:
+   - **`@mermaid-js/parser`** is the standalone **Langium** parser. It is
+     the home of the grammars migrated off the old system, and at the
+     time of writing it covers only the newer diagrams (pie, gitGraph,
+     packet, radar, …). It **cannot parse flowchart or sequence at all**.
+     So the apples-to-apples row against it is **pie**.
+   - **Flowchart and sequence** are still parsed by Mermaid's original
+     in-tree **Jison** grammars
+     (`packages/mermaid/src/diagrams/{flowchart,sequence}/parser/*.jison`),
+     which live inside the full `mermaid` package, not in
+     `@mermaid-js/parser`. The fair head-to-head there is
+     **`mermaid.parse()`** from the full library. `mermaid.parse` is
+     DOM-coupled, so the benchmark provides a **jsdom** global; it is
+     also async and runs Mermaid's whole parse front-end (type detection
+     + Jison + validation), so it is labeled as such, not as a bare-Jison
+     microbenchmark. `@jarenjs/mermaid` parses the same flowchart/sequence
+     sources roughly **two orders of magnitude faster**.
+
+3. **Jaren-only capability** — parse→AST and **parse→layout→SVG string**
+   (headless, no browser): the full pipeline mermaid.js cannot run
+   without a DOM (`getBBox`).
+
+```bash
+# scorecard + both head-to-heads + jaren-only rows
+node benchmark/mermaid.js
+
+# more iterations; JSON for the website
+node benchmark/mermaid.js --profile --iterations 500
+node benchmark/mermaid.js --output json --filepath out.json
+```
+
+Competitors are **benchmark devDependencies only**
+(`@mermaid-js/parser`, `mermaid`, `jsdom`); if any is missing the run
+degrades gracefully (each is dynamically imported and its rows are
+skipped). npm shortcut: `npm run benchmark:mermaid`.
+
 ## qt3-runner.js — the W3C QT3 scorecard
 
 Runs the complete W3C QT3 suite (31,821 XQuery/XPath 3.1 test cases) against
@@ -371,9 +420,12 @@ documented in [qt3-README.md](./qt3-README.md).
 ## Workspace notes
 
 - Competitor engines (`ajv`, `json-p3`, `fontoxpath`, `jsonata`,
-  `jsonpointer`, `fast-xml-parser`, `marked`, `markdown-it`, `micromark`)
-  are devDependencies of this benchmark
-  workspace only — the `packages/*` workspaces stay zero-dependency.
+  `jsonpointer`, `fast-xml-parser`, `marked`, `markdown-it`, `micromark`,
+  `@mermaid-js/parser`, `mermaid`, `jsdom`) are devDependencies of this
+  benchmark workspace only — the `packages/*` and `components/*`
+  workspaces stay zero-dependency. (`mermaid` + `jsdom` power the
+  flowchart/sequence Jison head-to-head; `@mermaid-js/parser` the pie
+  head-to-head.)
 - Adaptor files under [`adaptors/`](./adaptors/) express each scenario
   idiomatically per engine and document the fairness decisions (e.g.
   fontoxpath's one-time XDM pre-conversion, jsonata's awaited async

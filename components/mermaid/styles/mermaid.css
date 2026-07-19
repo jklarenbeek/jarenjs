@@ -1,0 +1,86 @@
+/* @jarenjs/mermaid — component stylesheet.
+ *
+ * Two things happen here, decoupled from the site's design tokens (sizes
+ * in `em`, like md.css):
+ *
+ * 1. It extends the unscoped `.md-mermaid` placeholder rules from
+ *    `@jarenjs/md`'s md.css (centered block, max-width svg) so a mermaid
+ *    fence rendered inside a Markdown article sits correctly.
+ * 2. It defines a self-scoped `.mermaid` class carrying its own `--mm-*`
+ *    tokens (with fallbacks) plus a `.dark` override. Because the render
+ *    pass stamps the same `--mm-*` variables on the root `<svg>` and a
+ *    `mm-*` class on every shape, the cascade re-themes the diagram in
+ *    place — no re-render — while `toSvgString()` still carries concrete
+ *    presentation-attribute colors for standalone/SSR use.
+ */
+
+/* --- md-embedded diagrams ----------------------------------------- */
+.md-mermaid.mermaid-block {
+  margin: 0.9em 0;
+  text-align: center;
+}
+.md-mermaid.mermaid-block svg { max-width: 100%; height: auto; }
+
+/* --- self-scoped diagram ------------------------------------------ */
+.mermaid {
+  --mm-node-fill: #ECECFF;
+  --mm-node-stroke: #9370DB;
+  --mm-node-text: #1f2020;
+  --mm-line-color: #333333;
+  --mm-edge-label-text: #333333;
+  --mm-edge-label-bg: #ffffff;
+  --mm-cluster-fill: #ffffde;
+  --mm-cluster-stroke: #aaaa33;
+  --mm-actor-fill: #ECECFF;
+  --mm-actor-stroke: #9370DB;
+  --mm-actor-text: #1f2020;
+  --mm-lifeline: #999999;
+  --mm-activation-fill: #f4f4f4;
+  --mm-activation-stroke: #666666;
+  --mm-note-fill: #fff5ad;
+  --mm-note-stroke: #aaaa33;
+  --mm-note-text: #1f2020;
+
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Cascade over the render pass's presentation attributes. */
+.mermaid .mm-node-shape { fill: var(--mm-node-fill); stroke: var(--mm-node-stroke); }
+.mermaid .mm-label,
+.mermaid .mm-node text { fill: var(--mm-node-text); }
+.mermaid .mm-edge-line { stroke: var(--mm-line-color); }
+.mermaid .mm-arrowhead { fill: var(--mm-line-color); stroke: var(--mm-line-color); }
+.mermaid .mm-edge-label { fill: var(--mm-edge-label-text); }
+.mermaid .mm-edge-label-bg { fill: var(--mm-edge-label-bg); }
+.mermaid .mm-cluster-rect { fill: var(--mm-cluster-fill); stroke: var(--mm-cluster-stroke); }
+.mermaid .mm-actor rect { fill: var(--mm-actor-fill); stroke: var(--mm-actor-stroke); }
+.mermaid .mm-actor text { fill: var(--mm-actor-text); }
+.mermaid .mm-lifeline { stroke: var(--mm-lifeline); }
+.mermaid .mm-activation { fill: var(--mm-activation-fill); stroke: var(--mm-activation-stroke); }
+.mermaid .mm-note rect { fill: var(--mm-note-fill); stroke: var(--mm-note-stroke); }
+.mermaid .mm-note text { fill: var(--mm-note-text); }
+
+.mermaid.mm-error { font-family: monospace; }
+
+/* --- dark scheme --------------------------------------------------- */
+.dark .mermaid, .mermaid.dark {
+  --mm-node-fill: #1f2020;
+  --mm-node-stroke: #81B1DB;
+  --mm-node-text: #f4f4f4;
+  --mm-line-color: #cccccc;
+  --mm-edge-label-text: #e0e0e0;
+  --mm-edge-label-bg: #1f2020;
+  --mm-cluster-fill: #2b2b3a;
+  --mm-cluster-stroke: #6f6f9e;
+  --mm-actor-fill: #252526;
+  --mm-actor-stroke: #81B1DB;
+  --mm-actor-text: #f4f4f4;
+  --mm-lifeline: #8a8a8a;
+  --mm-activation-fill: #31313a;
+  --mm-activation-stroke: #8a8a8a;
+  --mm-note-fill: #3b3b26;
+  --mm-note-stroke: #aaaa33;
+  --mm-note-text: #f4f4f4;
+}

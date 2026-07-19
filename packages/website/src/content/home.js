@@ -8,7 +8,7 @@
 export const HOME_CONTENT = {
   hero: {
     title: 'JSON all the way down',
-    lead: 'Jaren is a high-performance JSON toolchain: a fully conformant JSON Schema validating compiler surrounded by compiled engines for JSON Pointer, JSONPath, an XQuery-semantics JSON query language, JSLT stylesheets, schema-driven forms and a Markdown engine. Zero dependencies, eval-free, CSP-safe.',
+    lead: 'Jaren is a high-performance JSON toolchain: a fully conformant JSON Schema validating compiler surrounded by compiled engines for JSON Pointer, JSONPath, an XQuery-semantics JSON query language, JSLT stylesheets, schema-driven forms, a Markdown engine and a headless Mermaid diagram engine. Zero dependencies, eval-free, CSP-safe.',
     install: 'npm install @jarenjs/validate',
     points: [
       '100% of the official JSON-Schema-Test-Suite, all benchmarked drafts',
@@ -26,6 +26,7 @@ export const HOME_CONTENT = {
     { key: 'forms', title: 'Forms', blurb: 'JSON Schema to a framework-agnostic field tree with three validation layers on one stack — per keystroke, cross-field, and authoritative on submit.', perf: 'this site renders forms with it' },
     { key: 'josl', title: 'JOSL', blurb: 'A strict TOML 1.0 superset with JavaScript-obvious values and streaming document-order events. The only engine in our benchmark passing the full toml-test suite.', perf: '694/694 toml-test 1.0.0' },
     { key: 'markdown', title: 'Markdown', blurb: 'The inverse of JTLT: CommonMark + GFM + frontmatter parsed into a JSON AST — transformed by JSLT, rendered by @jarenjs/view with content-hash keys and structural sharing. Ships an app-ready visual component.', perf: 'within 1.1–1.5× of marked, O(1) re-render' },
+    { key: 'mermaid', title: 'Mermaid', blurb: 'A native, headless Mermaid clone: diagrams-as-code parsed to a geometry-free JSON AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able with no browser, structurally shared, bidirectional (parseMermaid ⇄ toMermaid).', perf: 'headless SVG, O(1) re-render' },
   ],
   ai: {
     title: 'Built for the LLM era',

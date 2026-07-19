@@ -158,6 +158,22 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'mermaid', title: 'Mermaid',
+    blocks: [
+      p('A native, headless Mermaid clone: @jarenjs/mermaid parses diagrams-as-code (flowchart and sequence fully; class, ER, state, gantt and pie too) into a geometry-free JSON AST, then lays it out and renders pure-vnode SVG through @jarenjs/view — no innerHTML, no browser. render() is synchronous, complete and error-safe, memoized by content hash.'),
+      code("import { parseMermaid, toMermaid, renderMermaid } from '@jarenjs/mermaid';\nconst doc = parseMermaid('flowchart TD\\n  A --> B');\ntoMermaid(doc);           // canonical text — a round-trip fixed point\nrenderMermaid('flowchart TD\\n  A --> B'); // an ['svg', …] vnode"),
+      p('Because the AST is geometry-free it is a reusable semantic model: a stateDiagram-v2 projects via a JSLT stylesheet into an @jarenjs/app workflow / FSM (events become actions), and toMermaid turns a workflow back into editable diagram text. Rendering is one consumer of the model, not the only one.'),
+      p('The Markdown engine embeds it: a ```mermaid fence renders to inline SVG through the native plugin — SSR-safe, no injected instance. This site dogfoods it; the package READMEs render their own Mermaid diagrams live in the docs dialog.'),
+      {
+        kind: 'callout',
+        title: 'Try it',
+        text: 'The Mermaid tab in the playground parses as you type — the rendered SVG, the geometry-free AST, the canonical toMermaid round-trip and (for state diagrams) the derived workflow JSON all come from one compiled document. The Benchmarks page has its coverage scorecard and parse-speed numbers.',
+        href: '#/playground?engine=mermaid',
+        link: 'Open the playground',
+      },
+    ],
+  },
+  {
     id: 'core', title: 'Core utilities',
     blocks: [
       p('Everything underneath, usable standalone: type guards, grapheme-aware Unicode strings, a large text-validation toolbox (emails, hostnames, IRIs, punycode, I-Regexp), RFC 3339 date-time parsing, fixed-width numeric ranges, a char-code scanner toolkit and asm.js-style int32/float64 math.'),

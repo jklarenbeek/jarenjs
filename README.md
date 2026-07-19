@@ -118,6 +118,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/view`](packages/view) | The vnode format: UIs as JSON, with a keyed DOM patcher and SSR | [README](packages/view/README.md) · [FORMAT](packages/view/docs/VIEW-FORMAT.md) |
 | [`@jarenjs/app`](packages/app) | Applications as JSON documents: the compiled dispatch loop | [README](packages/app/README.md) · [FORMAT](packages/app/docs/APP-FORMAT.md) |
 | [`@jarenjs/md`](components/md) | Markdown + frontmatter as JSON documents: the parsing engine and the drop-in visual component | [README](components/md/README.md) · [FORMAT](components/md/docs/MD-FORMAT.md) |
+| [`@jarenjs/mermaid`](components/mermaid) | A native, headless Mermaid clone: diagrams-as-code → geometry-free JSON AST → pure-vnode SVG, bidirectional | [README](components/mermaid/README.md) · [FORMAT](components/mermaid/docs/MERMAID-FORMAT.md) |
 | [`@jarenjs/josl`](packages/josl) | 🧪 Research: JOSL, a streaming TOML superset, and JSONX (unpublished) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
 
 ### 🤓 @jarenjs/core — the foundation

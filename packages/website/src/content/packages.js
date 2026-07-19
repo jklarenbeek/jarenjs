@@ -21,6 +21,7 @@ const ENTRIES = [
   { name: '@jarenjs/view', dir: 'packages/view', blurb: 'The vnode format: UIs as JSON, a keyed DOM patcher and SSR.' },
   { name: '@jarenjs/app', dir: 'packages/app', blurb: 'Applications as JSON documents: the compiled dispatch loop.' },
   { name: '@jarenjs/md', dir: 'components/md', blurb: 'Markdown + frontmatter as JSON: the engine and this visual component.' },
+  { name: '@jarenjs/mermaid', dir: 'components/mermaid', blurb: 'A native, headless Mermaid clone: diagrams-as-code to pure-vnode SVG.' },
   { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset (research).' },
 ];
 

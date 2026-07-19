@@ -581,3 +581,45 @@ is a fixed point.
 `,
   },
 ];
+
+export const mermaidExamples = [
+  {
+    name: 'Flowchart',
+    source: `flowchart TD
+  A[Start] --> B{Is it working?}
+  B -->|Yes| C[Ship it]
+  B -->|No| D[Debug]
+  D --> B
+  C --> E((Done))`,
+  },
+  {
+    name: 'Sequence',
+    source: `sequenceDiagram
+  participant A as Alice
+  participant B as Bob
+  A->>+B: Authenticate
+  B-->>-A: Token
+  note over A,B: handshake complete
+  alt success
+    A->>B: proceed
+  else failure
+    A->>A: retry
+  end`,
+  },
+  {
+    name: 'State ⇄ workflow',
+    source: `stateDiagram-v2
+  [*] --> Idle
+  Idle --> Running : start
+  Running --> Idle : stop
+  Running --> [*]`,
+  },
+  {
+    name: 'Pie',
+    source: `pie showData
+  title Time spent
+  "Parsing" : 20
+  "Layout" : 35
+  "Rendering" : 45`,
+  },
+];

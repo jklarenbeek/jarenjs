@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-mermaid-ast/0.1",
+  "title": "Jaren Mermaid diagram document",
+  "description": "The DiagramDocument envelope and per-type AST vocabulary of @jarenjs/mermaid (normative prose in docs/MERMAID-FORMAT.md). Draft-neutral: no $ref siblings, no unevaluated*, no $dynamic*. The AST is geometry-free — layout is a separate pass.",
+  "type": "object",
+  "required": ["$mermaid", "diagram", "config", "ast", "meta"],
+  "properties": {
+    "$mermaid": { "const": "0.1" },
+    "diagram": { "type": "string" },
+    "config": { "type": "object" },
+    "ast": { "type": "object" },
+    "meta": {
+      "type": "object",
+      "required": ["hash", "direction", "title"],
+      "properties": {
+        "hash": { "type": "string" },
+        "direction": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "$defs": {
+    "flowNode": {
+      "type": "object",
+      "required": ["id", "label", "shape"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "shape": { "type": "string" }
+      }
+    },
+    "flowEdge": {
+      "type": "object",
+      "required": ["from", "to", "stroke", "head", "tail", "length", "label"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "stroke": { "enum": ["solid", "thick", "dotted"] },
+        "head": { "enum": ["none", "arrow", "circle", "cross"] },
+        "tail": { "enum": ["none", "arrow", "circle", "cross"] },
+        "length": { "type": "integer" },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "flowchartAst": {
+      "type": "object",
+      "required": ["direction", "nodes", "edges", "subgraphs", "classDefs", "classes", "styles"],
+      "properties": {
+        "direction": { "type": "string" },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/flowNode" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/flowEdge" } },
+        "subgraphs": { "type": "array" },
+        "classDefs": { "type": "array" },
+        "classes": { "type": "array" },
+        "styles": { "type": "array" }
+      }
+    },
+    "seqParticipant": {
+      "type": "object",
+      "required": ["id", "label", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "kind": { "enum": ["participant", "actor"] }
+      }
+    },
+    "sequenceAst": {
+      "type": "object",
+      "required": ["participants", "statements", "autonumber"],
+      "properties": {
+        "participants": { "type": "array", "items": { "$ref": "#/$defs/seqParticipant" } },
+        "statements": { "type": "array" },
+        "autonumber": { "type": "boolean" }
+      }
+    }
+  }
+}

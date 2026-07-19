@@ -16,6 +16,7 @@
  *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
  *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
  *   markdown.json     markdown.js       — @jarenjs/md vs marked/markdown-it/micromark (CommonMark spec)
+ *   mermaid.json      mermaid.js        — @jarenjs/mermaid coverage + parse-speed vs @mermaid-js/parser
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -46,7 +47,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml, markdown, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml, markdown, mermaid, qt3');
         process.exit(0);
         break;
       default:
@@ -401,6 +402,40 @@ function generateMarkdown(tmp, options) {
   };
 }
 
+function generateMermaid(tmp, options) {
+  const file = path.join(tmp, 'mermaid.json');
+  try {
+    runTool([
+      'benchmark/mermaid.js', '--profile',
+      '--iterations', String(options.quick ? 20 : 100),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: mermaid run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the optional @mermaid-js/parser head-to-head needs that benchmark devDependency)');
+    return null;
+  }
+  const raw = readJson(file);
+  const slimRows = (rows) => (rows ?? []).map((row) => ({
+    name: row.name,
+    results: Object.fromEntries(Object.entries(row.results).map(([k, v]) => [k, sig4(v)])),
+  }));
+  return {
+    ...raw,
+    profile: raw.profile === null ? null : {
+      iterations: raw.profile.iterations,
+      parse: slimRows(raw.profile.parse),
+      parseJison: slimRows(raw.profile.parseJison),
+      jaren: raw.profile.jaren.map((row) => ({
+        name: row.name,
+        parseMs: sig4(row.parseMs),
+        svgMs: sig4(row.svgMs),
+      })),
+    },
+  };
+}
+
 function generateQt3() {
   let stdout;
   try {
@@ -468,6 +503,11 @@ async function main() {
     if (markdown !== null)
       generated.markdown = markdown;
   }
+  if (!options.skip.has('mermaid')) {
+    const mermaid = generateMermaid(tmp, options);
+    if (mermaid !== null)
+      generated.mermaid = mermaid;
+  }
 
   // Skipped suites keep their previous meta entries (when a meta.json
   // exists), so partial regeneration never clobbers the overview.
@@ -530,6 +570,9 @@ async function main() {
       markdown: generated.markdown === undefined
         ? (previousMeta?.conformance?.markdown ?? null)
         : { examples: generated.markdown.examples, scorecard: generated.markdown.scorecard },
+      mermaid: generated.mermaid === undefined
+        ? (previousMeta?.conformance?.mermaid ?? null)
+        : { examples: generated.mermaid.examples, scorecard: generated.mermaid.scorecard },
     },
   };
   writeJson('meta.json', meta);

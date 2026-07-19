@@ -3,6 +3,7 @@
 
 import './styles.css';
 import '@jarenjs/md/styles/md.css';
+import '@jarenjs/mermaid/styles/mermaid.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { parseHash } from './lib/route.js';
 

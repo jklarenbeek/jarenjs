@@ -161,41 +161,33 @@ describe('highlightPlugin', function () {
   });
 });
 
-describe('mermaidPlugin', function () {
-  it('renders a deterministic SSR placeholder keyed by content hash', function () {
+describe('mermaidPlugin (native, TODO_18)', function () {
+  it('renders inline pure-vnode SVG with no injected instance or innerHTML', function () {
     const plugin = mermaidPlugin();
     const doc = parseMarkdown('```mermaid\ngraph TD; A-->B\n```\n', { plugins: [plugin] });
     const html = renderToString(mdToVnode(doc, { plugins: [plugin] }));
-    assert.match(html, /<div class="md-mermaid" data-md-hydrate="mermaid" data-md-hash="[a-z0-9]+"><pre class="md-mermaid-src">graph TD; A--&gt;B\n<\/pre><\/div>/);
-    // Same content, same markup: deterministic.
-    assert.equal(html, renderToString(mdToVnode(parseMarkdown('```mermaid\ngraph TD; A-->B\n```\n', { plugins: [plugin] }), { plugins: [plugin] })));
+    assert.match(html, /<div class="md-mermaid mermaid-block"[^>]*><svg/);
+    assert.equal(html.includes('<script'), false);
+    // Deterministic: same content, same markup.
+    assert.equal(html, renderToString(mdToVnode(
+      parseMarkdown('```mermaid\ngraph TD; A-->B\n```\n', { plugins: [plugin] }), { plugins: [plugin] })));
   });
 
-  it('hydrate renders through the injected instance and caches by hash', async function () {
-    let calls = 0;
-    const fake = {
-      initialize() {},
-      render: async (id, source) => {
-        calls++;
-        return { svg: `<svg data-id="${id}">${source.length}</svg>` };
-      },
-    };
-    const plugin = mermaidPlugin({ mermaid: fake });
-    const node = { type: 'mermaid', value: 'graph TD; A-->B\n', meta: null };
-    const el = { innerHTML: '' };
-    await /** @type {any} */ (plugin).hydrate(el, node, {});
-    assert.match(el.innerHTML, /^<svg data-id="md-mermaid-[a-z0-9]+">16<\/svg>$/);
-    const el2 = { innerHTML: '' };
-    await /** @type {any} */ (plugin).hydrate(el2, node, {});
-    assert.equal(el2.innerHTML, el.innerHTML);
-    assert.equal(calls, 1); // cached by content hash
-  });
-
-  it('hydrate is a no-op without an instance', async function () {
+  it('is a self-frozen MdPlugin-shaped object with no hydrate (render is complete)', function () {
     const plugin = mermaidPlugin();
-    const el = { innerHTML: 'untouched' };
-    await /** @type {any} */ (plugin).hydrate(el, { type: 'mermaid', value: 'x' }, {});
-    assert.equal(el.innerHTML, 'untouched');
+    assert.equal(Object.isFrozen(plugin), true);
+    assert.equal(plugin.name, 'mermaid');
+    assert.deepEqual([...plugin.fences], ['mermaid', 'mmd']);
+    assert.equal(plugin.node, 'mermaid');
+    assert.equal(typeof plugin.render, 'function');
+    assert.equal(/** @type {any} */ (plugin).hydrate, undefined);
+  });
+
+  it('renders an error vnode instead of throwing on a broken diagram', function () {
+    const plugin = mermaidPlugin();
+    const doc = parseMarkdown('```mermaid\nflowchart TD\n  A[oops\n```\n', { plugins: [plugin] });
+    const html = renderToString(mdToVnode(doc, { plugins: [plugin] }));
+    assert.match(html, /mm-error/);
   });
 
   it('claimed mermaid nodes round-trip through toMarkdown', function () {

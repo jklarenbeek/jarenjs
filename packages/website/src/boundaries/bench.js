@@ -23,6 +23,7 @@ export const SUITES = [
   { key: 'jsonpatch', label: 'JSON Patch' },
   { key: 'toml', label: 'JOSL / TOML' },
   { key: 'markdown', label: 'Markdown' },
+  { key: 'mermaid', label: 'Mermaid' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -46,6 +47,7 @@ export function deriveSuite(state, suite) {
     case 'jsonpatch': return patch(data);
     case 'toml': return toml(data);
     case 'markdown': return markdown(data);
+    case 'mermaid': return mermaid(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -324,6 +326,56 @@ function markdown(data) {
           cells: [p.name, formatMs(p.parseMs), `${p.vnodeNs} ns`],
         })),
         'Once compiled, the vnode projection is reference-stable: the view patcher skips an unchanged article in O(1) (~30 ns) — the re-render path the whole suite is built for.'));
+    }
+  }
+  return out;
+}
+
+function mermaid(data) {
+  const out = [];
+  if (data.scorecard !== undefined) {
+    const types = Object.keys(data.scorecard);
+    out.push(table(
+      `Coverage scorecard (${data.examples ?? '?'} corpus diagrams rendered to SVG without error)`,
+      ['Diagram type', 'Rendered'],
+      types.map((type) => ({
+        cells: [type, `${data.scorecard[type]?.rendered} / ${data.scorecard[type]?.total}`],
+        strong: type === 'flowchart' || type === 'sequence',
+      })),
+      'Flowchart and sequence are fully laid out; class/ER/state/gantt render as structured panels and pie as a chart. Secondary types (mindmap, gitGraph) parse-accept and render an honest "not yet laid out" placeholder — counted, not hidden.'));
+  }
+  const profile = data.profile;
+  if (profile !== undefined && profile !== null) {
+    const engines = data.engines ?? ['jaren-mermaid'];
+    if (Array.isArray(profile.parse) && profile.parse.length > 0) {
+      out.push(table(
+        `Parse-speed head-to-head — pie vs @mermaid-js/parser (${profile.iterations} iterations, ms/op; lower is better)`,
+        ['Diagram', ...engines],
+        profile.parse.map((p) => ({
+          cells: [p.name, ...engines.map((e) => formatMs(p.results[e]))],
+          strong: true,
+        })),
+        'The standalone @mermaid-js/parser is the Langium parser — it only covers the grammars migrated off Jison (pie among them) and cannot parse flowchart or sequence at all; those still run on Mermaid\'s in-tree Jison grammars (next table).'));
+    }
+    if (Array.isArray(profile.parseJison) && profile.parseJison.length > 0) {
+      const jEngines = ['jaren-mermaid', 'mermaid (jison)'];
+      out.push(table(
+        'Parse-speed head-to-head — flowchart / sequence vs mermaid.parse (Jison, ms/op; lower is better)',
+        ['Diagram', ...jEngines],
+        profile.parseJison.map((p) => ({
+          cells: [p.name, ...jEngines.map((e) => formatMs(p.results[e]))],
+          strong: true,
+        })),
+        'Mermaid parses flowchart and sequence with its original in-tree Jison grammars (mermaid.parse, DOM-coupled, run here under jsdom). @jarenjs/mermaid parses the same sources roughly two orders of magnitude faster — a synchronous, allocation-light char-code recursive descent vs a generated Jison parser plus type-detection and validation. mermaid.parse is heavy and noisy, so this is the full parse front-end, not a bare-grammar microbenchmark.'));
+    }
+    if (Array.isArray(profile.jaren)) {
+      out.push(table(
+        'Jaren-only: headless parse → layout → SVG (no browser)',
+        ['Diagram', 'parse → AST', 'parse → SVG string'],
+        profile.jaren.map((p) => ({
+          cells: [p.name, formatMs(p.parseMs), formatMs(p.svgMs)],
+        })),
+        'mermaid.js needs a browser DOM (getBBox) to render, so there is no fair full-render head-to-head; @jarenjs/mermaid produces a complete standalone SVG string in pure Node — a capability mermaid.js lacks.'));
     }
   }
   return out;

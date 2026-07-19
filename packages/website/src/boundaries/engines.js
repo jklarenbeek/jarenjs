@@ -34,13 +34,16 @@ import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
 import { toMarkdown } from '@jarenjs/md';
 import { md as MD } from './markdown.js';
+import { mermaid as MERMAID } from './mermaid.js';
+import { transformJson } from '@jarenjs/json/jslt';
+import stateToWorkflow from '@jarenjs/mermaid/stylesheets/state-to-workflow.jslt.json' with { type: 'json' };
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { cards, table, code, error, callout, details, markdown } from '../lib/nodes.js';
 import {
   pathExamples, pointerExamples, patchExamples, queryExamples,
   jsltExamples, jtltExamples, xqueryExamples, joslExamples,
-  markdownExamples,
+  markdownExamples, mermaidExamples,
 } from '../content/engineExamples.js';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -343,6 +346,35 @@ function runMarkdown(inputs) {
   }
 }
 
+function runMermaid(inputs) {
+  try {
+    const source = inputs.source ?? '';
+    const compiledRun = timed(() => MERMAID.compile(source));
+    const compiled = compiledRun.value;
+    const doc = compiled.doc;
+    const out = [
+      cards([
+        { title: 'Diagram', value: doc ? doc.diagram : 'error' },
+        { title: 'Compile', value: ms(compiledRun.ms), note: 'memoized by source' },
+        { title: 'Hash', value: doc ? doc.meta.hash : '—' },
+      ]),
+      // The rendered SVG is a ready-made vnode; reuse the markdown
+      // preview kind that splices a vnode in verbatim.
+      markdown('Rendered to pure-vnode SVG (headless, SSR-able)', MERMAID.view(source)),
+      details('AST (geometry-free JSON document)', [code(null, J(doc ? doc.ast : String(compiled.parseError?.message ?? 'parse error')))]),
+      details('Canonical Mermaid (toMermaid round-trip)', [code(null, compiled.toText())]),
+    ];
+    if (doc && doc.diagram === 'state') {
+      const workflow = transformJson(stateToWorkflow, doc);
+      out.push(details('Derived workflow / FSM (JSLT projection → @jarenjs/app)', [code(null, J(workflow))]));
+    }
+    return out;
+  }
+  catch (err) {
+    return [error(/** @type {any} */ (err), 'Mermaid error')];
+  }
+}
+
 //#endregion
 
 //#region descriptors & examples
@@ -434,6 +466,14 @@ export const ENGINE_DEFS = {
     ],
     run: runMarkdown,
   },
+  mermaid: {
+    label: 'Mermaid',
+    lead: 'Diagrams-as-code: a native, headless Mermaid clone parsed to a geometry-free JSON AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able with no browser, bidirectional (parseMermaid ⇄ toMermaid). A state diagram also projects to an @jarenjs/app workflow via JSLT.',
+    inputs: [
+      { key: 'source', title: 'Mermaid source', control: 'code', rows: 16 },
+    ],
+    run: runMermaid,
+  },
   josl: {
     label: 'JOSL',
     lead: 'The streaming TOML superset: JavaScript-obvious values, document-order events, round trips.',
@@ -500,6 +540,10 @@ export const ENGINE_EXAMPLES = {
     inputs: { text: e.text, mode: e.mode ?? 'josl' },
   })),
   markdown: markdownExamples.map((e) => ({
+    label: e.name,
+    inputs: { source: e.source },
+  })),
+  mermaid: mermaidExamples.map((e) => ({
     label: e.name,
     inputs: { source: e.source },
   })),

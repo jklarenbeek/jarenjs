@@ -72,7 +72,7 @@ describe('website — the site as one app document', function () {
     const { container } = mountSite();
     const html = serialize(container);
     assert.match(html, /JSON all the way down/);
-    assert.match(html, /One stack, ten engines/);
+    assert.match(html, /One stack, eleven engines/);
     assert.match(html, /nav-link active/);
   });
 
@@ -174,6 +174,7 @@ describe('website — the site as one app document', function () {
     const fixtures = {
       meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
       jsonquery: load('jsonquery'), jslt: load('jslt'), markdown: load('markdown'),
+      mermaid: load('mermaid'),
     };
     const { container, go } = mountSite({ fixtures });
 
@@ -204,9 +205,23 @@ describe('website — the site as one app document', function () {
     assert.match(html, /compiled pipeline/, 'the jaren-only pipeline table renders');
     assert.match(html, /marked/, 'contenders are listed');
 
+    go('#/benchmarks?suite=mermaid');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /Coverage scorecard/, 'the mermaid coverage scorecard renders');
+    assert.match(html, /vs mermaid\.parse \(Jison/, 'the flowchart/sequence Jison head-to-head renders');
+    assert.match(html, /headless parse/, 'the jaren-only headless pipeline table renders');
+
     go('#/benchmarks?suite=jsonpath');
     await tick();
     assert.match(serialize(container), /Compliance by group/);
+  });
+
+  it('renders a Mermaid fence as inline SVG through the shared md boundary', async function () {
+    const { md } = await import('../../packages/website/src/boundaries/markdown.js');
+    const html = renderToString(md.view('# Diagram\n\n```mermaid\nflowchart TD\n  A --> B\n```\n'));
+    assert.match(html, /<svg/, 'the mermaid fence renders inline SVG (dogfooded on the site)');
+    assert.doesNotMatch(html, /<script/);
   });
 
   it('O(change) rendering: an unrelated state change leaves page vnodes reference-equal', function () {

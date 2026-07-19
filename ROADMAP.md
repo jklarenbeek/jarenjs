@@ -126,6 +126,20 @@ motivates them where one exists.
 - [ ] **Streaming reference definitions** — the incremental parser binds `[ref]` links against definitions seen so far; a deferred-resolution pass at `end()` would close the gap with batch mode.
 - [ ] **Website integration** — a Markdown playground tab (parse → AST → JSLT → vnode, live), and the docs content pipeline could dogfood `loadMarkdown`.
 
+## @jarenjs/mermaid (new — 0.1 format)
+
+A native, headless Mermaid clone: diagrams-as-code → geometry-free JSON
+AST → pure-vnode SVG through `@jarenjs/view`, bidirectional
+(`parseMermaid` ⇄ `toMermaid`). The Markdown plugin renders `mermaid`
+fences inline, SSR-safe, replacing the old injection wrapper.
+
+- [x] **Flowchart + sequence** fully modeled (grammar + layout + render); class/ER/state/gantt/pie implemented (structured panels / chart).
+- [ ] **`foreignObject` / `htmlLabels:true`** — labels are SVG `<text>` in v1 because `@jarenjs/view` 0.1 has no `foreignObject`/`setAttributeNS`; revisit alongside VIEW-FORMAT §6/§7 for HTML labels and pixel-closer parity.
+- [ ] **Full layout for the secondary types** — class/ER/state/gantt render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
+- [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight edges; orthogonal edge routing, subgraph clustering and crossing reduction are the next levers.
+- [ ] **More domain projections** — the flagship `stateDiagram ⇄ @jarenjs/app` workflow ships; flowchart⇄DAG executor, sequence⇄orchestration/saga, ER⇄JSON-Schema+`@jarenjs/forms` are follow-ups on the same geometry-free-AST-as-model idea.
+- [ ] **Interactive hydration** — pan/zoom/tooltips as an optional client-only plugin (`hydrate` is a no-op today because the render is complete).
+
 ## LLM & structured-output profile
 
 - [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.

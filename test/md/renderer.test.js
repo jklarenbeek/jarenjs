@@ -2,9 +2,9 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { compileMarkdown, createMdRenderer } from '@jarenjs/md';
-import { mermaidPlugin, highlightPlugin } from '@jarenjs/md/plugins';
-import { renderToString } from '@jarenjs/view';
+import { compileMarkdown, createMdRenderer, hashContent } from '@jarenjs/md';
+import { highlightPlugin, definePlugin } from '@jarenjs/md/plugins';
+import { renderToString, h } from '@jarenjs/view';
 import { StubElement, StubText, createStubHost, serialize } from '../view/dom.stub.js';
 
 // The md renderer needs two DOM members the view stub does not model.
@@ -54,15 +54,15 @@ describe('createMdRenderer', function () {
 
   it('runs hydrate hooks after mount, once per content hash', async function () {
     const rendered = [];
-    const fake = {
-      initialize() {},
-      render: async (id, source) => {
-        rendered.push(source);
-        return { svg: '<svg>ok</svg>' };
-      },
-    };
-    const plugins = [mermaidPlugin({ mermaid: fake }), highlightPlugin()];
-    const src = '# D\n\n```mermaid\ngraph TD; A-->B\n```\n';
+    // A synthetic hydratable plugin; the native mermaid no longer
+    // hydrates (its render is complete, TODO_18 D2).
+    const widget = definePlugin({
+      name: 'widget', fences: ['widget'], node: 'widget',
+      render: (node, hh) => hh('div', { class: 'widget', 'data-md-hydrate': 'widget', 'data-md-hash': hashContent(node.value) }),
+      hydrate: async (el, node) => { rendered.push(node.value); el.innerHTML = '<svg>ok</svg>'; },
+    });
+    const plugins = [widget, highlightPlugin()];
+    const src = '# D\n\n```widget\ngraph TD; A-->B\n```\n';
     const { document, container } = createStubHost();
     const render = createMdRenderer({ container, document, plugins });
     render(compileMarkdown(src, { plugins }));
@@ -78,17 +78,18 @@ describe('createMdRenderer', function () {
 
   it('contains hydrate failures per element', async function () {
     const errors = [];
-    const fake = {
-      initialize() {},
-      render: async () => { throw new Error('diagram exploded'); },
-    };
-    const plugins = [mermaidPlugin({ mermaid: fake })];
+    const widget = definePlugin({
+      name: 'widget', fences: ['widget'], node: 'widget',
+      render: (node, hh) => hh('div', { class: 'widget', 'data-md-hydrate': 'widget', 'data-md-hash': hashContent(node.value) }),
+      hydrate: async () => { throw new Error('diagram exploded'); },
+    });
+    const plugins = [widget];
     const { document, container } = createStubHost();
     const render = createMdRenderer({
       container, document, plugins,
       onHydrateError: (err) => errors.push(err.message),
     });
-    render(compileMarkdown('```mermaid\nboom\n```\n', { plugins }));
+    render(compileMarkdown('```widget\nboom\n```\n', { plugins }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepEqual(errors, ['diagram exploded']);
   });

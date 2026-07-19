@@ -1,0 +1,20 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "states": [
+          { "$for": { "s": "$.states[*]" }, "$return": { "id": "$s", "label": "$s" } }
+        ],
+        "transitions": [
+          { "from": "[*]", "to": "$.initial", "event": null, "parent": null },
+          {
+            "$for": { "t": "$.transitions[*]" },
+            "$return": { "from": "$t.from", "to": "$t.to", "event": "$t.event", "parent": null }
+          }
+        ]
+      }
+    }
+  ]
+}

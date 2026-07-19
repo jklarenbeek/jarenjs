@@ -4,8 +4,8 @@ import * as assert from 'node:assert/strict';
 
 import { parseMarkdown, hashContent } from '@jarenjs/md';
 import { createMdComponent, DEFAULT_PLUGINS } from '@jarenjs/md/component';
-import { mermaidPlugin, highlightPlugin } from '@jarenjs/md/plugins';
-import { renderToString } from '@jarenjs/view';
+import { highlightPlugin, definePlugin } from '@jarenjs/md/plugins';
+import { renderToString, h } from '@jarenjs/view';
 
 describe('createMdComponent: view projection', function () {
   it('is reference-stable per source string (the O(change) contract)', function () {
@@ -87,21 +87,29 @@ describe('createMdComponent: app effects', function () {
   });
 });
 
+// A synthetic hydratable plugin exercises the generic hydrate machinery
+// (the native mermaid plugin no longer hydrates — its render is
+// complete, TODO_18 D2).
+const widgetPlugin = definePlugin({
+  name: 'widget',
+  fences: ['widget'],
+  node: 'widget',
+  render: (node) => h('div', { class: 'widget', 'data-md-hydrate': 'widget', 'data-md-hash': hashContent(node.value) }),
+  hydrate: async (el) => { el.innerHTML = '<svg>ok</svg>'; },
+});
+
 describe('createMdComponent: hydrate', function () {
   it('hydrates marked elements once per content hash', async function () {
-    let calls = 0;
-    const fake = {
-      initialize() {},
-      render: async () => { calls++; return { svg: '<svg>ok</svg>' }; },
-    };
-    const plugins = [highlightPlugin(), mermaidPlugin({ mermaid: fake })];
+    const plugins = [highlightPlugin(), widgetPlugin];
     const md = createMdComponent({ plugins });
-    const source = '```mermaid\ngraph TD; A-->B\n```\n';
+    const source = '```widget\ngraph TD; A-->B\n```\n';
     md.view(source); // indexes the hydratable node
     const hash = hashContent('graph TD; A-->B\n');
+    let calls = 0;
     const el = {
-      innerHTML: '',
-      getAttribute: (name) => (name === 'data-md-hydrate' ? 'mermaid' : hash),
+      set innerHTML(v) { this._html = v; calls++; },
+      get innerHTML() { return this._html ?? ''; },
+      getAttribute: (name) => (name === 'data-md-hydrate' ? 'widget' : hash),
     };
     const container = { querySelectorAll: () => [el] };
     md.hydrate(container);

@@ -23,6 +23,7 @@
     "@jarenjs/json": "file:../json",
     "@jarenjs/locales": "file:../locales",
     "@jarenjs/md": "file:../../components/md",
+    "@jarenjs/mermaid": "file:../../components/mermaid",
     "@jarenjs/refs": "file:../refs",
     "@jarenjs/validate": "file:../validate",
     "@jarenjs/view": "file:../view"

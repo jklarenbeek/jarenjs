@@ -20,6 +20,7 @@ export default defineConfig({
             '@jarenjs/view',
             '@jarenjs/app',
             '@jarenjs/md',
+            '@jarenjs/mermaid',
           ],
         },
       },
