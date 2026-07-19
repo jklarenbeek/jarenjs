@@ -12,6 +12,7 @@ import { HOME_RULES } from './home.js';
 import { BENCH_RULES } from './benchmarks.js';
 import { PLAYGROUND_RULES } from './playground.js';
 import { STATIC_RULES } from './staticpages.js';
+import { README_RULES } from './readme.js';
 import { UI_RULES } from './ui.js';
 
 export const STYLESHEET = {
@@ -24,6 +25,7 @@ export const STYLESHEET = {
     benchmarks: { unmatched: 'error' },
     docs: { unmatched: 'error' },
     examples: { unmatched: 'error' },
+    readme: { unmatched: 'error' },
     ui: { unmatched: 'error' },
     form: { unmatched: 'error' },
   },
@@ -33,6 +35,7 @@ export const STYLESHEET = {
     ...BENCH_RULES,
     ...PLAYGROUND_RULES,
     ...STATIC_RULES,
+    ...README_RULES,
     ...UI_RULES,
     ...createFormView({ root: '$.ui.pg.validate.form' }).map((rule) => ({ ...rule, mode: 'form' })),
   ],

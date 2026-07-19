@@ -26,7 +26,7 @@ const FIXTURES = {
 };
 
 /** A full headless site over the stub DOM with a controllable route. */
-function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelContext } = {}) {
+function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelContext, fetchText } = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
@@ -41,6 +41,7 @@ function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelConte
     fetchJson: (name) => (name in fixtures
       ? Promise.resolve(fixtures[name])
       : Promise.reject(new Error('404'))),
+    fetchText,
     applyTheme: (t) => themes.push(t),
     listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
     navigate: (h) => { hashes.push(h); routeCb(parseHash(h)); },
@@ -212,6 +213,75 @@ describe('website — the site as one app document', function () {
     const main = (v) => v.find((c) => Array.isArray(c) && c[0] === 'main');
     assert.strictEqual(main(after)[2], main(before)[2],
       'the entire home page subtree is === — the DOM patcher skips it in O(1)');
+  });
+
+  it('docs page lists package README buttons', function () {
+    const { container, go } = mountSite();
+    go('#/docs');
+    const html = serialize(container);
+    assert.match(html, /Package READMEs/);
+    assert.match(html, /class="readme-btn"[^>]*>@jarenjs\/forms/);
+    assert.match(html, /@jarenjs\/md/);
+  });
+
+  it('opens a README in the dialog, rendered by @jarenjs/md', async function () {
+    const README = '# @jarenjs/forms\n\nForm **model** generation.\n\n```js\nbuildFormModel(schema);\n```\n';
+    const urls = [];
+    const { container, go } = mountSite({
+      fetchText: (url) => { urls.push(url); return Promise.resolve(README); },
+    });
+    go('#/docs');
+    const button = find(container, (n) =>
+      n.tagName === 'button' && n.attributes?.get('class') === 'readme-btn'
+      && n.childNodes?.[0]?.nodeValue === '@jarenjs/core');
+    assert.notStrictEqual(button, undefined, 'a README button rendered');
+
+    // click a specific package to assert the URL wiring
+    const formsBtn = find(container, (n) =>
+      n.tagName === 'button' && n.childNodes?.[0]?.nodeValue === '@jarenjs/forms');
+    fire(formsBtn, 'click');
+    assert.match(serialize(container), /Loading README/, 'shows a loading state');
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /md-dialog/, 'the dialog is open');
+    assert.match(html, /class="md-dialog-title">@jarenjs\/forms/, 'titled by package');
+    assert.match(html, /article class="md"/, 'rendered by the md component');
+    assert.match(html, /<strong>model<\/strong>/, 'markdown emphasis rendered');
+    assert.match(html, /tok-id|tok-pun|language-js/, 'code block highlighted');
+    assert.deepStrictEqual(urls, [
+      'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main/packages/forms/README.md',
+    ]);
+
+    // the × button closes it
+    const close = find(container, (n) => n.attributes?.get('class') === 'md-dialog-close');
+    fire(close, 'click');
+    assert.doesNotMatch(serialize(container), /md-dialog/, 'closed');
+  });
+
+  it('the README dialog reports a fetch failure', async function () {
+    const { container, go } = mountSite({
+      fetchText: () => Promise.reject(new Error('404 Not Found')),
+    });
+    go('#/docs');
+    const btn = find(container, (n) =>
+      n.tagName === 'button' && n.attributes?.get('class') === 'readme-btn');
+    fire(btn, 'click');
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /Could not load the README/);
+    assert.match(html, /404 Not Found/);
+  });
+
+  it('the backdrop closes the README dialog', async function () {
+    const { container, go } = mountSite({
+      fetchText: () => Promise.resolve('# Hi\n'),
+    });
+    go('#/docs');
+    fire(find(container, (n) => n.attributes?.get('class') === 'readme-btn'), 'click');
+    await tick();
+    assert.match(serialize(container), /md-dialog-backdrop/);
+    fire(find(container, (n) => n.attributes?.get('class') === 'md-dialog-backdrop'), 'click');
+    assert.doesNotMatch(serialize(container), /md-dialog/, 'backdrop click closed it');
   });
 
   it('parseHash covers the route grammar', function () {

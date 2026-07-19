@@ -31,6 +31,8 @@ import { encodeShare, decodeShare } from '../lib/share.js';
  * @property {(flush: () => void) => void} [schedule] - Render scheduler.
  * @property {string} [initialTheme] - 'light' | 'dark'.
  * @property {(name: string) => Promise<any>} fetchJson - Benchmark file loader.
+ * @property {(url: string) => Promise<string>} [fetchText] - Raw-text
+ *   loader for package READMEs (the dialog); omit for no-network hosts.
  * @property {(theme: string) => void} [applyTheme]
  * @property {(cb: (route: any) => void) => (() => void) | void} [listenHash]
  *   Must call `cb` once immediately with the current route, then on
@@ -138,7 +140,37 @@ export function createSiteApp(env) {
         dispatch('eng/load', { engine: props.engine, inputs: props.inputs });
       }
     },
+    // fetch a package README as raw text (cached per URL); the viewModel
+    // parses + renders it through the @jarenjs/md component
+    'readme-load': (props, dispatch) => {
+      if (env.fetchText === undefined) {
+        dispatch(props.error, 'README loading is unavailable in this environment.');
+        return;
+      }
+      const cached = readmeCache.get(props.url);
+      if (cached !== undefined) {
+        dispatch(props.done, cached);
+        return;
+      }
+      env.fetchText(props.url).then(
+        (text) => {
+          readmeCache.set(props.url, text);
+          // ignore a stale response if the dialog moved on or closed
+          const readme = app.getState().readme;
+          if (readme.open && readme.url === props.url) dispatch(props.done, text);
+        },
+        (err) => {
+          const readme = app.getState().readme;
+          if (readme.open && readme.url === props.url) {
+            dispatch(props.error, /** @type {Error} */ (err)?.message ?? String(err));
+          }
+        },
+      );
+    },
   };
+
+  /** README text cache, keyed by URL (a reopen is instant). */
+  const readmeCache = new Map();
 
   app = createApp({
     $app: '0.1',

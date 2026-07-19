@@ -118,6 +118,14 @@ motivates them where one exists.
 - [x] **Benchmark: view + app vs hyperapp/preact** — `benchmark/view.js` (`npm run benchmark:view`): SSR-equality-gated comparison of view production and SSR vs hyperapp and preact, plus the jaren-only frame-cost row on the stub DOM. Headlines (1000 rows, Node v22): unchanged document = O(1) frame; memo cuts a one-row frame 1.7×; the generic dispatcher is ~9× preact's `h()` on full builds — the abstraction's honest price, to be attacked by prepass pruning.
 - [x] **Join the release train** — `@jarenjs/view` and `@jarenjs/app` are in `pack:check`/`publish`; the 0.1 formats earned it by powering the deployed website.
 
+## @jarenjs/md (new — 0.1 format)
+
+- [ ] **CommonMark conformance push** — 526/655 spec examples pass today (`npm run benchmark:markdown --score-only --verbose` lists the failures); the largest deliberate class is raw-HTML pass-through (the vnode format has no unescaped output), the rest are honest dialect gaps (link-label edge cases, exotic emphasis nestings, HTML block subtleties) worth picking off.
+- [ ] **Parse-speed workstream** — ~0.3 ms per 10 kB to AST; the block scan re-slices lines per container level and the inline phase re-buffers leaf text; a column-offset scanner (no intermediate slices) is the next lever toward the sub-200 µs target.
+- [ ] **Sanitizer-backed raw HTML** — an opt-in `html` mode that parses raw HTML nodes into vnodes through an injected sanitizer, replacing today's skip/text-only choice.
+- [ ] **Streaming reference definitions** — the incremental parser binds `[ref]` links against definitions seen so far; a deferred-resolution pass at `end()` would close the gap with batch mode.
+- [ ] **Website integration** — a Markdown playground tab (parse → AST → JSLT → vnode, live), and the docs content pipeline could dogfood `loadMarkdown`.
+
 ## LLM & structured-output profile
 
 - [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.

@@ -1,0 +1,120 @@
+/*
+ * @jarenjs/md — the visual component's stylesheet.
+ *
+ * Scoped under the `.md` article the vnode emitter produces, plus the
+ * `tok-*` token classes of the highlight plugin (docs/PLUGINS.md §6.2)
+ * and the mermaid placeholder. Colors come in a light set and a dark
+ * override activated by a `.dark` class on any ancestor (the
+ * convention the jarenjs website uses); everything sizes in em so the
+ * component inherits its host's type scale.
+ */
+
+.md {
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+  line-height: 1.25;
+  margin: 1.4em 0 0.5em;
+}
+.md h1 { font-size: 1.7em; }
+.md h2 { font-size: 1.4em; }
+.md h3 { font-size: 1.2em; }
+
+.md p, .md ul, .md ol, .md table { margin: 0.6em 0; }
+.md ul, .md ol { padding-left: 1.5em; }
+.md li > ul, .md li > ol { margin: 0.15em 0; }
+.md li { margin: 0.15em 0; }
+
+.md blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 1em;
+  border-left: 3px solid var(--md-rule, #d0d4dc);
+  color: var(--md-muted, #5b6472);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--md-rule, #d0d4dc);
+  margin: 1.4em 0;
+}
+
+.md a { color: var(--md-link, #2456c4); }
+
+.md code {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
+  font-size: 0.92em;
+  background: var(--md-code-bg, #f2f4f8);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.md pre {
+  margin: 0.8em 0;
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  background: var(--md-code-bg, #f2f4f8);
+  border-radius: 8px;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.88em;
+}
+
+.md table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.md th, .md td {
+  border: 1px solid var(--md-rule, #d0d4dc);
+  padding: 0.35em 0.7em;
+}
+.md th { background: var(--md-code-bg, #f2f4f8); }
+
+.md img { max-width: 100%; }
+
+.md input[type='checkbox'] { margin-right: 0.4em; }
+
+/* --- highlight plugin token colors (PLUGINS.md §6.2) --------------- */
+
+.md .tok-kw  { color: var(--md-tok-kw, #a626a4); }
+.md .tok-str { color: var(--md-tok-str, #50a14f); }
+.md .tok-num { color: var(--md-tok-num, #b76b01); }
+.md .tok-com { color: var(--md-tok-com, #8b919c); font-style: italic; }
+.md .tok-pun { color: var(--md-tok-pun, #526069); }
+.md .tok-op  { color: var(--md-tok-op, #0184bc); }
+.md .tok-lit { color: var(--md-tok-lit, #b76b01); }
+
+/* --- mermaid placeholder / upgrade (PLUGINS.md §6.1) --------------- */
+
+.md-mermaid {
+  margin: 0.8em 0;
+  text-align: center;
+}
+.md-mermaid .md-mermaid-src {
+  text-align: left;
+  color: var(--md-muted, #5b6472);
+}
+.md-mermaid svg { max-width: 100%; }
+
+/* --- dark scheme --------------------------------------------------- */
+
+.dark .md, .md.dark {
+  --md-rule: #39414e;
+  --md-muted: #9aa4b2;
+  --md-link: #7aa2ff;
+  --md-code-bg: #1d232c;
+  --md-tok-kw: #c678dd;
+  --md-tok-str: #98c379;
+  --md-tok-num: #d19a66;
+  --md-tok-com: #7f848e;
+  --md-tok-pun: #9aa4b2;
+  --md-tok-op: #56b6c2;
+  --md-tok-lit: #d19a66;
+}

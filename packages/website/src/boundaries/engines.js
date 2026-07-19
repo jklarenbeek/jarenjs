@@ -32,12 +32,15 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
+import { toMarkdown } from '@jarenjs/md';
+import { md as MD } from './markdown.js';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
-import { cards, table, code, error, callout, details } from '../lib/nodes.js';
+import { cards, table, code, error, callout, details, markdown } from '../lib/nodes.js';
 import {
   pathExamples, pointerExamples, patchExamples, queryExamples,
   jsltExamples, jtltExamples, xqueryExamples, joslExamples,
+  markdownExamples,
 } from '../content/engineExamples.js';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -310,6 +313,36 @@ function runJosl(inputs) {
   }
 }
 
+function runMarkdown(inputs) {
+  try {
+    const source = inputs.source ?? '';
+    const compiledRun = timed(() => MD.compile(source));
+    const compiled = compiledRun.value;
+    const doc = compiled.doc;
+    let blockCount = 0;
+    let nodeCount = 0;
+    compiled.walk(() => { nodeCount++; });
+    blockCount = doc.ast.length;
+    return [
+      cards([
+        { title: 'Blocks', value: String(blockCount) },
+        { title: 'AST nodes', value: String(nodeCount) },
+        { title: 'Compile', value: ms(compiledRun.ms), note: 'memoized by source' },
+        { title: 'Frontmatter', value: doc.frontmatter === null ? 'none' : (doc.meta.frontmatterLang ?? 'yes') },
+      ]),
+      markdown('Rendered through @jarenjs/view', MD.view(source)),
+      details('AST (the JSON document)', [code(null, J(doc.ast))]),
+      details('Canonical Markdown (toMarkdown)', [code(null, toMarkdown(doc))]),
+      ...(doc.frontmatter !== null
+        ? [details('Frontmatter (plain JSON)', [code(null, J(doc.frontmatter))])]
+        : []),
+    ];
+  }
+  catch (err) {
+    return [error(/** @type {any} */ (err), 'Markdown error')];
+  }
+}
+
 //#endregion
 
 //#region descriptors & examples
@@ -393,6 +426,14 @@ export const ENGINE_DEFS = {
     ],
     run: runXQuery,
   },
+  markdown: {
+    label: 'Markdown',
+    lead: 'The inverse of JTLT: Markdown + frontmatter parsed into a JSON AST and rendered live through @jarenjs/view, syntax highlighting included.',
+    inputs: [
+      { key: 'source', title: 'Markdown source', control: 'code', rows: 16 },
+    ],
+    run: runMarkdown,
+  },
   josl: {
     label: 'JOSL',
     lead: 'The streaming TOML superset: JavaScript-obvious values, document-order events, round trips.',
@@ -457,6 +498,10 @@ export const ENGINE_EXAMPLES = {
   josl: joslExamples.map((e) => ({
     label: e.name,
     inputs: { text: e.text, mode: e.mode ?? 'josl' },
+  })),
+  markdown: markdownExamples.map((e) => ({
+    label: e.name,
+    inputs: { source: e.source },
   })),
 };
 

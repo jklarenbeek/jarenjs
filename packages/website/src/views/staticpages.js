@@ -13,6 +13,9 @@ export const STATIC_RULES = [
       ['nav', { class: 'docs-nav' },
         ['h1', {}, 'Docs'],
         [{ $apply: '$.sections[*]' }],
+        ['h2', { class: 'docs-nav-heading' }, 'Package READMEs'],
+        ['p', { class: 'docs-nav-note' }, 'Read any package’s README, rendered live by @jarenjs/md.'],
+        ['div', { class: 'docs-readmes' }, [{ $apply: '$.packages[*]' }]],
       ],
       ['article', { class: 'docs-article' },
         ['h2', {}, '$.section.title'],
@@ -26,6 +29,15 @@ export const STATIC_RULES = [
       href: '$.href',
       class: { $if: ['$.active', 'docs-link active', 'docs-link'] },
     }, '$.title'],
+  },
+  {
+    match: '$.ui.docs.packages[*]', mode: 'docs',
+    body: ['button', {
+      type: 'button',
+      class: 'readme-btn',
+      title: '$.blurb',
+      on: { click: { action: 'readme/open', with: { title: '$.name', url: '$.url' } } },
+    }, '$.name'],
   },
 
   // ---- examples ----

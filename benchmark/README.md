@@ -26,7 +26,7 @@ number in a README performance table names the command that produced it.
 
 ## Test suites (git submodules)
 
-Four official suites are vendored as submodules. After cloning, initialize
+Five official suites are vendored as submodules. After cloning, initialize
 the ones you need:
 
 ```bash
@@ -34,6 +34,7 @@ git submodule update --init benchmark/suite            # JSON-Schema-Test-Suite
 git submodule update --init benchmark/jsonpath-suite   # JSONPath Compliance Test Suite
 git submodule update --init benchmark/qt3tests         # W3C QT3 (XQuery/XPath 3.1), ~60 MB
 git submodule update --init benchmark/toml-test-suite  # toml-test (TOML 1.0.0)
+git submodule update --init benchmark/commonmark-spec  # CommonMark spec (embedded examples)
 ```
 
 | Path | Suite |
@@ -42,6 +43,7 @@ git submodule update --init benchmark/toml-test-suite  # toml-test (TOML 1.0.0)
 | `benchmark/jsonpath-suite/` | [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) — drives `jsonpath.js` (703 tests, normalized paths included) |
 | `benchmark/qt3tests/` | [W3C QT3 tests](https://github.com/w3c/qt3tests) — drives `qt3-runner.js` (31,821 cases; convert once with `npm run qt3:convert`) |
 | `benchmark/toml-test-suite/` | [toml-test](https://github.com/toml-lang/toml-test) — drives `toml.js` and `test/josl/compliance.test.js` (709 TOML 1.0.0 cases via `tests/files-toml-1.0.0`) |
+| `benchmark/commonmark-spec/` | [CommonMark spec](https://github.com/commonmark/commonmark-spec) — drives `markdown.js` (655 examples extracted from `spec.txt`) |
 
 ## Running the unit tests
 
@@ -317,6 +319,38 @@ node benchmark/jslt.js --profile --scale
 
 npm shortcuts: `npm run benchmark:jslt`, `npm run benchmark:jslt:profile`.
 
+## markdown.js — @jarenjs/md vs marked/markdown-it/micromark
+
+Compliance scorecard and performance comparison for the Markdown engine in
+`components/md/`. The scorecard extracts the 655 examples embedded in the
+official CommonMark `spec.txt` (submodule) and compares each engine's HTML
+after the spec's whitespace normalization. Two fairness notes are built in:
+`@jarenjs/md` is scored on its *pragmatic dialect* (components/md/docs/
+MD-FORMAT.md §1.3) — its number is honest coverage, not a compliance claim —
+and examples that require raw HTML pass-through can never pass, because the
+vnode format has no unescaped output by design. Performance measures
+parse + render-to-HTML (every engine's natural unit) over synthetic
+documents at ~2/10/100 kB, with GFM enabled for the engines that support
+it; `--profile` adds jaren-only rows for parse-to-AST and the compiled
+document's cached vnode fast path (O(1) once built — the row the view
+patcher actually consumes).
+
+```bash
+git submodule update --init benchmark/commonmark-spec   # once
+
+# Scorecard + performance
+node benchmark/markdown.js
+
+# Only one half; more iterations; failing example numbers
+node benchmark/markdown.js --score-only --verbose
+node benchmark/markdown.js --perf-only --profile --iterations 500
+
+# Restrict engines
+node benchmark/markdown.js --engines jaren,markdown-it
+```
+
+npm shortcut: `npm run benchmark:markdown`.
+
 ## qt3-runner.js — the W3C QT3 scorecard
 
 Runs the complete W3C QT3 suite (31,821 XQuery/XPath 3.1 test cases) against
@@ -337,7 +371,8 @@ documented in [qt3-README.md](./qt3-README.md).
 ## Workspace notes
 
 - Competitor engines (`ajv`, `json-p3`, `fontoxpath`, `jsonata`,
-  `jsonpointer`, `fast-xml-parser`) are devDependencies of this benchmark
+  `jsonpointer`, `fast-xml-parser`, `marked`, `markdown-it`, `micromark`)
+  are devDependencies of this benchmark
   workspace only — the `packages/*` workspaces stay zero-dependency.
 - Adaptor files under [`adaptors/`](./adaptors/) express each scenario
   idiomatically per engine and document the fairness decisions (e.g.

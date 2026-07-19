@@ -19,6 +19,7 @@ export default defineConfig({
             '@jarenjs/locales',
             '@jarenjs/view',
             '@jarenjs/app',
+            '@jarenjs/md',
           ],
         },
       },

@@ -103,3 +103,30 @@ alwaysString('Jaren', '/name');
 // Named type exports of @jarenjs/refs
 const draft: SchemaDraftInfo = getSchemaDraftByVersion(2020);
 void `${draft.draft} (${draft.schema.length} schemas)`;
+
+// @jarenjs/md — parse, compile, project, plugins
+import {
+  parseMarkdown,
+  compileMarkdown,
+  toMarkdown,
+  mdToVnode,
+  walkAst,
+  parseFrontmatter,
+  definePlugin,
+  loadMarkdown,
+} from '@jarenjs/md';
+import { highlightPlugin, mermaidPlugin } from '@jarenjs/md/plugins';
+
+const mdPlugins = [highlightPlugin(), mermaidPlugin()];
+const mdDoc = parseMarkdown('# Hi *there*', { plugins: mdPlugins });
+void mdDoc.meta.hash;
+const compiledMd = compileMarkdown('# Hi', { retainSource: false });
+void compiledMd.toVnode();
+void compiledMd.externals();
+void toMarkdown(mdDoc);
+void mdToVnode(mdDoc, { plugins: mdPlugins });
+walkAst(mdDoc.ast, (node) => void node.type);
+const fm = parseFrontmatter('---\ntitle: x\n---\nbody');
+void `${fm.lang}: ${JSON.stringify(fm.data)} :: ${fm.body}`;
+void definePlugin({ name: 'noop-plugin' });
+void (async () => (await loadMarkdown('https://example.com/a.md')).frontmatter);

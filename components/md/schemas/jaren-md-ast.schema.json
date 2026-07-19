@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-md-ast/0.1",
+  "title": "Jaren Markdown document",
+  "description": "The MdDocument envelope and AST node vocabulary of @jarenjs/md (normative prose in docs/MD-FORMAT.md). Core node types validate strictly; unknown types pass as extension nodes so compiled-in plugins can extend the vocabulary.",
+  "type": "object",
+  "required": ["$md", "frontmatter", "ast", "meta"],
+  "properties": {
+    "$md": { "const": "0.1" },
+    "frontmatter": true,
+    "ast": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/blockNode" }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["sourceUrl", "hash"],
+      "properties": {
+        "sourceUrl": { "type": ["string", "null"] },
+        "hash": { "type": "string" },
+        "frontmatterLang": { "enum": ["yaml", "json", "toml", null] }
+      }
+    }
+  },
+  "$defs": {
+    "blockNode": {
+      "anyOf": [
+        { "$ref": "#/$defs/paragraph" },
+        { "$ref": "#/$defs/heading" },
+        { "$ref": "#/$defs/thematicBreak" },
+        { "$ref": "#/$defs/blockquote" },
+        { "$ref": "#/$defs/list" },
+        { "$ref": "#/$defs/code" },
+        { "$ref": "#/$defs/html" },
+        { "$ref": "#/$defs/table" },
+        { "$ref": "#/$defs/custom" },
+        { "$ref": "#/$defs/extensionNode" }
+      ]
+    },
+    "inlineNode": {
+      "anyOf": [
+        { "$ref": "#/$defs/text" },
+        { "$ref": "#/$defs/emphasis" },
+        { "$ref": "#/$defs/strong" },
+        { "$ref": "#/$defs/strikethrough" },
+        { "$ref": "#/$defs/link" },
+        { "$ref": "#/$defs/image" },
+        { "$ref": "#/$defs/inlineCode" },
+        { "$ref": "#/$defs/break" },
+        { "$ref": "#/$defs/softBreak" },
+        { "$ref": "#/$defs/html" },
+        { "$ref": "#/$defs/custom" },
+        { "$ref": "#/$defs/extensionNode" }
+      ]
+    },
+    "inlineChildren": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/inlineNode" }
+    },
+    "blockChildren": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/blockNode" }
+    },
+    "paragraph": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "paragraph" },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "heading": {
+      "type": "object",
+      "required": ["type", "depth", "children"],
+      "properties": {
+        "type": { "const": "heading" },
+        "depth": { "type": "integer", "minimum": 1, "maximum": 6 },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "thematicBreak": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "thematicBreak" } }
+    },
+    "blockquote": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "blockquote" },
+        "children": { "$ref": "#/$defs/blockChildren" }
+      }
+    },
+    "list": {
+      "type": "object",
+      "required": ["type", "ordered", "start", "tight", "children"],
+      "properties": {
+        "type": { "const": "list" },
+        "ordered": { "type": "boolean" },
+        "start": { "type": ["integer", "null"] },
+        "tight": { "type": "boolean" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/listItem" }
+        }
+      }
+    },
+    "listItem": {
+      "type": "object",
+      "required": ["type", "checked", "children"],
+      "properties": {
+        "type": { "const": "listItem" },
+        "checked": { "type": ["boolean", "null"] },
+        "children": { "$ref": "#/$defs/blockChildren" }
+      }
+    },
+    "code": {
+      "type": "object",
+      "required": ["type", "lang", "meta", "value"],
+      "properties": {
+        "type": { "const": "code" },
+        "lang": { "type": ["string", "null"] },
+        "meta": { "type": ["string", "null"] },
+        "value": { "type": "string" }
+      }
+    },
+    "html": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "const": "html" },
+        "value": { "type": "string" }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["type", "align", "children"],
+      "properties": {
+        "type": { "const": "table" },
+        "align": {
+          "type": "array",
+          "items": { "enum": ["left", "right", "center", null] }
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tableRow" }
+        }
+      }
+    },
+    "tableRow": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "tableRow" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tableCell" }
+        }
+      }
+    },
+    "tableCell": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "tableCell" },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "text": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "const": "text" },
+        "value": { "type": "string" }
+      }
+    },
+    "emphasis": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "emphasis" },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "strong": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "strong" },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "strikethrough": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "strikethrough" },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["type", "url", "title", "children"],
+      "properties": {
+        "type": { "const": "link" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["type", "url", "title", "alt"],
+      "properties": {
+        "type": { "const": "image" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "alt": { "type": "string" }
+      }
+    },
+    "inlineCode": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "const": "inlineCode" },
+        "value": { "type": "string" }
+      }
+    },
+    "break": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "break" } }
+    },
+    "softBreak": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "softBreak" } }
+    },
+    "custom": {
+      "type": "object",
+      "required": ["type", "name", "data"],
+      "properties": {
+        "type": { "const": "custom" },
+        "name": { "type": "string" },
+        "data": true,
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/blockNode" }
+        }
+      }
+    },
+    "extensionNode": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "not": {
+            "enum": [
+              "paragraph", "heading", "thematicBreak", "blockquote",
+              "list", "listItem", "code", "html", "table", "tableRow",
+              "tableCell", "text", "emphasis", "strong", "strikethrough",
+              "link", "image", "inlineCode", "break", "softBreak", "custom"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

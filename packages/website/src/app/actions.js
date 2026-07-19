@@ -162,6 +162,37 @@ export const ACTIONS = {
   // examples page: load an example into the playground and go there
   'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },
 
+  // the package-README dialog: open (fetch), receive, fail, close
+  'readme/open': {
+    patch: [
+      { op: 'replace', path: '/readme/open', value: true },
+      { op: 'replace', path: '/readme/title', value: '$payload.title' },
+      { op: 'replace', path: '/readme/url', value: '$payload.url' },
+      { op: 'replace', path: '/readme/status', value: 'loading' },
+      { op: 'replace', path: '/readme/source', value: null },
+      { op: 'replace', path: '/readme/message', value: null },
+    ],
+    effects: [{
+      run: 'readme-load',
+      with: { url: '$payload.url', done: 'readme/loaded', error: 'readme/failed' },
+    }],
+  },
+  'readme/loaded': {
+    patch: [
+      { op: 'replace', path: '/readme/source', value: '$payload' },
+      { op: 'replace', path: '/readme/status', value: 'ready' },
+    ],
+  },
+  'readme/failed': {
+    patch: [
+      { op: 'replace', path: '/readme/status', value: 'error' },
+      { op: 'replace', path: '/readme/message', value: '$payload' },
+    ],
+  },
+  'readme/close': {
+    patch: [{ op: 'replace', path: '/readme/open', value: false }],
+  },
+
   // the generated form writes through the standard form actions
   ...createFormActions({ dataPointer: '/pg/data' }),
 };

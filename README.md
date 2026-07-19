@@ -117,6 +117,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms error messages | [README](packages/locales/README.md) |
 | [`@jarenjs/view`](packages/view) | The vnode format: UIs as JSON, with a keyed DOM patcher and SSR | [README](packages/view/README.md) · [FORMAT](packages/view/docs/VIEW-FORMAT.md) |
 | [`@jarenjs/app`](packages/app) | Applications as JSON documents: the compiled dispatch loop | [README](packages/app/README.md) · [FORMAT](packages/app/docs/APP-FORMAT.md) |
+| [`@jarenjs/md`](components/md) | Markdown + frontmatter as JSON documents: the parsing engine and the drop-in visual component | [README](components/md/README.md) · [FORMAT](components/md/docs/MD-FORMAT.md) |
 | [`@jarenjs/josl`](packages/josl) | 🧪 Research: JOSL, a streaming TOML superset, and JSONX (unpublished) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
 
 ### 🤓 @jarenjs/core — the foundation
@@ -154,6 +155,10 @@ The Jaren vnode format — text, `[tag, props?, ...children]` elements, spliced 
 ### 🌀 @jarenjs/app — applications as JSON documents
 
 [Hyperapp](https://github.com/jorgebucaran/hyperapp)'s dispatch loop rebuilt on the suite, with every slot a compiled Jaren document: the view is a JSLT stylesheet producing vnodes, actions are query documents producing transitions (next state or an RFC 6902 patch, computed from `$`, `$event`, `$payload`), subscriptions carry EBV `when` queries, and JavaScript enters only at named registries (effects, subscriptions, `compileTypeTest`, `validateState`). The whole app — state, view, actions — is one serializable JSON value: snapshot it, replay it, validate it, or generate it under constrained decoding. The contract lives in [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md). See [packages/app](packages/app/README.md).
+
+### 📄 @jarenjs/md — Markdown as JSON documents
+
+Where JTLT turns JSON into Markdown, `@jarenjs/md` is the inverse arrow: a from-scratch, zero-dependency parser (CommonMark core + GFM tables/strikethrough/task lists + YAML/JSON/TOML frontmatter) whose output is a plain JSON AST published as a schema (`jaren-md-ast.schema.json`) — transformable with JSLT, addressable with queries, rendered by `@jarenjs/view` with content-hash keys and structural sharing so unchanged blocks patch in O(1). Extensibility is compile-time plugins (mermaid and a built-in syntax highlighter ship as the reference pair), loading is a lazy URL loader with caching, AbortSignal and block-by-block streaming, and `toMarkdown` prints canonical round-trip text. The scorecard against the official CommonMark examples runs in the benchmark workspace (`npm run benchmark:markdown`). See [components/md](components/md/README.md).
 
 ### 🧪 @jarenjs/josl — JOSL & JSONX (research experiment)
 

@@ -57,6 +57,8 @@ export const SHELL_RULES = [
         { $apply: ['$.ui.examples', 'examples'] },
       ],
       footer,
+      // the package-README overlay: absent (renders nothing) until opened
+      { $apply: ['$.ui.readme', 'readme'] },
     ],
   },
   {

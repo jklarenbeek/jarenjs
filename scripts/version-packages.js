@@ -10,6 +10,7 @@ const packageFiles = [
   'packages/locales/package.json',
   'packages/view/package.json',
   'packages/app/package.json',
+  'components/md/package.json',
 ];
 
 // private workspaces that are never versioned but whose semver ranges on

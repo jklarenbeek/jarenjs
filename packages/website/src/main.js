@@ -2,6 +2,7 @@
 /** Browser bootstrap: real environment in, one running app document out. */
 
 import './styles.css';
+import '@jarenjs/md/styles/md.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { parseHash } from './lib/route.js';
 
@@ -22,6 +23,12 @@ createSiteApp({
   fetchJson: (name) =>
     fetch(`${BASE}benchmarks/${name}.json`).then((response) => (
       response.ok ? response.json() : Promise.reject(new Error(String(response.status)))
+    )),
+  fetchText: (url) =>
+    fetch(url).then((response) => (
+      response.ok
+        ? response.text()
+        : Promise.reject(new Error(`${response.status} ${response.statusText}`))
     )),
   applyTheme: (next) => {
     document.documentElement.classList.toggle('dark', next === 'dark');

@@ -44,7 +44,7 @@ const byClass = (container, cls) => find(container, (n) => n.attributes?.get('cl
 describe('website — the generic engine playgrounds', function () {
   it('renders every engine tab live from its descriptor', function () {
     const { container, go } = mountSite();
-    for (const engine of ['path', 'pointer', 'patch', 'query', 'jslt', 'jtlt', 'xquery', 'josl']) {
+    for (const engine of ['path', 'pointer', 'patch', 'query', 'jslt', 'jtlt', 'xquery', 'josl', 'markdown']) {
       go(`#/playground?engine=${engine}`);
       const html = serialize(container);
       assert.match(html, /pg-grid two/, `${engine}: input/result grid renders`);
@@ -87,6 +87,22 @@ describe('website — the generic engine playgrounds', function () {
     const select = find(container, (n) => n.tagName === 'select');
     fire(select, 'change', { target: { value: 'diff' } });
     assert.match(serialize(container), /Target document/, 'diff-mode field appeared');
+  });
+
+  it('markdown engine: live preview through the @jarenjs/md component', function () {
+    const { app, container, go } = mountSite();
+    go('#/playground?engine=markdown');
+    const html = serialize(container);
+    assert.match(html, /article class="md"/, 'the component article rendered');
+    assert.match(html, /Markdown, as JSON/, 'the first example parsed');
+    assert.match(html, /tok-kw/, 'the highlight plugin emitted token spans');
+    assert.match(html, /Canonical Markdown/, 'the round-trip card rendered');
+    const editor = find(container, (n) => n.tagName === 'textarea');
+    fire(editor, 'input', { target: { value: '# Live *edit*\n\n- re-parsed\n' } });
+    const edited = serialize(container);
+    assert.match(edited, /Live /, 'the preview re-rendered from the edit');
+    assert.match(edited, /<em>edit<\/em>/, 'inline emphasis rendered');
+    assert.strictEqual(app.getState().eng.markdown.source, '# Live *edit*\n\n- re-parsed\n');
   });
 
   it('example chips load complete input sets', function () {

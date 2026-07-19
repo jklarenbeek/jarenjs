@@ -10,3 +10,6 @@
 [submodule "benchmark/toml-test-suite"]
 	path = benchmark/toml-test-suite
 	url = https://github.com/toml-lang/toml-test.git
+[submodule "benchmark/commonmark-spec"]
+	path = benchmark/commonmark-spec
+	url = https://github.com/commonmark/commonmark-spec.git

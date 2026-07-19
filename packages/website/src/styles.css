@@ -374,3 +374,105 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   body { padding-bottom: env(safe-area-inset-bottom); }
   .header { padding-top: env(safe-area-inset-top); }
 }
+
+/* Markdown preview card (the @jarenjs/md visual component) */
+.md-preview { padding: 0.9rem 1.1rem; }
+.md-preview .code-head { margin-bottom: 0.5rem; }
+
+/* ---- Package README dialog (the @jarenjs/md visual component) ---- */
+.docs-nav-heading {
+  margin: 1.6rem 0 0.25rem;
+  font-size: 0.95rem;
+}
+.docs-nav-note {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.docs-readmes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.readme-btn {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+}
+.readme-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.md-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3vh 3vw;
+}
+.md-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+.md-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 94vw;
+  max-width: 1080px;
+  height: 94vh;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.md-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.4rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.md-dialog-title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 1rem;
+}
+.md-dialog-close {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.md-dialog-close:hover {
+  border-color: var(--fail);
+  color: var(--fail);
+}
+.md-dialog-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.6rem 2rem;
+}
+.md-dialog-status {
+  color: var(--muted);
+}

@@ -12,7 +12,9 @@ import { formViewFor, localizeErrors } from '../boundaries/validator.js';
 import { ENGINE_DEFS, ENGINE_EXAMPLES } from '../boundaries/engines.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
+import { PACKAGES } from '../content/packages.js';
 import { exampleSchemas } from '../content/schemas.js';
+import { md } from '../boundaries/markdown.js';
 import { callout } from '../lib/nodes.js';
 import { formatMs, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
@@ -64,8 +66,21 @@ export function viewModel(state) {
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
   if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
 
+  // The README dialog is a global overlay (any page can open it): it
+  // only materializes when open, so the shell's $apply renders nothing
+  // otherwise. `md.view` memoizes the article by source string, so a
+  // re-render with the same README returns the same vnode reference.
+  if (state.readme.open) ui.readme = readmeOverlay(state.readme);
+
   return { ...state, ui };
 }
+
+const readmeOverlay = memo1((readme) => ({
+  title: readme.title,
+  status: readme.status,
+  message: readme.message,
+  article: readme.source !== null ? md.view(readme.source) : null,
+}));
 
 const deriveNav = memo1((page) =>
   NAV.map((item) => ({ ...item, active: item.page === page })));
@@ -208,6 +223,7 @@ const docsPage = memo1((param) => {
       href: `#/docs?s=${s.id}`,
     })),
     section: { title: section.title, blocks: section.blocks },
+    packages: PACKAGES,
   };
 });
 

@@ -56,6 +56,10 @@ export const bars = (title, items, note) => ({
   items: items.map((i) => ({ kind: 'bar', tone: null, ...i })),
 });
 
+/** A rendered Markdown preview: `vnode` is @jarenjs/md's projection. */
+export const markdown = (title, vnode) =>
+  ({ kind: 'markdown', title: title ?? null, vnode });
+
 /** A live search input bound to the given action. */
 export const search = (action, value, placeholder) =>
   ({ kind: 'search', action, value, placeholder });

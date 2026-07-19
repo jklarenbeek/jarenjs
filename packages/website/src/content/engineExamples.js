@@ -528,3 +528,56 @@ middle-name = null
 `,
   },
 ];
+
+export const markdownExamples = [
+  {
+    name: 'GFM tour',
+    source: `---
+title: The inverse of JTLT
+tags: [markdown, jaren]
+---
+# Markdown, as JSON
+
+Parse **CommonMark** with *GFM* extensions into a plain JSON AST —
+then query it, transform it with JSLT, and render it as vnodes.
+
+- [x] tables, strikethrough, task lists
+- [ ] your ~~regex~~ hand-rolled parser
+
+| engine | output |
+| :----- | -----: |
+| JTLT | Markdown |
+| @jarenjs/md | JSON |
+
+\`\`\`js
+const doc = parseMarkdown(source);
+doc.ast[0].type; // 'heading'
+\`\`\`
+
+> One suite, one philosophy: parse once, run a specialized closure.
+`,
+  },
+  {
+    name: 'Frontmatter flavours',
+    source: `+++
+title = "TOML up top"
+weight = 3
++++
+The same document works with \`---\` YAML, \`---json\`, a leading
+\`{\` JSON object, or \`+++\` TOML — all normalize to plain JSON on
+\`doc.frontmatter\`, and bind as JSLT externals.
+`,
+  },
+  {
+    name: 'Round trip',
+    source: `# Canonical form
+
+Re-parsing \`toMarkdown(doc)\` yields a **deep-equal** AST: printing
+is a fixed point.
+
+1. parse
+2. print
+3. parse again
+`,
+  },
+];
