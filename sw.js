@@ -3,7 +3,7 @@
    - hashed assets (/assets/): cache-first (immutable by construction)
    - benchmark data: stale-while-revalidate */
 
-const CACHE = 'jaren-website-v2';
+const CACHE = 'jaren-website-v3';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 
 self.addEventListener('install', (event) => {
@@ -15,6 +15,11 @@ self.addEventListener('install', (event) => {
         `${BASE}jaren.svg`,
         `${BASE}icon-192.png`,
         `${BASE}icon-512.png`,
+        `${BASE}fonts/inter-latin-400-normal.woff2`,
+        `${BASE}fonts/inter-latin-600-normal.woff2`,
+        `${BASE}fonts/inter-latin-700-normal.woff2`,
+        `${BASE}fonts/jetbrains-mono-latin-400-normal.woff2`,
+        `${BASE}fonts/jetbrains-mono-latin-700-normal.woff2`,
       ]))
       .then(() => self.skipWaiting()));
 });
