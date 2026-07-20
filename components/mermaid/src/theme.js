@@ -7,9 +7,13 @@
  * Both are used at once, deliberately: the render pass writes the
  * concrete colors as SVG presentation attributes (so `toSvgString()` is
  * a valid, self-colored standalone SVG with no CSS), and also stamps the
- * `--mm-*` variables on the root `<svg>` and a `class` on every shape,
- * so `styles/mermaid.css` can re-theme (light/dark) purely in CSS —
- * cascade beats presentation attributes — **without a re-render**.
+ * `--mm-*` variables inline on the root `<svg>` plus a `class` on every
+ * shape, which `styles/mermaid.css` maps back to `var(--mm-*)`. Because
+ * the stamp is an inline style it beats every stylesheet rule — so the
+ * stamp itself is the re-theming hook: the `'host'` theme stamps each
+ * linked variable as `var(--<host-token>, <concrete>)` (see `HOST_VARS`),
+ * making diagrams follow a host's light/dark tokens live, with no
+ * re-render — memoized vnodes stay valid across a theme flip.
  *
  * Only the token tables live here; the resolution mechanics are shared
  * (`@jarenjs/view/helpers` `resolveTheme`).
@@ -21,22 +25,22 @@ import { resolveTheme } from '@jarenjs/view/helpers';
 const THEMES = {
   default: {
     background: 'transparent',
-    nodeFill: '#ECECFF',
-    nodeStroke: '#9370DB',
+    nodeFill: '#dbeafe',
+    nodeStroke: '#2563eb',
     nodeText: '#1f2020',
     lineColor: '#333333',
     edgeLabelText: '#333333',
     edgeLabelBg: '#ffffff',
-    clusterFill: '#ffffde',
-    clusterStroke: '#aaaa33',
-    actorFill: '#ECECFF',
-    actorStroke: '#9370DB',
+    clusterFill: '#f1f5f9',
+    clusterStroke: '#94a3b8',
+    actorFill: '#dbeafe',
+    actorStroke: '#2563eb',
     actorText: '#1f2020',
     lifeline: '#999999',
     activationFill: '#f4f4f4',
     activationStroke: '#666666',
-    noteFill: '#fff5ad',
-    noteStroke: '#aaaa33',
+    noteFill: '#fef3c7',
+    noteStroke: '#d97706',
     noteText: '#1f2020',
     fontFamily: '"trebuchet ms", verdana, arial, sans-serif',
   },
@@ -106,11 +110,40 @@ const THEMES = {
 };
 
 /**
- * Resolve a theme.
- * @param {string | Record<string, string>} [nameOrOverrides]
+ * Host custom-property links for the `'host'` theme: token key → the host
+ * token it should follow (the site token vocabulary, DESIGN.md §2). The
+ * default theme's concrete colors remain as `var()` fallbacks, so the
+ * same SVG is standalone-valid outside any host.
+ * @type {Record<string, string>}
+ */
+export const HOST_VARS = {
+  nodeFill: '--accent-soft',
+  nodeStroke: '--accent',
+  nodeText: '--fg',
+  lineColor: '--fg',
+  edgeLabelText: '--fg',
+  edgeLabelBg: '--bg',
+  clusterFill: '--surface',
+  clusterStroke: '--border',
+  actorFill: '--accent-soft',
+  actorStroke: '--accent',
+  actorText: '--fg',
+  lifeline: '--muted',
+  activationFill: '--surface',
+  activationStroke: '--muted',
+  noteFill: '--warn-soft',
+  noteStroke: '--warn',
+  noteText: '--fg',
+};
+
+/**
+ * Resolve a theme. The name `'host'` resolves the default tokens linked
+ * to the host token vocabulary via {@link HOST_VARS}.
+ * @param {string | Record<string, any>} [nameOrOverrides]
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
+  if (nameOrOverrides === 'host') nameOrOverrides = { vars: HOST_VARS };
   return resolveTheme(THEMES, 'mm', nameOrOverrides);
 }
 

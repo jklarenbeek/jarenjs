@@ -202,9 +202,11 @@ export const calcEditEffects = {
  * The viewModel derivation for the calculator (`contributeCalcViewModel`).
  * Pure: state in, UI document out, no dispatching.
  * @param {any} state
+ * @param {{ theme?: any }} [options] plot theme (name, overrides, or
+ *   `'host'` to follow the embedding host's tokens)
  * @returns {any}
  */
-export function contributeCalcViewModel(state) {
+export function contributeCalcViewModel(state, options = {}) {
   const calc = state.calc;
   if (!calc) return null;
   const desc = MODE_BY_ID[calc.mode] ?? standardMode;
@@ -265,7 +267,7 @@ export function contributeCalcViewModel(state) {
     plot = {
       expr: calc.plot.expr,
       kind: calc.plot.kind,
-      svg: calcToVnode(calc.plot.expr, { kind: calc.plot.kind }),
+      svg: calcToVnode(calc.plot.expr, { kind: calc.plot.kind, theme: options.theme }),
       kinds: [
         { id: '2d', label: 'x·y', active: calc.plot.kind === '2d', on: { click: { action: 'calc/plot-kind', with: { kind: '2d' } } } },
         { id: '3d', label: 'x·y·z', active: calc.plot.kind === '3d', on: { click: { action: 'calc/plot-kind', with: { kind: '3d' } } } },

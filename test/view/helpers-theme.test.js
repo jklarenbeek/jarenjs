@@ -46,4 +46,23 @@ describe('view/helpers — resolveTheme', () => {
     // merged, so a `theme` key leaks into tokens/cssVars
     assert.equal(r.cssVars['--mm-theme'], 'dark');
   });
+
+  it('links tokens to host custom properties via the reserved vars key', () => {
+    const r = resolveTheme(THEMES, 'mm', { vars: { axis: '--muted' } });
+    // tokens stay concrete (presentation attributes remain standalone-valid)
+    assert.equal(r.tokens.axis, '#64748b');
+    assert.equal(r.tokens.vars, undefined);
+    // the linked cssVar follows the host token, concrete value as fallback
+    assert.equal(r.cssVars['--mm-axis'], 'var(--muted, #64748b)');
+    // unlinked tokens stamp unchanged, and vars itself never stamps
+    assert.equal(r.cssVars['--mm-background'], 'transparent');
+    assert.equal(r.cssVars['--mm-vars'], undefined);
+  });
+
+  it('composes vars with a named base and plain overrides', () => {
+    const r = resolveTheme(THEMES, 'calc', { theme: 'dark', background: '#000', vars: { axis: '--muted' } });
+    assert.equal(r.name, 'dark');
+    assert.equal(r.cssVars['--calc-axis'], 'var(--muted, #94a3b8)');
+    assert.equal(r.cssVars['--calc-background'], '#000');
+  });
 });

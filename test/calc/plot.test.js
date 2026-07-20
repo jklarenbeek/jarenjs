@@ -78,4 +78,11 @@ describe('#calc calcToVnode + error vnode', function () {
     const svg = toSvgString(errorToVnode({ message: 'boom', line: 1, column: 2 }));
     assert.ok(svg.startsWith('<svg') && svg.includes('boom'));
   });
+  it("theme 'host' stamps host-linked cssVars, keeps attributes concrete", () => {
+    const v = calcToVnode('sin(x)', { theme: 'host' });
+    assert.equal(v[1].style['--calc-series1'], 'var(--accent, #2563eb)');
+    assert.equal(v[1].style['--calc-grid'], 'var(--border, #e2e8f0)');
+    // the curve itself still carries the concrete stroke for standalone use
+    assert.ok(toSvgString(v).includes('#2563eb'));
+  });
 });

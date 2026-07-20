@@ -12,8 +12,9 @@
 import { svgRoot, rect, path, group, textAt, num } from '@jarenjs/view/helpers';
 import { textWidth } from '../layout/metrics.js';
 
-/** A categorical palette for pie slices. */
-const PIE_COLORS = ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ac'];
+/** A categorical palette for pie slices — blue-anchored, no pink/purple
+ * (the suite-wide palette constraint, DESIGN.md §8). */
+const PIE_COLORS = ['#2563eb', '#f59e0b', '#0d9488', '#dc2626', '#16a34a', '#0369a1', '#ca8a04', '#64748b', '#93c5fd', '#78350f'];
 
 /**
  * @param {any} ast pie AST

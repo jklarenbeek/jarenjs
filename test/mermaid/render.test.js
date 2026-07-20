@@ -28,6 +28,15 @@ describe('render to pure-vnode SVG', function () {
     assert.equal(c.toVnode(), c.toVnode());
   });
 
+  it("theme 'host' stamps host-linked cssVars, keeps attributes concrete", function () {
+    const v = renderMermaid('flowchart TD\n  A --> B', { theme: 'host' });
+    // the inline stamp references the host token with the concrete fallback
+    assert.equal(v[1].style['--mm-node-fill'], 'var(--accent-soft, #dbeafe)');
+    assert.equal(v[1].style['--mm-node-stroke'], 'var(--accent, #2563eb)');
+    // presentation attributes stay concrete → standalone-valid SVG
+    assert.match(renderToString(v), /fill="#dbeafe"/);
+  });
+
   it('error path renders an error vnode instead of throwing', function () {
     const v = renderMermaid('flowchart TD\n  A[unterminated');
     assert.doesNotThrow(() => renderToString(v));

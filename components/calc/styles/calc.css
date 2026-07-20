@@ -1,8 +1,11 @@
 /**
  * @jarenjs/calc component stylesheet. `--calc-*` design tokens with a
- * `.dark` override (mirrors mermaid.css): the plot SVG carries concrete
- * presentation colors so it is valid standalone, and also `--calc-*`
- * variables + classes so the cascade re-themes without a re-render.
+ * `.dark` override (mirrors mermaid.css). These tokens theme the HTML
+ * chrome (keypad, panels), which hosts may override in their own sheet
+ * (higher specificity than the `.dark .calc` block here). The plot SVG
+ * carries concrete presentation colors (valid standalone) plus inline
+ * `--calc-*` stamps that beat this stylesheet — a live plot follows a
+ * host's tokens via the `'host'` theme (`src/theme.js` `HOST_VARS`).
  */
 
 .calc {
@@ -13,12 +16,13 @@
   --calc-muted: #64748b;
   --calc-key: #f1f5f9;
   --calc-key-hover: #e2e8f0;
-  --calc-op: #e0e7ff;
-  --calc-fn: #ecfeff;
-  --calc-equals: #4f46e5;
+  --calc-op: #dbeafe;
+  --calc-fn: #e0f2fe;
+  --calc-equals: #2563eb;
   --calc-equals-text: #ffffff;
   --calc-clear: #fee2e2;
-  --calc-accent: #4f46e5;
+  --calc-accent: #2563eb;
+  --calc-accent-text: #ffffff;
 
   display: grid;
   gap: 12px;
@@ -36,12 +40,13 @@
   --calc-muted: #94a3b8;
   --calc-key: #1e293b;
   --calc-key-hover: #334155;
-  --calc-op: #312e81;
-  --calc-fn: #164e63;
-  --calc-equals: #6366f1;
+  --calc-op: #1e3a8a;
+  --calc-fn: #0c4a6e;
+  --calc-equals: #3b82f6;
   --calc-equals-text: #ffffff;
   --calc-clear: #7f1d1d;
-  --calc-accent: #818cf8;
+  --calc-accent: #60a5fa;
+  --calc-accent-text: #0b1020;
 }
 
 .calc-modes { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -49,7 +54,7 @@
   padding: 6px 12px; border: 1px solid var(--calc-border); border-radius: 8px;
   background: var(--calc-panel); color: var(--calc-text); cursor: pointer; font-size: 13px;
 }
-.calc-mode-active { background: var(--calc-accent); color: #fff; border-color: var(--calc-accent); }
+.calc-mode-active { background: var(--calc-accent); color: var(--calc-accent-text); border-color: var(--calc-accent); }
 
 .calc-display {
   background: var(--calc-panel); border: 1px solid var(--calc-border); border-radius: 10px;
@@ -86,7 +91,7 @@
   padding: 4px 10px; border: 1px solid var(--calc-border); border-radius: 6px;
   background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 12px;
 }
-.calc-word.active, .calc-angle-btn.active { background: var(--calc-accent); color: #fff; }
+.calc-word.active, .calc-angle-btn.active { background: var(--calc-accent); color: var(--calc-accent-text); }
 
 .calc-financial, .calc-converter, .calc-plot-panel {
   background: var(--calc-panel); border: 1px solid var(--calc-border);
@@ -102,7 +107,7 @@
 
 .calc-plot-kinds { display: flex; gap: 6px; }
 .calc-plotkind { padding: 4px 12px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 13px; }
-.calc-plotkind.active { background: var(--calc-accent); color: #fff; }
+.calc-plotkind.active { background: var(--calc-accent); color: var(--calc-accent-text); }
 .calc-plot-expr { padding: 8px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-bg); color: var(--calc-text); font-family: ui-monospace, monospace; }
 .calc-plot-svg { display: flex; justify-content: center; }
 .calc-plot { background: var(--calc-bg); border-radius: 8px; }

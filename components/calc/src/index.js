@@ -29,7 +29,7 @@ export {
 export { plot2d, buildScene2d, scene2dToVnode } from './plot/plot2d.js';
 export { plot3d, buildScene3d, scene3dToVnode } from './plot/plot3d.js';
 export { errorToVnode } from './render/error.js';
-export { createTheme, THEMES } from './theme.js';
+export { createTheme, THEMES, HOST_VARS } from './theme.js';
 export { hashContent } from './utils.js';
 export {
   MODES, MODE_BY_ID,

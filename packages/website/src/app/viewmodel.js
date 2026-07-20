@@ -67,7 +67,7 @@ export function viewModel(state) {
   if (page === 'playground') ui.pg = playgroundPage(state);
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
   if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
-  if (page === 'calculator') ui.calculator = contributeCalcViewModel(state);
+  if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
 
   // The README dialog is a global overlay (any page can open it): it
   // only materializes when open, so the shell's $apply renders nothing

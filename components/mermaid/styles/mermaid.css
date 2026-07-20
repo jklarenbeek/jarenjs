@@ -6,12 +6,17 @@
  * 1. It extends the unscoped `.md-mermaid` placeholder rules from
  *    `@jarenjs/md`'s md.css (centered block, max-width svg) so a mermaid
  *    fence rendered inside a Markdown article sits correctly.
- * 2. It defines a self-scoped `.mermaid` class carrying its own `--mm-*`
- *    tokens (with fallbacks) plus a `.dark` override. Because the render
- *    pass stamps the same `--mm-*` variables on the root `<svg>` and a
- *    `mm-*` class on every shape, the cascade re-themes the diagram in
- *    place — no re-render — while `toSvgString()` still carries concrete
- *    presentation-attribute colors for standalone/SSR use.
+ * 2. It defines a self-scoped `.mermaid` class carrying the `--mm-*`
+ *    token vocabulary (light values plus a `.dark` override) and maps
+ *    each `mm-*` shape class to `var(--mm-*)`. The render pass stamps
+ *    the same variables *inline* on the root `<svg>`, and inline custom
+ *    properties beat these stylesheet blocks — so for pipeline-rendered
+ *    SVGs the stamp decides the colors. Re-theming a live diagram goes
+ *    through the `'host'` theme (`src/theme.js` `HOST_VARS`), whose
+ *    stamped values reference the host's tokens. The token blocks below
+ *    theme class-marked markup that carries no inline stamp, and are the
+ *    reference list of the vocabulary. `toSvgString()` output stays
+ *    standalone-valid via concrete presentation-attribute colors.
  */
 
 /* --- md-embedded diagrams ----------------------------------------- */
@@ -23,22 +28,22 @@
 
 /* --- self-scoped diagram ------------------------------------------ */
 .mermaid {
-  --mm-node-fill: #ECECFF;
-  --mm-node-stroke: #9370DB;
+  --mm-node-fill: #dbeafe;
+  --mm-node-stroke: #2563eb;
   --mm-node-text: #1f2020;
   --mm-line-color: #333333;
   --mm-edge-label-text: #333333;
   --mm-edge-label-bg: #ffffff;
-  --mm-cluster-fill: #ffffde;
-  --mm-cluster-stroke: #aaaa33;
-  --mm-actor-fill: #ECECFF;
-  --mm-actor-stroke: #9370DB;
+  --mm-cluster-fill: #f1f5f9;
+  --mm-cluster-stroke: #94a3b8;
+  --mm-actor-fill: #dbeafe;
+  --mm-actor-stroke: #2563eb;
   --mm-actor-text: #1f2020;
   --mm-lifeline: #999999;
   --mm-activation-fill: #f4f4f4;
   --mm-activation-stroke: #666666;
-  --mm-note-fill: #fff5ad;
-  --mm-note-stroke: #aaaa33;
+  --mm-note-fill: #fef3c7;
+  --mm-note-stroke: #d97706;
   --mm-note-text: #1f2020;
 
   display: block;

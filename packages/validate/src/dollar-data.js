@@ -595,35 +595,6 @@ export function compileDollarDataSchema(schemaObj, jsonSchema) {
   };
 }
 
-/**
- * Check if the schema has any $data references
- * This is used to determine if we should use the $data-aware compilation path
- * or the standard static compilation path.
- *
- * @param {object} jsonSchema - The JSON schema to check
- * @returns {boolean} True if the schema has any $data references
- */
-export function hasDollarDataReferences(jsonSchema) {
-  if (!isObjectType(jsonSchema)) return false;
-
-  // Keywords that can have $data values
-  const keywords = [
-    'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
-    'minLength', 'maxLength', 'pattern', 'format',
-    'minItems', 'maxItems', 'uniqueItems',
-    'minProperties', 'maxProperties', 'required',
-    'enum', 'const'
-  ];
-
-  for (const keyword of keywords) {
-    if (isDollarDataRef(jsonSchema[keyword])) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export function isDollarDataReference(jsonSchema) {
   return (jsonSchema !== null && (isObjectType(jsonSchema) && jsonSchema.$data));
 }

@@ -21,17 +21,26 @@ import { kebabCase } from '@jarenjs/core/string';
  * its `theme` property. The returned `cssVars` stamp every token as
  * `--<prefix>-<kebab-case-key>`.
  *
+ * An overrides object may also carry a reserved `vars` key: a map of token
+ * key → **host** custom-property name (e.g. `{ nodeFill: '--accent-soft' }`).
+ * Linked tokens keep their concrete value in `tokens` (so presentation
+ * attributes stay standalone-valid) but stamp their cssVar as
+ * `var(<host-property>, <concrete>)` — the stamped SVG then follows the
+ * host's tokens (light/dark and all) live, with the concrete color as the
+ * fallback outside any host. `vars` never leaks into `tokens`.
+ *
  * @param {Record<string, Record<string, string>>} themes the component's
  *   named token tables (must include a `default`)
  * @param {string} prefix the CSS-variable prefix (e.g. `mm`, `calc`),
  *   without the leading `--`
- * @param {string | Record<string, string>} [nameOrOverrides]
+ * @param {string | Record<string, any>} [nameOrOverrides]
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function resolveTheme(themes, prefix, nameOrOverrides = 'default') {
   let name = 'default';
   let base = themes.default;
   let overrides = {};
+  let vars = null;
   if (typeof nameOrOverrides === 'string') {
     name = themes[nameOrOverrides] ? nameOrOverrides : 'default';
     base = themes[name];
@@ -42,11 +51,16 @@ export function resolveTheme(themes, prefix, nameOrOverrides = 'default') {
       base = themes[name];
     }
     overrides = nameOrOverrides;
+    if (overrides.vars && typeof overrides.vars === 'object') vars = overrides.vars;
   }
   const tokens = { ...base, ...overrides };
+  delete tokens.vars;
   const cssVars = {};
   for (const key of Object.keys(tokens)) {
-    cssVars['--' + prefix + '-' + kebabCase(key)] = tokens[key];
+    const linked = vars !== null && typeof vars[key] === 'string' ? vars[key] : null;
+    cssVars['--' + prefix + '-' + kebabCase(key)] = linked !== null
+      ? 'var(' + linked + ', ' + tokens[key] + ')'
+      : tokens[key];
   }
   return { name, tokens, cssVars };
 }

@@ -12,7 +12,9 @@ export const STATIC_RULES = [
     body: ['div', { class: 'page container docs-grid' },
       ['nav', { class: 'docs-nav' },
         ['h1', {}, 'Docs'],
-        [{ $apply: '$.sections[*]' }],
+        // the wrapper is layout-inert on desktop (display: contents) and
+        // becomes the horizontally scrollable section strip on mobile
+        ['div', { class: 'docs-sections' }, [{ $apply: '$.sections[*]' }]],
         ['h2', { class: 'docs-nav-heading' }, 'Package READMEs'],
         ['p', { class: 'docs-nav-note' }, 'Read any package’s README, rendered live by @jarenjs/md.'],
         ['div', { class: 'docs-readmes' }, [{ $apply: '$.packages[*]' }]],

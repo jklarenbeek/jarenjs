@@ -83,7 +83,7 @@
 
 /* --- highlight plugin token colors (PLUGINS.md §6.2) --------------- */
 
-.md .tok-kw  { color: var(--md-tok-kw, #a626a4); }
+.md .tok-kw  { color: var(--md-tok-kw, #0550ae); }
 .md .tok-str { color: var(--md-tok-str, #50a14f); }
 .md .tok-num { color: var(--md-tok-num, #b76b01); }
 .md .tok-com { color: var(--md-tok-com, #8b919c); font-style: italic; }
@@ -110,7 +110,7 @@
   --md-muted: #9aa4b2;
   --md-link: #7aa2ff;
   --md-code-bg: #1d232c;
-  --md-tok-kw: #c678dd;
+  --md-tok-kw: #79b8ff;
   --md-tok-str: #98c379;
   --md-tok-num: #d19a66;
   --md-tok-com: #7f848e;

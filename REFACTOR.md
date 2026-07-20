@@ -36,10 +36,11 @@ do not count — `git status --porcelain` already ignores them.)
   restrict the sweep to that package's helpers plus everywhere that would share them — but still
   land shared code in the correct parent (`core`/`view`/`app`), not in the scoped package.
 
-Definition of done for a run: `npm run lint` clean, `npm test` green across ALL packages (with
-**no existing-fixture edits** — see below), `npm run website:build` succeeds, the dead-code
-audit (`npm run benchmark:coverage`) has every finding resolved, and every documentation/
-reference rule below holds.
+Definition of done for a run: `npm run lint` clean (**zero errors AND zero warnings** — see
+the lint sweep below), `npm test` green across ALL packages (with **no existing-fixture
+edits** — see below), `npm run website:build` succeeds, the dead-code audit
+(`npm run benchmark:coverage`) has every finding resolved, the design-conformance rules
+(**`DESIGN.md`** — see below) hold, and every documentation/reference rule below holds.
 
 ## Repo model (the invariants a refactor must preserve)
 
@@ -137,8 +138,45 @@ These keep the committed tree honest, and they are part of the refactor's job:
    reader needs to understand or safely change the code. Record the *why* of a non-obvious
    choice; drop the *when/where-it-came-from*.
 4. **Keep documentation in sync with the move.** When a symbol is relocated or renamed, update
-   every place that documents it — package `README.md`, `ARCHITECTURE.md`, `docs/*`, `ROADMAP.md`
-   — to its new name and home.
+   every place that documents it — package `README.md`, `ARCHITECTURE.md`, `docs/*`, `ROADMAP.md`,
+   `DESIGN.md` — to its new name and home.
+
+## Design conformance — DESIGN.md is binding (run every pass)
+
+**`DESIGN.md` (repo root) is the committed visual design system and branding contract** for
+`packages/website` and the visual components (`components/calc`, `components/md`,
+`components/mermaid`). It is not advisory: any code the refactor touches in those areas must
+hold its invariants, and every pass sweeps for drift:
+
+1. **Touched visual code follows the system.** Colors come from the token vocabulary (no raw
+   hex that duplicates a token's meaning), spacing snaps to the `--space-*` scale, radii use
+   the two radius tokens, `.page` never regains the `padding` shorthand, host stylesheet
+   overrides use the doubled selector, and SVG components theme through the two-layer /
+   host-linked `createTheme` architecture — all as specified in `DESIGN.md`.
+2. **Sweep for branding drift.** Run the banned-hue grep from `DESIGN.md` §10 over the
+   source tree and the built `dist/` — the brand is blue; **no pink, no purple, anywhere**
+   (UI chrome, syntax palettes, diagram themes, chart palettes). Zero hits required.
+3. **Code and DESIGN.md must not diverge.** When they disagree, decide which one is right:
+   repair the code toward the document, unless the code embodies a deliberate, newer design
+   decision — then update `DESIGN.md` in the same pass and say so in the summary. Never
+   leave the two in conflict, and never weaken a constraint silently.
+4. When a refactor moves or renames a token, theme symbol, or palette, `DESIGN.md` is
+   updated with it like every other document (Documentation rule 4 above).
+
+## Lint sweep (run every pass)
+
+Linting is part of the refactor's job, not just a gate at the end:
+
+- Run `npm run lint` over packages, components and tests; the pass is done only at
+  **zero errors and zero warnings**.
+- **Fix findings at the source.** Do not silence with `eslint-disable`, rule downgrades, or
+  config exclusions. An inline disable is acceptable only for a genuine false positive,
+  scoped to a single line, with a short justification comment.
+- Some rules only offer *suggestions*, not autofixes (e.g. `no-useless-escape` in ESLint
+  v9), so `--fix` will not clear them — resolve those by hand.
+- The lint **infrastructure** is in scope: a broken glob, a missing ignore, or a gate that
+  silently lints nothing is itself a finding — repair it so the gate genuinely covers the
+  tree.
 
 ## Dead-code audit (run every pass)
 
@@ -187,9 +225,15 @@ logical parent.
 
 - [ ] Started from a **clean working tree** (`git status --porcelain` empty), so the whole
       refactor is a single reviewable diff against the previous commit.
-- [ ] `npm run lint` clean; `npm test` green across ALL packages, with **no expected-value/fixture
-      edits** (import-path updates for moved symbols are fine); `npm run website:build` succeeds;
-      `npm run test:tree-shaking` passes.
+- [ ] `npm run lint` clean at **zero errors and zero warnings**, with findings fixed at the
+      source (no new disables/downgrades without a justified false positive); `npm test` green
+      across ALL packages, with **no expected-value/fixture edits** (import-path updates for
+      moved symbols are fine); `npm run website:build` succeeds; `npm run test:tree-shaking`
+      passes.
+- [ ] **`DESIGN.md` conformance holds**: touched visual code uses the token vocabulary, spacing
+      scale and theming architecture; the banned-hue sweep (no pink/purple) over source and
+      built `dist/` returns zero hits; code and `DESIGN.md` end the pass in agreement (the
+      document updated in-pass if a deliberate design decision superseded it).
 - [ ] Every duplicate collapsed to ONE implementation in its logical parent (pure → `core`,
       view → `@jarenjs/view/helpers`, app → `@jarenjs/app`); each former copy deleted and
       re-imported; the most general accurate name chosen and propagated to all dependents.
@@ -214,8 +258,9 @@ your own initiative — even if everything is green. Do **not** create a `PROGRE
 
 **Only when explicitly asked to commit**, run this in order and abort at the first failure:
 
-1. **Prove it's green:** `npm run lint`, `npm test` (all packages), `npm run website:build`, and
-   `npm run benchmark:coverage` with every dead-code finding resolved (or a justified keep).
+1. **Prove it's green:** `npm run lint` (zero errors, zero warnings), `npm test` (all packages),
+   `npm run website:build`, `npm run benchmark:coverage` with every dead-code finding resolved
+   (or a justified keep), and the `DESIGN.md` conformance sweep (banned-hue grep included).
 2. **Bump the patch version by one:** `npm run version:patch`, then `npm install` to sync the
    lockfile, and re-verify the build.
 3. **Deploy the website:** `npm run website:deploy` — it must finish successfully (`Published`).

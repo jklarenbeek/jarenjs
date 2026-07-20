@@ -189,6 +189,7 @@ I will look up what that means, later...
 - [HOWTO.md](HOWTO.md) — practical usage guide: installation profiles, options, formats, `$ref` patterns, performance tips, pitfalls, API reference.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the monorepo fits together and the shared compile-to-closures design; each package links its own deeper ARCHITECTURE document from there.
 - [ROADMAP.md](ROADMAP.md) — release milestones and everything still to be done or optimized, per package.
+- [DESIGN.md](DESIGN.md) — the visual design system and UI/UX constraints for the website and the visual components: brand palette, token vocabulary, spacing scale, breakpoints, accessibility rules and the host-linked theming architecture.
 - [PUBLISHING.md](PUBLISHING.md) — npm authentication, synchronized versioning, release checks and publishing the twelve public workspaces.
 - [benchmark/README.md](benchmark/README.md) — the complete measuring and debugging toolbox: conformance suites, profilers, the test-failure debugger, code coverage, call graphs, and the QT3 scorecard.
 - Language specifications: [QUERY-FORMAT.md](packages/json/docs/QUERY-FORMAT.md) (the Jaren JSON Query format), [JSLT-FORMAT.md](packages/json/docs/JSLT-FORMAT.md) (the JSLT stylesheet format), [XQUERY-FRONTEND.md](packages/json/docs/XQUERY-FRONTEND.md) (the XQuery text subset), [VIEW-FORMAT.md](packages/view/docs/VIEW-FORMAT.md) (the vnode format), [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md) (the app document format).

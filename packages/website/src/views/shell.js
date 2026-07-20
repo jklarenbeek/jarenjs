@@ -14,7 +14,7 @@ const header =
         ['img', { src: `${BASE}jaren.svg`, alt: '', class: 'brand-logo' }],
         ['span', { class: 'brand-name' }, 'Jaren'],
       ],
-      ['nav', { class: { $if: ['$.menu', 'nav open', 'nav'] } }, [{ $apply: '$.ui.nav[*]' }]],
+      ['nav', { id: 'site-nav', class: { $if: ['$.menu', 'nav open', 'nav'] } }, [{ $apply: '$.ui.nav[*]' }]],
       ['button', {
         class: 'theme-toggle',
         type: 'button',
@@ -26,6 +26,8 @@ const header =
         type: 'button',
         title: 'Menu',
         'aria-label': 'Toggle navigation',
+        'aria-expanded': { $if: ['$.menu', 'true', 'false'] },
+        'aria-controls': 'site-nav',
         on: { click: 'menu/toggle' },
       }, { $if: ['$.menu', '✕', '☰'] }],
     ],

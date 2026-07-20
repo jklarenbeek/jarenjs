@@ -27,7 +27,7 @@ export { parseMermaid } from './parser/index.js';
 export { toMermaid } from './to-mermaid.js';
 export { parseMermaidConfig } from './parser/config.js';
 export { layoutDiagram, diagramToVnode } from './render/index.js';
-export { createTheme, THEMES } from './theme.js';
+export { createTheme, THEMES, HOST_VARS } from './theme.js';
 export { sanitizeHref } from '@jarenjs/view/helpers';
 export { MermaidParseError } from './errors.js';
 export { hashContent } from './utils.js';

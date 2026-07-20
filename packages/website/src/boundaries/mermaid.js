@@ -8,4 +8,6 @@
 
 import { createMermaidComponent } from '@jarenjs/mermaid/component';
 
-export const mermaid = createMermaidComponent();
+// theme 'host': diagram cssVars reference the site tokens, so memoized
+// SVGs follow light/dark live (DESIGN.md §7)
+export const mermaid = createMermaidComponent({ theme: 'host' });

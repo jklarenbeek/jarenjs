@@ -15,4 +15,6 @@ import { createMdComponent } from '@jarenjs/md/component';
 import { highlightPlugin } from '@jarenjs/md/plugins';
 import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
 
-export const md = createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin()] });
+// theme 'host': diagram cssVars reference the site tokens, so memoized
+// SVGs follow light/dark live (DESIGN.md §7)
+export const md = createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host' })] });
