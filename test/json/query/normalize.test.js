@@ -46,7 +46,7 @@ describe('Jaren JSON Query normalizer', () => {
       failsWith({ a: { $nope: [] } }, 'JQ0002', '/a');
     });
 
-    it('should treat the schema-operator keys as vocabulary (TODO_10: no longer reserved)', () => {
+    it('should treat the schema-operator keys as vocabulary ($valid/$assert no longer reserved)', () => {
       // $valid/$assert are registry operators now: a non-array operand is
       // JQ0003 (bad shape), not JQ0002 (unknown key)
       failsWith({ $valid: 1 }, 'JQ0003', '/$valid');

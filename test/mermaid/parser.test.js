@@ -99,6 +99,25 @@ describe('parseMermaid: other types', function () {
     assert.equal(parseMermaid('gantt\ntitle X\nsection S\nT : a, 1d').diagram, 'gantt');
   });
 
+  it('parses ER relationships whose cardinality token contains a brace', function () {
+    // `o{`/`}o` embed a brace, so the relationship must be matched before
+    // the '{' entity-block check — otherwise `CUSTOMER ||--o{ ORDER` is
+    // misread as an entity block named `CUSTOMER ||--o`.
+    const { ast } = parseMermaid('erDiagram\n'
+      + '  CUSTOMER ||--o{ ORDER : places\n'
+      + '  ORDER }o--|| PRODUCT : contains\n'
+      + '  CUSTOMER {\n    string name PK\n  }');
+    assert.deepEqual(ast.entities.map((e) => e.name), ['CUSTOMER', 'ORDER', 'PRODUCT']);
+    assert.equal(ast.relationships.length, 2);
+    const [r0, r1] = ast.relationships;
+    assert.deepEqual(
+      { left: r0.left, leftCard: r0.leftCard, rightCard: r0.rightCard, right: r0.right, label: r0.label },
+      { left: 'CUSTOMER', leftCard: '||', rightCard: 'o{', right: 'ORDER', label: 'places' });
+    assert.equal(r1.leftCard, '}o');
+    // the CUSTOMER entity block still parses its attribute
+    assert.deepEqual(ast.entities[0].attributes, [{ type: 'string', name: 'name', keys: ['PK'] }]);
+  });
+
   it('parse-accepts secondary types as raw', function () {
     const doc = parseMermaid('mindmap\n  root\n    child');
     assert.equal(doc.diagram, 'mindmap');

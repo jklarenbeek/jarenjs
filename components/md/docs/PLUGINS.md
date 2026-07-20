@@ -131,10 +131,10 @@ for third-party plugins (math, callouts/admonitions, footnotes, embeds).
 
 ### 6.1 mermaidPlugin({ theme })
 
-The **native** plugin, re-exported from `@jarenjs/mermaid/plugin`
-(TODO_18). It parses the fence source with the in-house headless
-Mermaid engine and emits **pure-vnode SVG** synchronously — no injected
-`mermaid` instance, no CDN global, no `innerHTML`.
+The **native** plugin, re-exported from `@jarenjs/mermaid/plugin`. It
+parses the fence source with the in-house headless Mermaid engine and
+emits **pure-vnode SVG** synchronously — no injected `mermaid` instance,
+no CDN global, no `innerHTML`.
 
 - `render` claims `mermaid`/`mmd` fences and returns
   `div.md-mermaid.mermaid-block > svg`, keyed by content hash. Because it

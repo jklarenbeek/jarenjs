@@ -89,7 +89,7 @@ describe('createMdComponent: app effects', function () {
 
 // A synthetic hydratable plugin exercises the generic hydrate machinery
 // (the native mermaid plugin no longer hydrates — its render is
-// complete, TODO_18 D2).
+// complete).
 const widgetPlugin = definePlugin({
   name: 'widget',
   fences: ['widget'],

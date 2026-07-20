@@ -11,7 +11,7 @@ import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jar
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 import { nl } from '@jarenjs/locales';
 
-const now = typeof performance !== 'undefined' ? () => performance.now() : () => Date.now();
+const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
 
 /** Friendly draft name from a schema's $schema declaration. */
 export function detectDraftName(schema) {

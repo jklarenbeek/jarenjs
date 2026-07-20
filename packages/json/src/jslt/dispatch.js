@@ -112,7 +112,6 @@ function appendDispatched(acc, selected, targetMode, depth, tctx, dispatch) {
 
 function createApplyEntry(ruleBox, tableBox, targetModes) {
   return {
-    result: () => CARD_MANY,
     normalize(arg, docPath, opPath, scope, ctx, helpers) {
       let selector;
       let targetMode = ruleBox.mode;

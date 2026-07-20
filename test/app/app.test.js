@@ -228,3 +228,23 @@ describe('createApp', function () {
     assert.strictEqual(app.getState().count, 1);
   });
 });
+
+describe('createApp built-in defaults (no schedule / no onError given)', function () {
+  it('schedules renders on the microtask queue by default', async function () {
+    const { document, container } = createStubHost();
+    const app = createApp(counterDoc(), { node: container, document }); // no schedule
+    assert.match(serialize(container), /Count: 0/);
+    app.dispatch('inc');
+    assert.strictEqual(app.getState().count, 1, 'state updates synchronously');
+    assert.match(serialize(container), /Count: 0/, 'the DOM patch is deferred, not yet applied');
+    await Promise.resolve(); // flush the queued microtask render
+    assert.match(serialize(container), /Count: 1/, 'the default microtask scheduler flushed the render');
+  });
+
+  it('rethrows through the default error handler', function () {
+    const { document, container } = createStubHost();
+    const app = createApp(counterDoc(), { node: container, document }); // no onError
+    assert.throws(() => app.dispatch('does-not-exist'),
+      (err) => err instanceof AppRuntimeError);
+  });
+});

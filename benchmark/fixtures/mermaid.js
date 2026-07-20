@@ -4,12 +4,11 @@
  *
  * Used both as the coverage-scorecard corpus (does jaren-mermaid parse
  * AND render each without error?) and as the perf corpus. This is the
- * documented fallback to a full `mermaid-js/mermaid` submodule
- * (TODO_18 WI 8 / precondition 6): the standalone `@mermaid-js/parser`
- * only covers a handful of newer grammars (pie, gitGraph, packet, …) and
- * cannot parse flowchart/sequence at all, so a full-repo submodule buys
- * no head-to-head there. The head-to-head runs on the overlapping type
- * (pie); everything else is jaren-only.
+ * documented fallback to a full `mermaid-js/mermaid` submodule: the
+ * standalone `@mermaid-js/parser` only covers a handful of newer grammars
+ * (pie, gitGraph, packet, …) and cannot parse flowchart/sequence at all,
+ * so a full-repo submodule buys no head-to-head there. The head-to-head
+ * runs on the overlapping type (pie); everything else is jaren-only.
  */
 
 /** One representative diagram per first-class + secondary type. */

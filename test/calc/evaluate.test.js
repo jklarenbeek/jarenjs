@@ -105,3 +105,66 @@ describe('#calc converter orchestration (no factors here)', function () {
     assert.ok(Number.isNaN(convertValue('length', 1, 'kg', 'm')));
   });
 });
+
+describe('#calc scientific function coverage', function () {
+  it('inverse trig, hyperbolics, logarithms and exponentials', () => {
+    close(evaluate('acos(1)').value, 0);
+    close(evaluate('atan(1)').value, Math.PI / 4);
+    close(evaluate('atan2(1, 1)').value, Math.PI / 4);
+    close(evaluate('sinh(0)').value, 0);
+    close(evaluate('cosh(0)').value, 1);
+    close(evaluate('tanh(0)').value, 0);
+    close(evaluate('ln(e)').value, 1);
+    close(evaluate('log2(8)').value, 3);
+    close(evaluate('log10(1000)').value, 3);
+    close(evaluate('exp(0)').value, 1);
+    close(evaluate('expm1(0)').value, 0);
+  });
+
+  it('roots, rounding, sign, reducers, factorial and gamma', () => {
+    close(evaluate('cbrt(27)').value, 3);
+    close(evaluate('root(27, 3)').value, 3);
+    close(evaluate('abs(-5)').value, 5);
+    close(evaluate('sign(-3)').value, -1);
+    close(evaluate('floor(2.7)').value, 2);
+    close(evaluate('ceil(2.1)').value, 3);
+    close(evaluate('round(2.5)').value, 3);
+    close(evaluate('round(2.567, 1)').value, 2.6);   // two-arg round → roundTo
+    close(evaluate('trunc(2.9)').value, 2);
+    close(evaluate('min(3, 1, 2)').value, 1);
+    close(evaluate('max(3, 1, 2)').value, 3);
+    close(evaluate('fact(5)').value, 120);
+    close(evaluate('gamma(5)').value, 24);   // Γ(5) = 4!
+    close(evaluate('pow(2, 10)').value, 1024);
+  });
+});
+
+describe('#calc default-mode bitwise and unary operators', function () {
+  it('bitwise operators coerce through int32', () => {
+    close(evaluate('6 & 3').value, 2);
+    close(evaluate('4 | 1').value, 5);
+    close(evaluate('1 << 4').value, 16);
+    close(evaluate('16 >> 2').value, 4);
+  });
+
+  it('unary minus, plus and bitwise-not', () => {
+    close(evaluate('-(3)').value, -3);
+    close(evaluate('+5').value, 5);
+    close(evaluate('~5').value, -6);
+  });
+});
+
+describe('#calc programmer function coverage', function () {
+  const env = programmerEnv();
+  it('word logic, shift and rotate functions read the scope word size', () => {
+    close(evaluate('and(0xff, 0x0f)', { wordBits: 32 }, { env }).value, 0x0f);
+    close(evaluate('or(0x0f, 0xf0)', { wordBits: 32 }, { env }).value, 0xff);
+    close(evaluate('not(0)', { wordBits: 8 }, { env }).value, 255);
+    close(evaluate('shl(1, 4)', { wordBits: 32 }, { env }).value, 16);
+    close(evaluate('shr(16, 2)', { wordBits: 32 }, { env }).value, 4);
+    close(evaluate('rol(1, 1)', { wordBits: 8 }, { env }).value, 2);
+    close(evaluate('ror(1, 1)', { wordBits: 8 }, { env }).value, 128);
+    close(evaluate('mod(10, 3)', { wordBits: 32 }, { env }).value, 1);
+    close(evaluate('256 >> 2', { wordBits: 32 }, { env }).value, 64);   // word-masked shift
+  });
+});

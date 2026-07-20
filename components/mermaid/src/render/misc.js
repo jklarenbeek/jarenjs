@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file Renderers for the remaining first-class types (D10 step 2) and
- * an honest placeholder for the deferred secondary types (WI 7). Pie is
+ * an honest placeholder for the deferred secondary types. Pie is
  * a real chart; class/ER/state/gantt render as structured panels — a
  * readable, geometry-light view that renders without error and so counts
  * honestly in the coverage scorecard. Secondary types (mindmap,
@@ -9,8 +9,7 @@
  * placeholder.
  */
 
-import { h } from '@jarenjs/view';
-import { svgRoot, rect, path, group, num } from '@jarenjs/view/helpers';
+import { svgRoot, rect, path, group, textAt, num } from '@jarenjs/view/helpers';
 import { textWidth } from '../layout/metrics.js';
 
 /** A categorical palette for pie slices. */
@@ -55,13 +54,13 @@ export function renderPie(ast, theme, hash) {
     legendW = Math.max(legendW, textWidth(label, fs) + 30);
     return group({ class: 'mm-pie-legend' }, [
       rect(legendX, y, 14, 14, { fill: PIE_COLORS[i % PIE_COLORS.length] }),
-      h('text', { x: num(legendX + 20), y: num(y + 12), 'font-size': fs, fill: t.nodeText }, label),
+      textAt(legendX + 20, y + 12, label, fs, { fill: t.nodeText }),
     ]);
   });
 
   const children = [];
   if (ast.title) {
-    children.push(h('text', { x: num(cx), y: 24, 'font-size': fs + 2, 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }, ast.title));
+    children.push(textAt(cx, 24, ast.title, fs + 2, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }));
   }
   children.push(...slices, ...legend);
   const width = legendX + legendW + 20;
@@ -90,14 +89,14 @@ export function renderStructured(title, sections, theme, hash) {
   const gap = 16;
   const children = [];
   let y = 40;
-  children.push(h('text', { x: 16, y: 24, 'font-size': fs + 3, 'font-weight': 'bold', fill: t.nodeText }, title));
+  children.push(textAt(16, 24, title, fs + 3, { 'font-weight': 'bold', fill: t.nodeText }));
   for (const section of sections) {
     const boxH = headH + section.rows.length * rowH + 8;
     children.push(rect(16, y, boxW, boxH, { rx: 4, fill: t.nodeFill, stroke: t.nodeStroke, 'stroke-width': 1, class: 'mm-panel' }));
-    children.push(h('text', { x: 26, y: num(y + 17), 'font-size': fs, 'font-weight': 'bold', fill: t.nodeText }, section.heading));
+    children.push(textAt(26, y + 17, section.heading, fs, { 'font-weight': 'bold', fill: t.nodeText }));
     children.push(path(`M16,${num(y + headH)} h${boxW}`, { stroke: t.nodeStroke, 'stroke-width': 1 }));
     for (let i = 0; i < section.rows.length; i++) {
-      children.push(h('text', { x: 26, y: num(y + headH + 16 + i * rowH), 'font-size': fs, fill: t.nodeText }, section.rows[i]));
+      children.push(textAt(26, y + headH + 16 + i * rowH, section.rows[i], fs, { fill: t.nodeText }));
     }
     y += boxH + gap;
   }
@@ -117,8 +116,8 @@ export function renderPlaceholder(type, theme, hash) {
   const height = 84;
   return svgRoot('mermaid mm-svg', width, height, theme, [
     rect(1, 1, width - 2, height - 2, { rx: 6, fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1, 'stroke-dasharray': '5 4' }),
-    h('text', { x: num(width / 2), y: 36, 'font-size': 15, 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }, `${type} diagram`),
-    h('text', { x: num(width / 2), y: 58, 'font-size': 12, 'text-anchor': 'middle', fill: t.nodeText }, 'parsed — not yet laid out in v1'),
+    textAt(width / 2, 36, `${type} diagram`, 15, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }),
+    textAt(width / 2, 58, 'parsed — not yet laid out in v1', 12, { 'text-anchor': 'middle', fill: t.nodeText }),
   ], 'mmph-' + hash);
 }
 

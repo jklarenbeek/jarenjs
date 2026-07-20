@@ -65,23 +65,6 @@ export function appendItem(list, v) {
 }
 
 /**
- * Invoke `fn(item)` for each item of a sequence value, in order.
- * @param {any} v - a sequence value (EMPTY, item, or Seq)
- * @param {(item: any) => void} fn
- */
-export function forEachItem(v, fn) {
-  if (v === EMPTY)
-    return;
-  if (v instanceof Seq) {
-    const items = v.items;
-    for (let i = 0; i < items.length; i++)
-      fn(items[i]);
-    return;
-  }
-  fn(v);
-}
-
-/**
  * Number of items in a sequence value.
  * @param {any} v - a sequence value (EMPTY, item, or Seq)
  * @returns {number}

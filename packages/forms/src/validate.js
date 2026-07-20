@@ -11,7 +11,7 @@
  * dependencies, unevaluatedProperties, ...). Cross-field feedback per
  * keystroke is rules.js territory (the `x-form` annotation).
  *
- * Every failure is structured (TODO_17): a stable `msgid`
+ * Every failure is structured: a stable `msgid`
  * (`form/<keyword>`) plus raw `params`, with `message` rendered eagerly -
  * failure-only, cheap - through a catalog (messages.js), so consumers can
  * re-render in another locale from `msgid` + `params`.

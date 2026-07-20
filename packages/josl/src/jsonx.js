@@ -24,6 +24,7 @@ import {
   isValidDateParts,
   isValidTimeParts,
 } from './values.js';
+import { isDigitCode, isAsciiUpperCode, isAsciiLowerCode } from '@jarenjs/core/scan';
 import { setKey, countNewlines, columnOf } from './util.js';
 
 const RE_DATETIME = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/;
@@ -47,13 +48,7 @@ const CC_RBRACKET = 0x5D;
 const CC_LBRACE = 0x7B;
 const CC_RBRACE = 0x7D;
 
-function isDigit(c) {
-  return c >= 0x30 && c <= 0x39;
-}
-
-function isLetter(c) {
-  return (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A);
-}
+const isLetter = (c) => isAsciiUpperCode(c) || isAsciiLowerCode(c);
 
 class JsonxParser {
   constructor(text, options = {}) {
@@ -125,7 +120,7 @@ class JsonxParser {
         return this.scalar(this.parseWord());
       return this.scalar(this.parseNumber());
     }
-    if (isDigit(c)) {
+    if (isDigitCode(c)) {
       if (this.mode === 'jsonx') {
         const dt = this.tryDateTime();
         if (dt !== undefined)

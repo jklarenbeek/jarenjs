@@ -1,8 +1,8 @@
 //@ts-check
 
 /**
- * TODO_17 work items 5 & 6: forms structured errors, catalogs, MessageSpec
- * rules, the transform message carry, and static-text i18n.
+ * Forms structured errors, catalogs, MessageSpec rules, the transform
+ * message carry, and static-text i18n.
  *
  * Unlike rules.test.js this file MAY import @jarenjs/validate: the
  * keystroke/submit unification test compiles the transformed schema with

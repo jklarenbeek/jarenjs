@@ -33,6 +33,26 @@ export function parseEr(lines) {
     let line = lines[li].trim();
     if (line === '' || line.startsWith('%%')) continue;
 
+    // Relationships are matched BEFORE the '{' entity-block check: a
+    // cardinality token can itself contain a brace (`CUSTOMER ||--o{ ORDER`),
+    // so `indexOf('{')` alone would misread the relationship as an entity
+    // block. An entity opener (`CUSTOMER {`) has no `--`/`..` connector, so
+    // it can never match RE_REL.
+    const rel = RE_REL.exec(line);
+    if (rel !== null) {
+      ensure(rel[1]);
+      ensure(rel[5]);
+      relationships.push({
+        left: rel[1],
+        right: rel[5],
+        leftCard: rel[2],
+        rightCard: rel[4],
+        identifying: rel[3] === '--',
+        label: rel[6].trim(),
+      });
+      continue;
+    }
+
     const brace = line.indexOf('{');
     if (brace !== -1) {
       const name = line.slice(0, brace).trim();
@@ -50,20 +70,6 @@ export function parseEr(lines) {
         entityAttr(ent, parts);
       }
       continue;
-    }
-
-    const rel = RE_REL.exec(line);
-    if (rel !== null) {
-      ensure(rel[1]);
-      ensure(rel[5]);
-      relationships.push({
-        left: rel[1],
-        right: rel[5],
-        leftCard: rel[2],
-        rightCard: rel[4],
-        identifying: rel[3] === '--',
-        label: rel[6].trim(),
-      });
     }
   }
 

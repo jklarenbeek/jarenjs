@@ -1,7 +1,7 @@
 //@ts-check
 
 /**
- * TODO_17 work item 2: the 'errorMessage' keyword.
+ * The 'errorMessage' keyword.
  *
  * 'errorMessage' overrides text, never structure (D-M6): it changes what
  * message/msgid say on the errors it matches, registered at schema compile

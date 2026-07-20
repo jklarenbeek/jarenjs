@@ -4,7 +4,7 @@
  * the finite state machine faithfully (D11): states, transitions
  * (`A --> B : event`), the `[*]` start/end pseudo-states, `state "x" as
  * s` descriptions and `s : desc` labels. This is the AST the flagship
- * `state ⇄ workflow` JSLT projection consumes (WI 11).
+ * `state ⇄ workflow` JSLT projection consumes.
  *
  * Composite states (`state Foo { … }`) are flattened one level: the
  * inner transitions are captured with their parent recorded, keeping the

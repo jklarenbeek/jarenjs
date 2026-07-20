@@ -444,9 +444,6 @@ export class ValidationRoot {
       .filter(anchor => anchor.schema !== rootSchema);
   }
 
-  /** @returns {string} The root schema origin/URI */
-  get rootOrigin() { return this.#rootOrigin; }
-
   /** @returns {TraverseOptions} Schema traversal options */
   get traverse() { return this.#traverse; }
 
@@ -458,9 +455,6 @@ export class ValidationRoot {
 
   /** @returns {Array} Array of validation errors */
   get errors() { return this.#errors; }
-
-  /** @returns {ValidationObject} The root schema's ValidationObject */
-  get firstSchema() { return this.#firstSchema; }
 
   /** @returns {boolean} Whether any schema in this compilation contains a $data reference */
   get usesDollarData() { return this.#usesDollarData; }
@@ -512,24 +506,6 @@ export class ValidationRoot {
 
     objects.set(path, null);
     return null;
-  }
-
-  /**
-   * Gets the raw schema object for a given reference without compiling it.
-   * Used to check schema properties (like $recursiveAnchor) at compile time.
-   * @param {string} ref - The reference URI to resolve
-   * @param {string} path - The current path (for error messages)
-   * @param {object} schema - The schema containing the $ref
-   * @returns {{id: string, schema: object}|null} The resolved schema info or null
-   */
-  getRawSchema(ref, path, schema) {
-    try {
-      const schemas = this.#schemas;
-      const traverse = this.#traverse;
-      return resolveRefSchemaDeep(schemas, path, schema, traverse);
-    } catch (e) {
-      return null;
-    }
   }
 
   /**
@@ -996,11 +972,6 @@ export class ValidationObject {
     return this.#effectiveBaseUri;
   }
 
-  /** @returns {Array} The current validation errors from the root */
-  get errors() {
-    return this.#root.errors;
-  }
-
   /** @returns {function} The compiled validator function */
   get validate() {
     return this.#validator;
@@ -1393,10 +1364,6 @@ export class JarenValidator {
       }
       return valid;
     }
-
-    Object.defineProperty(jarenValidateSchema, "errors", {
-      get: function () { return root.errors }
-    })
 
     return jarenValidateSchema;
   }

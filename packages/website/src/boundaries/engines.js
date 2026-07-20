@@ -47,7 +47,7 @@ import {
 } from '../content/engineExamples.js';
 
 const compileTypeTest = createTypeTestCompiler();
-const now = typeof performance !== 'undefined' ? () => performance.now() : () => Date.now();
+const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
 const J = (value) => JSON.stringify(value, null, 2);
 
 /** Parse a JSON input; returns `{ value }` or `{ node }` (an error node). */

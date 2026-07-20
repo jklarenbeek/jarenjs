@@ -6,8 +6,7 @@
  * note boxes and block frames.
  */
 
-import { h } from '@jarenjs/view';
-import { svgRoot, group, rect, path, line, textLines, num } from '@jarenjs/view/helpers';
+import { svgRoot, group, rect, path, line, polygon, textAt, textLines, num } from '@jarenjs/view/helpers';
 
 /**
  * @param {any} scene PositionedDiagram (sequence)
@@ -91,16 +90,15 @@ function renderMessage(m, t, fs, i) {
     const y1 = m.y + 26;
     parts.push(path(`M${num(m.x1)},${num(y0)} h${loopW} v${y1 - y0} h${-loopW}`, lineProps));
     parts.push(arrowHead({ x: m.x1 + 6, y: y1 }, { x: m.x1 + loopW, y: y1 }, m.head, stroke));
-    parts.push(h('text', { x: num(m.x1 + loopW + 6), y: num((y0 + y1) / 2), 'font-size': fs, class: 'mm-message-label', fill: t.edgeLabelText }, m.label));
+    parts.push(textAt(m.x1 + loopW + 6, (y0 + y1) / 2, m.label, fs, { class: 'mm-message-label', fill: t.edgeLabelText }));
   }
   else {
     parts.push(line(m.x1, m.y, m.x2, m.y, lineProps));
     parts.push(arrowHead({ x: m.x2, y: m.y }, { x: m.x1, y: m.y }, m.head, stroke));
     const midX = (m.x1 + m.x2) / 2;
-    parts.push(h('text', {
-      x: num(midX), y: num(m.y - 6), 'font-size': fs, 'text-anchor': 'middle',
-      class: 'mm-message-label', fill: t.edgeLabelText,
-    }, m.label));
+    parts.push(textAt(midX, m.y - 6, m.label, fs, {
+      'text-anchor': 'middle', class: 'mm-message-label', fill: t.edgeLabelText,
+    }));
   }
   return group({ class: 'mm-message', key: 'msg-' + i }, parts);
 }
@@ -126,10 +124,11 @@ function arrowHead(tip, from, head, color) {
       { stroke: color, 'stroke-width': 1.2, fill: 'none' });
   }
   // filled arrow / async point → filled triangle
-  return h('polygon', {
-    points: `${num(tip.x)},${num(tip.y)} ${num(tip.x - dir * size)},${num(tip.y - 4)} ${num(tip.x - dir * size)},${num(tip.y + 4)}`,
-    class: 'mm-arrowhead', fill: color, stroke: color,
-  });
+  return polygon([
+    { x: tip.x, y: tip.y },
+    { x: tip.x - dir * size, y: tip.y - 4 },
+    { x: tip.x - dir * size, y: tip.y + 4 },
+  ], { class: 'mm-arrowhead', fill: color, stroke: color });
 }
 
 /**
@@ -142,11 +141,11 @@ function renderBlock(b, t, fs, i) {
   const parts = [
     rect(b.x, b.y, b.w, b.h, { class: 'mm-block', fill: 'none', stroke: t.actorStroke, 'stroke-width': 1 }),
     path(`M${num(b.x)},${num(b.y + 18)} h${num(tabW)} l-8,6 h${num(-tabW + 8)} Z`, { fill: t.clusterFill, stroke: t.actorStroke, 'stroke-width': 1 }),
-    h('text', { x: num(b.x + 6), y: num(b.y + 14), 'font-size': fs - 1, 'font-weight': 'bold', class: 'mm-block-label', fill: t.nodeText }, label),
+    textAt(b.x + 6, b.y + 14, label, fs - 1, { 'font-weight': 'bold', class: 'mm-block-label', fill: t.nodeText }),
   ];
   for (const d of b.dividers) {
     parts.push(line(b.x, d.y, b.x + b.w, d.y, { stroke: t.actorStroke, 'stroke-width': 1, 'stroke-dasharray': '2 2' }));
-    if (d.label) parts.push(h('text', { x: num(b.x + b.w / 2), y: num(d.y - 4), 'font-size': fs - 1, 'text-anchor': 'middle', class: 'mm-block-divider-label', fill: t.nodeText }, '[' + d.label + ']'));
+    if (d.label) parts.push(textAt(b.x + b.w / 2, d.y - 4, '[' + d.label + ']', fs - 1, { 'text-anchor': 'middle', class: 'mm-block-divider-label', fill: t.nodeText }));
   }
   return group({ class: 'mm-block-group', key: 'blk-' + i }, parts);
 }

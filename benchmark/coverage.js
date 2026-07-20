@@ -371,7 +371,11 @@ function runDeadCodeAudit(opts) {
   fs.mkdirSync(opts.tempDir, { recursive: true });
 
   // Instrument only shipped source (packages/*/src, components/*/src); tests,
-  // dist and node_modules are never "dead code" to be removed.
+  // dist and node_modules are never "dead code" to be removed. The website
+  // browser bootstrap (main.js) is excluded too: it wires the live DOM,
+  // localStorage, fetch and the service worker, so no headless test can load
+  // it — its logic is covered instead by driving createSiteApp over the stub
+  // host (test/website/site.test.js).
   const cmd = [
     'npx c8',
     '--reporter=json',
@@ -380,6 +384,7 @@ function runDeadCodeAudit(opts) {
     "--include 'components/**/src/**/*.js'",
     "--exclude '**/*.test.js'",
     "--exclude '**/dist/**'",
+    "--exclude 'packages/website/src/main.js'",
     `--temp-directory ${opts.tempDir}`,
     '--clean',
     'node --no-warnings=ExperimentalWarning --test "test/**/*.test.js"',

@@ -52,7 +52,7 @@ const TYPE_PARSERS = {
   pie: parsePie,
 };
 
-/** Types that parse-accept into a placeholder (WI 7 scorecard). */
+/** Types that parse-accept into a placeholder in the coverage scorecard. */
 export const SECONDARY_TYPES = new Set([
   'mindmap', 'gitGraph', 'journey', 'timeline', 'quadrantChart', 'requirement',
 ]);

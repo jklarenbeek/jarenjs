@@ -7,6 +7,7 @@
  * tests catch any drift. Output is a host-free `PositionedDiagram`.
  */
 
+import { Float64 } from '@jarenjs/core/math';
 import { measureText } from './metrics.js';
 
 const FONT_SIZE = 14;
@@ -242,7 +243,7 @@ function clipToBox(from, to, box) {
   return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
-const round = (n) => Math.round(n * 100) / 100;
+const round = (n) => Float64.roundTo(n, 2);
 const roundBox = (b) => ({ ...b, x: round(b.x), y: round(b.y), w: round(b.w), h: round(b.h) });
 const roundEdge = (e) => ({
   ...e,

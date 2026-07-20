@@ -6,7 +6,7 @@
  * patcher swaps it cleanly.
  */
 
-import { h } from '@jarenjs/view';
+import { rect, textAt } from '@jarenjs/view/helpers';
 import { hashContent } from '../utils.js';
 
 /**
@@ -30,11 +30,11 @@ export function errorVnode(message, line = 0, sourceLine = '') {
     key,
     style: { 'max-width': '100%', 'font-family': 'monospace' },
   },
-    h('rect', { x: 1, y: 1, width: width - 2, height: height - 2, rx: 6, fill: '#fdf2f2', stroke: '#e74c3c', 'stroke-width': 1.5 }),
-    h('text', { x: 14, y: 26, 'font-size': 14, 'font-weight': 'bold', fill: '#c0392b' }, 'Mermaid parse error'),
-    h('text', { x: 14, y: 48, 'font-size': 12, fill: '#7b241c' }, lineLabel + message),
+    rect(1, 1, width - 2, height - 2, { rx: 6, fill: '#fdf2f2', stroke: '#e74c3c', 'stroke-width': 1.5 }),
+    textAt(14, 26, 'Mermaid parse error', 14, { 'font-weight': 'bold', fill: '#c0392b' }),
+    textAt(14, 48, lineLabel + message, 12, { fill: '#7b241c' }),
     ...(sourceLine
-      ? [h('text', { x: 14, y: 72, 'font-size': 12, fill: '#555', style: { 'white-space': 'pre' } }, truncate(sourceLine, 72))]
+      ? [textAt(14, 72, truncate(sourceLine, 72), 12, { fill: '#555', style: { 'white-space': 'pre' } })]
       : []),
   ];
 }

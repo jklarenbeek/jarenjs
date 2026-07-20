@@ -1,7 +1,7 @@
 //@ts-check
 
 /**
- * TODO_17 work item 3: the messages module public API.
+ * The messages module public API.
  */
 
 import { describe, it } from 'node:test';

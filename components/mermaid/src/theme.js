@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Theme tokens (design decision D4/WI 4). `createTheme` resolves a
+ * @file Theme tokens (design decision D4). `createTheme` resolves a
  * theme name (or overrides) into a flat token object of concrete colors
  * *and* a matching set of `--mm-*` CSS custom properties.
  *

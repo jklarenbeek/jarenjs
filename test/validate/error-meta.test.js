@@ -1,7 +1,7 @@
 //@ts-check
 
 /**
- * TODO_17 work item 1: the handler-contract invariant.
+ * The handler-contract invariant.
  *
  * Every error handler call site passes the instance data path as the
  * first meta argument (normal handlers: addError(data, dataPath, ...),

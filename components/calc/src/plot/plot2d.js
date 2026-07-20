@@ -9,7 +9,7 @@
  * pure-vnode SVG.
  */
 
-import { remap } from '@jarenjs/core/math';
+import { Float64, remap } from '@jarenjs/core/math';
 import { svgRoot, line, path, textAt, polylinePath } from '@jarenjs/view/helpers';
 import { parseExpression } from '../parser/index.js';
 import { compileExpr } from '../compile.js';
@@ -214,7 +214,7 @@ function formatTick(v) {
   if (v === 0) return '0';
   const a = Math.abs(v);
   if (a >= 1e4 || a < 1e-3) return v.toExponential(0);
-  return String(Math.round(v * 1000) / 1000);
+  return String(Float64.roundTo(v, 3));
 }
 
 /**

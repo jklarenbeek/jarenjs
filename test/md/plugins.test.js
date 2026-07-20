@@ -161,7 +161,7 @@ describe('highlightPlugin', function () {
   });
 });
 
-describe('mermaidPlugin (native, TODO_18)', function () {
+describe('mermaidPlugin (native)', function () {
   it('renders inline pure-vnode SVG with no injected instance or innerHTML', function () {
     const plugin = mermaidPlugin();
     const doc = parseMarkdown('```mermaid\ngraph TD; A-->B\n```\n', { plugins: [plugin] });

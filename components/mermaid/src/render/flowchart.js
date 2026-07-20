@@ -7,9 +7,8 @@
  * theme colors for standalone SSR.
  */
 
-import { h } from '@jarenjs/view';
 import {
-  svgRoot, group, rect, path, circle, polygon, textLines, num,
+  svgRoot, group, rect, path, circle, polygon, textAt, textLines, num,
 } from '@jarenjs/view/helpers';
 
 /**
@@ -31,11 +30,9 @@ export function renderFlowchart(scene, theme, hash) {
         fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1,
       }),
       sg.label
-        ? h('text', {
-          x: num(sg.x + sg.w / 2), y: num(sg.y + 15),
-          'font-size': scene.fontSize, 'text-anchor': 'middle',
-          class: 'mm-cluster-label', fill: t.nodeText,
-        }, sg.label)
+        ? textAt(sg.x + sg.w / 2, sg.y + 15, sg.label, scene.fontSize, {
+          'text-anchor': 'middle', class: 'mm-cluster-label', fill: t.nodeText,
+        })
         : null,
     ]));
   }
@@ -171,11 +168,10 @@ function renderEdge(e, t, fontSize, i) {
     parts.push(rect(e.labelPos.x - lw / 2, e.labelPos.y - fontSize * 0.7, lw, fontSize * 1.4, {
       class: 'mm-edge-label-bg', fill: t.edgeLabelBg, stroke: 'none',
     }));
-    parts.push(h('text', {
-      x: num(e.labelPos.x), y: num(e.labelPos.y),
-      'font-size': fontSize, 'text-anchor': 'middle', 'dominant-baseline': 'central',
+    parts.push(textAt(e.labelPos.x, e.labelPos.y, e.label, fontSize, {
+      'text-anchor': 'middle', 'dominant-baseline': 'central',
       class: 'mm-edge-label', fill: t.edgeLabelText,
-    }, e.label));
+    }));
   }
 
   return group({ class: 'mm-edge', key: 'e-' + i }, parts);

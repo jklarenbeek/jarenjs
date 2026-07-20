@@ -7,6 +7,7 @@
  * text metrics (no DOM) — pixel parity is a non-goal.
  */
 
+import { Float64 } from '@jarenjs/core/math';
 import { textWidth } from './metrics.js';
 
 const FONT_SIZE = 14;
@@ -176,4 +177,4 @@ export function layoutSequence(ast) {
   };
 }
 
-const round = (n) => Math.round(n * 100) / 100;
+const round = (n) => Float64.roundTo(n, 2);

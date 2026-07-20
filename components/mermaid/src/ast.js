@@ -6,7 +6,7 @@
  * nodes of a type share one hidden class — property access stays
  * monomorphic and the structural hash is deterministic (MERMAID-FORMAT
  * §4, design decision D5). The AST is deliberately **geometry-free**:
- * layout (WI 3) is a separate pass, so the AST is a faithful, lossless
+ * layout is a separate pass, so the AST is a faithful, lossless
  * semantic model of the diagram's *meaning* (D11) — a directed graph
  * (flowchart), an ordered interaction (sequence), a finite state machine
  * (state) — that other engines project via JSLT without ever seeing a
@@ -216,7 +216,7 @@ export function sequenceAst(participants, statements, autonumber) {
 
 /**
  * A geometry-free "lines" AST for diagram types that parse-accept but
- * are not yet laid out (WI 7 secondary types). Preserves the raw body
+ * are not yet laid out (the secondary types). Preserves the raw body
  * lines so `toMermaid` round-trips and the coverage scorecard can be
  * honest.
  * @param {string} diagram

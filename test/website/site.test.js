@@ -340,4 +340,43 @@ describe('website — the site as one app document', function () {
       { page: 'benchmarks', params: { suite: 'validate' } });
     assert.deepStrictEqual(parseHash('#/bogus'), { page: 'home', params: {} });
   });
+
+  it('the Examples page lists per-engine example previews', function () {
+    const { container, go } = mountSite();
+    go('#/examples');
+    const html = serialize(container);
+    assert.match(html, /"type"/, 'a JSON-schema example preview renders');
+  });
+
+  it('playground: committing the data pane parses JSON and surfaces malformed input', function () {
+    const { app } = mountSite({ hash: '#/playground' });
+    app.dispatch('pg/data-text', null, { target: { value: '{ "custom": 123 }' } });
+    assert.deepStrictEqual(app.getState().pg.data, { custom: 123 });
+    assert.strictEqual(app.getState().pg.dataError, null);
+    app.dispatch('pg/data-text', null, { target: { value: '{ not json' } });
+    assert.match(app.getState().pg.dataError, /./, 'a parse error is surfaced, not thrown');
+  });
+
+  it('boots with built-in storage/error defaults when the env omits them', function () {
+    const { document, container } = createStubHost();
+    /** @type {any} */
+    let routeCb = null;
+    // no `storage`, no `onError` → exercises the built-in fallbacks
+    const app = createSiteApp({
+      node: container,
+      document,
+      schedule: (f) => f(),
+      fetchJson: () => Promise.reject(new Error('404')),
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/playground')); },
+      navigate: (h) => routeCb(parseHash(h)),
+    });
+    assert.ok(app.getState().pg, 'the default (empty) store still boots the playground');
+    // an IDE save writes through the default no-op storage without throwing
+    app.dispatch('ide/name', null, { target: { value: 'exp1' } });
+    app.dispatch('ide/save');
+    assert.ok(app.getState().ide.names.includes('exp1'), 'saved via the default storage');
+    // an unhandled app error routes to the default no-op error handler
+    app.dispatch('no-such-action');
+    assert.ok(app.getState().pg, 'the app survives an unknown-action error via the default handler');
+  });
 });

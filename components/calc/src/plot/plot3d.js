@@ -125,8 +125,8 @@ export function buildScene3d(exprOrConfig, options = {}) {
       const shade = Float64.clamp(remap(avgZ, zmin, zmax, 0, 1), 0, 1);
       quads.push({
         points: [round(a), round(b), round(c), round(d)],
-        depth: Math.round(depth * 1e4) / 1e4,
-        shade: Math.round(shade * 1000) / 1000,
+        depth: Float64.roundTo(depth, 4),
+        shade: Float64.roundTo(shade, 3),
       });
     }
   }
@@ -143,7 +143,7 @@ export function buildScene3d(exprOrConfig, options = {}) {
 
 /** @param {{x:number,y:number}} p */
 function round(p) {
-  return { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 };
+  return { x: Float64.roundTo(p.x, 2), y: Float64.roundTo(p.y, 2) };
 }
 
 /**

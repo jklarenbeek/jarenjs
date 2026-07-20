@@ -55,7 +55,7 @@ describe('createMdRenderer', function () {
   it('runs hydrate hooks after mount, once per content hash', async function () {
     const rendered = [];
     // A synthetic hydratable plugin; the native mermaid no longer
-    // hydrates (its render is complete, TODO_18 D2).
+    // hydrates (its render is complete).
     const widget = definePlugin({
       name: 'widget', fences: ['widget'], node: 'widget',
       render: (node, hh) => hh('div', { class: 'widget', 'data-md-hydrate': 'widget', 'data-md-hash': hashContent(node.value) }),

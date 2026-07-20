@@ -1,7 +1,7 @@
 //@ts-check
 
 /**
- * TODO_17 work item 4: the Dutch locale pack.
+ * The Dutch locale pack.
  *
  * Key parity with the built-in English catalogs is enforced HERE (by
  * test, not by imports - the pack itself has zero dependencies).
