@@ -85,6 +85,12 @@ member order (monomorphic; the structural hash is deterministic).
 | subgraph | `{ id, label, direction, nodes[] }` |
 | classDef / class / style | `{ name, styles }` / `{ node, name }` / `{ node, styles }` |
 
+A node `id` is alphanumeric/underscore (plus Unicode letters); `-` and
+`.` are **excluded** so an id can never swallow a following link
+operator — `A-->B` parses as an edge, not as a node with id `A-`. This
+is a deliberate parser-correctness deviation from upstream Mermaid,
+whose grammar permits those characters in ids.
+
 ### 4.2 sequence
 
 ```
@@ -120,6 +126,15 @@ type) and the reverse of `parseMermaid`. The normative contract:
 
 > **`parseMermaid(toMermaid(doc))` deep-equals `doc.ast`** for the
 > fully-modeled types (flowchart, sequence).
+
+The flowchart printer emits in a fixed order — node declarations (AST
+order) → subgraph membership → edges → classDef/class/style — and it is
+that ordering which makes node order and edge order a fixed point on the
+round trip. Subgraphs, however, round-trip **structurally, not as a
+deep-equal fixed point**: they emit their members by bare id and a
+re-parse reconstructs membership, so the shape survives but the strict
+`nodes[]` ordering of a subgraph is not guaranteed to be `===`-identical
+to the original.
 
 The printer is canonical, not verbatim: it does not preserve source
 whitespace or comments. Two round-trip modes coexist:

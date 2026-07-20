@@ -189,7 +189,7 @@ I will look up what that means, later...
 - [HOWTO.md](HOWTO.md) — practical usage guide: installation profiles, options, formats, `$ref` patterns, performance tips, pitfalls, API reference.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the monorepo fits together and the shared compile-to-closures design; each package links its own deeper ARCHITECTURE document from there.
 - [ROADMAP.md](ROADMAP.md) — release milestones and everything still to be done or optimized, per package.
-- [PUBLISHING.md](PUBLISHING.md) — npm authentication, synchronized versioning, release checks and publishing the six public workspaces.
+- [PUBLISHING.md](PUBLISHING.md) — npm authentication, synchronized versioning, release checks and publishing the twelve public workspaces.
 - [benchmark/README.md](benchmark/README.md) — the complete measuring and debugging toolbox: conformance suites, profilers, the test-failure debugger, code coverage, call graphs, and the QT3 scorecard.
 - Language specifications: [QUERY-FORMAT.md](packages/json/docs/QUERY-FORMAT.md) (the Jaren JSON Query format), [JSLT-FORMAT.md](packages/json/docs/JSLT-FORMAT.md) (the JSLT stylesheet format), [XQUERY-FRONTEND.md](packages/json/docs/XQUERY-FRONTEND.md) (the XQuery text subset), [VIEW-FORMAT.md](packages/view/docs/VIEW-FORMAT.md) (the vnode format), [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md) (the app document format).
 
@@ -197,7 +197,7 @@ For detailed API documentation beyond that, visit our official documentation. Wh
 
 ## 📅 Roadmap
 
-The roadmap moved to its own document: [ROADMAP.md](ROADMAP.md). It tracks the release milestones (0.9 → 1.0 stable → beyond) together with every open item and optimization opportunity recorded during development, grouped per package — from the JSLT single-walk matcher optimizer and query hash joins to `errorMessage`, i18n and the website playground.
+The roadmap moved to its own document: [ROADMAP.md](ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with every open item and optimization opportunity recorded during development, grouped per package — from the JSLT single-walk matcher optimizer and query hash joins to lazy `$range`, the `propertyDependencies` proposal and JSON Schema standard output formats.
 
 ## 🤝 Contributing to Jaren
 

@@ -53,6 +53,13 @@ constant-vs-variable factors.
 - `index.js` — `createCalcComponent()`: `initialState`, `actions`
   (patch/effect query documents + spread `createFormActions`), `viewModel`
   (`contributeCalcViewModel`), `rules`, `effects`, `subs`, `createApp`.
+  The financial panel's form actions are **namespaced** — `createFormView`
+  and `createFormActions` are both handed a `FORM_ACTIONS` map of
+  `calc-form/*` names (`calc-form/input`, `calc-form/check`,
+  `calc-form/number`, `calc-form/add`, `calc-form/remove`) — so an
+  embedding host that also runs `@jarenjs/forms` (e.g. the site's schema
+  playground, which spreads its own `createFormActions`) never collides on
+  the default action names.
 - `rules.js` — the `calculator` JSLT view.
 - `schema.js` / `schemas/*` — the financial form schema + AST/state schemas.
 - `rates/*` — CoinGecko + Binance adapters, the `rates-fetch` effect and

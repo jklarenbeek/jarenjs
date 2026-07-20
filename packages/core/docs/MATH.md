@@ -19,6 +19,21 @@ otherwise), `gamma(x)` (Lanczos, whole real line), `hypot(...args)`,
 `sign(x)`, `logBase(base, x)`. `cosHp(r)` is now implemented (a
 high-precision polynomial cosine; it previously threw).
 
+### Range remapping — use the free `remap`, not `Float64.map`
+
+The free export `remap(v, smin, smax, dmin, dmax)` is the
+**interpolation-correct** linear remap of `v` from `[smin, smax]` to
+`[dmin, dmax]`: `dmin + t·(dmax - dmin)` with `t = (v - smin)/(smax - smin)`,
+and a degenerate source range (`smax === smin`) collapses to `dmin`. Use it for
+any value/screen interpolation.
+
+> **Warning — `Float64.map`/`lerp`/`norm` are non-standard.** `Float64.lerp`
+> computes `(max - min)·(norm + min)` instead of the textbook
+> `min + norm·(max - min)`, and `Float64.map` composes `Float64.norm`/
+> `Float64.lerp`, so it inherits that quirk. Neither is correct for linear
+> interpolation or range mapping. They are **legacy** and are left untouched for
+> existing consumers; new code that wants interpolation MUST use `remap`.
+
 ## Word math — `word.js`
 
 BigInt fixed-width integers for programmer-calculator mode. `toWord(value,

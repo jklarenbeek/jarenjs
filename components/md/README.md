@@ -92,8 +92,7 @@ import { highlightPlugin, mermaidPlugin } from '@jarenjs/md/plugins';
 import { renderToString } from '@jarenjs/view';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
-const mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs')).default;
-const plugins = [highlightPlugin(), mermaidPlugin({ mermaid })];
+const plugins = [highlightPlugin(), mermaidPlugin()];   // native engine, no injected instance
 
 // 1. Load + compile (cached by URL, AbortSignal-aware, streaming).
 const md = await loadMarkdown('/docs/article.md', { plugins });
@@ -108,10 +107,10 @@ const dropH1 = compileJsltStylesheet([
 ], { compileTypeTest });   // hook from '@jarenjs/validate/query'
 const trimmed = dropH1(md.doc);   // unmatched blocks stay ===
 
-// 4. SSR: pure, deterministic (mermaid renders its placeholder).
+// 4. SSR: pure, deterministic (mermaid renders real inline SVG, no browser).
 const ssr = renderToString(mdToVnode(trimmed, { plugins }));
 
-// 5. Browser: mount, patch, and hydrate (mermaid swaps in the SVG).
+// 5. Browser: mount and patch (mermaid's SVG is already complete — no hydrate).
 const render = createMdRenderer({ container: document.getElementById('app'), plugins });
 render(md);
 ```
@@ -171,10 +170,12 @@ createApp(appDoc, {
   abort, streaming) and dispatches the plain `MdDocument` as the
   action payload; `md-parse` does the same for an in-state source
   string. Failures route to an optional `error` action.
-- `md.hydrate(container)` runs plugin `hydrate` hooks (mermaid's SVG
-  swap) over app-managed DOM, once per content hash.
+- `md.hydrate(container)` runs plugin `hydrate` hooks (browser-only
+  upgrades) over app-managed DOM, once per content hash. The bundled
+  plugins need none — mermaid renders complete SVG synchronously — so
+  this is a no-op until a hydrating third-party plugin is added.
 - Pass `plugins` to extend the compiled-in set — e.g.
-  `createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin({ mermaid })] })`.
+  `createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin()] })`.
 
 ### Forms and apps
 

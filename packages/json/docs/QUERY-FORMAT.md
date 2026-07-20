@@ -190,11 +190,15 @@ evaluating to the empty sequence contributes none.
 Against a store with four book prices, this constructs a single 7-element
 array: `1`, the four prices, `2`, `3`.
 
-The same flattening applies to the member value expressions of a map
-constructor and to every other expression position; it is a property of the
-sequence data model, not of the array constructor alone. To embed an array
-*as a value* without evaluation, use `$const` (§3.5.1); to bind one without
-iteration, use `$let` (§6.3).
+This flattening is a property of the sequence data model, not of the array
+constructor alone; it applies in every expression position where a sequence can
+flow. A **map-constructor member value** is the one position that cannot flatten
+— a JSON member holds exactly one value — so it takes the single-value
+cardinality rule instead: a member value that evaluates to the empty sequence
+**omits the member**, a singleton becomes the member's value, and a value of two
+or more items is runtime error `JQ2001`. To embed an array *as a value* without
+evaluation, use `$const` (§3.5.1); to bind one without iteration, use `$let`
+(§6.3).
 
 ### 3.5 Escape hatches
 
@@ -226,9 +230,12 @@ order:
 
 - *keyExpr* MUST evaluate to a single string; any other result (empty
   sequence, non-string, multi-item sequence) is runtime error `JQ2004`.
-- *valueExpr* is evaluated as an ordinary expression (its result flows per
-  §3.4).
-- Later pairs win on duplicate keys.
+- *valueExpr* is evaluated and taken as the member value under §3.4's
+  member-value cardinality: an empty result **omits the pair**, a singleton is
+  the value, and two or more items are runtime error `JQ2001`.
+- Later pairs win on duplicate keys — but because an omitted (empty-valued) pair
+  is never written, an earlier pair for the same key **survives** a later pair
+  for that key whose value is the empty sequence.
 
 Each pair MUST be an array of exactly two expressions (`JQ0003` otherwise).
 An empty pair list constructs the empty object.
@@ -295,6 +302,17 @@ this, and later work uses it for static cardinality checks.
 
 An absolute path in any expression position reads from the one input
 document; there is no context-item drift — `$` is always the document root.
+
+> **Footgun (variable-rooted filters).** A filter selector filters the
+> *children* of each node it is applied to (RFC 9535 §2.3.5). So a filter
+> written directly against a `$let`/`$for` variable tests that item's members,
+> not the item itself. Given `{"$let": {"books": "$.store.book[*]"}}`, the path
+> `"$books[?@.price > 20]"` applies the filter to the *members* of each book
+> object and asks each member for a `.price` child — no member has one, so every
+> book contributes the empty sequence and the whole path is empty. To filter the
+> books themselves, place the predicate one level up, where the books are the
+> children being filtered — `"$.store.book[?@.price > 20]"` — or iterate with
+> `$for` and test in `$where` (§6.4).
 
 ### 5.2 The two filter dialects
 
@@ -462,10 +480,14 @@ XQuery 3.1 group-by semantics:
 
 - Each *keyExpr* is evaluated per tuple; each *name* becomes a
   **grouping-key variable**, bound in every subsequent clause to that group's
-  key value (a singleton per group).
+  key value (a singleton per group). A *keyExpr* MUST evaluate to the empty
+  sequence or a single item; a two-or-more-item key is runtime error `JQ2001`.
+  An **empty key is allowed** and groups with the other empty keys.
 - Tuples with equal key combinations form one group. Key equality is **deep
-  structural JSON equality** (`equalsJson`-grade, the same relation as `$eq`
-  item equality, §8.4), with numbers compared mathematically.
+  structural JSON equality** (`equalsJson`-grade), with numbers compared
+  mathematically. Unlike `$eq` item equality (§8.4), grouping treats **`NaN` as
+  equal to itself** (the XQuery grouping rule; §8.9's `$distinct` and `$sort`
+  cite the same relation).
 - Every other variable bound in the phrase is **rebound to the sequence** of
   its values across the group's tuples, in tuple order.
 - The tuple stream after `$groupby` has one tuple per group, in order of
@@ -515,7 +537,9 @@ with `$key` REQUIRED and `$dir` (default `"asc"`) and `$empty` (default
   mathematically, strings by **Unicode scalar values** (code point order).
   Comparing any other combination (number with string, or a key that is a
   boolean, `null`, array, object, or multi-item sequence) is runtime error
-  `JQ2005`.
+  `JQ2005`. A `NaN` key is a number: the comparator is total over `NaN`, ordering
+  it **equal to itself and less than every other number**, then falling through
+  to the next key on ties (§8.9's `$sort` cites this same rule).
 - Empty key sequences sort per `$empty`: `"least"` (default) places them
   first ascending / last descending; `"greatest"` the reverse.
 
@@ -715,7 +739,10 @@ All arithmetic is IEEE double arithmetic (**D1**):
   XQuery *double* division semantics, not the decimal FOAR0001 error.
 - `$idiv` is **truncating division** (quotient rounded toward zero to an
   integral double); `$idiv` or `$mod` with a zero divisor is runtime error
-  `JQ2002`.
+  `JQ2002`. Only a **zero divisor** errors: an `Infinity` or `NaN` *dividend*
+  over a finite non-zero divisor is not an error — both operators keep IEEE
+  double behavior (`Math.trunc` of the quotient, `%` for `$mod`) and yield
+  `NaN`, in keeping with D1's IEEE arithmetic.
 - `$mod` takes the sign of the dividend (XQuery `mod` semantics).
 - `$neg` is unary minus.
 

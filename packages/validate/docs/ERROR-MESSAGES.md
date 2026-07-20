@@ -50,6 +50,19 @@ argument is ALWAYS the instance data path, so `instancePath` is a straight
 read. A charCode guard keeps a non-pointer value from ever becoming a
 wrong path (it yields `''`).
 
+### Deliberate `additionalProperties` divergence from ajv
+
+An `additionalProperties: false` failure reports `instancePath` at the
+**offending member** (`/nested/extra`), not at the parent object
+(`/nested`). The object compiler passes the child path
+(`${dataPath}/${dataKey}`) as the error's data path, so the pointer lands
+on the disallowed property itself. This is spec-correct (the failing
+location *is* that property) and friendlier for a UI that highlights the
+field. ajv reports the parent object's path with the property name in
+`params.additionalProperty`; Jaren carries the same `additionalProperty`
+param, so a consumer diffing error sets against ajv should treat the
+`instancePath` difference as intentional, not a bug.
+
 ## 2. The message-key registry
 
 One flat namespace:

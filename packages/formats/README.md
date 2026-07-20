@@ -38,14 +38,14 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 
 - `duration` | duration from RFC3339
 - `iso-date-time` | ISO 8601 date-time with optional timezone
-- `iso-time` | ISO 8601 time with optional timezone
+- `iso-time` | ISO 8601 time with optional timezone — the timezone offset is uniformly optional, so a zone-less time such as `12:30:00` validates
 
 *Note: All date time formats can use formatMinimum / formatMaximum and formatExclusiveMinimum and formatExclusiveMaximum*
 
 #### 🗨 Formats for url's, hostnames and emails
 
 - `url` | full URL
-- `url--full` | same as `url`, but more comprehensive
+- `url--full` | same as `url`, but more comprehensive — uses the dotted-host FULL grammar (a host must carry a dotted TLD), so a single-label authority like `http://localhost:8080` **fails** `url--full` while passing `url`
 - `uri` | full URI
 - `uri--full` | same as `uri`, but more comprehensive
 - `uri-reference` | URI reference, including full and relative URIs

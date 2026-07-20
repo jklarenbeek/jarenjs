@@ -21,8 +21,10 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/dates` | RFC 3339 / ISO 8601 date-time parsing and validation |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the interpolation-correct linear `remap` |
+| `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
+| `@jarenjs/core/convert` | pure deterministic quantity conversion: affine dimensional units and rate-table currency |
 
-Deep imports work too (`@jarenjs/core/text/email`, `@jarenjs/core/math/vec2f64`, ...).
+Deep imports work too (`@jarenjs/core/text/email`, `@jarenjs/core/math/vec2f64`, `@jarenjs/core/finance/tvm`, ...).
 
 ## Strings and Unicode
 

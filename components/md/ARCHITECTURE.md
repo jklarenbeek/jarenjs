@@ -169,6 +169,12 @@ return value is the finished document.
 - **Monomorphic nodes.** Constructors in `ast.js` build every node of a
   type with the same member order, which also makes the structural
   hash deterministic.
+- **Do not dedup the space scanner.** `scanner.js`'s `isSpaceCode`
+  matches space or tab only; `@jarenjs/core/scan`'s `isWhitespaceCode`
+  matches space, tab, LF *and* CR (RFC 9535 blank space). The character
+  sets differ, so md deliberately keeps its own char-code predicate
+  rather than folding it into core's — Markdown line scanning treats
+  line terminators as structural, not as inline whitespace.
 - **Honest numbers.** `npm run benchmark:markdown` measures against
   marked/markdown-it/micromark and scores the official CommonMark
   examples; the README quotes the results with date and Node version.

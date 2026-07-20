@@ -350,6 +350,16 @@ The compilation context that:
 - Collects validation errors
 - Provides `$ref` resolution services
 
+**Owner threading**: the constructor takes a sixth argument `owner`
+(default `null`), exposed through an `owner` getter, and both construction
+sites in `index.js` pass the owning `JarenValidator` for it. This lets
+`query-keyword.js` hand that instance to `createTypeTestCompiler`, so the
+schema literals inside a `$query` document (`$valid`/`$assert`/`$as`)
+resolve their `$ref`s against the owner's `addSchema` registrations. The
+resulting ESM cycle — `index.js` → `schema.js` → `query-keyword.js` →
+`query.js` → `index.js` — is benign: `query.js` only *reads* the hoisted
+`JarenValidator` declaration at call time, never at module-evaluation time.
+
 ### ValidationObject
 
 Represents a single schema location with its compiled validator:
@@ -576,6 +586,14 @@ flowchart TB
     A5 --> C[Runtime value resolution]
     B5 --> C
 ```
+
+**Compile-failure fallback**: the ref compilers of `@jarenjs/json`
+(`compileDataRef` for the `data` keyword, `compileRelativeJSONPointer` for
+`$data`) *throw* on a malformed reference. `data.js` and `dollar-data.js`
+each wrap the compile in a `compileRefResolver` try/catch that falls back to
+an always-`JSONPOINTER_NOTHING` resolver. A malformed `$data`/`data`
+reference therefore validates as "not found" — the keyword asserts nothing —
+instead of throwing at compile time, keeping the lax keyword semantics.
 
 ---
 

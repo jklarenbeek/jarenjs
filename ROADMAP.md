@@ -5,35 +5,40 @@ My manager tried to open that door before,
 but it apparently was scheduled for the next release.
 ```
 
-This is the single roadmap for the whole monorepo. It combines the release
-milestones with everything the development record identified as still to be
-done or optimized, grouped per package. Items link to the document that
-motivates them where one exists.
+This is the single roadmap for the whole monorepo. It lists everything the
+development record identified as still to be done or optimized, grouped per
+package, plus the remaining release milestones. Completed work has been retired
+from this file; items link to the document that motivates them where one exists.
 
 ## Release milestones
 
-- 0.9 — current
-  - [x] Jaren as a drop-in replacement for Ajv
-  - [x] add [benchmark](https://github.com/ebdrup/json-schema-benchmark) test suite for `draft7`
-  - [x] Fixing JSON error schema output
-  - [x] add error reporting tests
-  - [x] full `draft7` compliance (100% of the official test suite)
-  - [x] full `draft2019` compliance: `unevaluatedProperties`, `unevaluatedItems`, `$recursiveRef`/`$recursiveAnchor`, `$vocabulary`, cross-draft references
-  - [x] full `draft2020` compliance: `prefixItems`/`items`, `$dynamicRef`/`$dynamicAnchor`, format-annotation semantics
-  - [x] Runtime schema manipulation of constraints (via `data` keyword — json-everything's data-ref proposal)
-  - [x] add development documentation
-  - [x] add examples
-  - [x] `@jarenjs/json`: compiled JSON Pointer, RFC 9535 JSONPath (703/703 compliance), the Jaren JSON Query engine (FLWOR, 58-operator library, XQuery text front-end, QT3 scorecard), and the JSLT stylesheet layer — with published JSON Schema grammar twins for all of it
-  - [x] `$query` keyword: Jaren queries inside JSON Schema (cross-field assertions)
-  - [x] JSON Schema as the query type system (`$valid`/`$assert`/`$as` via the `compileTypeTest` hook)
-  - [x] `@jarenjs/forms` on the json stack: shared compiled pointers, `x-form` query-powered rules, write-once submit assertions
 - 🎉 1.0 Stable release
-  - [ ] add AI bot workflow and bootstrap prompt
-  - [ ] add a website to github pages with typescript and react
-  - [x] add i18n — every error carries `msgid` + structured params; catalogs render at report time (`localizeErrors`), locale packs live in `@jarenjs/locales` (Dutch shipped)
+  - [ ] **AI bot workflow and bootstrap prompt** — productionize the context-free,
+    work-order development workflow that built this monorepo so it can be re-run and
+    shared. That workflow ran entirely from local, gitignored scratch files (now
+    removed); reconstructing it as a committed, reusable harness means capturing its
+    four moving parts:
+    - a **program router** — the "what we are building" charter, the ordered table of
+      work orders with their dependencies and execution order, and the fixed design
+      decisions (D-numbers) an executor must not reopen;
+    - one **work order per step** — each self-contained so it can be executed in a
+      *fresh session with no conversation context*: everything the executor needs is
+      the router, the referenced work order, and the repo itself, ending in an
+      acceptance checklist;
+    - one **session record per step** — Summary / Files / Decisions & divergences /
+      Test & benchmark output / Open issues, written after the work is done and green;
+    - a **handoff note** — carries state (open follow-ups, prelude status,
+      cross-package handoffs) from one session to the next.
+
+    Operator conventions the workflow assumes: work lands on `main` for review; code
+    and docs never point at the scratch work-order/record files (module headers
+    describe the current role, not the extraction history). Shipping this milestone
+    means committing a sanitized, reusable version — the bootstrap prompt plus the
+    router/work-order/record/handoff templates and their conventions — so a fresh AI
+    session can pick up a work order, execute it against the codebase, run the suite,
+    and emit a session record without any prior context.
 - 1.1
   - [ ] [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md) proposal
-  - [x] `errorMessage` keyword — text overrides with `$msgid`/catalog indirection, registered at compile time, resolved at report time, zero validation-time cost ([ERROR-MESSAGES.md](packages/validate/docs/ERROR-MESSAGES.md))
   - [ ] JSON Schema standard output formats (`list`/`hierarchical` wrappers, `evaluationPath`/`schemaLocation` renames) — the remaining half of [Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output); the structured params + keyed messages are exactly what that format wants
 - 1.2
   - [ ] compileAsync for asynchronous schema loading
@@ -41,7 +46,6 @@ motivates them where one exists.
 
 ## @jarenjs/validate
 
-- [x] **`messages` companion keyword for `$query`** — DELIVERED as `errorMessage`'s `$query` entry (per-code map with an EBV-false `default`); no separate keyword needed.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 - [ ] **Additional locale packs** — the catalog contract and key-parity tests make each pack mechanical; `nl` is the reference implementation.
@@ -49,7 +53,9 @@ motivates them where one exists.
 - [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
 - [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.
 - [ ] **`data` next to `$ref` in 2019-09+** — `$query` was added to the `$ref`-sibling keyword list; `data` has the same latent gap and still relies on pre-existing behavior.
-- [x] **Type declarations for `@jarenjs/validate/query`** — declarations are generated from JSDoc for every public subpath.
+- [ ] **`required` short-circuit reports only the first missing property** — the historical `&&=` collection short-circuit means each object surfaces only its *first* missing `required` property, even in collect-all-errors mode.
+- [ ] **Type-only `items` fast path aggregates per-item failures** — the type-only `items` fast path reports a single error at the array path instead of one error per failing item; the multi-keyword path already yields per-item errors.
+- [ ] **`additionalProperties: false` instancePath divergence from ajv** — Jaren points the error at the offending member (`/nested/extra`) where ajv points at the parent object; deliberate and spec-truer, tracked so consumers diffing against ajv output know it is intentional.
 
 ## @jarenjs/json
 
@@ -63,16 +69,16 @@ motivates them where one exists.
 - [ ] **Closed-world compilation mode (`JQ0005`)** — a mode requiring all variables bound at compile time; today free variables are externals by default and `JQ0005` fires only for unknown `$as` names.
 - [ ] **`compileTypeTest` hook diagnostics** — the hook contract passes `docPath` so future hooks can report schema-compile diagnostics positionally; the reference `createTypeTestCompiler` ignores it today.
 - [ ] **`__proto__` member construction in query constructors** — `compileObject`/`compileMap` assign `out[name] = value`, so a *constructed* member named `__proto__` sets the result's prototype instead of a member. The JSLT dispatcher already rebuilds `__proto__` as an own property; the query-engine member appliers should adopt the same `setMember` pattern.
+- [ ] **Non-JSON `queryFn(data)` input** — a compiled query passed `undefined`/non-JSON returns non-JSON without a special-case guard; decide whether to reject or document the pass-through.
 - [ ] **Spec patch batch for QUERY-FORMAT.md §6.5** — the proposed wording for multi-item/empty grouping keys (`JQ2001`/allowed), `NaN` grouping equality and `NaN` order-by placement is implemented and tested but not yet folded into the normative text.
+- [ ] **Spec patch: member-value cardinality (§3.1/§3.5.2) and the `$string` cast table** — the normative wording for object-construction member values (an empty result omits the member; two-or-more items is `JQ2001`) plus the `$string`/`$concat` cast table (`number → String(n)`, booleans, `null → "null"`) is implemented and tested but not yet folded into QUERY-FORMAT.md.
+- [ ] **Spec examples: `$let`-bound sequences vs child filters (§5.1) and `$where` reading its own `$count` (§9)** — two correct-but-surprising behaviors worth a worked example in the spec: a `[?…]` filter on a `$let`-bound item sequence selects the *children* of each item (so an item-level predicate yields empty), and clause scope order lets `$where` observe the phrase's own `$count` name as an external.
 
 ### JSONPath & addressing
 
 - [ ] **Custom JSONPath function extensions** — a registry per RFC 9535 §2.4 with declared parameter/return types, so user functions get the same compile-time well-typedness checks as the built-ins.
 - [ ] **Lazy iteration** — `query.iterate(data)` as a generator yielding nodes on demand, plus early-exit `first()`/`exists()` for non-singular JSONPath queries.
-- [x] **Normalized path ↔ JSON Pointer bridge** — `jsonPointerFromJSONPath` (any singular query) and `jsonPathFromJSONPointer` (digit tokens become index selectors, documented convention) in path.js; the write operations accept either addressing form directly.
-- [x] **Write operations** — shipped as `@jarenjs/json/write`: `compileJSONPointerSetter`/`Inserter`/`Remover` (targets: RFC 6901 pointer, normalized path, or any singular query — including negative indexes and `-` append) and `compileJSONPathSetter`/`Inserter`/`Remover` (every node a query selects, applied in reverse document order so shifts and nested matches compose), plus one-shot forms. Copy-on-write via the shared owned-set core (now package-internal `src/cow.js`, shared with patch.js); `{ mutate: true }` for in-place; setters take updater functions.
-- [x] **JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396)** — apply and structural diff, built on compiled pointers; a diff that emits JSON Patch doubles as a change feed for `@jarenjs/forms`. Shipped as `@jarenjs/json/patch` (compiled copy-on-write appliers, `share`/`fresh`/`mutate` modes, full official json-patch-tests suite); an LCS array-diff mode is future work.
-- [x] **Shared pointer-segment encode helper** — `encodeJSONPointerSegment`/`formatJSONPointer` now live in `@jarenjs/json/pointer`; forms' `escapePointerKey` delegates to it (kept as a compatibility alias).
+- [ ] **`json-path-segments` format for variable-rooted paths** — the query schema only regex-checks the *head* of a variable-rooted path string (e.g. `$b.price[…]`); full segment-grammar validation is deferred to the compiler (`JQ0004`). A `json-path-segments` string format would give variable-rooted paths the same schema-time well-formedness check the absolute `json-path` format gives root-anchored ones.
 - [ ] **Canonical JSON (RFC 8785 / JCS)** — deterministic serialization for hashing and signing; `stableKeyString` in the query runtime is a starting point.
 - [ ] **Relative pointer `0#` fidelity flag** — the hash form returns the member-name *string* (the historical `$data` behavior); draft-luff resolves array positions to a *number*. An opt-in flag would serve a spec-faithful consumer if one appears.
 - [ ] **Optional codegen backend** — compile hot queries to source via `new Function` where CSP allows, reusing the same AST and semantics; the closure compiler stays the default.
@@ -91,10 +97,6 @@ motivates them where one exists.
 - [ ] **1-based positional *outputs*** — `at`/`count`/`fn:index-of` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; `fn:index-of` has a cheap local emission fix, `at`/`count` would need reference rewriting. Revisit if the scorecard noise starts to matter.
 - [ ] **Front-end diagnostic polish** — a bare NameTest colliding with a keyword (`let`, `order`, ...) raises `unexpected keyword` instead of `unsupported construct 'path expression'`; `=>` after a comparison RHS raises a generic error. Deliberate-diagnostic spots, baselined as known bugs in the QT3 harness.
 
-### Typing & packaging
-
-- [x] **Type declarations for the `query`/`jslt`/`jtlt`/`xquery` subpaths** — declarations are generated from JSDoc for every public subpath.
-
 ## @jarenjs/formats
 
 - [ ] **`iregexp` format** — register an I-Regexp (RFC 9485) string format backed by `isValidIRegexp` from `@jarenjs/core/text` (the implementation already exists and powers JSONPath's `match()`/`search()`).
@@ -104,20 +106,16 @@ motivates them where one exists.
 
 - [ ] **Rule dependency memoization** — every `evaluateFormRules` call re-evaluates every rule; the compiler already sees each rule's paths, so a dirty-pointer index (changed pointer → affected rules) is the obvious next step once forms get large.
 - [ ] **Pruning hidden fields before submit** — `visible: false` fields keep their values in the data; whether submit should drop them (and whether `formRulesToQueryAssertions` should guard asserts on their own `visible`) is an open product decision.
-- [x] **Computed views through JSLT** — landed as `buildFormViewModel` (viewmodel.js): the composed render tree that `@jarenjs/app`'s standard form rules dispatch over with `$apply`, keeping forms validator-independent. Still open from the original idea: letting stylesheets *replace* the JS composition step entirely (needs dynamic-pointer reads in rule bodies).
+- [ ] **Absent-field semantics: keystroke `null` vs submit empty-sequence** — form rules bind an absent field to `null` during editing, but the submit-side `$query` copy of the same rule binds it as the empty sequence, so `$eq`/`$ne` diverge between the two paths. Documented today with a `$exists`-guard workaround; unifying the two bindings is the real fix.
+- [ ] **Stylesheets replacing the JS composition step** — `buildFormViewModel` composes the render tree in JS today; letting stylesheets *replace* that composition entirely needs dynamic-pointer reads in rule bodies.
 
 ## @jarenjs/view & @jarenjs/app (new — 0.1 formats)
 
-- [x] **The standard forms stylesheet** — shipped: `createFormView()`/`createFormActions()` in `@jarenjs/app` (plain-JSON rules dispatching on `buildFormViewModel` trees by control shape), the `buildFormViewModel` render-tree layer in `@jarenjs/forms`, and the `viewModel` derivation boundary on `createApp`. Follow-ups: typed select values (non-string enums), tuple add/remove affordances, a `json` control editor, i18n for the chrome strings (add/remove button labels).
-- [x] **Rebuild the website on view + app** — shipped: `@jarenjs/website` IS the app-document site (the React predecessor is retired). All nine playground engines (generic descriptor framework in `boundaries/engines.js`), the localStorage experiment IDE with **share links** (base64url snapshots in `?s=`, clipboard-copied, restored on entry), all eight benchmark suites incl. searchable validate table + scenario matrices with sources, docs (19 sections as a content document) & examples with open-in-playground, WebMCP agent tools (schema-validated by Jaren itself), PWA (manifest + offline service worker + generated **PNG icons** — `scripts/make-icons.js`, zero-dependency) and the mobile drawer. Still open: an a11y audit in real browsers.
-- [x] **The app-document meta-schema** — shipped: `@jarenjs/app/schemas/jaren-app.schema.json` (+ draft-07 twin, sync-asserted in tests) composes the query and JSLT grammars by `$ref`; the vnode schema (`$id` normalized to `https://jarenjs.dev/schemas/jaren-vnode/0.1`) covers the view's output side. The test suite validates the production website's entire app document against it.
-- [~] **O(change) rendering** — two of three layers shipped. (1) The changed-path feed: `json/patch`'s `changes: true` reports invalidation-sound pointers, surfaced to `createApp` subscribers. (2) **Memoized rule outputs**: the JSLT `memo` compile option caches rule bodies by (location, value reference) behind a compile-time eligibility analysis (no `$root`/`$path`/externals, transitively through `$apply`; no root refs in match filters) with a two-generation cache — an unchanged document returns the ENTIRE previous output by reference, and `@jarenjs/app` + the website's `memo1` viewModel derivations turn that into reference-equal vnodes the patcher skips in O(1) (proven by `test/json/jslt/memo.test.js` and the site's O(change) test). Still open: (3) prepass-level pruning — skip re-evaluating match paths over unchanged regions using the changed-path feed directly.
-- [x] **Unify the write path** — shipped: `@jarenjs/json/write` grew a `parents: 'create'` option (grow missing containers, array/object inferred from the following step, scalars on the spine replaced; sparse creation rejects), and forms' `setValueAtPointer` is now that option plus undefined-deletes over the shared copy-on-write kernel — one write engine in the whole repo, untouched siblings shared by reference on every keystroke.
+- [ ] **Standard forms stylesheet follow-ups** — typed select values (non-string enums), tuple add/remove affordances, a `json` control editor, and i18n for the chrome strings (add/remove button labels).
+- [ ] **Website a11y audit in real browsers** — the app-document website shipped; a keyboard/screen-reader audit in real browsers is the remaining open item.
+- [~] **O(change) rendering** — two of three layers shipped. (1) The changed-path feed: `json/patch`'s `changes: true` reports invalidation-sound pointers, surfaced to `createApp` subscribers. (2) **Memoized rule outputs**: the JSLT `memo` compile option caches rule bodies by (location, value reference) behind a compile-time eligibility analysis (no `$root`/`$path`/externals, transitively through `$apply`; no root refs in match filters) with a two-generation cache — an unchanged document returns the ENTIRE previous output by reference, and `@jarenjs/app` + the website's `memo1` viewModel derivations turn that into reference-equal vnodes the patcher skips in O(1). Still open: (3) **prepass-level pruning** — skip re-evaluating match paths over unchanged regions using the changed-path feed directly.
 - [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§7: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
 - [ ] **Component escape hatch** — a registered-widget vocabulary (mirroring the effect registry) for irreducibly imperative islands: canvas, maps, third-party controls.
-- [x] **Benchmark: view + app vs hyperapp/preact** — `benchmark/view.js` (`npm run benchmark:view`): SSR-equality-gated comparison of view production and SSR vs hyperapp and preact, plus the jaren-only frame-cost row on the stub DOM. Headlines (1000 rows, Node v22): unchanged document = O(1) frame; memo cuts a one-row frame 1.7×; the generic dispatcher is ~9× preact's `h()` on full builds — the abstraction's honest price, to be attacked by prepass pruning.
-- [x] **Shared SVG-helper kernel — `@jarenjs/view/helpers`** — shipped: the small SVG-vnode builder set (`svgRoot`/`rect`/`circle`/`line`/`path`/`polyline`/`polygon`/`textAt`/`textLines`/`num`/`polylinePath`), the `sanitizeHref` allow-list, and the prefix-driven `resolveTheme` now live once in the new `./helpers` subpath instead of being copied in `@jarenjs/calc` and `@jarenjs/mermaid`. `svgRoot` takes the root class + cssVars from the caller; `resolveTheme` takes the CSS-var prefix, so components keep only their token tables. The pure primitives underneath moved down to `@jarenjs/core`: the suite's single `hashContent` and `kebabCase` (`core/string`), the interpolation-correct `remap` (`core/math`, distinct from the legacy quirky `Float64.map`), and `lerpColor` (`core/color`). This made `@jarenjs/view` depend on `@jarenjs/core` (still zero third-party deps).
-- [x] **Join the release train** — `@jarenjs/view` and `@jarenjs/app` are in `pack:check`/`publish`; the 0.1 formats earned it by powering the deployed website.
 
 ## @jarenjs/md (new — 0.1 format)
 
@@ -125,7 +123,6 @@ motivates them where one exists.
 - [ ] **Parse-speed workstream** — ~0.3 ms per 10 kB to AST; the block scan re-slices lines per container level and the inline phase re-buffers leaf text; a column-offset scanner (no intermediate slices) is the next lever toward the sub-200 µs target.
 - [ ] **Sanitizer-backed raw HTML** — an opt-in `html` mode that parses raw HTML nodes into vnodes through an injected sanitizer, replacing today's skip/text-only choice.
 - [ ] **Streaming reference definitions** — the incremental parser binds `[ref]` links against definitions seen so far; a deferred-resolution pass at `end()` would close the gap with batch mode.
-- [ ] **Website integration** — a Markdown playground tab (parse → AST → JSLT → vnode, live), and the docs content pipeline could dogfood `loadMarkdown`.
 
 ## @jarenjs/mermaid (new — 0.1 format)
 
@@ -134,7 +131,6 @@ AST → pure-vnode SVG through `@jarenjs/view`, bidirectional
 (`parseMermaid` ⇄ `toMermaid`). The Markdown plugin renders `mermaid`
 fences inline, SSR-safe, replacing the old injection wrapper.
 
-- [x] **Flowchart + sequence** fully modeled (grammar + layout + render); class/ER/state/gantt/pie implemented (structured panels / chart).
 - [ ] **`foreignObject` / `htmlLabels:true`** — labels are SVG `<text>` in v1 because `@jarenjs/view` 0.1 has no `foreignObject`/`setAttributeNS`; revisit alongside VIEW-FORMAT §6/§7 for HTML labels and pixel-closer parity.
 - [ ] **Full layout for the secondary types** — class/ER/state/gantt render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight edges; orthogonal edge routing, subgraph clustering and crossing reduction are the next levers.
@@ -148,6 +144,10 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 - [ ] **Retrofit `math/format.js`** — the website hand-rolls `formatMs` in `lib/format.js`; the core number formatter (`formatNumber`/`parseNumber`) can replace ad-hoc formatting suite-wide.
 - [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number` (values beyond 2^53 lose precision on read-back); the four-base display already stays exact via `word.js` BigInt. A BigInt-valued evaluation path would close the gap.
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
+
+## @jarenjs/core (shared kernel)
+
+- [ ] **Fix or retire `Float64.map`/`Float64.lerp`** — the core `Float64.map`/`lerp` helpers use a non-standard interpolation formula that returns wrong results for screen/range mapping; consumers work around it locally and the correct `remap` (added during the dedup pass) now lives beside it. A latent core bug worth resolving before the two drift — either fix `Float64.map` in place (auditing existing consumers) or deprecate it in favor of `remap`.
 
 ## LLM & structured-output profile
 
@@ -166,6 +166,6 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 - [ ] **Compile-mean coverage in `jslt.js`** — the compile row's stylesheet set omits the reshape stylesheet.
 - [ ] **`--cell-order` shuffle** — the 4-book singular cell reads higher than the 1000-book one run to run (JIT/IC noise across the cell sequence); a shuffle option would pin it down if it ever matters.
 - [ ] **Saxon-JS as an optional competitor** — noted and deliberately excluded so far (heavyweight SEF/XSLT toolchain for a zero-build workspace).
+- [ ] **Drop the fontoxpath baseline-subtraction hack if a compile-only API appears** — the jsonquery adaptor pre-converts XDM and subtracts a baseline because fontoxpath exposes no compile-only entry point; a future compile-only API would let the adaptor measure it fairly.
 - [ ] **Lint the benchmark workspace** — `benchmark/` sits outside the `npm run lint` glob; the tools follow house style but are not lint-enforced.
-- [ ] **Website: publish the new engine numbers** — the JSONPath/query/JSLT benchmark results are not yet integrated into the website's visualizations.
-- [ ] **Website: query/JSLT playground** — an editor that loads the published schema twins, validates generated query documents and stylesheets, and displays compiler `docPath` errors inline.
+- [ ] **Full `meta.json` regeneration before publishing** — benchmark result generation has been run per-slice (e.g. mermaid's conformance section); a full `npm run benchmark:generate` pass is needed before a real publish so every suite's numbers are current.

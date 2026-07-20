@@ -1,6 +1,7 @@
 # Publishing the Jaren packages
 
-The repository root and the benchmark/website workspaces are private. A release publishes only:
+The repository root and the benchmark/website workspaces are private, as is the
+`@jarenjs/josl` research experiment. A release publishes only:
 
 - `@jarenjs/core`
 - `@jarenjs/json`
@@ -8,6 +9,12 @@ The repository root and the benchmark/website workspaces are private. A release 
 - `@jarenjs/formats`
 - `@jarenjs/refs`
 - `@jarenjs/forms`
+- `@jarenjs/locales`
+- `@jarenjs/view`
+- `@jarenjs/app`
+- `@jarenjs/md`
+- `@jarenjs/mermaid`
+- `@jarenjs/calc`
 
 ## Authenticate locally
 
@@ -51,7 +58,7 @@ npm run release:check
 
 ## Publish
 
-The root command reruns the release gate and publishes only the six public workspaces:
+The root command reruns the release gate and publishes only the twelve public workspaces:
 
 ```bash
 npm run publish
@@ -66,6 +73,12 @@ npm view @jarenjs/validate version
 npm view @jarenjs/formats version
 npm view @jarenjs/refs version
 npm view @jarenjs/forms version
+npm view @jarenjs/locales version
+npm view @jarenjs/view version
+npm view @jarenjs/app version
+npm view @jarenjs/md version
+npm view @jarenjs/mermaid version
+npm view @jarenjs/calc version
 ```
 
 For automated releases, prefer npm trusted publishing with OIDC over a long-lived write token.

@@ -35,7 +35,7 @@ The sections from [Core Design Principles](#core-design-principles) onward descr
 
 ## Monorepo Layout
 
-The workspace is a dependency chain; every `packages/*` workspace declares its Jaren dependencies as peer dependencies and carries **zero runtime dependencies** outside the repository:
+The workspace is a dependency chain; every published workspace declares its Jaren dependencies as peer dependencies and carries **zero runtime dependencies** outside the repository. The graph below is the core library stack around the validator; the vnode presentation layer and the format components build on top of it (summarized in the table that follows):
 
 ```mermaid
 flowchart BT
@@ -66,6 +66,11 @@ flowchart BT
 | [`@jarenjs/refs`](packages/refs) | Data-only meta-schema bundle | — |
 | [`@jarenjs/forms`](packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](packages/forms/README.md)) |
 | [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately dependency-free — key parity with the built-in English catalogs is enforced by repo tests, not imports | — (see its [README](packages/locales/README.md) and [ERROR-MESSAGES](packages/validate/docs/ERROR-MESSAGES.md)) |
+| [`@jarenjs/view`](packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](packages/view/docs/VIEW-FORMAT.md) |
+| [`@jarenjs/app`](packages/app) | Applications as JSON documents; the compiled dispatch loop composing view (JSLT → vnodes) and json (query actions) | [APP-FORMAT](packages/app/docs/APP-FORMAT.md) |
+| [`@jarenjs/md`](components/md) | Markdown + frontmatter → JSON AST, rendered through view; a format component | [md ARCHITECTURE](components/md/ARCHITECTURE.md) |
+| [`@jarenjs/mermaid`](components/mermaid) | Headless Mermaid clone → geometry-free JSON AST → pure-vnode SVG through view; a format component | [mermaid ARCHITECTURE](components/mermaid/ARCHITECTURE.md) |
+| [`@jarenjs/calc`](components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](components/calc/ARCHITECTURE.md) |
 | [`@jarenjs/website`](packages/website) | The GitHub Pages site and playground (not part of the library chain) | [website ARCHITECTURE](packages/website/ARCHITECTURE.md) |
 
 Two deliberate inversions keep the graph acyclic while letting the layers cooperate:

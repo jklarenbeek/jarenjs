@@ -202,7 +202,7 @@ See also:
 - ❌ strict
 - ❌ strictFormat
 - ❌ strictTuple
-- ❌ errorMessage
+- errorMessage | author-supplied messages that override text (never structure) — see [Error messages &amp; i18n](#error-messages--i18n)
 - definitions | used by initial schema traversal _deprecated in `draft2019`_
 - $defs | used by initial schema traversal _new `draft2019`_
 - components | _(OpenAPI)_
@@ -323,7 +323,13 @@ Semantics and composition:
   keyword: under `properties`/`items` the query's `$` is that location's
   value, `$path` its pointer (`/lines/0`, ...), `$root` the whole document.
 - A bare JSONPath string is the degenerate query: `{ "$query": "$.approved" }`
-  asserts the EBV of that member (missing → empty sequence → false).
+  asserts the **EBV** of that member, not its mere existence: existence would
+  let `$.approved` pass on a literal `false`, exactly the case the constraint
+  means to reject (missing → empty sequence → false either way).
+- `$query` is a **validation keyword**, so under 2019-09 and 2020-12 it
+  asserts as a sibling of `$ref` (both apply together). Under draft-07 the
+  `$ref`-overrides-siblings rule stands, so a `$query` written beside a `$ref`
+  is ignored on that node.
 - Query **runtime** errors (`JQ2xxx` — e.g. arithmetic on a non-number, the
   EBV of a multi-item result) are validation **failures**, never throws; in
   `collectErrors` mode the error params carry the `code` and the query
@@ -331,7 +337,11 @@ Semantics and composition:
   `root`/`path` fail fast at `compile()`.
 - Schema literals inside the query (`$valid`/`$assert`/`$as`,
   QUERY-FORMAT §8.11) compile against the **same validator instance**, so
-  their `$ref`s resolve to your `addSchema` registrations.
+  their `$ref`s resolve to your `addSchema` registrations. The bridge
+  (`createTypeTestCompiler`) accepts nothing (a fresh default instance), a
+  `JarenValidator` instance, or a zero-arg factory, and probes the compiled
+  validator's return shape **once per schema literal** — so even a
+  `collectErrors` instance is unwrapped into a boolean predicate.
 
 ## Error messages & i18n
 
