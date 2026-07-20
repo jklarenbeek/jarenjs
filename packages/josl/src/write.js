@@ -12,7 +12,6 @@
 
 import { JoslStringifyError } from './errors.js';
 import {
-  formatKey,
   formatKeyPath,
   formatValue,
   formatSection,

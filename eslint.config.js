@@ -20,7 +20,7 @@ export default [
       },
     },
     rules: {
-      'no-unused-vars': 'warn',
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-console': 'error',
       'no-duplicate-imports': 'error',
       // 'import/no-dynamic-require': 'warn',
@@ -41,6 +41,15 @@ export default [
     },
   },
   {
-    ignores: ['**/dist', 'build', '**/_*', '**/*.no-lint.*'],
+    // CLI tooling: console output is intentional here
+    files: ['scripts/**/*.js'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
+    // benchmark/ is vendored (qt3, third-party) + CLI tooling: its no-console /
+    // no-undef output is intentional and must stay out of the gate.
+    ignores: ['**/dist', 'build', '**/_*', '**/*.no-lint.*', 'benchmark/**'],
   },
 ];

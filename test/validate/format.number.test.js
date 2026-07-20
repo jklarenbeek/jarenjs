@@ -142,7 +142,7 @@ describe('Schema Numeric Formats', function () {
 
   describe('#formatNumeric()', function () {
 
-    const PI = 3.14159265358979323846;
+    const PI = 3.141592653589793;
 
     it('should validate format: \'float16\'', function () {
       const validate = compiler.compile({

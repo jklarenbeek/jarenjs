@@ -4,8 +4,8 @@ import * as assert from 'node:assert/strict';
 
 import { compileMarkdown, createMdRenderer, hashContent } from '@jarenjs/md';
 import { highlightPlugin, definePlugin } from '@jarenjs/md/plugins';
-import { renderToString, h } from '@jarenjs/view';
-import { StubElement, StubText, createStubHost, serialize } from '../view/dom.stub.js';
+import { renderToString } from '@jarenjs/view';
+import { StubElement, createStubHost, serialize } from '../view/dom.stub.js';
 
 // The md renderer needs two DOM members the view stub does not model.
 /** @type {any} */ (StubElement.prototype).getAttribute = function (name) {

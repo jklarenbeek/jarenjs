@@ -2,7 +2,6 @@
 
 import {
   isStringType,
-  getStringType,
 } from '@jarenjs/core';
 
 import {
@@ -12,7 +11,6 @@ import {
 import {
   createRegExp,
   getStringLength,
-  getSegmenter,
 } from '@jarenjs/core/string';
 
 import {

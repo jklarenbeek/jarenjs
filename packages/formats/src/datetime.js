@@ -11,8 +11,6 @@ import {
   getDateTypeOfDateOnlyRFC3339,
   getDateTypeOfTimeOnlyRFC3339,
   isValidDuration,
-  isValidISODateTime,
-  isValidISOTime,
   getDateTypeOfISODateTime,
   getDateTypeOfISOTime,
 } from '@jarenjs/core/dates';
@@ -289,7 +287,7 @@ export function compileDurationFormat(schemaObj, jsonSchema) {
 
   // when skipErrors is true, we don't need to create error objects
   if (schemaObj.options.skipErrors) {
-    return function validateDurationFast(data, dataPath) {
+    return function validateDurationFast(data, _dataPath) {
       return isStringType(data)
         ? isValidDuration(data)
         : true;

@@ -28,14 +28,13 @@ import {
   JsonWriteError,
   compileJsonQuery,
 } from '@jarenjs/json';
-import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { compileJsltStylesheet, transformJson } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
 import { toMarkdown } from '@jarenjs/md';
 import { md as MD } from './markdown.js';
 import { mermaid as MERMAID } from './mermaid.js';
-import { transformJson } from '@jarenjs/json/jslt';
 import stateToWorkflow from '@jarenjs/mermaid/stylesheets/state-to-workflow.jslt.json' with { type: 'json' };
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 

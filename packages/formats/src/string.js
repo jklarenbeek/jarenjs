@@ -35,7 +35,7 @@ export function createStringFormatCompiler(formatName, isFormatTest) {
 
     // when skipErrors is true, we don't need to create error objects
     if (schemaObj.options.skipErrors) {
-      return function validateStringFormatFast(data, dataPath) {
+      return function validateStringFormatFast(data, _dataPath) {
         return isStringType(data)
           ? isFormatTest(data)
           : true;

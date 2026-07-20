@@ -33,7 +33,6 @@ export {
 } from './format.js';
 
 import {
-  ValidationError,
   convertInternalErrors,
 } from './messages.js';
 
@@ -917,8 +916,6 @@ export class ValidationObject {
   #schema = null;
   /** @type {function|null} The compiled validator function */
   #validator = null;
-  /** @type {string} The base URI passed during construction */
-  #baseUri = null;
   /** @type {string} The effective base URI for child $ref resolution */
   #effectiveBaseUri = null;
   /** @type {number|null} Draft version declared by this schema's document ($schema), inherited by subschemas; null when never declared */
@@ -957,7 +954,6 @@ export class ValidationObject {
       // No $id - inherit parent's base
       this.#effectiveBaseUri = baseUri;
     }
-    this.#baseUri = baseUri;
 
     this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
   }
@@ -1015,13 +1011,13 @@ export class ValidationObject {
     // Just return false immediately to avoid the overhead of error creation
     if (self.#root.options.skipErrors) {
       if (!Array.isArray(key)) {
-        return function addNormalErrorFast(data, ...meta) {
+        return function addNormalErrorFast(_data, ..._meta) {
           // Just return false without creating error object
           return false;
         };
       }
       else {
-        return function addKeyedErrorFast(dataKey, data, ...meta) {
+        return function addKeyedErrorFast(_dataKey, _data, ..._meta) {
           // Just return false without creating error object
           return false;
         };
@@ -1324,7 +1320,7 @@ export class JarenValidator {
     const newSchemas = new Map();
     try {
       storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts);
-    } catch (e) {
+    } catch (_e) {
       // Ignore errors for already-existing schemas at the root level
     }
 
@@ -1492,7 +1488,7 @@ export class JarenValidator {
         // This is a canonical $id path - create with origin as base
         try {
           root.createObject(id, schema, origin);
-        } catch (e) {
+        } catch (_e) {
           // May fail if dependencies not resolved yet
         }
       }
@@ -1598,7 +1594,7 @@ export class JarenValidator {
                 baseUri = candidateBase;
                 break;
               }
-            } catch (e) {
+            } catch (_e) {
               // Invalid URL, skip this candidate
             }
           }
@@ -1607,7 +1603,7 @@ export class JarenValidator {
 
       try {
         root.createObject(id, schema, baseUri);
-      } catch (e) {
+      } catch (_e) {
         // Ref may not be resolvable yet, that's ok
       }
     }

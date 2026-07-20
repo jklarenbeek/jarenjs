@@ -39,7 +39,6 @@ function find(node, pred) {
   }
   return undefined;
 }
-const byClass = (container, cls) => find(container, (n) => n.attributes?.get('class') === cls);
 
 describe('website — the generic engine playgrounds', function () {
   it('renders every engine tab live from its descriptor', function () {

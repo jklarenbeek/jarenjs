@@ -20,7 +20,7 @@ import {
   Int32
 } from '@jarenjs/core/math';
 
-describe('mathi32 primitives', async (t) => {
+describe('mathi32 primitives', async () => {
   it('mathi32_abs', () => {
     assert.equal(mathi32_abs(-5), 5);
     assert.equal(mathi32_abs(5), 5);
@@ -84,7 +84,7 @@ describe('mathi32 primitives', async (t) => {
   });
 });
 
-describe('Int32 class methods', async (t) => {
+describe('Int32 class methods', async () => {
   it('Int32.random', () => {
     const random = Int32.random();
     assert(random >= 0 && random < 1);

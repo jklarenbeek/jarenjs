@@ -28,7 +28,6 @@ const HEBREW_GERSHAYIM = 0x05f4;        // ״
 const KATAKANA_MIDDLE_DOT = 0x30fb;     // ・
 const ZERO_WIDTH_JOINER = 0x200d;       //
 const ZERO_WIDTH_NON_JOINER = 0x200c;   //
-const VIRAMA = 0x094d;                  // ् (Devanagari Sign Virama)
 
 // Character category checks
 export function isLatinLowercaseL(code) {

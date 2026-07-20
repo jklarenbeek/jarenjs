@@ -1,9 +1,9 @@
-const CONST_REGPEXP_ISBN10 = /^(?:ISBN(?:-10)?:?\ *((?=\d{1,5}([ -]?)\d{1,7}\2?\d{1,6}\2?\d)(?:\d\2*){9}[\dX]))$/i;
+const CONST_REGPEXP_ISBN10 = /^(?:ISBN(?:-10)?:? *((?=\d{1,5}([ -]?)\d{1,7}\2?\d{1,6}\2?\d)(?:\d\2*){9}[\dX]))$/i;
 export function isValidISBN10(str) {
   return CONST_REGPEXP_ISBN10.test(str);
 }
 
-const CONST_REGEXP_ISBN13 = /^(?:ISBN(?:-13)?:?\ *(97(?:8|9)([ -]?)(?=\d{1,5}\2?\d{1,7}\2?\d{1,6}\2?\d)(?:\d\2*){9}\d))$/i;
+const CONST_REGEXP_ISBN13 = /^(?:ISBN(?:-13)?:? *(97(?:8|9)([ -]?)(?=\d{1,5}\2?\d{1,7}\2?\d{1,6}\2?\d)(?:\d\2*){9}\d))$/i;
 export function isValidISBN13(str) {
   return CONST_REGEXP_ISBN13.test(str);
 }

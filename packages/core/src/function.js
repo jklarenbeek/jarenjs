@@ -14,7 +14,6 @@ import {
  * @param {string | string[] | undefined} _key a key or an array of keys
  * @returns {boolean} returns always true
  */
-// eslint-disable-next-line no-unused-vars
 export function trueThat(whatever, _path = undefined, _root = undefined, _key = undefined) {
   const that = true;
   return whatever === true || that;
@@ -29,7 +28,6 @@ export function trueThat(whatever, _path = undefined, _root = undefined, _key = 
  * @param {string | string[] | undefined} _key a key or an array of keys
  * @returns {boolean} returns always true
  */
-// eslint-disable-next-line no-unused-vars
 export function falseThat(whatever, _path = undefined, _root = undefined, _key = undefined) {
   // eslint-disable-next-line no-constant-binary-expression
   return false && whatever;

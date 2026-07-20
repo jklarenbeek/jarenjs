@@ -37,7 +37,6 @@ import {
   isObjectClass,
   isStringType,
   isNumberType,
-  isArrayClass,
   isObjectType,
 } from '@jarenjs/core';
 
@@ -276,7 +275,7 @@ function compileDollarDataFormat(schemaObj, ref) {
       if (typeof validator !== 'function') return true;
 
       return validator(data, dataPath) || addError(data, dataPath, formatName);
-    } catch (e) {
+    } catch (_e) {
       // If compilation fails, skip validation
       return true;
     }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   fetchCoinGecko, normalizeCoinGecko,
   fetchBinance, normalizeBinance,
-  createRatesLayer, FALLBACK_RATES,
+  createRatesLayer,
 } from '../../components/calc/src/component/rates/index.js';
 
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} !~= ${b}`);

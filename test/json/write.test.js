@@ -5,13 +5,10 @@ import * as assert from '../assert.node.js';
 import {
   compileJSONPointerSetter,
   compileJSONPointerInserter,
-  compileJSONPointerRemover,
   setAtJSONPointer,
   insertAtJSONPointer,
   removeAtJSONPointer,
   compileJSONPathSetter,
-  compileJSONPathInserter,
-  compileJSONPathRemover,
   setAtJSONPath,
   insertAtJSONPath,
   removeAtJSONPath,

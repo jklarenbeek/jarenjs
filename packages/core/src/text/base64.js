@@ -1,4 +1,4 @@
-const CONST_REGEXP_BASE64 = /^(?:[a-zA-Z0-9+\/]{4})*(?:|(?:[a-zA-Z0-9+\/]{3}=)|(?:[a-zA-Z0-9+\/]{2}==)|(?:[a-zA-Z0-9+\/]{1}===))$/;
+const CONST_REGEXP_BASE64 = /^(?:[a-zA-Z0-9+/]{4})*(?:|(?:[a-zA-Z0-9+/]{3}=)|(?:[a-zA-Z0-9+/]{2}==)|(?:[a-zA-Z0-9+/]{1}===))$/;
 export function isValidBase64Full(str) {
   return CONST_REGEXP_BASE64.test(str);
 }

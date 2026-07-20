@@ -225,7 +225,7 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
             if (targetObj && targetObj.validate) {
               return targetObj.validate;
             }
-          } catch (e) {
+          } catch (_e) {
             // Fall through to default handling
           }
         }
@@ -240,7 +240,7 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
     // Fast path: required-only schema - check property directly first
     if (itemSchema.required !== undefined && Object.keys(itemSchema).length === 1) {
       const required = itemSchema.required;
-      return function validateRequiredOnly(data, dataPath, dataRoot) {
+      return function validateRequiredOnly(data, _dataPath, _dataRoot) {
         // Required properties only apply to objects, not arrays or other types
         if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
         for (let i = 0; i < required.length; i++) {
@@ -392,7 +392,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
 
       // Wrap single-item validator with index loop
       const itemValidator = validateItem;
-      validateItem = function validateSingleItemSchema(data, dataPath, dataRoot, i) {
+      validateItem = function validateSingleItemSchema(data, dataPath, dataRoot, _i) {
         return itemValidator(data, dataPath, dataRoot);
       };
     } else if (items === true) {
@@ -421,7 +421,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       // items: true evaluates every item, which matters when annotations
       // are tracked for unevaluatedItems.
       if (track) {
-        return function validateArrayItemsTrue(data, dataPath, dataRoot) {
+        return function validateArrayItemsTrue(data, _dataPath, _dataRoot) {
           root.evalLog.add(data, -1);
           return true;
         };

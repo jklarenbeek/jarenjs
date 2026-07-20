@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { renderMermaid, diagramToVnode, compileMermaid, parseMermaid, sanitizeHref } from '@jarenjs/mermaid';
+import { renderMermaid, compileMermaid, sanitizeHref } from '@jarenjs/mermaid';
 import { renderToString, isElementNode } from '@jarenjs/view';
 
 describe('render to pure-vnode SVG', function () {

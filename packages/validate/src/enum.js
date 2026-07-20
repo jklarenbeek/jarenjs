@@ -1,7 +1,6 @@
 //@ts-check
 
 import {
-  isObjectType,
   isScalarType,
 } from '@jarenjs/core';
 

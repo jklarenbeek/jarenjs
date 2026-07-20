@@ -28,7 +28,6 @@ import {
   isObjectClass,
   isStringType,
   isNumberType,
-  isArrayClass,
 } from '@jarenjs/core';
 
 import {
@@ -368,7 +367,7 @@ function compileDataFormat(schemaObj, ref) {
         try {
           const candidate = formatCompiler(mockSchemaObj, { format: formatName });
           if (typeof candidate === 'function') validator = candidate;
-        } catch (e) {
+        } catch (_e) {
           // An uncompilable format asserts nothing
         }
       }

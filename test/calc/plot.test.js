@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildScene2d, scene2dToVnode, buildScene3d, scene3dToVnode,
-  plot2d, plot3d, calcToVnode, toSvgString, errorToVnode,
+  calcToVnode, toSvgString, errorToVnode,
 } from '@jarenjs/calc';
 
 describe('#calc 2D plot geometry + render', function () {

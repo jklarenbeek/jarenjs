@@ -80,7 +80,7 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
         url = new URL(refUri, 'http://example.com/' + effectiveBase);
         // Restore the original baseUri in the result
         const href = url.href.replace('http://example.com/', '');
-        const [uri, fragment] = href.split('#');
+        const [, fragment] = href.split('#');
         return new JsonPointer(
           effectiveBase + refUri,
           undefined,
@@ -364,7 +364,7 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
       if (finalId !== id && !schemas.has(finalId)) {
         schemas.set(finalId, finalSchema);
       }
-    } catch (e) {
+    } catch (_e) {
       // If deep resolution fails (remote ref not loaded), fall back to shallow resolution
       // This preserves the original behavior for unresolved refs
       const { schema } = resolveRefSchemaShallow(schemas, id, null, opts);

@@ -75,7 +75,6 @@ export function getSchemaDraftById(schemaId) {
     throw new Error('The schema id must be of type string');
 
   const $id = schemaId.toLowerCase();
-  // eslint-disable-next-line no-unused-vars
   for (const [_, item] of Object.entries(schemaDrafts)) {
     const draft = item.draft;
     if (draft.toLowerCase() === $id)

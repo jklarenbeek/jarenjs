@@ -16,7 +16,7 @@ export function isValidIdentifier(str) {
   return /* str != null && */ CONST_REGEXP_IDENTIFIER.test(str);
 }
 
-const CONST_REGEXP_HTML_IDENTIFIER = /^[A-Za-z][\w\-\:\.]{0,30}$/;
+const CONST_REGEXP_HTML_IDENTIFIER = /^[A-Za-z][\w\-:.]{0,30}$/;
 export function isValidHtmlIdentifier(str) {
   return /* str != null && */ CONST_REGEXP_HTML_IDENTIFIER.test(str);
 }

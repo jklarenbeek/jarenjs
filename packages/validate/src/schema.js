@@ -15,18 +15,19 @@ import {
 } from '@jarenjs/core/number';
 
 import {
-  falseThat,
   trueThat,
   addFunctionToArray,
 } from '@jarenjs/core/function';
 
 import {
   createIsSchemaTypeHandler,
+  hasSchemaRef,
+  hasSchemaRecursiveRef,
+  hasSchemaDynamicRef,
 } from './tools.js';
 
 import {
   getStringLength,
-  getSegmenter,
 } from '@jarenjs/core/string';
 
 import { compileErrorMessageSpec } from './messages.js';
@@ -42,9 +43,8 @@ import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
 import { compileQuerySchema } from './query-keyword.js';
-import { compileDollarDataSchema, hasDollarDataReferences } from './dollar-data.js';
+import { compileDollarDataSchema } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
-import { hasSchemaRef, hasSchemaRecursiveRef, hasSchemaDynamicRef } from './tools.js';
 import { createJsonPointer } from './traverse.js';
 
 /**
@@ -169,7 +169,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
       let targetObj;
       try {
         targetObj = root.resolveObject(resolvedRef, baseUri, { $ref: resolvedRef });
-      } catch (e) {
+      } catch (_e) {
         return addError(data, dataPath);
       }
       if (targetObj) {
@@ -463,10 +463,6 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     // Otherwise, continue to process siblings alongside $ref (2019-09+ only)
     refWithSiblings = true;
   }
-
-  // Check if schema has any $data references
-  // If so, we need to use the $data-aware compilation path
-  const hasDollarData = hasDollarDataReferences(jsonSchema);
 
   // When the metaschema's $vocabulary omits the validation vocabulary,
   // keywords like type/enum/minimum/minLength assert nothing.

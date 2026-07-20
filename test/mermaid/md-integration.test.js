@@ -4,7 +4,7 @@ import * as assert from 'node:assert/strict';
 
 import { parseMarkdown, mdToVnode, toMarkdown, compileMarkdown } from '@jarenjs/md';
 import { mermaidPlugin, refreshMermaidFence } from '@jarenjs/mermaid/plugin';
-import { parseMermaid, toMermaid } from '@jarenjs/mermaid';
+import { parseMermaid } from '@jarenjs/mermaid';
 import { renderToString } from '@jarenjs/view';
 
 const PLUGINS = [mermaidPlugin()];

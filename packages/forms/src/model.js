@@ -91,7 +91,7 @@ function resolveLocalRef(ref, rootSchema) {
     const target = compileJSONPointer(pointer)(rootSchema);
     return target === JSONPOINTER_NOTHING ? null : target;
   }
-  catch (e) {
+  catch (_e) {
     return null; // malformed fragment: same 'unresolvable' answer as a missing target
   }
 }
@@ -115,7 +115,7 @@ export function resolveSchema(schema, rootSchema, depth = 0) {
     if (target != null && typeof target === 'object') {
       const deref = resolveSchema(target, rootSchema, depth + 1);
       // 2019-09+: siblings apply together with the referenced schema
-      const { $ref, ...siblings } = schema;
+      const { $ref: _$ref, ...siblings } = schema;
       resolved = (deref && typeof deref === 'object')
         ? { ...deref, ...siblings }
         : deref;

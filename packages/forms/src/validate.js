@@ -50,7 +50,7 @@ function getPattern(source) {
     try {
       regex = createRegExp(source);
     }
-    catch (e) {
+    catch (_e) {
       regex = null;
     }
     if (regexCache.size > 500) regexCache.clear();

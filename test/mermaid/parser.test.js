@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { parseMermaid, toMermaid, MermaidParseError, parseMermaidConfig } from '@jarenjs/mermaid';
+import { parseMermaid, MermaidParseError, parseMermaidConfig } from '@jarenjs/mermaid';
 
 describe('parseMermaid: flowchart', function () {
   it('parses directions, shapes, edges and labels', function () {

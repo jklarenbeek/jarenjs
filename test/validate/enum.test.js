@@ -207,7 +207,7 @@ describe('Schema Generics', function () {
     });
 
     //
-    assert.isTrue(validate('<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><head></head></html>'), 'valid html');
+    assert.isTrue(validate('<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head></head></html>'), 'valid html');
   });
 
   describe.skip('#encode()', function () {

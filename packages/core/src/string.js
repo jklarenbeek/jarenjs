@@ -119,6 +119,7 @@ export function isAsciiString(str) {
 // Intl.Segmenter can be skipped.
 // (U+0600-0605, 06DD, 070F, 0890, 0891, 08E2, 110BD, 110CD are the
 // Prepended_Concatenation_Mark set, which V8 does not expose as \p{...})
+// eslint-disable-next-line no-misleading-character-class -- intentional grapheme-cluster detector: this char class deliberately mixes combining marks, join-controls, emoji modifiers, regional indicators and prepended concatenation marks to fast-path the Intl.Segmenter skip.
 const COMPLEX_GRAPHEME_REGEX = /[\r\p{M}\p{Join_Control}\p{Emoji_Modifier}\p{Regional_Indicator}\u0600-\u0605\u06DD\u070F\u0890\u0891\u08E2\uFE00-\uFE0F\u1100-\u11FF\uA960-\uA97F\uD7B0-\uD7FF\u{110BD}\u{110CD}\u{E0000}-\u{E007F}]/u;
 
 /**

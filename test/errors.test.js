@@ -2,7 +2,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { JarenValidator, ValidatorOptions, ValidationError } from '@jarenjs/validate';
+import { JarenValidator, ValidatorOptions } from '@jarenjs/validate';
 
 describe('Error Reporting', () => {
   
@@ -274,9 +274,6 @@ describe('Error Reporting', () => {
       const ageError = result.errors.find(e => 
         e.keyword === 'minimum' || (e.params && e.params.limit === 0)
       );
-      const nameError = result.errors.find(e => 
-        e.keyword === 'minLength' || (e.params && e.params.limit === 1)
-      );
       
       assert.ok(ageError || result.errors.length > 0, 'Should have validation errors');
     });
@@ -365,7 +362,7 @@ describe('Array Validation Errors', () => {
 describe('Format Validation Errors', () => {
   it('should report format error for invalid date-time', () => {
     const jaren = new JarenValidator(new ValidatorOptions({ collectErrors: true }));
-    jaren.addFormat('date-time', (schemaObj, schema) => {
+    jaren.addFormat('date-time', (schemaObj, _schema) => {
       const addError = schemaObj.createErrorHandler('date-time', 'format');
       return function validateDateTime(data, dataPath) {
         // Simple ISO 8601 regex check
@@ -389,7 +386,7 @@ describe('Format Validation Errors', () => {
 
   it('should report format error for invalid email', () => {
     const jaren = new JarenValidator(new ValidatorOptions({ collectErrors: true }));
-    jaren.addFormat('email', (schemaObj, schema) => {
+    jaren.addFormat('email', (schemaObj, _schema) => {
       const addError = schemaObj.createErrorHandler('email', 'format');
       return function validateEmail(data, dataPath) {
         // Simple email regex
@@ -412,7 +409,7 @@ describe('Format Validation Errors', () => {
 
   it('should report format error for invalid uri', () => {
     const jaren = new JarenValidator(new ValidatorOptions({ collectErrors: true }));
-    jaren.addFormat('uri', (schemaObj, schema) => {
+    jaren.addFormat('uri', (schemaObj, _schema) => {
       const addError = schemaObj.createErrorHandler('uri', 'format');
       return function validateUri(data, dataPath) {
         try {
@@ -735,7 +732,7 @@ describe('Error Collection Edge Cases', () => {
     };
     
     // Add email format
-    jaren.addFormat('email', (schemaObj, schema) => {
+    jaren.addFormat('email', (schemaObj, _schema) => {
       const addError = schemaObj.createErrorHandler('email', 'format');
       return function validateEmail(data, dataPath) {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
