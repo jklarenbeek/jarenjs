@@ -8,12 +8,13 @@
  * optional wireframe. Deterministic and headless → golden-geometry tests.
  */
 
-import { Float64, Vec3f64, Mat4, project3dTo2d } from '@jarenjs/core/math';
+import { Float64, Vec3f64, Mat4, project3dTo2d, remap } from '@jarenjs/core/math';
+import { lerpColor } from '@jarenjs/core/color';
+import { svgRoot, polygon } from '@jarenjs/view/helpers';
 import { parseExpression } from '../parser/index.js';
 import { compileExpr } from '../compile.js';
 import { defaultEnv } from '../env.js';
 import { createTheme } from '../theme.js';
-import { svgRoot, polygon, mapRange } from '../render/svg.js';
 import { hashContent } from '../utils.js';
 
 const DEFAULTS = {
@@ -27,18 +28,6 @@ const DEFAULTS = {
   variables: ['x', 'y'],
   distance: 3.2,
 };
-
-/** Linear-interpolate two `#rrggbb` colors. */
-function lerpColor(a, b, t) {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
-  const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
-  const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
-  const r = Math.round(ar + (br - ar) * t);
-  const g = Math.round(ag + (bg - ag) * t);
-  const bl = Math.round(ab + (bb - ab) * t);
-  return '#' + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
-}
 
 /**
  * @typedef {object} Plot3dConfig
@@ -90,8 +79,8 @@ export function buildScene3d(exprOrConfig, options = {}) {
   for (let i = 0; i <= N; i++) {
     const row = [];
     for (let j = 0; j <= N; j++) {
-      scope[vx] = mapRange(i, 0, N, xmin, xmax);
-      scope[vy] = mapRange(j, 0, N, ymin, ymax);
+      scope[vx] = remap(i, 0, N, xmin, xmax);
+      scope[vy] = remap(j, 0, N, ymin, ymax);
       const z = +fn(scope);
       row.push(z);
       if (Number.isFinite(z)) { if (z < zmin) zmin = z; if (z > zmax) zmax = z; }
@@ -108,9 +97,9 @@ export function buildScene3d(exprOrConfig, options = {}) {
   const viewport = { x: 0, y: 0, width, height };
 
   const toModel = (i, j) => {
-    const nx = mapRange(i, 0, N, -1.2, 1.2);
-    const ny = mapRange(j, 0, N, -1.2, 1.2);
-    const nz = Number.isFinite(zs[i][j]) ? mapRange(zs[i][j], zmin, zmax, -0.7, 0.7) : NaN;
+    const nx = remap(i, 0, N, -1.2, 1.2);
+    const ny = remap(j, 0, N, -1.2, 1.2);
+    const nz = Number.isFinite(zs[i][j]) ? remap(zs[i][j], zmin, zmax, -0.7, 0.7) : NaN;
     return new Vec3f64(nx, nz, ny); // z-height becomes the vertical (world Y)
   };
 
@@ -133,7 +122,7 @@ export function buildScene3d(exprOrConfig, options = {}) {
       if (a === null || b === null || c === null || d === null) continue;
       const depth = (a.z + b.z + c.z + d.z) / 4;
       const avgZ = (zs[i][j] + zs[i + 1][j] + zs[i + 1][j + 1] + zs[i][j + 1]) / 4;
-      const shade = Float64.clamp(mapRange(avgZ, zmin, zmax, 0, 1), 0, 1);
+      const shade = Float64.clamp(remap(avgZ, zmin, zmax, 0, 1), 0, 1);
       quads.push({
         points: [round(a), round(b), round(c), round(d)],
         depth: Math.round(depth * 1e4) / 1e4,
@@ -173,7 +162,7 @@ export function scene3dToVnode(scene, options = {}) {
     class: 'calc-face',
   }));
   const key = 'p3:' + hashContent(JSON.stringify({ z: scene.zrange, n: scene.quads.length, q0: scene.quads[0] }));
-  return svgRoot(scene.width, scene.height, theme, children, key);
+  return svgRoot('calc-plot', scene.width, scene.height, theme, children, key);
 }
 
 /**

@@ -40,9 +40,13 @@ constant-vs-variable factors.
 - `plot/plot2d.js`, `plot/plot3d.js` — geometry-as-JSON scene builders +
   scene→SVG renderers. 3D uses the core `mat4`/`project.js` kernel and
   painter's-algorithm depth sort.
-- `render/svg.js`, `render/error.js`, `theme.js`, `utils.js` — SVG vnode
-  helpers (adapted from mermaid), the error vnode, `--calc-*` theme tokens,
-  and the byte-reused `hashContent`.
+- `render/error.js`, `theme.js`, `utils.js` — the error vnode, the
+  `--calc-*` theme token tables (resolved through the shared
+  `@jarenjs/view/helpers` `resolveTheme`), and a re-export of the suite's
+  single `hashContent` from `@jarenjs/core`. The SVG vnode builders and the
+  interpolation-correct `remap` (`@jarenjs/core/math`) and `lerpColor`
+  (`@jarenjs/core/color`) are the shared kernels; the SVG vnode builders
+  live in `@jarenjs/view/helpers`.
 
 ## Component (`src/component/*`)
 

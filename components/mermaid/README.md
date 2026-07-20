@@ -177,9 +177,10 @@ Node is a capability it lacks.
 
 ## Design notes
 
-- **Two layers, one-way arrow.** The engine imports only `@jarenjs/view`
-  (+ a copied `hashContent`); the component adds the app glue. The
-  Markdown plugin lives on the md→mermaid arrow with no cycle.
+- **Two layers, one-way arrow.** The engine imports only `@jarenjs/core`
+  and `@jarenjs/view` (shared SVG builders from `@jarenjs/view/helpers`,
+  `hashContent` from core); the component adds the app glue. The Markdown
+  plugin lives on the md→mermaid arrow with no cycle.
 - **CSP-safe.** No `eval`, no `new Function`, no `innerHTML`. Text and
   attributes are escaped by the view serializer.
 - **Structural sharing.** Same source → reference-equal vnode; a small

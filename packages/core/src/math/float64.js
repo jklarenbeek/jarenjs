@@ -446,6 +446,30 @@ export class Float64 {
 
 }
 
+/**
+ * Standard linear remap of `v` from the source range `[smin, smax]` to the
+ * destination range `[dmin, dmax]`. A degenerate source range collapses to
+ * `dmin`.
+ *
+ * This is the interpolation-correct remap: `dmin + t·(dmax - dmin)` with
+ * `t = (v - smin)/(smax - smin)`. It is deliberately distinct from the
+ * legacy `Float64.map`, which composes `Float64.norm`/`Float64.lerp` with a
+ * non-standard `lerp` formula (`(max - min)·(norm + min)`) and is therefore
+ * unsuitable for screen/value interpolation. `Float64.map`'s quirk is left
+ * unchanged for its existing consumers; new interpolation callers use this.
+ *
+ * @param {number} v
+ * @param {number} smin
+ * @param {number} smax
+ * @param {number} dmin
+ * @param {number} dmax
+ * @returns {number}
+ */
+export function remap(v, smin, smax, dmin, dmax) {
+  if (smax === smin) return dmin;
+  return dmin + ((v - smin) / (smax - smin)) * (dmax - dmin);
+}
+
 /** Lanczos g=7 coefficients (shared, allocation-free). */
 const _LANCZOS_G7 = [
   0.99999999999980993,

@@ -9,11 +9,12 @@
  * pure-vnode SVG.
  */
 
+import { remap } from '@jarenjs/core/math';
+import { svgRoot, line, path, textAt, polylinePath } from '@jarenjs/view/helpers';
 import { parseExpression } from '../parser/index.js';
 import { compileExpr } from '../compile.js';
 import { defaultEnv } from '../env.js';
 import { createTheme } from '../theme.js';
-import { svgRoot, line, path, textAt, polylinePath, mapRange } from '../render/svg.js';
 import { hashContent } from '../utils.js';
 
 const DEFAULTS = {
@@ -92,7 +93,7 @@ export function buildScene2d(exprOrConfig, options = {}) {
 
   // sample each series into typed-array buffers (compile once)
   const xs = new Float64Array(samples);
-  for (let i = 0; i < samples; i++) xs[i] = mapRange(i, 0, samples - 1, xmin, xmax);
+  for (let i = 0; i < samples; i++) xs[i] = remap(i, 0, samples - 1, xmin, xmax);
 
   const rawSeries = [];
   for (const src of exprs) {
@@ -130,8 +131,8 @@ export function buildScene2d(exprOrConfig, options = {}) {
   }
 
   const toScreen = (x, y) => ({
-    x: mapRange(x, xmin, xmax, plot.left, plot.right),
-    y: mapRange(y, ymin, ymax, plot.bottom, plot.top),
+    x: remap(x, xmin, xmax, plot.left, plot.right),
+    y: remap(y, ymin, ymax, plot.bottom, plot.top),
   });
 
   // build screen-space points, breaking on non-finite and asymptote jumps
@@ -152,10 +153,10 @@ export function buildScene2d(exprOrConfig, options = {}) {
     return { source: s.source, points, error: false };
   });
 
-  const xticks = niceTicks(xmin, xmax, 8).map((v) => ({ value: v, x: mapRange(v, xmin, xmax, plot.left, plot.right) }));
-  const yticks = niceTicks(ymin, ymax, 6).map((v) => ({ value: v, y: mapRange(v, ymin, ymax, plot.bottom, plot.top) }));
-  const axisX = (0 >= ymin && 0 <= ymax) ? mapRange(0, ymin, ymax, plot.bottom, plot.top) : null;
-  const axisY = (0 >= xmin && 0 <= xmax) ? mapRange(0, xmin, xmax, plot.left, plot.right) : null;
+  const xticks = niceTicks(xmin, xmax, 8).map((v) => ({ value: v, x: remap(v, xmin, xmax, plot.left, plot.right) }));
+  const yticks = niceTicks(ymin, ymax, 6).map((v) => ({ value: v, y: remap(v, ymin, ymax, plot.bottom, plot.top) }));
+  const axisX = (0 >= ymin && 0 <= ymax) ? remap(0, ymin, ymax, plot.bottom, plot.top) : null;
+  const axisY = (0 >= xmin && 0 <= xmax) ? remap(0, xmin, xmax, plot.left, plot.right) : null;
 
   return {
     kind: '2d',
@@ -205,7 +206,7 @@ export function scene2dToVnode(scene, options = {}) {
   });
 
   const key = 'p2:' + hashContent(JSON.stringify({ d: scene.domain, r: scene.range, s: scene.series.map((s) => s.source) }));
-  return svgRoot(scene.width, scene.height, theme, children, key);
+  return svgRoot('calc-plot', scene.width, scene.height, theme, children, key);
 }
 
 /** @param {number} v */

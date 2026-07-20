@@ -10,7 +10,7 @@
 import { h } from '@jarenjs/view';
 import {
   svgRoot, group, rect, path, circle, polygon, textLines, num,
-} from './svg.js';
+} from '@jarenjs/view/helpers';
 
 /**
  * @param {any} scene PositionedDiagram (flowchart)
@@ -52,7 +52,7 @@ export function renderFlowchart(scene, theme, hash) {
     children.push(renderNode(node, t, scene.fontSize));
   }
 
-  return svgRoot(scene.width, scene.height, theme, children, 'mmfc-' + hash);
+  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children, 'mmfc-' + hash);
 }
 
 /**

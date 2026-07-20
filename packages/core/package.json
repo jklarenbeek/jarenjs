@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.14.0",
+  "version": "0.14.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -42,6 +42,10 @@
     "./bigint": {
       "types": "./dist/types/bigint.d.ts",
       "default": "./src/bigint.js"
+    },
+    "./color": {
+      "types": "./dist/types/color.d.ts",
+      "default": "./src/color.js"
     },
     "./dates": {
       "types": "./dist/types/dates.d.ts",

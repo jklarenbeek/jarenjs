@@ -20,6 +20,7 @@
 
 import { parseJSONPath, JSONPathSyntaxError } from '../path.js';
 import { isSingularSegments } from '../segments.js';
+import { encodeJSONPointerSegment } from '../pointer.js';
 import { JsonQueryCompileError } from './errors.js';
 // The operator registry: `name -> { params, result, compile }`. Only
 // referenced inside functions (never at module evaluation time), so the
@@ -108,13 +109,6 @@ function isVocabularyKey(key, ctx) {
 
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-// RFC 6901 reference token escaping for docPath pointers
-function escapeToken(token) {
-  if (token.indexOf('~') < 0 && token.indexOf('/') < 0)
-    return token;
-  return token.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 function fail(code, message, docPath) {
@@ -244,7 +238,7 @@ function normalizeObject(obj, docPath, scope, ctx) {
       const name = keys[i];
       entries[i] = Object.freeze({
         name,
-        expr: normalizeExpr(obj[name], docPath + '/' + escapeToken(name), scope, ctx),
+        expr: normalizeExpr(obj[name], docPath + '/' + encodeJSONPointerSegment(name), scope, ctx),
       });
     }
     return Object.freeze({ kind: 'object', card: CARD_ONE, docPath, entries: Object.freeze(entries) });
@@ -556,7 +550,7 @@ function normalizeLetBindings(letObj, letPath, scope, ctx, phraseNames, bindings
   let sc = scope;
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
-    const bindPath = letPath + '/' + escapeToken(name);
+    const bindPath = letPath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     const source = letObj[name];
     if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
@@ -591,7 +585,7 @@ function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings
   let sc = scope;
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
-    const bindPath = forPath + '/' + escapeToken(name);
+    const bindPath = forPath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     let source = forObj[name];
     let sourcePath = bindPath;
@@ -765,7 +759,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     const checks = new Array(names.length);
     for (let i = 0; i < names.length; i++) {
       const name = names[i];
-      const checkPath = asPath + '/' + escapeToken(name);
+      const checkPath = asPath + '/' + encodeJSONPointerSegment(name);
       let slot = -1;
       for (let j = 0; j < tupleSlots.length; j++) {
         if (tupleSlots[j].name === name) {
@@ -799,7 +793,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     const keys = new Array(names.length);
     for (let i = 0; i < names.length; i++) {
       const name = names[i];
-      const bindPath = groupPath + '/' + escapeToken(name);
+      const bindPath = groupPath + '/' + encodeJSONPointerSegment(name);
       bindPhraseName(name, phraseNames, bindPath);
       // key expressions evaluate per tuple, in the pre-group scope
       const expr = normalizeExpr(obj.$groupby[name], bindPath, sc, ctx);
@@ -918,7 +912,7 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
   let sc = scope;
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
-    const bindPath = clausePath + '/' + escapeToken(name);
+    const bindPath = clausePath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     const source = bindObj[name];
     if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))

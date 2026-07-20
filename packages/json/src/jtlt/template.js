@@ -6,6 +6,7 @@
 // drift apart.
 
 import { JtltCompileError } from './errors.js';
+import { encodeJSONPointerSegment } from '../pointer.js';
 
 const hasOwn = Object.hasOwn;
 const ENVELOPE_KEYS = new Set(['$jtlt', 'output', 'rules']);
@@ -18,12 +19,6 @@ export const RESERVED_PRIORITY_FLOOR = -1e307;
 
 function isObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function escapeToken(token) {
-  if (token.indexOf('~') < 0 && token.indexOf('/') < 0)
-    return token;
-  return token.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 function fail(code, message, docPath) {
@@ -39,7 +34,7 @@ function normalizeRule(value, index, rulesPath) {
   for (let i = 0; i < keys.length; i++) {
     if (!RULE_KEYS.has(keys[i]))
       fail('TL0002', `unknown rule member '${keys[i]}'`,
-        rulePath + '/' + escapeToken(keys[i]));
+        rulePath + '/' + encodeJSONPointerSegment(keys[i]));
   }
   if (!hasOwn(value, 'body'))
     fail('TL0002', "a template rule requires 'body'", rulePath + '/body');
@@ -92,7 +87,7 @@ export function normalizeJtltTemplate(doc) {
     for (let i = 0; i < keys.length; i++) {
       if (!ENVELOPE_KEYS.has(keys[i]))
         fail('TL0001', `unknown template member '${keys[i]}'`,
-          '/' + escapeToken(keys[i]));
+          '/' + encodeJSONPointerSegment(keys[i]));
     }
     if (!hasOwn(doc, '$jtlt'))
       fail('TL0001', "the template envelope requires '$jtlt'", '/$jtlt');

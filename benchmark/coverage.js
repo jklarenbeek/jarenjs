@@ -59,6 +59,20 @@ if (args.includes('--help') || args.includes('-h')) {
   process.exit(0);
 }
 
+// --- Whole-suite dead-code audit -------------------------------------------
+// `--dead-code` runs the ENTIRE test suite under c8 (with `--all`, so a
+// module no test ever imports still surfaces at 0%) and reports every
+// source function with zero hits and every source file whose functions are
+// all unhit — the stale/dead-code candidates a refactor must resolve.
+// Unlike the profiler mode below, it takes no target file.
+if (args.includes('--dead-code')) {
+  process.exit(runDeadCodeAudit({
+    tempDir: path.join(rootDir, 'coverage', 'tmp-dead'),
+    fail: !args.includes('--no-fail'),
+    json: args.includes('--json'),
+  }));
+}
+
 // Parse arguments
 let targetFile = null;
 let threshold = 0;
@@ -337,3 +351,137 @@ if (uncoveredFiles.length > 0) {
 }
 
 console.log('');
+
+/**
+ * Whole-suite dead-code audit (the `--dead-code` mode). Runs the full test
+ * suite under c8 with `--all` so that even a module no test imports shows
+ * up at 0%, then reports:
+ *   - FULLY DEAD FILES — every function in the file is unhit (no test loads it);
+ *   - DEAD FUNCTIONS   — individual unhit functions inside otherwise-used files.
+ * The refactor decides per finding: delete the dead code, or add a test that
+ * exercises it. Returns 1 when findings exist (unless `--no-fail`), so it can
+ * gate a health check.
+ *
+ * @param {{ tempDir: string, fail: boolean, json: boolean }} opts
+ * @returns {number} the process exit code
+ */
+function runDeadCodeAudit(opts) {
+  const coverageFile = path.join(rootDir, 'coverage', 'coverage-final.json');
+  if (fs.existsSync(opts.tempDir)) fs.rmSync(opts.tempDir, { recursive: true });
+  fs.mkdirSync(opts.tempDir, { recursive: true });
+
+  // Instrument only shipped source (packages/*/src, components/*/src); tests,
+  // dist and node_modules are never "dead code" to be removed.
+  const cmd = [
+    'npx c8',
+    '--reporter=json',
+    '--all',
+    "--include 'packages/**/src/**/*.js'",
+    "--include 'components/**/src/**/*.js'",
+    "--exclude '**/*.test.js'",
+    "--exclude '**/dist/**'",
+    `--temp-directory ${opts.tempDir}`,
+    '--clean',
+    'node --no-warnings=ExperimentalWarning --test "test/**/*.test.js"',
+  ].join(' ');
+
+  console.log('='.repeat(80));
+  console.log('DEAD-CODE AUDIT — running the full test suite under coverage…');
+  console.log('='.repeat(80));
+
+  let suiteFailed = false;
+  try {
+    execSync(cmd, { cwd: rootDir, stdio: ['inherit', 'ignore', 'inherit'], encoding: 'utf8' });
+  } catch {
+    // c8 exits non-zero when the suite has failing tests. Coverage is still
+    // written, but a red suite makes the audit unreliable (untested paths may
+    // simply not have run) — flag it.
+    suiteFailed = true;
+  }
+  if (!fs.existsSync(coverageFile)) {
+    console.error('Error: coverage data not generated.');
+    return 1;
+  }
+  if (suiteFailed) {
+    console.warn('Warning: the test suite did not pass cleanly — fix the suite first; '
+      + 'dead-code findings below may be inaccurate.');
+  }
+
+  const data = JSON.parse(fs.readFileSync(coverageFile, 'utf8'));
+  const deadFiles = [];   // { file, totalFunctions }
+  const deadFns = [];     // { file, name, line }  (in files that ARE otherwise used)
+  let totalFns = 0;
+  let hitFns = 0;
+
+  for (const [filePath, fc] of Object.entries(data)) {
+    if (filePath.includes('node_modules')) continue;
+    const rel = path.relative(rootDir, filePath);
+    const fnMap = fc.fnMap || {};
+    const f = fc.f || {};
+    const ids = Object.keys(fnMap);
+    if (ids.length === 0) continue; // pure re-export / constants module — nothing to call
+
+    let fileHit = 0;
+    const fileDead = [];
+    for (const id of ids) {
+      totalFns++;
+      if ((f[id] || 0) > 0) { hitFns++; fileHit++; }
+      else fileDead.push({
+        file: rel,
+        name: fnMap[id].name || '(anonymous)',
+        line: fnMap[id].decl?.start?.line ?? fnMap[id].line ?? '?',
+      });
+    }
+    if (fileHit === 0) deadFiles.push({ file: rel, totalFunctions: ids.length });
+    else deadFns.push(...fileDead); // report only the unhit functions of a used file
+  }
+
+  deadFiles.sort((a, b) => a.file.localeCompare(b.file));
+  deadFns.sort((a, b) => a.file.localeCompare(b.file) || (a.line - b.line));
+
+  if (opts.json) {
+    console.log(JSON.stringify({
+      deadFiles, deadFunctions: deadFns,
+      totalFunctions: totalFns, hitFunctions: hitFns,
+    }, null, 2));
+  } else {
+    console.log('');
+    console.log('='.repeat(80));
+    console.log(`FULLY DEAD FILES — no test executes any function (${deadFiles.length})`);
+    console.log('='.repeat(80));
+    if (deadFiles.length === 0) console.log('  none');
+    else for (const d of deadFiles) console.log(`  ✗ ${d.file}  (${d.totalFunctions} function(s))`);
+
+    console.log('');
+    console.log('='.repeat(80));
+    console.log(`DEAD FUNCTIONS — unhit functions in otherwise-used files (${deadFns.length})`);
+    console.log('='.repeat(80));
+    if (deadFns.length === 0) {
+      console.log('  none');
+    } else {
+      let current = null;
+      for (const d of deadFns) {
+        if (d.file !== current) { console.log(`  ${d.file}`); current = d.file; }
+        console.log(`    ✗ ${d.name} (line ${d.line})`);
+      }
+    }
+
+    console.log('');
+    console.log('='.repeat(80));
+    console.log('SUMMARY');
+    console.log('='.repeat(80));
+    const pct = totalFns > 0 ? ((hitFns / totalFns) * 100).toFixed(1) : '0.0';
+    console.log(`Functions executed: ${hitFns}/${totalFns} (${pct}%)`);
+    console.log(`Dead-code findings: ${deadFiles.length} file(s) + ${deadFns.length} function(s)`);
+    console.log('');
+    console.log('For each finding the refactor must DECIDE:');
+    console.log('  • remove it (it is genuinely unreachable/obsolete), or');
+    console.log('  • add a test that exercises it (it is a real, intended code path).');
+    console.log('Do not leave it unresolved. (Some entries may be intentional public API');
+    console.log('surface with no test yet — adding the test is then the correct choice.)');
+    console.log('');
+  }
+
+  const findings = deadFiles.length + deadFns.length;
+  return (opts.fail && findings > 0) || suiteFailed ? 1 : 0;
+}

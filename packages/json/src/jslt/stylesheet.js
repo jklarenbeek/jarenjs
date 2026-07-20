@@ -4,6 +4,7 @@
 // schema, and body closures are compiled by dispatch.js.
 
 import { JsltCompileError } from './errors.js';
+import { encodeJSONPointerSegment } from '../pointer.js';
 
 const hasOwn = Object.hasOwn;
 const ENVELOPE_KEYS = new Set(['$jslt', 'rules', 'unmatched', 'modes']);
@@ -13,12 +14,6 @@ const MODE_KEYS = new Set(['unmatched']);
 
 function isObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function escapeToken(token) {
-  if (token.indexOf('~') < 0 && token.indexOf('/') < 0)
-    return token;
-  return token.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 function fail(code, message, docPath) {
@@ -36,7 +31,7 @@ function normalizeModes(value, docPath) {
   const names = Object.keys(value);
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
-    const modePath = docPath + '/' + escapeToken(name);
+    const modePath = docPath + '/' + encodeJSONPointerSegment(name);
     const config = value[name];
     if (!isObject(config))
       fail('JT0001', `mode '${name}' must be an object`, modePath);
@@ -44,7 +39,7 @@ function normalizeModes(value, docPath) {
     for (let j = 0; j < keys.length; j++) {
       if (!MODE_KEYS.has(keys[j]))
         fail('JT0001', `unknown mode member '${keys[j]}'`,
-          modePath + '/' + escapeToken(keys[j]));
+          modePath + '/' + encodeJSONPointerSegment(keys[j]));
     }
     if (!hasOwn(config, 'unmatched'))
       fail('JT0001', `mode '${name}' requires 'unmatched'`, modePath + '/unmatched');
@@ -78,7 +73,7 @@ function normalizeMatch(value, matchPath) {
   for (let i = 0; i < keys.length; i++) {
     if (!MATCH_KEYS.has(keys[i]))
       fail('JT0003', `unknown match member '${keys[i]}'`,
-        matchPath + '/' + escapeToken(keys[i]));
+        matchPath + '/' + encodeJSONPointerSegment(keys[i]));
   }
   const hasPath = hasOwn(value, 'path');
   const hasSchema = hasOwn(value, 'schema');
@@ -105,7 +100,7 @@ function normalizeRule(value, index, rulesPath) {
   for (let i = 0; i < keys.length; i++) {
     if (!RULE_KEYS.has(keys[i]))
       fail('JT0002', `unknown rule member '${keys[i]}'`,
-        rulePath + '/' + escapeToken(keys[i]));
+        rulePath + '/' + encodeJSONPointerSegment(keys[i]));
   }
   if (!hasOwn(value, 'body'))
     fail('JT0002', "a stylesheet rule requires 'body'", rulePath + '/body');
@@ -158,7 +153,7 @@ export function normalizeJsltStylesheet(doc) {
     for (let i = 0; i < keys.length; i++) {
       if (!ENVELOPE_KEYS.has(keys[i]))
         fail('JT0001', `unknown stylesheet member '${keys[i]}'`,
-          '/' + escapeToken(keys[i]));
+          '/' + encodeJSONPointerSegment(keys[i]));
     }
     if (!hasOwn(doc, '$jslt'))
       fail('JT0001', "the stylesheet envelope requires '$jslt'", '/$jslt');

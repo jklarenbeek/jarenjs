@@ -15,6 +15,7 @@ import {
   mathf64_max,
   mathf64_random,
   Float64,
+  remap,
 } from '@jarenjs/core/math'
   //from '../../../packages/core/src/calc/float64.js';
 
@@ -272,6 +273,39 @@ describe('#Float64 primitives', function () {
     assert.equal(Float64.phi(1, 2).toFixed(6), '0.523599');
     assert.equal(Float64.phi(0, 1).toFixed(6), '0.000000');
     assert.equal(Float64.phi(1, 1).toFixed(6), '1.570796');
+  });
+
+});
+
+describe('#remap (interpolation-correct linear remap)', function () {
+
+  it('remaps across ranges linearly', () => {
+    assert.equal(remap(5, 0, 10, 0, 100), 50);
+    assert.equal(remap(0, 0, 10, 0, 100), 0);
+    assert.equal(remap(10, 0, 10, 0, 100), 100);
+    assert.equal(remap(2.5, 0, 10, 0, 100), 25);
+  });
+
+  it('handles inverted destination ranges (screen y-flip)', () => {
+    assert.equal(remap(0, 0, 1, 100, 0), 100);
+    assert.equal(remap(1, 0, 1, 100, 0), 0);
+    assert.equal(remap(0.5, 0, 1, 100, 0), 50);
+  });
+
+  it('extrapolates outside the source range', () => {
+    assert.equal(remap(20, 0, 10, 0, 100), 200);
+    assert.equal(remap(-5, 0, 10, 0, 100), -50);
+  });
+
+  it('collapses a degenerate source range to dmin', () => {
+    assert.equal(remap(5, 3, 3, 7, 9), 7);
+  });
+
+  it('differs from the legacy quirky Float64.map when dmin != 0', () => {
+    // Float64.map composes the non-standard lerp `(max-min)*(norm+min)`;
+    // remap is the standard `dmin + t*(dmax-dmin)`. With dmin=10 they part.
+    assert.equal(remap(5, 0, 10, 10, 20), 15);
+    assert.equal(Float64.map(5, 0, 10, 10, 20), 105);
   });
 
 });

@@ -10,7 +10,12 @@
  * `--mm-*` variables on the root `<svg>` and a `class` on every shape,
  * so `styles/mermaid.css` can re-theme (light/dark) purely in CSS —
  * cascade beats presentation attributes — **without a re-render**.
+ *
+ * Only the token tables live here; the resolution mechanics are shared
+ * (`@jarenjs/view/helpers` `resolveTheme`).
  */
+
+import { resolveTheme } from '@jarenjs/view/helpers';
 
 /** @type {Record<string, Record<string, string>>} */
 const THEMES = {
@@ -106,34 +111,7 @@ const THEMES = {
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
-  let base = THEMES.default;
-  let name = 'default';
-  let overrides = {};
-  if (typeof nameOrOverrides === 'string') {
-    name = THEMES[nameOrOverrides] ? nameOrOverrides : 'default';
-    base = THEMES[name];
-  }
-  else if (nameOrOverrides && typeof nameOrOverrides === 'object') {
-    if (typeof nameOrOverrides.theme === 'string' && THEMES[nameOrOverrides.theme]) {
-      name = nameOrOverrides.theme;
-      base = THEMES[name];
-    }
-    overrides = nameOrOverrides;
-  }
-  const tokens = { ...base, ...overrides };
-  const cssVars = {};
-  for (const key of Object.keys(tokens)) {
-    cssVars['--mm-' + kebab(key)] = tokens[key];
-  }
-  return { name, tokens, cssVars };
-}
-
-/**
- * @param {string} s
- * @returns {string}
- */
-function kebab(s) {
-  return s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  return resolveTheme(THEMES, 'mm', nameOrOverrides);
 }
 
 export { THEMES };

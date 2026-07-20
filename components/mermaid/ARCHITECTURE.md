@@ -13,7 +13,7 @@ deliberately.
 | Entry points | `@jarenjs/mermaid`, `@jarenjs/mermaid/plugin`, `@jarenjs/mermaid/theme` | `@jarenjs/mermaid/component`, `@jarenjs/mermaid/styles/mermaid.css` |
 | Source | `src/*.js`, `src/parser/`, `src/layout/`, `src/render/` | `src/component/`, `styles/` |
 | Job | text ⇄ AST ⇄ vnode **values**; parse, layout, render, print | package those values for a rendering **host** |
-| Knows about | nothing outside `@jarenjs/view` (+ a copied `hashContent`) | the engine, plus `@jarenjs/app`'s viewModel/effect shapes |
+| Knows about | `@jarenjs/core` + `@jarenjs/view` (shared SVG builders in `@jarenjs/view/helpers`, `hashContent` from core) | the engine, plus `@jarenjs/app`'s viewModel/effect shapes |
 | Ships CSS | no | yes (`styles/mermaid.css`) |
 | State | none — pure functions over data | memoization caches |
 
@@ -61,9 +61,9 @@ so each computes at most once.
 | `src/to-mermaid.js` | canonical AST → text printer (round-trip fixed point) |
 | `src/layout/metrics.js` | `measureText` from a precomputed advance-width table (no `getBBox`) |
 | `src/layout/{flowchart,sequence}.js` | pure, deterministic `PositionedDiagram` scene graphs |
-| `src/render/svg.js` | tagged-array SVG vnode helpers over `h()`; `sanitizeHref` |
+| `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; `sanitizeHref` (the engine imports them, no local copy) |
 | `src/render/{flowchart,sequence,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the D7 error box |
-| `src/theme.js` | theme tokens → concrete colors **and** `--mm-*` CSS variables |
+| `src/theme.js` | `--mm-*` token tables resolved through the shared `@jarenjs/view/helpers` `resolveTheme` (concrete colors **and** CSS variables) |
 | `src/plugin.js` | the self-frozen Markdown plugin (D9) + `refreshMermaidFence` |
 | `src/component/index.js` | `createMermaidComponent` (memoized `view()`, app effects, no-op hydrate) |
 
@@ -78,9 +78,9 @@ O(change):
 2. **The vnode is memoized per compiled document** — same source → same
    vnode reference, which the view patcher skips in O(1) (VIEW-FORMAT
    §5.1).
-3. **Vnodes carry content-hash keys** — `hashContent` (byte-identical to
-   md's) keys the root and reused sub-scenes, so the keyed patcher moves
-   rather than rebuilds.
+3. **Vnodes carry content-hash keys** — `hashContent` (the suite's single
+   copy, from `@jarenjs/core`) keys the root and reused sub-scenes, so the
+   keyed patcher moves rather than rebuilds.
 
 ## Layout & metrics
 

@@ -7,7 +7,7 @@
  */
 
 import { h } from '@jarenjs/view';
-import { svgRoot, group, rect, path, line, textLines, num } from './svg.js';
+import { svgRoot, group, rect, path, line, textLines, num } from '@jarenjs/view/helpers';
 
 /**
  * @param {any} scene PositionedDiagram (sequence)
@@ -60,7 +60,7 @@ export function renderSequence(scene, theme, hash) {
     children.push(renderMessage(scene.messages[i], t, fs, i));
   }
 
-  return svgRoot(scene.width, scene.height, theme, children, 'mmseq-' + hash);
+  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children, 'mmseq-' + hash);
 }
 
 /**

@@ -192,3 +192,36 @@ export function compareCodePoints(a, b) {
   // differing code units at i can never decode to equal code points
   return a.codePointAt(i) < b.codePointAt(i) ? -1 : 1;
 }
+
+/**
+ * FNV-1a 32-bit hash of a string, returned as an unsigned base-36 string
+ * (at most 7 chars). Not cryptographic — a stable, fast content
+ * fingerprint for cache keys and reconciliation keys. The suite's single
+ * content-hash primitive: equal content produces the same fingerprint
+ * (and therefore the same vnode `key`/memo key) everywhere downstream, so
+ * do NOT invent a second hash.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+export function hashContent(str) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * Convert a camelCase identifier to kebab-case by inserting a hyphen
+ * before each ASCII uppercase letter and lower-casing it
+ * (`fontFamily` → `font-family`). Leaves already-hyphenated or
+ * all-lowercase input unchanged.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function kebabCase(s) {
+  return s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+}

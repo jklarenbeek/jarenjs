@@ -14,6 +14,8 @@ import {
   getStringLength,
   countCodePoints,
   compareCodePoints,
+  hashContent,
+  kebabCase,
 } from '@jarenjs/core/string';
 
 describe('isStringEmpty', () => {
@@ -264,5 +266,39 @@ describe('compareCodePoints', () => {
     assert.isTrue('｡' > '\u{10000}');
     assert.deepEqual(compareCodePoints('｡', '\u{10000}'), -1);
     assert.deepEqual(compareCodePoints('\u{10000}', '｡'), 1);
+  });
+});
+
+describe('hashContent', () => {
+  it('should be a deterministic base-36 FNV-1a fingerprint', () => {
+    assert.deepEqual(hashContent('abc'), '7aigb0');
+    assert.deepEqual(hashContent('abc'), hashContent('abc'));
+    assert.deepEqual(hashContent(''), 'ztntfp');
+  });
+
+  it('should distinguish different content', () => {
+    assert.isTrue(hashContent('graph TD; A-->B') !== hashContent('graph TD; A-->C'));
+  });
+
+  it('should return at most 7 base-36 chars', () => {
+    for (const s of ['', 'x', 'a longer string of content', '🙂 unicode']) {
+      const h = hashContent(s);
+      assert.isTrue(h.length <= 7);
+      assert.isTrue(/^[0-9a-z]+$/.test(h));
+    }
+  });
+});
+
+describe('kebabCase', () => {
+  it('should hyphenate camelCase', () => {
+    assert.deepEqual(kebabCase('fontFamily'), 'font-family');
+    assert.deepEqual(kebabCase('surfaceLo'), 'surface-lo');
+    assert.deepEqual(kebabCase('edgeLabelBg'), 'edge-label-bg');
+  });
+
+  it('should leave already-lowercase or hyphenated input unchanged', () => {
+    assert.deepEqual(kebabCase('background'), 'background');
+    assert.deepEqual(kebabCase('line-color'), 'line-color');
+    assert.deepEqual(kebabCase(''), '');
   });
 });

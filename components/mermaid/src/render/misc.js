@@ -10,7 +10,7 @@
  */
 
 import { h } from '@jarenjs/view';
-import { svgRoot, rect, path, group, num } from './svg.js';
+import { svgRoot, rect, path, group, num } from '@jarenjs/view/helpers';
 import { textWidth } from '../layout/metrics.js';
 
 /** A categorical palette for pie slices. */
@@ -66,7 +66,7 @@ export function renderPie(ast, theme, hash) {
   children.push(...slices, ...legend);
   const width = legendX + legendW + 20;
   const height = 2 * R + 70;
-  return svgRoot(width, height, theme, children, 'mmpie-' + hash);
+  return svgRoot('mermaid mm-svg', width, height, theme, children, 'mmpie-' + hash);
 }
 
 /**
@@ -101,7 +101,7 @@ export function renderStructured(title, sections, theme, hash) {
     }
     y += boxH + gap;
   }
-  return svgRoot(boxW + 32, y, theme, children, 'mmstruct-' + hash);
+  return svgRoot('mermaid mm-svg', boxW + 32, y, theme, children, 'mmstruct-' + hash);
 }
 
 /**
@@ -115,7 +115,7 @@ export function renderPlaceholder(type, theme, hash) {
   const t = theme.tokens;
   const width = 380;
   const height = 84;
-  return svgRoot(width, height, theme, [
+  return svgRoot('mermaid mm-svg', width, height, theme, [
     rect(1, 1, width - 2, height - 2, { rx: 6, fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1, 'stroke-dasharray': '5 4' }),
     h('text', { x: num(width / 2), y: 36, 'font-size': 15, 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }, `${type} diagram`),
     h('text', { x: num(width / 2), y: 58, 'font-size': 12, 'text-anchor': 'middle', fill: t.nodeText }, 'parsed — not yet laid out in v1'),

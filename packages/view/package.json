@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/view",
   "private": false,
-  "version": "0.14.0",
+  "version": "0.14.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -10,6 +10,14 @@
     ".": {
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
+    },
+    "./helpers": {
+      "types": "./dist/types/helpers/index.d.ts",
+      "default": "./src/helpers/index.js"
+    },
+    "./helpers/*": {
+      "types": "./dist/types/helpers/*.d.ts",
+      "default": "./src/helpers/*.js"
     },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
@@ -44,6 +52,9 @@
     "renderer",
     "ssr"
   ],
+  "dependencies": {
+    "@jarenjs/core": "^0.14.1"
+  },
   "scripts": {
     "build": "npm run build:types",
     "build:types": "tsc -p tsconfig.json",

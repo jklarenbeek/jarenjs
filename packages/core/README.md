@@ -11,15 +11,16 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
 | `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), map/set merging |
-| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), cached regex compilation |
+| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), cached regex compilation, the suite's content fingerprint `hashContent` and `kebabCase` |
 | `@jarenjs/core/scan` | char-code constants and predicates for recursive-descent parsers |
+| `@jarenjs/core/color` | pure color math (`lerpColor` — hex `#rrggbb` interpolation) |
 | `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) |
 | `@jarenjs/core/integer` | `int8` ... `uint64` ranges and validators |
 | `@jarenjs/core/float` | `float16` ... `float64` constants, validators, increment/decrement |
 | `@jarenjs/core/bigint` | bigint helpers (`BigInt_min`, `BigInt_MinMax`, ...) |
 | `@jarenjs/core/dates` | RFC 3339 / ISO 8601 date-time parsing and validation |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
-| `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes |
+| `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the interpolation-correct linear `remap` |
 
 Deep imports work too (`@jarenjs/core/text/email`, `@jarenjs/core/math/vec2f64`, ...).
 

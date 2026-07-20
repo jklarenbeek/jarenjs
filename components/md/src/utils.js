@@ -2,28 +2,15 @@
 /**
  * @file Small shared helpers for the md package.
  *
- * Everything here is allocation-light and dependency-free. The content
- * hash is the package's identity primitive: block vnode keys, the
- * document `meta.hash`, and the mermaid SVG cache are all keyed by it,
- * so equal content hits O(1) fast paths everywhere downstream.
+ * The content hash is the package's identity primitive — block vnode
+ * keys, the document `meta.hash`, and the mermaid SVG cache are all keyed
+ * by it — so md re-exports the suite's single `hashContent` from
+ * `@jarenjs/core` rather than carrying its own copy; equal content hits
+ * O(1) fast paths everywhere downstream. The remaining helpers are md's
+ * own allocation-light scanner utilities.
  */
 
-/**
- * FNV-1a 32-bit hash of a string, returned as an unsigned base-36
- * string (at most 7 chars). Not cryptographic — a stable, fast content
- * fingerprint for cache keys and reconciliation keys.
- *
- * @param {string} str
- * @returns {string}
- */
-export function hashContent(str) {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
-  }
-  return hash.toString(36);
-}
+export { hashContent } from '@jarenjs/core/string';
 
 /**
  * Count leading space characters (U+0020 only; the scanner expands no

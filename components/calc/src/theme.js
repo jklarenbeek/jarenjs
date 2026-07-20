@@ -4,8 +4,12 @@
  * name (or overrides) into concrete colors (written as SVG presentation
  * attributes so `toSvgString()` is a valid standalone image) plus a
  * matching `--calc-*` CSS variable set (so `styles/calc.css` can re-theme
- * light/dark purely in CSS, without a re-render).
+ * light/dark purely in CSS, without a re-render). Only the token tables
+ * live here; the resolution mechanics are shared (`@jarenjs/view/helpers`
+ * `resolveTheme`).
  */
+
+import { resolveTheme } from '@jarenjs/view/helpers';
 
 /** @type {Record<string, Record<string, string>>} */
 const THEMES = {
@@ -45,29 +49,7 @@ const THEMES = {
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
-  let name = 'default';
-  let base = THEMES.default;
-  let overrides = {};
-  if (typeof nameOrOverrides === 'string') {
-    name = THEMES[nameOrOverrides] ? nameOrOverrides : 'default';
-    base = THEMES[name];
-  }
-  else if (nameOrOverrides && typeof nameOrOverrides === 'object') {
-    if (typeof nameOrOverrides.theme === 'string' && THEMES[nameOrOverrides.theme]) {
-      name = nameOrOverrides.theme;
-      base = THEMES[name];
-    }
-    overrides = nameOrOverrides;
-  }
-  const tokens = { ...base, ...overrides };
-  const cssVars = {};
-  for (const key of Object.keys(tokens)) cssVars['--calc-' + kebab(key)] = tokens[key];
-  return { name, tokens, cssVars };
-}
-
-/** @param {string} s */
-function kebab(s) {
-  return s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  return resolveTheme(THEMES, 'calc', nameOrOverrides);
 }
 
 export { THEMES };

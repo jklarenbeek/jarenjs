@@ -5,7 +5,7 @@ User interfaces as JSON documents. This package defines the **Jaren vnode format
 - a **keyed DOM patcher** (`createDomRenderer`): diff the previous vnode against the next, touch only what changed, reuse keyed nodes across reorders;
 - an **SSR string renderer** (`renderToString`): the same JSON to an HTML string, no DOM required.
 
-It is the only package in the Jaren suite that touches the DOM, and it knows nothing about schemas, queries or state — a vnode is plain JSON, wherever it came from. In practice it comes from a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) compiled by [`@jarenjs/json`](../json), and the loop around it lives in [`@jarenjs/app`](../app). Zero dependencies, no `eval`, CSP-safe.
+It is the only package in the Jaren suite that touches the DOM, and it knows nothing about schemas, queries or state — a vnode is plain JSON, wherever it came from. In practice it comes from a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) compiled by [`@jarenjs/json`](../json), and the loop around it lives in [`@jarenjs/app`](../app). Its only runtime dependency is the pure, zero-dependency [`@jarenjs/core`](../core); no `eval`, CSP-safe.
 
 The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.json`](schemas/jaren-vnode.schema.json) — hand it to a constrained decoder and a language model cannot emit an invalid interface. The normative contract is [docs/VIEW-FORMAT.md](docs/VIEW-FORMAT.md).
 
@@ -61,6 +61,16 @@ Text and attribute values are escaped, void elements render without end tags, `k
 ### With JavaScript in the middle
 
 `h(tag, props, ...children)` builds the same JSON a stylesheet would, for hand-written views and tests. The shape helpers (`isTextNode`, `isElementNode`, `propsOf`, `keyOf`, `childrenOf`, `isSameNode`) are exported for anyone building another renderer over the format.
+
+### Shared SVG helpers — `@jarenjs/view/helpers`
+
+The `./helpers` subpath is the single home for the small SVG-vnode builder kernel that the suite's SVG-emitting components (`@jarenjs/calc`, `@jarenjs/mermaid`) share, so no component re-implements them:
+
+- **SVG builders over `h()`** — `svgRoot(className, width, height, theme, children, key?)`, `group`, `rect`, `circle`, `line`, `path`, `polyline`, `polygon`, `textAt`, `textLines`, plus the geometry guard `num` and the path-string builder `polylinePath`. `svgRoot` takes the root `class` and (via `theme.cssVars`) the CSS variables from the caller.
+- **`sanitizeHref(url)`** — a URL allow-list (http/https/mailto/`#`/`/`/`.`) for link hrefs written into vnodes.
+- **`resolveTheme(themes, prefix, nameOrOverrides?)`** — the prefix-driven mechanics behind each component's `createTheme`: a name-or-overrides object resolved to `{ name, tokens, cssVars }`, stamping every token as `--<prefix>-<kebab-case-key>`. Components keep their own token tables; the resolution logic lives here once. The pure `kebabCase` transform it uses comes from [`@jarenjs/core/string`](../core).
+
+Import the whole barrel (`@jarenjs/view/helpers`) or a single module (`@jarenjs/view/helpers/svg`, `@jarenjs/view/helpers/theme`).
 
 ## Performance contract
 
