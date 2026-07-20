@@ -1,0 +1,113 @@
+/**
+ * @jarenjs/calc component stylesheet. `--calc-*` design tokens with a
+ * `.dark` override (mirrors mermaid.css): the plot SVG carries concrete
+ * presentation colors so it is valid standalone, and also `--calc-*`
+ * variables + classes so the cascade re-themes without a re-render.
+ */
+
+.calc {
+  --calc-bg: #ffffff;
+  --calc-panel: #f8fafc;
+  --calc-border: #e2e8f0;
+  --calc-text: #1e293b;
+  --calc-muted: #64748b;
+  --calc-key: #f1f5f9;
+  --calc-key-hover: #e2e8f0;
+  --calc-op: #e0e7ff;
+  --calc-fn: #ecfeff;
+  --calc-equals: #4f46e5;
+  --calc-equals-text: #ffffff;
+  --calc-clear: #fee2e2;
+  --calc-accent: #4f46e5;
+
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+  color: var(--calc-text);
+  font-family: "trebuchet ms", verdana, arial, sans-serif;
+}
+
+.dark .calc,
+.calc.dark {
+  --calc-bg: #0f172a;
+  --calc-panel: #1e293b;
+  --calc-border: #334155;
+  --calc-text: #e2e8f0;
+  --calc-muted: #94a3b8;
+  --calc-key: #1e293b;
+  --calc-key-hover: #334155;
+  --calc-op: #312e81;
+  --calc-fn: #164e63;
+  --calc-equals: #6366f1;
+  --calc-equals-text: #ffffff;
+  --calc-clear: #7f1d1d;
+  --calc-accent: #818cf8;
+}
+
+.calc-modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.calc-mode {
+  padding: 6px 12px; border: 1px solid var(--calc-border); border-radius: 8px;
+  background: var(--calc-panel); color: var(--calc-text); cursor: pointer; font-size: 13px;
+}
+.calc-mode-active { background: var(--calc-accent); color: #fff; border-color: var(--calc-accent); }
+
+.calc-display {
+  background: var(--calc-panel); border: 1px solid var(--calc-border); border-radius: 10px;
+  padding: 12px 14px; text-align: right; min-height: 56px;
+}
+.calc-entry { color: var(--calc-muted); font-size: 15px; word-break: break-all; }
+.calc-result { font-size: 28px; font-weight: 700; }
+.calc-err { color: #dc2626; font-size: 13px; text-align: left; }
+
+.calc-keypad { display: grid; gap: 6px; }
+.calc-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+.calc-key {
+  padding: 12px; border: 1px solid var(--calc-border); border-radius: 8px;
+  background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 16px;
+}
+.calc-key:hover { background: var(--calc-key-hover); }
+.calc-key-op { background: var(--calc-op); }
+.calc-key-fn { background: var(--calc-fn); font-size: 13px; }
+.calc-key-const { background: var(--calc-fn); }
+.calc-key-clear { background: var(--calc-clear); }
+.calc-key-equals { background: var(--calc-equals); color: var(--calc-equals-text); font-weight: 700; }
+.calc-key-span2 { grid-column: span 2; }
+.calc-key-mem { font-size: 13px; }
+
+.calc-mem { display: flex; align-items: center; gap: 8px; }
+.calc-memval { color: var(--calc-muted); font-size: 13px; margin-left: auto; }
+
+.calc-bases { display: grid; gap: 4px; background: var(--calc-panel); border: 1px solid var(--calc-border); border-radius: 10px; padding: 10px; font-family: ui-monospace, monospace; }
+.calc-baserow { display: flex; justify-content: space-between; gap: 12px; }
+.calc-baselabel { color: var(--calc-muted); }
+.calc-baseval { font-weight: 600; word-break: break-all; }
+.calc-wordopts, .calc-angle { display: flex; gap: 6px; flex-wrap: wrap; }
+.calc-word, .calc-angle-btn {
+  padding: 4px 10px; border: 1px solid var(--calc-border); border-radius: 6px;
+  background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 12px;
+}
+.calc-word.active, .calc-angle-btn.active { background: var(--calc-accent); color: #fff; }
+
+.calc-financial, .calc-converter, .calc-plot-panel {
+  background: var(--calc-panel); border: 1px solid var(--calc-border);
+  border-radius: 10px; padding: 12px; display: grid; gap: 10px;
+}
+.calc-fin-result, .calc-conv-result { font-size: 18px; }
+.calc-conv-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.calc-conv-input { flex: 1 1 100px; padding: 8px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-bg); color: var(--calc-text); }
+.calc-dim, .calc-conv-from, .calc-conv-to { padding: 8px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-bg); color: var(--calc-text); }
+.calc-swap, .calc-rates-refresh { padding: 8px 10px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-key); cursor: pointer; }
+.calc-rates { color: var(--calc-muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.calc-rates-stale { color: #d97706; }
+
+.calc-plot-kinds { display: flex; gap: 6px; }
+.calc-plotkind { padding: 4px 12px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-key); color: var(--calc-text); cursor: pointer; font-size: 13px; }
+.calc-plotkind.active { background: var(--calc-accent); color: #fff; }
+.calc-plot-expr { padding: 8px; border: 1px solid var(--calc-border); border-radius: 6px; background: var(--calc-bg); color: var(--calc-text); font-family: ui-monospace, monospace; }
+.calc-plot-svg { display: flex; justify-content: center; }
+.calc-plot { background: var(--calc-bg); border-radius: 8px; }
+.calc-grid { stroke: var(--calc-border); }
+
+.calc-tape { display: grid; gap: 2px; font-family: ui-monospace, monospace; font-size: 13px; color: var(--calc-muted); max-height: 120px; overflow: auto; }
+.calc-tape-row { display: flex; gap: 6px; }
+.calc-tape-res { color: var(--calc-text); font-weight: 600; }

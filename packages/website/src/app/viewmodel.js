@@ -15,6 +15,7 @@ import { DOCS_SECTIONS } from '../content/docs.js';
 import { PACKAGES } from '../content/packages.js';
 import { exampleSchemas } from '../content/schemas.js';
 import { md } from '../boundaries/markdown.js';
+import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { callout } from '../lib/nodes.js';
 import { formatMs, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
@@ -25,6 +26,7 @@ const NAV = [
   { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
   { page: 'docs', label: 'Docs', href: '#/docs' },
   { page: 'examples', label: 'Examples', href: '#/examples' },
+  { page: 'calculator', label: 'Calculator', href: '#/calculator' },
 ];
 
 const PG_ENGINES = [
@@ -65,6 +67,7 @@ export function viewModel(state) {
   if (page === 'playground') ui.pg = playgroundPage(state);
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
   if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
+  if (page === 'calculator') ui.calculator = contributeCalcViewModel(state);
 
   // The README dialog is a global overlay (any page can open it): it
   // only materializes when open, so the shell's $apply renders nothing

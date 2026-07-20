@@ -23,6 +23,7 @@ import { runValidation } from '../boundaries/validator.js';
 import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
 import { registerWebMcpTools } from '../boundaries/webmcp.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
+import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
 /**
  * @typedef {Object} SiteEnv
@@ -61,6 +62,15 @@ export function createSiteApp(env) {
   const requested = new Set();
   /** @type {any} */
   let app = null;
+
+  // the @jarenjs/calc live-rates layer: the impure half (fetch); the pure
+  // conversion stays in @jarenjs/core/convert. The static fallback keeps
+  // the converter working offline and in tests (no network).
+  const rates = createRatesLayer({
+    provider: 'coingecko',
+    refreshMs: 60000,
+    fetch: env.ratesFetch,
+  });
 
   const ideNames = () => Object.keys(store.experiments).sort();
 
@@ -172,12 +182,16 @@ export function createSiteApp(env) {
   /** README text cache, keyed by URL (a reopen is instant). */
   const readmeCache = new Map();
 
+  // fold in the calc sub-app's effects (= evaluation, backspace) and the
+  // live-rates effect, plus the `when`-gated rates-poll subscription.
+  Object.assign(effects, calcEditEffects, rates.effects);
+
   app = createApp({
     $app: '0.1',
     state: createInitialState(env.initialTheme ?? 'light', ideNames()),
     view: STYLESHEET,
     actions: ACTIONS,
-    subs: SUBS,
+    subs: [...SUBS, rates.subEntry],
   }, {
     node: env.node,
     document: env.document,
@@ -187,6 +201,7 @@ export function createSiteApp(env) {
     effects,
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),
+      ...rates.subs,
     },
   });
 

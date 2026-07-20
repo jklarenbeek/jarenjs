@@ -14,6 +14,7 @@ import { PLAYGROUND_RULES } from './playground.js';
 import { STATIC_RULES } from './staticpages.js';
 import { README_RULES } from './readme.js';
 import { UI_RULES } from './ui.js';
+import { calcViewRules } from '@jarenjs/calc/component';
 
 export const STYLESHEET = {
   $jslt: '0.1',
@@ -25,6 +26,7 @@ export const STYLESHEET = {
     benchmarks: { unmatched: 'error' },
     docs: { unmatched: 'error' },
     examples: { unmatched: 'error' },
+    calculator: { unmatched: 'error' },
     readme: { unmatched: 'error' },
     ui: { unmatched: 'error' },
     form: { unmatched: 'error' },
@@ -37,6 +39,7 @@ export const STYLESHEET = {
     ...STATIC_RULES,
     ...README_RULES,
     ...UI_RULES,
+    ...calcViewRules,
     ...createFormView({ root: '$.ui.pg.validate.form' }).map((rule) => ({ ...rule, mode: 'form' })),
   ],
 };

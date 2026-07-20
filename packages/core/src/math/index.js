@@ -3,3 +3,8 @@ export * from './vec2i32.js';
 export * from './float64.js';
 export * from './vec2f64.js';
 export * from './vec3f64.js';
+export * from './word.js';
+export * from './solve.js';
+export * from './mat4.js';
+export * from './project.js';
+export * from './format.js';

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/financial-inputs.schema.json",
+  "title": "Time Value of Money",
+  "type": "object",
+  "properties": {
+    "nper": { "type": "number", "title": "N — number of periods", "minimum": 0 },
+    "rate": { "type": "number", "title": "I/Y — interest % per period" },
+    "pv": { "type": "number", "title": "PV — present value" },
+    "pmt": { "type": "number", "title": "PMT — payment" },
+    "fv": { "type": "number", "title": "FV — future value" },
+    "solveFor": { "title": "Solve for", "enum": ["pmt", "pv", "fv", "nper", "rate"] }
+  },
+  "required": ["solveFor"]
+}

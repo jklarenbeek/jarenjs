@@ -50,6 +50,6 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.13.0"
+    "@jarenjs/core": "^0.14.0"
   }
 }

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-calc-state.schema.json",
+  "title": "Jaren calc state slice",
+  "description": "The plain-JSON $.calc state slice (design decision D4). Draft-neutral.",
+  "type": "object",
+  "properties": {
+    "mode": { "enum": ["standard", "scientific", "programmer", "financial", "converter"] },
+    "entry": { "type": "string" },
+    "ans": { "type": "number" },
+    "memory": { "type": "number" },
+    "angleMode": { "enum": ["rad", "deg", "grad"] },
+    "base": { "enum": ["HEX", "DEC", "OCT", "BIN"] },
+    "wordBits": { "enum": [8, 16, 32, 64] },
+    "signed": { "type": "boolean" },
+    "tape": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "expr": { "type": "string" }, "result": { "type": "string" } }
+      }
+    },
+    "plot": {
+      "type": "object",
+      "properties": {
+        "expr": { "type": "string" },
+        "kind": { "enum": ["2d", "3d"] }
+      }
+    },
+    "fin": { "$ref": "financial-inputs.schema.json" },
+    "conv": {
+      "type": "object",
+      "properties": {
+        "dimension": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "value": { "type": "number" }
+      }
+    },
+    "rates": {
+      "type": "object",
+      "properties": {
+        "base": { "type": "string" },
+        "rates": { "type": "object" },
+        "at": { "type": "number" },
+        "stale": { "type": "boolean" },
+        "status": { "type": "string" }
+      }
+    }
+  },
+  "required": ["mode", "entry"]
+}

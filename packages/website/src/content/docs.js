@@ -180,6 +180,14 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'calculator', title: 'Calculator',
+    blocks: [
+      p('A multi-mode calculator (standard/scientific/programmer/financial/converter) as an @jarenjs/app document, with x·y and x·y·z plots rendered as pure-vnode SVG. Its numeric kernel lives in @jarenjs/core: math (transcendentals, BigInt word math, root finders, a mat4/projection 3D kernel, number formatting), finance (TVM, NPV/IRR, amortization, bonds, indicators) and convert (fixed-factor units + the pure convertCurrency rate-table primitive). The expression engine is a two-stage compiler with a round-trip printer.'),
+      code("import { evaluate, parseExpression, toExpression, plot2d, toSvgString } from '@jarenjs/calc';\nevaluate('sin(pi/2) + 2^10').value;          // 1025\ntoExpression(parseExpression('a-(b-c)'));    // 'a - (b - c)'\ntoSvgString(plot2d('sin(x)', { domain: [-6.28, 6.28] }));"),
+      p('The converter’s currency dimension is the maturity example: live crypto+fiat rates flow through an @jarenjs/app effect and a when-gated poll (CoinGecko/Binance), while the pure conversion stays in @jarenjs/core/convert. A static fallback keeps it working offline.'),
+    ],
+  },
+  {
     id: 'josl', title: 'JOSL & JSONX',
     blocks: [
       p("A strict TOML 1.0 superset with JavaScript's obvious values first-class — null, bigint, regexp, all four datetime flavours — plus a streamable [[]] root array. The parser passes the complete official toml-test suite in strict TOML mode, consumes chunk streams that may split any token, and reports document-order events with pointer-able paths."),

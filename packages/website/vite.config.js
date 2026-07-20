@@ -21,6 +21,7 @@ export default defineConfig({
             '@jarenjs/app',
             '@jarenjs/md',
             '@jarenjs/mermaid',
+            '@jarenjs/calc',
           ],
         },
       },

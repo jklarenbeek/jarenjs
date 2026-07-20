@@ -8,8 +8,12 @@
  */
 
 import { createFormActions } from '@jarenjs/app';
+import { calcActions } from '@jarenjs/calc/component';
 
 export const ACTIONS = {
+  // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
+  ...calcActions,
+
   // hash changed: store the parsed route and fetch what the page needs
   // (the fetch-bench handler dedupes, so repeat visits are free)
   'route/set': {

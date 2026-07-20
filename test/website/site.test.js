@@ -72,7 +72,7 @@ describe('website — the site as one app document', function () {
     const { container } = mountSite();
     const html = serialize(container);
     assert.match(html, /JSON all the way down/);
-    assert.match(html, /One stack, eleven engines/);
+    assert.match(html, /One stack, twelve engines/);
     assert.match(html, /nav-link active/);
   });
 
@@ -84,6 +84,31 @@ describe('website — the site as one app document', function () {
     assert.match(serialize(container), /Playground/);
     go('#/nonsense');
     assert.match(serialize(container), /JSON all the way down/, 'unknown routes fall back home');
+  });
+
+  it('renders the Calculator page: keypad, display, plot, and an offline converter result', function () {
+    const { container, go, app } = mountSite();
+    go('#/calculator');
+    let html = serialize(container);
+    assert.match(html, /calc-modes/);
+    assert.match(html, /calc-display/);
+    assert.match(html, /calc-keypad/);
+    assert.match(html, /<svg/, 'the x·y plot renders inline SVG');
+
+    // typing evaluates through the expression engine
+    app.dispatch('calc/key', { k: '6' });
+    app.dispatch('calc/key', { k: '*' });
+    app.dispatch('calc/key', { k: '7' });
+    app.dispatch('calc/equals');
+    assert.strictEqual(app.getState().calc.ans, 42);
+
+    // mode switch is a patch; the converter shows a result from the
+    // static fallback rate table with NO network
+    app.dispatch('calc/mode', { mode: 'converter' });
+    html = serialize(container);
+    assert.match(html, /calc-converter/);
+    const m = html.match(/calc-conv-result[^>]*><strong>([^<]*)</);
+    assert.ok(m && Number.parseFloat(m[1].replace(/,/g, '')) > 0, 'offline currency conversion result');
   });
 
   it('toggles the theme through the apply-theme effect', function () {

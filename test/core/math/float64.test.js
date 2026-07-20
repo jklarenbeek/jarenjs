@@ -154,7 +154,10 @@ describe('#Float64 primitives', function () {
   });
 
   it('Float64.cosHp', (t) => {
-    assert.throws(() => Float64.cosHp(1), /not implemented/);
+    // now implemented (Part A1): a high-precision polynomial cosine
+    for (const r of [0, 0.5, 1, Math.PI / 2, Math.PI, -1]) {
+      assert.ok(Math.abs(Float64.cosHp(r) - Math.cos(r)) <= 2e-3);
+    }
   });
 
   it('Float64.fib2', (t) => {

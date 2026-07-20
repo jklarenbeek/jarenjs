@@ -12,6 +12,7 @@ const packageFiles = [
   'packages/app/package.json',
   'components/md/package.json',
   'components/mermaid/package.json',
+  'components/calc/package.json',
 ];
 
 // private workspaces that are never versioned but whose semver ranges on

@@ -22,6 +22,7 @@ const ENTRIES = [
   { name: '@jarenjs/app', dir: 'packages/app', blurb: 'Applications as JSON documents: the compiled dispatch loop.' },
   { name: '@jarenjs/md', dir: 'components/md', blurb: 'Markdown + frontmatter as JSON: the engine and this visual component.' },
   { name: '@jarenjs/mermaid', dir: 'components/mermaid', blurb: 'A native, headless Mermaid clone: diagrams-as-code to pure-vnode SVG.' },
+  { name: '@jarenjs/calc', dir: 'components/calc', blurb: 'A multi-mode calculator with x·y/x·y·z plots — apps as JSON on a pure core kernel.' },
   { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset (research).' },
 ];
 

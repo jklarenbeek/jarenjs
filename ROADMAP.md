@@ -139,6 +139,14 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight edges; orthogonal edge routing, subgraph clustering and crossing reduction are the next levers.
 - [ ] **More domain projections** — the flagship `stateDiagram ⇄ @jarenjs/app` workflow ships; flowchart⇄DAG executor, sequence⇄orchestration/saga, ER⇄JSON-Schema+`@jarenjs/forms` are follow-ups on the same geometry-free-AST-as-model idea.
 - [ ] **Interactive hydration** — pan/zoom/tooltips as an optional client-only plugin (`hydrate` is a no-op today because the render is complete).
+- [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
+
+## @jarenjs/calc (calculator + shared numeric kernel)
+
+- [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
+- [ ] **Retrofit `math/format.js`** — the website hand-rolls `formatMs` in `lib/format.js`; the core number formatter (`formatNumber`/`parseNumber`) can replace ad-hoc formatting suite-wide.
+- [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number` (values beyond 2^53 lose precision on read-back); the four-base display already stays exact via `word.js` BigInt. A BigInt-valued evaluation path would close the gap.
+- [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
 
 ## LLM & structured-output profile
 

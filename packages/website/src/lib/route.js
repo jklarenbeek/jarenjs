@@ -5,7 +5,7 @@
  * hash subscription (and tests) share it.
  */
 
-const PAGES = new Set(['home', 'playground', 'benchmarks', 'docs', 'examples']);
+const PAGES = new Set(['home', 'playground', 'benchmarks', 'docs', 'examples', 'calculator']);
 
 /**
  * @param {string} hash - `location.hash` (with or without `#`).

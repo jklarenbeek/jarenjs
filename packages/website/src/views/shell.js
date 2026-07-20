@@ -55,6 +55,7 @@ export const SHELL_RULES = [
         { $apply: ['$.ui.bench', 'benchmarks'] },
         { $apply: ['$.ui.docs', 'docs'] },
         { $apply: ['$.ui.examples', 'examples'] },
+        { $apply: ['$.ui.calculator', 'calculator'] },
       ],
       footer,
       // the package-README overlay: absent (renders nothing) until opened

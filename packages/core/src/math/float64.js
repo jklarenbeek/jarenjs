@@ -9,6 +9,24 @@ export const mathf64_cos = Math.cos;
 export const mathf64_atan2 = Math.atan2;
 export const mathf64_asin = Math.asin;
 
+// Transcendental completeness (Part A1). Free `Math.*` aliases, in the
+// module's existing naming style, so downstream packages bind them by
+// import instead of reaching for the global `Math`.
+export const mathf64_tan = Math.tan;
+export const mathf64_acos = Math.acos;
+export const mathf64_atan = Math.atan;
+export const mathf64_sinh = Math.sinh;
+export const mathf64_cosh = Math.cosh;
+export const mathf64_tanh = Math.tanh;
+export const mathf64_cbrt = Math.cbrt;
+export const mathf64_log = Math.log;
+export const mathf64_log2 = Math.log2;
+export const mathf64_log10 = Math.log10;
+export const mathf64_exp = Math.exp;
+export const mathf64_expm1 = Math.expm1;
+export const mathf64_hypot = Math.hypot;
+export const mathf64_sign = Math.sign;
+
 export const mathf64_ceil = Math.ceil;
 export const mathf64_floor = Math.floor;
 export const mathf64_round = Math.round;
@@ -20,6 +38,11 @@ export const mathf64_random = Math.random;
 export const mathf64_EPSILON = +0.000001;
 
 export const mathf64_SQRTFIVE = +mathf64_sqrt(5);
+
+export const mathf64_E = +Math.E;
+export const mathf64_LN2 = +Math.LN2;
+export const mathf64_LN10 = +Math.LN10;
+export const mathf64_PHI = +((1 + mathf64_sqrt(5)) / 2);
 
 export const mathf64_PI = +Math.PI;
 export const mathf64_PI2 = +(mathf64_PI * 2);
@@ -239,6 +262,8 @@ export class Float64 {
   }
 
   static cosHp(r = 0.0) {
+    // High-precision polynomial cosine (Nick's approximation), now
+    // implemented (Part A1): previously this threw.
     //   template<typename T>
     // inline T cos(T x) noexcept
     // {
@@ -251,7 +276,13 @@ export class Float64 {
     //     #endif
     //     return x;
     // }
-    throw new Error('float64_cosHp is not implemented! r=' + String(r));
+    r = +r;
+    const tp = +(1.0 / +mathf64_PI2);
+    let x = +(+r * tp);
+    x = +(x - +(0.25 + +mathf64_floor(+(x + 0.25))));
+    x = +(x * +(16.0 * +(+mathf64_abs(x) - 0.5)));
+    x = +(x + +(0.225 * x * +(+mathf64_abs(x) - 1.0)));
+    return +x;
   }
 
   static sinMpEx(r = 0.0) {
@@ -313,4 +344,117 @@ export class Float64 {
 
   //#endregion
 
+  //#region transcendental completeness (Part A1)
+
+  /**
+   * The base-e logarithm of `x` in an arbitrary base.
+   * @param {number} base
+   * @param {number} x
+   * @returns {number}
+   */
+  static logBase(base = 0.0, x = 0.0) {
+    return +(+mathf64_log(+x) / +mathf64_log(+base));
+  }
+
+  /**
+   * The sign of `x` (-1, 0 or +1); preserves ±0 and NaN like `Math.sign`.
+   * @param {number} x
+   * @returns {number}
+   */
+  static sign(x = 0.0) {
+    return +mathf64_sign(+x);
+  }
+
+  /**
+   * The Euclidean length of any number of components, overflow-safe.
+   * @param {...number} args
+   * @returns {number}
+   */
+  static hypot(...args) {
+    return +mathf64_hypot(...args);
+  }
+
+  /**
+   * The real `n`-th root of `x` (odd roots of negatives handled).
+   * @param {number} x
+   * @param {number} n
+   * @returns {number}
+   */
+  static nthroot(x = 0.0, n = 0.0) {
+    x = +x; n = +n;
+    if (x < 0.0 && (n % 2.0) !== 0.0) {
+      return +(-mathf64_pow(-x, +(1.0 / n)));
+    }
+    return +mathf64_pow(x, +(1.0 / n));
+  }
+
+  /**
+   * Round `value` to `digits` decimal places (banker-free, half-up).
+   * @param {number} value
+   * @param {number} [digits]
+   * @returns {number}
+   */
+  static roundTo(value = 0.0, digits = 0.0) {
+    value = +value; digits = +digits | 0;
+    if (!isFinite(value)) return +value;
+    const f = +mathf64_pow(10.0, digits);
+    return +(+mathf64_round(+(value * f)) / f);
+  }
+
+  /**
+   * The Lanczos approximation of the Gamma function, valid for the whole
+   * real line (poles at non-positive integers return ±Infinity/NaN).
+   * @param {number} x
+   * @returns {number}
+   */
+  static gamma(x = 0.0) {
+    x = +x;
+    // Reflection for the left half-plane: Γ(x)Γ(1-x) = π / sin(πx).
+    if (x < 0.5) {
+      return +(mathf64_PI / +(mathf64_sin(+(mathf64_PI * x)) * +Float64.gamma(+(1.0 - x))));
+    }
+    x -= 1.0;
+    // g=7, n=9 Lanczos coefficients.
+    const g = 7.0;
+    const c = _LANCZOS_G7;
+    let a = +c[0];
+    const t = +(x + g + 0.5);
+    for (let i = 1; i < c.length; i++) {
+      a += +(c[i] / +(x + i));
+    }
+    return +(+mathf64_sqrt(+(2.0 * mathf64_PI)) * +mathf64_pow(t, +(x + 0.5)) * +mathf64_exp(-t) * a);
+  }
+
+  /**
+   * The factorial `n!`. Integer `n` uses an exact product; non-integers
+   * are lifted to `gamma(n + 1)`. Negative integers return NaN.
+   * @param {number} n
+   * @returns {number}
+   */
+  static factorial(n = 0.0) {
+    n = +n;
+    if (n < 0.0 && mathf64_floor(n) === n) return NaN;
+    if (mathf64_floor(n) === n) {
+      let acc = 1.0;
+      for (let i = 2.0; i <= n; i += 1.0) acc *= i;
+      return +acc;
+    }
+    return +Float64.gamma(+(n + 1.0));
+  }
+
+  //#endregion
+
 }
+
+/** Lanczos g=7 coefficients (shared, allocation-free). */
+const _LANCZOS_G7 = [
+  0.99999999999980993,
+  676.5203681218851,
+  -1259.1392167224028,
+  771.32342877765313,
+  -176.61502916214059,
+  12.507343278686905,
+  -0.13857109526572012,
+  9.9843695780195716e-6,
+  1.5056327351493116e-7,
+];

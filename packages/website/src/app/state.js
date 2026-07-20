@@ -29,6 +29,7 @@ export const DEFAULT_DATA = {
 };
 
 import { initialEngineInputs } from '../boundaries/engines.js';
+import { calcInitialState } from '@jarenjs/calc/component';
 
 /**
  * @param {string} [theme]
@@ -54,6 +55,8 @@ export function createInitialState(theme = 'light', ideNames = []) {
     eng: initialEngineInputs(),  // engine key -> text inputs
     engResults: {},              // engine key -> render nodes
     ide: { name: '', names: ideNames, shared: null },
+    calc: calcInitialState(),    // the @jarenjs/calc sub-app slice
+
     // the package-README dialog: a fetched Markdown source rendered by
     // the @jarenjs/md visual component in a near-fullscreen overlay
     readme: { open: false, title: '', url: null, status: 'idle', source: null, message: null },

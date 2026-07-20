@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-calc-ast.schema.json",
+  "title": "Jaren calc expression AST",
+  "description": "The geometry-free expression AST produced by parseExpression and consumed by compileExpr / toExpression. Draft-neutral (no $ref siblings, no unevaluated*, no $dynamic*).",
+  "$ref": "#/$defs/node",
+  "$defs": {
+    "node": {
+      "oneOf": [
+        { "$ref": "#/$defs/num" },
+        { "$ref": "#/$defs/const" },
+        { "$ref": "#/$defs/var" },
+        { "$ref": "#/$defs/unary" },
+        { "$ref": "#/$defs/postfix" },
+        { "$ref": "#/$defs/binary" },
+        { "$ref": "#/$defs/call" }
+      ]
+    },
+    "num": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "const": "num" },
+        "value": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "const": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "const" },
+        "name": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "var": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "var" },
+        "name": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "unary": {
+      "type": "object",
+      "required": ["type", "op", "arg"],
+      "properties": {
+        "type": { "const": "unary" },
+        "op": { "enum": ["-", "+", "~"] },
+        "arg": { "$ref": "#/$defs/node" }
+      },
+      "additionalProperties": false
+    },
+    "postfix": {
+      "type": "object",
+      "required": ["type", "op", "arg"],
+      "properties": {
+        "type": { "const": "postfix" },
+        "op": { "enum": ["!", "%"] },
+        "arg": { "$ref": "#/$defs/node" }
+      },
+      "additionalProperties": false
+    },
+    "binary": {
+      "type": "object",
+      "required": ["type", "op", "left", "right"],
+      "properties": {
+        "type": { "const": "binary" },
+        "op": { "enum": ["+", "-", "*", "/", "^", "&", "|", "<<", ">>"] },
+        "left": { "$ref": "#/$defs/node" },
+        "right": { "$ref": "#/$defs/node" }
+      },
+      "additionalProperties": false
+    },
+    "call": {
+      "type": "object",
+      "required": ["type", "name", "args"],
+      "properties": {
+        "type": { "const": "call" },
+        "name": { "type": "string" },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
