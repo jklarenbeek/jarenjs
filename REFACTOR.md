@@ -10,6 +10,24 @@ This file is committed and self-contained: it does **not** depend on any other p
 document. (In particular it never relies on `TODO*.md`/`PROGRESS*.md`, which are gitignored —
 see the Documentation & reference rules below.)
 
+## Preflight — start only on a clean working tree (abort otherwise)
+
+**Before touching anything, the git working tree MUST be clean.** Run:
+
+```
+git status --porcelain
+```
+
+If it prints **any** line (modified, staged, or untracked non-ignored files), **abort
+immediately** — do not read code, move anything, or make edits. Tell the user, in a few lines,
+that the refactor was aborted because there are uncommitted changes, list what is dirty, and ask
+them to commit or stash first. Only proceed when the command prints nothing.
+
+Why: a refactor is a "close-in" pass. Starting from a clean commit means the entire refactor is a
+single diff against the previous commit — trivial to review, trivial to revert, and impossible to
+tangle with unrelated in-flight work. (Gitignored scratch files like `TODO*.md`/`PROGRESS*.md`
+do not count — `git status --porcelain` already ignores them.)
+
 ## How to run
 
 - **Whole repo (default):** sweep `packages/*` and `components/*` for redundancy and relocate
@@ -167,6 +185,8 @@ logical parent.
 
 ## Acceptance checklist
 
+- [ ] Started from a **clean working tree** (`git status --porcelain` empty), so the whole
+      refactor is a single reviewable diff against the previous commit.
 - [ ] `npm run lint` clean; `npm test` green across ALL packages, with **no expected-value/fixture
       edits** (import-path updates for moved symbols are fine); `npm run website:build` succeeds;
       `npm run test:tree-shaking` passes.
