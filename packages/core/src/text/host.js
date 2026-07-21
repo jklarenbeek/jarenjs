@@ -1,7 +1,7 @@
 //@ts-check
 import {
   toASCII,
-  toUnicode,
+  decode as punycodeDecode,
 } from './punycode.js';
 
 import {
@@ -41,37 +41,8 @@ export function isValidHostname(str) {
 const CONST_REGEXP_ACEHOSTNAME = /^(?!-)(xn--)?[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\.(?!-)(xn--)?([a-zA-Z0-9-]{1,50}|[a-zA-Z0-9-]{1,30}\.[a-zA-Z]{2,})$/;
 const CONST_REGEXP_ACEHOSTNAME_SINGLE = /^(?!-)(xn--)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
 
-// Check if label is valid ACE (Punycode)
-function isValidACE(label) {
-  if (!label.toLowerCase().startsWith('xn--')) {
-    return false;
-  }
-
-  // Check for valid Punycode format
-  // ACE labels must have at least one character after xn--
-  const punycodePart = label.slice(4);
-  if (punycodePart.length === 0) {
-    return false;
-  }
-
-  // ACE labels must contain only alphanumeric and hyphen
-  if (!/^[a-zA-Z0-9-]+$/.test(punycodePart)) {
-    return false;
-  }
-
-  // Try to decode - if it fails, it's invalid Punycode
-  try {
-    const decoded = toUnicode(label);
-    // If decode succeeds but returns the same string, it's invalid
-    // (e.g., "xn--X" can't be properly decoded)
-    if (decoded === label && punycodePart.length < 2) {
-      return false;
-    }
-    return true;
-  } catch (_e) {
-    return false;
-  }
-}
+// The encoded body of an ACE (xn--) label: alphanumerics and hyphens only
+const CONST_REGEXP_ACE_BODY = /^[a-zA-Z0-9-]+$/;
 
 export function isValidIdnHostname(str) {
   // Empty string check
@@ -140,23 +111,28 @@ export function isValidIdnHostname(str) {
     // For ACE labels, decode first then validate the decoded form
     let decodedLabel = label;
     if (isAce) {
-      // Check for "--" in 3rd and 4th position is always invalid in ACE
-      // (xn-- is at positions 0-3, so check after that)
-      const rest = label.slice(4);
-      if (rest.length < 1) {
+      // ACE labels must have at least one character after xn--
+      if (label.length < 5) {
         return false; // xn-- with nothing after
       }
 
-      // Validate the Punycode is decodable
-      if (!isValidACE(label)) {
+      // The encoded part allows only alphanumerics and hyphens
+      if (!CONST_REGEXP_ACE_BODY.test(label.slice(4))) {
         return false;
       }
 
-      // Decode the label for further validation
-      try {
-        decodedLabel = toUnicode(label);
-      } catch (_e) {
-        return false;
+      // Decode once; the decoded form drives the remaining label rules.
+      // The body is pure LDH (checked above), so decoding the label
+      // directly equals toUnicode's domain-wise mapping without its
+      // split/join passes. Punycode only recognizes an all-lowercase
+      // 'xn--' prefix; other casings keep the label undecoded and the
+      // '--' rule below rejects them.
+      if (label.startsWith('xn--')) {
+        try {
+          decodedLabel = punycodeDecode(label.slice(4).toLowerCase());
+        } catch (_e) {
+          return false;
+        }
       }
     }
 
@@ -181,7 +157,12 @@ export function isValidIdnHostname(str) {
     }
 
     // Get the Unicode code points from the decoded label
-    const codes = Array.from(decodedLabel).map(c => c.codePointAt(0));
+    const codes = [];
+    for (let i = 0; i < decodedLabel.length;) {
+      const code = decodedLabel.codePointAt(i);
+      codes.push(code);
+      i += code > 0xFFFF ? 2 : 1;
+    }
 
     // Check first character doesn't start with combining mark
     if (isCombiningMark(codes[0])) {
@@ -216,13 +197,19 @@ export function isValidIdnHostname(str) {
     }
   }
 
-  // For ASCII-only hostnames, also validate with ACE regex
+  // Also validate the Punycode (ACE) form of the hostname with the ACE
+  // regex. An ASCII-only input (already in ACE form) is its own Punycode:
+  // toASCII would return it unchanged, so skip the conversion.
   let punycode;
-  try {
-    punycode = toASCII(str);
-  } catch (_e) {
-    // If toASCII fails, the input is invalid
-    return false;
+  if (isAsciiOnly) {
+    punycode = str;
+  } else {
+    try {
+      punycode = toASCII(str);
+    } catch (_e) {
+      // If toASCII fails, the input is invalid
+      return false;
+    }
   }
 
   // Single label hostname

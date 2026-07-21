@@ -7,6 +7,8 @@ import {
 
 import {
   getBoolOrObjectClass,
+  hasUnevaluatedPropertiesCoverage,
+  hasUnevaluatedItemsCoverage,
 } from './tools.js';
 
 /**
@@ -21,6 +23,13 @@ import {
 function compileUnevaluatedProperties(schemaObj, jsonSchema) {
   const uneval = getBoolOrObjectClass(jsonSchema.unevaluatedProperties);
   if (uneval == null) return undefined;
+
+  // In skipErrors mode reaching this final-stage check means every sibling
+  // keyword passed; with a sibling additionalProperties every property was
+  // then evaluated (and logged), so the check can never match and the
+  // sibling already produced the annotations any outer check consumes.
+  if (schemaObj.options.skipErrors && hasUnevaluatedPropertiesCoverage(jsonSchema))
+    return undefined;
 
   const root = schemaObj.root;
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedProperties');
@@ -80,6 +89,14 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
 function compileUnevaluatedItems(schemaObj, jsonSchema) {
   const uneval = getBoolOrObjectClass(jsonSchema.unevaluatedItems);
   if (uneval == null) return undefined;
+
+  // In skipErrors mode reaching this final-stage check means every sibling
+  // keyword passed; with sibling coverage (uniform items, or tuple items
+  // plus additionalItems) every item was then evaluated (and logged), so
+  // the check can never match and the covering sibling already produced
+  // the annotations any outer check consumes.
+  if (schemaObj.options.skipErrors && hasUnevaluatedItemsCoverage(jsonSchema))
+    return undefined;
 
   const root = schemaObj.root;
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedItems');

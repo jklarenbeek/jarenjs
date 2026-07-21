@@ -17,12 +17,6 @@ export const CONST_RFC3339_DAYS = Object.freeze(
   [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31],
 );
 
-// full-date from http://tools.ietf.org/html/rfc3339#section-5.6
-export const CONST_RFC3339_REGEX_ISDATE = /^(\d\d\d\d)-([0-1]\d)-([0-3]\d)z?$/i;
-
-// full-date from http://tools.ietf.org/html/rfc3339#section-5.6
-export const CONST_RFC3339_REGEX_ISTIME = /^(\d\d):(\d\d):(\d\d)(\.\d{1,6})?(z|(([+-])(\d\d):(\d\d)))$/i;
-
 //#endregion
 
 //#region Dates Compare
@@ -49,18 +43,51 @@ export function isDateOnlyInRange(year = 0, month = 0, day = 0) {
       : CONST_RFC3339_DAYS[month]);
 }
 
+/**
+ * Reads two ASCII digits at index i as a number, or -1 when either
+ * character is not an ASCII digit (out-of-range indexes read as NaN and
+ * also yield -1).
+ * @param {string} str - The string to read from
+ * @param {number} i - The index of the first digit
+ * @returns {number} The two-digit value, or -1
+ */
+function getTwoDigits(str, i) {
+  const a = str.charCodeAt(i) - 48;
+  const b = str.charCodeAt(i + 1) - 48;
+  return (a >= 0 && a <= 9 && b >= 0 && b <= 9)
+    ? a * 10 + b
+    : -1;
+}
+
+/**
+ * Validates the region [from, to) of str as an RFC 3339 full-date
+ * (YYYY-MM-DD, with an optional trailing z/Z) without allocating.
+ * @param {string} str - The string containing the date
+ * @param {number} from - Start of the region (inclusive)
+ * @param {number} to - End of the region (exclusive)
+ * @returns {boolean} True when the region is a valid full-date
+ */
+function isDateOnlyRegion(str, from, to) {
+  let end = to;
+  const zc = str.charCodeAt(end - 1);
+  if (zc === 122 || zc === 90) end--; // optional trailing z/Z
+  if (end - from !== 10) return false;
+
+  const y1 = getTwoDigits(str, from);
+  const y2 = getTwoDigits(str, from + 2);
+  if (y1 < 0 || y2 < 0) return false;
+  if (str.charCodeAt(from + 4) !== 45) return false; // '-'
+  const m = getTwoDigits(str, from + 5);
+  if (m < 0) return false;
+  if (str.charCodeAt(from + 7) !== 45) return false; // '-'
+  const d = getTwoDigits(str, from + 8);
+  if (d < 0) return false;
+  return isDateOnlyInRange(y1 * 100 + y2, m, d);
+}
+
 export function isDateOnlyRFC3339(str) {
-  if (!isStringType(str))
-    return false;
-
-  const r = str.match(CONST_RFC3339_REGEX_ISDATE);
-  if (r == null)
-    return false;
-
-  const y = parseInt(r[1], 10) | 0;
-  const m = parseInt(r[2], 10) | 0;
-  const d = parseInt(r[3], 10) | 0;
-  return isDateOnlyInRange(y, m, d);
+  return isStringType(str)
+    && isDateOnlyRegion(str, 0, str.length);
 }
 
 export function isTimeOnlyInRange(hrs = 0, min = 0, sec = 0, tzh = 0, tzm = 0, tzSign = 1) {
@@ -101,33 +128,87 @@ export function isTimeOnlyInRange(hrs = 0, min = 0, sec = 0, tzh = 0, tzm = 0, t
     && sec >= 0 && sec <= 59;
 }
 
-export function isTimeOnlyRFC3339(str) {
-  if (!isStringType(str))
-    return false;
+/**
+ * Validates the tail of str starting at index from as an RFC 3339
+ * full-time (HH:MM:SS with an optional 1-6 digit fraction and a required
+ * z/Z or +HH:MM/-HH:MM offset) without allocating.
+ * @param {string} str - The string containing the time
+ * @param {number} from - Start of the time (inclusive; runs to the end)
+ * @returns {boolean} True when the tail is a valid full-time
+ */
+function isTimeOnlyRegion(str, from) {
+  const len = str.length;
+  const h = getTwoDigits(str, from);
+  if (h < 0 || str.charCodeAt(from + 2) !== 58) return false; // ':'
+  const m = getTwoDigits(str, from + 3);
+  if (m < 0 || str.charCodeAt(from + 5) !== 58) return false; // ':'
+  const s = getTwoDigits(str, from + 6);
+  if (s < 0) return false;
 
-  const r = str.match(CONST_RFC3339_REGEX_ISTIME);
-  if (r == null)
-    return false;
+  let i = from + 8;
+  if (str.charCodeAt(i) === 46) { // '.' starts a 1-6 digit fraction
+    const start = ++i;
+    while (i < len) {
+      const c = str.charCodeAt(i);
+      if (c >= 48 && c <= 57) i++;
+      else break;
+    }
+    const digits = i - start;
+    if (digits < 1 || digits > 6) return false;
+  }
 
-  const h = parseInt(r[1], 10) | 0;
-  const m = parseInt(r[2], 10) | 0;
-  const s = parseInt(r[3], 10) | 0;
-  const th = parseInt(r[8], 10) | 0;
-  const tm = parseInt(r[9], 10) | 0;
-  // r[7] is the timezone sign (+ or -)
+  const c = str.charCodeAt(i);
+  if (c === 122 || c === 90) { // z/Z: UTC, must end the string
+    return i + 1 === len
+      && isTimeOnlyInRange(h, m, s, 0, 0, 1);
+  }
+
+  if (c !== 43 && c !== 45) return false; // '+'/'-'
+  if (i + 6 !== len) return false;
+  const th = getTwoDigits(str, i + 1);
+  if (th < 0 || str.charCodeAt(i + 3) !== 58) return false; // ':'
+  const tm = getTwoDigits(str, i + 4);
+  if (tm < 0) return false;
   // + means local time is ahead of UTC, so we subtract to get UTC
   // - means local time is behind UTC, so we add to get UTC
-  const tzSign = r[7] === '-' ? -1 : 1;
-  return isTimeOnlyInRange(h, m, s, th, tm, tzSign);
+  return isTimeOnlyInRange(h, m, s, th, tm, c === 45 ? -1 : 1);
+}
+
+export function isTimeOnlyRFC3339(str) {
+  return isStringType(str)
+    && isTimeOnlyRegion(str, 0);
+}
+
+/**
+ * Whether the character code separates the date and time parts of a
+ * date-time: 't'/'T' or whitespace (the set matched by the \s class).
+ * @param {number} c - The character code
+ * @returns {boolean} True for a date/time separator
+ */
+function isDateTimeSeparator(c) {
+  if (c === 116 || c === 84 || c === 32) return true; // t T space
+  if (c >= 9 && c <= 13) return true; // \t \n \v \f \r
+  return c === 0x00A0 || c === 0x1680
+    || (c >= 0x2000 && c <= 0x200A)
+    || c === 0x2028 || c === 0x2029 || c === 0x202F
+    || c === 0x205F || c === 0x3000 || c === 0xFEFF;
 }
 
 export function isDateTimeRFC3339(str) {
   // http://tools.ietf.org/html/rfc3339#section-5.6
   if (!isStringType(str)) return false;
-  const dateTime = str.split(/t|\s/i);
-  return dateTime.length === 2
-    && isDateOnlyRFC3339(dateTime[0])
-    && isTimeOnlyRFC3339(dateTime[1]);
+  // Exactly one separator splits the full-date from the full-time.
+  const len = str.length;
+  let sep = -1;
+  for (let i = 0; i < len; ++i) {
+    if (isDateTimeSeparator(str.charCodeAt(i))) {
+      if (sep !== -1) return false;
+      sep = i;
+    }
+  }
+  return sep !== -1
+    && isDateOnlyRegion(str, 0, sep)
+    && isTimeOnlyRegion(str, sep + 1);
 }
 
 //#endregion

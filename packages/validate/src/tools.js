@@ -77,6 +77,32 @@ export function hasSchemaDynamicRef(schema) {
     && !isStringWhiteSpace(schema.$dynamicRef);
 }
 
+/**
+ * Whether a sibling keyword of unevaluatedProperties already evaluates every
+ * property of the instance. additionalProperties (boolean or schema) applies
+ * to each property not matched by properties/patternProperties, so once it
+ * has passed no property is left unevaluated.
+ * @param {object} schema - The schema holding the unevaluatedProperties keyword
+ * @returns {boolean} True when the unevaluatedProperties check can never match
+ */
+export function hasUnevaluatedPropertiesCoverage(schema) {
+  return isBoolOrObjectClass(schema.additionalProperties);
+}
+
+/**
+ * Whether a sibling keyword of unevaluatedItems already evaluates every item
+ * of the instance: a uniform items schema (boolean or object) covers all
+ * items beyond any prefixItems, and a tuple-form items with additionalItems
+ * covers the items beyond the tuple.
+ * @param {object} schema - The schema holding the unevaluatedItems keyword
+ * @returns {boolean} True when the unevaluatedItems check can never match
+ */
+export function hasUnevaluatedItemsCoverage(schema) {
+  const items = schema.items;
+  if (isBoolOrObjectClass(items)) return true;
+  return isArrayClass(items) && isBoolOrObjectClass(schema.additionalItems);
+}
+
 export function createIsSchemaTypeHandler(type, isStrict = false) {
   switch (type) {
     case 'null': return isNullValue;

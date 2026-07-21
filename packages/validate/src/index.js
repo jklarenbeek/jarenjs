@@ -21,6 +21,8 @@ import {
 import {
   isBoolOrObjectClass,
   hasSchemaRef,
+  hasUnevaluatedPropertiesCoverage,
+  hasUnevaluatedItemsCoverage,
   EvalLog,
 } from './tools.js';
 import { wrapUnevaluated } from './unevaluated.js';
@@ -335,6 +337,27 @@ export class ValidationRoot {
   ]);
 
   /**
+   * Whether an unevaluatedProperties/unevaluatedItems occurrence can force
+   * runtime annotation tracking. Two shapes never can (in skipErrors mode):
+   * the literal `true` form asserts nothing and only produces annotations,
+   * which matter only when a checking occurrence elsewhere consumes them;
+   * and a check whose sibling keywords already evaluate every property/item
+   * (see hasUnevaluatedPropertiesCoverage/hasUnevaluatedItemsCoverage) is
+   * unreachable, because reaching it means those siblings passed. When no
+   * occurrence forces tracking, the evaluation log has no consumers and
+   * annotation logging is skipped entirely.
+   * @param {object} node - The schema object holding the keyword
+   * @param {string} key - 'unevaluatedProperties' or 'unevaluatedItems'
+   * @returns {boolean} True when this occurrence requires annotation tracking
+   */
+  static #unevaluatedForcesTracking(node, key) {
+    if (node[key] === true) return false;
+    return key === 'unevaluatedProperties'
+      ? !hasUnevaluatedPropertiesCoverage(node)
+      : !hasUnevaluatedItemsCoverage(node);
+  }
+
+  /**
    * Recursively scans a schema (sub)tree for keys that require special
    * runtime support: '$data' references and 'unevaluatedProperties'/
    * 'unevaluatedItems'. Keys inside name->schema maps (properties, $defs,
@@ -378,7 +401,10 @@ export class ValidationRoot {
           // register as keywords of this compilation.
           continue;
         }
-        else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') flags.unevaluated = true;
+        else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') {
+          if (!flags.canElide || ValidationRoot.#unevaluatedForcesTracking(node, key))
+            flags.unevaluated = true;
+        }
         if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
           // The value is a name->schema map: its keys are names, its values schemas.
           ValidationRoot.#scanSchemaFeatures(node[key], seen, flags, false);
@@ -417,7 +443,10 @@ export class ValidationRoot {
     // Detect $data references and unevaluated* keywords once, so fast paths
     // can skip path building / annotation logging when nothing consumes them.
     // Must run before validators are compiled below.
-    const flags = { dollarData: false, unevaluated: false };
+    // Elision of unreachable unevaluated* checks relies on validators
+    // short-circuiting at the first failure, so it only holds in
+    // skipErrors mode (see #unevaluatedForcesTracking).
+    const flags = { dollarData: false, unevaluated: false, canElide: opts.skipErrors === true };
     const seen = new Set();
     for (const value of schemas.values()) {
       ValidationRoot.#scanSchemaFeatures(value, seen, flags);
@@ -601,6 +630,36 @@ export class ValidationRoot {
     // call compiled validator
     // Pass dataRoot as the third argument for data keyword support
     return rootValidator(data, '', data);
+  }
+
+  /**
+   * Returns the fastest repeated-validation entry point for this root.
+   * Error collection and root-level dynamic anchors need the per-call
+   * bookkeeping of validate(); without them the compiled root validator
+   * only needs the annotation log cleared (when tracking is on) and can
+   * otherwise be invoked directly. Dynamic anchors pushed during
+   * validation are balanced by try/finally, so the anchor map needs no
+   * per-call clearing here.
+   * @returns {(data: unknown) => boolean} The validation entry point
+   */
+  createValidateFn() {
+    if (!this.#options.skipErrors || this.#options.collectErrors
+      || this.#rootAnchorName !== null
+      || this.#rootDynamicAnchors.length !== 0) {
+      return (data) => this.validate(data);
+    }
+
+    const rootValidator = this.#rootValidator;
+    if (this.#usesUnevaluated) {
+      const evalLog = this.#evalLog;
+      return function validateRootTracked(data) {
+        evalLog.reset();
+        return rootValidator(data, '', data);
+      };
+    }
+    return function validateRoot(data) {
+      return rootValidator(data, '', data);
+    };
   }
 
   /**
@@ -1375,15 +1434,20 @@ export class JarenValidator {
   static #compileSchemaWithRoot(self, origin, schemas, root) {
     const collectErrors = self.#options.validation?.collectErrors || false;
 
+    if (!collectErrors) {
+      const jarenValidateSchema = root.createValidateFn();
+      Object.defineProperty(jarenValidateSchema, "errors", {
+        get: function () { return root.errors }
+      })
+      return jarenValidateSchema;
+    }
+
     function jarenValidateSchema(data) {
       const valid = root.validate(data);
-      if (collectErrors) {
-        return {
-          valid,
-          errors: valid ? [] : convertInternalErrors(root.errors)
-        };
-      }
-      return valid;
+      return {
+        valid,
+        errors: valid ? [] : convertInternalErrors(root.errors)
+      };
     }
 
     Object.defineProperty(jarenValidateSchema, "errors", {

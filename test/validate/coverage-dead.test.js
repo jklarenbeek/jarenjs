@@ -321,3 +321,74 @@ describe('String length counted as graphemes on the default validator', function
     assert.isFalse(byteValidate(family), 'counting code units the same emoji is too long');
   });
 });
+
+describe('Annotation-only unevaluated* producers under an outer check', function () {
+  // With a consuming unevaluated* check elsewhere in the schema, annotation
+  // tracking stays on and the pure-annotation producers must still run; a
+  // producer whose sibling keywords already evaluate everything is elided
+  // at compile time instead (tools.js coverage helpers).
+
+  it('should let an inner unevaluatedProperties:true feed the outer false check', function () {
+    // unevaluated.js -> validateUnevaluatedPropertiesTrue
+    const validate = new JarenValidator().compile({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: { foo: { type: 'string' } },
+      allOf: [{ unevaluatedProperties: true }],
+      unevaluatedProperties: false,
+    });
+
+    assert.isTrue(validate({ foo: 'a' }), 'declared property');
+    assert.isTrue(validate({ foo: 'a', bar: 1 }), 'inner true evaluates the extra property');
+    assert.isFalse(validate({ foo: 1 }), 'declared property must still be a string');
+  });
+
+  it('should let an inner items:true evaluate every item for the outer check', function () {
+    // array.js -> validateArrayItemsTrue
+    const validate = new JarenValidator().compile({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      allOf: [{ items: true }],
+      unevaluatedItems: false,
+    });
+
+    assert.isTrue(validate([1, 'two', null]), 'inner items:true evaluates every item');
+    assert.isTrue(validate([]), 'empty arrays have nothing unevaluated');
+
+    const control = new JarenValidator().compile({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      allOf: [{ minItems: 0 }],
+      unevaluatedItems: false,
+    });
+    assert.isFalse(control([1]), 'without the items:true producer the outer check fails');
+  });
+});
+
+describe('Non-string required entries stay on the data-keys path', function () {
+  // object.js -> validateRequiredOnly
+  // A non-string entry (an invalid schema) can never match a data key, so
+  // the Object.hasOwn fast path is skipped and the entry always fails.
+  it('should never satisfy a numeric required entry', function () {
+    const validate = new JarenValidator().compile({ required: ['a', 1] });
+
+    assert.isFalse(validate({ a: 1 }), 'the numeric entry never matches');
+    assert.isFalse(validate({ 'a': 1, '1': 2 }), 'a "1" data key does not match the number 1');
+    assert.isTrue(validate('not an object'), 'required only constrains objects');
+  });
+});
+
+describe('The errors property of a collectErrors validator', function () {
+  // index.js -> the errors getter of the collectErrors compile branch
+  it('should expose the internal errors of the last validation', function () {
+    const validate = new JarenValidator(new ValidatorOptions({ collectErrors: true }))
+      .compile({ type: 'number' });
+
+    const bad = validate('nope');
+    assert.isFalse(bad.valid);
+    assert.isTrue(bad.errors.length > 0, 'the result carries converted errors');
+    assert.isTrue(validate.errors.length > 0, 'the validator exposes the raw internal errors');
+
+    const good = validate(42);
+    assert.isTrue(good.valid);
+    assert.isTrue(good.errors.length === 0, 'a valid result has no errors');
+  });
+});

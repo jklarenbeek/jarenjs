@@ -418,6 +418,23 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
   if (!hasMin && !hasMax && hasRequired) {
     const rlength = required.length;
     const addError = schemaObj.createErrorHandler(required, ['required']);
+    // Non-string entries (invalid schemas) can never match a data key;
+    // they stay on the Object.keys path below.
+    if (required.every(key => typeof key === 'string')) {
+      return function validateRequiredHasOwn(data, dataPath, _dataRoot, _dataKeys) {
+        // Required properties only apply to objects, not arrays or other types
+        if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+          return true;
+        }
+        let valid = true;
+        for (let i = 0; i < rlength; ++i) {
+          const key = required[i];
+          if (!Object.hasOwn(data, key))
+            valid &&= addError(key, data, dataPath);
+        }
+        return valid;
+      };
+    }
     return function validateRequiredOnly(data, dataPath, dataRoot, dataKeys) {
       // Required properties only apply to objects, not arrays or other types
       if (typeof data !== 'object' || data === null || Array.isArray(data)) {
@@ -679,9 +696,10 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
   if (isOfSchemaType(jsonSchema, 'map'))
     return undefined;
 
-  // Fast path: properties-only schema in skipErrors mode. Iterate the
-  // (fixed) schema keys with direct property access instead of allocating
-  // Object.keys(data) and doing a map lookup per data key.
+  // Fast path: properties(+required)-only schema in skipErrors mode.
+  // Iterate the (fixed) schema keys with direct property access instead of
+  // allocating Object.keys(data) and doing a map lookup per data key;
+  // required membership is a per-key Object.hasOwn probe.
   if (schemaObj.options.skipErrors
     && jsonSchema.patternProperties == null
     && jsonSchema.additionalProperties == null
@@ -691,11 +709,20 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
     && jsonSchema.dependentRequired == null
     && jsonSchema.minProperties == null
     && jsonSchema.maxProperties == null
-    && jsonSchema.required == null
+    && (jsonSchema.required == null
+      || (isArrayClass(jsonSchema.required)
+        && jsonSchema.required.every(key => typeof key === 'string')))
     && getObjectType(jsonSchema.properties) != null) {
     const propsMap = buildPropertyValidators(schemaObj, jsonSchema);
     if (propsMap == null)
       return undefined;
+
+    // required belongs to the validation vocabulary; assert nothing when
+    // the metaschema disables it.
+    const requiredKeys = schemaObj.options.vocabValidation !== false
+      ? getArrayClassMinItems(jsonSchema.required, 1) || null
+      : null;
+    const requiredCount = requiredKeys === null ? 0 : requiredKeys.length;
 
     const propKeys = Array.from(propsMap.keys());
     const propValidators = Array.from(propsMap.values());
@@ -710,6 +737,10 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
       const extendPaths = root.usesDollarData;
       return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
         if (!isObjectType(data)) return true;
+        for (let i = 0; i < requiredCount; ++i) {
+          if (!Object.hasOwn(data, requiredKeys[i]))
+            return false;
+        }
         for (let i = 0; i < propCount; ++i) {
           const key = propKeys[i];
           // Object.hasOwn: avoid picking up inherited members like toString
@@ -726,6 +757,10 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
 
     return function validateObjectPropertiesOnly(data, dataPath, dataRoot) {
       if (!isObjectType(data)) return true;
+      for (let i = 0; i < requiredCount; ++i) {
+        if (!Object.hasOwn(data, requiredKeys[i]))
+          return false;
+      }
       for (let i = 0; i < propCount; ++i) {
         const key = propKeys[i];
         // Object.hasOwn: avoid picking up inherited members like toString
@@ -746,6 +781,18 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
 
   const validatePrimitives = objectPrimitives || trueThat;
   const validateChildren = objectChildren || trueThat;
+
+  // Without child validators the data keys are only consumed by the
+  // min/max length checks, which compute them on demand; skip the
+  // per-validation Object.keys allocation.
+  if (objectChildren == null) {
+    return function validateObjectPrimitivesSchema(data, dataPath, dataRoot) {
+      if (isObjectType(data)) {
+        return validatePrimitives(data, dataPath, dataRoot, undefined);
+      }
+      return true;
+    };
+  }
 
   return function validateObjectSchema(data, dataPath, dataRoot) {
     if (isObjectType(data)) {

@@ -7,6 +7,9 @@ import {
 
 import {
   isDateType,
+  isDateTimeRFC3339,
+  isDateOnlyRFC3339,
+  isTimeOnlyRFC3339,
   getDateTypeOfDateTimeRFC3339,
   getDateTypeOfDateOnlyRFC3339,
   getDateTypeOfTimeOnlyRFC3339,
@@ -103,6 +106,8 @@ function compileFormatMaximumByType(parseType, schemaObj, jsonSchema) {
  * @param {(value: string) => Date | undefined} parseType - Function to parse string into Date
  * @param {ValidationObject} schemaObj - The validation object for error handling and options
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @param {(value: string) => boolean} [isType] - Boolean tester matching parseType's
+ *   accepted grammar; used on the boundless path so no Date is constructed
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  * @example
  * // Basic format validation
@@ -114,7 +119,7 @@ function compileFormatMaximumByType(parseType, schemaObj, jsonSchema) {
  *   formatMinimum: '2024-01-01T00:00:00Z'
  * })('2024-06-15T12:00:00Z'); // true
  */
-function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
+function compileFormatByType(name, parseType, schemaObj, jsonSchema, isType = undefined) {
   if (jsonSchema.format !== name)
     throw new Error('ERROR: This should not happen!');
 
@@ -181,6 +186,16 @@ function compileFormatByType(name, parseType, schemaObj, jsonSchema) {
     };
   }
 
+  // Without bounds only the format assertion remains; the boolean tester
+  // avoids parsing the string into a Date that would be discarded.
+  if (isType != null) {
+    return function validateDateTimeFormatOnly(data, dataPath) {
+      return isStringType(data)
+        ? isType(data) || addError(data, dataPath)
+        : true;
+    };
+  }
+
   return function validateDateTime(data, dataPath) {
     if (isStringType(data)) {
       const date = parseType(data);
@@ -216,6 +231,7 @@ export function compileDateTimeFormat(schemaObj, jsonSchema) {
     getDateTypeOfDateTimeRFC3339,
     schemaObj,
     jsonSchema,
+    isDateTimeRFC3339,
   );
 }
 
@@ -237,6 +253,7 @@ export function compileDateOnlyFormat(schemaObj, jsonSchema) {
     getDateTypeOfDateOnlyRFC3339,
     schemaObj,
     jsonSchema,
+    isDateOnlyRFC3339,
   );
 }
 
@@ -259,6 +276,7 @@ export function compileTimeOnlyFormat(schemaObj, jsonSchema) {
     getDateTypeOfTimeOnlyRFC3339,
     schemaObj,
     jsonSchema,
+    isTimeOnlyRFC3339,
   );
 }
 

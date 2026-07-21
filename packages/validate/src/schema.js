@@ -515,16 +515,18 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // Fast path: required-only schema (common case: {"required": ["foo", "bar"]})
   if (vocabValidation && keyCount === 1 && jsonSchema.required !== undefined) {
     const required = jsonSchema.required;
-    if (Array.isArray(required) && required.length > 0) {
+    // Non-string entries (invalid schemas) can never match a data key;
+    // they stay on the generic Object.keys path.
+    if (Array.isArray(required) && required.length > 0
+      && required.every(key => typeof key === 'string')) {
       const addError = schemaObj.createErrorHandler(required, ['required']);
       const rlen = required.length;
 
       return function validateRequiredOnly(data, dataPath) {
         // Required only applies to objects, not arrays or primitives
         if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
-        const dataKeys = Object.keys(data);
         for (let i = 0; i < rlen; i++) {
-          if (dataKeys.indexOf(required[i]) === -1) {
+          if (!Object.hasOwn(data, required[i])) {
             return addError(required[i], data, dataPath);
           }
         }
