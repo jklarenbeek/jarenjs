@@ -164,8 +164,14 @@ export const ACTIONS = {
   },
 
   // the Binance live demo: an explicit user gesture opens (or closes)
-  // the market-data socket — nothing connects on page load
-  'binance/toggle': { effects: [{ run: 'binance-toggle' }] },
+  // the market-data socket — nothing connects on page load. Two
+  // surfaces, one controller: the playground charts engine and the
+  // /charts page each toggle their own target.
+  'binance/toggle': { effects: [{ run: 'binance-toggle', with: { target: 'playground' } }] },
+  'charts-live/toggle': { effects: [{ run: 'binance-toggle', with: { target: 'page' } }] },
+  'charts-live/set': {
+    patch: [{ op: 'add', path: '/chartsLive', value: '$payload' }],
+  },
 
   // examples page: load an example into the playground and go there
   'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },

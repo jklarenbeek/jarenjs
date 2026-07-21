@@ -21,7 +21,7 @@ import { viewModel } from './viewmodel.js';
 import { STYLESHEET } from '../views/index.js';
 import { runValidation } from '../boundaries/validator.js';
 import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
-import { binanceToggle } from '../boundaries/binance.js';
+import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
 import { registerWebMcpTools } from '../boundaries/webmcp.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
@@ -89,7 +89,8 @@ export function createSiteApp(env) {
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
     'binance-toggle': (props, dispatch) =>
-      binanceToggle((action, payload) => dispatch(action, payload)),
+      binanceToggle((action, payload) => dispatch(action, payload),
+        props.target === 'page' ? 'page' : 'playground'),
     'parse-data': (props, dispatch) => {
       try {
         dispatch('pg/data-set', JSON.parse(props.text));
@@ -296,6 +297,7 @@ function wireBoundaries(app, debounceMs) {
         runEng(engine);
       }
       syncAll();
+      binancePageSync(s.route.page === 'charts');
       applyShareToken(s);
     }
   });

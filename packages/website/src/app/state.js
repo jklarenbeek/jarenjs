@@ -54,6 +54,7 @@ export function createInitialState(theme = 'light', ideNames = []) {
     },
     eng: initialEngineInputs(),  // engine key -> text inputs
     engResults: {},              // engine key -> render nodes
+    chartsLive: null,            // /charts page live-feed render nodes
     ide: { name: '', names: ideNames, shared: null },
     calc: calcInitialState(),    // the @jarenjs/calc sub-app slice
 

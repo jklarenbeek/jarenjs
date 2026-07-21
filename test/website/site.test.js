@@ -411,3 +411,47 @@ describe('website — the Binance live toggle wiring', function () {
     }
   });
 });
+
+describe('website — the /charts page', function () {
+  it('renders the nav entry, five demo charts and the live invitation', async function () {
+    const { container } = mountSite({ hash: '#/charts' });
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /Charts/);
+    assert.match(html, /<h1>Charts<\/h1>/);
+    const svgCount = (html.match(/chart-svg/g) ?? []).length;
+    assert.ok(svgCount >= 5, `all five demo types render (${svgCount} svgs)`);
+    assert.match(html, /chart-candlestick-chart/);
+    assert.match(html, /Go live — stream from Binance/);
+    assert.match(html, /sends your IP address to Binance/, 'opt-in stays explicit');
+  });
+
+  it('goes live on the page target and closes the socket on navigation', async function () {
+    const sockets = [];
+    class StubWebSocket {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        sockets.push(this);
+      }
+
+      close() { this.closed = true; }
+    }
+    globalThis.WebSocket = /** @type {any} */ (StubWebSocket);
+    try {
+      const { app, container, go } = mountSite({ hash: '#/charts' });
+      await tick();
+      app.dispatch('charts-live/toggle');
+      await tick();
+      assert.strictEqual(sockets.length, 1, 'the page toggle opened the socket');
+      const html = serialize(container);
+      assert.match(html, /Binance feed/, 'live status card renders on the page');
+      go('#/');
+      await tick();
+      assert.strictEqual(sockets[0].closed, true, 'leaving /charts closed the socket');
+    }
+    finally {
+      delete globalThis.WebSocket;
+    }
+  });
+});

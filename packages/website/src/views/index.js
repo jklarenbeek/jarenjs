@@ -10,6 +10,7 @@ import { createFormView } from '@jarenjs/app';
 import { SHELL_RULES } from './shell.js';
 import { HOME_RULES } from './home.js';
 import { BENCH_RULES } from './benchmarks.js';
+import { CHARTSPAGE_RULES } from './chartspage.js';
 import { PLAYGROUND_RULES } from './playground.js';
 import { STATIC_RULES } from './staticpages.js';
 import { README_RULES } from './readme.js';
@@ -24,6 +25,7 @@ export const STYLESHEET = {
     home: { unmatched: 'error' },
     playground: { unmatched: 'error' },
     benchmarks: { unmatched: 'error' },
+    charts: { unmatched: 'error' },
     docs: { unmatched: 'error' },
     examples: { unmatched: 'error' },
     calculator: { unmatched: 'error' },
@@ -35,6 +37,7 @@ export const STYLESHEET = {
     ...SHELL_RULES,
     ...HOME_RULES,
     ...BENCH_RULES,
+    ...CHARTSPAGE_RULES,
     ...PLAYGROUND_RULES,
     ...STATIC_RULES,
     ...README_RULES,

@@ -152,18 +152,37 @@ export function binanceNodes(feed, status, note) {
   return nodes;
 }
 
-/** The opt-in invitation (nothing has connected yet). */
-export function binanceInvitation() {
+/**
+ * The opt-in invitation (nothing has connected yet). The toggle action
+ * differs per surface: the playground engine and the /charts page each
+ * own a target (see TARGETS below).
+ * @param {'playground'|'page'} [target]
+ */
+export function binanceInvitation(target = 'playground') {
   return [
     callout('Live market data — opt in',
       'This demo connects your browser to Binance (data-stream.binance.vision) and streams real ticker + kline messages through the strict-JSON streaming reader. Connecting sends your IP address to Binance; some regions block these endpoints — if so, the page stays fully usable.'),
-    more('binance/toggle', 'Go live — stream from Binance'),
+    more(TARGETS[target].action, 'Go live — stream from Binance'),
   ];
 }
 
 //#region connection controller (browser-native WebSocket + fetch)
 
-/** @type {{ws: any, feed: any, dispatch: any, raf: boolean, closed: boolean, retried: boolean}|null} */
+/** Where a session's render nodes go: the playground charts engine's
+ * results, or the /charts page's live slot. One socket exists at a
+ * time regardless of surface. */
+const TARGETS = {
+  playground: {
+    action: 'binance/toggle',
+    sink: (dispatch, nodes) => dispatch('eng/result', { engine: 'charts', result: nodes }),
+  },
+  page: {
+    action: 'charts-live/toggle',
+    sink: (dispatch, nodes) => dispatch('charts-live/set', nodes),
+  },
+};
+
+/** @type {{ws: any, feed: any, dispatch: any, target: 'playground'|'page', raf: boolean, closed: boolean, retried: boolean}|null} */
 let session = null;
 
 const scheduleFrame = (cb) =>
@@ -176,10 +195,7 @@ export function binanceLiveActive() {
 
 function paint(status, note) {
   if (session === null) return;
-  session.dispatch('eng/result', {
-    engine: 'charts',
-    result: binanceNodes(session.feed, status, note),
-  });
+  TARGETS[session.target].sink(session.dispatch, binanceNodes(session.feed, status, note));
 }
 
 function requestPaint() {
@@ -193,32 +209,46 @@ function requestPaint() {
 }
 
 /**
- * Start/stop from the "Go live" button (`binance/toggle`).
+ * Start/stop from a "Go live" button.
  * @param {(action: string, payload: any) => void} dispatch
+ * @param {'playground'|'page'} [target]
  */
-export function binanceToggle(dispatch) {
+export function binanceToggle(dispatch, target = 'playground') {
   if (session !== null) {
     const feed = session.feed;
+    const sessionTarget = session.target;
     stopBinance();
-    dispatch('eng/result', {
-      engine: 'charts',
-      result: [...binanceNodes(feed, 'closed', 'stopped by you'), ...binanceInvitation()],
-    });
+    TARGETS[sessionTarget].sink(dispatch, [
+      ...binanceNodes(feed, 'closed', 'stopped by you'),
+      ...binanceInvitation(sessionTarget),
+    ]);
     return;
   }
-  startBinance(dispatch);
+  startBinance(dispatch, target);
 }
 
 /**
- * Engine lifecycle hook: closes the socket whenever the charts
- * playground is left or the stream select moves off 'live'. Never
- * starts a connection — only the explicit toggle does.
+ * Engine lifecycle hook: closes a playground-target socket whenever
+ * the charts playground is left or the stream select moves off
+ * 'live'. Never starts a connection — only the explicit toggle does.
  * @param {any} inputs
  * @param {(action: string, payload: any) => void} dispatch
  * @param {boolean} isActive
  */
 export function binanceSync(inputs, dispatch, isActive) {
-  if (session !== null && (!isActive || inputs.stream !== 'live')) {
+  if (session !== null && session.target === 'playground'
+    && (!isActive || inputs.stream !== 'live')) {
+    stopBinance();
+  }
+}
+
+/**
+ * Route hook for the /charts page: closes a page-target socket when
+ * the page is left.
+ * @param {boolean} isActive
+ */
+export function binancePageSync(isActive) {
+  if (session !== null && session.target === 'page' && !isActive) {
     stopBinance();
   }
 }
@@ -236,17 +266,15 @@ export function stopBinance() {
   }
 }
 
-function startBinance(dispatch) {
+function startBinance(dispatch, target) {
   const WS = globalThis.WebSocket;
   if (typeof WS !== 'function') {
-    dispatch('eng/result', {
-      engine: 'charts',
-      result: [error({ message: 'WebSocket is not available in this environment.' }, 'Cannot connect')],
-    });
+    TARGETS[target].sink(dispatch,
+      [error({ message: 'WebSocket is not available in this environment.' }, 'Cannot connect')]);
     return;
   }
   const feed = createBinanceFeed();
-  session = { ws: null, feed, dispatch, raf: false, closed: false, retried: false };
+  session = { ws: null, feed, dispatch, target, raf: false, closed: false, retried: false };
   paint('connecting', 'opening the WebSocket…');
 
   // REST seed so the candlestick starts populated; response BODY text
@@ -288,15 +316,13 @@ function connect(feed) {
       return;
     }
     const dispatch = session.dispatch;
+    const sessionTarget = session.target;
     stopBinance();
-    dispatch('eng/result', {
-      engine: 'charts',
-      result: [
-        ...binanceNodes(feed, 'closed', 'connection lost (already retried once)'),
-        callout('Feed closed', 'The Binance connection closed twice — it may be geo-blocked or offline from here. The rest of the page is unaffected; press Go live to try again.'),
-        more('binance/toggle', 'Go live — stream from Binance'),
-      ],
-    });
+    TARGETS[sessionTarget].sink(dispatch, [
+      ...binanceNodes(feed, 'closed', 'connection lost (already retried once)'),
+      callout('Feed closed', 'The Binance connection closed twice — it may be geo-blocked or offline from here. The rest of the page is unaffected; press Go live to try again.'),
+      more(TARGETS[sessionTarget].action, 'Go live — stream from Binance'),
+    ]);
   };
 }
 

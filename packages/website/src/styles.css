@@ -361,6 +361,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
 }
 .chart-card svg { display: block; margin: 0 auto; }
+.charts-live, .charts-demos { margin-top: var(--space-10); }
+.charts-live h2, .charts-demos h2 { margin-bottom: var(--space-2); }
 
 /* search + show-more */
 .search-input {

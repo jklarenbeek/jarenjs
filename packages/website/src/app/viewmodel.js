@@ -15,6 +15,8 @@ import { DOCS_SECTIONS } from '../content/docs.js';
 import { PACKAGES } from '../content/packages.js';
 import { exampleSchemas } from '../content/schemas.js';
 import { md } from '../boundaries/markdown.js';
+import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
+import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { callout } from '../lib/nodes.js';
 import { formatMs, memo1 } from '../lib/format.js';
@@ -24,6 +26,7 @@ const NAV = [
   { page: 'home', label: 'Home', href: '#/' },
   { page: 'playground', label: 'Playground', href: '#/playground' },
   { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
+  { page: 'charts', label: 'Charts', href: '#/charts' },
   { page: 'docs', label: 'Docs', href: '#/docs' },
   { page: 'examples', label: 'Examples', href: '#/examples' },
   { page: 'calculator', label: 'Calculator', href: '#/calculator' },
@@ -64,6 +67,7 @@ export function viewModel(state) {
 
   if (page === 'home') ui.home = HOME_CONTENT;
   if (page === 'benchmarks') ui.bench = benchPage(state);
+  if (page === 'charts') ui.chartsPage = chartsPage(state);
   if (page === 'playground') ui.pg = playgroundPage(state);
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
   if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
@@ -98,6 +102,12 @@ const benchNodes = memo1((suite, data, status, benchUi, state) =>
   deriveSuite(state, suite));
 
 const composeBench = memo1((suites, nodes) => ({ suites, nodes }));
+
+const chartsPage = (state) => composeChartsPage(state.chartsLive);
+const composeChartsPage = memo1((live) => ({
+  live: live ?? binanceInvitation('page'),
+  demos: [...chartsPageDemos(), chartsPageStreamingCallout()],
+}));
 
 function benchPage(state) {
   const suite = state.route.params.suite ?? 'overview';
