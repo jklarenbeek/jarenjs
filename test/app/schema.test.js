@@ -114,4 +114,25 @@ describe('the jaren-vnode schema', function () {
     assert.strictEqual(validate(['div', { weird: { nested: 'object' } }]), false,
       'non-special props must be scalars');
   });
+
+  it('publishes the widget shape for constrained decoders', function () {
+    const widgetNode = ['jaren-widget', {
+      name: 'virtual-grid', props: { rows: [1, 2] }, tag: 'div',
+      key: 'grid', class: 'grid-host', on: { click: 'pick' },
+    }];
+    const validate = new JarenValidator().compile(vnodeSchema);
+    assert.strictEqual(validate(widgetNode), true,
+      'a widget node is a valid vnode (and stays a valid plain element — backward compatible)');
+
+    const widget = new JarenValidator().addSchema(vnodeSchema)
+      .compile({ $ref: 'https://jarenjs.dev/schemas/jaren-vnode/0.1#/$defs/widget' });
+    assert.strictEqual(widget(widgetNode), true);
+    assert.strictEqual(widget(['jaren-widget', { name: 'grid' }]), true,
+      'props alone is enough');
+    assert.strictEqual(widget(['jaren-widget', {}]), false, 'name is required');
+    assert.strictEqual(widget(['jaren-widget', { name: '' }]), false, 'name is non-empty');
+    assert.strictEqual(widget(['jaren-widget', { name: 'grid' }, ['div', {}]]), false,
+      'a widget node has no vnode children');
+    assert.strictEqual(widget(['div', { name: 'grid' }]), false, 'the tag is reserved');
+  });
 });

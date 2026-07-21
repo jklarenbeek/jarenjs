@@ -62,6 +62,33 @@ Text and attribute values are escaped, void elements render without end tags, `k
 
 `h(tag, props, ...children)` builds the same JSON a stylesheet would, for hand-written views and tests. The shape helpers (`isTextNode`, `isElementNode`, `propsOf`, `keyOf`, `childrenOf`, `isSameNode`) are exported for anyone building another renderer over the format.
 
+### Widgets — the imperative escape hatch
+
+Some islands are irreducibly imperative: a virtualized grid, a canvas, a map, a third-party control. The reserved tag `jaren-widget` mounts a **registered widget** into a host element the patcher owns but never descends into ([VIEW-FORMAT §7](docs/VIEW-FORMAT.md)):
+
+```json
+["jaren-widget", {
+  "name": "virtual-list", "key": "list", "class": "viewport",
+  "props": { "rows": "$.rows", "rowHeight": 28 }
+}]
+```
+
+```javascript
+const render = createDomRenderer(container, {
+  onEvent: (binding, event) => dispatch(binding, event),
+  widgets: {
+    'virtual-list': {
+      mount(host, props, emit) { /* build DOM, measure, listen */ return state; },
+      update(handle, props, prevProps) { /* re-window the visible rows */ },
+      unmount(handle) { /* timers, listeners and observers die here */ },
+      ssr: (props) => ['ul', { class: 'list' }],   // declarative fallback
+    },
+  },
+});
+```
+
+`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
+
 ### Shared SVG helpers — `@jarenjs/view/helpers`
 
 The `./helpers` subpath is the single home for the small SVG-vnode builder kernel that the suite's SVG-emitting components (`@jarenjs/calc`, `@jarenjs/mermaid`) share, so no component re-implements them:

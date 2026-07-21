@@ -9,6 +9,7 @@
       "anyOf": [
         { "type": ["string", "number", "boolean", "null"] },
         { "$ref": "#/$defs/element" },
+        { "$ref": "#/$defs/widget" },
         { "$ref": "#/$defs/list" }
       ]
     },
@@ -35,6 +36,58 @@
       "items": { "$ref": "#/$defs/vnode" },
       "description": "A child list, spliced into the parent's children in place. Distinguished from an element by its first item not being a string."
     },
+    "widget": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "const": "jaren-widget",
+          "description": "The reserved widget tag."
+        },
+        { "$ref": "#/$defs/widgetProps" }
+      ],
+      "description": "A widget vnode: [\"jaren-widget\", props] mounts a registered JavaScript widget into a host element the renderer owns. A widget node has NO vnode children — the widget owns the host's subtree. Every widget node also validates as a plain element (backward compatible); this shape exists so constrained decoders can target it. See docs/VIEW-FORMAT.md section 7."
+    },
+    "widgetProps": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The registered widget name."
+        },
+        "props": {
+          "description": "The widget's JSON props, any JSON value; compared by reference across renders."
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The host element's tag; default div (producers inside an svg subtree pick an SVG container like g)."
+        },
+        "key": {
+          "type": ["string", "number"],
+          "description": "Reconciliation identity among siblings; never rendered."
+        },
+        "on": {
+          "type": "object",
+          "additionalProperties": {
+            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name or { action, with, event }."
+          },
+          "description": "Event bindings on the HOST element, by DOM event type."
+        },
+        "style": {
+          "type": ["string", "object"],
+          "description": "A CSS declaration string, or an object of declarations (camelCase keys become kebab-case)."
+        }
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "null"],
+        "description": "Any other prop applies to the HOST element exactly as on any element vnode."
+      },
+      "description": "The props object of a widget vnode: name/props/tag configure the widget; everything else is a host-element prop."
+    },
     "props": {
       "type": "object",
       "properties": {
@@ -45,7 +98,7 @@
         "on": {
           "type": "object",
           "additionalProperties": {
-            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name or { action, with }."
+            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name or { action, with, event }."
           },
           "description": "Event bindings by DOM event type."
         },

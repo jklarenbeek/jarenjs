@@ -59,7 +59,8 @@ A vnode is classified by shape, in this order:
 3. **Element** — an array whose first item is a string: `[tag,
    props?, ...children]`. The tag MUST be a non-empty string. If the
    second item is a plain object (not an array, not `null`) it is the
-   **props**; otherwise it is the first child.
+   **props**; otherwise it is the first child. The tag
+   `"jaren-widget"` is reserved: it marks a widget node (§7).
 4. **List** — any other array. Its items are spliced into the parent's
    children **in place**, recursively. A list at the root of a document
    is a producer error in 0.1 (renderers MAY reject it): the root MUST
@@ -178,7 +179,127 @@ Hydration in 0.1 is a client-side first render into the same container
 (empty and rebuild). Adopting existing server-rendered DOM is a
 roadmap item, not part of this contract.
 
-## 7. Open items (roadmap, non-normative)
+## 7. Widgets
+
+The escape hatch for irreducibly imperative islands — virtualized
+grids, canvas, maps, third-party controls — mirroring the effect
+registry of APP-FORMAT: JavaScript enters only at named, registered
+boundaries. The format's side of the contract stays data; the
+imperative side is a **registered widget**. The environment owns state
+and orchestration; the widget owns its DOM.
+
+### 7.1 The widget vnode
+
+A widget node is an element vnode with the **reserved tag
+`"jaren-widget"`**:
+
+```json
+["jaren-widget", {
+  "name": "virtual-grid",
+  "props": { "rows": "$.visibleRows", "rowHeight": 28 },
+  "tag": "div",
+  "key": "grid",
+  "class": "grid-host"
+}]
+```
+
+- **`name`** (REQUIRED) — the registered widget name, a non-empty
+  string. An unregistered name is a configuration/producer error; the
+  reference renderer throws.
+- **`props`** (OPTIONAL) — the widget's JSON props, any JSON value;
+  `null` when absent. Compared **by reference** across renders — the
+  widget-level reading of §5.1's sharing contract: with the JSLT `memo`
+  option, unchanged state yields reference-equal props, so an untouched
+  widget is never poked.
+- **`tag`** (OPTIONAL) — the host element's tag, default `"div"`
+  (producers inside an `svg` subtree pick an SVG container like `"g"`).
+- Every other prop (`key`, `class`, `style`, `on`, `id`, ...) applies
+  to the **host element** exactly as on any element vnode (§3, §4).
+- A widget node MUST NOT have vnode children — the widget owns the
+  host's subtree and a patching renderer never descends into it.
+  Children present is a producer error; the reference renderer throws.
+
+**Why this tag** (non-normative, load-bearing): `$widget` is impossible
+— in query/JSLT rule bodies a string leaf starting with `$` is a path
+expression (QUERY-FORMAT §3.2, `JQ0004`), so every view stylesheet
+would need `$$widget` escapes. `jaren-widget` is a valid custom-element
+name, so a renderer that predates this section degrades to an inert,
+harmless element; and the dash makes collision with real HTML tags
+impossible.
+
+### 7.2 The widget definition
+
+A widget is registered JavaScript with this shape:
+
+```js
+{
+  mount(host, props, emit),        // REQUIRED → returns a handle
+  update(handle, props, prevProps),// OPTIONAL
+  unmount(handle),                 // OPTIONAL cleanup
+  ssr(props),                      // OPTIONAL → a vnode for serialization
+}
+```
+
+- **`mount`** MUST be called with the host element **after** it is
+  connected to the rendered tree (grids measure layout at mount). It
+  returns an opaque handle threaded to `update`/`unmount`.
+- **`update`** is called when the vnode's `props` **reference**
+  changed. When `update` is absent and props changed, the renderer
+  MUST fall back to `unmount` + a fresh `mount` into the same host.
+- **`unmount`** MUST be called exactly once when the widget leaves the
+  tree — including when an *ancestor* subtree is removed or replaced.
+  This is where timers, listeners and observers die.
+- **`emit(binding, nativeEvent?)`** — the function `mount` receives. It
+  delivers `(binding, event)` **verbatim** to the environment's event
+  hook, the identical contract to §4. A widget never invents its own
+  action vocabulary: bindings arrive in its `props` (authored by the
+  view stylesheet), and a widget that must attach runtime data (the
+  clicked row id, the visible range) composes the binding it was given
+  with that data — in `@jarenjs/app` terms, merges it into `with`. The
+  single point of binding interpretation stays the layer above.
+
+### 7.3 Registration and reconciliation
+
+Widgets are registered on the renderer:
+`createDomRenderer(container, { onEvent, widgets, document })`, with
+`widgets` a `Record<string, WidgetDef>`; `renderToString` takes an
+OPTIONAL `{ widgets }` (§7.4). Reconciliation semantics a patching
+renderer MUST honor:
+
+- **Create** — the host element is created from `tag`, the host props
+  are applied (`name`/`props`/`tag` configure the widget and never
+  reach the DOM; `on` wires exactly as in §4), and the mount is
+  deferred: mounts run **after the patch completes**, in document
+  order, when every host is connected. A mount MAY dispatch through
+  `emit` synchronously; environments batch as usual.
+- **Patch in place** — two widget vnodes with equal `key`: a changed
+  `name` or host `tag` is a replace (destroy the old widget, create
+  and mount the new one in a fresh host). Otherwise the host props
+  diff normally, the renderer never touches the host's `childNodes`,
+  and a changed `props` reference reaches the widget through `update`
+  (or the unmount/remount fallback of §7.2). A reference-equal `props`
+  MUST NOT call into the widget at all.
+- **Destroy** — when a subtree containing widgets is removed or
+  replaced, the renderer MUST walk the discarded subtree and call each
+  widget's `unmount(handle)` exactly once, without descending into any
+  widget's host subtree (the widget's own DOM may contain anything). A
+  throwing `unmount` MUST NOT prevent sibling widgets from
+  unmounting: the walk finishes, then the first error surfaces.
+
+Teardown guidance (non-normative): a host that discards the container
+unmounts widgets by rendering a final widget-free frame first. A
+`destroy()` on the renderer is a roadmap item (§8).
+
+### 7.4 Serialization
+
+`renderToString(vnode, { widgets })`: a widget node serializes its
+host element with the host props (widget-local members excluded),
+containing the serialized `ssr(props)` vnode when the widget is
+registered and has `ssr`, else empty content. Serialization stays pure
+— no state, no DOM, no widget is mounted; the client-side first render
+mounts widgets as usual (§6).
+
+## 8. Open items (roadmap, non-normative)
 
 - **Fragment / multi-root documents** — a list at the root.
 - **DOM-adopting hydration** (§6).
@@ -187,8 +308,9 @@ roadmap item, not part of this contract.
   (location, value reference) with compile-time eligibility analysis,
   so unchanged *state* yields reference-equal *vnodes* across frames
   and §5.1 fires for whole branches.
-- **Component escape hatch** — a registered-widget vocabulary for
-  irreducibly imperative islands (canvas, third-party controls),
-  mirroring the effect registry of APP-FORMAT.
+- ~~Component escape hatch~~ — **shipped**: the registered-widget
+  vocabulary of §7.
+- **A renderer `destroy()`** — tear down the rendered tree and unmount
+  every widget without rendering a final empty frame (§7.3).
 - **A `properties`-vs-`attributes` normative table** replacing the
   `name in node` heuristic of §3.

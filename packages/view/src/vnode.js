@@ -32,6 +32,15 @@
 export const EMPTY_PROPS = Object.freeze({});
 
 /**
+ * The reserved widget tag (VIEW-FORMAT §7). A valid custom-element name,
+ * so a renderer that predates the widget vocabulary degrades to an inert,
+ * harmless element — and the dash makes collision with real HTML tags
+ * impossible. (`$widget` is impossible: in query/JSLT rule bodies a
+ * string leaf starting with `$` is a path expression.)
+ */
+export const WIDGET_TAG = 'jaren-widget';
+
+/**
  * A vnode JSON value.
  * @typedef {string | number | boolean | null | undefined | VNodeElement | VNodeJson[]} VNodeJson
  */
@@ -66,6 +75,15 @@ export function isElementNode(vnode) {
  */
 export function isSkippedNode(vnode) {
   return vnode == null || vnode === true || vnode === false;
+}
+
+/**
+ * Is this vnode a widget node (`["jaren-widget", props]`, VIEW-FORMAT §7)?
+ * @param {any} vnode
+ * @returns {vnode is VNodeElement}
+ */
+export function isWidgetNode(vnode) {
+  return Array.isArray(vnode) && vnode[0] === WIDGET_TAG;
 }
 
 /**

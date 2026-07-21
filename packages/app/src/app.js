@@ -33,6 +33,15 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  *   Effect handlers by name.
  * @property {Record<string, (props: any, dispatch: Dispatch) => (() => void) | void>} [subs]
  *   Subscription handlers by name; may return a cleanup function.
+ * @property {Record<string, (nativeEvent: any) => any>} [eventFields]
+ *   Named event-field extractors: when a binding requests a field by
+ *   name, an extractor registered here wins over the built-in
+ *   allow-list. An extractor receives the native event and MUST return
+ *   a JSON value (`$event` stays serializable end to end).
+ * @property {Record<string, any>} [widgets] - Registered widget
+ *   definitions by name for `jaren-widget` vnodes (VIEW-FORMAT §7),
+ *   forwarded to the renderer — the mechanism lives in `@jarenjs/view`;
+ *   the app only names the boundary, like effects and subs.
  * @property {(schema: any, docPath: string) => ((value: any) => boolean)} [compileTypeTest]
  *   Enables JSON Schema operators (`$valid`/`$assert`/`$as`) and schema
  *   matches inside the view and the action documents.
@@ -57,6 +66,9 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  * @param {string} name - The action name.
  * @param {any} [payload] - Bound to `$payload` (`null` when absent).
  * @param {any} [domEvent] - A DOM event to derive `$event` from.
+ * @param {string[] | null} [eventFields] - Extra `$event` field names to
+ *   resolve from the event (the binding's `event` member; headless
+ *   callers get the same capability).
  * @returns {void}
  */
 
@@ -92,6 +104,7 @@ export function createApp(appDoc, options = {}) {
 
   const effectHandlers = options.effects ?? {};
   const subHandlers = options.subs ?? {};
+  const eventExtractors = options.eventFields ?? {};
   const onError = options.onError ?? ((err) => { throw err; });
   const schedule = options.schedule ?? ((flush) => queueMicrotask(flush));
 
@@ -109,11 +122,18 @@ export function createApp(appDoc, options = {}) {
     renderer = createDomRenderer(options.node, {
       document: options.document,
       onEvent: handleBinding,
+      widgets: options.widgets,
     });
   }
 
+  /** JA2009 sink for `eventData`: one report per offending field name. */
+  function reportUnknownField(field) {
+    onError(new AppRuntimeError('JA2009',
+      `a binding requested an unknown event field '${field}'`));
+  }
+
   /** @type {Dispatch} */
-  function dispatch(name, payload = null, domEvent = null) {
+  function dispatch(name, payload = null, domEvent = null, eventFields = null) {
     if (!running) return;
     const action = actions.get(name);
     if (action === undefined) {
@@ -123,7 +143,9 @@ export function createApp(appDoc, options = {}) {
     let transition;
     try {
       transition = action.first(state, {
-        event: domEvent !== null ? eventData(domEvent) : null,
+        event: domEvent !== null
+          ? eventData(domEvent, eventFields, eventExtractors, reportUnknownField)
+          : null,
         payload,
       });
     }
@@ -138,7 +160,7 @@ export function createApp(appDoc, options = {}) {
 
   /**
    * An `on` binding fired by the renderer: an action name, or
-   * `{ "action": name, "with": payload }`.
+   * `{ "action": name, "with"?: payload, "event"?: [fieldName, ...] }`.
    * @param {any} binding
    * @param {any} event
    */
@@ -147,8 +169,9 @@ export function createApp(appDoc, options = {}) {
       dispatch(binding, null, event);
     }
     else if (binding !== null && typeof binding === 'object'
-      && typeof binding.action === 'string') {
-      dispatch(binding.action, binding.with ?? null, event);
+      && typeof binding.action === 'string'
+      && (binding.event === undefined || isFieldNameArray(binding.event))) {
+      dispatch(binding.action, binding.with ?? null, event, binding.event ?? null);
     }
     else {
       onError(new AppRuntimeError('JA2001',
@@ -331,16 +354,86 @@ export function createApp(appDoc, options = {}) {
 }
 
 /**
- * The serializable slice of a DOM event bound to `$event`.
+ * Is this value a binding's `event` member: an array of field names?
+ * @param {any} value
+ * @returns {value is string[]}
+ */
+function isFieldNameArray(value) {
+  if (!Array.isArray(value)) return false;
+  for (const name of value) {
+    if (typeof name !== 'string') return false;
+  }
+  return true;
+}
+
+/**
+ * The built-in `$event` field allow-list (APP-FORMAT §3.1): field name →
+ * where it is read from. Every entry is a JSON primitive by construction;
+ * host-object-valued fields (`target`, `files`, touch lists) are
+ * deliberately absent — `$event` must survive `JSON.stringify`, the same
+ * invariant as state. Null prototype so lookups never walk to
+ * `Object.prototype`.
+ */
+const EVENT_FIELD_SOURCES = Object.freeze(Object.assign(Object.create(null), {
+  shiftKey: 'event', ctrlKey: 'event', altKey: 'event', metaKey: 'event',
+  button: 'event', buttons: 'event',
+  clientX: 'event', clientY: 'event', offsetX: 'event', offsetY: 'event',
+  pageX: 'event', pageY: 'event', screenX: 'event', screenY: 'event',
+  movementX: 'event', movementY: 'event',
+  deltaX: 'event', deltaY: 'event', deltaMode: 'event',
+  code: 'event', repeat: 'event', location: 'event', isComposing: 'event',
+  detail: 'event',
+  pointerId: 'event', pointerType: 'event', pressure: 'event', isPrimary: 'event',
+  selectionStart: 'target', selectionEnd: 'target',
+}));
+
+/**
+ * Resolve one requested `$event` field, in precedence order: a registered
+ * host extractor, the built-in allow-list, else `null` + a JA2009 report
+ * (a typo in one field must not swallow the dispatch). `undefined`
+ * coerces to `null` so the result stays JSON.
  * @param {any} event
+ * @param {string} name
+ * @param {Record<string, (nativeEvent: any) => any>} extractors
+ * @param {(field: string) => void} report
+ * @returns {any}
+ */
+function resolveEventField(event, name, extractors, report) {
+  if (Object.hasOwn(extractors, name)) {
+    const value = extractors[name](event);
+    return value === undefined ? null : value;
+  }
+  const source = EVENT_FIELD_SOURCES[name];
+  if (source !== undefined) {
+    const value = source === 'target' ? event?.target?.[name] : event?.[name];
+    return value === undefined ? null : value;
+  }
+  report(name);
+  return null;
+}
+
+/**
+ * The serializable slice of a DOM event bound to `$event`: the default
+ * `{ type, value, checked, key }` plus one member per requested field
+ * name (APP-FORMAT §3.1).
+ * @param {any} event
+ * @param {string[] | null} fields - Requested field names, or `null`.
+ * @param {Record<string, (nativeEvent: any) => any>} extractors
+ * @param {(field: string) => void} report - The JA2009 sink.
  * @returns {{ type: string, value: any, checked: any, key: any }}
  */
-function eventData(event) {
+function eventData(event, fields, extractors, report) {
   const target = event?.target;
-  return {
+  const data = {
     type: event?.type ?? '',
     value: target?.value ?? null,
     checked: target?.checked ?? null,
     key: event?.key ?? null,
   };
+  if (fields !== null) {
+    for (const name of fields) {
+      data[name] = resolveEventField(event, name, extractors, report);
+    }
+  }
+  return data;
 }

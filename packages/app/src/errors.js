@@ -45,6 +45,8 @@ export class AppCompileError extends Error {
  *  - `JA2006` — a transition named an effect with no registered handler
  *  - `JA2007` — an effect handler threw (see `cause`)
  *  - `JA2008` — a subscription entry names no registered handler
+ *  - `JA2009` — a binding requested an unknown event field (the member
+ *    is bound `null`; the dispatch itself is NOT dropped)
  */
 export class AppRuntimeError extends Error {
   /**

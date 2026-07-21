@@ -16,15 +16,16 @@ vnode output vocabulary and renderer behavior).
 
 ```
 event → binding (§4) → action document (§3) → transition (§3.2)
-      → invariant check (§6) → next state → subscriptions refresh (§5.2)
+      → invariant check (§6) → next state → subscriptions refresh (§5.3)
       → batched re-render (view stylesheet → vnodes → keyed DOM patch)
 ```
 
 Everything the loop executes is compiled once, when the app document is
 loaded. JavaScript participates only at **named, registered
-boundaries**: effect handlers, subscription handlers, the
-`compileTypeTest` hook and the `validateState` hook. Between the
-boundaries, everything is data.
+boundaries**: effect handlers, subscription handlers, event-field
+extractors (§5.4), registered widgets (§5.5), the `compileTypeTest`
+hook and the `validateState` hook. Between the boundaries, everything
+is data.
 
 ### 1.2 Conformance and normative language
 
@@ -70,13 +71,44 @@ An action is a Jaren JSON Query document evaluated with:
 
 - **`$`** — the current state (the whole document; cross-cutting
   transitions are the point, exactly as in `x-form` rules);
-- **`$event`** — when the dispatch originated from a DOM event, the
-  serializable slice `{ "type", "value", "checked", "key" }` of it;
-  otherwise `null`;
+- **`$event`** — when the dispatch originated from a DOM event, a
+  serializable slice of it (below); otherwise `null`;
 - **`$payload`** — the dispatch payload (§4); `null` when absent.
 
 These three names are the whole ambient vocabulary. The runtime takes
 the query's **first** result (`query.first` semantics).
+
+For a DOM dispatch, `$event` is the default slice
+`{ "type", "value", "checked", "key" }` **plus** one member per field
+name the binding requested (§4's `event` member). Each requested name
+is resolved in precedence order:
+
+1. a host extractor registered under that name
+   (`options.eventFields`, §5.4) — the host wins, so a host can also
+   *override* a built-in;
+2. the built-in allow-list below;
+3. neither — the member is bound `null` and `JA2009` is reported,
+   **without dropping the dispatch**: a typo in one field name MUST NOT
+   swallow the user's event (contrast §4's `JA2001`, where the whole
+   binding is unusable).
+
+The built-in allow-list — every entry is a JSON primitive by
+construction, `undefined` coerced to `null`:
+
+- read from the event: `shiftKey`, `ctrlKey`, `altKey`, `metaKey`,
+  `button`, `buttons`, `clientX`, `clientY`, `offsetX`, `offsetY`,
+  `pageX`, `pageY`, `screenX`, `screenY`, `movementX`, `movementY`,
+  `deltaX`, `deltaY`, `deltaMode`, `code`, `repeat`, `location`,
+  `isComposing`, `detail`, `pointerId`, `pointerType`, `pressure`,
+  `isPrimary`;
+- read from `event.target`: `selectionStart`, `selectionEnd`.
+
+`target` itself, `files`, touch lists, and every other
+host-object-valued field are deliberately excluded: host objects never
+enter `$event` — it MUST survive `JSON.stringify`, the same invariant
+as state. When a host needs data only such an object can provide (file
+selections, say), it registers an extractor that maps the object to a
+JSON value at the boundary (§5.4).
 
 ### 3.2 The transition object
 
@@ -119,16 +151,34 @@ A vnode `on` binding (opaque to the view layer) is interpreted by this
 format as either:
 
 - a **string** — an action name; `$payload` is `null`; or
-- an object **`{ "action": name, "with": payload }`** — `$payload` is
-  the `with` value, verbatim.
+- an object **`{ "action": name, "with"?: payload, "event"?:
+  [fieldName, ...] }`** — `$payload` is the `with` value, verbatim,
+  and `event`, when present, MUST be an array of strings naming the
+  extra `$event` fields to resolve (§3.1). The string binding form has
+  no extraction — it cannot carry the member.
 
 Payloads are built at *render* time by the view stylesheet: a rule
 body may embed `"$path"`, the matched value, or anything in scope
 inside the binding. Combined with §3's `$event`, this replaces both of
-hyperapp's payload-creator forms with data.
+hyperapp's payload-creator forms with data. Extraction requests are
+render-time data the same way: a JSLT rule builds them, so they are
+serializable, schema-checkable and replayable.
 
-Anything else dispatched as a binding is a producer error (`JA2001` at
-runtime).
+```json
+["tr", { "on": { "click": {
+  "action": "selectRow",
+  "with": { "id": "$.id" },
+  "event": ["shiftKey", "ctrlKey", "metaKey"]
+} } }, "…"]
+```
+
+The action then branches on `$event.shiftKey` to extend a selection
+range instead of replacing it.
+
+Anything else dispatched as a binding — including an object whose
+`event` member is present but not an array of strings — is a producer
+error (`JA2001` at runtime): the binding is unusable and the dispatch
+is dropped.
 
 ## 5. The boundaries
 
@@ -140,7 +190,10 @@ resolves `name` in the registered effect handlers
 Effects are fire-and-forget from the loop's perspective; asynchronous
 completion re-enters through `dispatch`. An unregistered name is
 `JA2006`; a throwing handler is `JA2007`; neither aborts the loop or
-the remaining effects.
+the remaining effects. For asynchronous work, the shipped task
+convention — request identity, stale-response rejection, cancellation,
+and the `createTaskEffect` helper — is documented in
+[TASKS.md](TASKS.md).
 
 ### 5.2 The derivation boundary
 
@@ -169,6 +222,55 @@ broken `when` fails **closed** — the subscription stops and the error
 is reported — because a broken rule must never keep side effects
 alive. An unregistered `run` name is `JA2008`, reported each time the
 entry would start.
+
+### 5.4 Event-field extractors
+
+`options.eventFields` (OPTIONAL) is a `Record<string, (nativeEvent:
+any) => any>` of named JavaScript extractors — the same philosophy as
+effects and subscriptions: JavaScript enters only at named, registered
+boundaries. When a binding requests a field (§4), an extractor
+registered under that name takes precedence over the built-in
+allow-list (§3.1). The extractor receives the native event and MUST
+return a JSON value; `undefined` is coerced to `null`. An extractor
+that throws surfaces as the dispatching action's `JA2002`.
+
+This is the escape hatch for everything the allow-list deliberately
+cannot serialize. The worked example: a `"fileTokens"` extractor that
+stows `event.target.files` in a host-side registry and returns opaque
+string tokens, so a form can dispatch a file selection without a
+`File` object ever entering `$event` or the state:
+
+```javascript
+const fileRegistry = new Map();
+createApp(doc, {
+  node,
+  eventFields: {
+    fileTokens: (event) =>
+      Array.from(event.target?.files ?? [], (file, i) => {
+        const token = `file:${fileRegistry.size + i}`;
+        fileRegistry.set(token, file);
+        return token;
+      }),
+  },
+});
+```
+
+A binding `{ "action": "pickFiles", "event": ["fileTokens"] }` then
+binds `$event.fileTokens` to `["file:0", ...]` — JSON all the way —
+and an upload effect later redeems the tokens at the boundary.
+
+### 5.5 Widgets
+
+`options.widgets` (OPTIONAL) is a `Record<string, WidgetDef>` of
+registered widget definitions for `jaren-widget` vnodes — JavaScript
+enters only at named, registered boundaries, the same sentence shape
+as effects and subs. The mechanism lives entirely in `@jarenjs/view`
+(the vocabulary, lifecycle and reconciliation semantics are
+VIEW-FORMAT §7); `createApp` only forwards the registry to the
+renderer it creates — the dependency arrow stays one-way. A widget's
+`emit` delivers ordinary §4 bindings, so widget events dispatch
+through the same `handleBinding` path as any DOM event — including
+§4's `event` extraction member.
 
 ## 6. Invariants
 
@@ -224,6 +326,7 @@ defaults to rethrowing):
 | `JA2006` | unregistered effect name |
 | `JA2007` | an effect handler threw |
 | `JA2008` | unregistered subscription name |
+| `JA2009` | a binding requested an unknown event field (the member is bound `null`; the dispatch is NOT dropped) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —
@@ -249,5 +352,10 @@ feedback shape a repair loop needs.
 - ~~Unifying the write path~~ — **shipped**: `@jarenjs/json/write`
   `parents: 'create'` + undefined-deletes is now exactly forms'
   `setValueAtPointer`, on the shared copy-on-write kernel.
-- **Async action documents** — a disposition for actions that await an
-  effect before transitioning (today: effect → dispatch).
+- **Async action documents** — the effect→dispatch convention for
+  asynchronous work is now documented and helper-backed
+  ([TASKS.md](TASKS.md): task-slot identity, stale-response rejection,
+  `createTaskEffect`); what remains open is a first-class *awaiting
+  disposition* — an action that suspends on an effect's settlement and
+  transitions with its result, instead of completing through a second
+  dispatched action.

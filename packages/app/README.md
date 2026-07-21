@@ -44,7 +44,7 @@ The view is a JSLT stylesheet: rules match state by location (JSONPath) and shap
 
 ## Actions and transitions
 
-An action document is evaluated with `$` bound to the current state, `$event` bound to serializable event data (`{ type, value, checked, key }`) and `$payload` bound to the binding's `with` value. It returns a **transition**:
+An action document is evaluated with `$` bound to the current state, `$event` bound to serializable event data (`{ type, value, checked, key }`) and `$payload` bound to the binding's `with` value. A binding can request more of the event declaratively — `{ "action": "selectRow", "with": { "id": "$.id" }, "event": ["shiftKey", "ctrlKey"] }` adds those members to `$event` from a closed allow-list of serializable fields (modifier keys, pointer coordinates, selection offsets, ...), and the `eventFields` option registers named JS extractors for anything the allow-list can't serialize (APP-FORMAT §3.1/§5.4). It returns a **transition**:
 
 ```json
 { "state":   "the next state, whole — optional",
@@ -75,6 +75,46 @@ createApp(doc, {
 ```
 
 Subscription entries in the document carry a `when` query; after every state change the loop starts and stops handlers to match (`{ "run": "interval", "with": { "ms": 1000, "tick": "tick" }, "when": "$.running" }`). A broken `when` fails **closed** — a broken rule must never keep side effects alive — and is reported through `onError`.
+
+## Async tasks
+
+Async work follows a documented convention — **correctness lives in state, cancellation lives in the host** — with one shipped helper packaging the host half:
+
+```javascript
+import { createTaskEffect } from '@jarenjs/app';
+
+// state:  "tasks": { "list": { "id": 0, "status": "idle", "error": null } }
+// start:  patch increments /tasks/list/id AND the effect's with.id
+//         carries the same increment expression (evaluated pre-transition!)
+// finish: the completion action guards { "$eq": ["$payload.id", "$.tasks.list.id"] }
+//         and yields the empty sequence for anything stale
+effects: {
+  http: createTaskEffect((props, signal) =>
+    fetch(props.url, { signal }).then((r) => r.json())),
+}
+```
+
+The helper aborts a slot's in-flight predecessor, dispatches `done` with `{ id, result }` on resolve and `fail ?? done` with `{ id, error }` (a string) on failure, and dispatches nothing for an abort. The abort is only an optimization — an aborted request may already have resolved — so the state-side id guard is the guarantee: out-of-order and polling responses are rejected by construction. The full convention, with a runnable worked example the test suite executes verbatim, is [docs/TASKS.md](docs/TASKS.md).
+
+## Widgets — imperative islands, declarative everything else
+
+An irreducibly imperative island — a virtualized grid, a canvas, a map — lives behind a **registered widget** ([VIEW-FORMAT §7](../view/docs/VIEW-FORMAT.md)); the app document stays JSON and the app option only names the boundary, like `effects` and `subs`:
+
+```javascript
+createApp({
+  state: { grid: { rows: hugeArray, scrollTop: 0 }, selected: null },
+  view: [
+    { "match": "$", "body": ["main", {}, { "$apply": "$.grid" }] },
+    { "match": "$.grid", "body":
+      ["jaren-widget", { "name": "virtual-list", "key": "list", "props": {
+        "rows": "$.rows", "scrollTop": "$.scrollTop",
+        "binding": { "action": "select", "with": {} } } }] },
+  ],
+  actions: { select: { patch: [{ op: 'add', path: '/selected', value: '$payload.id' }] } },
+}, { node, widgets: { 'virtual-list': virtualListWidget } });
+```
+
+Jaren owns state and orchestration; the widget owns its DOM. Its `props` come from the view stylesheet and are compared **by reference** — the JSLT memo means a transition that doesn't touch the widget's state slice never calls into the widget at all. The widget dispatches by composing runtime data into the binding its props carry and handing it to `emit`, which flows through the ordinary binding path — `with` payloads and `event` extraction included — and it is unmounted deterministically when it leaves the tree.
 
 ## Invariants the model can't cheat
 
@@ -134,7 +174,7 @@ renderToString(createApp(doc).getVnode());
 
 `createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), stop() }`
 
-Options: `node`, `document`, `effects`, `subs`, `compileTypeTest`, `validateState`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §8.
+Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §8.
 
 ## Development
 

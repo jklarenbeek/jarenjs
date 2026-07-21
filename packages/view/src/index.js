@@ -6,11 +6,13 @@
 
 export {
   EMPTY_PROPS,
+  WIDGET_TAG,
   h,
   isTextNode,
   isElementNode,
   isSkippedNode,
   isSameNode,
+  isWidgetNode,
   propsOf,
   keyOf,
   childrenOf,
