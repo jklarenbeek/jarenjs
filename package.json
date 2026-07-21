@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.14.5",
+  "version": "0.15.0",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
@@ -23,12 +23,13 @@
     "./components/md",
     "./components/mermaid",
     "./components/calc",
+    "./components/charts",
     "./packages/josl",
     "./packages/website",
     "./benchmark"
   ],
   "scripts": {
-    "clean": "rimraf ./dist ./packages/core/dist ./packages/json/dist ./packages/validate/dist ./packages/formats/dist ./packages/refs/dist ./packages/forms/dist ./packages/locales/dist ./packages/view/dist ./packages/app/dist ./components/md/dist ./components/mermaid/dist ./components/calc/dist",
+    "clean": "rimraf ./dist ./packages/core/dist ./packages/json/dist ./packages/validate/dist ./packages/formats/dist ./packages/refs/dist ./packages/forms/dist ./packages/locales/dist ./packages/view/dist ./packages/app/dist ./packages/josl/dist ./components/md/dist ./components/mermaid/dist ./components/calc/dist ./components/charts/dist",
     "lint": "eslint packages components test",
     "test": "node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\"",
     "test:core": "node --no-warnings=ExperimentalWarning --test \"test/core/**/*.test.js\"",
@@ -51,8 +52,8 @@
     "build": "npm run build --workspaces --if-present",
     "build:jaren": "node esbuild.config.js",
     "release:check": "npm run clean && npm run lint && npm test && npm run build && npm run test:types && npm run test:tree-shaking && npm run pack:check",
-    "pack:check": "npm pack --dry-run --workspace=@jarenjs/core --workspace=@jarenjs/json --workspace=@jarenjs/validate --workspace=@jarenjs/formats --workspace=@jarenjs/refs --workspace=@jarenjs/forms --workspace=@jarenjs/locales --workspace=@jarenjs/view --workspace=@jarenjs/app --workspace=@jarenjs/md --workspace=@jarenjs/mermaid --workspace=@jarenjs/calc",
-    "publish": "npm run release:check && npm publish --workspace=@jarenjs/core --workspace=@jarenjs/json --workspace=@jarenjs/validate --workspace=@jarenjs/formats --workspace=@jarenjs/refs --workspace=@jarenjs/forms --workspace=@jarenjs/locales --workspace=@jarenjs/view --workspace=@jarenjs/app --workspace=@jarenjs/md --workspace=@jarenjs/mermaid --workspace=@jarenjs/calc",
+    "pack:check": "npm pack --dry-run --workspace=@jarenjs/core --workspace=@jarenjs/json --workspace=@jarenjs/validate --workspace=@jarenjs/formats --workspace=@jarenjs/refs --workspace=@jarenjs/forms --workspace=@jarenjs/locales --workspace=@jarenjs/view --workspace=@jarenjs/app --workspace=@jarenjs/md --workspace=@jarenjs/mermaid --workspace=@jarenjs/calc --workspace=@jarenjs/charts --workspace=@jarenjs/josl",
+    "publish": "npm run release:check && npm publish --workspace=@jarenjs/core --workspace=@jarenjs/json --workspace=@jarenjs/validate --workspace=@jarenjs/formats --workspace=@jarenjs/refs --workspace=@jarenjs/forms --workspace=@jarenjs/locales --workspace=@jarenjs/view --workspace=@jarenjs/app --workspace=@jarenjs/md --workspace=@jarenjs/mermaid --workspace=@jarenjs/calc --workspace=@jarenjs/charts --workspace=@jarenjs/josl",
     "version:patch": "node ./scripts/version-packages.js patch",
     "version:minor": "node ./scripts/version-packages.js minor",
     "version:major": "node ./scripts/version-packages.js major",
@@ -62,6 +63,8 @@
     "benchmark": "node ./benchmark/index.js",
     "benchmark:jsonpath": "node ./benchmark/jsonpath.js",
     "benchmark:toml": "node ./benchmark/toml.js",
+    "benchmark:jsonx-stream": "node ./benchmark/jsonx-stream.js",
+    "benchmark:charts": "node ./benchmark/charts.js",
     "benchmark:jsonpath:profile": "node ./benchmark/jsonpath.js --profile --scale",
     "benchmark:jsonpointer": "node ./benchmark/jsonpointer.js",
     "benchmark:jsonpatch": "node ./benchmark/jsonpatch.js",
@@ -116,15 +119,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.14.5",
-    "@jarenjs/json": "^0.14.5",
-    "@jarenjs/validate": "^0.14.5",
-    "@jarenjs/formats": "^0.14.5",
-    "@jarenjs/refs": "^0.14.5",
-    "@jarenjs/forms": "^0.14.5",
-    "@jarenjs/view": "^0.14.5",
-    "@jarenjs/app": "^0.14.5",
-    "@jarenjs/md": "^0.14.5"
+    "@jarenjs/core": "^0.15.0",
+    "@jarenjs/json": "^0.15.0",
+    "@jarenjs/validate": "^0.15.0",
+    "@jarenjs/formats": "^0.15.0",
+    "@jarenjs/refs": "^0.15.0",
+    "@jarenjs/forms": "^0.15.0",
+    "@jarenjs/view": "^0.15.0",
+    "@jarenjs/app": "^0.15.0",
+    "@jarenjs/md": "^0.15.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

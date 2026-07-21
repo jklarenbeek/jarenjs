@@ -50,11 +50,11 @@ export function error(err, fallbackTitle) {
 /** A collapsible section of further nodes. */
 export const details = (summary, items) => ({ kind: 'details', summary, items });
 
-/** A horizontal bar list; value in [0, 1], tone 'win' | 'loss' | null. */
-export const bars = (title, items, note) => ({
-  kind: 'bars', title, note: note ?? null,
-  items: items.map((i) => ({ kind: 'bar', tone: null, ...i })),
-});
+/** An SVG chart card: `vnode` is @jarenjs/charts' projection (charts
+ * carry their own internal title; `title` adds a card heading only when
+ * the SVG has none). */
+export const chart = (title, vnode, note) =>
+  ({ kind: 'chart', title: title ?? null, vnode, note: note ?? null });
 
 /** A rendered Markdown preview: `vnode` is @jarenjs/md's projection. */
 export const markdown = (title, vnode) =>

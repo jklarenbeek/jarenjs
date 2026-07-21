@@ -1,0 +1,76 @@
+{
+  "name": "@jarenjs/charts",
+  "private": false,
+  "version": "0.15.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./component": {
+      "types": "./dist/types/component/index.d.ts",
+      "default": "./src/component/index.js"
+    },
+    "./stream-adapter": {
+      "types": "./dist/types/core/stream-adapter.d.ts",
+      "default": "./src/core/stream-adapter.js"
+    },
+    "./transforms/mermaid-adapter": {
+      "types": "./dist/types/transforms/mermaid-adapter.d.ts",
+      "default": "./src/transforms/mermaid-adapter.js"
+    },
+    "./transforms/benchmark-adapter": {
+      "types": "./dist/types/transforms/benchmark-adapter.d.ts",
+      "default": "./src/transforms/benchmark-adapter.js"
+    },
+    "./styles/charts.css": "./styles/charts.css",
+    "./schemas/*": "./schemas/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/types/",
+    "src/",
+    "schemas/",
+    "styles/"
+  ],
+  "description": "Headless charts for the jaren suite: chart definitions compiled to a geometry-free AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able, structurally shared, themeable via host-linked tokens",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "components/charts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "jaren",
+    "charts",
+    "svg",
+    "pie",
+    "bar",
+    "line",
+    "scatter",
+    "headless",
+    "streaming",
+    "vnode"
+  ],
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  },
+  "dependencies": {
+    "@jarenjs/core": "^0.15.0",
+    "@jarenjs/view": "^0.15.0"
+  }
+}

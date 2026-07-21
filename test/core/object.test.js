@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
-import { equalsDeep, equalsJson, mergeMap, mergeSet } from '@jarenjs/core/object';
+import { equalsDeep, equalsJson, mergeMap, mergeSet, stableStringify } from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
 
@@ -327,5 +327,28 @@ describe('mergeSet', () => {
     mergeSet(target, source);
     
     assert.isTrue(target.size === 2);
+  });
+});
+
+describe('stableStringify', () => {
+  it('emits sorted keys at every depth', () => {
+    assert.isTrue(
+      stableStringify({ b: 1, a: { d: 2, c: [3, { f: 4, e: 5 }] } })
+      === '{"a":{"c":[3,{"e":5,"f":4}],"d":2},"b":1}');
+  });
+
+  it('is insertion-order independent', () => {
+    assert.isTrue(
+      stableStringify({ x: 1, y: [true, null] })
+      === stableStringify({ y: [true, null], x: 1 }));
+  });
+
+  it('follows JSON.stringify for undefined and primitives', () => {
+    assert.isTrue(stableStringify(undefined) === undefined);
+    assert.isTrue(stableStringify({ u: undefined }) === '{}');
+    assert.isTrue(stableStringify([undefined]) === '[null]');
+    assert.isTrue(stableStringify('x') === '"x"');
+    assert.isTrue(stableStringify(1.5) === '1.5');
+    assert.isTrue(stableStringify(null) === 'null');
   });
 });

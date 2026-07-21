@@ -84,23 +84,13 @@ export const UI_RULES = [
     ],
   },
   {
-    match: "$..[?@.kind == 'bars']", mode: 'ui',
-    body: ['div', { class: 'bars-card' },
-      ['h3', {}, '$.title'],
-      [{ $apply: '$.items[*]' }],
+    // The chart card embeds a ready-made SVG vnode from
+    // @jarenjs/charts — the value splices in verbatim, no dispatch.
+    match: "$..[?@.kind == 'chart']", mode: 'ui',
+    body: ['div', { class: 'chart-card' },
+      { $if: ['$.title', ['h3', {}, '$.title']] },
+      '$.vnode',
       { $if: ['$.note', ['p', { class: 'table-note' }, '$.note']] },
-    ],
-  },
-  {
-    match: "$..[?@.kind == 'bar']", mode: 'ui',
-    body: ['div', { class: 'bar-row' },
-      ['span', { class: 'bar-label' }, '$.label'],
-      ['div', { class: 'bar-track' },
-        ['div', {
-          class: { $if: [{ $eq: ['$.tone', 'loss'] }, 'bar-fill loss', 'bar-fill'] },
-          style: '$.style',
-        }]],
-      ['span', { class: 'bar-text' }, '$.text'],
     ],
   },
   {

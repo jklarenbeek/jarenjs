@@ -35,6 +35,8 @@ import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
 import { toMarkdown } from '@jarenjs/md';
 import { md as MD } from './markdown.js';
 import { mermaid as MERMAID } from './mermaid.js';
+import { runCharts, chartsSync } from './charts.js';
+import { binanceSync } from './binance.js';
 import stateToWorkflow from '@jarenjs/mermaid/stylesheets/state-to-workflow.jslt.json' with { type: 'json' };
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
@@ -42,7 +44,7 @@ import { cards, table, code, error, callout, details, markdown } from '../lib/no
 import {
   pathExamples, pointerExamples, patchExamples, queryExamples,
   jsltExamples, jtltExamples, xqueryExamples, joslExamples,
-  markdownExamples, mermaidExamples,
+  markdownExamples, mermaidExamples, chartsExamples,
 } from '../content/engineExamples.js';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -482,6 +484,23 @@ export const ENGINE_DEFS = {
     ],
     run: runJosl,
   },
+  charts: {
+    label: 'Charts',
+    lead: 'Headless SVG charts from a JSON / JSONX / JOSL definition: validated by JSON Schema, parsed through the incremental streaming readers, rendered as pure vnodes — flip stream to replay and watch the chart build as chunks arrive.',
+    inputs: [
+      { key: 'format', title: 'Format', control: 'select', options: ['json', 'jsonx', 'josl'] },
+      { key: 'stream', title: 'Stream', control: 'select', options: ['off', 'replay', 'live'] },
+      { key: 'source', title: 'Chart definition', control: 'code', rows: 16, when: { key: 'stream', value: ['off', 'replay'] } },
+    ],
+    run: runCharts,
+    // wireBoundaries calls `sync` after each run and on route changes;
+    // the hooks own the side channels (replay timer, Binance socket)
+    // outside the pure runner and stop them when the engine is left
+    sync: (inputs, dispatch, active) => {
+      chartsSync(inputs, dispatch, active);
+      binanceSync(inputs, dispatch, active);
+    },
+  },
 };
 
 /** Run one engine's boundary; never throws. */
@@ -545,6 +564,10 @@ export const ENGINE_EXAMPLES = {
   mermaid: mermaidExamples.map((e) => ({
     label: e.name,
     inputs: { source: e.source },
+  })),
+  charts: chartsExamples.map((e) => ({
+    label: e.name,
+    inputs: { format: e.format, stream: e.stream, source: e.source },
   })),
 };
 

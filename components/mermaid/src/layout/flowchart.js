@@ -8,7 +8,7 @@
  */
 
 import { Float64 } from '@jarenjs/core/math';
-import { measureText } from './metrics.js';
+import { measureText } from '@jarenjs/view/helpers';
 
 const FONT_SIZE = 14;
 const PAD_X = 14;

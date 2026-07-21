@@ -8,7 +8,7 @@
  */
 
 import { Float64 } from '@jarenjs/core/math';
-import { textWidth } from './metrics.js';
+import { textWidth } from '@jarenjs/view/helpers';
 
 const FONT_SIZE = 14;
 const ACTOR_H = 34;

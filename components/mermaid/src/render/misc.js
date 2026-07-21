@@ -9,64 +9,30 @@
  * placeholder.
  */
 
-import { svgRoot, rect, path, group, textAt, num } from '@jarenjs/view/helpers';
-import { textWidth } from '../layout/metrics.js';
-
-/** A categorical palette for pie slices — blue-anchored, no pink/purple
- * (the suite-wide palette constraint, DESIGN.md §8). */
-const PIE_COLORS = ['#2563eb', '#f59e0b', '#0d9488', '#dc2626', '#16a34a', '#0369a1', '#ca8a04', '#64748b', '#93c5fd', '#78350f'];
+import { svgRoot, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
+import { buildPieAST, renderPieAST, CATEGORICAL } from '@jarenjs/charts';
+import { mermaidPieToChartAST } from '@jarenjs/charts/transforms/mermaid-adapter';
 
 /**
+ * Pie rendering delegates to `@jarenjs/charts` (the pie engine's single
+ * home); the options carry the mermaid class names, palette and theme
+ * so the SVG is byte-identical to the pre-delegation renderer.
  * @param {any} ast pie AST
  * @param {any} theme
  * @param {string} hash
  * @returns {any}
  */
 export function renderPie(ast, theme, hash) {
-  const t = theme.tokens;
-  const fs = 14;
-  const R = 130;
-  const cx = R + 20;
-  const cy = R + 40;
-  const total = ast.slices.reduce((s, x) => s + x.value, 0) || 1;
-  const slices = [];
-  let angle = -Math.PI / 2;
-  for (let i = 0; i < ast.slices.length; i++) {
-    const frac = ast.slices[i].value / total;
-    const next = angle + frac * Math.PI * 2;
-    const x1 = cx + R * Math.cos(angle);
-    const y1 = cy + R * Math.sin(angle);
-    const x2 = cx + R * Math.cos(next);
-    const y2 = cy + R * Math.sin(next);
-    const large = frac > 0.5 ? 1 : 0;
-    const color = PIE_COLORS[i % PIE_COLORS.length];
-    slices.push(path(
-      `M${num(cx)},${num(cy)} L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} Z`,
-      { fill: color, stroke: '#fff', 'stroke-width': 1, class: 'mm-pie-slice' }));
-    angle = next;
-  }
-
-  // Legend.
-  const legendX = 2 * R + 50;
-  let legendW = 120;
-  const legend = ast.slices.map((s, i) => {
-    const y = 40 + i * 24;
-    const label = `${s.label} (${((s.value / total) * 100).toFixed(1)}%)`;
-    legendW = Math.max(legendW, textWidth(label, fs) + 30);
-    return group({ class: 'mm-pie-legend' }, [
-      rect(legendX, y, 14, 14, { fill: PIE_COLORS[i % PIE_COLORS.length] }),
-      textAt(legendX + 20, y + 12, label, fs, { fill: t.nodeText }),
-    ]);
+  const { config, data } = mermaidPieToChartAST(ast);
+  return renderPieAST(buildPieAST(data, config), theme, hash, {
+    rootClass: 'mermaid mm-svg',
+    keyPrefix: 'mmpie-',
+    sliceClass: 'mm-pie-slice',
+    legendClass: 'mm-pie-legend',
+    palette: CATEGORICAL,
+    textColor: theme.tokens.nodeText,
+    sliceStroke: '#fff',
   });
-
-  const children = [];
-  if (ast.title) {
-    children.push(textAt(cx, 24, ast.title, fs + 2, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }));
-  }
-  children.push(...slices, ...legend);
-  const width = legendX + legendW + 20;
-  const height = 2 * R + 70;
-  return svgRoot('mermaid mm-svg', width, height, theme, children, 'mmpie-' + hash);
 }
 
 /**

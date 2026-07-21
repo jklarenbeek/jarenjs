@@ -5,6 +5,7 @@ import './styles.css';
 import '@jarenjs/md/styles/md.css';
 import '@jarenjs/mermaid/styles/mermaid.css';
 import '@jarenjs/calc/styles/calc.css';
+import '@jarenjs/charts/styles/charts.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { parseHash } from './lib/route.js';
 

@@ -1,5 +1,5 @@
 //#region @jarenjs/josl
-// JOSL - JavaScript Obvious Streaming Language. Experimental.
+// JOSL - JavaScript Obvious Streaming Language.
 //
 // A TOML 1.0 backward-compatible data language with JavaScript's obvious
 // value types as first-class citizens (null, bigint, regexp, datetimes)
@@ -18,6 +18,7 @@ export {
 } from './stringify.js';
 export { createStreamWriter, stringifyJoslChunks } from './write.js';
 export { parseJsonx, stringifyJsonx } from './jsonx.js';
+export { createJsonxStreamReader, parseJsonxStream } from './jsonx-stream.js';
 export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError } from './errors.js';
 export {
   LocalDate,

@@ -120,7 +120,6 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
-  .bar-fill { transition: width 0.3s ease; }
 }
 
 .site { min-height: 100vh; display: flex; flex-direction: column; }
@@ -356,14 +355,12 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .details-card summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--muted); }
 .details-card[open] summary { margin-bottom: 0.4rem; color: var(--fg); }
 
-/* bar charts */
-.bars-card { margin: var(--space-5) 0; }
-.bar-row { display: grid; grid-template-columns: 8.5rem 1fr 3.5rem; gap: var(--space-2); align-items: center; margin: var(--space-1) 0; }
-.bar-label { font-size: 0.8rem; color: var(--muted); text-align: right; }
-.bar-track { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; height: 0.9rem; overflow: hidden; }
-.bar-fill { height: 100%; background: var(--ok); border-radius: 999px; }
-.bar-fill.loss { background: var(--fail); }
-.bar-text { font-size: 0.8rem; font-weight: 600; }
+/* svg chart cards (@jarenjs/charts vnodes) */
+.chart-card {
+  margin: var(--space-5) 0; padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+}
+.chart-card svg { display: block; margin: 0 auto; }
 
 /* search + show-more */
 .search-input {
@@ -518,7 +515,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   }
   .docs-sections .docs-link { flex: none; white-space: nowrap; }
   .docs-readmes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
-  .bar-row { grid-template-columns: 6rem 1fr 3rem; }
+  .chart-card { padding: var(--space-3) var(--space-3); }
   .hero { padding-top: var(--space-8); }
   .btn, .chip, .seg-btn, .tab { min-height: 2.2rem; }
   body { padding-bottom: env(safe-area-inset-bottom); }

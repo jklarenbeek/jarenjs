@@ -40,7 +40,12 @@ import {
   CC_BACKSLASH,
   CC_RBRACKET,
   CC_UNDERSCORE,
+  CC_PLUS,
+  CC_LBRACE,
+  CC_RBRACE,
+  CC_DEL,
   isDigitCode,
+  isAsciiLetterCode,
 } from '@jarenjs/core/scan';
 
 import { JoslSyntaxError } from './errors.js';
@@ -53,21 +58,12 @@ import {
 } from './values.js';
 import { setKey, getOwn, countNewlines, columnOf } from './util.js';
 
-const CC_PLUS = 0x2B;
-const CC_LBRACE = 0x7B;
-const CC_RBRACE = 0x7D;
-const CC_DEL = 0x7F;
-
 function isBareKeyCode(c) {
   return (c >= 0x41 && c <= 0x5A) // A-Z
     || (c >= 0x61 && c <= 0x7A) // a-z
     || isDigitCode(c)
     || c === CC_MINUS
     || c === CC_UNDERSCORE;
-}
-
-function isAsciiLetterCode(c) {
-  return (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A);
 }
 
 // Cutter states: which context the chunk scanner is inside.

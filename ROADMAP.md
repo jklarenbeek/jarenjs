@@ -153,12 +153,32 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 
 - [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.
 
-## @jarenjs/josl (research experiment)
+## @jarenjs/josl (published)
+
+The charts/streaming program (shipped 2026-07-21) added the incremental
+JSONX/strict-JSON reader (`createJsonxStreamReader`, chunk-splittable at
+any token, unified `pair` events with the JOSL reader), flipped the
+package to `private: false` with typed `dist/types` builds, dropped the
+experimental label and joined it to the release train.
 
 - [ ] **Single-walk scanner** — fold the chunk cutter and the logical-line parser into one pass; the cutter's second scan over every character is the main share of smol-toml's remaining ~1.9x parse-speed edge (`npm run benchmark:toml`).
 - [ ] **CST mode** — preserve comments, key order aesthetics and formatting for faithful document rewriting, not just data round-trips.
 - [ ] **JOSL/JSONX grammar as JSON Schema** — publish the language surface as a schema twin for LLM constrained decoding, like the query/JSLT grammars.
-- [ ] **Graduation decision** — if the experiment earns its keep, drop `private: true`, add typed `dist/types` builds and join the release train; otherwise salvage the strict-TOML engine as a standalone package.
+- [ ] **Partial-string streaming events** — a `text-partial` event for progressive display of long strings as they stream in (the hook is noted in jsonx-stream.js; not implemented).
+
+## @jarenjs/charts (charts + streaming, shipped 2026-07-21)
+
+Headless charts: definition + data → geometry-free AST → pure-vnode
+SVG, five types (pie/bar/line/scatter/candlestick), a stream adapter
+over the josl readers' unified events, benchmark-page charts across
+every suite, a playground engine with chunked replay, and the Binance
+live demo (strict-JSON reader end to end). Backlog, each item waiting
+for a consumer:
+
+- [ ] **More chart types** — radar, treemap, sankey, gauge, boxplot, streamgraph, a donut variant of pie.
+- [ ] **Heatmap for the scenario matrices** — the jsonquery/jslt benchmark matrices ship as grouped bars; a heatmap is the alternative if they ever read poorly.
+- [ ] **JSON-Patch-based O(1) incremental re-render** — blocked on partial re-render support in `@jarenjs/app`; today the projection re-renders wholesale per snapshot (162 µs for a 100×5 line chart, `npm run benchmark:charts`).
+- [ ] **Tooltip interactivity beyond SVG `<title>`/CSS hover** — blocked on app action wiring for pointer events.
 
 ## Benchmarks, tooling & website
 

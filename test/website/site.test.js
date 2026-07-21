@@ -380,3 +380,34 @@ describe('website — the site as one app document', function () {
     assert.ok(app.getState().pg, 'the app survives an unknown-action error via the default handler');
   });
 });
+
+describe('website — the Binance live toggle wiring', function () {
+  it("dispatching 'binance/toggle' runs the effect (stub socket)", async function () {
+    const sockets = [];
+    class StubWebSocket {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        sockets.push(this);
+      }
+
+      close() { this.closed = true; }
+    }
+    globalThis.WebSocket = /** @type {any} */ (StubWebSocket);
+    try {
+      const { app, go } = mountSite({ hash: '#/playground?engine=charts' });
+      await tick();
+      app.dispatch('binance/toggle');
+      await tick();
+      assert.equal(sockets.length, 1, 'the effect opened the market-data socket');
+      assert.match(sockets[0].url, /data-stream\.binance\.vision/);
+      sockets[0].onerror?.(new Error('transient')); // reported via onclose only
+      go('#/'); // navigating away must close the socket (the sync hook)
+      await tick();
+      assert.equal(sockets[0].closed, true, 'navigation closed the socket');
+    }
+    finally {
+      delete globalThis.WebSocket;
+    }
+  });
+});

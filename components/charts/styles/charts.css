@@ -1,0 +1,50 @@
+/* @jarenjs/charts — component stylesheet.
+ *
+ * Defines the self-scoped `.chart` class carrying the `--chart-*` token
+ * vocabulary (light values plus a `.dark` override) and maps each
+ * `chart-*` shape class to `var(--chart-*)`. The render pass stamps the
+ * same variables *inline* on the root `<svg>`, and inline custom
+ * properties beat these stylesheet blocks — so for pipeline-rendered
+ * SVGs the stamp decides the colors. Re-theming a live chart goes
+ * through the `'host'` theme (`src/core/palette.js` `HOST_VARS`), whose
+ * stamped values reference the host's tokens. `toSvgString()` output
+ * stays standalone-valid via concrete presentation-attribute colors.
+ *
+ * Sync invariant (DESIGN.md §7): the fallback values below must match
+ * the `default`/`dark` token tables in `src/core/palette.js`.
+ */
+
+.chart {
+  --chart-background: transparent;
+  --chart-text: #1f2020;
+  --chart-muted: #64748b;
+  --chart-grid: #e2e8f0;
+  --chart-axis: #94a3b8;
+  --chart-win: #16a34a;
+  --chart-loss: #dc2626;
+  --chart-slice-stroke: #ffffff;
+}
+.dark .chart {
+  --chart-text: #f4f4f4;
+  --chart-muted: #94a3b8;
+  --chart-grid: #334155;
+  --chart-axis: #64748b;
+  --chart-win: #4ade80;
+  --chart-loss: #f87171;
+  --chart-slice-stroke: #11141c;
+}
+
+.chart-svg { max-width: 100%; height: auto; }
+
+.chart-pie-slice { stroke: var(--chart-slice-stroke); }
+.chart-pie-legend text { fill: var(--chart-text); }
+
+.chart-title { fill: var(--chart-text); }
+.chart-tick, .chart-axis-label { fill: var(--chart-muted); }
+.chart-grid { stroke: var(--chart-grid); }
+.chart-axis { stroke: var(--chart-axis); }
+.chart-ref { stroke: var(--chart-muted); }
+.chart-candle-up { stroke: var(--chart-win); }
+rect.chart-candle-up { fill: var(--chart-win); stroke: none; }
+.chart-candle-down { stroke: var(--chart-loss); }
+rect.chart-candle-down { fill: var(--chart-loss); stroke: none; }

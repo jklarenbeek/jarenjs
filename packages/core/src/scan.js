@@ -21,6 +21,7 @@ export const CC_SQUOTE = 0x27;
 export const CC_LPAREN = 0x28;
 export const CC_RPAREN = 0x29;
 export const CC_STAR = 0x2A;
+export const CC_PLUS = 0x2B;
 export const CC_COMMA = 0x2C;
 export const CC_MINUS = 0x2D;
 export const CC_DOT = 0x2E;
@@ -38,8 +39,11 @@ export const CC_LBRACKET = 0x5B;
 export const CC_BACKSLASH = 0x5C;
 export const CC_RBRACKET = 0x5D;
 export const CC_UNDERSCORE = 0x5F;
+export const CC_LBRACE = 0x7B;
 export const CC_PIPE = 0x7C;
+export const CC_RBRACE = 0x7D;
 export const CC_TILDE = 0x7E;
+export const CC_DEL = 0x7F;
 
 //#endregion
 
@@ -91,6 +95,15 @@ export function isAsciiLowerCode(c) {
  */
 export function isAsciiUpperCode(c) {
   return c >= 0x41 && c <= 0x5A;
+}
+
+/**
+ * Checks if a char code is an ASCII letter (A-Z or a-z).
+ * @param {number} c - The char code
+ * @returns {boolean}
+ */
+export function isAsciiLetterCode(c) {
+  return isAsciiUpperCode(c) || isAsciiLowerCode(c);
 }
 
 //#endregion

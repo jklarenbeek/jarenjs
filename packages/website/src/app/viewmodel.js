@@ -236,7 +236,7 @@ const J = (value) => JSON.stringify(value, null, 2);
 const PREVIEW_FIELD = {
   path: 'selector', pointer: 'pointer', patch: 'patch', query: 'query',
   jslt: 'stylesheet', jtlt: 'template', xquery: 'text', josl: 'text',
-  markdown: 'source', mermaid: 'source',
+  markdown: 'source', mermaid: 'source', charts: 'source',
 };
 
 const examplesPage = memo1((param) => {

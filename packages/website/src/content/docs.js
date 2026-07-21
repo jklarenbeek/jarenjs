@@ -163,7 +163,7 @@ export const DOCS_SECTIONS = [
       p('A native, headless Mermaid clone: @jarenjs/mermaid parses diagrams-as-code (flowchart and sequence fully; class, ER, state, gantt and pie too) into a geometry-free JSON AST, then lays it out and renders pure-vnode SVG through @jarenjs/view — no innerHTML, no browser. render() is synchronous, complete and error-safe, memoized by content hash.'),
       code("import { parseMermaid, toMermaid, renderMermaid } from '@jarenjs/mermaid';\nconst doc = parseMermaid('flowchart TD\\n  A --> B');\ntoMermaid(doc);           // canonical text — a round-trip fixed point\nrenderMermaid('flowchart TD\\n  A --> B'); // an ['svg', …] vnode"),
       p('Because the AST is geometry-free it is a reusable semantic model: a stateDiagram-v2 projects via a JSLT stylesheet into an @jarenjs/app workflow / FSM (events become actions), and toMermaid turns a workflow back into editable diagram text. Rendering is one consumer of the model, not the only one.'),
-      p('The Markdown engine embeds it: a ```mermaid fence renders to inline SVG through the native plugin — SSR-safe, no injected instance. This site dogfoods it; the package READMEs render their own Mermaid diagrams live in the docs dialog.'),
+      p('The Markdown engine embeds it: a ```mermaid fence renders to inline SVG through the native plugin — SSR-safe, no injected instance. This site dogfoods it; the package READMEs render their own Mermaid diagrams live in the docs dialog. Pie rendering delegates to @jarenjs/charts — same SVG, one pie engine for the whole suite.'),
       {
         kind: 'callout',
         title: 'Try it',
@@ -192,6 +192,23 @@ export const DOCS_SECTIONS = [
     blocks: [
       p("A strict TOML 1.0 superset with JavaScript's obvious values first-class — null, bigint, regexp, all four datetime flavours — plus a streamable [[]] root array. The parser passes the complete official toml-test suite in strict TOML mode, consumes chunk streams that may split any token, and reports document-order events with pointer-able paths."),
       code('# JOSL: TOML plus the obvious\nid = 123n\npattern = /^ok$/i\nmissing = null\n\n[[records]]\nname = "streaming"'),
+      p('JSONX — the same extensions over JSON — streams too: createJsonxStreamReader is an incremental reader whose chunks may split any token (escapes mid-\\uXXXX, numbers, tru + e), with a strict-JSON mode that makes it a streaming JSON.parse. Both readers emit one unified pair event with absolute paths, so a consumer never branches on syntax.'),
+      code("import { createJsonxStreamReader } from '@jarenjs/josl/jsonx-stream';\nconst reader = createJsonxStreamReader({ mode: 'json',\n  onEvent: (e) => e.type === 'pair' && console.log(e.path, e.value) });\nreader.feed('{\"run\": [{\"ops\": 61');   // any split point works\nreader.feed('200}]}');\nreader.end();                          // { run: [{ ops: 61200 }] }"),
+    ],
+  },
+  {
+    id: 'charts', title: 'Charts',
+    blocks: [
+      p('Headless charts: @jarenjs/charts compiles a definition document plus its data into a geometry-free AST (fractions, angles, unit coordinates — no pixels) and renders pure-vnode SVG through @jarenjs/view. Five types — pie, bar, line, scatter, candlestick — themed by host-linked tokens; the Benchmarks page charts and the mermaid pie are this engine.'),
+      code("import { compileChart } from '@jarenjs/charts';\nconst compiled = compileChart({ type: 'pie', title: 'Pets',\n  slices: [{ label: 'Dogs', value: 40 }, { label: 'Cats', value: 25 }] });\ncompiled.ast;           // geometry-free JSON\ncompiled.toSvgString(); // standalone SVG"),
+      p('The stream adapter turns the josl readers’ unified events into live chart data: records assemble as their fields arrive (path mode for one big document in chunks, document mode for many small messages), with ring-buffer eviction and identity-keyed memo re-renders. The playground replay demo and the Binance live feed are both this one code path.'),
+      {
+        kind: 'callout',
+        title: 'Try it',
+        text: 'The Charts tab in the playground compiles definitions in JSON, JSONX or JOSL — flip stream to replay to watch a chart build chunk by chunk through the incremental reader, or go live on real Binance market data (opt-in).',
+        href: '#/playground?engine=charts',
+        link: 'Open the playground',
+      },
     ],
   },
   {

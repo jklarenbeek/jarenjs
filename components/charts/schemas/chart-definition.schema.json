@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.github.io/schemas/chart-definition.schema.json",
+  "title": "Chart definition",
+  "description": "A self-contained chart definition for @jarenjs/charts compileChart: the type, presentation fields, and (inline) the data fields the type reads. Streaming callers may omit the data fields and pass data separately.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "enum": ["pie", "bar", "line", "scatter", "candlestick"]
+    },
+    "title": {
+      "type": ["string", "null"]
+    },
+    "stream": { "$ref": "#/$defs/streamSpec" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "pie" } } },
+      "then": {
+        "properties": {
+          "slices": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/slice" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "bar" } } },
+      "then": {
+        "properties": {
+          "stacked": { "type": "boolean" },
+          "log": { "type": "boolean" },
+          "orient": { "enum": ["v", "h"] },
+          "catLabel": { "type": ["string", "null"] },
+          "valLabel": { "type": ["string", "null"] },
+          "categories": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "series": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/barSeries" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "line" } } },
+      "then": {
+        "properties": {
+          "x": { "enum": ["linear", "time"] },
+          "log": { "type": "boolean" },
+          "markers": { "type": "boolean" },
+          "xLabel": { "type": ["string", "null"] },
+          "yLabel": { "type": ["string", "null"] },
+          "series": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/lineSeries" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "candlestick" } } },
+      "then": {
+        "properties": {
+          "xLabel": { "type": ["string", "null"] },
+          "yLabel": { "type": ["string", "null"] },
+          "candles": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/candle" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "scatter" } } },
+      "then": {
+        "properties": {
+          "xLog": { "type": "boolean" },
+          "yLog": { "type": "boolean" },
+          "refY": { "type": "number" },
+          "refLabel": { "type": ["string", "null"] },
+          "xLabel": { "type": ["string", "null"] },
+          "yLabel": { "type": ["string", "null"] },
+          "points": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/point" }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "streamSpec": {
+      "description": "createStreamAdapter mapping: how reader events accumulate into this chart's data",
+      "type": "object",
+      "properties": {
+        "recordPath": {
+          "type": "array",
+          "items": { "type": ["string", "number"] }
+        },
+        "recordBoundary": { "enum": ["path", "document"] },
+        "xField": { "type": "string" },
+        "yField": { "type": "string" },
+        "seriesField": { "type": "string" },
+        "maxPoints": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "slice": {
+      "type": "object",
+      "required": ["label", "value"],
+      "properties": {
+        "label": { "type": "string" },
+        "value": { "type": "number", "minimum": 0 }
+      }
+    },
+    "tone": {
+      "enum": ["win", "loss", null]
+    },
+    "barSeries": {
+      "type": "object",
+      "required": ["name", "values"],
+      "properties": {
+        "name": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "type": ["number", "null"] }
+        },
+        "tone": { "$ref": "#/$defs/tone" },
+        "tones": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tone" }
+        }
+      }
+    },
+    "lineSeries": {
+      "type": "object",
+      "required": ["name", "points"],
+      "properties": {
+        "name": { "type": "string" },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/point" }
+        }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "tone": { "$ref": "#/$defs/tone" }
+      }
+    },
+    "candle": {
+      "type": "object",
+      "required": ["t", "open", "high", "low", "close"],
+      "properties": {
+        "t": { "type": "number" },
+        "open": { "type": "number" },
+        "high": { "type": "number" },
+        "low": { "type": "number" },
+        "close": { "type": "number" }
+      }
+    }
+  }
+}

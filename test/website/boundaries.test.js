@@ -11,9 +11,11 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { runEngine } from '../../packages/website/src/boundaries/engines.js';
+import { runEngine, ENGINE_EXAMPLES } from '../../packages/website/src/boundaries/engines.js';
 import { runValidation } from '../../packages/website/src/boundaries/validator.js';
 import { deriveSuite } from '../../packages/website/src/boundaries/bench.js';
+import { chartsSync, chartsReplayActive } from '../../packages/website/src/boundaries/charts.js';
+import { renderToString } from '@jarenjs/view';
 
 const loadBench = (name) => JSON.parse(readFileSync(
   new URL(`../../packages/website/public/benchmarks/${name}.json`, import.meta.url), 'utf8'));
@@ -76,5 +78,124 @@ describe('website boundaries — benchmark suite derivations', function () {
   it('a suite whose data failed to load renders the error callout', function () {
     const nodes = deriveSuite({ benchStatus: { toml: 'error' }, bench: {}, benchUi: {} }, 'toml');
     assert.match(JSON.stringify(nodes), /Data unavailable/);
+  });
+});
+
+describe('website boundaries — benchmark charts', function () {
+  const UI = { search: '', limit: 50 };
+  const chartsIn = (nodes) => {
+    const found = [];
+    const walk = (n) => {
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n !== null && typeof n === 'object') {
+        if (n.kind === 'chart') found.push(n);
+        for (const v of Object.values(n)) walk(v);
+      }
+    };
+    walk(nodes);
+    return found;
+  };
+
+  const CASES = [
+    ['validate', 3], ['jsonpath', 1], ['jsonquery', 1], ['jslt', 1],
+    ['jsonpointer', 1], ['jsonpatch', 1], ['toml', 2], ['markdown', 2],
+    ['mermaid', 2],
+  ];
+  for (const [suite, minCharts] of CASES) {
+    it(`the ${suite} suite renders ${minCharts}+ svg chart(s) from the published data`, function () {
+      const state = { benchStatus: { [suite]: 'loaded' }, bench: { [suite]: loadBench(suite) }, benchUi: UI };
+      const nodes = deriveSuite(state, suite);
+      const charts = chartsIn(nodes);
+      assert.ok(charts.length >= minCharts,
+        `expected at least ${minCharts} chart nodes, found ${charts.length}`);
+      for (const c of charts) {
+        assert.ok(Array.isArray(c.vnode) && c.vnode[0] === 'svg', 'chart vnode is an svg');
+        assert.equal(c.vnode[1].style['--chart-text'], 'var(--fg, #1f2020)',
+          'charts are host-linked');
+      }
+    });
+  }
+
+  it('chart vnodes are reference-stable across re-derivations (memoized)', function () {
+    const data = loadBench('toml');
+    const state = { benchStatus: { toml: 'loaded' }, bench: { toml: data }, benchUi: UI };
+    const first = chartsIn(deriveSuite(state, 'toml'));
+    const second = chartsIn(deriveSuite(state, 'toml'));
+    assert.equal(first[0].vnode, second[0].vnode);
+  });
+});
+
+describe('website boundaries — charts engine', function () {
+  const example = (label) => {
+    const found = ENGINE_EXAMPLES.charts.find((e) => e.label.startsWith(label));
+    assert.ok(found, `example '${label}' exists`);
+    return found.inputs;
+  };
+
+  it('runs a static pie definition: cards, svg chart, AST details', function () {
+    const nodes = runEngine('charts', example('Static pie'));
+    const chartNode = nodes.find((n) => n.kind === 'chart');
+    assert.ok(chartNode, 'emits a chart node');
+    assert.equal(chartNode.vnode[0], 'svg');
+    assert.match(JSON.stringify(nodes), /schema-valid/);
+    assert.match(JSON.stringify(nodes), /Geometry-free AST/);
+  });
+
+  it('replay examples: JOSL and strict JSON produce byte-identical SVG', function () {
+    const joslNodes = runEngine('charts', example('Replay — JOSL'));
+    const jsonNodes = runEngine('charts', example('Replay — same data'));
+    const svg = (nodes) => renderToString(nodes.find((n) => n.kind === 'chart').vnode);
+    assert.equal(svg(joslNodes), svg(jsonNodes));
+  });
+
+  it('schema violations render error nodes, never throw', function () {
+    const nodes = runEngine('charts', { format: 'json', stream: 'off', source: '{"type": "sparkline"}' });
+    assert.ok(nodes.every((n) => typeof n === 'object'));
+    assert.match(JSON.stringify(nodes), /Schema validation failed/);
+  });
+
+  it('parse failures render error nodes, never throw', function () {
+    const jsonBad = runEngine('charts', { format: 'json', stream: 'off', source: '{"type": ' });
+    assert.match(JSON.stringify(jsonBad), /Parse error/);
+    const joslBad = runEngine('charts', { format: 'josl', stream: 'off', source: 'type = what' });
+    assert.match(JSON.stringify(joslBad), /Parse error/);
+  });
+
+  it('strict json mode rejects JSONX extensions in definitions', function () {
+    const nodes = runEngine('charts', { format: 'json', stream: 'off', source: '{"type": "pie", "slices": [], "n": 1n}' });
+    assert.match(JSON.stringify(nodes), /JSONX extension|Parse error/);
+  });
+
+  it('the replay controller starts and stops through the sync hook', function () {
+    const dispatched = [];
+    const dispatch = (action, payload) => dispatched.push([action, payload]);
+    const inputs = example('Replay — same data');
+    chartsSync(inputs, dispatch, true);
+    assert.equal(chartsReplayActive(), true, 'replay timer running');
+    chartsSync(inputs, dispatch, false); // navigated away
+    assert.equal(chartsReplayActive(), false, 'timer cleared on leave');
+    chartsSync({ ...inputs, stream: 'off' }, dispatch, true);
+    assert.equal(chartsReplayActive(), false, 'stream off keeps it stopped');
+  });
+
+  it('replay without a stream spec explains itself instead of ticking', function () {
+    const dispatched = [];
+    const dispatch = (action, payload) => dispatched.push([action, payload]);
+    chartsSync({ format: 'json', stream: 'replay', source: '{"type": "pie", "slices": []}' }, dispatch, true);
+    assert.equal(chartsReplayActive(), false);
+    assert.match(JSON.stringify(dispatched), /Replay needs a streaming definition/);
+  });
+
+  it('a replay tick dispatches an eng/result frame and then completes', async function () {
+    const dispatched = [];
+    const dispatch = (action, payload) => dispatched.push([action, payload]);
+    chartsSync(example('Replay — same data'), dispatch, true);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    chartsSync({}, dispatch, false); // ensure stopped even on slow machines
+    assert.ok(dispatched.length > 0, 'frames were dispatched');
+    const [action, payload] = dispatched[0];
+    assert.equal(action, 'eng/result');
+    assert.equal(payload.engine, 'charts');
+    assert.ok(payload.result.some((n) => n.kind === 'chart'));
   });
 });

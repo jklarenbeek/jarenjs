@@ -24,3 +24,4 @@ export {
 } from './svg.js';
 
 export { resolveTheme } from './theme.js';
+export { measureText, textWidth } from './metrics.js';

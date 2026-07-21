@@ -623,3 +623,104 @@ export const mermaidExamples = [
   "Rendering" : 45`,
   },
 ];
+
+/** The shared record set behind the two chart replay examples — built
+ * once so the JOSL and strict-JSON variants carry byte-identical data
+ * (one adapter, one chart, two syntaxes). */
+const CHART_RUN_RECORDS = (() => {
+  const suites = ['validate', 'jsonpath'];
+  const base = { validate: 61, jsonpath: 44 };
+  const out = [];
+  for (let i = 1; i <= 10; i++) {
+    for (const suite of suites) {
+      out.push({
+        iteration: i,
+        suite,
+        opsPerSecond: base[suite] + Math.round(Math.sin(i / 2) * 12 + i * 3),
+      });
+    }
+  }
+  return out;
+})();
+
+const CHART_STREAM_SPEC = {
+  recordPath: ['run'],
+  xField: 'iteration',
+  yField: 'opsPerSecond',
+  seriesField: 'suite',
+  maxPoints: 120,
+};
+
+const chartRunJosl = [
+  'type = "line"',
+  'title = "Benchmark timeline (streamed)"',
+  'markers = true',
+  '',
+  '[stream]',
+  'recordPath = ["run"]',
+  'xField = "iteration"',
+  'yField = "opsPerSecond"',
+  'seriesField = "suite"',
+  'maxPoints = 120',
+  '',
+  ...CHART_RUN_RECORDS.flatMap((r) => [
+    '[[run]]',
+    `iteration = ${r.iteration}`,
+    `suite = "${r.suite}"`,
+    `opsPerSecond = ${r.opsPerSecond}`,
+    '',
+  ]),
+].join('\n');
+
+const chartRunJson = JSON.stringify({
+  type: 'line',
+  title: 'Benchmark timeline (streamed)',
+  markers: true,
+  stream: CHART_STREAM_SPEC,
+  run: CHART_RUN_RECORDS,
+}, null, 2);
+
+export const chartsExamples = [
+  {
+    name: 'Static pie (JSON)',
+    format: 'json',
+    stream: 'off',
+    source: JSON.stringify({
+      type: 'pie',
+      title: 'Suite time by package',
+      slices: [
+        { label: 'validate', value: 42 },
+        { label: 'json', value: 25 },
+        { label: 'view', value: 18 },
+        { label: 'md', value: 15 },
+      ],
+    }, null, 2),
+  },
+  {
+    name: 'Grouped bars (JSON)',
+    format: 'json',
+    stream: 'off',
+    source: JSON.stringify({
+      type: 'bar',
+      title: 'Parse profile — ms per document',
+      valLabel: 'ms/op',
+      categories: ['~2 kB', '~40 kB', '~90 kB'],
+      series: [
+        { name: 'jaren', values: [0.11, 2.3, 10.7] },
+        { name: 'rival', values: [0.43, 6.1, 38.4] },
+      ],
+    }, null, 2),
+  },
+  {
+    name: 'Replay — JOSL [[run]]',
+    format: 'josl',
+    stream: 'replay',
+    source: chartRunJosl,
+  },
+  {
+    name: 'Replay — same data, strict JSON',
+    format: 'json',
+    stream: 'replay',
+    source: chartRunJson,
+  },
+];

@@ -1,6 +1,6 @@
 # JOSL — JavaScript Obvious Streaming Language
 
-**Status: research experiment.**
+**Status: published (format version 0.x — the surface may still evolve).**
 
 JOSL is a strict superset of [TOML 1.0.0](https://toml.io/en/v1.0.0) that
 adds JavaScript's obvious value types as first-class citizens and makes
@@ -12,7 +12,7 @@ only has to be taught the extensions below.
 The name follows Tom's lead: *Tom's Obvious Minimal Language* →
 *JavaScript's Obvious Streaming Language*.
 
-## Why (the experiment)
+## Why
 
 - **Streaming.** A truncated TOML/JOSL document is valid up to the last
   complete line; a truncated JSON document is unparseable until the last

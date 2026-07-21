@@ -1,0 +1,232 @@
+import { describe, it } from 'node:test';
+import { deepStrictEqual, strictEqual, throws, ok } from 'node:assert';
+
+import {
+  parseJsonx,
+  createJsonxStreamReader,
+  parseJsonxStream,
+  JsonxSyntaxError,
+} from '@jarenjs/josl';
+
+// Strict-JSON corpus (also valid JSONX).
+const STRICT_DOCS = [
+  'null', 'true', 'false', '0', '-0', '42', '-17', '3.1415', '5e+22',
+  '1e-7', '"hello \\"world\\" \\u0041\\n"', '[]', '[1,[2,[3]]]', '{}',
+  '{"a":1,"b":{"c":[true,null]}}', '  { "s" : "x" , "n" : -1.5e2 }  ',
+  '{"dup":1,"dup":2}', '"\\ud83d\\ude00"',
+  '{\n  "multi": [\n    1,\n    2\n  ]\n}',
+];
+
+// JSONX extension corpus.
+const JSONX_DOCS = [
+  '{"a": 123n, "b": -42n}',
+  '9007199254740993',
+  '{"re": /ab+c/gi, "cls": /[/]x/m}',
+  '[2026-07-18T12:00:00Z, 2026-07-18, 12:30:00, 2026-07-18T12:00:00]',
+  '[1979-05-27 07:32:00Z, 1979-05-27 07:32:00, 1979-05-27]',
+  '[inf, -inf, nan, Infinity, -Infinity, NaN, 1_000_000, +5]',
+  '{"__proto__": {"polluted": true}}',
+  '{"nested": {"deep": [{"x": [[1, 2n], []]}]}, "tail": "s"}',
+];
+
+function readAll(doc, chunks, options = undefined) {
+  const events = [];
+  const reader = createJsonxStreamReader({
+    ...(options ?? {}),
+    onEvent: (e) => events.push(e),
+  });
+  for (const chunk of chunks)
+    reader.feed(chunk);
+  return { root: reader.end(), events };
+}
+
+function errOf(fn) {
+  try {
+    fn();
+  }
+  catch (e) {
+    return e;
+  }
+  return null;
+}
+
+describe('jsonx-stream: equivalence with the full-text parser', () => {
+  for (const doc of [...STRICT_DOCS, ...JSONX_DOCS])
+    it(`end() equals parseJsonx for ${JSON.stringify(doc.slice(0, 30))}`, () => {
+      deepStrictEqual(readAll(doc, [doc]).root, parseJsonx(doc));
+    });
+  for (const doc of STRICT_DOCS)
+    it(`strict mode equals JSON.parse for ${JSON.stringify(doc.slice(0, 30))}`, () => {
+      deepStrictEqual(readAll(doc, [doc], { mode: 'json' }).root, JSON.parse(doc));
+    });
+});
+
+describe('jsonx-stream: split-point fuzz', () => {
+  for (const doc of [...STRICT_DOCS, ...JSONX_DOCS])
+    it(`splits of ${JSON.stringify(doc.slice(0, 30))} match single-feed`, () => {
+      const base = readAll(doc, [doc]);
+      // one char at a time
+      deepStrictEqual(readAll(doc, doc.split('')), base, 'char-at-a-time');
+      // every 2-chunk split
+      for (let i = 1; i < doc.length; ++i)
+        deepStrictEqual(
+          readAll(doc, [doc.slice(0, i), doc.slice(i)]), base, `split at ${i}`);
+    });
+});
+
+describe('jsonx-stream: event vocabulary', () => {
+  it('emits start/pair/item/end in document order with absolute paths', () => {
+    const { events } = readAll(
+      '{"a": [1, {"b": 2n}], "c": "x"}',
+      ['{"a": [1, {"b": 2n}], "c": "x"}']);
+    deepStrictEqual(events, [
+      { type: 'object-start', path: [], line: 1 },
+      { type: 'array-start', path: ['a'], line: 1 },
+      { type: 'item', path: ['a', 0], index: 0, value: 1, line: 1 },
+      { type: 'object-start', path: ['a', 1], line: 1 },
+      { type: 'pair', path: ['a', 1, 'b'], key: 'b', value: 2n, line: 1 },
+      { type: 'object-end', path: ['a', 1], line: 1 },
+      { type: 'array-end', path: ['a'], line: 1 },
+      { type: 'pair', path: ['c'], key: 'c', value: 'x', line: 1 },
+      { type: 'object-end', path: [], line: 1 },
+    ]);
+  });
+
+  it('reports physical line numbers', () => {
+    const { events } = readAll(
+      '{\n  "a": [\n    1\n  ]\n}',
+      ['{\n  "a": [\n    1\n  ]\n}']);
+    deepStrictEqual(events.map((e) => [e.type, e.line]), [
+      ['object-start', 1],
+      ['array-start', 2],
+      ['item', 3],
+      ['array-end', 4],
+      ['object-end', 5],
+    ]);
+  });
+
+  it('a scalar root emits no events', () => {
+    const { root, events } = readAll('42', ['42']);
+    strictEqual(root, 42);
+    deepStrictEqual(events, []);
+  });
+
+  it('fires scalars only on completion at their delimiter', () => {
+    const seen = [];
+    const reader = createJsonxStreamReader({ onEvent: (e) => seen.push(e.type) });
+    reader.feed('{"n": 12');
+    deepStrictEqual(seen, ['object-start']); // 12 may still grow
+    reader.feed('3, "s": "x');
+    deepStrictEqual(seen, ['object-start', 'pair']); // string still open
+    reader.feed('y"}');
+    deepStrictEqual(seen, ['object-start', 'pair', 'pair', 'object-end']);
+    deepStrictEqual(reader.end(), { n: 123, s: 'xy' });
+  });
+});
+
+describe('jsonx-stream: partial root', () => {
+  it('root() is undefined before any content', () => {
+    strictEqual(createJsonxStreamReader().root(), undefined);
+  });
+
+  it('exposes the growing tree; incomplete scalars are absent', () => {
+    const reader = createJsonxStreamReader();
+    reader.feed('{"a": [1, 2');
+    deepStrictEqual(reader.root(), { a: [1] });
+    reader.feed(', 3], "b"');
+    deepStrictEqual(reader.root(), { a: [1, 2, 3] });
+    reader.feed(': 4}');
+    deepStrictEqual(reader.end(), { a: [1, 2, 3], b: 4 });
+  });
+});
+
+describe('jsonx-stream: strict-json mode rejections', () => {
+  // every JSONX extension form, plus classic JSON errors
+  const badDocs = [
+    '+1', '1n', '1_000', 'inf', '-inf', 'nan', 'Infinity', 'NaN',
+    '/re/g', '2026-07-18', '12:30:00', '[1, 2n]', '{"a": /x/}',
+    '01', "'single'", '{a:1}', '[1,]', '{"a":1,}', '[1 2]', '"\t"',
+  ];
+  for (const doc of badDocs)
+    it(`rejects ${JSON.stringify(doc)} with the full-text parser's error`, () => {
+      const expected = errOf(() => parseJsonx(doc, { mode: 'json' }));
+      ok(expected instanceof JsonxSyntaxError);
+      const actual = errOf(() => readAll(doc, [doc], { mode: 'json' }));
+      ok(actual instanceof JsonxSyntaxError, `stream accepted ${doc}`);
+      strictEqual(actual.message, expected.message);
+    });
+});
+
+describe('jsonx-stream: errors', () => {
+  const incompleteDocs = [
+    '', '{', '[', '{"a"', '{"a":', '{"a":1', '[1', '[1,', '"abc',
+    '"ab\\', 'tru', '{"a": "b" "c"', '{"a" 1}', '[1:', '-',
+  ];
+  for (const doc of incompleteDocs)
+    it(`fails on ${JSON.stringify(doc)} like the full-text parser`, () => {
+      const expected = errOf(() => parseJsonx(doc));
+      ok(expected instanceof JsonxSyntaxError);
+      const actual = errOf(() => {
+        const reader = createJsonxStreamReader();
+        reader.feed(doc);
+        reader.end();
+      });
+      ok(actual instanceof JsonxSyntaxError, `stream accepted ${JSON.stringify(doc)}`);
+      strictEqual(actual.message, expected.message);
+    });
+
+  it('reports line and column across chunk boundaries', () => {
+    const expected = errOf(() => parseJsonx('{\n  "a": what\n}'));
+    const reader = createJsonxStreamReader();
+    reader.feed('{\n  "a": wh');
+    const actual = errOf(() => {
+      reader.feed('at\n}');
+      reader.end();
+    });
+    ok(actual instanceof JsonxSyntaxError);
+    strictEqual(actual.line, 2);
+    strictEqual(actual.column, 8);
+    strictEqual(actual.message, expected.message);
+  });
+
+  it('errors eagerly on trailing content', () => {
+    const reader = createJsonxStreamReader();
+    throws(() => reader.feed('1 2'), /unexpected trailing characters/);
+  });
+
+  it('rejects feeding after end', () => {
+    const reader = createJsonxStreamReader();
+    reader.feed('1');
+    reader.end();
+    throws(() => reader.feed('x'), /cannot feed after end/);
+  });
+
+  it('end() is idempotent', () => {
+    const reader = createJsonxStreamReader();
+    reader.feed('{"a": 1}');
+    deepStrictEqual(reader.end(), { a: 1 });
+    deepStrictEqual(reader.end(), { a: 1 });
+  });
+});
+
+describe('jsonx-stream: prototype safety', () => {
+  it('guards against prototype pollution', () => {
+    const { root } = readAll(
+      '{"__proto__": {"polluted": true}}',
+      ['{"__proto__', '": {"poll', 'uted": true}}']);
+    strictEqual({}.polluted, undefined);
+    strictEqual(Object.getPrototypeOf(root), Object.prototype);
+    deepStrictEqual(root.__proto__, { polluted: true });
+  });
+});
+
+describe('jsonx-stream: async convenience', () => {
+  it('parses async iterables of chunks', async () => {
+    const doc = '{"a": [1, 2, {"b": "cd"}]}';
+    async function* llmish() {
+      for (let i = 0; i < doc.length; i += 3)
+        yield doc.slice(i, i + 3);
+    }
+    deepStrictEqual(await parseJsonxStream(llmish()), parseJsonx(doc));
+  });
+});

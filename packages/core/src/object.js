@@ -214,6 +214,38 @@ export function isUniqueDeepArray(arr) {
 }
 
 /**
+ * Deterministic JSON text for plain data: like `JSON.stringify`, but
+ * object keys are emitted in sorted order at every depth, so two
+ * structurally equal values always produce the same string (a stable
+ * cache/memo/fingerprint key regardless of key insertion order).
+ * Non-JSON values follow `JSON.stringify` semantics (undefined members
+ * are dropped, undefined roots return undefined).
+ * @param {*} value - The value to serialize
+ * @returns {string|undefined} Deterministic JSON text
+ */
+export function stableStringify(value) {
+  if (value === null || typeof value !== 'object')
+    return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    let out = '[';
+    for (let i = 0; i < value.length; ++i)
+      out += (i === 0 ? '' : ',') + (stableStringify(value[i]) ?? 'null');
+    return out + ']';
+  }
+  const keys = Object.keys(value).sort();
+  let out = '{';
+  let first = true;
+  for (const key of keys) {
+    const sv = stableStringify(value[key]);
+    if (sv === undefined)
+      continue;
+    out += (first ? '' : ',') + JSON.stringify(key) + ':' + sv;
+    first = false;
+  }
+  return out + '}';
+}
+
+/**
  *
  * @param {Map<any, any>} map
  * @param {...Map<any, any>} iterables

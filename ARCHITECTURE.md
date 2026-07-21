@@ -71,6 +71,7 @@ flowchart BT
 | [`@jarenjs/md`](components/md) | Markdown + frontmatter → JSON AST, rendered through view; a format component | [md ARCHITECTURE](components/md/ARCHITECTURE.md) |
 | [`@jarenjs/mermaid`](components/mermaid) | Headless Mermaid clone → geometry-free JSON AST → pure-vnode SVG through view; a format component | [mermaid ARCHITECTURE](components/mermaid/ARCHITECTURE.md) |
 | [`@jarenjs/calc`](components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](components/calc/ARCHITECTURE.md) |
+| [`@jarenjs/charts`](components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG through view, with a stream adapter over the josl readers' unified events; mermaid's pie delegates here | [charts ARCHITECTURE](components/charts/ARCHITECTURE.md) |
 | [`@jarenjs/website`](packages/website) | The GitHub Pages site and playground (not part of the library chain) | [website ARCHITECTURE](packages/website/ARCHITECTURE.md) |
 
 Two deliberate inversions keep the graph acyclic while letting the layers cooperate:

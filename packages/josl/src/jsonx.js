@@ -15,40 +15,39 @@
 // `JSON.stringify`. In place of the reviver — which visits leaves
 // bottom-up, after the fact, without telling you where you are — the
 // parser reports document-order events with absolute paths.
+//
+// Scalar decoding lives in jsonx-scalar.js, shared with the incremental
+// reader (jsonx-stream.js), so both parse every value identically.
 
 import { JsonxSyntaxError } from './errors.js';
+import { LocalDate, LocalTime, LocalDateTime } from './values.js';
 import {
-  LocalDate,
-  LocalTime,
-  LocalDateTime,
-  isValidDateParts,
-  isValidTimeParts,
-} from './values.js';
-import { isDigitCode, isAsciiUpperCode, isAsciiLowerCode } from '@jarenjs/core/scan';
+  CC_TAB,
+  CC_LF,
+  CC_CR,
+  CC_SPACE,
+  CC_DQUOTE,
+  CC_PLUS,
+  CC_COMMA,
+  CC_MINUS,
+  CC_SLASH,
+  CC_COLON,
+  CC_LBRACKET,
+  CC_RBRACKET,
+  CC_LBRACE,
+  CC_RBRACE,
+  isDigitCode,
+  isAsciiLetterCode,
+} from '@jarenjs/core/scan';
 import { setKey, countNewlines, columnOf } from './util.js';
-
-const RE_DATETIME = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/;
-const RE_TIMEONLY = /^(\d{2}):(\d{2}):(\d{2})(\.\d+)?/;
-const RE_NUM_JSON = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/;
-const RE_NUM_JSONX = /^[+-]?(?:0|[1-9](?:_?\d)*)(?:\.\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?(n?)/;
-
-const CC_TAB = 0x09;
-const CC_LF = 0x0A;
-const CC_CR = 0x0D;
-const CC_SPACE = 0x20;
-const CC_DQUOTE = 0x22;
-const CC_PLUS = 0x2B;
-const CC_COMMA = 0x2C;
-const CC_MINUS = 0x2D;
-const CC_SLASH = 0x2F;
-const CC_COLON = 0x3A;
-const CC_LBRACKET = 0x5B;
-const CC_BACKSLASH = 0x5C;
-const CC_RBRACKET = 0x5D;
-const CC_LBRACE = 0x7B;
-const CC_RBRACE = 0x7D;
-
-const isLetter = (c) => isAsciiUpperCode(c) || isAsciiLowerCode(c);
+import {
+  isValueEndCode,
+  decodeString,
+  matchDateTime,
+  matchNumber,
+  matchWord,
+  matchRegExp,
+} from './jsonx-scalar.js';
 
 class JsonxParser {
   constructor(text, options = {}) {
@@ -57,6 +56,11 @@ class JsonxParser {
     this.mode = options.mode === 'json' ? 'json' : 'jsonx';
     this.onEvent = options.onEvent ?? null;
     this.path = [];
+    this.errCb = (pos, message, hint) => this.err(message, hint, pos);
+    this.endCb = (end) => {
+      this.pos = end;
+      this.checkValueEnd();
+    };
   }
 
   err(message, hint, pos = this.pos) {
@@ -110,25 +114,28 @@ class JsonxParser {
       return this.scalar(this.parseString());
     if (c === CC_SLASH) {
       this.extension('a regexp literal', 'quote the pattern as a string');
-      return this.scalar(this.parseRegExp());
+      const [re, end] = matchRegExp(this.text, this.pos, this.errCb);
+      this.pos = end;
+      this.checkValueEnd();
+      return this.scalar(re);
     }
     if (c === CC_MINUS || c === CC_PLUS) {
       if (c === CC_PLUS)
         this.extension("a leading '+' sign", 'remove the + sign');
       const d = this.pos + 1 < this.text.length ? this.text.charCodeAt(this.pos + 1) : -1;
-      if (isLetter(d))
+      if (isAsciiLetterCode(d))
         return this.scalar(this.parseWord());
       return this.scalar(this.parseNumber());
     }
     if (isDigitCode(c)) {
       if (this.mode === 'jsonx') {
-        const dt = this.tryDateTime();
-        if (dt !== undefined)
-          return this.scalar(dt);
+        const dt = matchDateTime(this.text, this.pos, this.errCb, this.endCb);
+        if (dt !== null)
+          return this.scalar(dt[0]);
       }
       return this.scalar(this.parseNumber());
     }
-    if (isLetter(c))
+    if (isAsciiLetterCode(c))
       return this.scalar(this.parseWord());
     this.err('invalid value');
   }
@@ -141,11 +148,8 @@ class JsonxParser {
   checkValueEnd() {
     if (this.pos >= this.text.length)
       return;
-    const c = this.text.charCodeAt(this.pos);
-    if (c === CC_SPACE || c === CC_TAB || c === CC_LF || c === CC_CR
-      || c === CC_COMMA || c === CC_RBRACKET || c === CC_RBRACE)
-      return;
-    this.err('unexpected character after value');
+    if (!isValueEndCode(this.text.charCodeAt(this.pos)))
+      this.err('unexpected character after value');
   }
 
   parseObject() {
@@ -223,207 +227,20 @@ class JsonxParser {
   }
 
   parseString() {
-    const text = this.text;
-    let pos = this.pos + 1; // consume '"'
-    let out = '';
-    let chunk = pos;
-    while (pos < text.length) {
-      const c = text.charCodeAt(pos);
-      if (c === CC_DQUOTE) {
-        this.pos = pos + 1;
-        return out + text.slice(chunk, pos);
-      }
-      if (c === CC_BACKSLASH) {
-        out += text.slice(chunk, pos);
-        out += this.decodeEscape(pos);
-        pos = this.pos;
-        chunk = pos;
-        continue;
-      }
-      if (c < 0x20)
-        this.err('control characters must be escaped in strings', undefined, pos);
-      pos++;
-    }
-    this.err('unterminated string', "close the string with '\"'", pos);
-  }
-
-  decodeEscape(pos) {
-    // pos sits on the backslash; sets this.pos past the escape
-    const text = this.text;
-    if (pos + 1 >= text.length)
-      this.err('unterminated escape sequence', undefined, pos);
-    const c = text.charCodeAt(pos + 1);
-    this.pos = pos + 2;
-    switch (c) {
-      case CC_DQUOTE: return '"';
-      case CC_BACKSLASH: return '\\';
-      case CC_SLASH: return '/';
-      case 0x62: return '\b';
-      case 0x66: return '\f';
-      case 0x6E: return '\n';
-      case 0x72: return '\r';
-      case 0x74: return '\t';
-      case 0x75: {
-        const hex = text.slice(pos + 2, pos + 6);
-        if (hex.length !== 4 || !/^[0-9a-fA-F]{4}$/.test(hex))
-          this.err("expected 4 hex digits after '\\u'", undefined, pos);
-        this.pos = pos + 6;
-        return String.fromCharCode(parseInt(hex, 16));
-      }
-      default:
-        this.err(`invalid escape '\\${text[pos + 1]}'`, undefined, pos);
-    }
+    const [value, end] = decodeString(this.text, this.pos, this.errCb);
+    this.pos = end;
+    return value;
   }
 
   parseWord() {
-    const text = this.text;
-    const start = this.pos;
-    let pos = start;
-    if (text.charCodeAt(pos) === CC_MINUS || text.charCodeAt(pos) === CC_PLUS)
-      pos++;
-    const neg = text.charCodeAt(start) === CC_MINUS;
-    const wordStart = pos;
-    while (pos < text.length && isLetter(text.charCodeAt(pos)))
-      pos++;
-    const word = text.slice(wordStart, pos);
-    const signed = start !== wordStart;
-    switch (word) {
-      case 'true':
-        if (signed)
-          break;
-        this.pos = pos;
-        this.checkValueEnd();
-        return true;
-      case 'false':
-        if (signed)
-          break;
-        this.pos = pos;
-        this.checkValueEnd();
-        return false;
-      case 'null':
-        if (signed)
-          break;
-        this.pos = pos;
-        this.checkValueEnd();
-        return null;
-      case 'inf':
-      case 'Infinity':
-        this.extension(`'${word}'`, 'JSON cannot represent non-finite numbers');
-        this.pos = pos;
-        this.checkValueEnd();
-        return neg ? -Infinity : Infinity;
-      case 'nan':
-      case 'NaN':
-        this.extension(`'${word}'`, 'JSON cannot represent non-finite numbers');
-        this.pos = pos;
-        this.checkValueEnd();
-        return NaN;
-    }
-    this.err(`invalid value '${text.slice(start, pos)}'`, undefined, start);
-  }
-
-  tryDateTime() {
-    const s = this.text.slice(this.pos);
-    let m = RE_DATETIME.exec(s);
-    if (m !== null) {
-      const year = Number(m[1]);
-      const month = Number(m[2]);
-      const day = Number(m[3]);
-      if (!isValidDateParts(year, month, day))
-        this.err(`invalid date '${m[0]}'`);
-      const date = new LocalDate(year, month, day);
-      this.pos += m[0].length;
-      this.checkValueEnd();
-      if (m[4] === undefined)
-        return date;
-      const hour = Number(m[4]);
-      const minute = Number(m[5]);
-      const second = Number(m[6]);
-      if (!isValidTimeParts(hour, minute, second))
-        this.err(`invalid time '${m[0]}'`);
-      const time = new LocalTime(hour, minute, second, m[7] ?? '');
-      if (m[8] === undefined)
-        return new LocalDateTime(date, time);
-      const offset = m[8] === 'z' || m[8] === 'Z' ? 'Z' : m[8];
-      const instant = new Date(`${date.toString()}T${time.toString()}${offset}`);
-      if (Number.isNaN(instant.getTime()))
-        this.err(`invalid date-time '${m[0]}'`);
-      return instant;
-    }
-    m = RE_TIMEONLY.exec(s);
-    if (m !== null) {
-      const hour = Number(m[1]);
-      const minute = Number(m[2]);
-      const second = Number(m[3]);
-      if (!isValidTimeParts(hour, minute, second))
-        this.err(`invalid time '${m[0]}'`);
-      this.pos += m[0].length;
-      this.checkValueEnd();
-      return new LocalTime(hour, minute, second, m[4] ?? '');
-    }
-    return undefined;
+    const [value, end] = matchWord(this.text, this.pos, this.mode, this.errCb);
+    this.pos = end;
+    this.checkValueEnd();
+    return value;
   }
 
   parseNumber() {
-    const start = this.pos;
-    const s = this.text.slice(start);
-    const m = (this.mode === 'json' ? RE_NUM_JSON : RE_NUM_JSONX).exec(s);
-    if (m === null || m[0].length === 0)
-      this.err('invalid number');
-    this.pos = start + m[0].length;
-    this.checkValueEnd();
-    if (this.mode === 'json')
-      return Number(m[0]);
-    const big = m[1] === 'n';
-    const token = big ? m[0].slice(0, -1) : m[0];
-    const isFloat = /[.eE]/.test(token);
-    if (isFloat) {
-      if (big)
-        this.err('bigint literals cannot have a fraction or exponent', undefined, start);
-      return Number(token.replace(/_/g, ''));
-    }
-    const stripped = token.replace(/[_+]/g, '');
-    if (big)
-      return BigInt(stripped);
-    const value = Number(stripped);
-    return Number.isSafeInteger(value) ? value : BigInt(stripped);
-  }
-
-  parseRegExp() {
-    const text = this.text;
-    const start = this.pos;
-    let pos = start + 1; // consume '/'
-    let inClass = false;
-    for (;;) {
-      if (pos >= text.length || text.charCodeAt(pos) === CC_LF)
-        this.err('unterminated regexp literal', "close the regexp with '/'", start);
-      const c = text.charCodeAt(pos);
-      if (c === CC_BACKSLASH) {
-        pos += 2;
-        continue;
-      }
-      if (c === CC_LBRACKET)
-        inClass = true;
-      else if (c === CC_RBRACKET)
-        inClass = false;
-      else if (c === CC_SLASH && !inClass)
-        break;
-      pos++;
-    }
-    const body = text.slice(start + 1, pos);
-    pos++; // consume '/'
-    const flagStart = pos;
-    while (pos < text.length && isLetter(text.charCodeAt(pos)))
-      pos++;
-    const flags = text.slice(flagStart, pos);
-    this.pos = pos;
-    this.checkValueEnd();
-    try {
-      return new RegExp(body, flags);
-    }
-    catch (e) {
-      this.err(`invalid regexp literal: ${e.message}`, undefined, start);
-    }
+    return matchNumber(this.text, this.pos, this.mode, this.errCb, this.endCb)[0];
   }
 }
 

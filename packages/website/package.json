@@ -18,6 +18,7 @@
   "dependencies": {
     "@jarenjs/app": "file:../app",
     "@jarenjs/calc": "file:../../components/calc",
+    "@jarenjs/charts": "file:../../components/charts",
     "@jarenjs/core": "file:../core",
     "@jarenjs/formats": "file:../formats",
     "@jarenjs/forms": "file:../forms",

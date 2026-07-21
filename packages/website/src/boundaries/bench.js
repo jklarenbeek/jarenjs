@@ -10,8 +10,19 @@
  * "Jaren is N× faster".
  */
 
-import { cards, table, callout, bars, search, more, details, code } from '../lib/nodes.js';
-import { formatNs, formatMs, formatRatio } from '../lib/format.js';
+import { cards, table, callout, chart, search, more, details, code } from '../lib/nodes.js';
+import { formatNs, formatMs, formatRatio, memo1 } from '../lib/format.js';
+import { createChartComponent } from '@jarenjs/charts/component';
+import {
+  ratioDistributionBars, ratioScatter, conformanceBars,
+  profileBars, matrixBars, passCountBars, querySpreadBars, resultTableBars,
+} from '@jarenjs/charts/transforms/benchmark-adapter';
+
+/** Host-linked chart projections; view() memoizes per data object. */
+const charts = createChartComponent({ theme: 'host' });
+
+/** A chart node from an adapter `{config, data}` pair. */
+const chartNode = (pair, note) => chart(null, charts.view(pair.config, pair.data), note);
 
 export const SUITES = [
   { key: 'overview', label: 'Overview' },
@@ -88,12 +99,30 @@ function passFail(s) {
 //#region validate
 
 const RATIO_BUCKETS = [
-  { label: '> 10× faster', test: (r) => r > 10 },
-  { label: '2–10× faster', test: (r) => r > 2 },
-  { label: '1–2× faster', test: (r) => r >= 1 },
-  { label: '1–2× slower', test: (r) => r >= 0.5 },
-  { label: '> 2× slower', test: (r) => r < 0.5 },
+  { label: '> 10× faster', test: (r) => r > 10, tone: 'win' },
+  { label: '2–10× faster', test: (r) => r > 2, tone: 'win' },
+  { label: '1–2× faster', test: (r) => r >= 1, tone: 'win' },
+  { label: '1–2× slower', test: (r) => r >= 0.5, tone: 'loss' },
+  { label: '> 2× slower', test: (r) => r < 0.5, tone: 'loss' },
 ];
+
+/** The validate charts, rebuilt only when the suite data reloads. */
+const validateCharts = memo1((data) => {
+  const results = Array.isArray(data.results) ? data.results : [];
+  const success = results.filter((r) => r.ratio !== null && r.isSuccessTest);
+  const nodes = [
+    chartNode(ratioDistributionBars(success, RATIO_BUCKETS,
+      'Ratio distribution (success-only tests)')),
+    chartNode(ratioScatter(success, 'Every success-only test — ratio vs Ajv'),
+      'One point per test, fastest ratios first; log scale, dashed line = parity. Points above the line are tests where Jaren is faster.'),
+  ];
+  const stats = data.summary?.engineStats;
+  if (stats !== undefined) {
+    nodes.push(chartNode(conformanceBars(stats, 'Official-suite conformance by draft'),
+      'Tests passed per draft, optional format suites included.'));
+  }
+  return nodes;
+});
 
 function validate(data, benchUi) {
   const out = [];
@@ -108,20 +137,7 @@ function validate(data, benchUi) {
   const results = Array.isArray(data.results) ? data.results : [];
   const success = results.filter((r) => r.ratio !== null && r.isSuccessTest);
 
-  // ratio distribution
-  const counts = RATIO_BUCKETS.map(() => 0);
-  for (const r of success) {
-    const index = RATIO_BUCKETS.findIndex((b) => b.test(r.ratio));
-    if (index >= 0) counts[index] += 1;
-  }
-  const maxCount = Math.max(1, ...counts);
-  out.push(bars('Ratio distribution (success-only tests)',
-    RATIO_BUCKETS.map((bucket, i) => ({
-      label: bucket.label,
-      style: `width:${Math.round((counts[i] / maxCount) * 100)}%`,
-      text: String(counts[i]),
-      tone: i < 3 ? 'win' : 'loss',
-    }))));
+  out.push(...validateCharts(data));
 
   // the searchable per-test table
   const needle = benchUi.search.trim().toLowerCase();
@@ -150,6 +166,15 @@ function validate(data, benchUi) {
 
 //#region jsonpath
 
+/** Top-spread chart, rebuilt only when the suite data reloads. */
+const jsonpathCharts = memo1((data) => {
+  const rows = data.profile?.rows ?? [];
+  if (rows.length === 0) return [];
+  return [chartNode(
+    querySpreadBars(rows, 'json-p3', 12, 'Widest spreads — ns per query (log)'),
+    'The 12 queries with the largest Jaren-vs-json-p3 spread; every query is in the table below.')];
+});
+
 function jsonpath(data, benchUi) {
   const out = [];
   const groups = data.compliance?.groups ?? [];
@@ -161,6 +186,7 @@ function jsonpath(data, benchUi) {
     groups.map(([name, g]) => ({
       cells: [name, String(g.total), String(g.pass?.jaren ?? '—'), String(g.pass?.['json-p3'] ?? '—')],
     }))));
+  out.push(...jsonpathCharts(data));
 
   const rows = data.profile?.rows ?? [];
   const needle = benchUi.search.trim().toLowerCase();
@@ -193,9 +219,18 @@ function jsonpath(data, benchUi) {
 
 //#region scenario matrices (jsonquery, jslt)
 
+/** Scenario grouped bars (single-entry memo; suite tabs alternate the
+ * data object, which just recomputes on switch). Grouped bars shipped
+ * first per the charts program; a heatmap stays the backlogged
+ * alternative if the matrix ever reads poorly this way. */
+const matrixCharts = memo1((data) => [chartNode(
+  matrixBars(data.rows ?? [], { title: 'Scenario matrix — ns per operation (log)' }),
+  'Grouped per scenario, log scale — lower is better; the table below is the evidence.')]);
+
 function scenarioMatrix(data, programsWord) {
   const engineKeys = collectEngineKeys(data.rows);
   const out = [];
+  out.push(...matrixCharts(data));
   out.push(table(
     `Scenario matrix (per-operation time; ratio vs the fastest rival)`,
     ['Scenario', 'Document', ...engineKeys, 'Ratio'],
@@ -250,18 +285,28 @@ function prettyMaybeJson(source) {
 
 //#endregion
 
+/** One grouped-bar chart per result table, memoized per data object. */
+const genericTableCharts = memo1((data) => (data.tables ?? []).map((t) =>
+  chartNode(resultTableBars(t, { log: true, valLabel: 'ns/op (log)' }))));
+
 /** pointer-style payloads: `{ tables: [{ title, columns, rows: [{ name, results[] }] }] }` */
 function genericTables(data, note) {
-  return (data.tables ?? []).map((t) => table(
-    t.title,
-    ['Scenario', ...t.columns],
-    t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
-    note));
+  const chartNodes = genericTableCharts(data);
+  return (data.tables ?? []).flatMap((t, i) => [
+    chartNodes[i],
+    table(
+      t.title,
+      ['Scenario', ...t.columns],
+      t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
+      note),
+  ]);
 }
 
 function patch(data) {
   const out = [];
   if (data.conformance !== undefined) {
+    // 108/108 is one number — a chart of it would restate the card, so
+    // the conformance stays a stat card and the charts cover timings.
     out.push(cards([{
       title: 'Conformance',
       value: `${data.conformance.pass} / ${data.conformance.total}`,
@@ -272,9 +317,27 @@ function patch(data) {
   return out;
 }
 
+/** The toml charts, rebuilt only when the suite data reloads. */
+const tomlCharts = memo1((data) => ({
+  compliance: data.compliance !== undefined
+    ? chartNode(passCountBars(data.compliance, {
+      title: 'toml-test 1.0.0 — tests passed',
+      highlight: 'jaren',
+    }))
+    : undefined,
+  parse: Array.isArray(data.profile?.parse)
+    ? chartNode(profileBars(data.profile.parse, data.engines ?? [], {
+      title: 'Parse profile — ms per document',
+      valLabel: 'ms/op',
+    }))
+    : undefined,
+}));
+
 function toml(data) {
   const out = [];
+  const { compliance: complianceChart, parse: parseChart } = tomlCharts(data);
   if (data.compliance !== undefined) {
+    out.push(complianceChart);
     out.push(table(
       `toml-test 1.0.0 compliance (${data.cases?.valid ?? '?'} valid + ${data.cases?.invalid ?? '?'} invalid cases)`,
       ['Engine', 'Passing'],
@@ -285,6 +348,7 @@ function toml(data) {
   }
   const profile = data.profile;
   if (profile !== undefined) {
+    if (parseChart !== undefined) out.push(parseChart);
     out.push(table(
       `Parse profile (${profile.iterations} iterations)`,
       ['Document', ...(data.engines ?? [])],
@@ -296,9 +360,30 @@ function toml(data) {
   return out;
 }
 
+/** The markdown charts, rebuilt only when the suite data reloads.
+ * The render comparison stays on a linear axis: the engines sit within
+ * one order of magnitude, where a log axis would only flatter the
+ * slowest. */
+const markdownCharts = memo1((data) => ({
+  scorecard: data.scorecard !== undefined
+    ? chartNode(passCountBars(data.scorecard, {
+      title: 'CommonMark scorecard — examples passed',
+      highlight: 'jaren-md',
+    }))
+    : undefined,
+  render: Array.isArray(data.profile?.render)
+    ? chartNode(profileBars(data.profile.render, data.engines ?? [], {
+      title: 'Parse + render to HTML — ms per document',
+      valLabel: 'ms/op',
+    }))
+    : undefined,
+}));
+
 function markdown(data) {
   const engines = data.engines ?? [];
   const out = [];
+  const { scorecard: scorecardChart, render: renderChart } = markdownCharts(data);
+  if (scorecardChart !== undefined) out.push(scorecardChart);
   if (data.scorecard !== undefined) {
     out.push(table(
       `CommonMark scorecard (${data.examples ?? '?'} official spec examples, whitespace-normalized)`,
@@ -311,6 +396,7 @@ function markdown(data) {
   }
   const profile = data.profile;
   if (profile !== undefined && profile !== null) {
+    if (renderChart !== undefined) out.push(renderChart);
     out.push(table(
       `Parse + render to HTML (${profile.iterations} iterations, ms/op; lower is better)`,
       ['Document', ...engines],
@@ -331,8 +417,28 @@ function markdown(data) {
   return out;
 }
 
+/** The mermaid charts, rebuilt only when the suite data reloads. The
+ * Langium head-to-head is near-parity so it stays linear; the Jison
+ * one spans two orders of magnitude, hence the log axis. */
+const mermaidCharts = memo1((data) => ({
+  parse: Array.isArray(data.profile?.parse) && data.profile.parse.length > 0
+    ? chartNode(profileBars(data.profile.parse, data.engines ?? ['jaren-mermaid'], {
+      title: 'Parse head-to-head — pie, ms per parse',
+      valLabel: 'ms/op',
+    }))
+    : undefined,
+  parseJison: Array.isArray(data.profile?.parseJison) && data.profile.parseJison.length > 0
+    ? chartNode(profileBars(data.profile.parseJison, data.jisonEngines ?? ['jaren-mermaid', 'mermaid (jison)'], {
+      title: 'Parse head-to-head — flowchart / sequence, ms per parse (log)',
+      log: true,
+      valLabel: 'ms/op (log)',
+    }))
+    : undefined,
+}));
+
 function mermaid(data) {
   const out = [];
+  const { parse: parseChart, parseJison: jisonChart } = mermaidCharts(data);
   if (data.scorecard !== undefined) {
     const types = Object.keys(data.scorecard);
     out.push(table(
@@ -348,6 +454,7 @@ function mermaid(data) {
   if (profile !== undefined && profile !== null) {
     const engines = data.engines ?? ['jaren-mermaid'];
     if (Array.isArray(profile.parse) && profile.parse.length > 0) {
+      if (parseChart !== undefined) out.push(parseChart);
       out.push(table(
         `Parse-speed head-to-head — pie vs @mermaid-js/parser (${profile.iterations} iterations, ms/op; lower is better)`,
         ['Diagram', ...engines],
@@ -359,6 +466,7 @@ function mermaid(data) {
     }
     if (Array.isArray(profile.parseJison) && profile.parseJison.length > 0) {
       const jEngines = ['jaren-mermaid', 'mermaid (jison)'];
+      if (jisonChart !== undefined) out.push(jisonChart);
       out.push(table(
         'Parse-speed head-to-head — flowchart / sequence vs mermaid.parse (Jison, ms/op; lower is better)',
         ['Diagram', ...jEngines],

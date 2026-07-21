@@ -13,14 +13,14 @@ const packageFiles = [
   'components/md/package.json',
   'components/mermaid/package.json',
   'components/calc/package.json',
+  'components/charts/package.json',
+  'packages/josl/package.json',
 ];
 
 // private workspaces that are never versioned but whose semver ranges on
 // the publishable packages must keep tracking the release (website and
 // benchmark use file:/absent ranges and need no updating)
-const rangeOnlyFiles = [
-  'packages/josl/package.json',
-];
+const rangeOnlyFiles = [];
 
 const rootFile = 'package.json';
 const rootPackage = readPackage(rootFile);

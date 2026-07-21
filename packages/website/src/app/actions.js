@@ -163,6 +163,10 @@ export const ACTIONS = {
     patch: [{ op: 'replace', path: '/ide/shared', value: '$payload' }],
   },
 
+  // the Binance live demo: an explicit user gesture opens (or closes)
+  // the market-data socket — nothing connects on page load
+  'binance/toggle': { effects: [{ run: 'binance-toggle' }] },
+
   // examples page: load an example into the playground and go there
   'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },
 

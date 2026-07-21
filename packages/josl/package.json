@@ -1,11 +1,12 @@
 {
   "name": "@jarenjs/josl",
-  "private": true,
-  "version": "0.10.0",
+  "private": false,
+  "version": "0.15.0",
   "type": "module",
   "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
   "sideEffects": false,
-  "description": "JOSL - JavaScript Obvious Streaming Language. A TOML 1.0 backward-compatible data language with null, bigint, regexp, datetimes and root arrays as first class citizens, plus JSONX, the same extensions over JSON. Experimental.",
+  "description": "JOSL - JavaScript Obvious Streaming Language. A TOML 1.0 backward-compatible data language with null, bigint, regexp, datetimes and root arrays as first class citizens, plus JSONX, the same extensions over JSON - with incremental streaming readers for JOSL, TOML, JSONX and strict JSON.",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -16,40 +17,69 @@
   "engines": {
     "node": ">=22"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "keywords": [
     "jaren",
     "josl",
     "toml",
     "jsonx",
+    "json",
     "streaming",
+    "incremental",
+    "real-time",
+    "structured-output",
     "parser",
     "llm"
   ],
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  },
+  "files": [
+    "dist/types/",
+    "src/",
+    "FORMAT.md"
+  ],
   "exports": {
     ".": {
+      "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
     "./parse": {
+      "types": "./dist/types/parse.d.ts",
       "default": "./src/parse.js"
     },
     "./stream": {
+      "types": "./dist/types/stream.d.ts",
       "default": "./src/stream.js"
     },
     "./stringify": {
+      "types": "./dist/types/stringify.d.ts",
       "default": "./src/stringify.js"
     },
     "./write": {
+      "types": "./dist/types/write.d.ts",
       "default": "./src/write.js"
     },
     "./jsonx": {
+      "types": "./dist/types/jsonx.d.ts",
       "default": "./src/jsonx.js"
     },
+    "./jsonx-stream": {
+      "types": "./dist/types/jsonx-stream.d.ts",
+      "default": "./src/jsonx-stream.js"
+    },
     "./values": {
+      "types": "./dist/types/values.d.ts",
       "default": "./src/values.js"
     },
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.14.5"
+    "@jarenjs/core": "^0.15.0"
   }
 }

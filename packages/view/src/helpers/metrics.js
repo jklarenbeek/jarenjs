@@ -5,9 +5,10 @@
  * `measureText` estimates a string's rendered box from a precomputed
  * per-codepoint advance-width table for a default sans-serif at unit em.
  * It is deliberately an **approximation** — pixel parity with a browser
- * font is a non-goal (see MERMAID-FORMAT §6). The table is a module
- * constant (`Float32Array`), the hot loop allocates nothing, and
- * unmapped codepoints fall back to an average advance.
+ * font is a non-goal. The table is a module constant (`Float32Array`),
+ * the hot loop allocates nothing, and unmapped codepoints fall back to
+ * an average advance. Shared by the SVG-emitting components
+ * (`@jarenjs/mermaid` layout, `@jarenjs/charts` legends and axes).
  */
 
 /** Average advance (em) for codepoints outside the ASCII table. */

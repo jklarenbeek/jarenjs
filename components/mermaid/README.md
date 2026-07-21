@@ -141,6 +141,10 @@ honest "not yet laid out" placeholder: mindmap, gitGraph, journey,
 timeline, quadrantChart. The benchmark's coverage scorecard reports this
 without hiding gaps.
 
+Pie rendering delegates to [`@jarenjs/charts`](../charts) (the pie
+engine's single home) — the emitted SVG is unchanged; mermaid passes
+its class names, palette and theme through the render options.
+
 ## Performance (measured)
 
 Node v22.22.2, 2026-07-19, `npm run benchmark:mermaid` (run it

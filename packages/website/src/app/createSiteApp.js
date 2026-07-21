@@ -21,6 +21,7 @@ import { viewModel } from './viewmodel.js';
 import { STYLESHEET } from '../views/index.js';
 import { runValidation } from '../boundaries/validator.js';
 import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
+import { binanceToggle } from '../boundaries/binance.js';
 import { registerWebMcpTools } from '../boundaries/webmcp.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
@@ -87,6 +88,8 @@ export function createSiteApp(env) {
         });
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
+    'binance-toggle': (props, dispatch) =>
+      binanceToggle((action, payload) => dispatch(action, payload)),
     'parse-data': (props, dispatch) => {
       try {
         dispatch('pg/data-set', JSON.parse(props.text));
@@ -230,6 +233,23 @@ function wireBoundaries(app, debounceMs) {
     if (state.eng[engine] === undefined) return;
     app.dispatch('eng/result', { engine, result: runEngine(engine, state.eng[engine]) });
   };
+  // Engines may carry a `sync(inputs, dispatch, active)` lifecycle hook
+  // (the charts replay timer): called after that engine's boundary run
+  // and on every route change, with `active` false whenever the
+  // playground no longer shows the engine — the hook must stop its
+  // side channel then.
+  const syncEng = (engine) => {
+    const def = ENGINE_DEFS[engine];
+    if (def === undefined || def.sync === undefined) return;
+    const state = app.getState();
+    const active = state.route.page === 'playground'
+      && (state.route.params.engine ?? 'validate') === engine;
+    def.sync(state.eng[engine] ?? {},
+      (action, payload) => app.dispatch(action, payload), active);
+  };
+  const syncAll = () => {
+    for (const engine of Object.keys(ENGINE_DEFS)) syncEng(engine);
+  };
   /** @type {Map<string, any>} */
   const timers = new Map();
   const debounced = (key, run) => {
@@ -262,7 +282,12 @@ function wireBoundaries(app, debounceMs) {
       }
     }
     if (validate) debounced('validate', runValidate);
-    for (const engine of engines) debounced(`eng:${engine}`, () => runEng(engine));
+    for (const engine of engines) {
+      debounced(`eng:${engine}`, () => {
+        runEng(engine);
+        syncEng(engine);
+      });
+    }
     if (routed) {
       const s = app.getState();
       const engine = s.route.params.engine;
@@ -270,6 +295,7 @@ function wireBoundaries(app, debounceMs) {
         && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
         runEng(engine);
       }
+      syncAll();
       applyShareToken(s);
     }
   });
