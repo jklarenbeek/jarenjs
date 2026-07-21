@@ -46,6 +46,21 @@ from this file; items link to the document that motivates them where one exists.
 
 ## @jarenjs/validate
 
+- [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the sibling-coverage
+  elision shipped in v0.16.1 compiles away the checks that are statically unreachable
+  (`additionalProperties` next to `unevaluatedProperties`, uniform `items` next to
+  `unevaluatedItems`, annotation-only `true` forms with no consumer), but the genuinely
+  dynamic cases — nested `unevaluated*`, cousin schemas, annotations flowing across
+  `$ref`/in-place applicators — still pay the runtime evaluation log and its linear scans,
+  and sit well behind Ajv's compile-time evaluated-set tracking. Computing a static
+  evaluated set per schema scope (with a small dynamic remainder only where refs make it
+  unknowable) is the main remaining validator performance workstream.
+- [ ] **Optional codegen backend for nano-schemas** — closure-compiled validators bottom
+  out around 5× Ajv's generated code on trivial schemas (a two-branch `allOf` runs ~90 ns
+  vs ~15 ns), which is the price of the CSP-safe no-`new Function` rule. Mirroring the
+  query engine's "optional codegen backend" idea — same compile pipeline, a codegen
+  emitter where CSP allows, closures as the default — would close the floor without
+  giving up the guarantee.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 - [ ] **Additional locale packs** — the catalog contract and key-parity tests make each pack mechanical; `nl` is the reference implementation.
@@ -101,6 +116,17 @@ from this file; items link to the document that motivates them where one exists.
 
 - [ ] **`iregexp` format** — register an I-Regexp (RFC 9485) string format backed by `isValidIRegexp` from `@jarenjs/core/text` (the implementation already exists and powers JSONPath's `match()`/`search()`).
 - [ ] **Tests for `country2` and `iban`** — both formats ship without tests (flagged in their format list entries).
+- [ ] **Char-code IRI/IRI-reference validator** — `isValidIRI` falls back to a heavily
+  backtracking alternation regex for non-ASCII and bracketed inputs (microseconds per
+  call). The RFC 3339 date/time testers moved to allocation-free char-code parsers in
+  v0.16.1; the IRI family is the remaining regex monster. Ajv does not implement `iri`
+  at all, so this is about absolute cost for real consumers, not a benchmark ratio.
+- [ ] **`idn-hostname` punycode cost** — validation of a Unicode hostname costs ~1.6 µs,
+  dominated by the genuine IDNA work (per-label punycode decode plus a whole-string
+  `toASCII` re-encode for the ACE shape check). The double decode and the identity
+  re-encode for ASCII inputs were removed in v0.16.1; anything further means reworking
+  the punycode encoder itself. Ajv errors on this format, so the same fairness note as
+  `iri` applies.
 
 ## @jarenjs/forms
 
@@ -190,4 +216,3 @@ for a consumer:
 - [ ] **Saxon-JS as an optional competitor** — noted and deliberately excluded so far (heavyweight SEF/XSLT toolchain for a zero-build workspace).
 - [ ] **Drop the fontoxpath baseline-subtraction hack if a compile-only API appears** — the jsonquery adaptor pre-converts XDM and subtracts a baseline because fontoxpath exposes no compile-only entry point; a future compile-only API would let the adaptor measure it fairly.
 - [ ] **Lint the benchmark workspace** — `benchmark/` sits outside the `npm run lint` glob; the tools follow house style but are not lint-enforced.
-- [ ] **Full `meta.json` regeneration before publishing** — benchmark result generation has been run per-slice (e.g. mermaid's conformance section); a full `npm run benchmark:generate` pass is needed before a real publish so every suite's numbers are current.

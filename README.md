@@ -8,7 +8,7 @@ Every engine in the repository follows one philosophy: **parse and decide everyt
 
 ## ✅ Conformance & Speed
 
-Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)** — including the optional format suites — for all benchmarked drafts, while being faster than Ajv on the majority of individual test cases in every draft. All numbers below were measured on 2026-07-17 with Node v24.14.0; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
+Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)** — including the optional format suites — for all benchmarked drafts, while being faster than Ajv on roughly four of five individual test cases in every draft and about twice as fast on the success-only totals. All numbers below were measured on 2026-07-21 with Node v22.22.2; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
 
 ### @jarenjs/validate — vs Ajv over the official suite
 
@@ -16,11 +16,11 @@ Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/
 
 | Draft | Jaren | Ajv | Success-only totals | Jaren faster on |
 |---|---|---|---|---|
-| draft-07 | **308 passed, 0 failed, 0 errors** | 294 passed, 13 failed, 1 error | **117 ms** vs 151 ms | 205 of 294 tests |
-| 2019-09 | **425 passed, 0 failed, 0 errors** | 406 passed, 15 failed, 4 errors | **200 ms** vs 212 ms | 240 of 406 tests |
-| 2020-12 | **433 passed, 0 failed, 0 errors** | 390 passed, 33 failed, 10 errors | 198 ms vs **189 ms** | 217 of 390 tests |
+| draft-07 | **308 passed, 0 failed, 0 errors** | 294 passed, 13 failed, 1 error | **122 ms** vs 249 ms | 266 of 294 tests |
+| 2019-09 | **425 passed, 0 failed, 0 errors** | 406 passed, 15 failed, 4 errors | **195 ms** vs 382 ms | 332 of 406 tests |
+| 2020-12 | **433 passed, 0 failed, 0 errors** | 390 passed, 33 failed, 10 errors | **170 ms** vs 330 ms | 306 of 390 tests |
 
-These runs exercise `@jarenjs/formats` and `@jarenjs/refs` too: the optional format suites are included, and every draft's bundled meta-schemas are in play. The 2020-12 totals are a near-tie dominated by a handful of `unevaluated*` outliers; per-test medians favor Jaren in all three drafts.
+These runs exercise `@jarenjs/formats` and `@jarenjs/refs` too: the optional format suites are included, and every draft's bundled meta-schemas are in play. `unevaluatedProperties`/`unevaluatedItems` checks that sibling keywords make unreachable are compiled away entirely, so the `unevaluated*` outliers that once dragged the 2020-12 totals to a near-tie are gone; per-test medians favor Jaren in all three drafts.
 
 ### @jarenjs/json — four compiled engines, five benchmarks
 

@@ -12,12 +12,12 @@ export const HOME_CONTENT = {
     install: 'npm install @jarenjs/validate',
     points: [
       '100% of the official JSON-Schema-Test-Suite, all benchmarked drafts',
-      'Faster than Ajv on the majority of individual tests per draft',
+      'Faster than Ajv on roughly 4 of 5 individual tests per draft, ≈2× faster on the suite totals',
       'Every grammar published as JSON Schema for LLM constrained decoding',
     ],
   },
   engines: [
-    { key: 'validate', title: 'JSON Schema', blurb: 'Compiles schemas to specialized closures: annotation-driven unevaluated*, dynamic refs, $data, the $query cross-field keyword and structured, localizable errors.', perf: '308–433 suite tests per draft, 0 failures' },
+    { key: 'validate', title: 'JSON Schema', blurb: 'Compiles schemas to specialized closures: annotation-driven unevaluated* with statically-elided checks, dynamic refs, $data, the $query cross-field keyword and structured, localizable errors.', perf: '0 failures on every draft, ≈2× Ajv where both pass' },
     { key: 'path', title: 'JSONPath', blurb: 'The complete RFC 9535 grammar as a compiler — all 703 compliance tests pass, normalized paths included.', perf: '18.7× faster than json-p3 on the CTS mean' },
     { key: 'pointer', title: 'JSON Pointer', blurb: 'RFC 6901 with zero-allocation compiled getters, plus relative pointers — the $data hot path.', perf: '37 ns on escaped keys vs 548 ns npm' },
     { key: 'patch', title: 'JSON Patch', blurb: 'RFC 6902 and RFC 7396 as copy-on-write appliers: atomic, structure-sharing, and a change feed of written paths.', perf: '5–170× vs clone-and-interpret' },
