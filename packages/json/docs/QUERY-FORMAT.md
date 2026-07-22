@@ -519,11 +519,21 @@ A *keySpec* is either an expression (shorthand for ascending, empty-least) or
 the explicit form
 
 ```json
-{ "$key": expr, "$dir": "asc" | "desc", "$empty": "least" | "greatest" }
+{ "$key": expr, "$dir": "asc" | "desc", "$empty": "least" | "greatest",
+  "$collation": "name" }
 ```
 
-with `$key` REQUIRED and `$dir` (default `"asc"`) and `$empty` (default
-`"least"`) OPTIONAL.
+with `$key` REQUIRED and `$dir` (default `"asc"`), `$empty` (default
+`"least"`) and `$collation` OPTIONAL.
+
+`$collation` names a **registered pure compare function**
+(`options.collations`, a trusted host capability like `options.functions`,
+§8.12) applied to this key's *string* comparisons — the natural-language
+orders (`Intl.Collator('nl').compare`, say) that the format's default
+code-point order (§8.9) deliberately does not build in. Number keys keep
+numeric order; an unregistered name is compile error `JQ0010`. Registered
+collations appear in `query.dependencies`/`query.explain()` (§8.12), so a
+saved rule declares the collations it needs.
 
 - An array value of `$orderby` is **always a list of key specs**, ordered
   major to minor, and MUST NOT be empty. Consequently a *single* key spec is
@@ -954,6 +964,53 @@ README's "`$query` — cross-field assertions" section.
 
 ---
 
+### 8.12 Registered functions, collations, and execution limits
+
+Three compile options make a compilation's **trusted host capabilities**
+explicit — none of them changes the closed format: a document using them
+compiles only against a host that registered them, and a host that
+registered nothing keeps exactly the spec vocabulary.
+
+**`options.functions` and `$call`.** A registry of named pure functions;
+the `$call` phrase invokes one:
+
+```json
+{ "$call": ["upper", "$b.title"] }
+```
+
+The first item MUST be a literal string naming a registered function
+(`JQ0010` otherwise). Argument expressions evaluate first; each crosses
+the boundary as plain JSON — a sequence as an array of items, the empty
+sequence as `undefined`. The function's return value is one item;
+`undefined` is the empty sequence. A throwing function is runtime error
+`JQ2010`. Functions MUST be pure over JSON: they are part of the query's
+semantics, not an effect hatch.
+
+**`options.collations`.** A registry of named pure compare functions for
+`$orderby`'s `$collation` member (§6.6).
+
+**`options.limits`.** Deterministic execution limits enforced *inside*
+the synchronous engine:
+
+- `sequenceItems` — bounds every FLWOR phrase materialization and
+  tightens `$range`'s resource guard below its 2³² ceiling; exceeding it
+  is `JQ2009` (`$range` keeps its historical `JQ2007`).
+- `resultItems` — bounds the final result at the query boundary
+  (`JQ2009`).
+
+Only enforced limits are accepted: `steps`/`depth` (a fully instrumented
+evaluation core) are **rejected with a `TypeError`** until they exist —
+an accepted-but-unenforced limit would be a silent false guarantee. A
+wall-clock or CPU limit is out of scope by design: a synchronous run on
+the caller's thread cannot be preempted; a host needing hard termination
+owns a worker or isolate.
+
+**Dependencies and explanation.** The compiled query reports what it
+needs: `query.dependencies` is a frozen `{ externals, operators,
+functions, collations }`, and `query.explain()` returns that plus the
+enforced limits as fresh plain JSON — the vetting surface for saved or
+machine-authored rules.
+
 ## 9. Variables, scoping, and external parameters
 
 1. Variables are introduced by `$for`, `$let`, `$at`, `$count`, `$groupby`
@@ -1006,6 +1063,7 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ0007` | Duplicate variable binding within one phrase (§6.3) | XQST0089 |
 | `JQ0008` | Schema operator (`$valid`/`$assert`/`$as`) in a query compiled without a type-test compiler (§8.11) | XQST0009 |
 | `JQ0009` | Schema literal rejected by the type-test compiler (invalid embedded schema, §8.11) | XQST0059 |
+| `JQ0010` | `$call`/`$collation` naming no registered function/collation (§8.12, §6.6) | XPST0017 |
 
 ### 10.3 Runtime errors (`JQ2xxx`)
 
@@ -1019,6 +1077,8 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2006` | Reference to an unbound external parameter (§9) | XPDY0002 |
 | `JQ2007` | Resource guard: an operator result exceeding an implementation limit (`$range` over 2³² items, §8.9) | XPDY0130 |
 | `JQ2008` | Schema assertion failure: an item rejected by `$assert`'s schema, or a bound variable rejected by its `$as` schema (§6.8, §8.11) | XPTY0004 |
+| `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, or `limits.resultItems` at the query boundary (§8.12) | XPDY0130 |
+| `JQ2010` | A registered `$call` function threw (§8.12) | FOER0000 |
 
 ---
 

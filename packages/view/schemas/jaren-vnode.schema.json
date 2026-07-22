@@ -20,7 +20,8 @@
         {
           "type": "string",
           "minLength": 1,
-          "description": "The tag name."
+          "not": { "const": "jaren-widget" },
+          "description": "The tag name. The reserved widget tag is excluded: a jaren-widget node must satisfy the strict widget shape and can never validate through this generic branch."
         }
       ],
       "items": {
@@ -33,6 +34,15 @@
     },
     "list": {
       "type": "array",
+      "prefixItems": [
+        {
+          "allOf": [
+            { "not": { "type": "string" } },
+            { "$ref": "#/$defs/vnode" }
+          ],
+          "description": "The documented distinction, enforced: an array whose first item IS a string is an element (or a widget), never a list. The first item is still a vnode like every other."
+        }
+      ],
       "items": { "$ref": "#/$defs/vnode" },
       "description": "A child list, spliced into the parent's children in place. Distinguished from an element by its first item not being a string."
     },
@@ -47,7 +57,7 @@
         },
         { "$ref": "#/$defs/widgetProps" }
       ],
-      "description": "A widget vnode: [\"jaren-widget\", props] mounts a registered JavaScript widget into a host element the renderer owns. A widget node has NO vnode children — the widget owns the host's subtree. Every widget node also validates as a plain element (backward compatible); this shape exists so constrained decoders can target it. See docs/VIEW-FORMAT.md section 7."
+      "description": "A widget vnode: [\"jaren-widget\", props] mounts a registered JavaScript widget into a host element the renderer owns. A widget node has NO vnode children — the widget owns the host's subtree. The reserved tag is excluded from the generic element branch, so a malformed widget node fails validation instead of passing as a plain element. See docs/VIEW-FORMAT.md section 7."
     },
     "widgetProps": {
       "type": "object",
@@ -73,7 +83,7 @@
         "on": {
           "type": "object",
           "additionalProperties": {
-            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name or { action, with, event }."
+            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name, or { action, with?, event?, preventDefault?, stopPropagation? } - event is an array of requested $event field names; the two boolean controls (default false) run synchronously in the native event callback, before the action is queued (APP-FORMAT section 3.1)."
           },
           "description": "Event bindings on the HOST element, by DOM event type."
         },
@@ -98,7 +108,7 @@
         "on": {
           "type": "object",
           "additionalProperties": {
-            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name or { action, with, event }."
+            "description": "An opaque event binding, delivered as-is to the renderer's onEvent hook. In @jarenjs/app: an action name, or { action, with?, event?, preventDefault?, stopPropagation? } - event is an array of requested $event field names; the two boolean controls (default false) run synchronously in the native event callback, before the action is queued (APP-FORMAT section 3.1)."
           },
           "description": "Event bindings by DOM event type."
         },

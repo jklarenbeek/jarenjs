@@ -134,8 +134,10 @@ export function createDomRenderer(container, options = {}) {
   let oldVnode = null;
   /** @type {any} */
   let rootNode = null;
+  let destroyed = false;
 
-  return function render(vnode) {
+  function render(vnode) {
+    if (destroyed) return; // a scheduled flush after destroy is a no-op
     if (!isTextNode(vnode) && !isElementNode(vnode)) {
       throw new TypeError('view: the root vnode must be a text or element vnode');
     }
@@ -158,7 +160,33 @@ export function createDomRenderer(container, options = {}) {
       ctx.destroyError = null;
       throw err;
     }
+  }
+
+  /**
+   * Terminal teardown (VIEW-FORMAT §8): every mounted widget in the
+   * rendered tree unmounts exactly once (pending mounts are canceled),
+   * the container is left empty, and later `render` calls are exact
+   * no-ops. Idempotent. A throwing widget `unmount` never stops the
+   * walk; the first such error is thrown after the teardown completes.
+   */
+  render.destroy = function destroy() {
+    if (destroyed) return;
+    destroyed = true;
+    ctx.mountQueue.length = 0;
+    if (rootNode !== null) {
+      destroyNode(ctx, rootNode, oldVnode);
+      container.textContent = '';
+      rootNode = null;
+      oldVnode = null;
+    }
+    if (ctx.destroyError !== null) {
+      const err = ctx.destroyError;
+      ctx.destroyError = null;
+      throw err;
+    }
   };
+
+  return render;
 }
 
 /**

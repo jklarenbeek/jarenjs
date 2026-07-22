@@ -94,7 +94,13 @@ effects: {
 }
 ```
 
-The helper aborts a slot's in-flight predecessor, dispatches `done` with `{ id, result }` on resolve and `fail ?? done` with `{ id, error }` (a string) on failure, and dispatches nothing for an abort. The abort is only an optimization — an aborted request may already have resolved — so the state-side id guard is the guarantee: out-of-order and polling responses are rejected by construction. The full convention, with a runnable worked example the test suite executes verbatim, is [docs/TASKS.md](docs/TASKS.md).
+The helper aborts a slot's in-flight predecessor (`mode: "switch"`, the default — `"exhaust"`, `"concat"` and `"parallel"` pick the other per-slot concurrency semantics), dispatches `done` with `{ id, result }` on resolve and `fail ?? done` with `{ id, error }` (a string) on failure, and dispatches nothing for an abort. The abort is only an optimization — an aborted request may already have resolved — so the state-side id guard is the guarantee: out-of-order and polling responses are rejected by construction. The handler exposes `cancel(slot)`/`cancelAll()`/`dispose()`; `app.destroy()` disposes it automatically. The full convention, with a runnable worked example the test suite executes verbatim, is [docs/TASKS.md](docs/TASKS.md).
+
+## One FIFO queue, observable transactions
+
+Every dispatch — from the DOM, an effect, a listener, a subscription or a widget — is one **transaction** on one FIFO queue; nested dispatches queue, never interleave, so every listener observes every transaction in the same order with the state that transaction produced ([APP-FORMAT §8](docs/APP-FORMAT.md)). Boot is a transaction too: a failing initial subscription or first frame rolls back everything acquired and throws `JA0007`. `app.stop()` pauses; `app.destroy()` is the terminal teardown — subscriptions cleaned, effect handlers disposed, widgets unmounted exactly once, the container emptied.
+
+`app.observe(fn)` streams one bounded JSON record per transaction (`seq`, `action`, `source`, `status`, `changedPaths`, `scheduledEffects`, `durationMs`, `errorCode` — payloads only with the `capturePayloads` opt-in), and `createTransactionLog({ limit, redact })` packages the ring buffer with a redaction hook for support exports. `createFocusEffect({ container })` bridges focus, text selection and measurement through post-render `data-ref` intents, so accessible dialogs restore focus without a DOM node ever entering state (§8.4).
 
 ## Widgets — imperative islands, declarative everything else
 

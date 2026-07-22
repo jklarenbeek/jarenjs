@@ -85,7 +85,7 @@ const QUANTIFIER_KEYS = new Set(['$some', '$every', '$satisfies']);
 
 // Keys of the explicit $orderby key-spec form (section 6.6). Contextual:
 // they are not operators and stay outside the KNOWN_KEYS vocabulary.
-const ORDERBY_SPEC_KEYS = new Set(['$key', '$dir', '$empty']);
+const ORDERBY_SPEC_KEYS = new Set(['$key', '$dir', '$empty', '$collation']);
 
 // Escape hatches (QUERY-FORMAT.md section 3.5): structural forms with
 // dedicated normalizer cases; every other operator lives in the registry.
@@ -444,9 +444,15 @@ function argCards(args) {
 // `result` - individual operators never re-check structure.
 function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   const args = normalizeParams(key, entry.params, arg, opPath, scope, ctx);
-  return Object.freeze({
+  /** @type {any} */
+  const node = {
     kind: 'op', card: entry.result(argCards(args)), docPath, name: key, args: Object.freeze(args),
-  });
+  };
+  // $range materializes its whole result: the resource guard becomes
+  // configurable through the compilation's limits (compileOp hands the
+  // node through to the entry's compile)
+  if (key === '$range' && ctx.limits !== null) node.limits = ctx.limits;
+  return Object.freeze(node);
 }
 
 // Helpers handed to an extension entry's `normalize` override; see
@@ -479,9 +485,29 @@ function normalizeExtensionCall(key, entry, arg, docPath, opPath, scope, ctx) {
 
 function normalizeOperator(key, arg, docPath, scope, ctx) {
   const opPath = docPath + '/' + key;
+  ctx.usedOps.add(key); // dependency reporting (query.explain)
   switch (key) {
     case '$const': // quote: verbatim single item, nothing inside evaluated
       return Object.freeze({ kind: 'literal', card: CARD_ONE, docPath, value: deepFreezeCopy(arg) });
+
+    case '$call': { // a registered trusted host function (options.functions)
+      if (!Array.isArray(arg) || arg.length < 1 || typeof arg[0] !== 'string')
+        return fail('JQ0010', "'$call' requires ['name', ...argument expressions]", opPath);
+      const name = arg[0];
+      const fn = ctx.functions !== null && hasOwn(ctx.functions, name)
+        ? ctx.functions[name]
+        : undefined;
+      if (fn === undefined)
+        return fail('JQ0010', `'$call' names no registered function '${name}'`, opPath);
+      ctx.usedFunctions.add(name);
+      const callArgs = new Array(arg.length - 1);
+      for (let i = 1; i < arg.length; i++)
+        callArgs[i - 1] = normalizeExpr(arg[i], opPath + '/' + i, scope, ctx);
+      return Object.freeze({
+        kind: 'call', card: CARD_OPT, docPath, name, fn,
+        args: Object.freeze(callArgs),
+      });
+    }
 
     case '$map': { // general map constructor (section 3.5.2)
       const list = requireExprArray(key, arg, 0, Infinity, opPath);
@@ -616,13 +642,19 @@ function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings
 }
 
 // One $orderby key spec (section 6.6): an expression (ascending,
-// empty-least) or the explicit {"$key", "$dir"?, "$empty"?} form.
+// empty-least) or the explicit {"$key", "$dir"?, "$empty"?,
+// "$collation"?} form. A $collation names a registered pure compare
+// function (options.collations) applied to STRING keys; number keys
+// keep numeric order.
 function normalizeOrderbySpec(spec, specPath, scope, ctx) {
   let key = spec;
   let keyPath = specPath;
   let desc = false;
   let emptyGreatest = false;
-  if (isPlainObject(spec) && (hasOwn(spec, '$key') || hasOwn(spec, '$dir') || hasOwn(spec, '$empty'))) {
+  let collation = null;
+  let collationName = null;
+  if (isPlainObject(spec)
+    && (hasOwn(spec, '$key') || hasOwn(spec, '$dir') || hasOwn(spec, '$empty') || hasOwn(spec, '$collation'))) {
     const specKeys = Object.keys(spec);
     for (let i = 0; i < specKeys.length; i++) {
       if (!ORDERBY_SPEC_KEYS.has(specKeys[i]))
@@ -640,12 +672,23 @@ function normalizeOrderbySpec(spec, specPath, scope, ctx) {
         return fail('JQ0003', "'$empty' must be 'least' or 'greatest'", specPath + '/$empty');
       emptyGreatest = spec.$empty === 'greatest';
     }
+    if (hasOwn(spec, '$collation')) {
+      if (typeof spec.$collation !== 'string')
+        return fail('JQ0003', "'$collation' must be a registered collation name", specPath + '/$collation');
+      collationName = spec.$collation;
+      collation = ctx.collations !== null && hasOwn(ctx.collations, collationName)
+        ? ctx.collations[collationName]
+        : undefined;
+      if (collation === undefined)
+        return fail('JQ0010', `'$collation' names no registered collation '${collationName}'`, specPath + '/$collation');
+      ctx.usedCollations.add(collationName);
+    }
     key = spec.$key;
     keyPath = specPath + '/$key';
   }
   return Object.freeze({
     key: normalizeExpr(key, keyPath, scope, ctx),
-    desc, emptyGreatest, docPath: specPath,
+    desc, emptyGreatest, collation, collationName, docPath: specPath,
   });
 }
 
@@ -681,6 +724,7 @@ function collectReadSlots(node, out) {
     case 'raw': // compile-time data of a registry operator, never evaluated
       return;
     case 'op':
+    case 'call':
       for (let i = 0; i < node.args.length; i++)
         collectReadSlots(node.args[i], out);
       return;
@@ -895,6 +939,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     groupby: groupby === null ? null : Object.freeze(groupby),
     orderby: orderby === null ? null : Object.freeze(orderby),
     count, ret,
+    limits: ctx.limits,
   });
 }
 
@@ -955,6 +1000,42 @@ function validateExtensions(extensions) {
   return extensions;
 }
 
+// Validate a named registry of trusted pure host functions
+// (options.functions / options.collations): a plain object of
+// `name -> function`. Violations are host programming errors
+// (TypeError), like options.extensions.
+function validateNamedFunctions(value, what) {
+  if (!isPlainObject(value))
+    throw new TypeError(`options.${what} must be a plain object of named functions`);
+  for (const name in value) {
+    if (typeof value[name] !== 'function')
+      throw new TypeError(`options.${what}['${name}'] must be a function`);
+  }
+  return value;
+}
+
+// Validate `options.limits`. Only the limits the engine actually
+// enforces are accepted - an accepted-but-unenforced limit would be a
+// silent false guarantee. `steps`/`depth` need an instrumented
+// evaluation core and are rejected until that exists.
+function validateLimits(value) {
+  if (!isPlainObject(value))
+    throw new TypeError('options.limits must be a plain object');
+  for (const name in value) {
+    if (name === 'steps' || name === 'depth')
+      throw new TypeError(`options.limits.${name} is not enforced by this engine yet; refusing to accept a limit that would not be honored`);
+    if (name !== 'sequenceItems' && name !== 'resultItems')
+      throw new TypeError(`options.limits.${name} is not a known limit`);
+    const v = value[name];
+    if (!Number.isInteger(v) || v < 1)
+      throw new TypeError(`options.limits.${name} must be a positive integer`);
+  }
+  return Object.freeze({
+    sequenceItems: value.sequenceItems ?? null,
+    resultItems: value.resultItems ?? null,
+  });
+}
+
 function normalizeExpr(value, docPath, scope, ctx) {
   switch (typeof value) {
     case 'string':
@@ -1008,7 +1089,14 @@ export function normalizeQuery(doc, options = {}) {
     ? options.compileTypeTest
     : null;
   const extensions = options.extensions == null ? null : validateExtensions(options.extensions);
-  const ctx = { nextSlot: 1, externals: new Map(), compileTypeTest, extensions };
+  const functions = options.functions == null ? null : validateNamedFunctions(options.functions, 'functions');
+  const collations = options.collations == null ? null : validateNamedFunctions(options.collations, 'collations');
+  const limits = options.limits == null ? null : validateLimits(options.limits);
+  const ctx = {
+    nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
+    functions, collations, limits,
+    usedOps: new Set(), usedFunctions: new Set(), usedCollations: new Set(),
+  };
   let expr = doc;
   let rootPath = '';
   // the version envelope is only recognized at the top level (section 4)
@@ -1033,7 +1121,13 @@ export function normalizeQuery(doc, options = {}) {
   let i = 0;
   for (const [name, slot] of ctx.externals)
     externals[i++] = Object.freeze({ name, slot });
-  return { root, frameSize: ctx.nextSlot, externals: Object.freeze(externals) };
+  return {
+    root, frameSize: ctx.nextSlot, externals: Object.freeze(externals),
+    limits,
+    usedOps: ctx.usedOps,
+    usedFunctions: ctx.usedFunctions,
+    usedCollations: ctx.usedCollations,
+  };
 }
 
 //#endregion

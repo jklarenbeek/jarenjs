@@ -281,7 +281,38 @@ function compileOp(node) {
   const gets = new Array(args.length);
   for (let i = 0; i < args.length; i++)
     gets[i] = args[i].kind === 'raw' ? null : compileNode(args[i]);
-  return entry.compile(gets, args, node.docPath + '/' + node.name);
+  // the node rides along for entries that read compilation context
+  // (e.g. $range's configurable resource guard via node.limits)
+  return entry.compile(gets, args, node.docPath + '/' + node.name, node);
+}
+
+// A '$call' node: a registered trusted pure host function
+// (options.functions). Sequences cross the boundary as arrays, the
+// empty sequence as undefined; a returned undefined is the empty
+// sequence, anything else is one item. A throwing function is JQ2010.
+function compileCall(node) {
+  const fn = node.fn;
+  const name = node.name;
+  const docPath = node.docPath;
+  const argGets = new Array(node.args.length);
+  for (let i = 0; i < node.args.length; i++)
+    argGets[i] = compileNode(node.args[i]);
+  return (f) => {
+    const argv = new Array(argGets.length);
+    for (let i = 0; i < argGets.length; i++) {
+      const v = argGets[i](f);
+      argv[i] = v === EMPTY ? undefined : v instanceof Seq ? v.items.slice() : v;
+    }
+    let out;
+    try {
+      out = fn(...argv);
+    }
+    catch (err) {
+      throw new JsonQueryRuntimeError('JQ2010',
+        `registered function '${name}' threw: ${/** @type {Error} */ (err).message}`, docPath);
+    }
+    return out === undefined ? EMPTY : out;
+  };
 }
 
 //#endregion
@@ -472,9 +503,11 @@ function compileRowComparator(specs, keyPaths) {
   const keyCount = specs.length;
   const descs = new Array(keyCount);
   const emptyGreatests = new Array(keyCount);
+  const collations = new Array(keyCount);
   for (let i = 0; i < keyCount; i++) {
     descs[i] = specs[i].desc;
     emptyGreatests[i] = specs[i].emptyGreatest;
+    collations[i] = specs[i].collation ?? null;
   }
   return (a, b) => {
     for (let i = 0; i < keyCount; i++) {
@@ -504,7 +537,9 @@ function compileRowComparator(specs, keyPaths) {
         if (typeof y !== 'string')
           throw new JsonQueryRuntimeError('JQ2005',
             'cannot order a string against a number in $orderby', keyPaths[i]);
-        c = compareCodePoints(x, y);
+        // a registered $collation orders the STRING keys; the default
+        // stays the format's code-point order
+        c = collations[i] !== null ? collations[i](x, y) : compareCodePoints(x, y);
       }
       if (c !== 0)
         return descs[i] ? -c : c;
@@ -529,6 +564,24 @@ function compileFlwor(node) {
     sink = (f, out) => {
       inner(f, out);
       f[countSlot] += 1;
+    };
+  }
+
+  // limits.sequenceItems bounds every phrase materialization: the guard
+  // fires while the accumulator grows, deterministically, inside the
+  // synchronous engine (never a wall-clock claim)
+  const seqLimit = node.limits !== null && node.limits !== undefined
+    && node.limits.sequenceItems !== null
+    ? node.limits.sequenceItems
+    : 0;
+  if (seqLimit > 0) {
+    const inner = sink;
+    const limitPath = node.docPath;
+    sink = (f, out) => {
+      inner(f, out);
+      if (out.length > seqLimit)
+        throw new JsonQueryRuntimeError('JQ2009',
+          `a phrase materialized more than ${seqLimit} items (limits.sequenceItems)`, limitPath);
     };
   }
 
@@ -805,6 +858,8 @@ export function compileNode(node) {
       return compileArray(node);
     case 'op':
       return compileOp(node);
+    case 'call':
+      return compileCall(node);
     case 'let':
       return compileLet(node);
     case 'quant':

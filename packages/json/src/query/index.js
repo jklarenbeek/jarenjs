@@ -16,6 +16,7 @@
 import { normalizeQuery, deepFreezeCopy } from './normalize.js';
 import { compileNode, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
+import { JsonQueryRuntimeError } from './errors.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 
@@ -74,9 +75,11 @@ const hasOwn = Object.hasOwn;
  * q(data, { max: 10 }); // { title: 'Sayings of the Century', cheap: true }
  */
 export function compileJsonQuery(doc, options = {}) {
-  const { root, frameSize, externals } = normalizeQuery(doc, options);
+  const { root, frameSize, externals, limits, usedOps, usedFunctions, usedCollations } =
+    normalizeQuery(doc, options);
   const get = compileNode(root);
   const extCount = externals.length;
+  const resultCap = limits !== null && limits.resultItems !== null ? limits.resultItems : 0;
 
   function evaluate(data, ext) {
     const frame = new Array(frameSize);
@@ -92,7 +95,13 @@ export function compileJsonQuery(doc, options = {}) {
     const v = evaluate(data, ext);
     if (v === EMPTY)
       return undefined;
-    return v instanceof Seq ? v.items : v;
+    if (v instanceof Seq) {
+      if (resultCap > 0 && v.items.length > resultCap)
+        throw new JsonQueryRuntimeError('JQ2009',
+          `the query result has ${v.items.length} items, more than limits.resultItems (${resultCap})`, '');
+      return v.items;
+    }
+    return v;
   };
   query.first = (data, ext) => {
     const v = evaluate(data, ext);
@@ -104,6 +113,29 @@ export function compileJsonQuery(doc, options = {}) {
   query.ebv = (data, ext) => ebv(evaluate(data, ext), '');
   query.externals = Object.freeze(externals.map((e) => e.name));
   query.doc = deepFreezeCopy(doc);
+  /**
+   * What the compiled query depends on (saved-rule vetting): the
+   * external names it binds, the operators it uses, and the registered
+   * functions/collations it resolved. All frozen JSON.
+   */
+  query.dependencies = Object.freeze({
+    externals: query.externals,
+    operators: Object.freeze([...usedOps].sort()),
+    functions: Object.freeze([...usedFunctions].sort()),
+    collations: Object.freeze([...usedCollations].sort()),
+  });
+  /**
+   * A plain-JSON explanation of the compiled query: its dependencies
+   * plus the enforced limits. A fresh value each call.
+   * @returns {{ externals: string[], operators: string[], functions: string[], collations: string[], limits: { sequenceItems: number | null, resultItems: number | null } | null }}
+   */
+  query.explain = () => ({
+    externals: [...query.externals],
+    operators: [...query.dependencies.operators],
+    functions: [...query.dependencies.functions],
+    collations: [...query.dependencies.collations],
+    limits: limits === null ? null : { sequenceItems: limits.sequenceItems, resultItems: limits.resultItems },
+  });
   return query;
 }
 

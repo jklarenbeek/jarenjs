@@ -1008,11 +1008,16 @@ export const OPERATORS = Object.freeze({
   '$range': {
     params: ARGS_2,
     result: RESULT_MANY,
-    compile: (gets, args, docPath) => {
+    compile: (gets, args, docPath, node) => {
       const fromGet = gets[0];
       const fromPath = args[0].docPath;
       const toGet = gets[1];
       const toPath = args[1].docPath;
+      // the compilation's limits.sequenceItems tightens the resource
+      // guard below its 2^32 ceiling
+      const cap = node !== undefined && node.limits != null && node.limits.sequenceItems !== null
+        ? Math.min(node.limits.sequenceItems, RANGE_LIMIT)
+        : RANGE_LIMIT;
       return (f) => {
         const a = fromGet(f);
         const b = toGet(f);
@@ -1025,8 +1030,8 @@ export const OPERATORS = Object.freeze({
         if (a > b)
           return EMPTY;
         const n = b - a + 1;
-        if (n > RANGE_LIMIT)
-          throw runtimeError('JQ2007', `'$range' of ${n} items exceeds the 2^32-item resource guard`, docPath);
+        if (n > cap)
+          throw runtimeError('JQ2007', `'$range' of ${n} items exceeds the ${cap === RANGE_LIMIT ? '2^32-item' : String(cap) + '-item'} resource guard`, docPath);
         const out = new Array(n);
         for (let i = 0; i < n; i++)
           out[i] = a + i;

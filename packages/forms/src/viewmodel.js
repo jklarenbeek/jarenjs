@@ -19,6 +19,8 @@
  * pointer keys of `evaluateFormRules` and `validateAllFields`.
  */
 
+import { equalsJson } from '@jarenjs/core/object';
+
 import { getValueAtPointer, createItemValue } from './data.js';
 import { evaluateFormRules } from './rules.js';
 import { validateAllFields } from './validate.js';
@@ -56,6 +58,60 @@ const EMPTY_STATE = Object.freeze({});
  * @property {FormViewNode[]|null} items - Array elements, expanded.
  * @property {any} addValue - Starter value for a new array item
  *   (`createItemValue`); only on array nodes with an item template.
+ * @property {string} [id] - Stable accessible element id derived from
+ *   the pointer (session forms only).
+ * @property {string|null} [describedBy] - The id of this node's error
+ *   text (`aria-describedby` wiring), `null` when the node has no
+ *   errors (session forms only).
+ * @property {boolean} [dirty] - Whether this node's value differs from
+ *   the session's initial data (session forms only).
+ * @property {boolean} [touched] - Whether the session marked this
+ *   pointer visited (session forms only).
+ * @property {string[]} [serverErrors] - Server-reported messages for
+ *   this pointer, kept distinct from the client-side `errors` (session
+ *   forms only).
+ */
+
+/**
+ * The submit/draft session of a form (blueprint contract B4): the
+ * lifecycle state around one edited document. Everything is JSON — the
+ * session lives in app state; this option only folds it into the tree.
+ *
+ * Hidden-field policy: fields excluded by `x-form` `visible` rules keep
+ * their values in the data — the view model never prunes; whether a
+ * submit drops them is a product decision made at the submit boundary.
+ *
+ * @typedef {Object} FormSessionOptions
+ * @property {any} [initial] - The baseline document; each node's
+ *   `dirty` is a JSON deep-compare of its value against this.
+ * @property {string[] | Record<string, boolean>} [touched] - Pointers
+ *   the operator has visited.
+ * @property {boolean} [submitted] - Whether a submit was attempted;
+ *   echoed in the root summary (renderers typically surface every
+ *   error once true).
+ * @property {Record<string, string | string[]> | Array<{ pointer: string, message: string }>} [serverErrors]
+ *   Server-reported messages by JSON Pointer; folded onto the matching
+ *   nodes as `serverErrors`, never mixed into the client `errors`.
+ * @property {string | null} [submitStatus] - The submit task status
+ *   (e.g. 'idle'/'pending'/'done'/'error'); echoed in the root summary.
+ * @property {any} [requestId] - The in-flight submit's request
+ *   identity; echoed in the root summary.
+ * @property {string} [idPrefix] - Prefix for the stable accessible ids
+ *   (default 'form'); ids are `<prefix>--<pointer segments joined
+ *   with ->` and `'<prefix>--root'` for the root.
+ */
+
+/**
+ * The root summary of a session form (`root.session`).
+ * @typedef {Object} FormSessionSummary
+ * @property {boolean} dirty - Whether ANY node is dirty.
+ * @property {string[]} dirtyPaths - The dirty leaf pointers, in tree
+ *   order (a navigation guard's evidence).
+ * @property {boolean} submitted
+ * @property {string | null} submitStatus
+ * @property {any} requestId
+ * @property {number} errorCount - Client-side error total.
+ * @property {number} serverErrorCount - Server-reported error total.
  */
 
 /**
@@ -69,6 +125,11 @@ const EMPTY_STATE = Object.freeze({});
  *   no errors until the app opts in).
  * @property {object} [catalog] - Compiled message catalog for error
  *   texts (compileMessageCatalog), default English.
+ * @property {FormSessionOptions} [session] - Fold a form session
+ *   (initial/touched/submitted/serverErrors/submit identity) into the
+ *   tree: every node gains `id`/`describedBy`/`dirty`/`touched`/
+ *   `serverErrors`, and the root gains a `session` summary. Absent, the
+ *   tree is byte-identical to the sessionless shape.
  */
 
 /**
@@ -94,7 +155,88 @@ export function buildFormViewModel(model, data, options = {}) {
   const fieldErrors = options.validateFields === true
     ? validateAllFields(model, data, options.catalog)
     : EMPTY_STATE;
-  return buildNode(model, '', data, ruleState, fieldErrors, false, false);
+  const session = options.session !== undefined
+    ? compileSession(options.session, data)
+    : null;
+  const root = buildNode(model, '', data, ruleState, fieldErrors, false, false, session);
+  if (root !== null && session !== null) {
+    /** @type {any} */ (root).session = {
+      dirty: session.dirtyPaths.length > 0,
+      dirtyPaths: session.dirtyPaths,
+      submitted: session.submitted,
+      submitStatus: session.submitStatus,
+      requestId: session.requestId,
+      errorCount: session.errorCount,
+      serverErrorCount: session.serverErrorCount,
+    };
+  }
+  return root;
+}
+
+/**
+ * Normalize the session options into the walk's working state.
+ * @param {FormSessionOptions} session
+ * @param {any} data
+ */
+function compileSession(session, data) {
+  /** @type {Set<string>} */
+  const touched = new Set();
+  if (Array.isArray(session.touched)) {
+    for (const pointer of session.touched) touched.add(pointer);
+  }
+  else if (session.touched !== null && typeof session.touched === 'object') {
+    for (const pointer in session.touched) {
+      if (session.touched[pointer] === true) touched.add(pointer);
+    }
+  }
+  /** @type {Map<string, string[]>} */
+  const serverErrors = new Map();
+  const raw = session.serverErrors;
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (entry === null || typeof entry !== 'object' || typeof entry.pointer !== 'string') continue;
+      const list = serverErrors.get(entry.pointer) ?? [];
+      list.push(String(entry.message));
+      serverErrors.set(entry.pointer, list);
+    }
+  }
+  else if (raw !== null && typeof raw === 'object' && raw !== undefined) {
+    for (const pointer in raw) {
+      const value = raw[pointer];
+      serverErrors.set(pointer, Array.isArray(value) ? value.map(String) : [String(value)]);
+    }
+  }
+  return {
+    hasInitial: 'initial' in session,
+    initial: session.initial,
+    data,
+    touched,
+    serverErrors,
+    submitted: session.submitted === true,
+    submitStatus: session.submitStatus ?? null,
+    requestId: session.requestId ?? null,
+    idPrefix: session.idPrefix ?? 'form',
+    /** @type {string[]} */
+    dirtyPaths: [],
+    errorCount: 0,
+    serverErrorCount: 0,
+  };
+}
+
+/**
+ * A stable accessible element id for a pointer: the segments joined
+ * with '-', prefixed; the empty pointer is 'root'. Non-id characters
+ * are escaped as their code point, so distinct pointers keep distinct
+ * ids.
+ * @param {string} prefix
+ * @param {string} pointer
+ * @returns {string}
+ */
+function pointerId(prefix, pointer) {
+  if (pointer === '') return `${prefix}--root`;
+  const safe = pointer.slice(1).replace(/\//g, '-')
+    .replace(/[^A-Za-z0-9_-]/g, (ch) => `_${ch.codePointAt(0)}_`);
+  return `${prefix}--${safe}`;
 }
 
 /**
@@ -107,9 +249,10 @@ export function buildFormViewModel(model, data, options = {}) {
  * @param {Record<string, any>} fieldErrors
  * @param {boolean} element
  * @param {boolean} removable
+ * @param {ReturnType<typeof compileSession> | null} [session]
  * @returns {FormViewNode|null}
  */
-function buildNode(field, pointer, data, ruleState, fieldErrors, element, removable) {
+function buildNode(field, pointer, data, ruleState, fieldErrors, element, removable, session = null) {
   const rs = ruleState[pointer];
   if (rs !== undefined && rs.visible === false) return null;
 
@@ -157,11 +300,38 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
     }));
   }
 
+  if (session !== null) {
+    node.id = pointerId(session.idPrefix, pointer);
+    node.touched = session.touched.has(pointer);
+    const server = session.serverErrors.get(pointer);
+    node.serverErrors = server !== undefined ? server.slice() : [];
+    session.errorCount += errors.length;
+    session.serverErrorCount += node.serverErrors.length;
+    node.describedBy = errors.length > 0 || node.serverErrors.length > 0
+      ? `${node.id}-error`
+      : null;
+    if (session.hasInitial) {
+      const initialValue = getValueAtPointer(session.initial, pointer);
+      node.dirty = !equalsJson(
+        initialValue === undefined ? null : initialValue,
+        raw === undefined ? null : raw);
+    }
+    else {
+      node.dirty = false;
+    }
+  }
+
+  const isContainer = (field.children !== null && field.children !== undefined)
+    || field.kind === 'array';
+  if (session !== null && node.dirty === true && !isContainer) {
+    session.dirtyPaths.push(pointer);
+  }
+
   if (field.children !== null && field.children !== undefined) {
     const children = [];
     for (const child of field.children) {
       const built = buildNode(
-        child, `${pointer}/${child.key}`, data, ruleState, fieldErrors, false, false);
+        child, `${pointer}/${child.key}`, data, ruleState, fieldErrors, false, false, session);
       if (built !== null) children.push(built);
     }
     node.children = children;
@@ -177,7 +347,7 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
       if (template === null || template === undefined) break;
       const isTupleSlot = field.tuple !== null && field.tuple !== undefined && i < field.tuple.length;
       const built = buildNode(
-        template, `${pointer}/${i}`, data, ruleState, fieldErrors, true, !isTupleSlot);
+        template, `${pointer}/${i}`, data, ruleState, fieldErrors, true, !isTupleSlot, session);
       if (built !== null) items.push(built);
     }
     node.items = items;

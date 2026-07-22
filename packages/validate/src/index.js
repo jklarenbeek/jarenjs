@@ -47,6 +47,7 @@ export {
   localizeErrors,
 } from './messages.js';
 
+
 export { TraverseOptions };
 
 /**
@@ -1396,7 +1397,7 @@ export class JarenValidator {
    * @param {JarenValidator} self
    * @param {string} origin
    * @param {Map} schemas
-   * @returns {(data) => boolean | {valid: boolean, errors: ValidationError[]}}
+   * @returns {(data) => boolean | {valid: boolean, errors: import("./messages.js").ValidationError[]}}
    */
   static #compileSchema(self, origin, schemas) {
     const root = new ValidationRoot(
@@ -1429,7 +1430,7 @@ export class JarenValidator {
    * @param {string} origin
    * @param {Map} schemas
    * @param {ValidationRoot} root - Pre-created root with pre-compiled refs
-   * @returns {(data) => boolean | {valid: boolean, errors: ValidationError[]}}
+   * @returns {(data) => boolean | {valid: boolean, errors: import("./messages.js").ValidationError[]}}
    */
   static #compileSchemaWithRoot(self, origin, schemas, root) {
     const collectErrors = self.#options.validation?.collectErrors || false;
@@ -1679,7 +1680,7 @@ export class JarenValidator {
    * compiles the schema structure, and returns a function that validates data.
    * @param {JSONSchema | boolean} schema - The schema to compile
    * @param {(JSONSchema | boolean)[]} [schemas] - Additional schemas to reference during compilation
-   * @returns {(data: any) => boolean | {valid: boolean, errors: ValidationError[]}} A validation function
+   * @returns {(data: any) => boolean | {valid: boolean, errors: import("./messages.js").ValidationError[]}} A validation function
    * @example
    * const validate = validator.compile({
    *   type: 'object',

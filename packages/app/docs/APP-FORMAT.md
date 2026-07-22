@@ -34,8 +34,9 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**,
 RFC 2119. A **producer** emits app documents and MUST emit documents
 valid per §2–§5. A **runtime** (the reference implementation is
 `createApp`) MUST reject invalid documents with the compile errors of
-§8 and MUST raise the runtime errors of §8 under the conditions
-specified there.
+§10, MUST raise the runtime errors of §10 under the conditions
+specified there, and MUST serialize dispatches per the transaction
+model of §8.
 
 ## 2. The app document
 
@@ -152,10 +153,32 @@ format as either:
 
 - a **string** — an action name; `$payload` is `null`; or
 - an object **`{ "action": name, "with"?: payload, "event"?:
-  [fieldName, ...] }`** — `$payload` is the `with` value, verbatim,
-  and `event`, when present, MUST be an array of strings naming the
-  extra `$event` fields to resolve (§3.1). The string binding form has
-  no extraction — it cannot carry the member.
+  [fieldName, ...], "preventDefault"?: bool, "stopPropagation"?:
+  bool }`** — `$payload` is the `with` value, verbatim, and `event`,
+  when present, MUST be an array of strings naming the extra `$event`
+  fields to resolve (§3.1). The string binding form carries none of
+  the optional members.
+
+The two **native controls** default to `false` and are allowed only on
+the object form. When declared `true`, `event.preventDefault()` /
+`event.stopPropagation()` run **synchronously in the native event
+callback**, before the action is queued (§8) and before the browser
+can perform its default or bubble behavior — a checkbox, link or
+button nested inside a clickable row is expressible declaratively.
+Whether the action later succeeds or fails cannot retroactively change
+an already-performed native control. A widget's `emit(binding,
+nativeEvent)` follows the identical path. Headless dispatch with an
+event object lacking the methods is a documented no-op.
+
+`$event` extraction runs synchronously at dispatch time too: the
+native event is reduced to plain JSON before the transaction enters
+the queue, so a recycled event object can never corrupt a queued
+dispatch. Requesting a **default member** (`type`/`value`/`checked`/
+`key`) never overwrites it — it is already bound; a registered
+extractor still wins, the host chose to redefine it. A requested
+`__proto__`/`constructor` member binds as an ordinary own data
+property and never mutates a prototype. Registered extractors are
+trusted host code and MUST return JSON.
 
 Payloads are built at *render* time by the view stylesheet: a rule
 body may embed `"$path"`, the matched value, or anything in scope
@@ -241,13 +264,16 @@ string tokens, so a form can dispatch a file selection without a
 `File` object ever entering `$event` or the state:
 
 ```javascript
+// Token identity is MONOTONIC (or a UUID): a registry key is never
+// reused, so a stale token can never rebind to a different File.
+let nextFileToken = 1;
 const fileRegistry = new Map();
 createApp(doc, {
   node,
   eventFields: {
     fileTokens: (event) =>
-      Array.from(event.target?.files ?? [], (file, i) => {
-        const token = `file:${fileRegistry.size + i}`;
+      Array.from(event.target?.files ?? [], (file) => {
+        const token = `file:${nextFileToken++}`;
         fileRegistry.set(token, file);
         return token;
       }),
@@ -256,8 +282,24 @@ createApp(doc, {
 ```
 
 A binding `{ "action": "pickFiles", "event": ["fileTokens"] }` then
-binds `$event.fileTokens` to `["file:0", ...]` — JSON all the way —
+binds `$event.fileTokens` to `["file:1", ...]` — JSON all the way —
 and an upload effect later redeems the tokens at the boundary.
+
+The registry the host builds around those tokens needs an explicit
+lifecycle, because the tokens in state outlive the objects they name:
+
+- **identity** — monotonic or UUID, never derived from the registry's
+  current size; a token is never rebound to a different `File`;
+- **per-attempt identity** — each upload attempt gets its own request
+  id; a failed or canceled attempt may retain the same session-owned
+  `File` for an explicit retry;
+- **consume** — a successfully committed file is removed from the
+  registry (and its object URLs revoked);
+- **discard/revoke** — canceling the selection, closing the owning
+  route/session, or `app.destroy()` revokes every remaining token;
+- **expiry** — a bounded retention policy, so an abandoned selection
+  cannot hold file handles forever; a redeemed-but-expired token MUST
+  fail safely (a structured error), never select another file.
 
 ### 5.5 Widgets
 
@@ -299,7 +341,152 @@ transition's `patch` over the wire). Runtimes SHOULD keep it that way:
 any extension that puts a function in the document breaks the format's
 core property.
 
-## 8. Errors
+## 8. The transaction model
+
+### 8.1 One FIFO queue
+
+Every dispatch is one **transaction** on one FIFO queue; only the
+queue drain evaluates and applies transitions. A dispatch made from an
+effect handler, a state listener, a transaction observer, a
+subscription handler or callback, a widget `emit`, or any lifecycle
+hook **queues behind the current transaction** — dispatches never
+nest. Within a transaction the order is fixed:
+
+1. action evaluation and state commit;
+2. effect invocation;
+3. listener notification (registration order — every listener observes
+   every transaction in the same order, with the state produced by
+   exactly that transaction and its changed paths);
+4. subscription reconciliation;
+5. render scheduling;
+6. observer notification (§8.3).
+
+All six complete before the next transaction begins. Errors from
+isolated sites — listeners (`JA2011`), observers (`JA2011`), cleanups
+(`JA2012`) — are reported through `onError` and never corrupt the
+queue: whatever the sink throws surfaces to the outermost dispatch
+caller only after the drain fully completed. A runaway
+action→effect→action loop is diagnosed as `JA2010` after
+`options.maxTurns` transactions (default 1000) instead of hanging.
+
+`validateState` receives a second argument, the transaction context
+`{ previous, action, payload, changes }` — `changes` is the patch
+engine's changed-pointer list, or `null` meaning *unknown: validate
+fully*. Selective validation keyed on `changes` is sound only when the
+hook falls back to a full check for `null`.
+
+### 8.2 Boot, stop, destroy
+
+**Boot is a transaction.** Compiling the documents, creating the
+renderer, starting the initial subscriptions and painting the first
+frame either all succeed, or every already-acquired resource is
+disposed and `createApp` throws `JA0007` with the original failure as
+`cause`. `onError` observes individual boot failures first: a sink
+that swallows a subscription-start failure (`JA2013`) keeps that slot
+stopped and boots the rest; the default rethrowing sink aborts boot.
+
+**Subscription startup is resource acquisition.** A slot commits live
+only after its handler returned; a throwing handler leaves the slot
+stopped (`JA2013`). Cleanups run exactly once, a throwing cleanup is
+isolated (`JA2012`) and never skips its siblings. Because dispatches
+queue, a condition flipped by a starting handler is observed by the
+next transaction's reconciliation, which disposes the just-started
+resource through the ordinary stop path — rapid `false`/`true`
+condition changes coalesce per transaction.
+
+**`stop()` pauses; `destroy()` ends.** `stop()` clears the queue,
+disposes live subscriptions and listeners, and ignores further
+dispatches; the renderer and effect handlers stay untouched.
+`destroy()` is terminal and idempotent: `stop()` plus observer
+removal, effect-handler `dispose()` (each handler identity exactly
+once), and renderer destruction — widgets unmount exactly once, the
+container is left empty, and scheduled render flushes become exact
+no-ops.
+
+### 8.3 Transaction observers and diagnostics
+
+`app.observe(fn)` delivers one bounded JSON record per settled
+transaction: `{ seq, action, source, status, changedPaths,
+scheduledEffects, durationMs, errorCode }` — `source` is
+`'dispatch'`/`'binding'`/`'effect'`/`'subscription'`, `status` is
+`'applied'`/`'noop'`/`'rejected'`/`'failed'`. Payload/event values are
+included **only** when the app was created with `capturePayloads:
+true` — diagnostics must not leak data by default. A throwing observer
+is isolated (`JA2011`). `createTransactionLog({ limit, redact })`
+packages the bounded ring buffer with a redaction hook and a versioned
+`export()` envelope; the log lives in host memory, never in state.
+
+### 8.4 The post-render focus/measurement queue
+
+DOM nodes never enter state; focus, selection and measurement bridge
+through JSON intents naming a `data-ref` attribute token.
+`createFocusEffect({ container })` returns an effect handler whose
+intents `{ ref, op?: "focus"|"select"|"measure", done?, id? }` queue
+during the transaction and flush after the **next committed frame** —
+wire its `flush` as `options.afterRender`, which runs after the DOM
+patch *and* after widget mounts, so a target born in the same
+transition is already connected. A missing target is a diagnosable
+`JA2014`, never a silent no-op; sibling intents still resolve.
+`measure` dispatches `done` with `{ id, ref, rect }`, the JSON-reduced
+bounding rect. `app.destroy()` cancels pending intents through the
+handler's `dispose()`. A headless app never flushes — the queue is a
+documented no-op there.
+
+### 8.5 Accessible component contracts (non-normative)
+
+The format's accessibility position: **the widget escape hatch is not
+an accessibility escape hatch**, and the primitives above exist so the
+accessible patterns are expressible as data.
+
+- **Dialogs**: opening moves focus into the dialog through a §8.4
+  intent (`data-ref` on its first control); closing restores it to the
+  opener the same way; the dialog element carries `role="dialog"`,
+  `aria-modal` and a label. The executable skeleton lives in the
+  focus-queue test suite and is the pattern to copy.
+- **Tabs**: a tablist/tab/tabpanel triple is ordinary vnode data —
+  `role`/`aria-selected`/`aria-controls` are props like any other, and
+  arrow-key movement is a `keydown` binding requesting `key` (§3.1).
+- **Rows with nested controls**: `stopPropagation` on the nested
+  binding (§4) keeps a checkbox or link inside a clickable row from
+  triggering the row action; `preventDefault` expresses suppressed
+  native behavior declaratively.
+- **Widgets** own the complete keyboard, focus and announcement
+  behavior of their subtree — the renderer guarantees only mount/
+  update/unmount-exactly-once (VIEW-FORMAT §7/§8); everything inside
+  is the widget contract's responsibility.
+- These contracts are tested headlessly in this repository; a real
+  Chromium/Firefox/WebKit matrix is CI follow-up work, tracked in the
+  roadmap, not silently claimed.
+
+## 9. Tasks and host concurrency
+
+### 9.1 The convention
+
+The async-task convention (state-side ids + guard-first completion
+actions) is specified in [TASKS.md](./TASKS.md); its host half is
+`createTaskEffect(run, options)`.
+
+### 9.2 Concurrency modes and controls
+
+`createTaskEffect` takes a per-slot concurrency `mode`:
+
+| Mode | A new start while the slot is busy… |
+|---|---|
+| `"switch"` (default) | aborts the in-flight predecessor; newest wins |
+| `"exhaust"` | is ignored entirely — the double-click-safe commit mode |
+| `"concat"` | queues and runs strictly after — deliberately ordered commands |
+| `"parallel"` | runs concurrently; the consumer owns the merge rule |
+
+Whatever the mode, correctness stays visible in JSON state — the task
+slot's monotonic `id` and the completion action's guard remain the
+authority on which response may land. The handler exposes
+`cancel(slot)` (abort in-flight, discard queued), `cancelAll()`, and
+`dispose()` (terminal: nothing dispatches afterwards; called
+automatically by `app.destroy()`). `run` is invoked through a uniform
+promise boundary: a synchronous throw and a non-promise return settle
+through the same path as a rejection/resolution.
+
+## 10. Errors
 
 Compile (`AppCompileError`, thrown by `createApp`; `docPath` is a JSON
 Pointer into the app document):
@@ -312,6 +499,7 @@ Pointer into the app document):
 | `JA0004` | an action document failed to compile |
 | `JA0005` | `subs` is not an array |
 | `JA0006` | a subscription entry is malformed / its `when` failed to compile |
+| `JA0007` | boot failed after compilation (initial subscriptions / first frame); everything acquired was rolled back (§8.2) |
 
 Runtime (`AppRuntimeError`, routed through `options.onError`, which
 defaults to rethrowing):
@@ -327,13 +515,18 @@ defaults to rethrowing):
 | `JA2007` | an effect handler threw |
 | `JA2008` | unregistered subscription name |
 | `JA2009` | a binding requested an unknown event field (the member is bound `null`; the dispatch is NOT dropped) |
+| `JA2010` | the dispatch loop exceeded `maxTurns` in one drain; the queue was abandoned (§8.1) |
+| `JA2011` | a state listener or transaction observer threw (isolated) |
+| `JA2012` | a cleanup threw while stopping/reconciling/destroying (isolated) |
+| `JA2013` | a subscription handler threw while starting; the slot stays stopped |
+| `JA2014` | a post-render intent named a `data-ref` with no rendered target (§8.4) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —
 with their `docPath`s pointing inside the embedded document, the
 feedback shape a repair loop needs.
 
-## 9. Open items (roadmap, non-normative)
+## 11. Open items (roadmap, non-normative)
 
 - ~~The app-document meta-schema~~ — **shipped**:
   [`schemas/jaren-app.schema.json`](../schemas/jaren-app.schema.json)

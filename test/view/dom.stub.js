@@ -96,6 +96,27 @@ export class StubElement extends StubNode {
     this.attributes.delete(name);
   }
 
+  /** @param {string} name */
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
+
+  /** Focus tracking: the document records the active element. */
+  focus() {
+    this.ownerDocument.activeElement = this;
+  }
+
+  /** Text-control selection: focuses and marks the selection. */
+  select() {
+    this.focus();
+    this.selected = true;
+  }
+
+  /** A fixed layout box, enough for measurement plumbing tests. */
+  getBoundingClientRect() {
+    return { x: 1, y: 2, width: 30, height: 40, top: 2, left: 1, right: 31, bottom: 42 };
+  }
+
   /**
    * @param {string} type
    * @param {Function} listener
@@ -122,6 +143,11 @@ export class StubElement extends StubNode {
 }
 
 export class StubDocument {
+  constructor() {
+    /** @type {StubElement | null} The last focused element. */
+    this.activeElement = null;
+  }
+
   /** @param {string} tag */
   createElement(tag) {
     return new StubElement(this, tag);

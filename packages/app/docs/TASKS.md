@@ -13,7 +13,7 @@ task's identity is ordinary state, its guard is an ordinary query, so
 snapshots, replay and the meta-schema all keep working with nothing
 added. First-class async action documents (a disposition that awaits an
 effect before transitioning) remain the roadmap item they already are
-([APP-FORMAT §9](APP-FORMAT.md)).
+([APP-FORMAT §11](APP-FORMAT.md)).
 
 > **The worked example below is executable.** The single `json` code
 > block in this document is a complete app document; the test suite
@@ -94,16 +94,26 @@ createApp(doc, {
 });
 ```
 
-`createTaskEffect(run)` takes the host's async function
+`createTaskEffect(run, options)` takes the host's async function
 `run(props, signal) => Promise<JSON>` and returns an ordinary effect
-handler. The effect-props convention (all JSON):
+handler. `run` is invoked through a **uniform promise boundary**: a
+synchronous throw and a non-promise return settle through exactly the
+same path as a rejection/resolution. `options.mode` picks the per-slot
+concurrency semantics — `"switch"` (default: a new start aborts the
+slot's in-flight predecessor), `"exhaust"` (duplicate starts are
+ignored — the double-click-safe commit mode), `"concat"` (starts queue
+and run strictly in order) or `"parallel"` (APP-FORMAT §9.2). The
+handler carries the host-side controls `cancel(slot)`, `cancelAll()`
+and `dispose()` — after `dispose()` (which `app.destroy()` calls
+automatically) no late settlement can dispatch. The effect-props
+convention (all JSON):
 
 | Prop | | Meaning |
 |---|---|---|
 | `id` | REQUIRED | The task identity, echoed back verbatim in the completion payload. |
 | `done` | REQUIRED | The action dispatched on settle. |
 | `fail` | OPTIONAL | The action for rejections. Absent: rejections dispatch `done` with `{ id, error }` instead of `{ id, result }` — one completion action guarding on `$payload.error` is the query-friendliest shape, so it is the default. |
-| `slot` | OPTIONAL | The concurrency key, default `""`. Starting a task aborts the slot's in-flight predecessor. |
+| `slot` | OPTIONAL | The concurrency key (a string), default `""`. What a new start does to the slot's in-flight task is the effect's `mode` (default `"switch"`: it aborts the predecessor). |
 | ... | | Anything else `run` needs (a URL, a query, ...). |
 
 Settlement semantics, exactly:
@@ -114,11 +124,12 @@ Settlement semantics, exactly:
 | resolve | `dispatch(done, { id, result })`. |
 | reject, `err.name === "AbortError"` | **Nothing.** A superseded task is dead by design; its successor's dispatch carries the story. |
 | reject, anything else | `dispatch(fail ?? done, { id, error })` — `error` is a **string**, never an Error object; JSON only crosses the boundary. |
-| settle | The stored controller is cleared when it is still the current one. |
-| missing `id`/`done` | A `TypeError` from the handler — a host programming error, reported by the loop as `JA2007`. |
+| settle | The task's controller is released; a `concat` slot starts its next queued task. |
+| after `dispose()` | **Nothing** — a late settlement can no longer dispatch. |
+| malformed `id`/`done`/`fail`/`slot` | A `TypeError` from the handler — a host programming error, reported by the loop as `JA2007`. |
 
 Tasks in different slots never touch each other. The helper holds no
-state beyond the per-slot controller map, uses no timers, and has zero
+state beyond the per-slot records, uses no timers, and has zero
 dependencies (`AbortController` is platform).
 
 ## The worked example

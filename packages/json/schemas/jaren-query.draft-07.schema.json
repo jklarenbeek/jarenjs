@@ -121,6 +121,9 @@
           "$ref": "#/definitions/mapPhrase"
         },
         {
+          "$ref": "#/definitions/callPhrase"
+        },
+        {
           "$ref": "#/definitions/flworPhrase"
         },
         {
@@ -343,7 +346,7 @@
       ]
     },
     "orderByKeySpec": {
-      "description": "Explicit order key: direction defaults to 'asc', empty-sequence placement to 'least'.",
+      "description": "Explicit order key: direction defaults to 'asc', empty-sequence placement to 'least'. A $collation names a registered pure compare function (options.collations, JQ0010) applied to string keys; the default stays code-point order.",
       "type": "object",
       "properties": {
         "$key": {
@@ -360,6 +363,10 @@
             "least",
             "greatest"
           ]
+        },
+        "$collation": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -608,6 +615,23 @@
       "additionalProperties": {
         "$ref": "#/definitions/schemaLiteral"
       }
+    },
+    "callPhrase": {
+      "description": "A registered trusted host function call: ['name', ...argument expressions]. The name must be registered at compile time (options.functions, JQ0010); sequences cross the boundary as arrays, a returned undefined is the empty sequence, a throwing function is JQ2010.",
+      "type": "object",
+      "properties": {
+        "$call": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/expression"
+          }
+        }
+      },
+      "required": [
+        "$call"
+      ],
+      "additionalProperties": false
     }
   }
 }

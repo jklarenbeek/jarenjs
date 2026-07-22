@@ -106,7 +106,8 @@ The value of an `on` member is an opaque JSON **binding**. The view
 layer MUST deliver the binding verbatim to the environment's event hook
 (`onEvent(binding, nativeEvent)`) and MUST NOT interpret it. What a
 binding means belongs to the layer above; in `@jarenjs/app` it is an
-action name or `{"action": name, "with": payload}`
+action name or `{"action": name, "with"?: payload, "event"?: [...],
+"preventDefault"?: bool, "stopPropagation"?: bool}`
 ([APP-FORMAT](../../app/docs/APP-FORMAT.md) §4).
 
 Because bindings are data, a producer builds event payloads at *render
@@ -286,9 +287,24 @@ renderer MUST honor:
   throwing `unmount` MUST NOT prevent sibling widgets from
   unmounting: the walk finishes, then the first error surfaces.
 
-Teardown guidance (non-normative): a host that discards the container
-unmounts widgets by rendering a final widget-free frame first. A
-`destroy()` on the renderer is a roadmap item (§8).
+### 7.3.1 Renderer destroy
+
+`createDomRenderer` returns a render function carrying a
+**`destroy()`** member — the terminal teardown:
+
+- every mounted widget in the rendered tree unmounts **exactly once**;
+  widgets still queued for mount never mount;
+- the container is left **empty** (`textContent = ''`);
+- later `render` calls are exact no-ops (a scheduled flush racing a
+  teardown cannot resurrect the DOM);
+- `destroy()` is idempotent;
+- a throwing widget `unmount` MUST NOT stop the teardown: the walk
+  completes, then the first error surfaces — the same isolation rule
+  as §7.3's destroy walk.
+
+A host that merely wants a widget-free tree still renders a widget-free
+frame; `destroy()` is for ending the renderer's life (`app.destroy()`
+calls it).
 
 ### 7.4 Serialization
 
@@ -310,7 +326,6 @@ mounts widgets as usual (§6).
   and §5.1 fires for whole branches.
 - ~~Component escape hatch~~ — **shipped**: the registered-widget
   vocabulary of §7.
-- **A renderer `destroy()`** — tear down the rendered tree and unmount
-  every widget without rendering a final empty frame (§7.3).
+- ~~A renderer `destroy()`~~ — **shipped**: §7.3.1.
 - **A `properties`-vs-`attributes` normative table** replacing the
   `name in node` heuristic of §3.

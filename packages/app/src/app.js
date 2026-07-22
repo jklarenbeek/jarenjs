@@ -5,15 +5,31 @@
  * `createApp` takes an **app document** — one JSON value holding the
  * initial state, a JSLT view stylesheet, named action documents and
  * subscription entries — compiles every embedded document once, and runs
- * hyperapp's dispatch loop over the compiled closures:
+ * a serialized dispatch loop over the compiled closures:
  *
  *   DOM event → binding → action document → transition → next state
- *     → subscriptions refresh → batched re-render → keyed DOM patch
+ *     → effects → listeners → subscriptions refresh → batched re-render
  *
  * JavaScript enters only at named, registered boundaries: effect and
  * subscription handlers, the `compileTypeTest` hook, and the optional
  * `validateState` invariant hook. Everything between the boundaries is
  * data. See docs/APP-FORMAT.md for the document contract.
+ *
+ * **Transaction model (APP-FORMAT §8).** Every dispatch is one
+ * transaction on one FIFO queue. Only the queue drain evaluates and
+ * applies transitions; a dispatch from an effect, listener, observer,
+ * subscription handler, widget or lifecycle hook queues behind the
+ * current transaction and never nests. Within a transaction the order
+ * is: state commit → effect invocation → listener notification →
+ * subscription reconciliation → render scheduling → observer
+ * notification; all of it completes before the next transaction begins.
+ * Every listener therefore observes every transaction in the same
+ * order, and each notification carries the state produced by exactly
+ * that transaction. Native event data is reduced to JSON synchronously
+ * at dispatch time, before queuing. A listener, observer or cleanup
+ * error is isolated: it is reported through `onError`, and whatever the
+ * sink throws is re-thrown only after the drain has fully completed —
+ * the queue always drains, cleanups are never skipped.
  */
 
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
@@ -30,7 +46,9 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  * @property {any} [document] - The DOM document (defaults to
  *   `node.ownerDocument`).
  * @property {Record<string, (props: any, dispatch: Dispatch) => void>} [effects]
- *   Effect handlers by name.
+ *   Effect handlers by name. A handler function may carry an optional
+ *   `dispose()` member, called exactly once by `app.destroy()` (a
+ *   handler registered under several names is disposed once).
  * @property {Record<string, (props: any, dispatch: Dispatch) => (() => void) | void>} [subs]
  *   Subscription handlers by name; may return a cleanup function.
  * @property {Record<string, (nativeEvent: any) => any>} [eventFields]
@@ -45,20 +63,67 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  * @property {(schema: any, docPath: string) => ((value: any) => boolean)} [compileTypeTest]
  *   Enables JSON Schema operators (`$valid`/`$assert`/`$as`) and schema
  *   matches inside the view and the action documents.
- * @property {(state: any) => boolean | { valid: boolean, errors?: any }} [validateState]
- *   Invariant hook, called with every candidate next state. A rejection
- *   (`false` or `{ valid: false }`) blocks the transition (fail closed)
- *   and reports `JA2005` through `onError`.
+ * @property {(state: any, context: ValidateContext) => boolean | { valid: boolean, errors?: any }} [validateState]
+ *   Invariant hook, called with every candidate next state plus a
+ *   context carrying the previous state, the acting action name, its
+ *   payload and the transition's changed paths (`null` = unknown, the
+ *   whole state must be treated as changed — selective validation on
+ *   `changes` is only sound when the hook falls back to a full check
+ *   for `null`). A rejection (`false` or `{ valid: false }`) blocks the
+ *   transition (fail closed) and reports `JA2005` through `onError`.
  * @property {(state: any) => any} [viewModel] - The derivation boundary:
  *   maps the state to the view stylesheet's input document before every
  *   render (default identity). This is where JS-computed derivations —
  *   `buildFormViewModel` from `@jarenjs/forms`, aggregations, joins —
  *   enter the render path without ever entering the state.
  * @property {(error: Error) => void} [onError] - Runtime error sink;
- *   default rethrows.
+ *   default rethrows. Errors reported from isolated sites (listeners,
+ *   observers, cleanups, unknown event fields) never break the
+ *   transaction queue: whatever the sink throws surfaces to the outer
+ *   dispatch caller only after the drain completes.
  * @property {(flush: () => void) => void} [schedule] - Render scheduler;
  *   default batches on a microtask. Pass `(f) => f()` for synchronous
  *   rendering (tests, SSR pipelines).
+ * @property {() => void} [afterRender] - Called after every committed
+ *   frame (the DOM patch and widget mounts of a render are complete).
+ *   The post-render focus/measurement queue (`createFocusEffect`)
+ *   plugs in here. Never called on headless apps.
+ * @property {number} [maxTurns] - The dispatch-loop guard (default
+ *   1000): the maximum number of transactions one drain may process
+ *   before the queue is abandoned with `JA2010` — an accidental
+ *   action→effect→action loop diagnoses instead of hanging.
+ * @property {boolean} [capturePayloads] - Include `payload` and `event`
+ *   values in transaction records handed to observers (default false —
+ *   diagnostics must not leak data by default).
+ */
+
+/**
+ * The context handed to `validateState` (second argument).
+ * @typedef {Object} ValidateContext
+ * @property {any} previous - The state the transition started from.
+ * @property {string} action - The acting action name.
+ * @property {any} payload - The dispatch payload (`null` when absent).
+ * @property {string[] | null} changes - Changed JSON Pointers when the
+ *   transition was patch-only, else `null` (= unknown, validate fully).
+ */
+
+/**
+ * A transaction record handed to observers (APP-FORMAT §8.3). Payload
+ * and event members are present only when `capturePayloads` is on.
+ * @typedef {Object} TransactionRecord
+ * @property {number} seq - Monotonic transaction sequence number.
+ * @property {string} action - The dispatched action name.
+ * @property {string} source - What queued it: `'dispatch'` (external),
+ *   `'binding'` (DOM/widget), `'effect'`, `'subscription'`.
+ * @property {'applied' | 'noop' | 'rejected' | 'failed'} status
+ * @property {string[] | null} changedPaths - Changed JSON Pointers, or
+ *   `null` when the whole state was replaced (unknown = everything).
+ * @property {string[]} scheduledEffects - Names of effects invoked.
+ * @property {number} durationMs
+ * @property {string | null} errorCode - The `JA2xxx` code when the
+ *   transaction failed or was rejected.
+ * @property {any} [payload]
+ * @property {any} [event]
  */
 
 /**
@@ -74,6 +139,17 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
 
 /**
  * Compile an app document and start the loop.
+ *
+ * Boot is a transaction: compiling the documents, creating the
+ * renderer, starting the initial subscriptions and painting the first
+ * frame either all succeed, or every already-acquired resource is
+ * disposed and `createApp` throws `JA0007` (an `AppCompileError`
+ * carrying the original failure as `cause`). `onError` observes
+ * individual boot-time failures first — a sink that swallows a
+ * subscription failure keeps that subscription stopped and boots the
+ * rest; the default rethrowing sink aborts boot. After a successful
+ * boot the returned app never throws from `createApp` paths again.
+ *
  * @param {any} appDoc
  * @param {AppOptions} [options]
  */
@@ -107,16 +183,39 @@ export function createApp(appDoc, options = {}) {
   const eventExtractors = options.eventFields ?? {};
   const onError = options.onError ?? ((err) => { throw err; });
   const schedule = options.schedule ?? ((flush) => queueMicrotask(flush));
+  const afterRender = options.afterRender ?? null;
+  const maxTurns = options.maxTurns ?? 1000;
+  const capturePayloads = options.capturePayloads === true;
 
   let state = appDoc.state;
   let running = true;
+  let destroyed = false;
   let renderScheduled = false;
-  /** @type {Set<(state: any) => void>} */
+  /** @type {Set<(state: any, changes: string[] | null) => void>} */
   const stateListeners = new Set();
+  /** @type {Set<(tx: TransactionRecord) => void>} */
+  const observers = new Set();
   /** Per compiled sub: `{ live: boolean, cleanup: (() => void) | void }`. */
   const subStates = subs.map(() => ({ live: false, cleanup: undefined }));
 
-  /** @type {((vnode: any) => void) | null} */
+  /**
+   * The FIFO transaction queue (APP-FORMAT §8). Entries carry the
+   * already-JSON-reduced event — native events never wait in the queue.
+   * @type {Array<{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null }>}
+   */
+  const actionQueue = [];
+  let draining = false;
+  let txSeq = 0;
+  /**
+   * The first error an `onError` sink (or an isolated site) threw while
+   * the drain was running. The drain always completes; this surfaces to
+   * the outermost caller afterwards, so the default rethrowing sink
+   * still fails loudly without ever corrupting the queue.
+   * @type {Error | null}
+   */
+  let pendingError = null;
+
+  /** @type {(((vnode: any) => void) & { destroy?: () => void }) | null} */
   let renderer = null;
   if (options.node !== undefined) {
     renderer = createDomRenderer(options.node, {
@@ -126,75 +225,190 @@ export function createApp(appDoc, options = {}) {
     });
   }
 
-  /** JA2009 sink for `eventData`: one report per offending field name. */
-  function reportUnknownField(field) {
-    onError(new AppRuntimeError('JA2009',
-      `a binding requested an unknown event field '${field}'`));
+  /**
+   * Report an error without ever breaking the drain: the sink runs, and
+   * anything it throws parks on `pendingError` until the drain (or the
+   * calling entry point) finishes.
+   * @param {Error} err
+   */
+  function safeError(err) {
+    try {
+      onError(err);
+    }
+    catch (thrown) {
+      if (pendingError === null) pendingError = /** @type {Error} */ (thrown);
+    }
+  }
+
+  /** Re-throw the parked drain error at an entry-point boundary. */
+  function flushPendingError() {
+    if (pendingError !== null) {
+      const err = pendingError;
+      pendingError = null;
+      throw err;
+    }
+  }
+
+  /**
+   * Queue one transaction and drain if no drain is running. The native
+   * event is reduced to JSON here, synchronously — by the time the
+   * transaction runs, the event object may be recycled by the browser.
+   * @param {string} source
+   * @param {string} name
+   * @param {any} payload
+   * @param {any} domEvent
+   * @param {string[] | null} eventFields
+   */
+  function queueDispatch(source, name, payload, domEvent, eventFields) {
+    if (!running) return;
+    let event = null;
+    let unknownFields = null;
+    if (domEvent !== null && domEvent !== undefined) {
+      /** @type {string[]} */
+      const unknown = [];
+      event = eventData(domEvent, eventFields, eventExtractors,
+        (field) => unknown.push(field));
+      if (unknown.length > 0) unknownFields = unknown;
+    }
+    actionQueue.push({ source, name, payload, event, unknownFields });
+    drainQueue();
+  }
+
+  /** Drain the queue to empty; the sole caller of `runTransaction`. */
+  function drainQueue() {
+    if (draining) return;
+    draining = true;
+    let turns = 0;
+    try {
+      while (actionQueue.length > 0) {
+        if (++turns > maxTurns) {
+          actionQueue.length = 0;
+          safeError(new AppRuntimeError('JA2010',
+            `the dispatch loop exceeded ${maxTurns} queued transactions in one drain; `
+            + 'the queue was abandoned (an action/effect dispatch loop?)'));
+          break;
+        }
+        const entry = /** @type {NonNullable<ReturnType<typeof actionQueue.shift>>} */ (actionQueue.shift());
+        runTransaction(entry);
+      }
+    }
+    finally {
+      draining = false;
+    }
+    flushPendingError();
   }
 
   /** @type {Dispatch} */
   function dispatch(name, payload = null, domEvent = null, eventFields = null) {
-    if (!running) return;
-    const action = actions.get(name);
-    if (action === undefined) {
-      onError(new AppRuntimeError('JA2001', `unknown action '${name}'`));
-      return;
-    }
-    let transition;
-    try {
-      transition = action.first(state, {
-        event: domEvent !== null
-          ? eventData(domEvent, eventFields, eventExtractors, reportUnknownField)
-          : null,
-        payload,
-      });
-    }
-    catch (err) {
-      onError(new AppRuntimeError('JA2002',
-        `action '${name}' failed: ${/** @type {Error} */ (err).message}`,
-        /** @type {Error} */ (err)));
-      return;
-    }
-    applyTransition(name, transition);
+    queueDispatch('dispatch', name, payload, domEvent, eventFields);
+  }
+
+  /** The dispatch handed to effect handlers: tags the source. */
+  function effectDispatch(name, payload = null, domEvent = null, eventFields = null) {
+    queueDispatch('effect', name, payload, domEvent, eventFields);
+  }
+
+  /** The dispatch handed to subscription handlers: tags the source. */
+  function subDispatch(name, payload = null, domEvent = null, eventFields = null) {
+    queueDispatch('subscription', name, payload, domEvent, eventFields);
   }
 
   /**
-   * An `on` binding fired by the renderer: an action name, or
-   * `{ "action": name, "with"?: payload, "event"?: [fieldName, ...] }`.
+   * An `on` binding fired by the renderer (or a widget's `emit`): an
+   * action name, or `{ "action": name, "with"?: payload, "event"?:
+   * [fieldName, ...], "preventDefault"?: bool, "stopPropagation"?:
+   * bool }`. The two native controls run synchronously in the event
+   * callback, before the transaction is queued — whether the action
+   * later succeeds cannot retroactively change them. Headless events
+   * without the methods are a documented no-op.
    * @param {any} binding
    * @param {any} event
    */
   function handleBinding(binding, event) {
     if (typeof binding === 'string') {
-      dispatch(binding, null, event);
+      queueDispatch('binding', binding, null, event, null);
+      return;
     }
-    else if (binding !== null && typeof binding === 'object'
+    if (binding !== null && typeof binding === 'object'
       && typeof binding.action === 'string'
-      && (binding.event === undefined || isFieldNameArray(binding.event))) {
-      dispatch(binding.action, binding.with ?? null, event, binding.event ?? null);
+      && (binding.event === undefined || isFieldNameArray(binding.event))
+      && (binding.preventDefault === undefined || typeof binding.preventDefault === 'boolean')
+      && (binding.stopPropagation === undefined || typeof binding.stopPropagation === 'boolean')) {
+      if (binding.preventDefault === true && typeof event?.preventDefault === 'function') {
+        event.preventDefault();
+      }
+      if (binding.stopPropagation === true && typeof event?.stopPropagation === 'function') {
+        event.stopPropagation();
+      }
+      queueDispatch('binding', binding.action, binding.with ?? null, event, binding.event ?? null);
+      return;
     }
-    else {
-      onError(new AppRuntimeError('JA2001',
-        `unusable event binding: ${JSON.stringify(binding)}`));
-    }
+    safeError(new AppRuntimeError('JA2001',
+      `unusable event binding: ${JSON.stringify(binding)}`));
+    if (!draining) flushPendingError();
   }
 
   /**
-   * @param {string} name - The acting action, for error messages.
-   * @param {any} transition
+   * Run one queued transaction to completion: evaluate the action,
+   * commit the state, invoke effects, notify listeners, reconcile
+   * subscriptions, schedule the render, then notify observers.
+   * @param {{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null }} entry
    */
-  function applyTransition(name, transition) {
-    if (transition === undefined || transition === null) return;
-    if (typeof transition !== 'object' || Array.isArray(transition)) {
-      onError(new AppRuntimeError('JA2003',
-        `action '${name}' produced a transition that is not an object`));
+  function runTransaction(entry) {
+    const started = now();
+    const seq = ++txSeq;
+    /** @type {'applied' | 'noop' | 'rejected' | 'failed'} */
+    let status = 'noop';
+    /** @type {string | null} */
+    let errorCode = null;
+    /** @type {string[] | null} */
+    let changes = null;
+    /** @type {string[]} */
+    const scheduledEffects = [];
+
+    // a typo in one requested event field binds null and reports; the
+    // dispatch itself is never dropped (JA2009 contract)
+    if (entry.unknownFields !== null) {
+      for (const field of entry.unknownFields) {
+        safeError(new AppRuntimeError('JA2009',
+          `a binding requested an unknown event field '${field}'`));
+      }
+    }
+
+    const action = actions.get(entry.name);
+    if (action === undefined) {
+      safeError(new AppRuntimeError('JA2001', `unknown action '${entry.name}'`));
+      finish('failed', 'JA2001');
       return;
     }
+
+    let transition;
+    try {
+      transition = action.first(state, { event: entry.event, payload: entry.payload });
+    }
+    catch (err) {
+      safeError(new AppRuntimeError('JA2002',
+        `action '${entry.name}' failed: ${/** @type {Error} */ (err).message}`,
+        /** @type {Error} */ (err)));
+      finish('failed', 'JA2002');
+      return;
+    }
+
+    if (transition === undefined || transition === null) {
+      finish('noop', null);
+      return;
+    }
+    if (typeof transition !== 'object' || Array.isArray(transition)) {
+      safeError(new AppRuntimeError('JA2003',
+        `action '${entry.name}' produced a transition that is not an object`));
+      finish('failed', 'JA2003');
+      return;
+    }
+
     let next = state;
     // changed paths for this transition: an array of JSON Pointers when
     // the transition was patch-only (the engine's tracked writes), else
     // null = "unknown, treat everything as changed"
-    let changes = null;
     if ('state' in transition) next = transition.state;
     if (transition.patch !== undefined) {
       try {
@@ -203,40 +417,98 @@ export function createApp(appDoc, options = {}) {
         if (!('state' in transition)) changes = tracked.changes;
       }
       catch (err) {
-        onError(new AppRuntimeError('JA2004',
-          `action '${name}' produced a patch that failed to apply: ${/** @type {Error} */ (err).message}`,
+        safeError(new AppRuntimeError('JA2004',
+          `action '${entry.name}' produced a patch that failed to apply: ${/** @type {Error} */ (err).message}`,
           /** @type {Error} */ (err)));
+        finish('failed', 'JA2004');
         return;
       }
     }
     if (next !== state && options.validateState !== undefined) {
-      const verdict = options.validateState(next);
+      const verdict = options.validateState(next, {
+        previous: state,
+        action: entry.name,
+        payload: entry.payload,
+        changes,
+      });
       if (verdict === false
         || (verdict !== null && typeof verdict === 'object' && verdict.valid === false)) {
         const err = new AppRuntimeError('JA2005',
-          `action '${name}' violated the app's state invariants; transition rejected`);
+          `action '${entry.name}' violated the app's state invariants; transition rejected`);
         err.detail = typeof verdict === 'object' ? verdict.errors : undefined;
-        onError(err);
+        safeError(err);
+        finish('rejected', 'JA2005');
         return;
       }
     }
+
     const changed = next !== state;
     state = next;
-    if (transition.effects !== undefined) runEffects(name, transition.effects);
+    if (transition.effects !== undefined) {
+      runEffects(entry.name, transition.effects, scheduledEffects);
+    }
     if (changed) {
-      for (const listener of stateListeners) listener(state, changes);
+      for (const listener of stateListeners) {
+        try {
+          listener(state, changes);
+        }
+        catch (err) {
+          safeError(new AppRuntimeError('JA2011',
+            `a state listener threw: ${/** @type {Error} */ (err).message}`,
+            /** @type {Error} */ (err)));
+        }
+      }
       refreshSubs();
       scheduleRender();
+    }
+    finish(changed || scheduledEffects.length > 0 ? 'applied' : 'noop', null);
+
+    /**
+     * Build the transaction record and notify observers (isolated: an
+     * observer failure never reaches the queue).
+     * @param {'applied' | 'noop' | 'rejected' | 'failed'} finalStatus
+     * @param {string | null} code
+     */
+    function finish(finalStatus, code) {
+      status = finalStatus;
+      errorCode = code;
+      if (observers.size === 0) return;
+      /** @type {TransactionRecord} */
+      const record = {
+        seq,
+        action: entry.name,
+        source: entry.source,
+        status,
+        changedPaths: status === 'applied' ? changes : null,
+        scheduledEffects,
+        durationMs: now() - started,
+        errorCode,
+      };
+      if (capturePayloads) {
+        record.payload = entry.payload;
+        record.event = entry.event;
+      }
+      for (const observer of observers) {
+        try {
+          observer(record);
+        }
+        catch (err) {
+          safeError(new AppRuntimeError('JA2011',
+            `a transaction observer threw: ${/** @type {Error} */ (err).message}`,
+            /** @type {Error} */ (err)));
+        }
+      }
     }
   }
 
   /**
    * @param {string} name
    * @param {any} effects
+   * @param {string[]} scheduled - Records invoked effect names.
    */
-  function runEffects(name, effects) {
+  function runEffects(name, effects, scheduled) {
     if (!Array.isArray(effects)) {
-      onError(new AppRuntimeError('JA2003',
+      safeError(new AppRuntimeError('JA2003',
         `action '${name}' produced "effects" that are not an array`));
       return;
     }
@@ -244,15 +516,16 @@ export function createApp(appDoc, options = {}) {
       const run = effect?.run;
       const handler = typeof run === 'string' ? effectHandlers[run] : undefined;
       if (handler === undefined) {
-        onError(new AppRuntimeError('JA2006',
+        safeError(new AppRuntimeError('JA2006',
           `action '${name}' invoked unregistered effect '${String(run)}'`));
         continue;
       }
+      scheduled.push(run);
       try {
-        handler(effect.with ?? null, dispatch);
+        handler(effect.with ?? null, effectDispatch);
       }
       catch (err) {
-        onError(new AppRuntimeError('JA2007',
+        safeError(new AppRuntimeError('JA2007',
           `effect '${run}' threw: ${/** @type {Error} */ (err).message}`,
           /** @type {Error} */ (err)));
       }
@@ -264,6 +537,14 @@ export function createApp(appDoc, options = {}) {
    * the current state. A broken `when` fails CLOSED (the subscription
    * stops — a broken rule must never keep side effects alive) and is
    * reported through `onError`.
+   *
+   * Startup is resource acquisition: a slot is committed live only
+   * after its handler returned. A throwing handler leaves the slot
+   * stopped (`JA2013`); a throwing cleanup is isolated (`JA2012`) and
+   * never skips its siblings. Because dispatches queue (they never
+   * nest), condition changes made by a starting handler coalesce: they
+   * are observed by the next transaction's reconciliation, which then
+   * disposes the just-started resource through the ordinary stop path.
    */
   function refreshSubs() {
     for (let i = 0; i < subs.length; i++) {
@@ -276,7 +557,7 @@ export function createApp(appDoc, options = {}) {
         }
         catch (err) {
           live = false;
-          onError(new AppRuntimeError('JA2002',
+          safeError(new AppRuntimeError('JA2002',
             `subscription '${sub.run}' has a "when" that failed: ${/** @type {Error} */ (err).message}`,
             /** @type {Error} */ (err)));
         }
@@ -284,17 +565,37 @@ export function createApp(appDoc, options = {}) {
       if (live && !slot.live) {
         const handler = subHandlers[sub.run];
         if (handler === undefined) {
-          onError(new AppRuntimeError('JA2008',
+          safeError(new AppRuntimeError('JA2008',
             `subscription '${sub.run}' has no registered handler`));
           continue;
         }
+        let cleanup;
+        try {
+          cleanup = handler(sub.props, subDispatch);
+        }
+        catch (err) {
+          safeError(new AppRuntimeError('JA2013',
+            `subscription '${sub.run}' threw while starting; it stays stopped: ${/** @type {Error} */ (err).message}`,
+            /** @type {Error} */ (err)));
+          continue;
+        }
         slot.live = true;
-        slot.cleanup = handler(sub.props, dispatch);
+        slot.cleanup = cleanup;
       }
       else if (!live && slot.live) {
+        const cleanup = slot.cleanup;
         slot.live = false;
-        if (typeof slot.cleanup === 'function') slot.cleanup();
         slot.cleanup = undefined;
+        if (typeof cleanup === 'function') {
+          try {
+            cleanup();
+          }
+          catch (err) {
+            safeError(new AppRuntimeError('JA2012',
+              `subscription '${sub.run}' threw while cleaning up: ${/** @type {Error} */ (err).message}`,
+              /** @type {Error} */ (err)));
+          }
+        }
       }
     }
   }
@@ -304,7 +605,20 @@ export function createApp(appDoc, options = {}) {
     renderScheduled = true;
     schedule(() => {
       renderScheduled = false;
-      if (running) render();
+      if (!running) return;
+      if (draining) {
+        // synchronous scheduler: a renderer failure (a throwing widget
+        // unmount) must not corrupt the transaction queue
+        try {
+          render();
+        }
+        catch (err) {
+          safeError(/** @type {Error} */ (err));
+        }
+      }
+      else {
+        render();
+      }
     });
   }
 
@@ -317,12 +631,79 @@ export function createApp(appDoc, options = {}) {
 
   /** Render synchronously, now. */
   function render() {
-    if (renderer !== null) renderer(vnode());
+    if (renderer === null) return;
+    renderer(vnode());
+    if (afterRender !== null) afterRender();
   }
 
-  // boot: subscriptions against the initial state, then the first frame
-  refreshSubs();
-  render();
+  /**
+   * Dispose every live subscription and clear the listeners; shared by
+   * stop/destroy/boot-rollback. Cleanup errors are isolated.
+   */
+  function teardownLoop() {
+    running = false;
+    actionQueue.length = 0;
+    refreshSubs();
+    stateListeners.clear();
+  }
+
+  /** Dispose registered effect handlers, each identity exactly once. */
+  function disposeEffectHandlers() {
+    const seen = new Set();
+    for (const name in effectHandlers) {
+      const handler = effectHandlers[name];
+      if (seen.has(handler)) continue;
+      seen.add(handler);
+      const dispose = /** @type {any} */ (handler)?.dispose;
+      if (typeof dispose === 'function') {
+        try {
+          dispose.call(handler);
+        }
+        catch (err) {
+          safeError(new AppRuntimeError('JA2012',
+            `effect handler '${name}' threw while disposing: ${/** @type {Error} */ (err).message}`,
+            /** @type {Error} */ (err)));
+        }
+      }
+    }
+  }
+
+  // boot: the initial subscriptions and the first frame are one
+  // transaction — on failure everything acquired is rolled back and
+  // createApp throws JA0007 (see the function contract above)
+  {
+    /** @type {Error | null} */
+    let bootFailure = null;
+    draining = true; // dispatches made by starting handlers queue
+    try {
+      refreshSubs();
+      render();
+    }
+    catch (err) {
+      bootFailure = /** @type {Error} */ (err);
+    }
+    finally {
+      draining = false;
+    }
+    if (bootFailure === null && pendingError !== null) {
+      bootFailure = pendingError;
+    }
+    pendingError = null;
+    if (bootFailure !== null) {
+      try {
+        teardownLoop();
+        if (renderer !== null && typeof renderer.destroy === 'function') renderer.destroy();
+      }
+      catch {
+        // rollback is best-effort by contract; the boot failure wins
+      }
+      pendingError = null;
+      throw new AppCompileError('JA0007',
+        `the app failed to boot: ${bootFailure.message}`, '', bootFailure);
+    }
+    // subscriptions queued dispatches during boot: process them now
+    drainQueue();
+  }
 
   return {
     dispatch,
@@ -336,7 +717,9 @@ export function createApp(appDoc, options = {}) {
      * transition's changed paths: an array of JSON Pointers when the
      * transition was patch-only (see the patch engine's `changes` option
      * for the invalidation-sound semantics), or `null` when the whole
-     * state was replaced — treat everything as changed.
+     * state was replaced — treat everything as changed. Listeners run
+     * inside the transaction, in registration order, all observing the
+     * same state/changes pair; a throwing listener is isolated (JA2011).
      * @param {(state: any, changes: string[] | null) => void} listener
      * @returns {() => void} unsubscribe
      */
@@ -344,13 +727,62 @@ export function createApp(appDoc, options = {}) {
       stateListeners.add(listener);
       return () => { stateListeners.delete(listener); };
     },
-    /** Stop the loop: cleans up subscriptions, ignores further dispatches. */
+    /**
+     * Observe completed transactions (APP-FORMAT §8.3). The observer
+     * receives one bounded JSON metadata record per transaction, after
+     * the transaction fully settled (state, effects, listeners,
+     * subscriptions, render scheduling). Payload/event values are
+     * included only when the app was created with `capturePayloads`.
+     * A throwing observer is isolated and never corrupts the queue.
+     * @param {(tx: TransactionRecord) => void} observer
+     * @returns {() => void} unsubscribe
+     */
+    observe(observer) {
+      observers.add(observer);
+      return () => { observers.delete(observer); };
+    },
+    /**
+     * Pause the loop: live subscriptions are cleaned up (isolated),
+     * listeners are cleared and further dispatches are ignored. The
+     * renderer and effect handlers stay untouched — `destroy()` is the
+     * terminal teardown.
+     */
     stop() {
-      running = false;
-      refreshSubs();
-      stateListeners.clear();
+      teardownLoop();
+      flushPendingError();
+    },
+    /**
+     * Terminal teardown: `stop()` plus observer removal, effect-handler
+     * `dispose()` (each handler identity once), and renderer
+     * destruction (widgets unmount exactly once, the container is left
+     * empty). Idempotent; scheduled render flushes become exact no-ops;
+     * every cleanup error is isolated so siblings always run.
+     */
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      teardownLoop();
+      observers.clear();
+      disposeEffectHandlers();
+      if (renderer !== null) {
+        try {
+          if (typeof renderer.destroy === 'function') renderer.destroy();
+        }
+        catch (err) {
+          safeError(new AppRuntimeError('JA2012',
+            `the renderer threw while being destroyed: ${/** @type {Error} */ (err).message}`,
+            /** @type {Error} */ (err)));
+        }
+        renderer = null;
+      }
+      flushPendingError();
     },
   };
+}
+
+/** Monotonic-ish milliseconds for transaction durations. */
+function now() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
 /**
@@ -387,6 +819,32 @@ const EVENT_FIELD_SOURCES = Object.freeze(Object.assign(Object.create(null), {
   selectionStart: 'target', selectionEnd: 'target',
 }));
 
+/** The default `$event` members; a requested name from this set is
+ * already bound and is never overwritten (a `null` re-bind would erase
+ * real data). A registered extractor still wins — the host chose to
+ * redefine the member. */
+const DEFAULT_EVENT_MEMBERS = Object.freeze(Object.assign(Object.create(null), {
+  type: true, value: true, checked: true, key: true,
+}));
+
+/**
+ * Bind one member of the `$event` object without ever mutating a
+ * prototype: `__proto__` becomes an ordinary own data property.
+ * @param {any} obj
+ * @param {string} name
+ * @param {any} value
+ */
+function setEventMember(obj, name, value) {
+  if (name === '__proto__') {
+    Object.defineProperty(obj, name, {
+      value, writable: true, enumerable: true, configurable: true,
+    });
+  }
+  else {
+    obj[name] = value;
+  }
+}
+
 /**
  * Resolve one requested `$event` field, in precedence order: a registered
  * host extractor, the built-in allow-list, else `null` + a JA2009 report
@@ -399,10 +857,6 @@ const EVENT_FIELD_SOURCES = Object.freeze(Object.assign(Object.create(null), {
  * @returns {any}
  */
 function resolveEventField(event, name, extractors, report) {
-  if (Object.hasOwn(extractors, name)) {
-    const value = extractors[name](event);
-    return value === undefined ? null : value;
-  }
   const source = EVENT_FIELD_SOURCES[name];
   if (source !== undefined) {
     const value = source === 'target' ? event?.target?.[name] : event?.[name];
@@ -415,7 +869,8 @@ function resolveEventField(event, name, extractors, report) {
 /**
  * The serializable slice of a DOM event bound to `$event`: the default
  * `{ type, value, checked, key }` plus one member per requested field
- * name (APP-FORMAT §3.1).
+ * name (APP-FORMAT §3.1). Runs synchronously at dispatch time — the
+ * result is plain JSON by contract, never the native event.
  * @param {any} event
  * @param {string[] | null} fields - Requested field names, or `null`.
  * @param {Record<string, (nativeEvent: any) => any>} extractors
@@ -432,7 +887,14 @@ function eventData(event, fields, extractors, report) {
   };
   if (fields !== null) {
     for (const name of fields) {
-      data[name] = resolveEventField(event, name, extractors, report);
+      if (Object.hasOwn(extractors, name)) {
+        const value = extractors[name](event);
+        setEventMember(data, name, value === undefined ? null : value);
+        continue;
+      }
+      // a requested default member is already bound; never null it out
+      if (DEFAULT_EVENT_MEMBERS[name] === true) continue;
+      setEventMember(data, name, resolveEventField(event, name, extractors, report));
     }
   }
   return data;

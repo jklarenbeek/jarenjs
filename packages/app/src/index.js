@@ -9,4 +9,6 @@ export { createApp } from './app.js';
 export { compileActions, compileSubs } from './actions.js';
 export { createFormView, createFormActions } from './forms.js';
 export { createTaskEffect } from './tasks.js';
+export { createFocusEffect } from './focus.js';
+export { createTransactionLog } from './diagnostics.js';
 export { AppCompileError, AppRuntimeError } from './errors.js';

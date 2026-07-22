@@ -17,6 +17,9 @@
  *  - `JA0005` — `subs` is not an array of subscription entries
  *  - `JA0006` — a subscription entry is malformed or its `when` failed
  *    to compile (see `cause`)
+ *  - `JA0007` — the app failed to boot: the initial subscriptions or
+ *    the first frame failed after compilation succeeded; every
+ *    already-acquired resource was rolled back (see `cause`)
  */
 export class AppCompileError extends Error {
   /**
@@ -47,6 +50,17 @@ export class AppCompileError extends Error {
  *  - `JA2008` — a subscription entry names no registered handler
  *  - `JA2009` — a binding requested an unknown event field (the member
  *    is bound `null`; the dispatch itself is NOT dropped)
+ *  - `JA2010` — the dispatch loop exceeded `maxTurns` transactions in
+ *    one drain (an accidental action/effect loop); the queue was
+ *    abandoned
+ *  - `JA2011` — a state listener or transaction observer threw
+ *    (isolated; the queue drains on)
+ *  - `JA2012` — a cleanup threw while stopping/reconciling/destroying
+ *    (isolated; sibling cleanups still run)
+ *  - `JA2013` — a subscription handler threw while starting; the slot
+ *    stays stopped
+ *  - `JA2014` — a post-render focus/measure intent named a `data-ref`
+ *    with no rendered target
  */
 export class AppRuntimeError extends Error {
   /**
