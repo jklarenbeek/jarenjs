@@ -284,13 +284,23 @@ renderer MUST honor:
 - **Destroy** — when a subtree containing widgets is removed or
   replaced, the renderer MUST call each widget's `unmount(handle)`
   exactly once, without descending into any widget's host subtree (the
-  widget's own DOM may contain anything). The walk is
-  **ownership-based**: it drains what the renderer actually acquired —
-  the widget-host markers in the live DOM — never a vnode, because a
-  vnode is a description that may be old, new, or (after a mid-pass
-  `destroy()`) only partially committed. A throwing `unmount` MUST NOT
+  widget's own DOM may contain anything). The observable contract is
+  **ownership-exactness**: cleanup MUST be independent of speculative
+  or uncommitted desired-vnode state and exact for every resource the
+  renderer actually acquired — a vnode is a description that may be
+  old, new, or (after a mid-pass `destroy()`) only partially
+  committed, so it cannot be the authority. The reference
+  implementation walks the live DOM by its widget-host markers; a live
+  acquisition registry or a precise partial-commit model conforms
+  equally, provided the exactness holds. A throwing `unmount` MUST NOT
   prevent sibling widgets from unmounting: the walk finishes, then the
-  first error surfaces.
+  first error surfaces. The walk snapshots each renderer-owned child
+  list before invoking hooks, so an `unmount` that detaches its own
+  host cannot shift a sibling out of the cleanup — though detaching,
+  replacing or reparenting the renderer-owned host is OUTSIDE the
+  widget's boundary (the widget owns the host's *subtree*; the host
+  element and its position belong to the renderer), and hosts SHOULD
+  NOT rely on it beyond this cleanup hardening.
 - **Hook failure** — a throwing `mount` or `update` **poisons** the
   widget: sibling widgets and the frame still complete, the first
   error surfaces after the frame settles, and the NEXT render MUST
@@ -324,16 +334,23 @@ A host that merely wants a widget-free tree still renders a widget-free
 frame; `destroy()` is for ending the renderer's life (`app.destroy()`
 calls it). A `destroy()` entered from inside a widget hook or nested
 render is still terminal: the active pass stops **immediately** — no
-later sibling observes another `mount` or `update` in that frame — and
-the teardown runs as the pass unwinds. Because teardown drains the
-renderer's live resources rather than pairing a vnode against the DOM,
-it is exact even when the aborted pass had structurally diverged from
-the committed tree (insertions, removals, replacements or keyed moves
+later sibling observes another `mount` or `update` in that frame, and
+the no-`update` recycle fallback MUST NOT begin its fresh `mount` when
+its `unmount` requested the destroy (the ended acquisition is recorded
+so teardown does not unmount it a second time) — and the teardown runs
+as the pass unwinds. Because teardown drains the renderer's live
+resources rather than pairing a vnode against the DOM, it is exact
+even when the aborted pass had structurally diverged from the
+committed tree (insertions, removals, replacements or keyed moves
 before or after the destroying widget): every successfully mounted
 instance — a mount hook that itself requested the destroy included —
 unmounts exactly once, pending mounts are canceled, the container ends
 empty even when an unmount throws, and no internal traversal error is
-ever produced.
+ever produced. Terminal-cleanup errors carry provenance: a host may
+register `onCleanupError` to receive the first unmount error after
+every sibling cleaned up (the app loop uses this to assign its stable
+cleanup code), instead of having it surface indistinguishably from a
+render failure.
 
 ### 7.3.2 Render serialization
 

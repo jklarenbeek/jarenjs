@@ -737,6 +737,15 @@ export function createApp(appDoc, options = {}) {
           document: options.document,
           onEvent: handleBinding,
           widgets: options.widgets,
+          // terminal-cleanup provenance: a widget unmount that throws
+          // during renderer teardown — deferred teardown after an
+          // app.destroy() from inside a hook included — is a CLEANUP
+          // failure (JA2012, original cause preserved, reported after
+          // every sibling cleaned up), never an anonymous render error
+          onCleanupError: (err) => {
+            safeError(new AppRuntimeError('JA2012',
+              `the renderer threw while being destroyed: ${err.message}`, err));
+          },
         });
       }
       if (options.validateState !== undefined) {

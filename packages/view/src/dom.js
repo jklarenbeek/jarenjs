@@ -111,6 +111,14 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  *   definitions by name (VIEW-FORMAT §7).
  * @property {any} [document] - The document to create nodes with
  *   (defaults to `container.ownerDocument`).
+ * @property {(error: Error) => void} [onCleanupError] - Receives the
+ *   first error a widget `unmount` threw during TERMINAL teardown
+ *   (`destroy()`, direct or deferred), after every sibling cleaned up
+ *   — the provenance channel that lets a host assign cleanup failures
+ *   their own error policy, distinct from mount/update/render
+ *   failures. Absent: the error surfaces after the teardown (thrown
+ *   from `destroy()` or from the render pass that finished a deferred
+ *   teardown).
  */
 
 /**
@@ -157,6 +165,10 @@ export function createDomRenderer(container, options = {}) {
     poisonedCount: 0,
     /** True after `destroy()`: every later render is an exact no-op. */
     destroyed: false,
+    /** Terminal-cleanup error sink (see `teardown`): receives the
+     * first error a widget `unmount` threw during terminal teardown,
+     * after every sibling cleaned up. */
+    onCleanupError: options.onCleanupError ?? null,
     /** The one `emit` every widget of this renderer receives. */
     emit: /** @type {WidgetEmit | null} */ (null),
   };
@@ -224,14 +236,30 @@ export function createDomRenderer(container, options = {}) {
     }
   }
 
-  /** The destroy walk shared by `destroy()` and a deferred destroy. */
+  /**
+   * The destroy walk shared by `destroy()` and a deferred destroy.
+   * Terminal-cleanup errors carry PROVENANCE: with an `onCleanupError`
+   * sink registered (the app loop registers one to assign its stable
+   * cleanup code) the first error routes there — after every sibling
+   * cleaned up — instead of surfacing indistinguishably from a
+   * mount/update/render failure; without a sink it surfaces after the
+   * teardown, as before.
+   */
   function teardown() {
     ctx.mountQueue.length = 0;
     if (rootNode !== null) {
-      destroyNode(ctx, rootNode);
+      /** @type {Error | null} */
+      let cleanupError = null;
+      if (ctx.hasWidgets) {
+        cleanupError = destroyDomWalk(ctx, rootNode, null);
+      }
       container.textContent = '';
       rootNode = null;
       oldVnode = null;
+      if (cleanupError !== null) {
+        if (ctx.onCleanupError !== null) ctx.onCleanupError(cleanupError);
+        else if (ctx.frameError === null) ctx.frameError = cleanupError;
+      }
     }
   }
 
@@ -560,6 +588,17 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
         // no update hook: recycle the host with a fresh lifecycle
         try {
           if (w.def.unmount !== undefined) w.def.unmount(w.handle);
+          // the unmount may have requested terminal destroy: the old
+          // acquisition has ENDED (record it, or deferred teardown
+          // would unmount it a second time) and no fresh acquisition
+          // may begin — a mount after a terminal request would run
+          // brand-new host side effects on a destroyed renderer
+          if (ctx.destroyed) {
+            w.mounted = false;
+            w.handle = undefined;
+            w.destroyed = true;
+            return node;
+          }
           w.handle = w.def.mount(node, props, ctx.emit);
         }
         catch (err) {
@@ -658,8 +697,13 @@ function destroyDomWalk(ctx, node, firstError) {
   }
   const children = node.childNodes;
   if (children !== undefined) {
-    for (let i = 0; i < children.length; i++) {
-      firstError = destroyDomWalk(ctx, children[i], firstError);
+    // snapshot before invoking hooks: `childNodes` is live, and an
+    // `unmount` that detaches its own host would shift the indices and
+    // silently skip a sibling's cleanup
+    const snapshot = [];
+    for (let i = 0; i < children.length; i++) snapshot.push(children[i]);
+    for (let i = 0; i < snapshot.length; i++) {
+      firstError = destroyDomWalk(ctx, snapshot[i], firstError);
     }
   }
   return firstError;

@@ -60,6 +60,14 @@ npm run release:check
 
 ## Publish
 
+**Bun is mandatory for a release.** The release gate's packed-consumer
+step runs in `--require-bun` mode (`npm run test:packed:release`): every
+packed package must import from its declared closure under Node AND Bun,
+strict packed TypeScript must resolve, and the `@jarenjs/app` closure
+must bundle under an isolated Vite build. A machine without a `bun`
+binary on `PATH` fails the gate before anything is packed — install Bun
+before publishing.
+
 The root command reruns the release gate and publishes only the fourteen public workspaces:
 
 ```bash

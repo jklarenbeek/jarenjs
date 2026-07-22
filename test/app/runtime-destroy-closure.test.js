@@ -138,11 +138,17 @@ describe('VIEW-FORMAT terminal destroy under an aborted structural patch', () =>
       ['section', { key: 's' }, probe('c', 0)],
       probe('a', 0),
     ]);
-    // the desired tree drops the section entirely; a's update destroys
-    render(['div', {}, probe('a', 1)]);
-    assert.deepStrictEqual(log.slice(0, 3), ['mount:c', 'mount:a', 'update:a']);
-    assert.deepStrictEqual([...log.slice(3)].sort(), ['unmount:a', 'unmount:c'],
-      'the nested widget of the never-removed section still unmounts');
+    // the section keeps its identity but drops its child, so the
+    // removal of c is GENUINELY APPLIED (unmount + removeChild) before
+    // the walk reaches a, whose update then destroys the renderer —
+    // the aborted pass follows a real structural change, not a
+    // tail-match shortcut
+    render(['div', {},
+      ['section', { key: 's' }],
+      probe('a', 1),
+    ]);
+    assert.deepStrictEqual(log, ['mount:c', 'mount:a', 'unmount:c', 'update:a', 'unmount:a'],
+      'c was removed by the applied patch before the destroyer ran; teardown then owned only a');
     assert.strictEqual(serialize(container), '<div></div>');
   });
 

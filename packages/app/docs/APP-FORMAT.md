@@ -339,7 +339,11 @@ never imports the validator; like forms, the application holds the key
 Because state, view, actions and subs are one JSON value and every
 dispatch is `(name, payload)` — also JSON — the following are
 compositions, not features: state snapshots, action logs, time-travel
-(replay the log through a fresh `createApp`), server rendering
+(replay the log through a fresh `createApp` — with the LIVE effect and
+subscription handlers stubbed or replaced, since replaying a log
+re-runs its transitions but must not re-fire real side effects;
+replaying recorded effect *outcomes* is an open follow-up, not a
+shipped capability), server rendering
 (`renderToString(app.getVnode())`), and remote mutation (ship a
 transition's `patch` over the wire). Runtimes SHOULD keep it that way:
 any extension that puts a function in the document breaks the format's
@@ -539,7 +543,7 @@ defaults to rethrowing):
 | `JA2009` | a binding requested an unknown event field (the member is bound `null`; the dispatch is NOT dropped) |
 | `JA2010` | the dispatch loop exceeded `maxTurns` in one drain; the queue was abandoned (§8.1) |
 | `JA2011` | a state listener or transaction observer threw (isolated) |
-| `JA2012` | a cleanup threw while stopping/reconciling/destroying (isolated) |
+| `JA2012` | a cleanup threw while stopping/reconciling/destroying (isolated; a widget `unmount` failing during renderer teardown — deferred teardown after an in-hook `destroy()` included — reports here with the first host cause preserved, after every sibling cleaned up) |
 | `JA2013` | a subscription handler threw while starting; the slot stays stopped |
 | `JA2014` | a post-render intent named a `data-ref` with no rendered target (§8.4) |
 | `JA2015` | the `validateState` hook itself threw (the transaction failed; the queue keeps draining) |
