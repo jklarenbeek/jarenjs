@@ -37,7 +37,7 @@ import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createDomRenderer } from '@jarenjs/view';
 
 import { compileActions, compileSubs } from './actions.js';
-import { AppCompileError, AppRuntimeError } from './errors.js';
+import { AppCompileError, AppRuntimeError, toError } from './errors.js';
 
 /**
  * @typedef {Object} AppOptions
@@ -90,10 +90,14 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  * @property {(flush: () => void) => void} [schedule] - Render scheduler;
  *   default batches on a microtask. Pass `(f) => f()` for synchronous
  *   rendering (tests, SSR pipelines).
- * @property {() => void} [afterRender] - Called after every committed
- *   frame (the DOM patch and widget mounts of a render are complete).
- *   The post-render focus/measurement queue (`createFocusEffect`)
- *   plugs in here. Never called on headless apps.
+ * @property {() => void} [afterRender] - Called exactly once per
+ *   settled, NONTERMINAL committed frame: after the DOM patch and
+ *   widget mounts complete, and — when a widget hook error was parked
+ *   during the frame — BEFORE that error is delivered to `onError`
+ *   (the committed frame is real; its callback is never starved by
+ *   error delivery). Never called for a pass that ended in terminal
+ *   teardown, and never on headless apps. The post-render
+ *   focus/measurement queue (`createFocusEffect`) plugs in here.
  * @property {number} [maxTurns] - The dispatch-loop guard (default
  *   1000): the maximum number of transactions one drain may process
  *   before the queue is abandoned with `JA2010` — an accidental
@@ -222,17 +226,20 @@ export function createApp(appDoc, options = {}) {
   /**
    * The FIFO transaction queue (APP-FORMAT §8). Entries carry the
    * already-JSON-reduced event — native events never wait in the queue.
-   * @type {Array<{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, cause: Error }> | null }>}
+   * @type {Array<{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, value: unknown }> | null }>}
    */
   const actionQueue = [];
   let draining = false;
   let txSeq = 0;
   /**
-   * The first error an `onError` sink (or an isolated site) threw while
-   * the drain was running. The drain always completes; this surfaces to
-   * the outermost caller afterwards, so the default rethrowing sink
-   * still fails loudly without ever corrupting the queue.
-   * @type {Error | null}
+   * The first value an `onError` sink (or an isolated site) threw
+   * while the drain was running, as a PRESENCE record — host code may
+   * legally `throw null`/`throw undefined`, so the thrown value itself
+   * can never double as the absence sentinel. The drain always
+   * completes; the value surfaces to the outermost caller afterwards
+   * BY IDENTITY, so the default rethrowing sink still fails loudly
+   * without ever corrupting the queue.
+   * @type {{ value: unknown } | null}
    */
   let pendingError = null;
 
@@ -250,16 +257,16 @@ export function createApp(appDoc, options = {}) {
       onError(err);
     }
     catch (thrown) {
-      if (pendingError === null) pendingError = /** @type {Error} */ (thrown);
+      if (pendingError === null) pendingError = { value: thrown };
     }
   }
 
   /** Re-throw the parked drain error at an entry-point boundary. */
   function flushPendingError() {
     if (pendingError !== null) {
-      const err = pendingError;
+      const { value } = pendingError;
       pendingError = null;
-      throw err;
+      throw value;
     }
   }
 
@@ -281,12 +288,14 @@ export function createApp(appDoc, options = {}) {
     if (domEvent !== null && domEvent !== undefined) {
       /** @type {string[]} */
       const unknown = [];
-      /** @type {Array<{ field: string, cause: Error }>} */
+      /** @type {Array<{ field: string, value: unknown }>} */
       const failures = [];
+      // tagged outcomes: a thrown `undefined` is a FAILURE, structurally
+      // distinct from an unknown field — the two must never share a signal
       event = eventData(domEvent, eventFields, eventExtractors,
-        (field, cause) => {
-          if (cause === undefined) unknown.push(field);
-          else failures.push({ field, cause });
+        (outcome) => {
+          if (outcome.kind === 'unknown') unknown.push(outcome.field);
+          else failures.push({ field: outcome.field, value: outcome.value });
         });
       if (unknown.length > 0) unknownFields = unknown;
       if (failures.length > 0) extractorFailures = failures;
@@ -379,7 +388,7 @@ export function createApp(appDoc, options = {}) {
    * Run one queued transaction to completion: evaluate the action,
    * commit the state, invoke effects, notify listeners, reconcile
    * subscriptions, schedule the render, then notify observers.
-   * @param {{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, cause: Error }> | null }} entry
+   * @param {{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, value: unknown }> | null }} entry
    */
   function runTransaction(entry) {
     const started = now();
@@ -405,7 +414,8 @@ export function createApp(appDoc, options = {}) {
     // action's JA2002 (APP-FORMAT §5.4), the member binds null, and the
     // dispatch itself is never dropped
     if (entry.extractorFailures !== null) {
-      for (const { field, cause } of entry.extractorFailures) {
+      for (const { field, value } of entry.extractorFailures) {
+        const cause = toError(value);
         safeError(new AppRuntimeError('JA2002',
           `action '${entry.name}' event-field extractor '${field}' threw: ${cause.message}`,
           cause));
@@ -424,9 +434,9 @@ export function createApp(appDoc, options = {}) {
       transition = action.first(state, { event: entry.event, payload: entry.payload });
     }
     catch (err) {
+      const cause = toError(err);
       safeError(new AppRuntimeError('JA2002',
-        `action '${entry.name}' failed: ${/** @type {Error} */ (err).message}`,
-        /** @type {Error} */ (err)));
+        `action '${entry.name}' failed: ${cause.message}`, cause));
       finish('failed', 'JA2002');
       return;
     }
@@ -454,9 +464,10 @@ export function createApp(appDoc, options = {}) {
         if (!('state' in transition)) changes = tracked.changes;
       }
       catch (err) {
+        const cause = toError(err);
         safeError(new AppRuntimeError('JA2004',
-          `action '${entry.name}' produced a patch that failed to apply: ${/** @type {Error} */ (err).message}`,
-          /** @type {Error} */ (err)));
+          `action '${entry.name}' produced a patch that failed to apply: ${cause.message}`,
+          cause));
         finish('failed', 'JA2004');
         return;
       }
@@ -475,9 +486,10 @@ export function createApp(appDoc, options = {}) {
         // the validator is host code: a throw is its own failure mode
         // (JA2015), never a rejection verdict — the transaction fails,
         // the queue keeps draining
+        const cause = toError(err);
         safeError(new AppRuntimeError('JA2015',
-          `the validateState hook threw for action '${entry.name}': ${/** @type {Error} */ (err).message}`,
-          /** @type {Error} */ (err)));
+          `the validateState hook threw for action '${entry.name}': ${cause.message}`,
+          cause));
         finish('failed', 'JA2015');
         return;
       }
@@ -503,9 +515,9 @@ export function createApp(appDoc, options = {}) {
           listener(state, changes);
         }
         catch (err) {
+          const cause = toError(err);
           safeError(new AppRuntimeError('JA2011',
-            `a state listener threw: ${/** @type {Error} */ (err).message}`,
-            /** @type {Error} */ (err)));
+            `a state listener threw: ${cause.message}`, cause));
         }
       }
       refreshSubs();
@@ -543,9 +555,9 @@ export function createApp(appDoc, options = {}) {
           observer(record);
         }
         catch (err) {
+          const cause = toError(err);
           safeError(new AppRuntimeError('JA2011',
-            `a transaction observer threw: ${/** @type {Error} */ (err).message}`,
-            /** @type {Error} */ (err)));
+            `a transaction observer threw: ${cause.message}`, cause));
         }
       }
     }
@@ -575,9 +587,9 @@ export function createApp(appDoc, options = {}) {
         handler(effect.with ?? null, effectDispatch);
       }
       catch (err) {
+        const cause = toError(err);
         safeError(new AppRuntimeError('JA2007',
-          `effect '${run}' threw: ${/** @type {Error} */ (err).message}`,
-          /** @type {Error} */ (err)));
+          `effect '${run}' threw: ${cause.message}`, cause));
       }
     }
   }
@@ -607,9 +619,9 @@ export function createApp(appDoc, options = {}) {
         }
         catch (err) {
           live = false;
+          const cause = toError(err);
           safeError(new AppRuntimeError('JA2002',
-            `subscription '${sub.run}' has a "when" that failed: ${/** @type {Error} */ (err).message}`,
-            /** @type {Error} */ (err)));
+            `subscription '${sub.run}' has a "when" that failed: ${cause.message}`, cause));
         }
       }
       if (live && !slot.live) {
@@ -624,9 +636,10 @@ export function createApp(appDoc, options = {}) {
           cleanup = handler(sub.props, subDispatch);
         }
         catch (err) {
+          const cause = toError(err);
           safeError(new AppRuntimeError('JA2013',
-            `subscription '${sub.run}' threw while starting; it stays stopped: ${/** @type {Error} */ (err).message}`,
-            /** @type {Error} */ (err)));
+            `subscription '${sub.run}' threw while starting; it stays stopped: ${cause.message}`,
+            cause));
           continue;
         }
         slot.live = true;
@@ -641,9 +654,9 @@ export function createApp(appDoc, options = {}) {
             cleanup();
           }
           catch (err) {
+            const cause = toError(err);
             safeError(new AppRuntimeError('JA2012',
-              `subscription '${sub.run}' threw while cleaning up: ${/** @type {Error} */ (err).message}`,
-              /** @type {Error} */ (err)));
+              `subscription '${sub.run}' threw while cleaning up: ${cause.message}`, cause));
           }
         }
       }
@@ -666,7 +679,7 @@ export function createApp(appDoc, options = {}) {
         render();
       }
       catch (err) {
-        safeError(/** @type {Error} */ (err));
+        safeError(toError(err));
       }
       if (!draining) flushPendingError();
     });
@@ -679,11 +692,15 @@ export function createApp(appDoc, options = {}) {
     return view(viewModel !== null ? viewModel(state) : state);
   }
 
-  /** Render synchronously, now. */
+  /** Render synchronously, now. `afterRender` is NOT called here: the
+   * renderer's `onFrame` channel invokes it exactly once per settled,
+   * nonterminal committed frame — a normal return is the wrong signal
+   * (the renderer may have performed terminal teardown, or may be
+   * about to deliver a parked widget error for a frame that DID
+   * commit). */
   function render() {
     if (renderer === null) return;
     renderer(vnode());
-    if (afterRender !== null) afterRender();
   }
 
   /**
@@ -710,9 +727,9 @@ export function createApp(appDoc, options = {}) {
           dispose.call(handler);
         }
         catch (err) {
+          const cause = toError(err);
           safeError(new AppRuntimeError('JA2012',
-            `effect handler '${name}' threw while disposing: ${/** @type {Error} */ (err).message}`,
-            /** @type {Error} */ (err)));
+            `effect handler '${name}' threw while disposing: ${cause.message}`, cause));
         }
       }
     }
@@ -728,7 +745,8 @@ export function createApp(appDoc, options = {}) {
   // error inside queued boot work) recovers it and boot continues;
   // renderer construction and first-frame failures are always fatal.
   {
-    /** @type {Error | null} */
+    /** A presence record: a boot step may legally throw `null`.
+     * @type {{ value: unknown } | null} */
     let bootFailure = null;
     draining = true; // dispatches made by starting handlers queue
     try {
@@ -742,9 +760,17 @@ export function createApp(appDoc, options = {}) {
           // app.destroy() from inside a hook included — is a CLEANUP
           // failure (JA2012, original cause preserved, reported after
           // every sibling cleaned up), never an anonymous render error
-          onCleanupError: (err) => {
+          onCleanupError: (thrown) => {
+            const cause = toError(thrown);
             safeError(new AppRuntimeError('JA2012',
-              `the renderer threw while being destroyed: ${err.message}`, err));
+              `the renderer threw while being destroyed: ${cause.message}`, cause));
+          },
+          // the committed-live-frame boundary: `afterRender` runs once
+          // per SETTLED, NONTERMINAL frame — after the DOM patch and
+          // widget mounts, before a parked hook error is delivered —
+          // and never after terminal teardown (APP-FORMAT §8.4)
+          onFrame: (state) => {
+            if (state === 'live' && afterRender !== null) afterRender();
           },
         });
       }
@@ -755,7 +781,7 @@ export function createApp(appDoc, options = {}) {
       render();
     }
     catch (err) {
-      bootFailure = /** @type {Error} */ (err);
+      bootFailure = { value: err };
     }
     finally {
       draining = false;
@@ -772,7 +798,7 @@ export function createApp(appDoc, options = {}) {
         drainQueue();
       }
       catch (err) {
-        bootFailure = /** @type {Error} */ (err);
+        bootFailure = { value: err };
       }
     }
     if (bootFailure !== null) {
@@ -794,8 +820,9 @@ export function createApp(appDoc, options = {}) {
         renderer = null;
       }
       pendingError = null;
+      const cause = toError(bootFailure.value);
       throw new AppCompileError('JA0007',
-        `the app failed to boot: ${bootFailure.message}`, '', bootFailure);
+        `the app failed to boot: ${cause.message}`, '', cause);
     }
   }
 
@@ -813,9 +840,9 @@ export function createApp(appDoc, options = {}) {
         state, { previous: null, action: null, payload: null, changes: null });
     }
     catch (err) {
+      const cause = toError(err);
       safeError(new AppRuntimeError('JA2015',
-        `the validateState hook threw for the initial state: ${/** @type {Error} */ (err).message}`,
-        /** @type {Error} */ (err)));
+        `the validateState hook threw for the initial state: ${cause.message}`, cause));
       return;
     }
     if (verdict === false
@@ -892,9 +919,9 @@ export function createApp(appDoc, options = {}) {
           if (typeof renderer.destroy === 'function') renderer.destroy();
         }
         catch (err) {
+          const cause = toError(err);
           safeError(new AppRuntimeError('JA2012',
-            `the renderer threw while being destroyed: ${/** @type {Error} */ (err).message}`,
-            /** @type {Error} */ (err)));
+            `the renderer threw while being destroyed: ${cause.message}`, cause));
         }
         renderer = null;
       }
@@ -976,7 +1003,7 @@ function setEventMember(obj, name, value) {
  * @param {any} event
  * @param {string} name
  * @param {Record<string, (nativeEvent: any) => any>} extractors
- * @param {(field: string) => void} report
+ * @param {(outcome: { kind: 'unknown', field: string }) => void} report
  * @returns {any}
  */
 function resolveEventField(event, name, extractors, report) {
@@ -985,7 +1012,7 @@ function resolveEventField(event, name, extractors, report) {
     const value = source === 'target' ? event?.target?.[name] : event?.[name];
     return value === undefined ? null : value;
   }
-  report(name);
+  report({ kind: 'unknown', field: name });
   return null;
 }
 
@@ -997,10 +1024,12 @@ function resolveEventField(event, name, extractors, report) {
  * @param {any} event
  * @param {string[] | null} fields - Requested field names, or `null`.
  * @param {Record<string, (nativeEvent: any) => any>} extractors
- * @param {(field: string, cause?: Error) => void} report - The failure
- *   sink: no `cause` = unknown field (JA2009), with `cause` = a
- *   registered extractor threw (JA2002). Either way the member binds
- *   `null` and the dispatch continues.
+ * @param {(outcome: { kind: 'unknown', field: string } | { kind: 'threw', field: string, value: unknown }) => void} report
+ *   The failure sink, TAGGED so a thrown `undefined` can never be
+ *   mistaken for an unknown field: `'unknown'` = the field name
+ *   resolves nowhere (JA2009), `'threw'` = a registered extractor
+ *   threw (JA2002, the thrown value retained verbatim). Either way the
+ *   member binds `null` and the dispatch continues.
  * @returns {{ type: string, value: any, checked: any, key: any }}
  */
 function eventData(event, fields, extractors, report) {
@@ -1020,7 +1049,7 @@ function eventData(event, fields, extractors, report) {
           value = out === undefined ? null : out;
         }
         catch (err) {
-          report(name, /** @type {Error} */ (err));
+          report({ kind: 'threw', field: name, value: err });
         }
         setEventMember(data, name, value);
         continue;

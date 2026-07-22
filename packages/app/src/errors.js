@@ -82,3 +82,71 @@ export class AppRuntimeError extends Error {
     this.detail = undefined;
   }
 }
+
+/**
+ * A non-Error value thrown by host code, wrapped for the framework's
+ * error channels. JavaScript permits `throw null`, `throw undefined`,
+ * strings, numbers and arbitrary objects; host extension points
+ * (effects, subscriptions, validators, extractors, listeners,
+ * observers, widgets, sinks) may produce any of them, and the
+ * framework's isolation guarantees must hold for all of them.
+ *
+ * The original value is retained as an OWN `cause` property — set even
+ * when the value is `undefined`, so `Object.hasOwn(err, 'cause')`
+ * distinguishes "threw undefined" from "no cause" — and the message
+ * describes the value without invoking any user coercion (`toString`
+ * on a hostile object is never called).
+ */
+export class HostValueError extends Error {
+  /** @param {unknown} value - The value host code threw. */
+  constructor(value) {
+    super(`host code threw a non-Error value (${describeThrown(value)})`);
+    this.name = 'HostValueError';
+    Object.defineProperty(this, 'cause', {
+      value, writable: true, enumerable: false, configurable: true,
+    });
+  }
+}
+
+/**
+ * Describe a thrown non-Error value without calling user code: only
+ * primitive-safe conversions are used, never a `toString` that host
+ * code controls.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function describeThrown(value) {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  switch (typeof value) {
+    case 'string': {
+      const short = value.length > 80 ? value.slice(0, 80) + '…' : value;
+      return JSON.stringify(short);
+    }
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+      return String(value);
+    case 'symbol':
+      return 'a symbol';
+    case 'function':
+      return 'a function';
+    default:
+      return Array.isArray(value) ? 'an array' : 'a non-Error object';
+  }
+}
+
+/**
+ * The one host-failure normalization policy (APP-FORMAT §10): every
+ * value caught at a host boundary passes through here. An `Error`
+ * instance passes by IDENTITY — wherever a contract promises the
+ * original error as `cause`, that identity survives; anything else is
+ * wrapped in a {@link HostValueError} that retains the original value
+ * as an own `cause` property. No caught value is ever assumed to have
+ * `.message`, and no thrown value is ever used as an absence sentinel.
+ * @param {unknown} value - Whatever host code threw.
+ * @returns {Error}
+ */
+export function toError(value) {
+  return value instanceof Error ? value : new HostValueError(value);
+}

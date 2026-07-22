@@ -332,8 +332,16 @@ renderer MUST honor:
 
 A host that merely wants a widget-free tree still renders a widget-free
 frame; `destroy()` is for ending the renderer's life (`app.destroy()`
-calls it). A `destroy()` entered from inside a widget hook or nested
-render is still terminal: the active pass stops **immediately** — no
+calls it). Thrown-value policy: the renderer never interprets what a
+widget hook throws — the first thrown value of a frame or teardown
+surfaces BY IDENTITY, whatever it is (`null` and `undefined`
+included; parked failures are presence records, so no thrown value
+can read as "nothing was thrown"). The `onFrame` option reports frame
+settlement (`'live'` or `'destroyed'`) once per top-level render pass,
+BEFORE a parked hook error is delivered — the channel a host uses to
+run committed-frame work (the app loop's `afterRender`) without being
+starved by error delivery. A `destroy()` entered from inside a widget
+hook or nested render is still terminal: the active pass stops **immediately** — no
 later sibling observes another `mount` or `update` in that frame, and
 the no-`update` recycle fallback MUST NOT begin its fresh `mount` when
 its `unmount` requested the destroy (the ended acquisition is recorded

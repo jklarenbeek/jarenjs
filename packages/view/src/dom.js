@@ -111,14 +111,20 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  *   definitions by name (VIEW-FORMAT §7).
  * @property {any} [document] - The document to create nodes with
  *   (defaults to `container.ownerDocument`).
- * @property {(error: Error) => void} [onCleanupError] - Receives the
- *   first error a widget `unmount` threw during TERMINAL teardown
- *   (`destroy()`, direct or deferred), after every sibling cleaned up
- *   — the provenance channel that lets a host assign cleanup failures
- *   their own error policy, distinct from mount/update/render
- *   failures. Absent: the error surfaces after the teardown (thrown
- *   from `destroy()` or from the render pass that finished a deferred
- *   teardown).
+ * @property {(thrown: unknown) => void} [onCleanupError] - Receives
+ *   the first VALUE a widget `unmount` threw during TERMINAL teardown
+ *   (`destroy()`, direct or deferred) — by identity, whatever host
+ *   code threw — after every sibling cleaned up: the provenance
+ *   channel that lets a host assign cleanup failures their own error
+ *   policy, distinct from mount/update/render failures. Absent: the
+ *   value surfaces after the teardown (thrown from `destroy()` or
+ *   from the render pass that finished a deferred teardown).
+ * @property {(state: 'live' | 'destroyed') => void} [onFrame] - Called
+ *   once at the end of every top-level render pass: `'live'` = a
+ *   committed live frame settled (DOM patch and widget mounts done; a
+ *   parked widget hook error, if any, is delivered AFTER this call),
+ *   `'destroyed'` = the pass ended in terminal teardown. Not called
+ *   for a post-destroy no-op render or by `destroy()` itself.
  */
 
 /**
@@ -153,10 +159,14 @@ export function createDomRenderer(container, options = {}) {
     mountQueue: [],
     /** True once any widget node exists — gates the destroy walk. */
     hasWidgets: false,
-    /** First error a widget hook (`mount`/`update`/`unmount`) threw
-     * this frame (§7): the walk, the patch and the mount flush always
-     * finish; the error surfaces after the frame settles. */
-    frameError: /** @type {Error | null} */ (null),
+    /** First value a widget hook (`mount`/`update`/`unmount`) threw
+     * this frame (§7), as a PRESENCE record — host code may legally
+     * `throw null`/`throw undefined`, so the thrown value can never
+     * double as the absence sentinel. The walk, the patch and the
+     * mount flush always finish; the value surfaces BY IDENTITY after
+     * the frame settles.
+     * @type {{ value: unknown } | null} */
+    frameError: null,
     /** Live poisoned widgets (§7.3). While non-zero, the `===` subtree
      * fast path is disabled so structural sharing (the JSLT memo
      * reusing a reference-equal vnode) can never leave a poisoned
@@ -165,10 +175,17 @@ export function createDomRenderer(container, options = {}) {
     poisonedCount: 0,
     /** True after `destroy()`: every later render is an exact no-op. */
     destroyed: false,
-    /** Terminal-cleanup error sink (see `teardown`): receives the
-     * first error a widget `unmount` threw during terminal teardown,
-     * after every sibling cleaned up. */
+    /** Terminal-cleanup sink (see `teardown`): receives the first
+     * VALUE a widget `unmount` threw during terminal teardown — by
+     * identity, whatever it is — after every sibling cleaned up. */
     onCleanupError: options.onCleanupError ?? null,
+    /** Frame-settlement sink: called once at the end of every
+     * top-level render pass with `'live'` (a committed live frame —
+     * possibly with a parked hook error, delivered afterwards) or
+     * `'destroyed'` (the pass ended in terminal teardown). Called
+     * BEFORE a parked hook error is thrown, so a committed frame's
+     * host callback is never starved by error delivery. */
+    onFrame: options.onFrame ?? null,
     /** The one `emit` every widget of this renderer receives. */
     emit: /** @type {WidgetEmit | null} */ (null),
   };
@@ -229,10 +246,15 @@ export function createDomRenderer(container, options = {}) {
       destroyPending = false;
       teardown();
     }
+    // frame settlement precedes parked-error delivery: a committed
+    // live frame is real even when a widget hook failed during it
+    if (ctx.onFrame !== null) {
+      ctx.onFrame(ctx.destroyed ? 'destroyed' : 'live');
+    }
     if (ctx.frameError !== null) {
-      const err = ctx.frameError;
+      const { value } = ctx.frameError;
       ctx.frameError = null;
-      throw err;
+      throw value;
     }
   }
 
@@ -248,17 +270,17 @@ export function createDomRenderer(container, options = {}) {
   function teardown() {
     ctx.mountQueue.length = 0;
     if (rootNode !== null) {
-      /** @type {Error | null} */
-      let cleanupError = null;
+      /** @type {{ value: unknown } | null} */
+      let cleanupFailure = null;
       if (ctx.hasWidgets) {
-        cleanupError = destroyDomWalk(ctx, rootNode, null);
+        cleanupFailure = destroyDomWalk(ctx, rootNode, null);
       }
       container.textContent = '';
       rootNode = null;
       oldVnode = null;
-      if (cleanupError !== null) {
-        if (ctx.onCleanupError !== null) ctx.onCleanupError(cleanupError);
-        else if (ctx.frameError === null) ctx.frameError = cleanupError;
+      if (cleanupFailure !== null) {
+        if (ctx.onCleanupError !== null) ctx.onCleanupError(cleanupFailure.value);
+        else if (ctx.frameError === null) ctx.frameError = cleanupFailure;
       }
     }
   }
@@ -284,9 +306,9 @@ export function createDomRenderer(container, options = {}) {
     }
     teardown();
     if (ctx.frameError !== null) {
-      const err = ctx.frameError;
+      const { value } = ctx.frameError;
       ctx.frameError = null;
-      throw err;
+      throw value;
     }
   };
 
@@ -316,7 +338,7 @@ function flushMounts(ctx) {
     catch (err) {
       w.failed = 'mount';
       ctx.poisonedCount++;
-      if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
+      if (ctx.frameError === null) ctx.frameError = { value: err };
     }
   }
 }
@@ -581,7 +603,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
         catch (err) {
           w.failed = 'update';
           ctx.poisonedCount++;
-          if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
+          if (ctx.frameError === null) ctx.frameError = { value: err };
         }
       }
       else {
@@ -606,7 +628,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
           // could own: poison as 'mount' (skip unmount, replace next)
           w.failed = 'mount';
           ctx.poisonedCount++;
-          if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
+          if (ctx.frameError === null) ctx.frameError = { value: err };
         }
       }
     }
@@ -661,8 +683,8 @@ function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
  */
 function destroyNode(ctx, node) {
   if (!ctx.hasWidgets) return;
-  const err = destroyDomWalk(ctx, node, null);
-  if (err !== null && ctx.frameError === null) ctx.frameError = err;
+  const failure = destroyDomWalk(ctx, node, null);
+  if (failure !== null && ctx.frameError === null) ctx.frameError = failure;
 }
 
 /**
@@ -675,8 +697,10 @@ function destroyNode(ctx, node) {
  * after which the `===` fast path is sound again.
  * @param {any} ctx
  * @param {any} node
- * @param {Error | null} firstError
- * @returns {Error | null}
+ * @param {{ value: unknown } | null} firstError - Presence record: a
+ *   hook may legally throw `null`, which must still count as the
+ *   first failure.
+ * @returns {{ value: unknown } | null}
  */
 function destroyDomWalk(ctx, node, firstError) {
   const w = node.__jarenWidget;
@@ -689,7 +713,7 @@ function destroyDomWalk(ctx, node, firstError) {
           w.def.unmount(w.handle);
         }
         catch (err) {
-          if (firstError === null) firstError = /** @type {Error} */ (err);
+          if (firstError === null) firstError = { value: err };
         }
       }
     }

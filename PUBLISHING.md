@@ -89,6 +89,8 @@ npm view @jarenjs/app version
 npm view @jarenjs/md version
 npm view @jarenjs/mermaid version
 npm view @jarenjs/calc version
+npm view @jarenjs/charts version
+npm view @jarenjs/josl version
 ```
 
 For automated releases, prefer npm trusted publishing with OIDC over a long-lived write token.

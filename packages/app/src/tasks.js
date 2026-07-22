@@ -14,6 +14,8 @@
  * (`AbortController` is platform).
  */
 
+import { toError } from './errors.js';
+
 /**
  * The host's task function, typically wrapping `fetch`. A synchronous
  * return is allowed — the effect settles every result through one
@@ -167,7 +169,13 @@ export function createTaskEffect(run, options = {}) {
         settle();
         if (disposed) return;
         if (err !== null && typeof err === 'object' && err.name === 'AbortError') return;
-        const error = err instanceof Error ? err.message : String(err);
+        // primitives stringify verbatim (the established payload
+        // contract); objects and symbols go through the safe
+        // normalizer so a hostile toString cannot break settlement
+        const error = err instanceof Error ? err.message
+          : (typeof err === 'object' && err !== null) || typeof err === 'symbol'
+            ? toError(err).message
+            : String(err);
         dispatch(props.fail ?? props.done, { id: props.id, error });
       });
   }

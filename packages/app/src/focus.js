@@ -107,7 +107,9 @@ export function createFocusEffect(options) {
     if (disposed || queue.length === 0) return;
     const batch = queue;
     queue = [];
-    /** @type {Error | null} */
+    /** A presence record: a sink may legally throw `null`, which must
+     * still surface after the batch completes.
+     * @type {{ value: unknown } | null} */
     let firstError = null;
     for (const { props, dispatch } of batch) {
       const target = findByRef(container, props.ref);
@@ -121,10 +123,10 @@ export function createFocusEffect(options) {
             onError(err);
           }
           catch (thrown) {
-            if (firstError === null) firstError = /** @type {Error} */ (thrown);
+            if (firstError === null) firstError = { value: thrown };
           }
         }
-        else if (firstError === null) firstError = err;
+        else if (firstError === null) firstError = { value: err };
         continue;
       }
       const op = props.op ?? 'focus';
@@ -151,7 +153,7 @@ export function createFocusEffect(options) {
         });
       }
     }
-    if (firstError !== null) throw firstError;
+    if (firstError !== null) throw firstError.value;
   };
 
   /** Terminal: drop pending intents and ignore new ones. Idempotent. */

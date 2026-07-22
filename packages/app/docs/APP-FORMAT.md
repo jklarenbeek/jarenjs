@@ -449,9 +449,14 @@ through JSON intents naming a `data-ref` attribute token.
 `createFocusEffect({ container })` returns an effect handler whose
 intents `{ ref, op?: "focus"|"select"|"measure", done?, id? }` queue
 during the transaction and flush after the **next committed frame** —
-wire its `flush` as `options.afterRender`, which runs after the DOM
-patch *and* after widget mounts, so a target born in the same
-transition is already connected. A missing target is a diagnosable
+wire its `flush` as `options.afterRender`. `afterRender` is a
+**committed-live-frame boundary**: it runs exactly once per settled,
+nonterminal committed frame — after the DOM patch *and* after widget
+mounts, so a target born in the same transition is already connected;
+when a widget hook error was parked during the frame, `afterRender`
+runs BEFORE that error is delivered (the frame committed; error
+delivery cannot starve its callback); and it never runs for a pass
+that ended in terminal teardown (there is no live frame to act on). A missing target is a diagnosable
 `JA2014`, never a silent no-op; sibling intents still resolve.
 `measure` dispatches `done` with `{ id, ref, rect }`, the JSON-reduced
 bounding rect. `app.destroy()` cancels pending intents through the
@@ -513,6 +518,35 @@ promise boundary: a synchronous throw and a non-promise return settle
 through the same path as a rejection/resolution.
 
 ## 10. Errors
+
+### 10.1 The host-failure normalization policy
+
+JavaScript's `throw` accepts any value — `null`, `undefined`, strings,
+numbers, arbitrary objects — and every host extension point (effects,
+subscriptions, validators, event extractors, listeners, observers,
+widget hooks, error sinks) may produce any of them. One shared policy
+covers them all:
+
+- every caught value is treated as `unknown`; no boundary ever reads
+  `.message` off a raw caught value;
+- an `Error` instance passes through BY IDENTITY wherever a contract
+  promises the original as `cause`;
+- a non-Error value is wrapped in a `HostValueError` whose message
+  describes the value **without invoking user coercion** (a hostile
+  `toString` is never called) and which retains the original value as
+  an OWN `cause` property — set even for `undefined`, so
+  `Object.hasOwn(err, 'cause')` distinguishes "threw undefined" from
+  "no cause";
+- parked failures use presence records, never the thrown value itself
+  as the absence sentinel — a thrown `null` still counts, still
+  surfaces, and still surfaces BY IDENTITY to the outermost caller;
+- event extraction reports tagged outcomes: a thrown `undefined` is a
+  failure (`JA2002`), structurally distinct from an unknown field
+  (`JA2009`);
+- direct and deferred teardown behave identically, all sibling
+  listeners, cleanups, queued transactions and renderer teardown
+  complete before the first sink failure surfaces, and terminal
+  idempotence survives any cleanup failure.
 
 Compile (`AppCompileError`, thrown by `createApp`; `docPath` is a JSON
 Pointer into the app document):
