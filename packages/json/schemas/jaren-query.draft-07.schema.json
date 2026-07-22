@@ -204,6 +204,29 @@
       "minItems": 2,
       "maxItems": 2
     },
+    "callPhrase": {
+      "description": "A registered trusted host function call: ['name', ...argument expressions]. The name must be registered at compile time (options.functions, JQ0010); sequences cross the boundary as arrays, a returned undefined is the empty sequence, a throwing function is JQ2010.",
+      "type": "object",
+      "properties": {
+        "$call": {
+          "type": "array",
+          "minItems": 1,
+          "items": [
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "additionalItems": {
+            "$ref": "#/definitions/expression"
+          }
+        }
+      },
+      "required": [
+        "$call"
+      ],
+      "additionalProperties": false
+    },
     "flworPhrase": {
       "description": "FLWOR phrase. Clauses apply in the fixed semantic order $for, $let, $as, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $for/$let.",
       "type": "object",
@@ -615,23 +638,6 @@
       "additionalProperties": {
         "$ref": "#/definitions/schemaLiteral"
       }
-    },
-    "callPhrase": {
-      "description": "A registered trusted host function call: ['name', ...argument expressions]. The name must be registered at compile time (options.functions, JQ0010); sequences cross the boundary as arrays, a returned undefined is the empty sequence, a throwing function is JQ2010.",
-      "type": "object",
-      "properties": {
-        "$call": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/definitions/expression"
-          }
-        }
-      },
-      "required": [
-        "$call"
-      ],
-      "additionalProperties": false
     }
   }
 }

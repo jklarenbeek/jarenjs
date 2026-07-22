@@ -44,7 +44,7 @@ export function solveTvm(inputs) {
 /**
  * Amortization series (delegates to core), ready to become a table/plot.
  * @param {{ principal: number, rate: number, nper: number, type?: number }} inputs
- * @returns {import('@jarenjs/core/finance/amortization.js').AmortRow[]}
+ * @returns {import('@jarenjs/core/finance/amortization').AmortRow[]}
  */
 export function buildAmortization(inputs) {
   return amortizationSchedule(+inputs.principal, +inputs.rate / 100, +inputs.nper, { type: inputs.type ?? 0 });

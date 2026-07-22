@@ -15,14 +15,16 @@
  */
 
 /**
- * The host's asynchronous function, typically wrapping `fetch`.
+ * The host's task function, typically wrapping `fetch`. A synchronous
+ * return is allowed — the effect settles every result through one
+ * uniform promise boundary either way.
  * @callback TaskRun
  * @param {any} props - The effect's `with` value, verbatim.
  * @param {AbortSignal} signal - Aborted when the slot's concurrency mode
  *   supersedes this task, when the host cancels the slot, or when the
  *   effect is disposed; pass it to `fetch` (or ignore it — the
  *   state-side id guard stays correct either way).
- * @returns {Promise<any>} Resolves to a JSON result.
+ * @returns {any | PromiseLike<any>} The JSON result, or a promise of it.
  */
 
 /**

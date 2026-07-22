@@ -242,16 +242,24 @@ describe('validateState context (changed-path validation)', function () {
     }, {
       schedule: sync,
       validateState: (next, context) => {
-        seen.push({ next: next.n, previous: context.previous.n, action: context.action, payload: context.payload, changes: context.changes });
+        seen.push({
+          next: next.n,
+          previous: context.previous === null ? null : context.previous.n,
+          action: context.action,
+          payload: context.payload,
+          changes: context.changes,
+        });
         return true;
       },
     });
     app.dispatch('set', 5);
     app.dispatch('swap');
     assert.deepStrictEqual(seen, [
+      { next: 0, previous: null, action: null, payload: null, changes: null },
       { next: 5, previous: 0, action: 'set', payload: 5, changes: ['/n'] },
       { next: 99, previous: 5, action: 'swap', payload: null, changes: null },
-    ], 'patch transitions carry pointers; whole-state swaps carry null = validate fully');
+    ], 'boot validates the initial state with the null boot context; patch transitions carry '
+      + 'pointers; whole-state swaps carry null = validate fully');
   });
 });
 

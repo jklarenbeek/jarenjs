@@ -1008,6 +1008,10 @@ function validateNamedFunctions(value, what) {
   if (!isPlainObject(value))
     throw new TypeError(`options.${what} must be a plain object of named functions`);
   for (const name in value) {
+    // the schema twins require non-empty names (minLength 1); the
+    // registry enforces the same, so document and runtime agree
+    if (name === '')
+      throw new TypeError(`options.${what} must not register an empty-string name`);
     if (typeof value[name] !== 'function')
       throw new TypeError(`options.${what}['${name}'] must be a function`);
   }

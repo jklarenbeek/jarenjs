@@ -98,7 +98,7 @@ The helper aborts a slot's in-flight predecessor (`mode: "switch"`, the default 
 
 ## One FIFO queue, observable transactions
 
-Every dispatch — from the DOM, an effect, a listener, a subscription or a widget — is one **transaction** on one FIFO queue; nested dispatches queue, never interleave, so every listener observes every transaction in the same order with the state that transaction produced ([APP-FORMAT §8](docs/APP-FORMAT.md)). Boot is a transaction too: a failing initial subscription or first frame rolls back everything acquired and throws `JA0007`. `app.stop()` pauses; `app.destroy()` is the terminal teardown — subscriptions cleaned, effect handlers disposed, widgets unmounted exactly once, the container emptied.
+Every dispatch — from the DOM, an effect, a listener, a subscription or a widget — is one **transaction** on one FIFO queue; nested dispatches queue, never interleave, so every listener observes every transaction in the same order with the state that transaction produced ([APP-FORMAT §8](docs/APP-FORMAT.md)). Boot is a transaction too: a failure in renderer construction, the initial-state check, a starting subscription, the first frame or the queued boot work rolls back everything acquired (effect handlers disposed, container emptied) and throws `JA0007`. `app.stop()` halts the loop one-way (no resume); `app.destroy()` is the terminal teardown — subscriptions cleaned, effect handlers disposed, widgets unmounted exactly once, the container emptied.
 
 `app.observe(fn)` streams one bounded JSON record per transaction (`seq`, `action`, `source`, `status`, `changedPaths`, `scheduledEffects`, `durationMs`, `errorCode` — payloads only with the `capturePayloads` opt-in), and `createTransactionLog({ limit, redact })` packages the ring buffer with a redaction hook for support exports. `createFocusEffect({ container })` bridges focus, text selection and measurement through post-render `data-ref` intents, so accessible dialogs restore focus without a DOM node ever entering state (§8.4).
 
@@ -178,7 +178,7 @@ renderToString(createApp(doc).getVnode());
 
 ## API
 
-`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), stop() }`
+`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), observe(observer), stop(), destroy() }`
 
 Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §8.
 

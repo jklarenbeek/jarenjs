@@ -272,7 +272,8 @@ renderer MUST honor:
   reach the DOM; `on` wires exactly as in §4), and the mount is
   deferred: mounts run **after the patch completes**, in document
   order, when every host is connected. A mount MAY dispatch through
-  `emit` synchronously; environments batch as usual.
+  `emit` synchronously; environments batch as usual, and the render
+  boundary itself is serialized (§7.3.2).
 - **Patch in place** — two widget vnodes with equal `key`: a changed
   `name` or host `tag` is a replace (destroy the old widget, create
   and mount the new one in a fresh host). Otherwise the host props
@@ -286,6 +287,14 @@ renderer MUST honor:
   widget's host subtree (the widget's own DOM may contain anything). A
   throwing `unmount` MUST NOT prevent sibling widgets from
   unmounting: the walk finishes, then the first error surfaces.
+- **Hook failure** — a throwing `mount` or `update` **poisons** the
+  widget: sibling widgets and the frame still complete, the first
+  error surfaces after the frame settles, and the next render that
+  revisits the widget MUST replace it with a fresh lifecycle rather
+  than keep patching it. A poisoned widget never receives further
+  `update` calls; `unmount` runs on the old instance only when its
+  `mount` had succeeded (a mount that threw acquired nothing). A
+  half-mounted handle receiving updates is non-conforming.
 
 ### 7.3.1 Renderer destroy
 
@@ -304,7 +313,27 @@ renderer MUST honor:
 
 A host that merely wants a widget-free tree still renders a widget-free
 frame; `destroy()` is for ending the renderer's life (`app.destroy()`
-calls it).
+calls it). A `destroy()` entered from inside a widget hook or nested
+render is still terminal: the active pass stops and the teardown runs
+as it unwinds, unmounting once.
+
+### 7.3.2 Render serialization
+
+The public render boundary MUST NOT re-enter itself. A `render` call
+made synchronously from inside a widget `mount`/`update` or an event
+callback (an `emit` chain) queues behind the running patch instead of
+nesting; multiple nested requests **coalesce to the latest vnode**
+(every call carries the full desired tree, so intermediate trees are
+redundant); the queued tree applies after the current frame, against
+the committed baseline. Consequences a conforming renderer exhibits:
+
+- no `update` is delivered before the widget's `mount` has returned
+  its handle;
+- every `update` receives the last committed props as its previous
+  props, never a stale outer value;
+- the app-integrated path (`createApp`'s FIFO transaction queue) and
+  the direct renderer path observe the same ordering discipline: the
+  app queue serializes *dispatches*, the renderer serializes *frames*.
 
 ### 7.4 Serialization
 

@@ -45,7 +45,10 @@ const render = createDomRenderer(document.getElementById('app'), {
 
 render(['h1', {}, 'Hello']);
 render(['h1', {}, 'Goodbye']);   // patches the text node in place
+render.destroy();                // terminal teardown, idempotent
 ```
+
+`render.destroy()` unmounts every mounted widget exactly once (pending mounts are canceled), empties the container, and turns every later `render` call into an exact no-op — including a scheduled flush that fires after destruction. The render boundary is **serialized**: a `render` entered synchronously from inside a widget hook or event callback (an `emit` chain) never nests — it queues behind the running patch, multiple nested requests coalesce to the latest vnode, and the queued tree is applied against the committed baseline, so no widget sees `update` before its `mount` returned or receives stale previous props.
 
 ### On the server
 
@@ -87,7 +90,7 @@ const render = createDomRenderer(container, {
 });
 ```
 
-`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
+`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. A throwing `mount` or `update` **poisons** the widget instead of corrupting it: siblings and the frame still complete, the first error surfaces after the frame settles, and the next render that revisits the widget replaces it with a fresh lifecycle (`unmount` runs on the old instance only when its `mount` had succeeded). `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
 
 ### Shared SVG helpers — `@jarenjs/view/helpers`
 

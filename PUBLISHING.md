@@ -1,7 +1,7 @@
 # Publishing the Jaren packages
 
-The repository root and the benchmark/website workspaces are private, as is the
-`@jarenjs/josl` research experiment. A release publishes only:
+The repository root and the benchmark/website workspaces are private. A
+release publishes the fourteen public workspaces:
 
 - `@jarenjs/core`
 - `@jarenjs/json`
@@ -15,6 +15,8 @@ The repository root and the benchmark/website workspaces are private, as is the
 - `@jarenjs/md`
 - `@jarenjs/mermaid`
 - `@jarenjs/calc`
+- `@jarenjs/charts`
+- `@jarenjs/josl`
 
 ## Authenticate locally
 
@@ -58,7 +60,7 @@ npm run release:check
 
 ## Publish
 
-The root command reruns the release gate and publishes only the twelve public workspaces:
+The root command reruns the release gate and publishes only the fourteen public workspaces:
 
 ```bash
 npm run publish

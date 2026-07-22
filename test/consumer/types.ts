@@ -130,3 +130,74 @@ const fm = parseFrontmatter('---\ntitle: x\n---\nbody');
 void `${fm.lang}: ${JSON.stringify(fm.data)} :: ${fm.body}`;
 void definePlugin({ name: 'noop-plugin' });
 void (async () => (await loadMarkdown('https://example.com/a.md')).frontmatter);
+
+// @jarenjs/view — the renderer surface, destroy included
+import { createDomRenderer } from '@jarenjs/view';
+
+const renderDom = createDomRenderer(({} as any), {
+  onEvent: (binding, event) => void [binding, event],
+});
+renderDom(['p', {}, 'hi']);
+renderDom.destroy();
+
+// @jarenjs/app — app handle (observe/destroy), tasks, focus
+import { createApp, createTaskEffect, createFocusEffect } from '@jarenjs/app';
+
+const app = createApp({ state: {}, view: [{ match: '$', body: ['p', {}, 'x'] }] }, {
+  validateState: (next, context) =>
+    context.action === null ? true : { valid: next !== undefined },
+  maxTurns: 100,
+});
+app.dispatch('noop');
+void app.getState();
+const unobserve = app.observe((tx) => void `${tx.seq}:${tx.action}:${tx.status}`);
+unobserve();
+const unsubscribe = app.subscribe((state, changes) => void [state, changes]);
+unsubscribe();
+app.stop();
+app.destroy();
+
+// TaskRun allows a synchronous (non-Promise) return
+const syncTask = createTaskEffect((props, signal) => ({ echoed: props, aborted: signal.aborted }));
+const asyncTask = createTaskEffect(async () => ({}));
+syncTask.cancel();
+asyncTask.cancelAll();
+syncTask.dispose();
+
+const focus = createFocusEffect({ container: ({} as any) });
+focus.flush();
+focus.dispose();
+
+// @jarenjs/json/query — compile options (limits/functions/collations),
+// dependencies and explain()
+const limitedQuery = compileJsonQuery('$.rows[*]', {
+  limits: { sequenceItems: 100, resultItems: 10 },
+  functions: { double: (n: number) => n * 2 },
+  collations: { flipped: (a: string, b: string) => b.localeCompare(a) },
+});
+const deps: readonly string[] = limitedQuery.dependencies.functions;
+void deps;
+void limitedQuery.dependencies.collations.length;
+const explanation = limitedQuery.explain();
+void explanation.limits?.sequenceItems;
+void limitedQuery.first({ rows: [] });
+void limitedQuery.exists({ rows: [] });
+void limitedQuery.ebv({ rows: [1] });
+
+// @jarenjs/forms — the session view model surface
+import { buildFormViewModel } from '@jarenjs/forms';
+
+const sessionTree = buildFormViewModel(form, { name: 'Jo' }, {
+  session: {
+    initial: { name: 'Jo' },
+    touched: ['/name'],
+    submitted: false,
+    idPrefix: 'consumer',
+  },
+});
+if (sessionTree !== null && sessionTree.session !== undefined) {
+  const dirtyPaths: string[] = sessionTree.session.dirtyPaths;
+  void dirtyPaths;
+  void (sessionTree.session.dirty && sessionTree.session.submitted);
+  void (sessionTree.session.errorCount + sessionTree.session.serverErrorCount);
+}

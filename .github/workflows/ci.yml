@@ -1,0 +1,36 @@
+name: CI
+
+# The release evidence matrix: the same gate on Linux and on Windows,
+# because a Windows-only failure is a release failure (packed-consumer
+# portability, glob quoting, newline normalization are all platform
+# classes of defect). QT3 conformance and the dead-code audit remain
+# separate evidence runs (they need the qt3tests submodule and a long
+# coverage pass) — they are not silently implied by this green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:types
+      - run: npm run test:tree-shaking
+      - run: node scripts/check-packed-consumers.js --require-bun
+      - run: npm run pack:check

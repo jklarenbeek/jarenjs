@@ -28,6 +28,16 @@ export function downlevelDraft07(schema) {
       return node;
     const out = {};
     for (const key of Object.keys(node)) {
+      if (key === 'prefixItems') {
+        // 2020-12 `prefixItems` + object-form `items` (the rest) is
+        // exactly draft-07 array-form `items` + `additionalItems`
+        out.items = walk(node.prefixItems);
+        if (Object.hasOwn(node, 'items'))
+          out.additionalItems = walk(node.items);
+        continue;
+      }
+      if (key === 'items' && Object.hasOwn(node, 'prefixItems'))
+        continue; // folded into additionalItems above
       const target = key === '$defs' ? 'definitions' : key;
       const value = node[key];
       out[target] = key === '$ref' && typeof value === 'string'
@@ -51,10 +61,13 @@ export function downlevelDraft07(schema) {
  * @returns {string[]} human-readable violations with JSON-Pointer-like paths
  */
 export function draftNeutralSubsetViolations(schema) {
+  // `prefixItems` is allowed: with object-form `items` as the rest
+  // schema it downlevels mechanically to draft-07 array-form
+  // `items` + `additionalItems` with identical semantics.
   const forbiddenKeys = [
     'unevaluatedProperties', 'unevaluatedItems',
     '$dynamicRef', '$dynamicAnchor', '$recursiveRef', '$recursiveAnchor',
-    'prefixItems', 'definitions',
+    'definitions',
   ];
   const violations = [];
 

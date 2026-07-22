@@ -20,6 +20,7 @@
  */
 
 import { equalsJson } from '@jarenjs/core/object';
+import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
 import { getValueAtPointer, createItemValue } from './data.js';
 import { evaluateFormRules } from './rules.js';
@@ -64,12 +65,16 @@ const EMPTY_STATE = Object.freeze({});
  *   text (`aria-describedby` wiring), `null` when the node has no
  *   errors (session forms only).
  * @property {boolean} [dirty] - Whether this node's value differs from
- *   the session's initial data (session forms only).
+ *   the session's initial data — presence-aware: a member added or
+ *   removed is dirty even when the compared values coincide as `null`
+ *   (session forms only).
  * @property {boolean} [touched] - Whether the session marked this
  *   pointer visited (session forms only).
  * @property {string[]} [serverErrors] - Server-reported messages for
  *   this pointer, kept distinct from the client-side `errors` (session
  *   forms only).
+ * @property {FormSessionSummary} [session] - The root summary (root
+ *   node of session forms only).
  */
 
 /**
@@ -102,11 +107,20 @@ const EMPTY_STATE = Object.freeze({});
  */
 
 /**
- * The root summary of a session form (`root.session`).
+ * The root summary of a session form (`root.session`) — the
+ * navigation-guard authority: derived from a full JSON comparison of
+ * the initial document against the current data, independent of what
+ * is rendered, so removed members, hidden retained values and
+ * missing-versus-`null` membership changes all count. The visible
+ * per-node `dirty`/`errors` members remain the render-layer summary.
  * @typedef {Object} FormSessionSummary
- * @property {boolean} dirty - Whether ANY node is dirty.
- * @property {string[]} dirtyPaths - The dirty leaf pointers, in tree
- *   order (a navigation guard's evidence).
+ * @property {boolean} dirty - Whether the current data differs from the
+ *   initial document ANYWHERE.
+ * @property {string[]} dirtyPaths - Every changed pointer between the
+ *   initial document and the current data, in diff-walk (document)
+ *   order. A member added or removed — including an explicit-`null`
+ *   membership change and a shortened array tail — contributes the
+ *   pointer of the added/removed location.
  * @property {boolean} submitted
  * @property {string | null} submitStatus
  * @property {any} requestId
@@ -160,7 +174,7 @@ export function buildFormViewModel(model, data, options = {}) {
     : null;
   const root = buildNode(model, '', data, ruleState, fieldErrors, false, false, session);
   if (root !== null && session !== null) {
-    /** @type {any} */ (root).session = {
+    root.session = {
       dirty: session.dirtyPaths.length > 0,
       dirtyPaths: session.dirtyPaths,
       submitted: session.submitted,
@@ -206,8 +220,15 @@ function compileSession(session, data) {
       serverErrors.set(pointer, Array.isArray(value) ? value.map(String) : [String(value)]);
     }
   }
+  /** @type {string[]} */
+  const dirtyPaths = [];
+  const hasInitial = 'initial' in session;
+  // the navigation-guard evidence is a FULL diff of the two documents,
+  // never a walk of the rendered tree: removed members, hidden retained
+  // values and null-membership changes must all surface
+  if (hasInitial) collectDirtyPaths(session.initial, data, '', dirtyPaths);
   return {
-    hasInitial: 'initial' in session,
+    hasInitial,
     initial: session.initial,
     data,
     touched,
@@ -216,34 +237,77 @@ function compileSession(session, data) {
     submitStatus: session.submitStatus ?? null,
     requestId: session.requestId ?? null,
     idPrefix: session.idPrefix ?? 'form',
-    /** @type {string[]} */
-    dirtyPaths: [],
+    dirtyPaths,
     errorCount: 0,
     serverErrorCount: 0,
   };
 }
 
 /**
- * A stable accessible element id for a pointer: the segments joined
- * with '-', prefixed; the empty pointer is 'root'. Non-id characters
- * are escaped as their code point, so distinct pointers keep distinct
- * ids.
+ * Collect every changed pointer between the initial and the current
+ * document. Membership is significant: an added or removed member (or
+ * array tail slot) contributes its pointer even when both sides read
+ * back as `null` through a pointer lookup.
+ * @param {any} initial
+ * @param {any} current
+ * @param {string} pointer
+ * @param {string[]} out
+ */
+function collectDirtyPaths(initial, current, pointer, out) {
+  if (initial === current) return;
+  if (Array.isArray(initial) && Array.isArray(current)) {
+    const shared = Math.min(initial.length, current.length);
+    for (let i = 0; i < shared; i++) {
+      collectDirtyPaths(initial[i], current[i], `${pointer}/${i}`, out);
+    }
+    const longest = Math.max(initial.length, current.length);
+    for (let i = shared; i < longest; i++) {
+      out.push(`${pointer}/${i}`); // added or removed tail slot
+    }
+    return;
+  }
+  if (initial !== null && typeof initial === 'object' && !Array.isArray(initial)
+    && current !== null && typeof current === 'object' && !Array.isArray(current)) {
+    for (const key in initial) {
+      const child = `${pointer}/${encodeJSONPointerSegment(key)}`;
+      if (!(key in current)) out.push(child); // removed member
+      else collectDirtyPaths(initial[key], current[key], child, out);
+    }
+    for (const key in current) {
+      if (!(key in initial)) {
+        out.push(`${pointer}/${encodeJSONPointerSegment(key)}`); // added member
+      }
+    }
+    return;
+  }
+  if (!equalsJson(initial, current)) out.push(pointer);
+}
+
+/**
+ * A stable accessible element id for a pointer: the encoded segments
+ * joined with '-', prefixed; the empty pointer is 'root'. The encoding
+ * is INJECTIVE — distinct pointers always get distinct ids: every
+ * character outside `[A-Za-z0-9]` (including `-` and `_` themselves)
+ * is escaped as `_<codepoint>_` BEFORE the segments are joined, so a
+ * literal '-' or '_' inside a member name can never collide with the
+ * separator or an escape (`/a/b` → `a-b`, `/a-b` → `a_45_b`).
  * @param {string} prefix
  * @param {string} pointer
  * @returns {string}
  */
 function pointerId(prefix, pointer) {
   if (pointer === '') return `${prefix}--root`;
-  const safe = pointer.slice(1).replace(/\//g, '-')
-    .replace(/[^A-Za-z0-9_-]/g, (ch) => `_${ch.codePointAt(0)}_`);
+  const safe = pointer.slice(1)
+    .replace(/[^A-Za-z0-9/]/gu, (ch) => `_${ch.codePointAt(0)}_`)
+    .replace(/\//g, '-');
   return `${prefix}--${safe}`;
 }
 
 /**
  * @param {FormField} field
- * @param {string} pointer - The concrete pointer of this node (pointer
- *   segments follow the walk convention of validateAllFields:
- *   `parent + '/' + key`).
+ * @param {string} pointer - The concrete RFC 6901 pointer of this node
+ *   (segments encoded with `encodeJSONPointerSegment`, the walk
+ *   convention shared with the model, rule and validation pointers).
  * @param {any} data - The form data root.
  * @param {Record<string, any>} ruleState
  * @param {Record<string, any>} fieldErrors
@@ -311,27 +375,23 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
       ? `${node.id}-error`
       : null;
     if (session.hasInitial) {
+      // presence-aware: adding or removing a member whose value is
+      // null is a membership change, so it is dirty
       const initialValue = getValueAtPointer(session.initial, pointer);
-      node.dirty = !equalsJson(
-        initialValue === undefined ? null : initialValue,
-        raw === undefined ? null : raw);
+      node.dirty = (initialValue === undefined) !== (raw === undefined)
+        || (initialValue !== undefined && !equalsJson(initialValue, raw));
     }
     else {
       node.dirty = false;
     }
   }
 
-  const isContainer = (field.children !== null && field.children !== undefined)
-    || field.kind === 'array';
-  if (session !== null && node.dirty === true && !isContainer) {
-    session.dirtyPaths.push(pointer);
-  }
-
   if (field.children !== null && field.children !== undefined) {
     const children = [];
     for (const child of field.children) {
       const built = buildNode(
-        child, `${pointer}/${child.key}`, data, ruleState, fieldErrors, false, false, session);
+        child, `${pointer}/${encodeJSONPointerSegment(child.key)}`, data, ruleState,
+        fieldErrors, false, false, session);
       if (built !== null) children.push(built);
     }
     node.children = children;

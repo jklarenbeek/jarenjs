@@ -28,6 +28,10 @@ import {
 } from '@jarenjs/core/object';
 
 import {
+  encodeJSONPointerSegment,
+} from '@jarenjs/json/pointer';
+
+import {
   getFormatInfo,
 } from './formats.js';
 
@@ -245,7 +249,10 @@ function walkFields(field, value, pointer, result, catalog) {
 
   if (field.kind === 'object' && field.children && value != null && typeof value === 'object') {
     for (const child of field.children) {
-      walkFields(child, value[child.key], `${pointer}/${child.key}`, result, catalog);
+      // RFC 6901-encoded, the walk convention shared with the model
+      // and rule pointers — a member name containing '/' or '~' stays
+      // addressable and never collides with a nested path
+      walkFields(child, value[child.key], `${pointer}/${encodeJSONPointerSegment(child.key)}`, result, catalog);
     }
   }
   else if (field.kind === 'array' && Array.isArray(value)) {

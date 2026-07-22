@@ -989,14 +989,27 @@ semantics, not an effect hatch.
 **`options.collations`.** A registry of named pure compare functions for
 `$orderby`'s `$collation` member (§6.6).
 
-**`options.limits`.** Deterministic execution limits enforced *inside*
-the synchronous engine:
+**`options.limits`.** Deterministic **output caps** enforced *inside*
+the synchronous engine. They bound what a phrase or the query hands
+onward — they are NOT memory, work, fan-out, recursion or preemption
+budgets, and they do not bound intermediate accumulation:
 
-- `sequenceItems` — bounds every FLWOR phrase materialization and
-  tightens `$range`'s resource guard below its 2³² ceiling; exceeding it
-  is `JQ2009` (`$range` keeps its historical `JQ2007`).
+- `sequenceItems` — bounds every FLWOR phrase materialization (the
+  sequence a phrase *returns*) and tightens `$range`'s resource guard
+  below its 2³² ceiling; exceeding it is `JQ2009` (`$range` keeps its
+  historical `JQ2007`). A `$groupby`/`$orderby` barrier may accumulate
+  arbitrarily many items — and a collation may run arbitrarily many
+  comparisons — behind a small final output; bare paths, `$count` and
+  other operators can likewise materialize above the cap internally.
 - `resultItems` — bounds the final result at the query boundary
-  (`JQ2009`).
+  (`JQ2009`), checked after evaluation; `first()`, `exists()` and
+  `ebv()` deliberately bypass it.
+
+The caps make trusted, developer-authored rules diagnosable. They are
+not a sandbox: user- or model-authored arbitrary queries need worker
+isolation (or a future instrumented `steps`/`depth` core) — which is
+exactly why unenforced limit names are rejected rather than accepted
+as a false guarantee.
 
 Only enforced limits are accepted: `steps`/`depth` (a fully instrumented
 evaluation core) are **rejected with a `TypeError`** until they exist —

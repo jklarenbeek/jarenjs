@@ -160,13 +160,17 @@ format as either:
   the optional members.
 
 The two **native controls** default to `false` and are allowed only on
-the object form. When declared `true`, `event.preventDefault()` /
-`event.stopPropagation()` run **synchronously in the native event
-callback**, before the action is queued (§8) and before the browser
-can perform its default or bubble behavior — a checkbox, link or
-button nested inside a clickable row is expressible declaratively.
-Whether the action later succeeds or fails cannot retroactively change
-an already-performed native control. A widget's `emit(binding,
+the object form. When declared `true` **and the named action is
+registered**, `event.preventDefault()` / `event.stopPropagation()` run
+**synchronously in the native event callback**, before the action is
+queued (§8) and before the browser can perform its default or bubble
+behavior — a checkbox, link or button nested inside a clickable row is
+expressible declaratively. Only a registered action owns the native
+behavior: an unknown action name suppresses nothing (the dispatch
+still queues and reports `JA2001`). A registered action that later
+fails keeps its already-applied controls — whether the action succeeds
+or fails cannot retroactively change an already-performed native
+control. A widget's `emit(binding,
 nativeEvent)` follows the identical path. Headless dispatch with an
 event object lacking the methods is a documented no-op.
 
@@ -367,7 +371,15 @@ isolated sites — listeners (`JA2011`), observers (`JA2011`), cleanups
 queue: whatever the sink throws surfaces to the outermost dispatch
 caller only after the drain fully completed. A runaway
 action→effect→action loop is diagnosed as `JA2010` after
-`options.maxTurns` transactions (default 1000) instead of hanging.
+`options.maxTurns` transactions (default 1000) instead of hanging;
+`maxTurns` MUST be a positive finite integer — `createApp` rejects
+anything else (a guard that silently coerces is no guard).
+
+`validateState` is host code and may itself fail: a throwing validator
+is isolated as `JA2015` — the transaction fails (its observer record
+carries the code), the original cause is preserved, and the queue
+keeps draining; parked errors from the default rethrowing sink surface
+only after the drain.
 
 `validateState` receives a second argument, the transaction context
 `{ previous, action, payload, changes }` — `changes` is the patch
@@ -378,12 +390,21 @@ hook falls back to a full check for `null`.
 ### 8.2 Boot, stop, destroy
 
 **Boot is a transaction.** Compiling the documents, creating the
-renderer, starting the initial subscriptions and painting the first
-frame either all succeed, or every already-acquired resource is
-disposed and `createApp` throws `JA0007` with the original failure as
-`cause`. `onError` observes individual boot failures first: a sink
-that swallows a subscription-start failure (`JA2013`) keeps that slot
-stopped and boots the rest; the default rethrowing sink aborts boot.
+renderer, validating the initial state, starting the initial
+subscriptions, painting the first frame and draining the dispatches
+those handlers queued either all succeed, or every already-acquired
+resource — subscriptions, effect handlers, the renderer (the container
+ends empty, scheduled work becomes a no-op) — is disposed and
+`createApp` throws `JA0007` with the original failure as `cause`.
+`onError` observes individual boot failures first: a sink that
+swallows a subscription-start failure (`JA2013`), the initial-state
+check (`JA2005`/`JA2015` with the boot context `{ previous: null,
+action: null, payload: null, changes: null }`) or an error inside
+queued boot work recovers it and boots the rest; renderer-construction
+and first-frame failures are always fatal; the default rethrowing sink
+aborts boot on any of them. No failure path leaves a live
+subscription, a populated container or an unreturned app handle
+behind.
 
 **Subscription startup is resource acquisition.** A slot commits live
 only after its handler returned; a throwing handler leaves the slot
@@ -394,8 +415,9 @@ next transaction's reconciliation, which disposes the just-started
 resource through the ordinary stop path — rapid `false`/`true`
 condition changes coalesce per transaction.
 
-**`stop()` pauses; `destroy()` ends.** `stop()` clears the queue,
-disposes live subscriptions and listeners, and ignores further
+**`stop()` halts; `destroy()` ends.** `stop()` is one-way and
+nonterminal — there is no resume: it clears the queue, disposes live
+subscriptions and listeners, and permanently ignores further
 dispatches; the renderer and effect handlers stay untouched.
 `destroy()` is terminal and idempotent: `stop()` plus observer
 removal, effect-handler `dispose()` (each handler identity exactly
@@ -499,7 +521,7 @@ Pointer into the app document):
 | `JA0004` | an action document failed to compile |
 | `JA0005` | `subs` is not an array |
 | `JA0006` | a subscription entry is malformed / its `when` failed to compile |
-| `JA0007` | boot failed after compilation (initial subscriptions / first frame); everything acquired was rolled back (§8.2) |
+| `JA0007` | boot failed after compilation (renderer construction, initial-state check, initial subscriptions, first frame or queued boot work); everything acquired was rolled back (§8.2) |
 
 Runtime (`AppRuntimeError`, routed through `options.onError`, which
 defaults to rethrowing):
@@ -507,7 +529,7 @@ defaults to rethrowing):
 | Code | Condition |
 |---|---|
 | `JA2001` | unknown action name, or unusable binding |
-| `JA2002` | an action or `when` document threw while evaluating |
+| `JA2002` | an action or `when` document threw while evaluating, or a registered event-field extractor threw (the member is bound `null`; the dispatch is NOT dropped) |
 | `JA2003` | a transition is not an object / `effects` not an array |
 | `JA2004` | a `patch` failed to apply (transition aborted) |
 | `JA2005` | `validateState` rejected the next state (transition blocked) |
@@ -520,6 +542,7 @@ defaults to rethrowing):
 | `JA2012` | a cleanup threw while stopping/reconciling/destroying (isolated) |
 | `JA2013` | a subscription handler threw while starting; the slot stays stopped |
 | `JA2014` | a post-render intent named a `data-ref` with no rendered target (§8.4) |
+| `JA2015` | the `validateState` hook itself threw (the transaction failed; the queue keeps draining) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —

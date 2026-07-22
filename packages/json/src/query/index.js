@@ -23,6 +23,88 @@ export { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 const hasOwn = Object.hasOwn;
 
 /**
+ * The enforced query limits (QUERY-FORMAT.md section 8.12). These are
+ * deterministic result/phrase-OUTPUT caps, not general resource
+ * budgets: they bound what a phrase or the query hands onward, never
+ * the memory, work, fan-out or recursion spent producing it (a group
+ * or order barrier may accumulate arbitrarily many items behind a
+ * small final result). Untrusted queries need worker isolation, not
+ * these limits.
+ * @typedef {Object} JsonQueryLimits
+ * @property {number} [sequenceItems] - Caps every FLWOR phrase
+ *   materialization and tightens `$range`'s resource guard; exceeding
+ *   it is `JQ2009` (`$range` keeps its historical `JQ2007`).
+ * @property {number} [resultItems] - Caps the final result at the
+ *   query boundary (`JQ2009`); checked after evaluation, and
+ *   deliberately bypassed by `first`/`exists`/`ebv`.
+ */
+
+/**
+ * Compile options for {@link compileJsonQuery}.
+ * @typedef {Object} JsonQueryOptions
+ * @property {(schemaJson: any, docPath: string) => ((value: any) => boolean)} [compileTypeTest]
+ *   Hook compiling a JSON Schema literal into a boolean item
+ *   predicate, called once per schema literal at query compile time
+ *   (QUERY-FORMAT.md section 8.11). `@jarenjs/validate/query` exports
+ *   `createTypeTestCompiler()` producing one; any conforming
+ *   implementation works - this package never imports the validator.
+ *   Without a hook, the schema operators `$valid`/`$assert`/`$as` are
+ *   compile error JQ0008.
+ * @property {object} [extensions] - Package-internal operator
+ *   extension point, the operator analogue of `compileTypeTest` (used
+ *   by the JSLT layer; not a public contract). A plain object of
+ *   `name -> entry` following the operator registry contract; see
+ *   normalizeQuery in normalize.js for the full shape. The published
+ *   format vocabulary is unchanged: without extensions, documents
+ *   using such operators fail JQ0002.
+ * @property {Record<string, (...args: any[]) => any>} [functions]
+ *   Registry of named trusted pure host functions for `$call`
+ *   (QUERY-FORMAT.md section 8.12); an unregistered or empty name is
+ *   rejected at compile time (JQ0010 / TypeError).
+ * @property {Record<string, (a: string, b: string) => number>} [collations]
+ *   Registry of named pure compare functions for `$orderby`'s
+ *   `$collation` member (QUERY-FORMAT.md section 6.6).
+ * @property {JsonQueryLimits} [limits] - Enforced output caps; the
+ *   unenforced `steps`/`depth` are rejected with a TypeError.
+ */
+
+/**
+ * The frozen dependency record of a compiled query (saved-rule
+ * vetting): the external names it binds, the operators it uses, and
+ * the registered functions/collations it resolved.
+ * @typedef {Object} JsonQueryDependencies
+ * @property {readonly string[]} externals
+ * @property {readonly string[]} operators
+ * @property {readonly string[]} functions
+ * @property {readonly string[]} collations
+ */
+
+/**
+ * A plain-JSON explanation of a compiled query: its dependencies plus
+ * the enforced limits. A fresh value each `explain()` call.
+ * @typedef {Object} JsonQueryExplanation
+ * @property {string[]} externals
+ * @property {string[]} operators
+ * @property {string[]} functions
+ * @property {string[]} collations
+ * @property {{ sequenceItems: number | null, resultItems: number | null } | null} limits
+ */
+
+/**
+ * The compiled query returned by {@link compileJsonQuery}: the query
+ * function itself, carrying its helper methods and metadata.
+ * @typedef {((data: any, externals?: Record<string, any>) => any) & {
+ *   first: (data: any, externals?: Record<string, any>) => any,
+ *   exists: (data: any, externals?: Record<string, any>) => boolean,
+ *   ebv: (data: any, externals?: Record<string, any>) => boolean,
+ *   externals: readonly string[],
+ *   doc: any,
+ *   dependencies: Readonly<JsonQueryDependencies>,
+ *   explain: () => JsonQueryExplanation,
+ * }} CompiledJsonQuery
+ */
+
+/**
  * Compile a Jaren JSON Query document into a reusable query function.
  *
  * The returned function applies the query to a JSON value and returns the
@@ -45,26 +127,15 @@ const hasOwn = Object.hasOwn;
  *   external raises `JQ2006`.
  * - `query.doc` - a deeply frozen copy of the query document (the
  *   caller's object is never frozen)
+ * - `query.dependencies` - what the query depends on (frozen JSON):
+ *   external names, operators, registered functions and collations
+ * - `query.explain()` - a fresh plain-JSON explanation: the
+ *   dependencies plus the enforced limits
  *
  * @param {any} doc - the query document (any JSON value; a bare RFC 9535
  *   JSONPath string is the degenerate query)
- * @param {object} [options] - compile options
- * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
- *   [options.compileTypeTest] - hook compiling a JSON Schema literal into
- *   a boolean item predicate, called once per schema literal at query
- *   compile time (QUERY-FORMAT.md section 8.11). `@jarenjs/validate/query`
- *   exports `createTypeTestCompiler()` producing one; any conforming
- *   implementation works - this package never imports the validator.
- *   Without a hook, the schema operators `$valid`/`$assert`/`$as` are
- *   compile error JQ0008.
- * @param {object} [options.extensions] - package-internal operator
- *   extension point, the operator analogue of `compileTypeTest` (used by
- *   the JSLT layer; not a public contract). A plain object of
- *   `name -> entry` following the operator registry contract; see
- *   normalizeQuery in normalize.js for the full shape. The published
- *   format vocabulary is unchanged: without extensions, documents using
- *   such operators fail JQ0002.
- * @returns {function} the compiled query function
+ * @param {JsonQueryOptions} [options] - compile options
+ * @returns {CompiledJsonQuery} the compiled query function
  * @throws {JsonQueryCompileError} when the document violates the format
  * @example
  * const q = compileJsonQuery({

@@ -18,6 +18,12 @@
  *    correspondence lives in parallel arrays local to each patch, so
  *    frozen or shared vnode JSON (a JSLT output, a cached document) is
  *    always safe.
+ *  - The render boundary is serialized: a `render` entered from inside
+ *    a widget hook or event callback (a synchronous `emit` chain) never
+ *    nests — it queues behind the running patch, nested requests
+ *    coalesce to the latest vnode, and it applies against the committed
+ *    baseline. No widget sees `update` before its `mount` returned or
+ *    receives stale previous props.
  *
  * Event handling stores the binding JSON on the DOM node and attaches one
  * shared proxy listener per event type; rebinding a handler on re-render
@@ -75,6 +81,13 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
 /**
  * A registered widget definition (VIEW-FORMAT §7). The renderer owns the
  * host element and the widget owns the host's subtree.
+ *
+ * Failure policy: a throwing `mount` or `update` poisons the widget —
+ * siblings and the frame still complete, the first error surfaces after
+ * the frame settles, and the next render that revisits the widget
+ * replaces it with a fresh lifecycle (`unmount` runs on the old
+ * instance only when its `mount` had succeeded). A poisoned widget
+ * never receives further `update` calls.
  * @typedef {Object} WidgetDef
  * @property {(host: any, props: any, emit: WidgetEmit) => any} mount -
  *   Called with the host element after it is connected to the rendered
@@ -98,19 +111,27 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  */
 
 /**
+ * The renderer returned by {@link createDomRenderer}: the patch
+ * function, carrying the terminal `destroy()` (VIEW-FORMAT §8).
+ * @typedef {((vnode: any) => void) & { destroy: () => void }} DomRenderer
+ */
+
+/**
  * Create a renderer bound to a container element. The returned function
- * patches the container's single root node to match the given vnode.
+ * patches the container's single root node to match the given vnode;
+ * `render.destroy()` is the terminal teardown.
  *
  * @example
  * const render = createDomRenderer(document.getElementById('app'), {
  *   onEvent: (binding, event) => dispatch(binding, event),
  * });
  * render(['main', {}, ['h1', {}, 'Hello']]);
+ * render.destroy();
  *
  * @param {any} container - The DOM element to render into (emptied on
  *   first render).
  * @param {DomRendererOptions} [options]
- * @returns {(vnode: any) => void}
+ * @returns {DomRenderer}
  */
 export function createDomRenderer(container, options = {}) {
   const ctx = {
@@ -121,9 +142,12 @@ export function createDomRenderer(container, options = {}) {
     mountQueue: [],
     /** True once any widget node exists — gates the destroy walk. */
     hasWidgets: false,
-    /** First error a widget `unmount` threw this render (§7): the walk
-     * and the patch always finish; the error surfaces after them. */
-    destroyError: /** @type {Error | null} */ (null),
+    /** First error a widget hook (`mount`/`update`/`unmount`) threw
+     * this frame (§7): the walk, the patch and the mount flush always
+     * finish; the error surfaces after the frame settles. */
+    frameError: /** @type {Error | null} */ (null),
+    /** True after `destroy()`: every later render is an exact no-op. */
+    destroyed: false,
     /** The one `emit` every widget of this renderer receives. */
     emit: /** @type {WidgetEmit | null} */ (null),
   };
@@ -134,44 +158,65 @@ export function createDomRenderer(container, options = {}) {
   let oldVnode = null;
   /** @type {any} */
   let rootNode = null;
-  let destroyed = false;
+  /** True while a patch/mount pass runs: the renderer boundary is
+   * serialized — a render entered from inside a widget hook or event
+   * callback never nests. */
+  let rendering = false;
+  /** The latest vnode a nested render asked for. Nested renders
+   * COALESCE: intermediate trees are redundant because every call
+   * carries the full desired tree; only the last one is applied. */
+  let pendingVnode;
+  let destroyPending = false;
 
   function render(vnode) {
-    if (destroyed) return; // a scheduled flush after destroy is a no-op
+    if (ctx.destroyed) return; // a scheduled flush after destroy is a no-op
     if (!isTextNode(vnode) && !isElementNode(vnode)) {
       throw new TypeError('view: the root vnode must be a text or element vnode');
     }
-    if (rootNode === null) {
-      container.textContent = '';
-      rootNode = createNode(ctx, vnode, null);
-      container.appendChild(rootNode);
+    if (rendering) {
+      // re-entrant call (a widget mount/update emitted synchronously):
+      // queue behind the current patch — it applies after this frame,
+      // against the committed baseline, never against stale props
+      pendingVnode = vnode;
+      return;
     }
-    else {
-      rootNode = patchNode(ctx, container, rootNode, oldVnode, vnode, null);
+    rendering = true;
+    try {
+      let next = vnode;
+      do {
+        pendingVnode = undefined;
+        if (rootNode === null) {
+          container.textContent = '';
+          rootNode = createNode(ctx, next, null);
+          container.appendChild(rootNode);
+        }
+        else {
+          rootNode = patchNode(ctx, container, rootNode, oldVnode, next, null);
+        }
+        oldVnode = next;
+        // mount flush: after the patch completes every queued host is
+        // connected; an emit during mount defers into pendingVnode
+        flushMounts(ctx);
+        next = pendingVnode;
+      } while (next !== undefined && !ctx.destroyed);
     }
-    oldVnode = vnode;
-    // mount flush: after the patch completes every queued host is
-    // connected. Mount may dispatch synchronously through `emit`; the
-    // shift-drain stays correct under the re-entrant render that a
-    // synchronous scheduler turns that into.
-    flushMounts(ctx);
-    if (ctx.destroyError !== null) {
-      const err = ctx.destroyError;
-      ctx.destroyError = null;
+    finally {
+      rendering = false;
+      pendingVnode = undefined;
+    }
+    if (destroyPending) {
+      destroyPending = false;
+      teardown();
+    }
+    if (ctx.frameError !== null) {
+      const err = ctx.frameError;
+      ctx.frameError = null;
       throw err;
     }
   }
 
-  /**
-   * Terminal teardown (VIEW-FORMAT §8): every mounted widget in the
-   * rendered tree unmounts exactly once (pending mounts are canceled),
-   * the container is left empty, and later `render` calls are exact
-   * no-ops. Idempotent. A throwing widget `unmount` never stops the
-   * walk; the first such error is thrown after the teardown completes.
-   */
-  render.destroy = function destroy() {
-    if (destroyed) return;
-    destroyed = true;
+  /** The destroy walk shared by `destroy()` and a deferred destroy. */
+  function teardown() {
     ctx.mountQueue.length = 0;
     if (rootNode !== null) {
       destroyNode(ctx, rootNode, oldVnode);
@@ -179,9 +224,31 @@ export function createDomRenderer(container, options = {}) {
       rootNode = null;
       oldVnode = null;
     }
-    if (ctx.destroyError !== null) {
-      const err = ctx.destroyError;
-      ctx.destroyError = null;
+  }
+
+  /**
+   * Terminal teardown (VIEW-FORMAT §8): every mounted widget in the
+   * rendered tree unmounts exactly once (pending mounts are canceled),
+   * the container is left empty, and later `render` calls are exact
+   * no-ops. Idempotent. Called from inside a widget hook or a nested
+   * render it is still terminal: the active pass stops and the
+   * teardown runs when that pass unwinds. A throwing widget `unmount`
+   * never stops the walk; the first such error is thrown after the
+   * teardown completes.
+   */
+  render.destroy = function destroy() {
+    if (ctx.destroyed) return;
+    ctx.destroyed = true;
+    if (rendering) {
+      // called from inside the active pass: the pass sees `destroyed`,
+      // stops, and finishes the teardown as it unwinds
+      destroyPending = true;
+      return;
+    }
+    teardown();
+    if (ctx.frameError !== null) {
+      const err = ctx.frameError;
+      ctx.frameError = null;
       throw err;
     }
   };
@@ -190,17 +257,29 @@ export function createDomRenderer(container, options = {}) {
 }
 
 /**
- * Mount every queued widget, in queue (document) order.
+ * Mount every queued widget, in queue (document) order. A throwing
+ * `mount` poisons that widget (§7 failure policy): the host stays
+ * inert, siblings still mount, the first error parks on the frame, and
+ * the next render that revisits the widget replaces it with a fresh
+ * lifecycle. A poisoned-at-mount widget never receives `update` or
+ * `unmount` — it holds no successfully acquired resources.
  * @param {any} ctx
  */
 function flushMounts(ctx) {
   const queue = ctx.mountQueue;
   while (queue.length > 0) {
+    if (ctx.destroyed) { queue.length = 0; return; }
     const node = queue.shift();
     const w = node.__jarenWidget;
     if (w.mounted || w.destroyed) continue;
     w.mounted = true;
-    w.handle = w.def.mount(node, w.props, ctx.emit);
+    try {
+      w.handle = w.def.mount(node, w.props, ctx.emit);
+    }
+    catch (err) {
+      w.failed = 'mount';
+      if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
+    }
   }
 }
 
@@ -403,6 +482,10 @@ function createWidgetNode(ctx, vnode, ns) {
     handle: undefined,
     mounted: false,
     destroyed: false,
+    /** `false`, or the poisoning hook: `'mount'` (skip unmount — the
+     * widget acquired nothing) or `'update'` (unmount still runs). A
+     * poisoned widget is replaced on the next render that revisits it. */
+    failed: /** @type {false | 'mount' | 'update'} */ (false),
   };
   ctx.hasWidgets = true;
   ctx.mountQueue.push(node);
@@ -428,13 +511,17 @@ function createWidgetNode(ctx, vnode, ns) {
 function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
   const oldProps = propsOf(oldV);
   const newProps = propsOf(newV);
-  if (newProps.name !== oldProps.name || (newProps.tag ?? 'div') !== (oldProps.tag ?? 'div')) {
+  const w = node.__jarenWidget;
+  if (newProps.name !== oldProps.name || (newProps.tag ?? 'div') !== (oldProps.tag ?? 'div')
+    || w.failed !== false) {
+    // a poisoned widget (a hook threw) is replaced, not patched: the
+    // old lifecycle ends (unmount only if mount succeeded) and a fresh
+    // one begins — half-mounted handles never receive updates
     destroyNode(ctx, node, oldV);
     const next = createWidgetNode(ctx, newV, ns);
     parent.replaceChild(next, node);
     return next;
   }
-  const w = node.__jarenWidget;
   widgetDef(ctx, newV, newProps);
   patchWidgetProps(ctx, node, oldProps, newProps, ns);
   const props = newProps.props ?? null;
@@ -443,12 +530,26 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
     w.props = props;
     if (w.mounted) {
       if (w.def.update !== undefined) {
-        w.def.update(w.handle, props, prevProps);
+        try {
+          w.def.update(w.handle, props, prevProps);
+        }
+        catch (err) {
+          w.failed = 'update';
+          if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
+        }
       }
       else {
         // no update hook: recycle the host with a fresh lifecycle
-        if (w.def.unmount !== undefined) w.def.unmount(w.handle);
-        w.handle = w.def.mount(node, props, ctx.emit);
+        try {
+          if (w.def.unmount !== undefined) w.def.unmount(w.handle);
+          w.handle = w.def.mount(node, props, ctx.emit);
+        }
+        catch (err) {
+          // either hook failing leaves no resource a later unmount
+          // could own: poison as 'mount' (skip unmount, replace next)
+          w.failed = 'mount';
+          if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
+        }
       }
     }
     // not yet mounted (still queued): the pending mount reads w.props
@@ -496,7 +597,7 @@ function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
 function destroyNode(ctx, node, vnode) {
   if (!ctx.hasWidgets) return;
   const err = destroyWalk(node, vnode, null);
-  if (err !== null && ctx.destroyError === null) ctx.destroyError = err;
+  if (err !== null && ctx.frameError === null) ctx.frameError = err;
 }
 
 /**
@@ -514,7 +615,7 @@ function destroyWalk(node, vnode, firstError) {
     const w = node.__jarenWidget;
     if (w !== undefined && !w.destroyed) {
       w.destroyed = true;
-      if (w.mounted && w.def.unmount !== undefined) {
+      if (w.mounted && w.failed !== 'mount' && w.def.unmount !== undefined) {
         try {
           w.def.unmount(w.handle);
         }

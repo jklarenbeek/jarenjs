@@ -12,11 +12,14 @@
  *
  * Intents queue during the transaction and flush after the NEXT
  * committed frame — after the DOM patch and after widget mounts, so a
- * target inside freshly rendered markup is already connected. A missing
- * target is a diagnosable `JA2014`, never a silent no-op. Destroying
- * the app (or `dispose()`) cancels pending intents; a headless app
- * never flushes (there is no frame), which makes the queue a documented
- * no-op there.
+ * target inside freshly rendered markup is already connected. Only a
+ * state change schedules a frame: an intent queued by an effect-only
+ * action (no state transition) waits until the next state-changing
+ * transaction or a manual `render()` commits one — pair the intent
+ * with the transition that produces its target. A missing target is a
+ * diagnosable `JA2014`, never a silent no-op. Destroying the app (or
+ * `dispose()`) cancels pending intents; a headless app never flushes
+ * (there is no frame), which makes the queue a documented no-op there.
  */
 
 import { AppRuntimeError } from './errors.js';
@@ -27,7 +30,10 @@ import { AppRuntimeError } from './errors.js';
  *   handed to `createApp` as `node`); intents resolve inside it.
  * @property {(error: Error) => void} [onError] - Sink for `JA2014`
  *   missing-target diagnostics; default: the first one is thrown after
- *   the flush completes (siblings still run).
+ *   the flush completes (siblings still run). The sink itself is
+ *   isolated: a throwing sink never stops the flush — every sibling
+ *   intent still resolves, and the first error the sink threw
+ *   surfaces after the flush completes.
  */
 
 /**
@@ -108,7 +114,16 @@ export function createFocusEffect(options) {
       if (target === null) {
         const err = new AppRuntimeError('JA2014',
           `a post-render intent named data-ref '${props.ref}' but no rendered element carries it`);
-        if (onError !== null) onError(err);
+        if (onError !== null) {
+          // the sink is host code: isolate it like the app loop does,
+          // so one throwing report never starves the sibling intents
+          try {
+            onError(err);
+          }
+          catch (thrown) {
+            if (firstError === null) firstError = /** @type {Error} */ (thrown);
+          }
+        }
         else if (firstError === null) firstError = err;
         continue;
       }

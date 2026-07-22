@@ -5,6 +5,7 @@ import * as assert from 'node:assert';
 import {
   buildFormModel,
   buildFormViewModel,
+  compileFormRules,
 } from '@jarenjs/forms';
 
 const schema = {
@@ -119,6 +120,82 @@ describe('the form session contract (B4)', function () {
     assert.strictEqual(root.session.submitted, true);
     assert.strictEqual(root.session.submitStatus, 'pending');
     assert.strictEqual(root.session.requestId, 'req-7');
+  });
+
+  it('a removed array tail is dirty in the root summary', function () {
+    const initial = { name: 'Jo', lines: [1, 2] };
+    const root = tree({ name: 'Jo', lines: [1] }, { session: { initial } });
+    assert.strictEqual(child(root, 'lines').dirty, true);
+    assert.deepStrictEqual(root.session.dirtyPaths, ['/lines/1'],
+      'the removed slot contributes its pointer even though it is not rendered');
+    assert.strictEqual(root.session.dirty, true);
+  });
+
+  it('a hidden-only change still dirties the root summary', function () {
+    const hiddenSchema = {
+      type: 'object',
+      properties: {
+        company: { type: 'boolean' },
+        vatId: { type: 'string', 'x-form': { visible: { $eq: ['$.company', true] } } },
+      },
+    };
+    const model = buildFormModel(hiddenSchema);
+    const rules = compileFormRules(model);
+    const initial = { company: false, vatId: 'NL01' };
+    const root = buildFormViewModel(model, { company: false, vatId: 'NL02' },
+      { rules, session: { initial } });
+    assert.strictEqual(root.children.some((c) => c.key === 'vatId'), false,
+      'the field is excluded from the render tree');
+    assert.deepStrictEqual(root.session.dirtyPaths, ['/vatId'],
+      'the retained hidden value still guards navigation');
+    assert.strictEqual(root.session.dirty, true);
+  });
+
+  it('missing versus explicit null is a membership change', function () {
+    const withNull = tree({ name: 'Jo', email: null },
+      { session: { initial: { name: 'Jo' } } });
+    assert.strictEqual(child(withNull, 'email').dirty, true);
+    assert.deepStrictEqual(withNull.session.dirtyPaths, ['/email']);
+
+    const removed = tree({ name: 'Jo' },
+      { session: { initial: { name: 'Jo', email: null } } });
+    assert.strictEqual(child(removed, 'email').dirty, true);
+    assert.deepStrictEqual(removed.session.dirtyPaths, ['/email']);
+
+    const same = tree({ name: 'Jo', email: null },
+      { session: { initial: { name: 'Jo', email: null } } });
+    assert.strictEqual(child(same, 'email').dirty, false);
+    assert.deepStrictEqual(same.session.dirtyPaths, []);
+  });
+
+  it('ids are injective: separator lookalikes cannot collide', function () {
+    const idSchema = {
+      type: 'object',
+      properties: {
+        'a-b': { type: 'string' },
+        'a_b': { type: 'string' },
+        'a/b': { type: 'string' },
+        'a': {
+          type: 'object',
+          properties: { b: { type: 'string' } },
+        },
+        'ä': { type: 'string' },
+        '': { type: 'string' },
+      },
+    };
+    const model = buildFormModel(idSchema);
+    const root = buildFormViewModel(model, {}, { session: {} });
+    const ids = [];
+    (function walk(node) {
+      ids.push(node.id);
+      for (const c of node.children ?? []) walk(c);
+      for (const c of node.items ?? []) walk(c);
+    })(root);
+    assert.strictEqual(new Set(ids).size, ids.length,
+      `every id is unique: ${ids.join(', ')}`);
+    const byKey = (key) => root.children.find((c) => c.key === key);
+    assert.strictEqual(byKey('a-b').id, 'form--a_45_b');
+    assert.strictEqual(byKey('a').children[0].id, 'form--a-b');
   });
 
   it('the whole session tree stays plain JSON', function () {

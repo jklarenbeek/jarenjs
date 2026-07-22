@@ -54,6 +54,21 @@ const parser = new XMLParser({
 
 const NAMED_ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
 
+/**
+ * Read a suite source file: strip a UTF-8 BOM and normalize line
+ * endings to LF. XML mandates exactly this line-ending normalization
+ * (the JS parser does not perform it), and the W3C sources are LF —
+ * CRLF only appears when a Windows checkout mangles them, which must
+ * not change the converted corpus or the scorecard.
+ * @param {string} filePath
+ * @returns {string}
+ */
+function readText(filePath) {
+  return fs.readFileSync(filePath, 'utf8')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n');
+}
+
 function decodeXmlEntities(s) {
   let amp = s.indexOf('&');
   if (amp < 0)
@@ -245,7 +260,7 @@ function convertTestCase(node, setDir) {
   if (test !== undefined) {
     const file = attrsOf(test).file;
     testCase.test = file !== undefined
-      ? fs.readFileSync(path.join(setDir, file), 'utf8').replace(/^\uFEFF/, '')
+      ? readText(path.join(setDir, file))
       : textOf(test);
   }
 
@@ -261,7 +276,7 @@ function convertTestCase(node, setDir) {
 
 function convertTestSet(filePath, setName) {
   const setDir = path.dirname(filePath);
-  const doc = parser.parse(fs.readFileSync(filePath, 'utf8'));
+  const doc = parser.parse(readText(filePath));
   const root = doc.find((n) => tagOf(n) === 'test-set');
   if (root === undefined)
     throw new Error(`no <test-set> element in ${filePath}`);
@@ -311,7 +326,7 @@ function main() {
     process.exit(2);
   }
 
-  const catalog = parser.parse(fs.readFileSync(catalogPath, 'utf8'));
+  const catalog = parser.parse(readText(catalogPath));
   const root = catalog.find((n) => tagOf(n) === 'catalog');
 
   const catalogEnvironments = {};

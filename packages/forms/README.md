@@ -283,6 +283,30 @@ const tree = buildFormViewModel(model, data, { rules, validateFields: true, cata
 
 Render it with anything — a React component walking the tree, or **no framework at all**: the standard form rules of [`@jarenjs/app`](../app) are a shipped JSLT rule set that dispatches over exactly this shape and produces [`@jarenjs/view`](../view) vnodes, closing the loop from JSON Schema to live DOM without a single hand-written render function.
 
+### The form session — submit/draft lifecycle around one document
+
+Pass `options.session` and every node additionally carries `id` (a stable, **injective** accessible element id derived from the pointer — distinct pointers can never collide), `describedBy` (the id of the node's error text, or `null`), `dirty` (presence-aware deep compare against `session.initial` — adding or removing a member counts even when both sides read back `null`), `touched`, and `serverErrors` (kept distinct from client `errors`). The root gains a `session` summary:
+
+```javascript
+const tree = buildFormViewModel(model, data, {
+  rules, validateFields: true,
+  session: {
+    initial,                       // the baseline document
+    touched: ['/email'],           // pointers the operator visited
+    submitted: true,
+    submitStatus: 'pending',       // echoed verbatim
+    requestId: 'req-7',            // the in-flight submit's identity
+    serverErrors: { '/email': ['Al in gebruik.'] },
+    idPrefix: 'customer',          // ids become customer--…
+  },
+});
+tree.session;
+// { dirty, dirtyPaths, submitted, submitStatus, requestId,
+//   errorCount, serverErrorCount }
+```
+
+`session.dirty`/`session.dirtyPaths` are the **navigation-guard authority**: they come from a full JSON diff of `initial` against the current data — independent of what is rendered — so removed array tails, members removed or added (including explicit `null`), and values retained under rule-hidden fields all count, each contributing its pointer. The per-node `dirty`/`errors` members remain the render-layer, visible-only summary. Without `session`, the tree is byte-identical to the sessionless shape.
+
 ## Development
 
 Unit tests live in `test/forms/` at the repository root. See the repository [README](../../README.md) for the full Jaren documentation, and the [ROADMAP](../../ROADMAP.md) for planned forms work (rule dependency memoization, hidden-field pruning on submit, computed views through JSLT).

@@ -30,7 +30,7 @@
  *   node benchmark/coverage.js '/required.json' --touched-only
  */
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -150,30 +150,29 @@ console.log(`Iterations: ${iterations}`);
 console.log(`Threshold: ${threshold}%`);
 console.log('');
 
-const c8Cmd = [
-  'npx c8',
+// argv-based on purpose: shell-quoted arguments are not portable
+// (Windows cmd.exe passes single quotes through literally)
+const c8Args = [
+  path.join(rootDir, 'node_modules', 'c8', 'bin', 'c8.js'),
   '--reporter=json',
   '--all',
-  '--exclude packages/_',
-  '--exclude test/',
-  '--exclude coverage/',
-  `--temp-directory ${tempDir}`,
+  '--exclude', 'packages/_',
+  '--exclude', 'test/',
+  '--exclude', 'coverage/',
+  '--temp-directory', tempDir,
   '--clean',
-  `node ${path.join(__dirname, 'debug.js')}`,
-  `'${targetFile}'`,
+  process.execPath, path.join(__dirname, 'debug.js'),
+  targetFile,
   '--profile',
-  `--iterations ${iterations}`
-].join(' ');
+  '--iterations', String(iterations),
+];
 
-try {
-  execSync(c8Cmd, {
-    cwd: rootDir,
-    stdio: ['inherit', 'pipe', 'inherit'],
-    encoding: 'utf8'
-  });
-} catch (e) {
-  // c8 may exit with error code but still produce coverage
-}
+// c8 may exit with an error code but still produce coverage
+spawnSync(process.execPath, c8Args, {
+  cwd: rootDir,
+  stdio: ['inherit', 'pipe', 'inherit'],
+  encoding: 'utf8'
+});
 
 // Check if coverage file was generated
 if (!fs.existsSync(coverageFile)) {
@@ -376,33 +375,34 @@ function runDeadCodeAudit(opts) {
   // localStorage, fetch and the service worker, so no headless test can load
   // it — its logic is covered instead by driving createSiteApp over the stub
   // host (test/website/site.test.js).
-  const cmd = [
-    'npx c8',
+  // argv-based on purpose: shell-quoted globs are not portable (Windows
+  // cmd.exe passes single quotes through literally, silently
+  // instrumenting nothing) — the include/exclude patterns must reach c8
+  // verbatim on every platform
+  const c8Args = [
+    path.join(rootDir, 'node_modules', 'c8', 'bin', 'c8.js'),
     '--reporter=json',
     '--all',
-    "--include 'packages/**/src/**/*.js'",
-    "--include 'components/**/src/**/*.js'",
-    "--exclude '**/*.test.js'",
-    "--exclude '**/dist/**'",
-    "--exclude 'packages/website/src/main.js'",
-    `--temp-directory ${opts.tempDir}`,
+    '--include', 'packages/**/src/**/*.js',
+    '--include', 'components/**/src/**/*.js',
+    '--exclude', '**/*.test.js',
+    '--exclude', '**/dist/**',
+    '--exclude', 'packages/website/src/main.js',
+    '--temp-directory', opts.tempDir,
     '--clean',
-    'node --no-warnings=ExperimentalWarning --test "test/**/*.test.js"',
-  ].join(' ');
+    process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',
+  ];
 
   console.log('='.repeat(80));
   console.log('DEAD-CODE AUDIT — running the full test suite under coverage…');
   console.log('='.repeat(80));
 
-  let suiteFailed = false;
-  try {
-    execSync(cmd, { cwd: rootDir, stdio: ['inherit', 'ignore', 'inherit'], encoding: 'utf8' });
-  } catch {
-    // c8 exits non-zero when the suite has failing tests. Coverage is still
-    // written, but a red suite makes the audit unreliable (untested paths may
-    // simply not have run) — flag it.
-    suiteFailed = true;
-  }
+  // A non-zero exit means the suite has failing tests. Coverage is still
+  // written, but a red suite makes the audit unreliable (untested paths
+  // may simply not have run) — flag it.
+  const run = spawnSync(process.execPath, c8Args,
+    { cwd: rootDir, stdio: ['inherit', 'ignore', 'inherit'] });
+  const suiteFailed = run.status !== 0;
   if (!fs.existsSync(coverageFile)) {
     console.error('Error: coverage data not generated.');
     return 1;
@@ -413,6 +413,13 @@ function runDeadCodeAudit(opts) {
   }
 
   const data = JSON.parse(fs.readFileSync(coverageFile, 'utf8'));
+  // fail CLOSED on an empty report: "zero findings" from a run that
+  // instrumented nothing is not evidence, it is a broken audit
+  if (Object.keys(data).length === 0) {
+    console.error('Error: the coverage report is empty — the audit instrumented nothing '
+      + '(broken include/exclude patterns?). Failing closed.');
+    return 1;
+  }
   const deadFiles = [];   // { file, totalFunctions }
   const deadFns = [];     // { file, name, line }  (in files that ARE otherwise used)
   let totalFns = 0;
@@ -485,6 +492,12 @@ function runDeadCodeAudit(opts) {
     console.log('Do not leave it unresolved. (Some entries may be intentional public API');
     console.log('surface with no test yet — adding the test is then the correct choice.)');
     console.log('');
+  }
+
+  if (totalFns === 0) {
+    console.error('Error: zero functions were instrumented — a 0/0 summary is a broken '
+      + 'audit, never a pass. Failing closed.');
+    return 1;
   }
 
   const findings = deadFiles.length + deadFns.length;

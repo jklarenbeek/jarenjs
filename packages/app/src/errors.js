@@ -17,8 +17,9 @@
  *  - `JA0005` — `subs` is not an array of subscription entries
  *  - `JA0006` — a subscription entry is malformed or its `when` failed
  *    to compile (see `cause`)
- *  - `JA0007` — the app failed to boot: the initial subscriptions or
- *    the first frame failed after compilation succeeded; every
+ *  - `JA0007` — the app failed to boot: the renderer construction, the
+ *    initial-state check, the initial subscriptions, the first frame or
+ *    the queued boot work failed after compilation succeeded; every
  *    already-acquired resource was rolled back (see `cause`)
  */
 export class AppCompileError extends Error {
@@ -40,7 +41,9 @@ export class AppCompileError extends Error {
  * A failure while the app is running. Codes:
  *
  *  - `JA2001` — an unknown action was dispatched
- *  - `JA2002` — an action document threw while evaluating (see `cause`)
+ *  - `JA2002` — an action or `when` document threw while evaluating,
+ *    or a registered event-field extractor threw (see `cause`; the
+ *    extractor's member binds `null` and the dispatch still runs)
  *  - `JA2003` — an action produced a transition that is not an object
  *  - `JA2004` — a transition's `patch` failed to apply (see `cause`)
  *  - `JA2005` — the next state violated the app's invariants
@@ -61,6 +64,9 @@ export class AppCompileError extends Error {
  *    stays stopped
  *  - `JA2014` — a post-render focus/measure intent named a `data-ref`
  *    with no rendered target
+ *  - `JA2015` — the `validateState` hook itself threw (see `cause`) —
+ *    distinct from a rejection verdict (`JA2005`); the transaction
+ *    fails and the queue keeps draining
  */
 export class AppRuntimeError extends Error {
   /**

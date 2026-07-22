@@ -71,6 +71,12 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  *   `changes` is only sound when the hook falls back to a full check
  *   for `null`). A rejection (`false` or `{ valid: false }`) blocks the
  *   transition (fail closed) and reports `JA2005` through `onError`.
+ *   The hook is host code and may itself fail: a throwing validator is
+ *   isolated as `JA2015` (the transaction fails, the original cause is
+ *   preserved, and the queue keeps draining — parked errors from the
+ *   default rethrowing sink surface only after the drain). The hook
+ *   also runs once at boot against the initial state (see
+ *   {@link ValidateContext}).
  * @property {(state: any) => any} [viewModel] - The derivation boundary:
  *   maps the state to the view stylesheet's input document before every
  *   render (default identity). This is where JS-computed derivations —
@@ -98,10 +104,16 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  */
 
 /**
- * The context handed to `validateState` (second argument).
+ * The context handed to `validateState` (second argument). During boot
+ * the hook is called once with the initial state and the **boot
+ * context**: `previous` and `action` are `null` (no transition
+ * produced the state) and `changes` is `null` (validate fully); this
+ * runs before any subscription starts or effect runs.
  * @typedef {Object} ValidateContext
- * @property {any} previous - The state the transition started from.
- * @property {string} action - The acting action name.
+ * @property {any} previous - The state the transition started from
+ *   (`null` for the boot-time initial-state check).
+ * @property {string | null} action - The acting action name (`null`
+ *   for the boot-time initial-state check).
  * @property {any} payload - The dispatch payload (`null` when absent).
  * @property {string[] | null} changes - Changed JSON Pointers when the
  *   transition was patch-only, else `null` (= unknown, validate fully).
@@ -141,14 +153,19 @@ import { AppCompileError, AppRuntimeError } from './errors.js';
  * Compile an app document and start the loop.
  *
  * Boot is a transaction: compiling the documents, creating the
- * renderer, starting the initial subscriptions and painting the first
- * frame either all succeed, or every already-acquired resource is
- * disposed and `createApp` throws `JA0007` (an `AppCompileError`
- * carrying the original failure as `cause`). `onError` observes
- * individual boot-time failures first — a sink that swallows a
- * subscription failure keeps that subscription stopped and boots the
- * rest; the default rethrowing sink aborts boot. After a successful
- * boot the returned app never throws from `createApp` paths again.
+ * renderer, validating the initial state, starting the initial
+ * subscriptions, painting the first frame and draining the dispatches
+ * queued by starting handlers either all succeed, or every
+ * already-acquired resource (subscriptions, effect handlers, the
+ * renderer — the container ends empty) is disposed and `createApp`
+ * throws `JA0007` (an `AppCompileError` carrying the original failure
+ * as `cause`). `onError` observes individual boot-time failures first —
+ * a sink that swallows a subscription-start failure, the initial-state
+ * check or an error inside queued boot work recovers it and boots the
+ * rest; renderer-construction and first-frame failures are always
+ * fatal; the default rethrowing sink aborts boot on any of them. After
+ * a successful boot the returned app never throws from `createApp`
+ * paths again.
  *
  * @param {any} appDoc
  * @param {AppOptions} [options]
@@ -185,6 +202,10 @@ export function createApp(appDoc, options = {}) {
   const schedule = options.schedule ?? ((flush) => queueMicrotask(flush));
   const afterRender = options.afterRender ?? null;
   const maxTurns = options.maxTurns ?? 1000;
+  // a loop guard that silently coerces (NaN, '50', 2.5, 0) is no guard
+  if (!Number.isInteger(maxTurns) || maxTurns <= 0) {
+    throw new TypeError('createApp: options.maxTurns must be a positive integer');
+  }
   const capturePayloads = options.capturePayloads === true;
 
   let state = appDoc.state;
@@ -201,7 +222,7 @@ export function createApp(appDoc, options = {}) {
   /**
    * The FIFO transaction queue (APP-FORMAT §8). Entries carry the
    * already-JSON-reduced event — native events never wait in the queue.
-   * @type {Array<{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null }>}
+   * @type {Array<{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, cause: Error }> | null }>}
    */
   const actionQueue = [];
   let draining = false;
@@ -217,13 +238,6 @@ export function createApp(appDoc, options = {}) {
 
   /** @type {(((vnode: any) => void) & { destroy?: () => void }) | null} */
   let renderer = null;
-  if (options.node !== undefined) {
-    renderer = createDomRenderer(options.node, {
-      document: options.document,
-      onEvent: handleBinding,
-      widgets: options.widgets,
-    });
-  }
 
   /**
    * Report an error without ever breaking the drain: the sink runs, and
@@ -263,14 +277,21 @@ export function createApp(appDoc, options = {}) {
     if (!running) return;
     let event = null;
     let unknownFields = null;
+    let extractorFailures = null;
     if (domEvent !== null && domEvent !== undefined) {
       /** @type {string[]} */
       const unknown = [];
+      /** @type {Array<{ field: string, cause: Error }>} */
+      const failures = [];
       event = eventData(domEvent, eventFields, eventExtractors,
-        (field) => unknown.push(field));
+        (field, cause) => {
+          if (cause === undefined) unknown.push(field);
+          else failures.push({ field, cause });
+        });
       if (unknown.length > 0) unknownFields = unknown;
+      if (failures.length > 0) extractorFailures = failures;
     }
-    actionQueue.push({ source, name, payload, event, unknownFields });
+    actionQueue.push({ source, name, payload, event, unknownFields, extractorFailures });
     drainQueue();
   }
 
@@ -318,8 +339,11 @@ export function createApp(appDoc, options = {}) {
    * action name, or `{ "action": name, "with"?: payload, "event"?:
    * [fieldName, ...], "preventDefault"?: bool, "stopPropagation"?:
    * bool }`. The two native controls run synchronously in the event
-   * callback, before the transaction is queued — whether the action
-   * later succeeds cannot retroactively change them. Headless events
+   * callback, before the transaction is queued — but only a REGISTERED
+   * action owns the native behavior: an unknown action name suppresses
+   * nothing (it still queues and reports `JA2001`). A registered action
+   * that later fails keeps its already-applied modifiers — whether the
+   * action succeeds cannot retroactively change them. Headless events
    * without the methods are a documented no-op.
    * @param {any} binding
    * @param {any} event
@@ -334,10 +358,13 @@ export function createApp(appDoc, options = {}) {
       && (binding.event === undefined || isFieldNameArray(binding.event))
       && (binding.preventDefault === undefined || typeof binding.preventDefault === 'boolean')
       && (binding.stopPropagation === undefined || typeof binding.stopPropagation === 'boolean')) {
-      if (binding.preventDefault === true && typeof event?.preventDefault === 'function') {
+      const registered = actions.has(binding.action);
+      if (registered && binding.preventDefault === true
+        && typeof event?.preventDefault === 'function') {
         event.preventDefault();
       }
-      if (binding.stopPropagation === true && typeof event?.stopPropagation === 'function') {
+      if (registered && binding.stopPropagation === true
+        && typeof event?.stopPropagation === 'function') {
         event.stopPropagation();
       }
       queueDispatch('binding', binding.action, binding.with ?? null, event, binding.event ?? null);
@@ -352,7 +379,7 @@ export function createApp(appDoc, options = {}) {
    * Run one queued transaction to completion: evaluate the action,
    * commit the state, invoke effects, notify listeners, reconcile
    * subscriptions, schedule the render, then notify observers.
-   * @param {{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null }} entry
+   * @param {{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, cause: Error }> | null }} entry
    */
   function runTransaction(entry) {
     const started = now();
@@ -372,6 +399,16 @@ export function createApp(appDoc, options = {}) {
       for (const field of entry.unknownFields) {
         safeError(new AppRuntimeError('JA2009',
           `a binding requested an unknown event field '${field}'`));
+      }
+    }
+    // an extractor is host code: a throw surfaces as the dispatching
+    // action's JA2002 (APP-FORMAT §5.4), the member binds null, and the
+    // dispatch itself is never dropped
+    if (entry.extractorFailures !== null) {
+      for (const { field, cause } of entry.extractorFailures) {
+        safeError(new AppRuntimeError('JA2002',
+          `action '${entry.name}' event-field extractor '${field}' threw: ${cause.message}`,
+          cause));
       }
     }
 
@@ -425,12 +462,25 @@ export function createApp(appDoc, options = {}) {
       }
     }
     if (next !== state && options.validateState !== undefined) {
-      const verdict = options.validateState(next, {
-        previous: state,
-        action: entry.name,
-        payload: entry.payload,
-        changes,
-      });
+      let verdict;
+      try {
+        verdict = options.validateState(next, {
+          previous: state,
+          action: entry.name,
+          payload: entry.payload,
+          changes,
+        });
+      }
+      catch (err) {
+        // the validator is host code: a throw is its own failure mode
+        // (JA2015), never a rejection verdict — the transaction fails,
+        // the queue keeps draining
+        safeError(new AppRuntimeError('JA2015',
+          `the validateState hook threw for action '${entry.name}': ${/** @type {Error} */ (err).message}`,
+          /** @type {Error} */ (err)));
+        finish('failed', 'JA2015');
+        return;
+      }
       if (verdict === false
         || (verdict !== null && typeof verdict === 'object' && verdict.valid === false)) {
         const err = new AppRuntimeError('JA2005',
@@ -606,19 +656,19 @@ export function createApp(appDoc, options = {}) {
     schedule(() => {
       renderScheduled = false;
       if (!running) return;
-      if (draining) {
-        // synchronous scheduler: a renderer failure (a throwing widget
-        // unmount) must not corrupt the transaction queue
-        try {
-          render();
-        }
-        catch (err) {
-          safeError(/** @type {Error} */ (err));
-        }
-      }
-      else {
+      // a renderer failure (a throwing widget hook) always routes
+      // through the app error policy: under a synchronous scheduler it
+      // must not corrupt the transaction queue (the parked error
+      // surfaces after the drain); under a deferred scheduler `onError`
+      // observes it and whatever the sink throws surfaces to the
+      // scheduler's context
+      try {
         render();
       }
+      catch (err) {
+        safeError(/** @type {Error} */ (err));
+      }
+      if (!draining) flushPendingError();
     });
   }
 
@@ -668,14 +718,30 @@ export function createApp(appDoc, options = {}) {
     }
   }
 
-  // boot: the initial subscriptions and the first frame are one
-  // transaction — on failure everything acquired is rolled back and
-  // createApp throws JA0007 (see the function contract above)
+  // boot: renderer construction, the initial-state check, the initial
+  // subscriptions, the first frame AND the queued work they produce are
+  // one transaction — any failure that would escape createApp rolls
+  // back every acquired resource (subscriptions, effect handlers, the
+  // renderer; the container ends empty, scheduled work becomes a no-op)
+  // and throws one JA0007. A custom onError that swallows a reported
+  // boot failure (a subscription start, the initial-state check, an
+  // error inside queued boot work) recovers it and boot continues;
+  // renderer construction and first-frame failures are always fatal.
   {
     /** @type {Error | null} */
     let bootFailure = null;
     draining = true; // dispatches made by starting handlers queue
     try {
+      if (options.node !== undefined) {
+        renderer = createDomRenderer(options.node, {
+          document: options.document,
+          onEvent: handleBinding,
+          widgets: options.widgets,
+        });
+      }
+      if (options.validateState !== undefined) {
+        validateInitialState();
+      }
       refreshSubs();
       render();
     }
@@ -687,22 +753,69 @@ export function createApp(appDoc, options = {}) {
     }
     if (bootFailure === null && pendingError !== null) {
       bootFailure = pendingError;
+      pendingError = null;
     }
-    pendingError = null;
+    // subscriptions queued dispatches during boot: drain them inside
+    // the boot ownership window, so a queued failure that escapes the
+    // sink still rolls back instead of leaving a half-booted app behind
+    if (bootFailure === null) {
+      try {
+        drainQueue();
+      }
+      catch (err) {
+        bootFailure = /** @type {Error} */ (err);
+      }
+    }
     if (bootFailure !== null) {
+      // rollback: each step is isolated so a throwing cleanup never
+      // skips its siblings; the original boot failure always wins
       try {
         teardownLoop();
-        if (renderer !== null && typeof renderer.destroy === 'function') renderer.destroy();
       }
-      catch {
-        // rollback is best-effort by contract; the boot failure wins
+      catch { /* isolated */ }
+      try {
+        disposeEffectHandlers();
+      }
+      catch { /* isolated */ }
+      if (renderer !== null) {
+        try {
+          if (typeof renderer.destroy === 'function') renderer.destroy();
+        }
+        catch { /* isolated */ }
+        renderer = null;
       }
       pendingError = null;
       throw new AppCompileError('JA0007',
         `the app failed to boot: ${bootFailure.message}`, '', bootFailure);
     }
-    // subscriptions queued dispatches during boot: process them now
-    drainQueue();
+  }
+
+  /**
+   * The boot-time initial-state check (see {@link ValidateContext}):
+   * a rejection is `JA2005`, a throwing validator `JA2015` — both are
+   * reported first, so a swallowing sink can accept the state and boot
+   * on; under the default rethrowing sink they abort the boot.
+   */
+  function validateInitialState() {
+    /** @type {ReturnType<NonNullable<AppOptions['validateState']>>} */
+    let verdict;
+    try {
+      verdict = /** @type {NonNullable<AppOptions['validateState']>} */ (options.validateState)(
+        state, { previous: null, action: null, payload: null, changes: null });
+    }
+    catch (err) {
+      safeError(new AppRuntimeError('JA2015',
+        `the validateState hook threw for the initial state: ${/** @type {Error} */ (err).message}`,
+        /** @type {Error} */ (err)));
+      return;
+    }
+    if (verdict === false
+      || (verdict !== null && typeof verdict === 'object' && verdict.valid === false)) {
+      const err = new AppRuntimeError('JA2005',
+        'the initial state violates the app\'s state invariants');
+      err.detail = typeof verdict === 'object' ? verdict.errors : undefined;
+      safeError(err);
+    }
   }
 
   return {
@@ -742,10 +855,11 @@ export function createApp(appDoc, options = {}) {
       return () => { observers.delete(observer); };
     },
     /**
-     * Pause the loop: live subscriptions are cleaned up (isolated),
-     * listeners are cleared and further dispatches are ignored. The
+     * Stop the loop — one-way and nonterminal, not a resumable pause:
+     * live subscriptions are cleaned up (isolated), listeners are
+     * cleared and further dispatches are ignored, permanently. The
      * renderer and effect handlers stay untouched — `destroy()` is the
-     * terminal teardown.
+     * terminal teardown that owns them.
      */
     stop() {
       teardownLoop();
@@ -874,7 +988,10 @@ function resolveEventField(event, name, extractors, report) {
  * @param {any} event
  * @param {string[] | null} fields - Requested field names, or `null`.
  * @param {Record<string, (nativeEvent: any) => any>} extractors
- * @param {(field: string) => void} report - The JA2009 sink.
+ * @param {(field: string, cause?: Error) => void} report - The failure
+ *   sink: no `cause` = unknown field (JA2009), with `cause` = a
+ *   registered extractor threw (JA2002). Either way the member binds
+ *   `null` and the dispatch continues.
  * @returns {{ type: string, value: any, checked: any, key: any }}
  */
 function eventData(event, fields, extractors, report) {
@@ -888,8 +1005,15 @@ function eventData(event, fields, extractors, report) {
   if (fields !== null) {
     for (const name of fields) {
       if (Object.hasOwn(extractors, name)) {
-        const value = extractors[name](event);
-        setEventMember(data, name, value === undefined ? null : value);
+        let value = null;
+        try {
+          const out = extractors[name](event);
+          value = out === undefined ? null : out;
+        }
+        catch (err) {
+          report(name, /** @type {Error} */ (err));
+        }
+        setEventMember(data, name, value);
         continue;
       }
       // a requested default member is already bound; never null it out
