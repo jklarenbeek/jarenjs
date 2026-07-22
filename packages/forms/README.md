@@ -285,7 +285,7 @@ Render it with anything — a React component walking the tree, or **no framewor
 
 ### The form session — submit/draft lifecycle around one document
 
-Pass `options.session` and every node additionally carries `id` (a stable, **injective** accessible element id derived from the pointer — distinct pointers can never collide), `describedBy` (the id of the node's error text, or `null`), `dirty` (presence-aware deep compare against `session.initial` — adding or removing a member counts even when both sides read back `null`), `touched`, and `serverErrors` (kept distinct from client `errors`). The root gains a `session` summary:
+Pass `options.session` and every node additionally carries `id` (a stable, **injective** accessible element id derived from the pointer — distinct pointers can never collide, and member ids carry an `f-` marker so the `<prefix>--root` sentinel is disjoint from every member, a member literally named `root` included), `describedBy` (the id of the node's error text, or `null`), `dirty` (presence-aware deep compare against `session.initial` — adding or removing a member counts even when both sides read back `null`), `touched`, and `serverErrors` (kept distinct from client `errors`). The root gains a `session` summary:
 
 ```javascript
 const tree = buildFormViewModel(model, data, {
@@ -305,7 +305,7 @@ tree.session;
 //   errorCount, serverErrorCount }
 ```
 
-`session.dirty`/`session.dirtyPaths` are the **navigation-guard authority**: they come from a full JSON diff of `initial` against the current data — independent of what is rendered — so removed array tails, members removed or added (including explicit `null`), and values retained under rule-hidden fields all count, each contributing its pointer. The per-node `dirty`/`errors` members remain the render-layer, visible-only summary. Without `session`, the tree is byte-identical to the sessionless shape.
+`session.dirty`/`session.dirtyPaths` are the **navigation-guard authority**: they come from a full JSON diff of `initial` against the current data — independent of what is rendered — so removed array tails, members removed or added (including explicit `null`), and values retained under rule-hidden fields all count, each contributing its pointer. The diff walks **own** keys only (`Object.hasOwn`), so hostile-but-legal member names like `constructor` or a JSON-parsed `__proto__` diff as data, never through the prototype chain. To keep the authority unconditional, a root-level `x-form` `visible` rule is rejected by `compileFormRules` with a `TypeError` — hiding the whole form would null the render tree *and* its summary; gate whole-form visibility at the mount boundary instead. The per-node `dirty`/`errors` members remain the render-layer, visible-only summary. Without `session`, the tree is byte-identical to the sessionless shape.
 
 ## Development
 

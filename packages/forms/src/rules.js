@@ -190,6 +190,16 @@ function compileRuleMessageSpec(raw, fieldPointer) {
  * results['/vatId']; // { visible: true, errors: [{ keyword: 'x-form/assert', ... }] }
  */
 export function compileFormRules(model, options = {}) {
+  // a root-level `visible` rule is a modeling error, rejected here so
+  // it can never fire: hiding the whole form would make the render
+  // tree AND the session summary vanish (`buildFormViewModel` → null),
+  // silently voiding the dirty/navigation authority. Whole-form
+  // visibility belongs to the host at the mount boundary.
+  if (model?.rules?.visible !== undefined) {
+    throw new TypeError(
+      'compileFormRules: a root-level x-form "visible" rule is not allowed - '
+      + 'gate the whole form at the mount boundary instead');
+  }
   const queryOptions = options.compileTypeTest !== undefined
     ? { compileTypeTest: options.compileTypeTest }
     : {};

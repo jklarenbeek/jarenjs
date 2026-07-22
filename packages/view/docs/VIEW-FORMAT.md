@@ -289,12 +289,17 @@ renderer MUST honor:
   unmounting: the walk finishes, then the first error surfaces.
 - **Hook failure** — a throwing `mount` or `update` **poisons** the
   widget: sibling widgets and the frame still complete, the first
-  error surfaces after the frame settles, and the next render that
-  revisits the widget MUST replace it with a fresh lifecycle rather
-  than keep patching it. A poisoned widget never receives further
+  error surfaces after the frame settles, and the NEXT render MUST
+  replace it with a fresh lifecycle rather than keep patching it.
+  Recovery MUST NOT depend on vnode reference identity: a producer
+  that reuses the failed vnode (or a reference-equal ancestor — the
+  JSLT memo does exactly this for unaffected subtrees) still recovers,
+  so a conforming renderer suspends its `===` subtree fast path while
+  any widget is poisoned. A poisoned widget never receives further
   `update` calls; `unmount` runs on the old instance only when its
   `mount` had succeeded (a mount that threw acquired nothing). A
-  half-mounted handle receiving updates is non-conforming.
+  half-mounted handle receiving updates, or a widget left permanently
+  inert by structural sharing, is non-conforming.
 
 ### 7.3.1 Renderer destroy
 
@@ -314,8 +319,10 @@ renderer MUST honor:
 A host that merely wants a widget-free tree still renders a widget-free
 frame; `destroy()` is for ending the renderer's life (`app.destroy()`
 calls it). A `destroy()` entered from inside a widget hook or nested
-render is still terminal: the active pass stops and the teardown runs
-as it unwinds, unmounting once.
+render is still terminal: the active pass stops **immediately** — no
+later sibling observes another `update` in that frame — and the
+teardown runs as the pass unwinds, unmounting every successfully
+mounted instance exactly once.
 
 ### 7.3.2 Render serialization
 

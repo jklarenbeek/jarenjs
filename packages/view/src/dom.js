@@ -84,10 +84,13 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  *
  * Failure policy: a throwing `mount` or `update` poisons the widget —
  * siblings and the frame still complete, the first error surfaces after
- * the frame settles, and the next render that revisits the widget
- * replaces it with a fresh lifecycle (`unmount` runs on the old
- * instance only when its `mount` had succeeded). A poisoned widget
- * never receives further `update` calls.
+ * the frame settles, and the NEXT render replaces it with a fresh
+ * lifecycle (`unmount` runs on the old instance only when its `mount`
+ * had succeeded). Recovery never depends on the producer allocating a
+ * fresh vnode: while any widget is poisoned the `===` subtree fast
+ * path is suspended, so a memoized reference-equal tree still reaches
+ * and replaces it. A poisoned widget never receives further `update`
+ * calls.
  * @typedef {Object} WidgetDef
  * @property {(host: any, props: any, emit: WidgetEmit) => any} mount -
  *   Called with the host element after it is connected to the rendered
@@ -146,6 +149,12 @@ export function createDomRenderer(container, options = {}) {
      * this frame (§7): the walk, the patch and the mount flush always
      * finish; the error surfaces after the frame settles. */
     frameError: /** @type {Error | null} */ (null),
+    /** Live poisoned widgets (§7.3). While non-zero, the `===` subtree
+     * fast path is disabled so structural sharing (the JSLT memo
+     * reusing a reference-equal vnode) can never leave a poisoned
+     * widget permanently inert — every render revisits it until it is
+     * replaced or removed. */
+    poisonedCount: 0,
     /** True after `destroy()`: every later render is an exact no-op. */
     destroyed: false,
     /** The one `emit` every widget of this renderer receives. */
@@ -278,6 +287,7 @@ function flushMounts(ctx) {
     }
     catch (err) {
       w.failed = 'mount';
+      ctx.poisonedCount++;
       if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
     }
   }
@@ -325,7 +335,14 @@ function createNode(ctx, vnode, ns) {
  * @returns {any}
  */
 function patchNode(ctx, parent, node, oldV, newV, ns) {
-  if (oldV === newV) return node;
+  // a destroy() requested inside a widget hook stops the active pass:
+  // no later sibling may observe another update in this frame
+  if (ctx.destroyed) return node;
+  // the === fast path is sound only while no widget is poisoned: a
+  // reference-equal subtree may hide a poisoned widget awaiting its
+  // replacement (§7.3), so recovery must not depend on the producer
+  // allocating a fresh vnode
+  if (oldV === newV && ctx.poisonedCount === 0) return node;
   if (isTextNode(oldV) && isTextNode(newV)) {
     const text = String(newV);
     if (node.nodeValue !== text) node.nodeValue = text;
@@ -535,6 +552,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
         }
         catch (err) {
           w.failed = 'update';
+          ctx.poisonedCount++;
           if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
         }
       }
@@ -548,6 +566,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
           // either hook failing leaves no resource a later unmount
           // could own: poison as 'mount' (skip unmount, replace next)
           w.failed = 'mount';
+          ctx.poisonedCount++;
           if (ctx.frameError === null) ctx.frameError = /** @type {Error} */ (err);
         }
       }
@@ -596,25 +615,30 @@ function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
  */
 function destroyNode(ctx, node, vnode) {
   if (!ctx.hasWidgets) return;
-  const err = destroyWalk(node, vnode, null);
+  const err = destroyWalk(ctx, node, vnode, null);
   if (err !== null && ctx.frameError === null) ctx.frameError = err;
 }
 
 /**
  * The recursive half of `destroyNode`: unmount widget nodes, recurse
  * through ordinary element children, never descend into a widget's host
- * subtree (the widget's own DOM may contain anything).
+ * subtree (the widget's own DOM may contain anything). A destroyed
+ * poisoned widget leaves the live-poison count — replacement and
+ * subtree removal are the two ways a poisoned widget recovers, after
+ * which the `===` fast path is sound again.
+ * @param {any} ctx
  * @param {any} node
  * @param {any} vnode
  * @param {Error | null} firstError
  * @returns {Error | null}
  */
-function destroyWalk(node, vnode, firstError) {
+function destroyWalk(ctx, node, vnode, firstError) {
   if (!isElementNode(vnode)) return firstError;
   if (vnode[0] === WIDGET_TAG) {
     const w = node.__jarenWidget;
     if (w !== undefined && !w.destroyed) {
       w.destroyed = true;
+      if (w.failed !== false) ctx.poisonedCount--;
       if (w.mounted && w.failed !== 'mount' && w.def.unmount !== undefined) {
         try {
           w.def.unmount(w.handle);
@@ -628,7 +652,7 @@ function destroyWalk(node, vnode, firstError) {
   }
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
-    firstError = destroyWalk(node.childNodes[i], children[i], firstError);
+    firstError = destroyWalk(ctx, node.childNodes[i], children[i], firstError);
   }
   return firstError;
 }
@@ -680,6 +704,7 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
   let tailRef = null;
 
   while (oldStart <= oldEnd && newStart <= newEnd) {
+    if (ctx.destroyed) return; // a mid-pass destroy stops the traversal
     const oS = oldCh[oldStart];
     if (oS === undefined) { oldStart++; continue; } // consumed by a keyed move
     const oE = oldCh[oldEnd];
@@ -728,12 +753,14 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
   if (oldStart > oldEnd) {
     // old range exhausted: mount the remaining new children before the tail
     for (let i = newStart; i <= newEnd; i++) {
+      if (ctx.destroyed) return;
       parent.insertBefore(createNode(ctx, newCh[i], ns), tailRef);
     }
   }
   else {
     // new range exhausted: unmount the remaining old children
     for (let i = oldStart; i <= oldEnd; i++) {
+      if (ctx.destroyed) return;
       if (oldCh[i] !== undefined) {
         destroyNode(ctx, oldDom[i], oldCh[i]);
         parent.removeChild(oldDom[i]);

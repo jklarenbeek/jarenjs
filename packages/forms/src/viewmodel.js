@@ -268,13 +268,17 @@ function collectDirtyPaths(initial, current, pointer, out) {
   }
   if (initial !== null && typeof initial === 'object' && !Array.isArray(initial)
     && current !== null && typeof current === 'object' && !Array.isArray(current)) {
-    for (const key in initial) {
+    // own keys only, membership by Object.hasOwn — JSON member names
+    // like 'constructor', 'toString' or a parsed own '__proto__' are
+    // legal data and must diff as data, never through the prototype
+    // chain (null-prototype records diff identically)
+    for (const key of Object.keys(initial)) {
       const child = `${pointer}/${encodeJSONPointerSegment(key)}`;
-      if (!(key in current)) out.push(child); // removed member
+      if (!Object.hasOwn(current, key)) out.push(child); // removed member
       else collectDirtyPaths(initial[key], current[key], child, out);
     }
-    for (const key in current) {
-      if (!(key in initial)) {
+    for (const key of Object.keys(current)) {
+      if (!Object.hasOwn(initial, key)) {
         out.push(`${pointer}/${encodeJSONPointerSegment(key)}`); // added member
       }
     }
@@ -286,11 +290,18 @@ function collectDirtyPaths(initial, current, pointer, out) {
 /**
  * A stable accessible element id for a pointer: the encoded segments
  * joined with '-', prefixed; the empty pointer is 'root'. The encoding
- * is INJECTIVE — distinct pointers always get distinct ids: every
- * character outside `[A-Za-z0-9]` (including `-` and `_` themselves)
- * is escaped as `_<codepoint>_` BEFORE the segments are joined, so a
- * literal '-' or '_' inside a member name can never collide with the
- * separator or an escape (`/a/b` → `a-b`, `/a-b` → `a_45_b`).
+ * is INJECTIVE — distinct pointers always get distinct ids:
+ *
+ *  - every character outside `[A-Za-z0-9]` (including `-` and `_`
+ *    themselves) is escaped as `_<codepoint>_` BEFORE the segments are
+ *    joined, so a literal '-' or '_' inside a member name can never
+ *    collide with the separator or an escape (`/a/b` → `f-a-b`,
+ *    `/a-b` → `f-a_45_b`);
+ *  - member ids carry the structural marker `f-`, so the root
+ *    sentinel lives in a DISJOINT namespace: a member named `root`
+ *    (`<prefix>--f-root`) can never collide with the root itself
+ *    (`<prefix>--root`), and an empty member name (`<prefix>--f-`) is
+ *    distinct from both.
  * @param {string} prefix
  * @param {string} pointer
  * @returns {string}
@@ -300,7 +311,7 @@ function pointerId(prefix, pointer) {
   const safe = pointer.slice(1)
     .replace(/[^A-Za-z0-9/]/gu, (ch) => `_${ch.codePointAt(0)}_`)
     .replace(/\//g, '-');
-  return `${prefix}--${safe}`;
+  return `${prefix}--f-${safe}`;
 }
 
 /**

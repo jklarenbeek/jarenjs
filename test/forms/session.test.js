@@ -106,11 +106,11 @@ describe('the form session contract (B4)', function () {
     const root = tree({ name: 'Jo', lines: [1] },
       { session: { idPrefix: 'customer' } });
     assert.strictEqual(root.id, 'customer--root');
-    assert.strictEqual(child(root, 'name').id, 'customer--name');
-    assert.strictEqual(child(root, 'lines').items[0].id, 'customer--lines-0');
+    assert.strictEqual(child(root, 'name').id, 'customer--f-name');
+    assert.strictEqual(child(root, 'lines').items[0].id, 'customer--f-lines-0');
     const again = tree({ name: 'Jo', lines: [1] },
       { session: { idPrefix: 'customer' } });
-    assert.strictEqual(child(again, 'name').id, 'customer--name', 'stable across builds');
+    assert.strictEqual(child(again, 'name').id, 'customer--f-name', 'stable across builds');
   });
 
   it('echoes submit identity in the root summary', function () {
@@ -194,8 +194,8 @@ describe('the form session contract (B4)', function () {
     assert.strictEqual(new Set(ids).size, ids.length,
       `every id is unique: ${ids.join(', ')}`);
     const byKey = (key) => root.children.find((c) => c.key === key);
-    assert.strictEqual(byKey('a-b').id, 'form--a_45_b');
-    assert.strictEqual(byKey('a').children[0].id, 'form--a-b');
+    assert.strictEqual(byKey('a-b').id, 'form--f-a_45_b');
+    assert.strictEqual(byKey('a').children[0].id, 'form--f-a-b');
   });
 
   it('the whole session tree stays plain JSON', function () {

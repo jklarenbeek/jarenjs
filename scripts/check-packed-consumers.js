@@ -13,13 +13,18 @@
  *      tarballs, nothing hoisted, nothing extra),
  *   3. imports every explicit JavaScript export subpath under plain
  *      Node ESM,
- *   4. type-checks a strict TypeScript consumer of the same subpaths
- *      against the packed declarations (`tsc --noEmit`, strict, no
- *      `skipLibCheck`),
+ *   4. type-checks a strict TypeScript consumer against the packed
+ *      declarations (`tsc --noEmit`, strict, no `skipLibCheck`) —
+ *      namespace imports of every subpath, plus semantic calls of the
+ *      key public APIs for the packages that carry them,
  *   5. repeats the runtime imports under Bun when a `bun` binary is on
  *      PATH (consumers ship Bun single-binaries); `--require-bun`
  *      makes a missing Bun a gate FAILURE (release CI must pass it —
- *      an optional leg cannot prove a release claim).
+ *      an optional leg cannot prove a release claim),
+ *   6. bundles the `@jarenjs/app` consumer with an isolated Vite `lib`
+ *      build (the browser-bundler leg of the release gate: Vite must
+ *      resolve the packed export maps from the declared closure
+ *      alone).
  *
  * An undeclared import fails here with ERR_MODULE_NOT_FOUND even though
  * the workspace test suite passes — exactly the class of defect this
@@ -31,8 +36,11 @@
  * Portability: paths derive from `fileURLToPath` (a URL `pathname` is
  * not a Windows filesystem path), npm runs through its own JS
  * entrypoint (`npm_execpath`) under the current Node executable (the
- * Windows `npm` shim is not a portable `execFileSync` target), and the
- * temporary work directory is removed in `finally`, also on failure.
+ * Windows `npm` shim is not a portable `execFileSync` target), Bun
+ * executes a program FILE — never a multiline `-e` string, which a
+ * Windows shell reparses into garbage — with no shell anywhere, and
+ * the temporary work directory is removed in `finally`, also on
+ * failure.
  *
  * Run: `node scripts/check-packed-consumers.js [--require-bun]`
  * (or `npm run test:packed`).
@@ -119,15 +127,79 @@ if (!existsSync(tscBin)) {
   process.exit(1);
 }
 
-const bunProbe = spawnSync('bun', ['--version'], {
-  encoding: 'utf8', shell: process.platform === 'win32',
-});
+// no shell: `bun` resolves to the real executable on every platform
+// (Windows CreateProcess appends `.exe`); a shell would reparse args
+const bunProbe = spawnSync('bun', ['--version'], { encoding: 'utf8' });
 const bun = bunProbe.status === 0;
 if (!bun && requireBun) {
   console.error('--require-bun: no bun binary on PATH — the Bun consumer leg is mandatory in release mode.');
   process.exit(1);
 }
 if (!bun) console.log('(no bun binary on PATH — the Bun consumer leg is skipped)');
+
+/**
+ * Semantic strict-TypeScript snippets per package: beyond resolving
+ * declarations, the packed consumer CALLS the key public APIs in value
+ * positions, so a declaration that resolves but no longer matches the
+ * runtime surface fails here. Each snippet may import only from the
+ * package's own declared closure.
+ * @type {Record<string, string>}
+ */
+const SEMANTIC_SNIPPETS = {
+  '@jarenjs/view': `
+import { createDomRenderer } from '@jarenjs/view';
+const render = createDomRenderer(({} as any), {
+  onEvent: (binding, event) => void [binding, event],
+});
+render(['p', {}, 'hi']);
+render.destroy();
+`,
+  '@jarenjs/app': `
+import { createApp, createTaskEffect, createFocusEffect } from '@jarenjs/app';
+const app = createApp({ state: {}, view: [{ match: '$', body: ['p', {}, 'x'] }] }, {
+  validateState: (next, context) =>
+    context.action === null ? true : { valid: next !== undefined },
+  maxTurns: 100,
+});
+void app.getState();
+app.observe((tx) => void [tx.seq, tx.action, tx.status, tx.errorCode])();
+app.subscribe((state, changes) => void [state, changes])();
+app.stop();
+app.destroy();
+const task = createTaskEffect((props, signal) => ({ echoed: props, aborted: signal.aborted }));
+task.cancel();
+task.dispose();
+const focus = createFocusEffect({ container: ({} as any) });
+focus.flush();
+focus.dispose();
+`,
+  '@jarenjs/json': `
+import { compileJsonQuery } from '@jarenjs/json/query';
+const q = compileJsonQuery('$.rows[*]', {
+  limits: { sequenceItems: 100, resultItems: 10 },
+  functions: { double: (n: number) => n * 2 },
+  collations: { flipped: (a: string, b: string) => b.localeCompare(a) },
+});
+const fns: readonly string[] = q.dependencies.functions;
+void fns;
+void q.explain().limits?.sequenceItems;
+void q.first({ rows: [] });
+void q.exists({ rows: [] });
+void q.ebv({ rows: [1] });
+`,
+  '@jarenjs/forms': `
+import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
+const model = buildFormModel({ type: 'object', properties: { name: { type: 'string' } } });
+const tree = buildFormViewModel(model, { name: 'Jo' }, {
+  session: { initial: { name: 'Jo' }, touched: ['/name'], idPrefix: 'consumer' },
+});
+if (tree !== null && tree.session !== undefined) {
+  const dirtyPaths: string[] = tree.session.dirtyPaths;
+  void dirtyPaths;
+  void (tree.session.errorCount + tree.session.serverErrorCount);
+}
+`,
+};
 
 const packages = publishableWorkspaces();
 const byName = new Map(packages.map((entry) => [entry.name, entry]));
@@ -163,9 +235,13 @@ try {
     }
 
     const subpaths = importSubpaths(pkg);
-    const program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n');
+    const program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
+    // the runtime consumer is a real program FILE: `-e` strings are not
+    // portable (a Windows shell reparses multiline programs)
+    const programFile = join(consumerDir, 'consumer.mjs');
+    writeFileSync(programFile, program);
 
-    const node = spawnSync(process.execPath, ['--input-type=module', '-e', program],
+    const node = spawnSync(process.execPath, [programFile],
       { cwd: consumerDir, encoding: 'utf8' });
     if (node.status !== 0) {
       failures++;
@@ -174,9 +250,11 @@ try {
     }
 
     // strict TypeScript consumer against the PACKED declarations: every
-    // explicit JS subpath must resolve a declaration from the tarball
+    // explicit JS subpath must resolve a declaration from the tarball,
+    // and the key public APIs are exercised in value positions
     writeFileSync(join(consumerDir, 'consumer.ts'),
-      subpaths.map((s, i) => `import * as m${i} from ${JSON.stringify(s)};\nvoid m${i};`).join('\n') + '\n');
+      subpaths.map((s, i) => `import * as m${i} from ${JSON.stringify(s)};\nvoid m${i};`).join('\n')
+      + '\n' + (SEMANTIC_SNIPPETS[name] ?? ''));
     writeFileSync(join(consumerDir, 'tsconfig.json'), JSON.stringify({
       compilerOptions: {
         noEmit: true, strict: true, skipLibCheck: false,
@@ -194,9 +272,8 @@ try {
     }
 
     if (bun) {
-      const bunRun = spawnSync('bun', ['-e', program], {
-        cwd: consumerDir, encoding: 'utf8', shell: process.platform === 'win32',
-      });
+      const bunRun = spawnSync('bun', [programFile],
+        { cwd: consumerDir, encoding: 'utf8' });
       if (bunRun.status !== 0) {
         failures++;
         console.error(`✗ ${name} (bun): ${bunRun.stderr.split('\n').find((l) => l.trim() !== '') ?? 'failed'}`);
@@ -204,7 +281,39 @@ try {
       }
     }
 
-    console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s), node+types${bun ? '+bun' : ''}`);
+    // the isolated Vite leg (browser-bundler evidence) runs on the app
+    // package: Vite must resolve the packed export maps from the
+    // declared closure alone and bundle a library build cleanly
+    if (name === '@jarenjs/app') {
+      writeFileSync(join(consumerDir, 'consumer-vite.js'),
+        subpaths.map((s) => `export * from ${JSON.stringify(s)};`).join('\n') + '\n');
+      writeFileSync(join(consumerDir, 'vite.config.mjs'), [
+        'export default {',
+        "  logLevel: 'error',",
+        '  build: {',
+        "    lib: { entry: 'consumer-vite.js', formats: ['es'], fileName: 'consumer-bundle' },",
+        '    minify: false,',
+        '  },',
+        '};',
+        '',
+      ].join('\n'));
+      const viteBin = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
+      if (!existsSync(viteBin)) {
+        failures++;
+        console.error(`✗ ${name} (vite): vite is not installed at the workspace root (npm ci first)`);
+        continue;
+      }
+      const vite = spawnSync(process.execPath, [viteBin, 'build'],
+        { cwd: consumerDir, encoding: 'utf8' });
+      const bundle = join(consumerDir, 'dist', 'consumer-bundle.js');
+      if (vite.status !== 0 || !existsSync(bundle)) {
+        failures++;
+        console.error(`✗ ${name} (vite): ${(vite.stderr + vite.stdout).split('\n').find((l) => l.trim() !== '') ?? 'failed'}`);
+        continue;
+      }
+    }
+
+    console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s), node+types${bun ? '+bun' : ''}${name === '@jarenjs/app' ? '+vite' : ''}`);
   }
 }
 finally {
@@ -215,4 +324,6 @@ if (failures > 0) {
   console.error(`\n${failures} package(s) failed the packed-consumer gate.`);
   process.exit(1);
 }
-console.log('\nEvery explicit JavaScript export key of every packed package imports and type-checks from its declared closure.');
+console.log('\nEvery explicit JavaScript export key of every packed package imports and '
+  + `type-checks from its declared closure${bun ? ', under Node and Bun' : ' (Bun leg skipped)'}; `
+  + 'the @jarenjs/app closure bundles under an isolated Vite build.');
