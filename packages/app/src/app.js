@@ -237,19 +237,27 @@ export function createApp(appDoc, options = {}) {
   let draining = false;
   let txSeq = 0;
   /**
-   * The first value an `onError` sink (or an isolated site) threw
-   * while the drain was running, as a PRESENCE record — host code may
-   * legally `throw null`/`throw undefined`, so the thrown value itself
-   * can never double as the absence sentinel. The drain always
-   * completes; the value surfaces to the outermost caller afterwards
-   * BY IDENTITY, so the default rethrowing sink still fails loudly
-   * without ever corrupting the queue.
-   * @type {{ value: unknown } | null}
+   * Every value the `onError` sink threw while the drain was running,
+   * in report order — a FRAMEWORK-OWNED array, never a structure
+   * derived from the values themselves: appending performs no
+   * reflection or coercion on a sink-thrown value (a revoked proxy, a
+   * hostile accessor or a host-created AggregateError is stored and
+   * later surfaced BY IDENTITY, one element each). The drain always
+   * completes; the failures surface to the outermost caller afterwards
+   * — a single value as itself, several as one AggregateError over the
+   * originals in report order.
+   * @type {unknown[]}
    */
-  let pendingError = null;
+  const pendingFailures = [];
 
   /** @type {(((vnode: any) => void) & { destroy?: () => void }) | null} */
   let renderer = null;
+  /** Boot atomicity for the frame callback: frames committed while the
+   * boot transaction runs defer `afterRender` (see the renderer's
+   * `onFrame` wiring); after a successful boot one deferred call
+   * fires. A failed boot never fires it. */
+  let booted = false;
+  let bootFrameLive = false;
 
   /**
    * Report an error without ever breaking the drain: the sink runs, and
@@ -262,30 +270,21 @@ export function createApp(appDoc, options = {}) {
       onError(err);
     }
     catch (thrown) {
-      if (pendingError === null) {
-        pendingError = { value: thrown };
-      }
-      else {
-        // a second sink failure in the same drain must not disappear:
-        // both cross the caller boundary in one AggregateError, each
-        // retained by identity (APP-FORMAT §10.1)
-        const prior = pendingError.value;
-        const errors = prior instanceof AggregateError
-          && prior.message === MULTIPLE_SINK_FAILURES
-          ? [...prior.errors, thrown]
-          : [prior, thrown];
-        pendingError = { value: new AggregateError(errors, MULTIPLE_SINK_FAILURES) };
-      }
+      pendingFailures.push(thrown);
     }
   }
 
-  /** Re-throw the parked drain error at an entry-point boundary. */
+  /**
+   * Surface the parked sink failures at an entry-point boundary: one
+   * failure crosses by identity; several cross as one AggregateError
+   * over the originals in report order (a host-created AggregateError
+   * stays ONE element — nothing is ever inspected or flattened).
+   */
   function flushPendingError() {
-    if (pendingError !== null) {
-      const { value } = pendingError;
-      pendingError = null;
-      throw value;
-    }
+    if (pendingFailures.length === 0) return;
+    const failures = pendingFailures.splice(0);
+    if (failures.length === 1) throw failures[0];
+    throw new AggregateError(failures, MULTIPLE_SINK_FAILURES);
   }
 
   /**
@@ -594,7 +593,19 @@ export function createApp(appDoc, options = {}) {
     }
     for (const effect of effects) {
       const run = effect?.run;
-      const handler = typeof run === 'string' ? effectHandlers[run] : undefined;
+      // registry member acquisition is host-observable (the registry
+      // may be a proxy or carry accessors): lookup and invocation
+      // share one boundary and one failure policy (JA2007)
+      let handler;
+      try {
+        handler = typeof run === 'string' ? effectHandlers[run] : undefined;
+      }
+      catch (err) {
+        const cause = toError(err);
+        safeError(new AppRuntimeError('JA2007',
+          `effect '${String(run)}' threw during lookup: ${safeErrorMessage(cause)}`, cause));
+        continue;
+      }
       if (handler === undefined) {
         safeError(new AppRuntimeError('JA2006',
           `action '${name}' invoked unregistered effect '${String(run)}'`));
@@ -643,7 +654,17 @@ export function createApp(appDoc, options = {}) {
         }
       }
       if (live && !slot.live) {
-        const handler = subHandlers[sub.run];
+        let handler;
+        try {
+          handler = subHandlers[sub.run];
+        }
+        catch (err) {
+          const cause = toError(err);
+          safeError(new AppRuntimeError('JA2013',
+            `subscription '${sub.run}' threw during lookup; it stays stopped: ${safeErrorMessage(cause)}`,
+            cause));
+          continue;
+        }
         if (handler === undefined) {
           safeError(new AppRuntimeError('JA2008',
             `subscription '${sub.run}' has no registered handler`));
@@ -673,8 +694,9 @@ export function createApp(appDoc, options = {}) {
           }
           catch (err) {
             const cause = toError(err);
-            safeError(new AppRuntimeError('JA2012',
-              `subscription '${sub.run}' threw while cleaning up: ${safeErrorMessage(cause)}`, cause));
+            reportCleanup(
+              `subscription '${sub.run}' threw while cleaning up: ${safeErrorMessage(cause)}`,
+              cause);
           }
         }
       }
@@ -732,23 +754,60 @@ export function createApp(appDoc, options = {}) {
     stateListeners.clear();
   }
 
-  /** Dispose registered effect handlers, each identity exactly once. */
+  /**
+   * The destroy-scope cleanup collector: while `destroy()` runs, every
+   * cleanup failure (subscription cleanups, effect disposal, renderer
+   * teardown) collects here and is delivered as ONE `JA2012` whose
+   * cause is the single failure by identity or an AggregateError over
+   * all of them in occurrence order. Outside `destroy()` (stop(),
+   * per-transaction reconciliation) each failure reports its own
+   * `JA2012` as before.
+   * @type {Error[] | null}
+   */
+  let destroyFailures = null;
+
+  /**
+   * Route one cleanup failure: into the destroy-scope collector when
+   * one is active, else as its own immediate `JA2012` report.
+   * @param {string} message
+   * @param {Error} cause
+   */
+  function reportCleanup(message, cause) {
+    if (destroyFailures !== null) destroyFailures.push(cause);
+    else safeError(new AppRuntimeError('JA2012', message, cause));
+  }
+
+  /** Dispose registered effect handlers, each identity exactly once.
+   * Capability ACQUISITION shares the invocation boundary: a hostile
+   * key enumeration, member read or `dispose` accessor is a cleanup
+   * failure like a throwing `dispose()` — later disposers and the
+   * renderer teardown always still run. */
   function disposeEffectHandlers() {
+    let names;
+    try {
+      names = Object.keys(effectHandlers);
+    }
+    catch (err) {
+      const cause = toError(err);
+      reportCleanup(
+        `the effect registry threw while enumerating for disposal: ${safeErrorMessage(cause)}`,
+        cause);
+      return;
+    }
     const seen = new Set();
-    for (const name in effectHandlers) {
-      const handler = effectHandlers[name];
-      if (seen.has(handler)) continue;
-      seen.add(handler);
-      const dispose = /** @type {any} */ (handler)?.dispose;
-      if (typeof dispose === 'function') {
-        try {
-          dispose.call(handler);
-        }
-        catch (err) {
-          const cause = toError(err);
-          safeError(new AppRuntimeError('JA2012',
-            `effect handler '${name}' threw while disposing: ${safeErrorMessage(cause)}`, cause));
-        }
+    for (const name of names) {
+      try {
+        const handler = effectHandlers[name];
+        if (handler === undefined || handler === null || seen.has(handler)) continue;
+        seen.add(handler);
+        const dispose = /** @type {any} */ (handler).dispose;
+        if (typeof dispose === 'function') dispose.call(handler);
+      }
+      catch (err) {
+        const cause = toError(err);
+        reportCleanup(
+          `effect handler '${name}' threw while disposing: ${safeErrorMessage(cause)}`,
+          cause);
       }
     }
   }
@@ -780,15 +839,24 @@ export function createApp(appDoc, options = {}) {
           // every sibling cleaned up), never an anonymous render error
           onCleanupError: (thrown) => {
             const cause = toError(thrown);
-            safeError(new AppRuntimeError('JA2012',
-              `the renderer threw while being destroyed: ${safeErrorMessage(cause)}`, cause));
+            reportCleanup(
+              `the renderer threw while being destroyed: ${safeErrorMessage(cause)}`, cause);
           },
           // the committed-live-frame boundary: `afterRender` runs once
           // per SETTLED, NONTERMINAL frame — after the DOM patch and
           // widget mounts, before a parked hook error is delivered —
-          // and never after terminal teardown (APP-FORMAT §8.4)
+          // and never after terminal teardown (APP-FORMAT §8.4). Boot
+          // is ATOMIC: frames committed during the boot transaction do
+          // not fire the callback; one deferred call runs only after
+          // the whole boot (queued drain included) succeeded, so no
+          // post-render side effect can escape a boot that rolls back.
           onFrame: (state) => {
-            if (state === 'live' && afterRender !== null) {
+            if (state !== 'live') return;
+            if (!booted) {
+              bootFrameLive = true;
+              return;
+            }
+            if (afterRender !== null) {
               // isolated: an afterRender failure (the focus queue's
               // JA2014 included) is reported through the app policy and
               // can never starve the same frame's parked widget error,
@@ -815,9 +883,13 @@ export function createApp(appDoc, options = {}) {
     finally {
       draining = false;
     }
-    if (bootFailure === null && pendingError !== null) {
-      bootFailure = pendingError;
-      pendingError = null;
+    if (bootFailure === null && pendingFailures.length > 0) {
+      const failures = pendingFailures.splice(0);
+      bootFailure = {
+        value: failures.length === 1
+          ? failures[0]
+          : new AggregateError(failures, MULTIPLE_SINK_FAILURES),
+      };
     }
     // subscriptions queued dispatches during boot: drain them inside
     // the boot ownership window, so a queued failure that escapes the
@@ -828,6 +900,29 @@ export function createApp(appDoc, options = {}) {
       }
       catch (err) {
         bootFailure = { value: err };
+      }
+    }
+    // the boot-atomic first-frame callback: boot's frames coalesce
+    // into ONE deferred afterRender that runs only after the entire
+    // boot transaction succeeded; its failure follows boot policy (a
+    // swallowing sink recovers it, an escaping failure rolls back)
+    if (bootFailure === null) {
+      booted = true;
+      if (bootFrameLive && afterRender !== null) {
+        try {
+          afterRender();
+        }
+        catch (err) {
+          safeError(toError(err));
+        }
+        if (pendingFailures.length > 0) {
+          const failures = pendingFailures.splice(0);
+          bootFailure = {
+            value: failures.length === 1
+              ? failures[0]
+              : new AggregateError(failures, MULTIPLE_SINK_FAILURES),
+          };
+        }
       }
     }
     if (bootFailure !== null) {
@@ -848,7 +943,7 @@ export function createApp(appDoc, options = {}) {
         catch { /* isolated */ }
         renderer = null;
       }
-      pendingError = null;
+      pendingFailures.length = 0;
       const cause = toError(bootFailure.value);
       throw new AppCompileError('JA0007',
         `the app failed to boot: ${safeErrorMessage(cause)}`, '', cause);
@@ -940,6 +1035,7 @@ export function createApp(appDoc, options = {}) {
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      destroyFailures = [];
       teardownLoop();
       observers.clear();
       disposeEffectHandlers();
@@ -949,10 +1045,24 @@ export function createApp(appDoc, options = {}) {
         }
         catch (err) {
           const cause = toError(err);
-          safeError(new AppRuntimeError('JA2012',
-            `the renderer threw while being destroyed: ${safeErrorMessage(cause)}`, cause));
+          reportCleanup(
+            `the renderer threw while being destroyed: ${safeErrorMessage(cause)}`, cause);
         }
         renderer = null;
+      }
+      // one terminal operation, one machine-readable cleanup outcome:
+      // a single failure is the cause by identity; several aggregate
+      // in occurrence order (subscriptions, then effect disposal, then
+      // the renderer walk — whose own envelope arrives as one element)
+      const failures = destroyFailures;
+      destroyFailures = null;
+      if (failures !== null && failures.length > 0) {
+        const cause = failures.length === 1
+          ? failures[0]
+          : new AggregateError(failures, 'multiple cleanup failures in one destroy');
+        safeError(new AppRuntimeError('JA2012',
+          `cleanup failed while destroying the app: ${failures.length} failure(s)`,
+          /** @type {any} */ (cause)));
       }
       flushPendingError();
     },

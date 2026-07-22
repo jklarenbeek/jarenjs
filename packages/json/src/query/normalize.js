@@ -123,7 +123,7 @@ function fail(code, message, docPath, options) {
  * @param {unknown} e
  * @returns {string}
  */
-function hostFailureText(e) {
+export function hostFailureText(e) {
   try {
     if (e instanceof Error) {
       const message = e.message;

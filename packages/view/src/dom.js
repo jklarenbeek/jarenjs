@@ -356,7 +356,7 @@ function flushMounts(ctx) {
     catch (err) {
       w.failed = 'mount';
       ctx.poisonedCount++;
-      if (ctx.frameError === null) ctx.frameError = { value: err };
+      appendFrameFailure(ctx, err);
     }
   }
 }
@@ -614,20 +614,37 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
   if (props !== prevProps) {
     w.props = props;
     if (w.mounted) {
-      if (w.def.update !== undefined) {
+      // capability ACQUISITION is host-observable (an accessor or
+      // proxy trap can throw): the `update` read shares the poison
+      // boundary with its invocation — a lookup failure poisons the
+      // widget exactly like an invocation failure, the frame settles,
+      // and the next render replaces it
+      let update;
+      let acquired = true;
+      try {
+        update = w.def.update;
+      }
+      catch (err) {
+        acquired = false;
+        w.failed = 'update';
+        ctx.poisonedCount++;
+        appendFrameFailure(ctx, err);
+      }
+      if (acquired && update !== undefined) {
         try {
-          w.def.update(w.handle, props, prevProps);
+          update.call(w.def, w.handle, props, prevProps);
         }
         catch (err) {
           w.failed = 'update';
           ctx.poisonedCount++;
-          if (ctx.frameError === null) ctx.frameError = { value: err };
+          appendFrameFailure(ctx, err);
         }
       }
-      else {
+      else if (acquired) {
         // no update hook: recycle the host with a fresh lifecycle
         try {
-          if (w.def.unmount !== undefined) w.def.unmount(w.handle);
+          const unmount = w.def.unmount;
+          if (unmount !== undefined) unmount.call(w.def, w.handle);
           // the unmount may have requested terminal destroy: the old
           // acquisition has ENDED (record it, or deferred teardown
           // would unmount it a second time) and no fresh acquisition
@@ -646,7 +663,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
           // could own: poison as 'mount' (skip unmount, replace next)
           w.failed = 'mount';
           ctx.poisonedCount++;
-          if (ctx.frameError === null) ctx.frameError = { value: err };
+          appendFrameFailure(ctx, err);
         }
       }
     }
@@ -704,13 +721,33 @@ function destroyNode(ctx, node) {
   /** @type {unknown[]} */
   const failures = [];
   destroyDomWalk(ctx, node, failures);
-  if (failures.length > 0 && ctx.frameError === null) {
-    ctx.frameError = {
-      value: failures.length === 1
-        ? failures[0]
-        : new AggregateError(failures, 'multiple cleanup failures in one teardown'),
-    };
+  for (let i = 0; i < failures.length; i++) appendFrameFailure(ctx, failures[i]);
+}
+
+/**
+ * Park one more failure on the frame. EVERY failure of a frame stays
+ * observable regardless of how many internal walks or hooks produced
+ * them: the first surfaces by identity; from the second on, the frame
+ * delivers one framework-owned AggregateError over the originals in
+ * occurrence order (only the framework's OWN envelope is ever
+ * extended — a host-thrown value, an AggregateError included, is
+ * stored untouched as one element; nothing is inspected).
+ * @param {any} ctx
+ * @param {unknown} value
+ */
+function appendFrameFailure(ctx, value) {
+  if (ctx.frameError === null) {
+    ctx.frameError = { value, envelope: false };
+    return;
   }
+  const prior = ctx.frameError;
+  const items = prior.envelope
+    ? [.../** @type {AggregateError} */ (prior.value).errors, value]
+    : [prior.value, value];
+  ctx.frameError = {
+    value: new AggregateError(items, 'multiple failures in one frame'),
+    envelope: true,
+  };
 }
 
 /**
@@ -734,9 +771,14 @@ function destroyDomWalk(ctx, node, failures) {
     if (!w.destroyed) {
       w.destroyed = true;
       if (w.failed !== false) ctx.poisonedCount--;
-      if (w.mounted && w.failed !== 'mount' && w.def.unmount !== undefined) {
+      if (w.mounted && w.failed !== 'mount') {
+        // the `unmount` READ shares the collection boundary with its
+        // call: a hostile accessor is a cleanup failure like any
+        // other — every sibling still unmounts, the container still
+        // empties
         try {
-          w.def.unmount(w.handle);
+          const unmount = w.def.unmount;
+          if (unmount !== undefined) unmount.call(w.def, w.handle);
         }
         catch (err) {
           failures.push(err);

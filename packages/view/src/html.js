@@ -108,8 +108,13 @@ export function renderToString(vnode, options = {}) {
     const widgets = options.widgets;
     const def = widgets !== undefined && typeof props.name === 'string'
       && Object.hasOwn(widgets, props.name) ? widgets[props.name] : undefined;
-    const inner = def !== undefined && def.ssr !== undefined
-      ? renderToString(def.ssr(props.props ?? null), options)
+    // one read: acquisition and invocation are one boundary here too —
+    // renderToString is pure and offers no isolation, so a hostile
+    // `ssr` accessor propagates to the caller exactly like a throwing
+    // `ssr()` (the documented behavior for both)
+    const ssr = def !== undefined ? def.ssr : undefined;
+    const inner = ssr !== undefined
+      ? renderToString(ssr.call(def, props.props ?? null), options)
       : '';
     return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS) + '>'
       + inner + '</' + hostTag + '>';

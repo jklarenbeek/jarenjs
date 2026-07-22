@@ -345,9 +345,21 @@ failure is copied and cleared BEFORE the frame callback runs, so a
 throwing callback can neither hide it nor push it into a later frame;
 the callback is isolated, and when both fail the parked hook failure
 is primary — a host that must not lose its own callback failure
-isolates that callback itself, exactly as `createApp` does. Multiple
-cleanup failures in one teardown deliver as one value whose
-`AggregateError` retains every failure with the first primary. A `destroy()` entered from inside a widget
+isolates that callback itself, exactly as `createApp` does. EVERY
+failure of one frame stays observable regardless of how many walks or
+hooks produced it: the first surfaces by identity, and from the second
+on the frame delivers one framework-owned `AggregateError` over the
+originals in occurrence order — separate sibling removals included; a
+host-thrown value (an `AggregateError` of the host's own included) is
+stored untouched as one element, never inspected. Capability
+ACQUISITION is part of every widget boundary: reading `update`,
+`unmount` or `ssr` off a definition executes host code when the
+definition uses accessors or proxies, so the read shares the boundary
+and policy of the call — a hostile `update` lookup poisons like a
+throwing update, a hostile `unmount` lookup collects like a throwing
+unmount (siblings unmount, the container empties), and a hostile `ssr`
+lookup propagates from `renderToString` exactly like a throwing
+`ssr()` (serialization is pure and offers no isolation). A `destroy()` entered from inside a widget
 hook or nested render is still terminal: the active pass stops **immediately** — no
 later sibling observes another `mount` or `update` in that frame, and
 the no-`update` recycle fallback MUST NOT begin its fresh `mount` when

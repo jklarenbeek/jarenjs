@@ -14,6 +14,7 @@ import {
 import {
   CARD_MANY,
   normalizeQuery,
+  hostFailureText,
 } from '../query/normalize.js';
 import {
   compileNode,
@@ -46,9 +47,9 @@ function composeDocPath(base, inner) {
   return inner.length === 0 ? base : base + inner;
 }
 
-function errorText(error) {
-  return error instanceof Error ? error.message : String(error);
-}
+// the one total host-failure projection of the package (see
+// query/normalize.js): no raw .message read, no user coercion, no
+// proxy-observable reflection
 
 // One compiled query per distinct match-path source string: rules across
 // modes matching the same path share the object, so the per-call
@@ -89,7 +90,7 @@ function compileMatchSchema(rule, compileTypeTest) {
   }
   catch (error) {
     throw new JsltCompileError('JT0005',
-      `invalid match schema: ${errorText(error)}`, match.schemaDocPath, error);
+      `invalid match schema: ${hostFailureText(error)}`, match.schemaDocPath, error);
   }
   if (typeof test !== 'function') {
     const cause = new TypeError('the type-test compiler did not return a predicate function');

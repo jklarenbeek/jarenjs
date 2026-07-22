@@ -18,7 +18,7 @@ import {
 } from '../segments.js';
 import { JsonQueryRuntimeError } from './errors.js';
 import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, describeItem } from './runtime.js';
-import { CARD_ONE } from './normalize.js';
+import { CARD_ONE, hostFailureText } from './normalize.js';
 // The operator registry: every section-8 operator compiles through its
 // table entry (compileOp). Only referenced inside functions, so the
 // import cycle compile.js <-> operators.js is initialization-safe.
@@ -308,8 +308,12 @@ function compileCall(node) {
       out = fn(...argv);
     }
     catch (err) {
+      // TOTAL: the registered function is host code — no .message read
+      // on the raw value, no coercion; the original thrown value is
+      // retained as an own cause (present even for undefined)
       throw new JsonQueryRuntimeError('JQ2010',
-        `registered function '${name}' threw: ${/** @type {Error} */ (err).message}`, docPath);
+        `registered function '${name}' threw: ${hostFailureText(err)}`, docPath,
+        { cause: err });
     }
     return out === undefined ? EMPTY : out;
   };

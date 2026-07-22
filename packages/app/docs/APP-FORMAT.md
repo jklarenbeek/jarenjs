@@ -456,7 +456,14 @@ mounts, so a target born in the same transition is already connected;
 when a widget hook error was parked during the frame, `afterRender`
 runs BEFORE that error is delivered (the frame committed; error
 delivery cannot starve its callback); and it never runs for a pass
-that ended in terminal teardown (there is no live frame to act on). A missing target is a diagnosable
+that ended in terminal teardown (there is no live frame to act on).
+Boot is ATOMIC for the callback: frames committed during the boot
+transaction defer, and one `afterRender` fires only after the entire
+boot — queued boot drain included — succeeded. A failed boot never
+fires it, so no post-render side effect can escape a boot that rolled
+back; a deferred callback's own failure follows boot policy (a
+swallowing sink recovers it; an escaping failure rolls back as
+`JA0007`). A missing target is a diagnosable
 `JA2014`, never a silent no-op; sibling intents still resolve.
 `measure` dispatches `done` with `{ id, ref, rect }`, the JSON-reduced
 bounding rect. `app.destroy()` cancels pending intents through the
@@ -560,12 +567,33 @@ covers them all:
 - dual failures stay observable in their own frame: when both
   `afterRender` and a widget hook fail in one frame, a collecting sink
   receives the `afterRender` failure first and the parked hook failure
-  second — in that frame, never a later one; under the default
-  rethrowing sink both cross the caller boundary as one
-  `AggregateError` (each retained by identity, reporting order
-  preserved). Multiple cleanup failures in one teardown deliver as ONE
-  `JA2012` whose cause aggregates every failure, the first primary
-  (`errors[0]`);
+  second — in that frame, never a later one. Under the default
+  rethrowing sink, ALL values the sink threw during one drain cross
+  the caller boundary together: one value by identity, several as one
+  `AggregateError` over the originals in report order. The collection
+  is FRAMEWORK-OWNED — appending performs no reflection or coercion on
+  a sink-thrown value, and a host-created `AggregateError` (the
+  framework's own envelope message included) stays ONE element by
+  identity, never flattened;
+- capability ACQUISITION is part of the boundary: reading an optional
+  host method — an effect handler's `dispose`, a widget definition's
+  `update`/`unmount`, a registry member — executes host code when the
+  host used an accessor or proxy, so the read shares the isolation
+  boundary and the failure policy of the invocation. A hostile
+  `dispose` lookup is a cleanup failure (`JA2012`) after which later
+  disposers and renderer teardown still run; a hostile `unmount`
+  lookup is collected like a throwing unmount, every sibling still
+  unmounts and the container empties; a hostile `update` lookup
+  poisons the widget exactly like a throwing update, the frame
+  settles, and the next render replaces it; hostile effect/
+  subscription registry reads report `JA2007`/`JA2013` and the loop
+  drains on;
+- one `app.destroy()` delivers ONE `JA2012`: a single cleanup failure
+  is its cause by identity; several aggregate in occurrence order
+  (subscription cleanups, then effect disposal, then the renderer
+  walk — whose own frame envelope arrives as one element). Outside
+  `destroy()` — `stop()`, per-transaction reconciliation — each
+  cleanup failure reports its own `JA2012`, as before;
 - task settlement is total: abort classification reads the rejection
   value's `name` through a safe accessor (the signal never suppresses
   — a superseded task's non-abort failure still dispatches, the
