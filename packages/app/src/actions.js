@@ -21,7 +21,7 @@
  */
 
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { AppCompileError } from './errors.js';
+import { AppCompileError, toError, safeErrorMessage } from './errors.js';
 
 /**
  * The compile-time options shared by every embedded query document.
@@ -51,10 +51,10 @@ export function compileActions(actions, options) {
       map.set(name, compileJsonQuery(actions[name], options));
     }
     catch (err) {
+      const cause = toError(err);
       throw new AppCompileError('JA0004',
-        `action '${name}' failed to compile: ${/** @type {Error} */ (err).message}`,
-        `/actions/${name}`,
-        /** @type {Error} */ (err));
+        `action '${name}' failed to compile: ${safeErrorMessage(cause)}`,
+        `/actions/${name}`, cause);
     }
   }
   return map;
@@ -95,10 +95,10 @@ export function compileSubs(subs, options) {
         when = compileJsonQuery(entry.when, options);
       }
       catch (err) {
+        const cause = toError(err);
         throw new AppCompileError('JA0006',
-          `subscription ${i} ('${entry.run}') has a "when" that failed to compile: ${/** @type {Error} */ (err).message}`,
-          `/subs/${i}/when`,
-          /** @type {Error} */ (err));
+          `subscription ${i} ('${entry.run}') has a "when" that failed to compile: ${safeErrorMessage(cause)}`,
+          `/subs/${i}/when`, cause);
       }
     }
     return { run: entry.run, props: entry.with ?? null, when };

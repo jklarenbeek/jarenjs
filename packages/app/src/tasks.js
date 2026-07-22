@@ -14,7 +14,43 @@
  * (`AbortController` is platform).
  */
 
-import { toError } from './errors.js';
+import { toError, isErrorSafely, safeErrorMessage } from './errors.js';
+
+/**
+ * Read a rejection value's `name` without trusting it: `typeof` is
+ * untrappable, the property read is guarded — a revoked proxy or a
+ * throwing accessor classifies as "not an AbortError".
+ * @param {unknown} err
+ * @returns {string | null}
+ */
+function safeName(err) {
+  if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
+  try {
+    const name = /** @type {any} */ (err).name;
+    return typeof name === 'string' ? name : null;
+  }
+  catch {
+    return null;
+  }
+}
+
+/**
+ * The `{ id, error }` payload string for a rejection, TOTAL for every
+ * value: primitives stringify verbatim (the established payload
+ * contract); Errors project their message through the safe accessor;
+ * objects, functions and symbols go through the normalizer — no host
+ * `toString`/`Symbol.toPrimitive` is ever invoked.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function rejectionText(err) {
+  if (isErrorSafely(err)) return safeErrorMessage(err);
+  if (err === null
+    || (typeof err !== 'object' && typeof err !== 'function' && typeof err !== 'symbol')) {
+    return String(err);
+  }
+  return toError(err).message;
+}
 
 /**
  * The host's task function, typically wrapping `fetch`. A synchronous
@@ -91,6 +127,12 @@ import { toError } from './errors.js';
  * the boundary. After `dispose()` no settlement dispatches anything.
  * A malformed `id`/`done`/`fail`/`slot` is a host programming error:
  * the handler throws a `TypeError`, which the loop reports as `JA2007`.
+ * Settlement is TOTAL for every rejection value (hostile accessors,
+ * revoked proxies included) and never creates an unhandled rejection
+ * from framework code; a settlement dispatch that itself throws (a
+ * rethrowing error sink surfacing at the dispatch boundary) is
+ * re-raised on its own microtask so the host's global error handling
+ * observes it.
  *
  * Host-side controls on the returned handler:
  *
@@ -163,20 +205,33 @@ export function createTaskEffect(run, options = {}) {
       (result) => {
         settle();
         if (disposed) return;
-        dispatch(props.done, { id: props.id, result });
+        try {
+          dispatch(props.done, { id: props.id, result });
+        }
+        catch (thrown) {
+          queueMicrotask(() => { throw thrown; });
+        }
       },
       (err) => {
         settle();
         if (disposed) return;
-        if (err !== null && typeof err === 'object' && err.name === 'AbortError') return;
-        // primitives stringify verbatim (the established payload
-        // contract); objects and symbols go through the safe
-        // normalizer so a hostile toString cannot break settlement
-        const error = err instanceof Error ? err.message
-          : (typeof err === 'object' && err !== null) || typeof err === 'symbol'
-            ? toError(err).message
-            : String(err);
-        dispatch(props.fail ?? props.done, { id: props.id, error });
+        // abort classification is TOTAL and classifies the REJECTION
+        // VALUE only (`safeName` guards the read): the signal state
+        // must not suppress — a superseded task's non-abort failure
+        // still dispatches by contract, and only the state-side id
+        // guard rejects it. A hostile value never breaks settlement.
+        if (safeName(err) === 'AbortError') return;
+        const error = rejectionText(err);
+        // a settlement dispatch that itself throws (a rethrowing error
+        // sink surfacing at the dispatch boundary) must not become an
+        // unobservable promise rejection: it is re-raised on its own
+        // microtask so the host's global error handling observes it
+        try {
+          dispatch(props.fail ?? props.done, { id: props.id, error });
+        }
+        catch (thrown) {
+          queueMicrotask(() => { throw thrown; });
+        }
       });
   }
 

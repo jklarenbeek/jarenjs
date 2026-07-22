@@ -546,7 +546,34 @@ covers them all:
 - direct and deferred teardown behave identically, all sibling
   listeners, cleanups, queued transactions and renderer teardown
   complete before the first sink failure surfaces, and terminal
-  idempotence survives any cleanup failure.
+  idempotence survives any cleanup failure;
+- the policy is TOTAL: no operation performed while handling a caught
+  value may itself escape. Classification (`instanceof Error`) and
+  every diagnostic property read (`message`, `name`) run inside
+  nonthrowing accessors, and value description uses only untrappable
+  conversions — a revoked `Proxy`, a throwing trap, a hostile
+  `message` accessor or a booby-trapped `toString`/`Symbol.toPrimitive`
+  degrades the *description*, never the guarantee. An `Error` whose
+  diagnostics are hostile still passes as `cause` by identity, with a
+  safe projected message beside it; a value whose classification
+  throws wraps like any non-Error;
+- dual failures stay observable in their own frame: when both
+  `afterRender` and a widget hook fail in one frame, a collecting sink
+  receives the `afterRender` failure first and the parked hook failure
+  second — in that frame, never a later one; under the default
+  rethrowing sink both cross the caller boundary as one
+  `AggregateError` (each retained by identity, reporting order
+  preserved). Multiple cleanup failures in one teardown deliver as ONE
+  `JA2012` whose cause aggregates every failure, the first primary
+  (`errors[0]`);
+- task settlement is total: abort classification reads the rejection
+  value's `name` through a safe accessor (the signal never suppresses
+  — a superseded task's non-abort failure still dispatches, the
+  state-side id guard is the authority), every non-abort rejection
+  produces exactly one `{ id, error }` settlement dispatch, and a
+  settlement dispatch that itself throws is re-raised on its own
+  microtask so the host's global error handling observes it — never a
+  framework-originated unhandled promise rejection.
 
 Compile (`AppCompileError`, thrown by `createApp`; `docPath` is a JSON
 Pointer into the app document):

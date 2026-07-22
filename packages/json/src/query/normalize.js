@@ -111,8 +111,32 @@ function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function fail(code, message, docPath) {
-  throw new JsonQueryCompileError(code, message, docPath);
+function fail(code, message, docPath, options) {
+  throw new JsonQueryCompileError(code, message, docPath, options);
+}
+
+/**
+ * Project a safe diagnostic string from whatever a host hook threw:
+ * no `.message` read on a raw value, no user coercion, no
+ * proxy-observable reflection — the compiler must never fail while
+ * describing a host failure.
+ * @param {unknown} e
+ * @returns {string}
+ */
+function hostFailureText(e) {
+  try {
+    if (e instanceof Error) {
+      const message = e.message;
+      if (typeof message === 'string') return message;
+      return 'host error (message unavailable)';
+    }
+  }
+  catch { /* hostile classification or accessor */ }
+  if (e === null) return 'null';
+  const t = typeof e;
+  if (t === 'string') return e.length > 80 ? e.slice(0, 80) + '…' : e;
+  if (t === 'number' || t === 'boolean' || t === 'bigint' || t === 'undefined') return String(e);
+  return t === 'symbol' ? 'a symbol' : t === 'function' ? 'a function' : 'an object';
 }
 
 /**
@@ -380,7 +404,7 @@ function compileSchemaLiteral(value, schemaPath, opPath, ctx) {
     test = ctx.compileTypeTest(schema, schemaPath);
   }
   catch (e) {
-    fail('JQ0009', `invalid schema literal: ${e.message}`, opPath);
+    fail('JQ0009', `invalid schema literal: ${hostFailureText(e)}`, opPath, { cause: e });
   }
   if (typeof test !== 'function')
     fail('JQ0009', 'the type-test compiler did not return a predicate function', opPath);

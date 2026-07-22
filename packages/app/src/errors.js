@@ -109,9 +109,12 @@ export class HostValueError extends Error {
 }
 
 /**
- * Describe a thrown non-Error value without calling user code: only
- * primitive-safe conversions are used, never a `toString` that host
- * code controls.
+ * Describe a thrown non-Error value without observing it: only
+ * conversions no host code can trap are used — never a `toString`,
+ * never `Symbol.toPrimitive`, and never proxy-observable reflection
+ * (`Array.isArray` runs the proxy-sensitive IsArray operation, so a
+ * revoked proxy is simply "an object"). `typeof` and identity
+ * comparisons are untrappable, which is the whole vocabulary here.
  * @param {unknown} value
  * @returns {string}
  */
@@ -132,21 +135,59 @@ function describeThrown(value) {
     case 'function':
       return 'a function';
     default:
-      return Array.isArray(value) ? 'an array' : 'a non-Error object';
+      return 'an object';
   }
 }
 
 /**
- * The one host-failure normalization policy (APP-FORMAT §10): every
- * value caught at a host boundary passes through here. An `Error`
- * instance passes by IDENTITY — wherever a contract promises the
- * original error as `cause`, that identity survives; anything else is
- * wrapped in a {@link HostValueError} that retains the original value
- * as an own `cause` property. No caught value is ever assumed to have
+ * `value instanceof Error` without trusting the value: `instanceof`
+ * walks the prototype chain, which a revoked or hostile proxy turns
+ * into a throw. A value whose very classification throws is treated as
+ * not-an-Error and wrapped.
+ * @param {unknown} value
+ * @returns {value is Error}
+ */
+export function isErrorSafely(value) {
+  try {
+    return value instanceof Error;
+  }
+  catch {
+    return false;
+  }
+}
+
+/**
+ * Read an error's `message` without trusting it: JavaScript permits an
+ * own `message` accessor (or a proxy `get` trap) that throws, and the
+ * framework must never fail while formatting a failure. The original
+ * error object is never mutated — it stays the causal identity; this
+ * only projects a safe diagnostic string.
+ * @param {Error} error
+ * @returns {string}
+ */
+export function safeErrorMessage(error) {
+  try {
+    const message = error.message;
+    if (typeof message === 'string') return message;
+  }
+  catch { /* a hostile accessor is a diagnostic, not a crash */ }
+  return 'host error (message unavailable)';
+}
+
+/**
+ * The one host-failure normalization policy (APP-FORMAT §10.1): every
+ * value caught at a host boundary passes through here, and the policy
+ * is TOTAL — no ECMAScript value, revoked proxies and throwing
+ * accessors included, can make it throw. An `Error` instance passes by
+ * IDENTITY — wherever a contract promises the original error as
+ * `cause`, that identity survives; anything else (a value whose
+ * classification itself throws included) is wrapped in a
+ * {@link HostValueError} that retains the original value as an own
+ * `cause` property. No caught value is ever assumed to have
  * `.message`, and no thrown value is ever used as an absence sentinel.
  * @param {unknown} value - Whatever host code threw.
  * @returns {Error}
  */
 export function toError(value) {
-  return value instanceof Error ? value : new HostValueError(value);
+  return isErrorSafely(value) ? /** @type {Error} */ (value) : new HostValueError(value);
 }

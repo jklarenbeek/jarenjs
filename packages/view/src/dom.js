@@ -246,16 +246,28 @@ export function createDomRenderer(container, options = {}) {
       destroyPending = false;
       teardown();
     }
-    // frame settlement precedes parked-error delivery: a committed
-    // live frame is real even when a widget hook failed during it
+    // dual-failure settlement: the parked hook failure is copied and
+    // CLEARED before the frame callback runs, so a throwing callback
+    // can neither hide it nor push it into a later frame. The callback
+    // is isolated; frame settlement still precedes parked-error
+    // delivery (a committed live frame is real even when a widget hook
+    // failed during it). When both fail, the parked hook failure is
+    // primary; a host that must not lose its own callback failure
+    // isolates that callback itself (`createApp` does exactly that).
+    const parked = ctx.frameError;
+    ctx.frameError = null;
+    /** @type {{ value: unknown } | null} */
+    let callbackFailure = null;
     if (ctx.onFrame !== null) {
-      ctx.onFrame(ctx.destroyed ? 'destroyed' : 'live');
+      try {
+        ctx.onFrame(ctx.destroyed ? 'destroyed' : 'live');
+      }
+      catch (err) {
+        callbackFailure = { value: err };
+      }
     }
-    if (ctx.frameError !== null) {
-      const { value } = ctx.frameError;
-      ctx.frameError = null;
-      throw value;
-    }
+    if (parked !== null) throw parked.value;
+    if (callbackFailure !== null) throw callbackFailure.value;
   }
 
   /**
@@ -270,17 +282,23 @@ export function createDomRenderer(container, options = {}) {
   function teardown() {
     ctx.mountQueue.length = 0;
     if (rootNode !== null) {
-      /** @type {{ value: unknown } | null} */
-      let cleanupFailure = null;
+      /** @type {unknown[]} */
+      const failures = [];
       if (ctx.hasWidgets) {
-        cleanupFailure = destroyDomWalk(ctx, rootNode, null);
+        destroyDomWalk(ctx, rootNode, failures);
       }
       container.textContent = '';
       rootNode = null;
       oldVnode = null;
-      if (cleanupFailure !== null) {
-        if (ctx.onCleanupError !== null) ctx.onCleanupError(cleanupFailure.value);
-        else if (ctx.frameError === null) ctx.frameError = cleanupFailure;
+      if (failures.length > 0) {
+        // one delivery: a single failure surfaces by identity; several
+        // aggregate — the first is primary (errors[0]) and every later
+        // one stays observable instead of silently vanishing
+        const value = failures.length === 1
+          ? failures[0]
+          : new AggregateError(failures, 'multiple cleanup failures in one teardown');
+        if (ctx.onCleanupError !== null) ctx.onCleanupError(value);
+        else if (ctx.frameError === null) ctx.frameError = { value };
       }
     }
   }
@@ -683,8 +701,16 @@ function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
  */
 function destroyNode(ctx, node) {
   if (!ctx.hasWidgets) return;
-  const failure = destroyDomWalk(ctx, node, null);
-  if (failure !== null && ctx.frameError === null) ctx.frameError = failure;
+  /** @type {unknown[]} */
+  const failures = [];
+  destroyDomWalk(ctx, node, failures);
+  if (failures.length > 0 && ctx.frameError === null) {
+    ctx.frameError = {
+      value: failures.length === 1
+        ? failures[0]
+        : new AggregateError(failures, 'multiple cleanup failures in one teardown'),
+    };
+  }
 }
 
 /**
@@ -697,12 +723,12 @@ function destroyNode(ctx, node) {
  * after which the `===` fast path is sound again.
  * @param {any} ctx
  * @param {any} node
- * @param {{ value: unknown } | null} firstError - Presence record: a
- *   hook may legally throw `null`, which must still count as the
- *   first failure.
- * @returns {{ value: unknown } | null}
+ * @param {unknown[]} failures - Collects EVERY cleanup failure, in
+ *   document order — an array, never a thrown-value sentinel, so a
+ *   hook that legally throws `null` still counts and a second failure
+ *   is never hidden behind the first.
  */
-function destroyDomWalk(ctx, node, firstError) {
+function destroyDomWalk(ctx, node, failures) {
   const w = node.__jarenWidget;
   if (w !== undefined) {
     if (!w.destroyed) {
@@ -713,11 +739,11 @@ function destroyDomWalk(ctx, node, firstError) {
           w.def.unmount(w.handle);
         }
         catch (err) {
-          if (firstError === null) firstError = { value: err };
+          failures.push(err);
         }
       }
     }
-    return firstError; // the widget owns everything below its host
+    return; // the widget owns everything below its host
   }
   const children = node.childNodes;
   if (children !== undefined) {
@@ -727,10 +753,9 @@ function destroyDomWalk(ctx, node, firstError) {
     const snapshot = [];
     for (let i = 0; i < children.length; i++) snapshot.push(children[i]);
     for (let i = 0; i < snapshot.length; i++) {
-      firstError = destroyDomWalk(ctx, snapshot[i], firstError);
+      destroyDomWalk(ctx, snapshot[i], failures);
     }
   }
-  return firstError;
 }
 
 /**

@@ -37,7 +37,7 @@ import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createDomRenderer } from '@jarenjs/view';
 
 import { compileActions, compileSubs } from './actions.js';
-import { AppCompileError, AppRuntimeError, toError } from './errors.js';
+import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './errors.js';
 
 /**
  * @typedef {Object} AppOptions
@@ -153,6 +153,10 @@ import { AppCompileError, AppRuntimeError, toError } from './errors.js';
  * @returns {void}
  */
 
+/** The aggregate envelope message for multiple same-drain sink
+ * failures (see `safeError`); exact-match tested so nesting flattens. */
+const MULTIPLE_SINK_FAILURES = 'multiple failures surfaced in one drain';
+
 /**
  * Compile an app document and start the loop.
  *
@@ -192,9 +196,10 @@ export function createApp(appDoc, options = {}) {
     view = compileJsltStylesheet(appDoc.view, { ...queryOptions, memo: true });
   }
   catch (err) {
+    const cause = toError(err);
     throw new AppCompileError('JA0002',
-      `the "view" stylesheet failed to compile: ${/** @type {Error} */ (err).message}`,
-      '/view', /** @type {Error} */ (err));
+      `the "view" stylesheet failed to compile: ${safeErrorMessage(cause)}`,
+      '/view', cause);
   }
   const actions = compileActions(appDoc.actions, queryOptions);
   const subs = compileSubs(appDoc.subs, queryOptions);
@@ -257,7 +262,20 @@ export function createApp(appDoc, options = {}) {
       onError(err);
     }
     catch (thrown) {
-      if (pendingError === null) pendingError = { value: thrown };
+      if (pendingError === null) {
+        pendingError = { value: thrown };
+      }
+      else {
+        // a second sink failure in the same drain must not disappear:
+        // both cross the caller boundary in one AggregateError, each
+        // retained by identity (APP-FORMAT §10.1)
+        const prior = pendingError.value;
+        const errors = prior instanceof AggregateError
+          && prior.message === MULTIPLE_SINK_FAILURES
+          ? [...prior.errors, thrown]
+          : [prior, thrown];
+        pendingError = { value: new AggregateError(errors, MULTIPLE_SINK_FAILURES) };
+      }
     }
   }
 
@@ -417,7 +435,7 @@ export function createApp(appDoc, options = {}) {
       for (const { field, value } of entry.extractorFailures) {
         const cause = toError(value);
         safeError(new AppRuntimeError('JA2002',
-          `action '${entry.name}' event-field extractor '${field}' threw: ${cause.message}`,
+          `action '${entry.name}' event-field extractor '${field}' threw: ${safeErrorMessage(cause)}`,
           cause));
       }
     }
@@ -436,7 +454,7 @@ export function createApp(appDoc, options = {}) {
     catch (err) {
       const cause = toError(err);
       safeError(new AppRuntimeError('JA2002',
-        `action '${entry.name}' failed: ${cause.message}`, cause));
+        `action '${entry.name}' failed: ${safeErrorMessage(cause)}`, cause));
       finish('failed', 'JA2002');
       return;
     }
@@ -466,7 +484,7 @@ export function createApp(appDoc, options = {}) {
       catch (err) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2004',
-          `action '${entry.name}' produced a patch that failed to apply: ${cause.message}`,
+          `action '${entry.name}' produced a patch that failed to apply: ${safeErrorMessage(cause)}`,
           cause));
         finish('failed', 'JA2004');
         return;
@@ -488,7 +506,7 @@ export function createApp(appDoc, options = {}) {
         // the queue keeps draining
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2015',
-          `the validateState hook threw for action '${entry.name}': ${cause.message}`,
+          `the validateState hook threw for action '${entry.name}': ${safeErrorMessage(cause)}`,
           cause));
         finish('failed', 'JA2015');
         return;
@@ -517,7 +535,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2011',
-            `a state listener threw: ${cause.message}`, cause));
+            `a state listener threw: ${safeErrorMessage(cause)}`, cause));
         }
       }
       refreshSubs();
@@ -557,7 +575,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2011',
-            `a transaction observer threw: ${cause.message}`, cause));
+            `a transaction observer threw: ${safeErrorMessage(cause)}`, cause));
         }
       }
     }
@@ -589,7 +607,7 @@ export function createApp(appDoc, options = {}) {
       catch (err) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2007',
-          `effect '${run}' threw: ${cause.message}`, cause));
+          `effect '${run}' threw: ${safeErrorMessage(cause)}`, cause));
       }
     }
   }
@@ -621,7 +639,7 @@ export function createApp(appDoc, options = {}) {
           live = false;
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2002',
-            `subscription '${sub.run}' has a "when" that failed: ${cause.message}`, cause));
+            `subscription '${sub.run}' has a "when" that failed: ${safeErrorMessage(cause)}`, cause));
         }
       }
       if (live && !slot.live) {
@@ -638,7 +656,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2013',
-            `subscription '${sub.run}' threw while starting; it stays stopped: ${cause.message}`,
+            `subscription '${sub.run}' threw while starting; it stays stopped: ${safeErrorMessage(cause)}`,
             cause));
           continue;
         }
@@ -656,7 +674,7 @@ export function createApp(appDoc, options = {}) {
           catch (err) {
             const cause = toError(err);
             safeError(new AppRuntimeError('JA2012',
-              `subscription '${sub.run}' threw while cleaning up: ${cause.message}`, cause));
+              `subscription '${sub.run}' threw while cleaning up: ${safeErrorMessage(cause)}`, cause));
           }
         }
       }
@@ -729,7 +747,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2012',
-            `effect handler '${name}' threw while disposing: ${cause.message}`, cause));
+            `effect handler '${name}' threw while disposing: ${safeErrorMessage(cause)}`, cause));
         }
       }
     }
@@ -763,14 +781,25 @@ export function createApp(appDoc, options = {}) {
           onCleanupError: (thrown) => {
             const cause = toError(thrown);
             safeError(new AppRuntimeError('JA2012',
-              `the renderer threw while being destroyed: ${cause.message}`, cause));
+              `the renderer threw while being destroyed: ${safeErrorMessage(cause)}`, cause));
           },
           // the committed-live-frame boundary: `afterRender` runs once
           // per SETTLED, NONTERMINAL frame — after the DOM patch and
           // widget mounts, before a parked hook error is delivered —
           // and never after terminal teardown (APP-FORMAT §8.4)
           onFrame: (state) => {
-            if (state === 'live' && afterRender !== null) afterRender();
+            if (state === 'live' && afterRender !== null) {
+              // isolated: an afterRender failure (the focus queue's
+              // JA2014 included) is reported through the app policy and
+              // can never starve the same frame's parked widget error,
+              // which the renderer delivers right after this returns
+              try {
+                afterRender();
+              }
+              catch (err) {
+                safeError(toError(err));
+              }
+            }
           },
         });
       }
@@ -822,7 +851,7 @@ export function createApp(appDoc, options = {}) {
       pendingError = null;
       const cause = toError(bootFailure.value);
       throw new AppCompileError('JA0007',
-        `the app failed to boot: ${cause.message}`, '', cause);
+        `the app failed to boot: ${safeErrorMessage(cause)}`, '', cause);
     }
   }
 
@@ -842,7 +871,7 @@ export function createApp(appDoc, options = {}) {
     catch (err) {
       const cause = toError(err);
       safeError(new AppRuntimeError('JA2015',
-        `the validateState hook threw for the initial state: ${cause.message}`, cause));
+        `the validateState hook threw for the initial state: ${safeErrorMessage(cause)}`, cause));
       return;
     }
     if (verdict === false
@@ -921,7 +950,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2012',
-            `the renderer threw while being destroyed: ${cause.message}`, cause));
+            `the renderer threw while being destroyed: ${safeErrorMessage(cause)}`, cause));
         }
         renderer = null;
       }

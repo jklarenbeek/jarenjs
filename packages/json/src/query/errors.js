@@ -9,11 +9,24 @@
  * (`JQ0xxx` codes, QUERY-FORMAT.md section 10.2).
  */
 export class JsonQueryCompileError extends Error {
-  constructor(code, message, docPath) {
+  /**
+   * @param {string} code
+   * @param {string} message
+   * @param {string} docPath
+   * @param {{ cause?: unknown }} [options] - `cause` retains what a
+   *   host hook (e.g. `compileTypeTest`) threw, BY VALUE — set via an
+   *   own property even for `undefined`, so presence is testable.
+   */
+  constructor(code, message, docPath, options) {
     super(`${code}: ${message} at ${docPath}`);
     this.name = 'JsonQueryCompileError';
     this.code = code;
     this.docPath = docPath;
+    if (options !== undefined && Object.hasOwn(options, 'cause')) {
+      Object.defineProperty(this, 'cause', {
+        value: options.cause, writable: true, enumerable: false, configurable: true,
+      });
+    }
   }
 }
 

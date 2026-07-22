@@ -340,7 +340,14 @@ can read as "nothing was thrown"). The `onFrame` option reports frame
 settlement (`'live'` or `'destroyed'`) once per top-level render pass,
 BEFORE a parked hook error is delivered — the channel a host uses to
 run committed-frame work (the app loop's `afterRender`) without being
-starved by error delivery. A `destroy()` entered from inside a widget
+starved by error delivery. Dual-failure settlement: the parked hook
+failure is copied and cleared BEFORE the frame callback runs, so a
+throwing callback can neither hide it nor push it into a later frame;
+the callback is isolated, and when both fail the parked hook failure
+is primary — a host that must not lose its own callback failure
+isolates that callback itself, exactly as `createApp` does. Multiple
+cleanup failures in one teardown deliver as one value whose
+`AggregateError` retains every failure with the first primary. A `destroy()` entered from inside a widget
 hook or nested render is still terminal: the active pass stops **immediately** — no
 later sibling observes another `mount` or `update` in that frame, and
 the no-`update` recycle fallback MUST NOT begin its fresh `mount` when

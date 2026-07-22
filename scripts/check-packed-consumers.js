@@ -201,6 +201,20 @@ if (tree !== null && tree.session !== undefined) {
 `,
 };
 
+// lockfile hygiene is release evidence: an extraneous record means the
+// lock describes a workspace that no longer exists, and a release
+// reported from a stale lock is not evidence of the tree being shipped
+{
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  const extraneous = Object.entries(lock.packages ?? {})
+    .filter(([, entry]) => entry.extraneous === true)
+    .map(([key]) => key);
+  if (extraneous.length > 0) {
+    console.error(`extraneous package-lock records: ${extraneous.join(', ')} — run npm install and commit the pruned lock.`);
+    process.exit(1);
+  }
+}
+
 const packages = publishableWorkspaces();
 const byName = new Map(packages.map((entry) => [entry.name, entry]));
 const work = mkdtempSync(join(tmpdir(), 'jaren-packed-'));
