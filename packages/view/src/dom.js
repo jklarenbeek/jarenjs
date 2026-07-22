@@ -228,7 +228,7 @@ export function createDomRenderer(container, options = {}) {
   function teardown() {
     ctx.mountQueue.length = 0;
     if (rootNode !== null) {
-      destroyNode(ctx, rootNode, oldVnode);
+      destroyNode(ctx, rootNode);
       container.textContent = '';
       rootNode = null;
       oldVnode = null;
@@ -357,7 +357,7 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
     patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), ns);
     return node;
   }
-  destroyNode(ctx, node, oldV);
+  destroyNode(ctx, node);
   const next = createNode(ctx, newV, ns);
   parent.replaceChild(next, node);
   return next;
@@ -534,7 +534,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
     // a poisoned widget (a hook threw) is replaced, not patched: the
     // old lifecycle ends (unmount only if mount succeeded) and a fresh
     // one begins — half-mounted handles never receive updates
-    destroyNode(ctx, node, oldV);
+    destroyNode(ctx, node);
     const next = createWidgetNode(ctx, newV, ns);
     parent.replaceChild(next, node);
     return next;
@@ -609,34 +609,40 @@ function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
  * walk or the patch — one broken widget must not leak its siblings — so
  * the first captured error parks on `ctx` and `render` rethrows it after
  * the frame settles.
+ *
+ * The walk is OWNERSHIP-based: it follows the live DOM and this
+ * renderer's own widget-host marker, never a vnode. A vnode is a
+ * *description* — old, new, or (after a mid-pass `destroy()`) only
+ * partially committed — and pairing it with the DOM is exactly how a
+ * teardown skips a mounted widget or indexes a missing node. What the
+ * renderer actually acquired is recorded on the DOM nodes it owns, so
+ * that is what teardown drains.
  * @param {any} ctx
- * @param {any} node - The DOM node rendered from `vnode`.
- * @param {any} vnode
+ * @param {any} node - The root DOM node of the discarded subtree.
  */
-function destroyNode(ctx, node, vnode) {
+function destroyNode(ctx, node) {
   if (!ctx.hasWidgets) return;
-  const err = destroyWalk(ctx, node, vnode, null);
+  const err = destroyDomWalk(ctx, node, null);
   if (err !== null && ctx.frameError === null) ctx.frameError = err;
 }
 
 /**
- * The recursive half of `destroyNode`: unmount widget nodes, recurse
- * through ordinary element children, never descend into a widget's host
- * subtree (the widget's own DOM may contain anything). A destroyed
- * poisoned widget leaves the live-poison count — replacement and
- * subtree removal are the two ways a poisoned widget recovers, after
- * which the `===` fast path is sound again.
+ * The recursive half of `destroyNode`: unmount marked widget hosts,
+ * recurse through ordinary DOM children, never descend into a widget's
+ * host subtree (the widget's own DOM may contain anything — including a
+ * nested renderer whose widgets it, not this renderer, owns). A
+ * destroyed poisoned widget leaves the live-poison count — replacement
+ * and subtree removal are the two ways a poisoned widget recovers,
+ * after which the `===` fast path is sound again.
  * @param {any} ctx
  * @param {any} node
- * @param {any} vnode
  * @param {Error | null} firstError
  * @returns {Error | null}
  */
-function destroyWalk(ctx, node, vnode, firstError) {
-  if (!isElementNode(vnode)) return firstError;
-  if (vnode[0] === WIDGET_TAG) {
-    const w = node.__jarenWidget;
-    if (w !== undefined && !w.destroyed) {
+function destroyDomWalk(ctx, node, firstError) {
+  const w = node.__jarenWidget;
+  if (w !== undefined) {
+    if (!w.destroyed) {
       w.destroyed = true;
       if (w.failed !== false) ctx.poisonedCount--;
       if (w.mounted && w.failed !== 'mount' && w.def.unmount !== undefined) {
@@ -648,11 +654,13 @@ function destroyWalk(ctx, node, vnode, firstError) {
         }
       }
     }
-    return firstError;
+    return firstError; // the widget owns everything below its host
   }
-  const children = childrenOf(vnode);
-  for (let i = 0; i < children.length; i++) {
-    firstError = destroyWalk(ctx, node.childNodes[i], children[i], firstError);
+  const children = node.childNodes;
+  if (children !== undefined) {
+    for (let i = 0; i < children.length; i++) {
+      firstError = destroyDomWalk(ctx, children[i], firstError);
+    }
   }
   return firstError;
 }
@@ -762,7 +770,7 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
     for (let i = oldStart; i <= oldEnd; i++) {
       if (ctx.destroyed) return;
       if (oldCh[i] !== undefined) {
-        destroyNode(ctx, oldDom[i], oldCh[i]);
+        destroyNode(ctx, oldDom[i]);
         parent.removeChild(oldDom[i]);
       }
     }

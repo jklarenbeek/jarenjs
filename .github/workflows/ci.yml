@@ -32,5 +32,5 @@ jobs:
       - run: npm run build
       - run: npm run test:types
       - run: npm run test:tree-shaking
-      - run: node scripts/check-packed-consumers.js --require-bun
+      - run: npm run test:packed:release
       - run: npm run pack:check

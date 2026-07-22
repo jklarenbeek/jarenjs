@@ -282,11 +282,15 @@ renderer MUST honor:
   (or the unmount/remount fallback of §7.2). A reference-equal `props`
   MUST NOT call into the widget at all.
 - **Destroy** — when a subtree containing widgets is removed or
-  replaced, the renderer MUST walk the discarded subtree and call each
-  widget's `unmount(handle)` exactly once, without descending into any
-  widget's host subtree (the widget's own DOM may contain anything). A
-  throwing `unmount` MUST NOT prevent sibling widgets from
-  unmounting: the walk finishes, then the first error surfaces.
+  replaced, the renderer MUST call each widget's `unmount(handle)`
+  exactly once, without descending into any widget's host subtree (the
+  widget's own DOM may contain anything). The walk is
+  **ownership-based**: it drains what the renderer actually acquired —
+  the widget-host markers in the live DOM — never a vnode, because a
+  vnode is a description that may be old, new, or (after a mid-pass
+  `destroy()`) only partially committed. A throwing `unmount` MUST NOT
+  prevent sibling widgets from unmounting: the walk finishes, then the
+  first error surfaces.
 - **Hook failure** — a throwing `mount` or `update` **poisons** the
   widget: sibling widgets and the frame still complete, the first
   error surfaces after the frame settles, and the NEXT render MUST
@@ -320,9 +324,16 @@ A host that merely wants a widget-free tree still renders a widget-free
 frame; `destroy()` is for ending the renderer's life (`app.destroy()`
 calls it). A `destroy()` entered from inside a widget hook or nested
 render is still terminal: the active pass stops **immediately** — no
-later sibling observes another `update` in that frame — and the
-teardown runs as the pass unwinds, unmounting every successfully
-mounted instance exactly once.
+later sibling observes another `mount` or `update` in that frame — and
+the teardown runs as the pass unwinds. Because teardown drains the
+renderer's live resources rather than pairing a vnode against the DOM,
+it is exact even when the aborted pass had structurally diverged from
+the committed tree (insertions, removals, replacements or keyed moves
+before or after the destroying widget): every successfully mounted
+instance — a mount hook that itself requested the destroy included —
+unmounts exactly once, pending mounts are canceled, the container ends
+empty even when an unmount throws, and no internal traversal error is
+ever produced.
 
 ### 7.3.2 Render serialization
 
