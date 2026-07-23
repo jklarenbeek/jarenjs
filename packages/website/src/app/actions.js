@@ -211,6 +211,73 @@ export const ACTIONS = {
     effects: [{ run: 'lock-scroll', with: { on: false } }],
   },
 
+  // the browser-side AI assistant (@jarenjs/ai): a slide-out chat panel
+  // that drives the playground through schema-guarded tools. The API key
+  // lives only in the `ai` slice (never in share links or experiments).
+  'ai/toggle': {
+    patch: [{ op: 'replace', path: '/ai/open', value: { $not: '$.ai.open' } }],
+  },
+  'ai/settings-toggle': {
+    patch: [{ op: 'replace', path: '/ai/settingsOpen', value: { $not: '$.ai.settingsOpen' } }],
+  },
+  'ai/setting': {
+    patch: [{
+      op: 'add',
+      path: { $concat: ['/ai/settings/', '$payload.key'] },
+      value: '$event.value',
+    }],
+  },
+  'ai/save-settings': {
+    patch: [{ op: 'replace', path: '/ai/settingsOpen', value: false }],
+    effects: [{ run: 'ai-save-settings' }],
+  },
+  'ai/draft': {
+    patch: [{ op: 'replace', path: '/ai/draft', value: '$event.value' }],
+  },
+  'ai/send': { effects: [{ run: 'ai-send' }] },
+  // the streaming turn dispatches these back as it runs
+  'ai/user': {
+    patch: [
+      { op: 'add', path: '/ai/messages/-', value: { role: 'user', content: '$payload' } },
+      { op: 'replace', path: '/ai/draft', value: '' },
+      { op: 'replace', path: '/ai/pending', value: '' },
+      { op: 'replace', path: '/ai/status', value: 'streaming' },
+      { op: 'replace', path: '/ai/activity', value: null },
+      { op: 'replace', path: '/ai/error', value: null },
+    ],
+  },
+  'ai/delta': {
+    patch: [{ op: 'replace', path: '/ai/pending', value: { $concat: ['$.ai.pending', '$payload'] } }],
+  },
+  'ai/activity': {
+    patch: [{ op: 'replace', path: '/ai/activity', value: '$payload' }],
+  },
+  'ai/reply': {
+    patch: [
+      { op: 'add', path: '/ai/messages/-', value: { role: 'assistant', content: '$payload' } },
+      { op: 'replace', path: '/ai/pending', value: '' },
+      { op: 'replace', path: '/ai/status', value: 'idle' },
+      { op: 'replace', path: '/ai/activity', value: null },
+    ],
+  },
+  'ai/failed': {
+    patch: [
+      { op: 'replace', path: '/ai/status', value: 'error' },
+      { op: 'replace', path: '/ai/error', value: '$payload' },
+      { op: 'replace', path: '/ai/pending', value: '' },
+      { op: 'replace', path: '/ai/activity', value: null },
+    ],
+  },
+  'ai/clear': {
+    patch: [
+      { op: 'replace', path: '/ai/messages', value: [] },
+      { op: 'replace', path: '/ai/pending', value: '' },
+      { op: 'replace', path: '/ai/status', value: 'idle' },
+      { op: 'replace', path: '/ai/activity', value: null },
+      { op: 'replace', path: '/ai/error', value: null },
+    ],
+  },
+
   // the generated form writes through the standard form actions
   ...createFormActions({ dataPointer: '/pg/data' }),
 };

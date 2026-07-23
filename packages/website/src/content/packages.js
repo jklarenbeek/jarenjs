@@ -25,6 +25,7 @@ const ENTRIES = [
   { name: '@jarenjs/calc', dir: 'components/calc', blurb: 'A multi-mode calculator with x·y/x·y·z plots — apps as JSON on a pure core kernel.' },
   { name: '@jarenjs/charts', dir: 'components/charts', blurb: 'Headless charts: definitions to geometry-free ASTs to pure-vnode SVG, streamable.' },
   { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset, plus incremental JSON/JSONX readers.' },
+  { name: '@jarenjs/ai', dir: 'packages/ai', blurb: 'Browser-side AI: one OpenAI-compatible client (OpenRouter/Ollama/LM Studio), a Jaren-guarded tool registry, a bounded agent loop and WebMCP.' },
 ];
 
 export const PACKAGES = ENTRIES.map((entry) => ({

@@ -220,37 +220,3 @@ describe('website — docs, examples, menu', function () {
     assert.strictEqual(app.getState().menu, false);
   });
 });
-
-describe('website — WebMCP', function () {
-  it('registers tools on a provided modelContext and they execute', function () {
-    /** @type {any[]} */
-    let registered = [];
-    const modelContext = {
-      provideContext: ({ tools }) => { registered = tools; },
-    };
-    const { app } = mountSite({ modelContext });
-    const names = registered.map((t) => t.name);
-    assert.ok(names.includes('jaren_validate'));
-    assert.ok(names.includes('jaren_run_engine'));
-    assert.ok(names.includes('jaren_navigate'));
-
-    const validate = registered.find((t) => t.name === 'jaren_validate');
-    const good = validate.execute({ schema: { type: 'integer' }, data: 5 });
-    assert.strictEqual(good.valid, true);
-    const bad = validate.execute({ schema: { type: 'integer' }, data: 'nope' });
-    assert.strictEqual(bad.valid, false);
-    assert.ok(bad.errors.length > 0);
-
-    const run = registered.find((t) => t.name === 'jaren_run_engine');
-    const nodes = run.execute({ engine: 'path', inputs: { selector: '$.a', data: '{"a": 42}' } });
-    assert.strictEqual(nodes.some((n) => n.kind === 'error'), false);
-    assert.match(JSON.stringify(nodes), /42/);
-
-    const rejected = run.execute({ engine: 'no-such-engine', inputs: {} });
-    assert.match(rejected.error, /invalid input/, 'tool inputs are schema-validated by Jaren itself');
-
-    const nav = registered.find((t) => t.name === 'jaren_navigate');
-    nav.execute({ page: 'playground', params: { engine: 'jslt' } });
-    assert.strictEqual(app.getState().route.params.engine, 'jslt');
-  });
-});

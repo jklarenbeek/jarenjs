@@ -18,6 +18,7 @@ import { md } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
+import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
 import { callout } from '../lib/nodes.js';
 import { formatMs, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
@@ -79,8 +80,42 @@ export function viewModel(state) {
   // re-render with the same README returns the same vnode reference.
   if (state.readme.open) ui.readme = readmeOverlay(state.readme);
 
+  // The AI assistant is a global slide-out on every page.
+  ui.assistant = assistantView(state.ai);
+
   return { ...state, ui };
 }
+
+const assistantView = memo1((ai) => {
+  const s = ai.settings;
+  const configured = isConfigured(s);
+  return {
+    open: ai.open,
+    status: ai.status,
+    activity: ai.activity,
+    error: ai.error,
+    draft: ai.draft,
+    configured,
+    // the settings form shows until the assistant can actually run, or
+    // whenever the user opens it explicitly
+    showSettings: ai.settingsOpen || !configured,
+    settings: {
+      provider: s.provider,
+      baseUrl: s.baseUrl,
+      model: s.model,
+      apiKey: s.apiKey,
+      needsKey: s.provider === 'openrouter' || s.provider === 'custom',
+    },
+    providers: PROVIDER_OPTIONS.map((p) => ({ ...p, selected: p.value === s.provider })),
+    empty: ai.messages.length === 0,
+    messages: ai.messages.map((m) => (m.role === 'user'
+      ? { role: 'user', text: m.content }
+      : { role: 'assistant', article: md.view(m.content) })),
+    // the reply currently streaming in (plain text: it changes per token)
+    streaming: ai.status === 'streaming',
+    pending: ai.pending,
+  };
+});
 
 const readmeOverlay = memo1((readme) => ({
   title: readme.title,

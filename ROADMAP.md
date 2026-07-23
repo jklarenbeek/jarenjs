@@ -184,6 +184,22 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 
 - [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.
 
+## @jarenjs/ai (browser-side AI, published)
+
+Browser-side AI that makes sense with bring-your-own-key: one
+OpenAI-compatible chat client (OpenRouter / Ollama / LM Studio / any
+compatible URL, `fetch` injected), an incremental SSE decoder, a tool
+registry whose inputs `@jarenjs/validate` checks before every call, a
+bounded agent loop, and WebMCP (`navigator.modelContext`) registration
+of the same tools. The website's assistant and its WebMCP bridge both
+run on it; the playground engines are the toolbox, so Jaren validates
+the model's own tool calls.
+
+- [ ] **Structured-output mode** — thread the query/JSLT/JOSL schema twins into a `response_format`/JSON-Schema constrained-decoding request helper, validated locally with the same validator that guards the tools.
+- [ ] **Retry/backoff + rate-limit surfacing** — the client reports `AI0002` verbatim today; a small retry policy (429/5xx with jittered backoff) belongs in the client, not each caller.
+- [ ] **Token-budget compaction** — the agent truncates oversized tool results; a history-compaction pass (summarize the middle, keep the tail) would let long sessions run against small local context windows.
+- [ ] **Provider capability probes** — optional `list models`/health calls per provider so the settings UI can validate a key/URL before the first turn.
+
 ## @jarenjs/josl (published)
 
 The charts/streaming program (shipped 2026-07-21) added the incremental

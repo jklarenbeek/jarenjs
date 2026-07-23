@@ -212,6 +212,22 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'assistant', title: 'AI assistant',
+    blocks: [
+      p('@jarenjs/ai is browser-side AI that makes sense: one OpenAI-compatible chat client for OpenRouter, Ollama or LM Studio, bring-your-own-key, no server and no proxy. The playground assistant (the ✦ button, bottom-right) runs on it — describe what you want and it drives the playground for you.'),
+      p('Tools are the point. Each playground engine is a tool declared with a JSON Schema, and Jaren validates the model’s own tool calls before they run — the suite guarding its own tools. A bounded agent loop keeps even small local models on the rails: malformed arguments and failing tools come back as readable results the model can correct, never crashes.'),
+      code("import { createChatClient, createToolbox, createAgent } from '@jarenjs/ai';\n\nconst client = createChatClient({ provider: 'ollama', model: 'qwen3:4b' });\nconst toolbox = createToolbox();\ntoolbox.add({\n  name: 'lookup', description: 'Look up one record.',\n  inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },\n  execute: ({ id }) => records.get(id) ?? { error: `no '${id}'` },\n});\nconst agent = createAgent({ client, toolbox, maxToolRounds: 5 });\nconst { message } = await agent.send(history, { onDelta: (t) => ui.stream(t) });"),
+      p('The same tools publish over WebMCP (navigator.modelContext) with one call, so a browser-hosted agent drives the identical schema-guarded surface. The key stays in your browser, stored locally and sent only to the provider you choose.'),
+      {
+        kind: 'callout',
+        title: 'Try it',
+        text: 'Open the assistant (bottom-right), add your provider, model and — for OpenRouter — an API key in settings, then ask it to validate a schema or run any engine. Local runtimes need CORS enabled for this origin (Ollama: OLLAMA_ORIGINS; LM Studio: the server CORS toggle).',
+        href: '#/playground',
+        link: 'Open the playground',
+      },
+    ],
+  },
+  {
     id: 'further-reading', title: 'Further reading',
     blocks: [
       p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, ERROR-MESSAGES.md and the JOSL FORMAT.md. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),

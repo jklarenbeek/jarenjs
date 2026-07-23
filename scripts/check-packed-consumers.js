@@ -146,6 +146,22 @@ if (!bun) console.log('(no bun binary on PATH — the Bun consumer leg is skippe
  * @type {Record<string, string>}
  */
 const SEMANTIC_SNIPPETS = {
+  '@jarenjs/ai': `
+import { createChatClient, createToolbox, createAgent, registerModelContext, resolveEndpoint } from '@jarenjs/ai';
+const endpoint = resolveEndpoint({ provider: 'ollama', model: 'm' });
+void endpoint.url;
+const client = createChatClient({ provider: 'ollama', model: 'm', fetch: (globalThis.fetch) });
+const toolbox = createToolbox();
+toolbox.add({
+  name: 'echo', description: 'echo', inputSchema: { type: 'object' },
+  execute: (input: any) => input,
+});
+void toolbox.toFunctionTools();
+void toolbox.execute('echo', {});
+void registerModelContext(toolbox, undefined);
+const agent = createAgent({ client, toolbox, system: 'x', maxToolRounds: 3 });
+void agent.send([{ role: 'user', content: 'hi' }]);
+`,
   '@jarenjs/view': `
 import { createDomRenderer } from '@jarenjs/view';
 const render = createDomRenderer(({} as any), {

@@ -63,6 +63,8 @@ export const SHELL_RULES = [
       footer,
       // the package-README overlay: absent (renders nothing) until opened
       { $apply: ['$.ui.readme', 'readme'] },
+      // the AI assistant slide-out: present on every page
+      { $apply: ['$.ui.assistant', 'assistant'] },
     ],
   },
   {

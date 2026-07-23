@@ -31,12 +31,20 @@ export const DEFAULT_DATA = {
 import { initialEngineInputs } from '../boundaries/engines.js';
 import { calcInitialState } from '@jarenjs/calc/component';
 
+export const DEFAULT_AI_SETTINGS = {
+  provider: 'openrouter',  // 'openrouter' | 'ollama' | 'lmstudio' | 'custom'
+  baseUrl: '',             // required for 'custom'; overrides the preset otherwise
+  model: '',               // e.g. 'qwen/qwen3-4b' or a local model name
+  apiKey: '',              // bring your own; local runtimes need none
+};
+
 /**
  * @param {string} [theme]
  * @param {string[]} [ideNames] - saved experiment names from storage
+ * @param {any} [aiSettings] - persisted assistant settings, if any
  * @returns {any} a fresh initial state
  */
-export function createInitialState(theme = 'light', ideNames = []) {
+export function createInitialState(theme = 'light', ideNames = [], aiSettings = null) {
   return {
     route: { page: 'home', params: {} },
     theme,
@@ -56,6 +64,21 @@ export function createInitialState(theme = 'light', ideNames = []) {
     engResults: {},              // engine key -> render nodes
     chartsLive: null,            // /charts page live-feed render nodes
     ide: { name: '', names: ideNames, shared: null },
+
+    // the browser-side AI assistant (@jarenjs/ai): a bring-your-own-key
+    // chat panel that drives the playground through schema-guarded tools
+    ai: {
+      open: false,
+      settingsOpen: false,
+      settings: { ...DEFAULT_AI_SETTINGS, ...(aiSettings ?? {}) },
+      messages: [],          // visible transcript: { role, content }
+      draft: '',             // composer text
+      pending: '',           // the assistant reply currently streaming
+      status: 'idle',        // 'idle' | 'streaming' | 'error'
+      activity: null,        // the tool the model is currently calling
+      error: null,
+    },
+
     calc: calcInitialState(),    // the @jarenjs/calc sub-app slice
 
     // the package-README dialog: a fetched Markdown source rendered by

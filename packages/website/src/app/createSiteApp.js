@@ -22,7 +22,9 @@ import { STYLESHEET } from '../views/index.js';
 import { runValidation } from '../boundaries/validator.js';
 import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
 import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
-import { registerWebMcpTools } from '../boundaries/webmcp.js';
+import {
+  createSiteToolbox, createAssistantEffects, registerSiteWebMcp,
+} from '../boundaries/assistant.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
@@ -46,6 +48,10 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   The experiment store (localStorage in the browser).
  * @property {any} [modelContext] - A WebMCP `navigator.modelContext`
  *   implementation; when present, the site registers its tools on it.
+ * @property {typeof fetch} [aiFetch] - fetch for the AI assistant's
+ *   provider calls (default global fetch); injectable for tests.
+ * @property {{ read: () => any, write: (data: any) => void }} [aiStorage]
+ *   Persistence for the assistant settings (localStorage in the browser).
  * @property {number} [debounceMs] - Boundary-run debounce (default 250;
  *   0 = synchronous, for tests).
  * @property {(error: Error) => void} [onError]
@@ -74,6 +80,17 @@ export function createSiteApp(env) {
   });
 
   const ideNames = () => Object.keys(store.experiments).sort();
+
+  // the AI assistant toolbox: the playground engines as schema-guarded
+  // @jarenjs/ai tools, shared by the chat panel and the WebMCP bridge.
+  // `getApp` is lazy because the app is created further down.
+  const toolbox = createSiteToolbox({
+    getApp: () => app,
+    navigate: env.navigate,
+    share: env.share,
+    store,
+  });
+  const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
 
   const effects = {
     'fetch-bench': (props, dispatch) => {
@@ -189,13 +206,15 @@ export function createSiteApp(env) {
   /** README text cache, keyed by URL (a reopen is instant). */
   const readmeCache = new Map();
 
-  // fold in the calc sub-app's effects (= evaluation, backspace) and the
-  // live-rates effect, plus the `when`-gated rates-poll subscription.
-  Object.assign(effects, calcEditEffects, rates.effects);
+  // fold in the calc sub-app's effects (= evaluation, backspace), the
+  // live-rates effect (plus the `when`-gated rates-poll subscription),
+  // and the AI assistant's streaming-turn + settings effects.
+  Object.assign(effects, calcEditEffects, rates.effects,
+    createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage }));
 
   app = createApp({
     $app: '0.1',
-    state: createInitialState(env.initialTheme ?? 'light', ideNames()),
+    state: createInitialState(env.initialTheme ?? 'light', ideNames(), aiStorage.read()),
     view: STYLESHEET,
     actions: ACTIONS,
     subs: [...SUBS, rates.subEntry],
@@ -216,12 +235,7 @@ export function createSiteApp(env) {
   });
 
   wireBoundaries(app, env.debounceMs ?? 250);
-  registerWebMcpTools(app, {
-    modelContext: env.modelContext,
-    navigate: env.navigate,
-    store,
-    onError: report,
-  });
+  registerSiteWebMcp(toolbox, { modelContext: env.modelContext, onError: report });
   return app;
 }
 

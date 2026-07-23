@@ -122,6 +122,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/calc`](components/calc) | A multi-mode calculator (standard/scientific/programmer/financial/converter) as an @jarenjs/app document, with x·y/x·y·z plots as pure-vnode SVG; its numeric kernel lives in @jarenjs/core (math/finance/convert) | [README](components/calc/README.md) · [FORMAT](components/calc/docs/CALC-FORMAT.md) |
 | [`@jarenjs/charts`](components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG (pie/bar/line/scatter/candlestick), with a stream adapter over the josl readers' events | [README](components/charts/README.md) · [ARCHITECTURE](components/charts/ARCHITECTURE.md) |
 | [`@jarenjs/josl`](packages/josl) | JOSL, a streaming TOML superset, and JSONX — with incremental streaming readers for all four dialects (JOSL/TOML/JSONX/strict JSON) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
+| [`@jarenjs/ai`](packages/ai) | Browser-side AI: one OpenAI-compatible client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs Jaren validates before every call, a bounded agent loop, and WebMCP registration | [README](packages/ai/README.md) |
 
 ### 🤓 @jarenjs/core — the foundation
 

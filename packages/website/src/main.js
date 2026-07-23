@@ -12,6 +12,28 @@ import { parseHash } from './lib/route.js';
 const BASE = import.meta.env.BASE_URL;
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
+const AI_KEY = 'jaren-ai';
+
+/** A localStorage-backed JSON slot; failures degrade to in-memory. */
+const jsonStore = (key) => ({
+  read: () => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    }
+    catch {
+      return null;
+    }
+  },
+  write: (data) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    }
+    catch {
+      // storage full or unavailable: the session keeps working
+    }
+  },
+});
 
 const stored = localStorage.getItem(THEME_KEY);
 const theme = stored === 'dark' || stored === 'light'
@@ -57,25 +79,11 @@ createSiteApp({
     navigator.clipboard?.writeText(url).catch(() => {});
     return url;
   },
-  storage: {
-    read: () => {
-      try {
-        const raw = localStorage.getItem(IDE_KEY);
-        return raw === null ? null : JSON.parse(raw);
-      }
-      catch {
-        return null;
-      }
-    },
-    write: (data) => {
-      try {
-        localStorage.setItem(IDE_KEY, JSON.stringify(data));
-      }
-      catch {
-        // storage full or unavailable: the session keeps working
-      }
-    },
-  },
+  storage: jsonStore(IDE_KEY),
+  // the AI assistant: real fetch to the user-chosen provider, settings
+  // (including the bring-your-own key) persisted locally and nowhere else
+  aiFetch: (url, init) => fetch(url, init),
+  aiStorage: jsonStore(AI_KEY),
   modelContext: /** @type {any} */ (navigator).modelContext,
 });
 

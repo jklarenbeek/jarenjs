@@ -1,0 +1,78 @@
+{
+  "name": "@jarenjs/ai",
+  "private": false,
+  "version": "0.18.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": false,
+  "description": "Browser-side AI that makes sense: one OpenAI-compatible chat client for OpenRouter, Ollama and LM Studio (bring your own key), an SSE stream decoder, a JSON-Schema-validated tool registry guarded by Jaren itself, a bounded agent loop, and WebMCP (navigator.modelContext) registration.",
+  "author": "joham",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jklarenbeek/jarenjs.git",
+    "directory": "packages/ai"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "jaren",
+    "ai",
+    "llm",
+    "agent",
+    "tools",
+    "function-calling",
+    "webmcp",
+    "openrouter",
+    "ollama",
+    "lmstudio",
+    "sse",
+    "streaming",
+    "json-schema"
+  ],
+  "scripts": {
+    "build": "npm run build:types",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
+  },
+  "files": [
+    "dist/types/",
+    "src/"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./providers": {
+      "types": "./dist/types/providers.d.ts",
+      "default": "./src/providers.js"
+    },
+    "./sse": {
+      "types": "./dist/types/sse.d.ts",
+      "default": "./src/sse.js"
+    },
+    "./client": {
+      "types": "./dist/types/client.d.ts",
+      "default": "./src/client.js"
+    },
+    "./toolbox": {
+      "types": "./dist/types/toolbox.d.ts",
+      "default": "./src/toolbox.js"
+    },
+    "./agent": {
+      "types": "./dist/types/agent.d.ts",
+      "default": "./src/agent.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@jarenjs/validate": "^0.18.0"
+  }
+}
