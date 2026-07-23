@@ -88,6 +88,9 @@ export function createSiteApp(env) {
         });
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
+    // the README dialog locks the page scroll behind it; headless
+    // hosts simply omit the capability
+    'lock-scroll': (props) => env.lockScroll?.(props.on === true),
     'binance-toggle': (props, dispatch) =>
       binanceToggle((action, payload) => dispatch(action, payload),
         props.target === 'page' ? 'page' : 'playground'),
@@ -201,6 +204,9 @@ export function createSiteApp(env) {
     document: env.document,
     schedule: env.schedule,
     viewModel,
+    // per committed frame: keep the active tab/section of the mobile
+    // scroll strips in view (a no-op capability on headless hosts)
+    afterRender: () => env.revealActiveTab?.(),
     onError: report,
     effects,
     subs: {

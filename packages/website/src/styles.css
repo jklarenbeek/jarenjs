@@ -98,6 +98,14 @@
 }
 
 * { box-sizing: border-box; }
+/* overflow guard: no unbounded child may ever widen the layout
+   viewport (`clip` creates no scroll container, so position: sticky
+   keeps working) */
+html, body { overflow-x: clip; }
+/* the README dialog locks the page scroll behind it (the app's
+   lock-scroll effect toggles this class) */
+body.dialog-open { overflow: hidden; }
+
 body {
   margin: 0;
   font-family: var(--font);
@@ -165,7 +173,7 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 .nav-link.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
 .theme-toggle {
   border: 1px solid var(--border); background: transparent; color: var(--fg);
-  border-radius: var(--radius-sm); width: 2.1rem; height: 2.1rem; cursor: pointer; font-size: 0.95rem;
+  border-radius: var(--radius-sm); width: 2.75rem; height: 2.75rem; cursor: pointer; font-size: 0.95rem;
 }
 .theme-toggle:hover { background: var(--surface); }
 
@@ -356,6 +364,11 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .details-card[open] summary { margin-bottom: 0.4rem; color: var(--fg); }
 
 /* svg chart cards (@jarenjs/charts vnodes) */
+/* charts scale to their card: the definition's viewBox preserves the
+   aspect while width tracks the column; stray labels clip at the card */
+.chart-card { overflow: hidden; }
+.chart-card svg { max-width: 100%; height: auto; display: block; }
+
 .chart-card {
   margin: var(--space-5) 0; padding: var(--space-4) var(--space-5);
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
@@ -433,7 +446,11 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 }
 
 /* docs */
-.docs-grid { display: grid; grid-template-columns: 14rem 1fr; gap: var(--space-10); align-items: start; }
+/* content column is minmax(0, 1fr): a plain `1fr` track can never
+   shrink below its largest item's min-content width, so one nowrap
+   scroll strip would widen the whole page instead of scrolling */
+.docs-grid { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: var(--space-10); align-items: start; }
+.docs-nav, .docs-sections, .docs-readmes { min-width: 0; }
 .docs-nav { position: sticky; top: 4.5rem; display: flex; flex-direction: column; gap: 0.1rem; }
 .docs-nav h1 { font-size: 1.3rem; margin-bottom: var(--space-2); }
 .docs-sections { display: contents; }
@@ -479,14 +496,14 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 
 /* tablet: two-column grids collapse before they get cramped */
 @media (max-width: 1024px) {
-  .pg-grid.two { grid-template-columns: 1fr; }
-  .docs-grid { grid-template-columns: 12rem 1fr; gap: var(--space-6); }
+  .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .docs-grid { grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-6); }
 }
 
 /* mobile */
 .menu-toggle {
   display: none; border: 1px solid var(--border); background: transparent; color: var(--fg);
-  border-radius: var(--radius-sm); width: 2.1rem; height: 2.1rem; cursor: pointer; font-size: 0.95rem;
+  border-radius: var(--radius-sm); width: 2.75rem; height: 2.75rem; cursor: pointer; font-size: 0.95rem;
 }
 @media (max-width: 760px) {
   .menu-toggle { display: block; }
@@ -506,22 +523,35 @@ tr.strong td { font-weight: 700; color: var(--accent); }
     margin-inline: calc(-1 * var(--space-5)); padding-inline: var(--space-5);
   }
   .tab { white-space: nowrap; }
-  .cards { grid-template-columns: 1fr 1fr; }
+  .cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .stat-card { padding: var(--space-3) var(--space-4); }
-  .pg-grid, .pg-grid.two { grid-template-columns: 1fr; }
-  .docs-grid { grid-template-columns: 1fr; gap: var(--space-4); }
+  .pg-grid, .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .docs-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .docs-nav { position: static; }
   .docs-sections {
     display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
     gap: var(--space-1); margin-inline: calc(-1 * var(--space-5)); padding-inline: var(--space-5);
   }
   .docs-sections .docs-link { flex: none; white-space: nowrap; }
-  .docs-readmes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+  .docs-readmes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
   .chart-card { padding: var(--space-3) var(--space-3); }
   .hero { padding-top: var(--space-8); }
   .btn, .chip, .seg-btn, .tab { min-height: 2.2rem; }
+  /* scroll-strip affordance: an edge fade hints that the row scrolls,
+     and scroll padding keeps a focused item off the hard edge */
+  .tabs, .docs-sections {
+    mask-image: linear-gradient(90deg, #000 92%, transparent);
+    scroll-padding-inline: var(--space-5);
+  }
+  /* comfortable touch rows (WCAG 2.5.8: 44px targets) */
+  .docs-link, .readme-btn { min-height: 2.75rem; display: inline-flex; align-items: center; }
   body { padding-bottom: env(safe-area-inset-bottom); }
   .header { padding-top: env(safe-area-inset-top); }
+}
+
+/* very narrow phones: README buttons need full rows to stay tappable */
+@media (max-width: 360px) {
+  .docs-readmes { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Markdown preview card (the @jarenjs/md visual component) */
@@ -591,6 +621,32 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   flex: 1;
   overflow-y: auto;
   padding: var(--space-6) var(--space-8);
+  overscroll-behavior: contain; /* no scroll chaining to the page */
+}
+/* wide content stays inside its column on any screen */
+.docs-article table, .docs-article svg, .docs-article img,
+.md-dialog-body table, .md-dialog-body svg, .md-dialog-body img { max-width: 100%; }
+.md-dialog-body .md table { display: block; overflow-x: auto; }
+/* section links land below the sticky header, not under it */
+.docs-article [id], section[id] { scroll-margin-top: 4.5rem; }
+
+/* mobile: the dialog is a full-screen sheet — sized by the DYNAMIC
+   viewport (dvw/dvh track the browser chrome; vw/vh lines are the
+   fallback for older engines) so it can never open into an inflated
+   layout viewport or jump with the URL bar */
+@media (max-width: 760px) {
+  .md-dialog-overlay { padding: 0; }
+  .md-dialog {
+    width: 100vw; height: 100vh;
+    width: 100dvw; height: 100dvh;
+    max-width: none; border: 0; border-radius: 0;
+  }
+  .md-dialog-head {
+    padding: var(--space-4) var(--space-5);
+    padding-top: calc(var(--space-4) + env(safe-area-inset-top));
+  }
+  .md-dialog-body { padding: var(--space-4) var(--space-5); }
+  .md-dialog-close { width: 2.75rem; height: 2.75rem; }
 }
 .md-dialog-status {
   color: var(--muted);

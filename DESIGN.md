@@ -80,16 +80,41 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 
 ## 5. Responsiveness & mobile patterns
 
-- Two breakpoints only: **1024 px** (two-column grids collapse or narrow before they
-  cramp) and **760 px** (mobile). New intermediate breakpoints need a reason recorded here.
+- Breakpoints: **1024 px** (two-column grids collapse or narrow before they cramp),
+  **760 px** (mobile), and one recorded exception, **360 px** (very narrow phones: the
+  docs README buttons drop from 2-up to full rows so they stay tappable). New
+  intermediate breakpoints need a reason recorded here.
+- **Grid tracks that hold arbitrary content are `minmax(0, 1fr)`, never bare `1fr`.**
+  `1fr` means `minmax(auto, 1fr)`: the track can never shrink below its largest item's
+  min-content width, so a single nowrap scroll strip inside it widens the whole page
+  (the Docs 8×-viewport collapse). Scrollable children additionally carry
+  `min-width: 0`. Belt-and-braces guard: `html, body { overflow-x: clip; }` (`clip`,
+  not `hidden` — no scroll container, `position: sticky` keeps working).
 - Mobile patterns (reuse these, don't invent siblings):
   - **Scroll strip**: tab bars and the docs section list become a single
     non-wrapping horizontally scrollable row, bled edge-to-edge with
     `margin-inline: calc(-1 * var(--space-5)); padding-inline: var(--space-5)` so the
-    first item still aligns to the gutter. (Only valid because `.page` keeps its gutters.)
-  - **2-up grids**: stat cards and the docs README buttons go `1fr 1fr`, never one-per-row
-    towers.
-  - Touch targets: interactive chrome ≥ `2.2rem` min-height at ≤ 760 px.
+    first item still aligns to the gutter. (Only valid because `.page` keeps its
+    gutters — and only inside a `minmax(0, 1fr)` track, per the rule above.) Strips
+    carry the affordance pair: a right edge fade
+    (`mask-image: linear-gradient(90deg, #000 92%, transparent)`) and
+    `scroll-padding-inline: var(--space-5)`; the app keeps the active item in view
+    per committed frame (the `revealActiveTab` host capability in `afterRender`).
+  - **2-up grids**: stat cards and the docs README buttons go
+    `minmax(0, 1fr) minmax(0, 1fr)`, never one-per-row towers (README buttons
+    excepted below 360 px, above).
+  - **Full-screen sheet dialog**: at ≤ 760 px the README dialog fills the dynamic
+    viewport (`100dvw/100dvh`, with a `vw/vh` fallback line before it), drops border
+    and radius, pads its head by `env(safe-area-inset-top)`, and contains its scroll
+    (`overscroll-behavior: contain`). While open, the app's `lock-scroll` effect sets
+    `body.dialog-open { overflow: hidden; }` — the page never scrolls under a modal.
+  - Touch targets, two tiers: dense in-flow chrome (chips, segments, tabs) ≥ `2.2rem`;
+    primary tap targets — the header toggles, the dialog close, docs section links and
+    README rows — ≥ `2.75rem` (the WCAG 2.5.8 / 44 px class).
+- Long-form content discipline: tables, SVG and images inside articles and the README
+  dialog carry `max-width: 100%`; README tables scroll internally
+  (`display: block; overflow-x: auto`); anchored headings carry
+  `scroll-margin-top: 4.5rem` so section links land below the sticky header.
 - A media-query override of a rule must appear **later in the file** than its base rule —
   media queries add no specificity (the `.docs-readmes` trap).
 
@@ -102,7 +127,9 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 - Disclosure toggles expose state declaratively (`aria-expanded` + `aria-controls` on the
   menu button). **No programmatic focus management from actions/effects**: the app's
   render is async-scheduled, so an effect touching the DOM races the patch — state must be
-  expressed as attributes the renderer owns.
+  expressed as attributes the renderer owns. DOM work that genuinely needs the committed
+  frame (focus intents, scroll-into-view of the active tab) belongs in `afterRender`,
+  the committed-frame boundary — never in an effect.
 - Pronounceable labels over icon-only controls (`aria-label` on the menu/theme toggles).
 
 ## 7. Component theming architecture

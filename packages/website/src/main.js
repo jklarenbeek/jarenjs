@@ -33,6 +33,14 @@ createSiteApp({
         ? response.text()
         : Promise.reject(new Error(`${response.status} ${response.statusText}`))
     )),
+  lockScroll: (on) => {
+    document.body.classList.toggle('dialog-open', on);
+  },
+  revealActiveTab: () => {
+    for (const el of document.querySelectorAll('.tabs .tab.active, .docs-sections .docs-link.active')) {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  },
   applyTheme: (next) => {
     document.documentElement.classList.toggle('dark', next === 'dark');
     localStorage.setItem(THEME_KEY, next);

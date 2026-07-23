@@ -186,10 +186,13 @@ export const ACTIONS = {
       { op: 'replace', path: '/readme/source', value: null },
       { op: 'replace', path: '/readme/message', value: null },
     ],
-    effects: [{
-      run: 'readme-load',
-      with: { url: '$payload.url', done: 'readme/loaded', error: 'readme/failed' },
-    }],
+    effects: [
+      { run: 'lock-scroll', with: { on: true } },
+      {
+        run: 'readme-load',
+        with: { url: '$payload.url', done: 'readme/loaded', error: 'readme/failed' },
+      },
+    ],
   },
   'readme/loaded': {
     patch: [
@@ -205,6 +208,7 @@ export const ACTIONS = {
   },
   'readme/close': {
     patch: [{ op: 'replace', path: '/readme/open', value: false }],
+    effects: [{ run: 'lock-scroll', with: { on: false } }],
   },
 
   // the generated form writes through the standard form actions
