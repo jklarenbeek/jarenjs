@@ -408,7 +408,15 @@ queued boot work recovers it and boots the rest; renderer-construction
 and first-frame failures are always fatal; the default rethrowing sink
 aborts boot on any of them. No failure path leaves a live
 subscription, a populated container or an unreturned app handle
-behind.
+behind. Boot is SCHEDULER-INDEPENDENT: every frame the boot
+transaction produces commits inside the boot window (never on a later
+microtask), so the deferred first `afterRender` always acts on the
+final boot DOM — a boot subscription that changes state and queues a
+focus intent settles identically under the synchronous and the
+default scheduler. Effect-handler identities are snapshotted inside
+the boot rollback BEFORE any resource is acquired: disposal never
+re-enumerates a host registry at destroy time, and an unenumerable
+registry rejects the boot (`JA0007`) while nothing is owned yet.
 
 **Subscription startup is resource acquisition.** A slot commits live
 only after its handler returned; a throwing handler leaves the slot
@@ -591,9 +599,13 @@ covers them all:
 - one `app.destroy()` delivers ONE `JA2012`: a single cleanup failure
   is its cause by identity; several aggregate in occurrence order
   (subscription cleanups, then effect disposal, then the renderer
-  walk — whose own frame envelope arrives as one element). Outside
-  `destroy()` — `stop()`, per-transaction reconciliation — each
-  cleanup failure reports its own `JA2012`, as before;
+  walk — whose own frame envelope arrives as one element). This holds
+  for an IN-HOOK destroy too: when a widget hook calls
+  `app.destroy()` and the renderer teardown defers to the end of the
+  active pass, the collector stays open and delivers once, after that
+  teardown completes. Outside `destroy()` — `stop()`, per-transaction
+  reconciliation — each cleanup failure reports its own `JA2012`, as
+  before;
 - task settlement is total: abort classification reads the rejection
   value's `name` through a safe accessor (the signal never suppresses
   — a superseded task's non-abort failure still dispatches, the

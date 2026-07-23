@@ -101,3 +101,7 @@ benchmark/qt3-baseline.seed.json
 TODO*.md
 PROGRESS*.md
 NEXT_SESSION.md
+
+# playwright artifacts
+test-results/
+playwright-report/

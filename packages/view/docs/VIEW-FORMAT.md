@@ -364,7 +364,13 @@ hook or nested render is still terminal: the active pass stops **immediately** �
 later sibling observes another `mount` or `update` in that frame, and
 the no-`update` recycle fallback MUST NOT begin its fresh `mount` when
 its `unmount` requested the destroy (the ended acquisition is recorded
-so teardown does not unmount it a second time) — and the teardown runs
+so teardown does not unmount it a second time), and the fallback's
+failure handling is PHASE-SENSITIVE: a failure before the old
+instance's `unmount` had its exactly-once chance (a hostile `unmount`
+lookup) leaves the old acquisition OWNED — the widget poisons with
+update-failure semantics so replacement or terminal destroy still
+releases the resource; only a failure after the teardown attempt takes
+mount-failure semantics (nothing is left to release) — and the teardown runs
 as the pass unwinds. Because teardown drains the renderer's live
 resources rather than pairing a vnode against the DOM, it is exact
 even when the aborted pass had structurally diverged from the

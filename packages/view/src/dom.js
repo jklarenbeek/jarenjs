@@ -641,10 +641,23 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
         }
       }
       else if (acquired) {
-        // no update hook: recycle the host with a fresh lifecycle
+        // no update hook: recycle the host with a fresh lifecycle.
+        // The catch is PHASE-SENSITIVE: a failure before the old
+        // instance's `unmount` had its exactly-once chance (a hostile
+        // `unmount` lookup) leaves the OLD acquisition owned — poison
+        // as 'update' so replacement and terminal destroy still
+        // release it; only after the teardown attempt does a failure
+        // take mount-failure semantics (nothing left to release).
+        let unmountAttempted = false;
         try {
           const unmount = w.def.unmount;
-          if (unmount !== undefined) unmount.call(w.def, w.handle);
+          if (unmount !== undefined) {
+            unmountAttempted = true;
+            unmount.call(w.def, w.handle);
+          }
+          else {
+            unmountAttempted = true; // nothing to run: teardown is complete
+          }
           // the unmount may have requested terminal destroy: the old
           // acquisition has ENDED (record it, or deferred teardown
           // would unmount it a second time) and no fresh acquisition
@@ -659,9 +672,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
           w.handle = w.def.mount(node, props, ctx.emit);
         }
         catch (err) {
-          // either hook failing leaves no resource a later unmount
-          // could own: poison as 'mount' (skip unmount, replace next)
-          w.failed = 'mount';
+          w.failed = unmountAttempted ? 'mount' : 'update';
           ctx.poisonedCount++;
           appendFrameFailure(ctx, err);
         }

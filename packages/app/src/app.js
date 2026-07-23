@@ -258,6 +258,16 @@ export function createApp(appDoc, options = {}) {
    * fires. A failed boot never fires it. */
   let booted = false;
   let bootFrameLive = false;
+  /**
+   * Effect-handler identities, snapshotted inside the boot rollback
+   * BEFORE any resource is acquired: disposal must never depend on
+   * re-enumerating a host registry at destroy time (a hostile
+   * enumeration would skip every disposer with resources already
+   * live). An unenumerable registry fails the boot instead —
+   * rejection before ownership.
+   * @type {Array<[string, any]> | null}
+   */
+  let effectDisposeEntries = null;
 
   /**
    * Report an error without ever breaking the drain: the sink runs, and
@@ -705,6 +715,20 @@ export function createApp(appDoc, options = {}) {
 
   function scheduleRender() {
     if (renderer === null || renderScheduled) return;
+    if (!booted) {
+      // boot is ATOMIC under every scheduler: a boot frame commits
+      // inside the boot window, never on a later microtask — a paint
+      // pending outside the transaction would leave the deferred first
+      // `afterRender` running against the OLD DOM, missing targets the
+      // boot transaction already placed in state
+      try {
+        render();
+      }
+      catch (err) {
+        safeError(toError(err));
+      }
+      return;
+    }
     renderScheduled = true;
     schedule(() => {
       renderScheduled = false;
@@ -740,7 +764,18 @@ export function createApp(appDoc, options = {}) {
    * commit). */
   function render() {
     if (renderer === null) return;
-    renderer(vnode());
+    renderDepth++;
+    try {
+      renderer(vnode());
+    }
+    finally {
+      renderDepth--;
+      // catch-all: a destroy requested inside this pass (a widget
+      // hook calling app.destroy()) deferred the renderer teardown
+      // into the pass itself — deliver the destroy-wide cleanup
+      // outcome as the pass unwinds, never earlier and never split
+      if (renderDepth === 0 && destroyed) deliverDestroyFailures();
+    }
   }
 
   /**
@@ -755,16 +790,35 @@ export function createApp(appDoc, options = {}) {
   }
 
   /**
-   * The destroy-scope cleanup collector: while `destroy()` runs, every
-   * cleanup failure (subscription cleanups, effect disposal, renderer
-   * teardown) collects here and is delivered as ONE `JA2012` whose
-   * cause is the single failure by identity or an AggregateError over
-   * all of them in occurrence order. Outside `destroy()` (stop(),
-   * per-transaction reconciliation) each failure reports its own
-   * `JA2012` as before.
+   * The destroy-scope cleanup collector: while `destroy()` runs —
+   * INCLUDING a renderer teardown deferred to the end of the active
+   * render pass when the destroy was requested from inside a widget
+   * hook — every cleanup failure (subscription cleanups, effect
+   * disposal, renderer teardown) collects here and is delivered as
+   * ONE `JA2012` whose cause is the single failure by identity or an
+   * AggregateError over all of them in occurrence order. Outside
+   * `destroy()` (stop(), per-transaction reconciliation) each failure
+   * reports its own `JA2012` as before.
    * @type {Error[] | null}
    */
   let destroyFailures = null;
+  /** Non-zero while the app's render pass is on the stack — the only
+   * path from which a widget hook can request an in-hook destroy. */
+  let renderDepth = 0;
+
+  /** Deliver the destroy-wide cleanup outcome exactly once. */
+  function deliverDestroyFailures() {
+    const failures = destroyFailures;
+    destroyFailures = null;
+    if (failures !== null && failures.length > 0) {
+      const cause = failures.length === 1
+        ? failures[0]
+        : new AggregateError(failures, 'multiple cleanup failures in one destroy');
+      safeError(new AppRuntimeError('JA2012',
+        `cleanup failed while destroying the app: ${failures.length} failure(s)`,
+        /** @type {any} */ (cause)));
+    }
+  }
 
   /**
    * Route one cleanup failure: into the destroy-scope collector when
@@ -783,21 +837,10 @@ export function createApp(appDoc, options = {}) {
    * failure like a throwing `dispose()` — later disposers and the
    * renderer teardown always still run. */
   function disposeEffectHandlers() {
-    let names;
-    try {
-      names = Object.keys(effectHandlers);
-    }
-    catch (err) {
-      const cause = toError(err);
-      reportCleanup(
-        `the effect registry threw while enumerating for disposal: ${safeErrorMessage(cause)}`,
-        cause);
-      return;
-    }
+    if (effectDisposeEntries === null) return; // boot failed before the snapshot
     const seen = new Set();
-    for (const name of names) {
+    for (const [name, handler] of effectDisposeEntries) {
       try {
-        const handler = effectHandlers[name];
         if (handler === undefined || handler === null || seen.has(handler)) continue;
         seen.add(handler);
         const dispose = /** @type {any} */ (handler).dispose;
@@ -827,6 +870,14 @@ export function createApp(appDoc, options = {}) {
     let bootFailure = null;
     draining = true; // dispatches made by starting handlers queue
     try {
+      // snapshot BEFORE ownership begins (see effectDisposeEntries)
+      {
+        const entries = [];
+        for (const name of Object.keys(effectHandlers)) {
+          entries.push([name, effectHandlers[name]]);
+        }
+        effectDisposeEntries = entries;
+      }
       if (options.node !== undefined) {
         renderer = createDomRenderer(options.node, {
           document: options.document,
@@ -851,7 +902,13 @@ export function createApp(appDoc, options = {}) {
           // the whole boot (queued drain included) succeeded, so no
           // post-render side effect can escape a boot that rolls back.
           onFrame: (state) => {
-            if (state !== 'live') return;
+            if (state !== 'live') {
+              // the pass ended in terminal teardown: a deferred
+              // in-hook destroy has now finished its renderer walk —
+              // the destroy-wide cleanup outcome is complete
+              deliverDestroyFailures();
+              return;
+            }
             if (!booted) {
               bootFrameLive = true;
               return;
@@ -1053,17 +1110,12 @@ export function createApp(appDoc, options = {}) {
       // one terminal operation, one machine-readable cleanup outcome:
       // a single failure is the cause by identity; several aggregate
       // in occurrence order (subscriptions, then effect disposal, then
-      // the renderer walk — whose own envelope arrives as one element)
-      const failures = destroyFailures;
-      destroyFailures = null;
-      if (failures !== null && failures.length > 0) {
-        const cause = failures.length === 1
-          ? failures[0]
-          : new AggregateError(failures, 'multiple cleanup failures in one destroy');
-        safeError(new AppRuntimeError('JA2012',
-          `cleanup failed while destroying the app: ${failures.length} failure(s)`,
-          /** @type {any} */ (cause)));
-      }
+      // the renderer walk — whose own envelope arrives as one element).
+      // When the destroy was requested from inside the active render
+      // pass, the renderer teardown is still pending — the collector
+      // stays open and delivers when that pass settles (onFrame
+      // 'destroyed', with the render unwind as the catch-all).
+      if (renderDepth === 0) deliverDestroyFailures();
       flushPendingError();
     },
   };
