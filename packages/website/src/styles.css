@@ -489,6 +489,38 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   color: var(--accent);
 }
 
+/* the Studio: split view — the document editor and the live mount of
+   the hosted app; .studio-app* classes style the SEED TEMPLATES'
+   chrome (a hosted document may use any classes; these keep the seeds
+   presentable inside the mount) */
+.studio-grid {
+  display: grid; gap: var(--space-4);
+  grid-template-columns: minmax(20rem, 34rem) minmax(0, 1fr);
+  align-items: start;
+}
+.studio-mount { min-width: 0; }
+.studio-errors { margin-bottom: var(--space-4); }
+.studio-editor .details-card { margin-top: 0; }
+.studio-app h2 { margin-top: 0; }
+.studio-app-lead { color: var(--muted); }
+.studio-app-control { display: inline-flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
+.studio-app-control select {
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg);
+  padding: var(--space-2) var(--space-3); font-size: 0.9rem;
+}
+.studio-app-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-4); }
+.studio-app-nav {
+  display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-4);
+}
+.studio-app-link {
+  border: none; background: transparent; cursor: pointer;
+  padding: var(--space-2) var(--space-3); color: var(--muted); font-size: 0.92rem;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0; border-bottom: 2px solid transparent;
+}
+.studio-app-link.active { color: var(--fg); border-bottom-color: var(--accent); }
+.studio-chart svg { max-width: 100%; height: auto; display: block; }
+
 /* examples */
 .example-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: var(--space-4); }
 .example-card { display: flex; flex-direction: column; }
@@ -497,6 +529,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 /* tablet: two-column grids collapse before they get cramped */
 @media (max-width: 1024px) {
   .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .studio-grid { grid-template-columns: minmax(0, 1fr); }
   .docs-grid { grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-6); }
 }
 
@@ -526,6 +559,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .stat-card { padding: var(--space-3) var(--space-4); }
   .pg-grid, .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .studio-grid { grid-template-columns: minmax(0, 1fr); }
+  .studio-app-panels { grid-template-columns: minmax(0, 1fr); }
   .docs-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .docs-nav { position: static; }
   .docs-sections {

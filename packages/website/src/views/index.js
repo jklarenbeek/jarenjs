@@ -12,6 +12,7 @@ import { HOME_RULES } from './home.js';
 import { BENCH_RULES } from './benchmarks.js';
 import { CHARTSPAGE_RULES } from './chartspage.js';
 import { PLAYGROUND_RULES } from './playground.js';
+import { STUDIO_RULES } from './studio.js';
 import { STATIC_RULES } from './staticpages.js';
 import { README_RULES } from './readme.js';
 import { ASSISTANT_RULES } from './assistant.js';
@@ -25,6 +26,7 @@ export const STYLESHEET = {
   modes: {
     home: { unmatched: 'error' },
     playground: { unmatched: 'error' },
+    studio: { unmatched: 'error' },
     benchmarks: { unmatched: 'error' },
     charts: { unmatched: 'error' },
     docs: { unmatched: 'error' },
@@ -41,6 +43,7 @@ export const STYLESHEET = {
     ...BENCH_RULES,
     ...CHARTSPAGE_RULES,
     ...PLAYGROUND_RULES,
+    ...STUDIO_RULES,
     ...STATIC_RULES,
     ...README_RULES,
     ...ASSISTANT_RULES,

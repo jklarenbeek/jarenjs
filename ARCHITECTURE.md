@@ -73,7 +73,7 @@ flowchart BT
 | [`@jarenjs/calc`](components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](components/calc/ARCHITECTURE.md) |
 | [`@jarenjs/charts`](components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG through view, with a stream adapter over the josl readers' unified events; mermaid's pie delegates here | [charts ARCHITECTURE](components/charts/ARCHITECTURE.md) |
 | [`@jarenjs/ai`](packages/ai) | Browser-side AI: one OpenAI-compatible chat client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs `@jarenjs/validate` checks before every call, a bounded agent loop, and WebMCP registration; depends only on validate | [ai README](packages/ai/README.md) |
-| [`@jarenjs/website`](packages/website) | The GitHub Pages site and playground (not part of the library chain) | [website ARCHITECTURE](packages/website/ARCHITECTURE.md) |
+| [`@jarenjs/website`](packages/website) | The GitHub Pages site, playground, AI assistant and the Studio — a meta-schema-gated host for AI-authored app documents (not part of the library chain) | [website README](packages/website/README.md) |
 
 Two deliberate inversions keep the graph acyclic while letting the layers cooperate:
 

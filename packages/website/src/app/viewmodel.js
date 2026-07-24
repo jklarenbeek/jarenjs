@@ -19,13 +19,15 @@ import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chart
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
-import { callout } from '../lib/nodes.js';
+import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
+import { callout, error } from '../lib/nodes.js';
 import { formatMs, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
 
 const NAV = [
   { page: 'home', label: 'Home', href: '#/' },
   { page: 'playground', label: 'Playground', href: '#/playground' },
+  { page: 'studio', label: 'Studio', href: '#/studio' },
   { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
   { page: 'charts', label: 'Charts', href: '#/charts' },
   { page: 'docs', label: 'Docs', href: '#/docs' },
@@ -70,6 +72,7 @@ export function viewModel(state) {
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
   if (page === 'playground') ui.pg = playgroundPage(state);
+  if (page === 'studio') ui.studio = studioPage(state);
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
   if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
@@ -227,6 +230,63 @@ function playgroundPage(state) {
   return composePg(engine, pgTabs(engine),
     pgIde(state.ide.name, state.ide.names, state.ide.shared),
     validate, generic);
+}
+
+// ---- the Studio ----
+
+/** The picker cards: constant content, computed once. */
+const STUDIO_PICKER = {
+  templates: STUDIO_TEMPLATES.map((t) => ({
+    name: t.name,
+    title: t.title,
+    lead: t.lead,
+    preview: JSON.stringify(t.doc, null, 2).split('\n').slice(0, 14).join('\n') + '\n…',
+  })),
+};
+
+/** The host-widget props: reference-stable per (doc, revision). */
+const studioMount = memo1((doc, revision) => ({ doc, revision }));
+
+const studioEditorText = memo1((doc) => JSON.stringify(doc, null, 2));
+
+/** A failed validation report as the site's standard error nodes. */
+const studioErrorNodes = memo1((errors) => {
+  if (errors === null) return [];
+  const nodes = errors.list.map((e) => error({
+    message: e.message,
+    dataPath: e.instancePath,
+    code: e.keyword !== '' ? e.keyword : undefined,
+  }, 'Schema error'));
+  if (errors.total > errors.list.length) {
+    nodes.push(callout('More errors', `${errors.total - errors.list.length} further meta-schema errors were truncated — fix the ones above first.`));
+  }
+  return nodes;
+});
+
+const composeStudioLive = memo1((editorText, revision, bootError, ide, mount) => ({
+  editorText,
+  revision,
+  error: bootError,
+  ide,
+  mount,
+}));
+
+// the validation report renders at page level: a failed editor commit
+// (or an invalid inbound share) reports whether or not a document is
+// currently live — the old document stays mounted underneath
+const composeStudioPage = memo1((live, errorNodes) => ({
+  ...(live === null ? { picker: STUDIO_PICKER } : { live }),
+  errors: errorNodes,
+  hasErrors: errorNodes.length > 0,
+}));
+
+function studioPage(state) {
+  const s = state.studio;
+  const live = s.doc === null ? null : composeStudioLive(
+    studioEditorText(s.doc), s.revision, s.error,
+    pgIde(state.ide.name, state.ide.names, state.ide.shared),
+    studioMount(s.doc, s.revision));
+  return composeStudioPage(live, studioErrorNodes(s.errors));
 }
 
 function matchesWhen(when, inputs) {

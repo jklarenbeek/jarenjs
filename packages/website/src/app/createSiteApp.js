@@ -25,6 +25,8 @@ import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
 import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp,
 } from '../boundaries/assistant.js';
+import { validateAppDocument, createStudioHostWidget } from '../boundaries/studio.js';
+import { studioTemplate } from '../content/appTemplates.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
@@ -46,6 +48,9 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   absolute URL for a hash and put it on the clipboard; returns the URL.
  * @property {{ read: () => any, write: (data: any) => void }} [storage]
  *   The experiment store (localStorage in the browser).
+ * @property {(filename: string, text: string) => boolean | void} [download]
+ *   Save a text file on the user's machine (a Blob + anchor click in
+ *   the browser); omit for no-download hosts. Return true on success.
  * @property {any} [modelContext] - A WebMCP `navigator.modelContext`
  *   implementation; when present, the site registers its tools on it.
  * @property {typeof fetch} [aiFetch] - fetch for the AI assistant's
@@ -59,6 +64,10 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   0 = synchronous, for tests).
  * @property {(error: Error) => void} [onError]
  */
+
+/** Share tokens beyond this length get an honest refusal, not a
+ * silently mangled URL (studio documents can be long). */
+const SHARE_TOKEN_LIMIT = 8000;
 
 /** @param {SiteEnv} env */
 export function createSiteApp(env) {
@@ -83,6 +92,23 @@ export function createSiteApp(env) {
   });
 
   const ideNames = () => Object.keys(store.experiments).sort();
+
+  /** Which experiment kind the current route saves/shares. */
+  const engineFor = (state) => (state.route.page === 'studio'
+    ? 'studio'
+    : state.route.page === 'playground'
+      ? (state.route.params.engine ?? 'validate')
+      : 'validate');
+
+  /** Engine → the inputs snapshot the IDE store keeps for it. */
+  const ideInputsFor = (state, engine) => {
+    if (engine === 'studio') {
+      return state.studio.doc === null ? null : { doc: state.studio.doc };
+    }
+    return engine === 'validate'
+      ? { schemaText: state.pg.schemaText, data: state.pg.data }
+      : state.eng[engine];
+  };
 
   // the AI assistant toolbox: the playground engines as schema-guarded
   // @jarenjs/ai tools, shared by the chat panel and the WebMCP bridge.
@@ -127,12 +153,9 @@ export function createSiteApp(env) {
       const state = app.getState();
       const name = state.ide.name.trim();
       if (name === '') return;
-      const engine = state.route.page === 'playground'
-        ? (state.route.params.engine ?? 'validate')
-        : 'validate';
-      const inputs = engine === 'validate'
-        ? { schemaText: state.pg.schemaText, data: state.pg.data }
-        : state.eng[engine];
+      const engine = engineFor(state);
+      const inputs = ideInputsFor(state, engine);
+      if (inputs === null) return; // an empty studio has nothing to save
       store.experiments[name] = { engine, inputs, savedAt: new Date().toISOString() };
       storage.write(store);
       dispatch('ide/names', ideNames());
@@ -140,6 +163,11 @@ export function createSiteApp(env) {
     'ide-load': (props, dispatch) => {
       const experiment = store.experiments[props.name];
       if (experiment === undefined) return;
+      if (experiment.engine === 'studio') {
+        env.navigate?.('#/studio');
+        dispatch('studio/doc', { doc: experiment.inputs.doc });
+        return;
+      }
       env.navigate?.(`#/playground?engine=${experiment.engine}`);
       if (experiment.engine === 'validate') {
         dispatch('pg/example', {
@@ -158,15 +186,55 @@ export function createSiteApp(env) {
     },
     'ide-share': (props, dispatch) => {
       const state = app.getState();
-      const engine = state.route.page === 'playground'
-        ? (state.route.params.engine ?? 'validate')
-        : 'validate';
-      const inputs = engine === 'validate'
-        ? { schemaText: state.pg.schemaText, data: state.pg.data }
-        : state.eng[engine];
+      const engine = engineFor(state);
+      const inputs = ideInputsFor(state, engine);
+      if (inputs === null) return; // an empty studio has nothing to share
       const token = encodeShare({ e: engine, i: inputs });
-      const url = env.share?.(`#/playground?engine=${engine}&s=${token}`);
+      // hash-length honesty: a very long studio document makes a token
+      // browsers and chat clients mangle — say so instead of truncating
+      if (token.length > SHARE_TOKEN_LIMIT) {
+        dispatch('ide/shared',
+          `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars) — use Download instead`);
+        return;
+      }
+      const hash = engine === 'studio'
+        ? `#/studio?s=${token}`
+        : `#/playground?engine=${engine}&s=${token}`;
+      const url = env.share?.(hash);
       dispatch('ide/shared', url === undefined ? 'link ready' : 'link copied');
+    },
+
+    // the Studio boundary runs: parse + meta-schema-validate an editor
+    // commit, load a seed template, download the current document
+    'studio-parse': (props, dispatch) => {
+      let doc;
+      try {
+        doc = JSON.parse(props.text);
+      }
+      catch (err) {
+        dispatch('studio/errors', {
+          list: [{ instancePath: '', keyword: '', message: `Invalid JSON: ${/** @type {Error} */ (err).message}` }],
+          total: 1,
+        });
+        return;
+      }
+      const report = validateAppDocument(doc);
+      if (!report.valid) {
+        dispatch('studio/errors', { list: report.errors, total: report.total });
+        return;
+      }
+      dispatch('studio/doc', { doc });
+    },
+    'studio-template': (props, dispatch) => {
+      const template = studioTemplate(props.name);
+      if (template === undefined) return;
+      dispatch('studio/doc', { doc: template.doc });
+    },
+    'studio-download': (props, dispatch) => {
+      const doc = app.getState().studio.doc;
+      if (doc === null) return;
+      const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
+      dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
     },
     'open-example': (props, dispatch) => {
       if (props.validate === true) {
@@ -232,6 +300,9 @@ export function createSiteApp(env) {
     afterRender: () => env.revealActiveTab?.(),
     onError: report,
     effects,
+    // the Studio host: a widget whose mount/destroy owns the nested,
+    // isolated app a studio document boots into (boundaries/studio.js)
+    widgets: { 'studio-doc': createStudioHostWidget({ schedule: env.schedule }) },
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),
       ...rates.subs,
@@ -330,12 +401,27 @@ function wireBoundaries(app, debounceMs) {
   let appliedToken = null;
   function applyShareToken(state) {
     const token = state.route.params.s;
-    if (state.route.page !== 'playground' || token === undefined || token === appliedToken)
+    const page = state.route.page;
+    if ((page !== 'playground' && page !== 'studio') || token === undefined
+      || token === appliedToken) {
       return;
+    }
     appliedToken = token;
     const snapshot = decodeShare(token);
     if (snapshot === null || typeof snapshot.e !== 'string' || snapshot.i === undefined)
       return;
+    if (page === 'studio') {
+      // a shared studio document passes the same meta-schema gate as
+      // every other entry path; a failing one reports instead of booting
+      if (snapshot.e !== 'studio' || snapshot.i.doc === null
+        || typeof snapshot.i.doc !== 'object') {
+        return;
+      }
+      const report = validateAppDocument(snapshot.i.doc);
+      if (report.valid) app.dispatch('studio/doc', { doc: snapshot.i.doc });
+      else app.dispatch('studio/errors', { list: report.errors, total: report.total });
+      return;
+    }
     if (snapshot.e === 'validate') {
       app.dispatch('pg/example', { schemaText: snapshot.i.schemaText, data: snapshot.i.data });
     }

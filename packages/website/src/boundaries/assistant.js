@@ -21,8 +21,12 @@ import {
   createChatClient, createAgent, createToolbox, registerModelContext, PROVIDERS,
 } from '@jarenjs/ai';
 
+import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
+
 import { runValidation } from './validator.js';
 import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES } from './engines.js';
+import { validateAppDocument } from './studio.js';
+import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
 
 /** Provider options for the settings select (BYOK: three shapes). */
 export const PROVIDER_OPTIONS = Object.entries(PROVIDERS)
@@ -156,7 +160,7 @@ export function createSiteToolbox(env) {
     inputSchema: {
       type: 'object',
       properties: {
-        page: { enum: ['home', 'playground', 'benchmarks', 'charts', 'docs', 'examples', 'calculator'] },
+        page: { enum: ['home', 'playground', 'studio', 'benchmarks', 'charts', 'docs', 'examples', 'calculator'] },
         params: { type: 'object', additionalProperties: { type: 'string' } },
       },
       required: ['page'],
@@ -184,9 +188,112 @@ export function createSiteToolbox(env) {
     },
   });
 
+  // ---- the Studio: authoring a complete app document ----
+
+  /** The current studio document, or null. */
+  const studioDoc = () => env.getApp()?.getState().studio.doc ?? null;
+
+  /** Validate + swap a document in, navigating so the human watches it boot. */
+  const studioSwap = (doc) => {
+    const report = validateAppDocument(doc);
+    if (!report.valid) {
+      return {
+        ok: false,
+        errors: report.errors,
+        total: report.total,
+        hint: 'The document must validate against the jaren-app meta-schema. Each error carries an instancePath into your document — fix those paths and try again.',
+      };
+    }
+    const app = env.getApp();
+    if (app === null) return { error: 'the studio is not running here' };
+    go('#/studio');
+    app.dispatch('studio/doc', { doc });
+    return { ok: true, revision: app.getState().studio.revision };
+  };
+
+  toolbox.add({
+    name: 'jaren_studio_write',
+    description: 'Load a COMPLETE @jarenjs/app document (state + JSLT view + actions as one JSON value) into the Studio (#/studio), where it boots as a live app the user watches. The document is validated against the jaren-app meta-schema first; on failure you get the errors (with instancePaths) to repair. Start from jaren_get_templates and iterate with jaren_studio_patch instead of resending whole documents.',
+    inputSchema: {
+      type: 'object',
+      properties: { doc: { type: 'object' } },
+      required: ['doc'],
+    },
+    execute: (input) => studioSwap(input.doc),
+  });
+
+  toolbox.add({
+    name: 'jaren_studio_patch',
+    description: 'Modify the current Studio document with an RFC 6902 JSON Patch (applied by the suite\'s own patch engine). The patched result is re-validated against the meta-schema before it swaps in — an invalid result is rejected atomically and the current document stays live. Returns the new revision, or the errors to repair.',
+    inputSchema: {
+      type: 'object',
+      properties: { patch: { type: 'array', items: { type: 'object' } } },
+      required: ['patch'],
+    },
+    execute: (input) => {
+      const doc = studioDoc();
+      if (doc === null) {
+        return { error: 'no studio document is loaded — load one with jaren_studio_write or a template first' };
+      }
+      let next;
+      try {
+        next = applyJSONPatch(doc, input.patch);
+      }
+      catch (err) {
+        return { error: `the patch failed to apply: ${/** @type {Error} */ (err).message}` };
+      }
+      return studioSwap(next);
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_studio_read',
+    description: 'Read the current Studio document, or one subtree of it via a JSON Pointer (e.g. { pointer: "/view/rules/0" }) — inspect narrowly instead of pulling the whole document into context.',
+    inputSchema: {
+      type: 'object',
+      properties: { pointer: { type: 'string' } },
+    },
+    execute: (input) => {
+      const doc = studioDoc();
+      if (doc === null) return { error: 'no studio document is loaded' };
+      if (input.pointer === undefined || input.pointer === '') {
+        return { doc, revision: env.getApp().getState().studio.revision };
+      }
+      let value;
+      try {
+        value = compileJSONPointer(input.pointer)(doc);
+      }
+      catch (err) {
+        return { error: `invalid JSON Pointer: ${/** @type {Error} */ (err).message}` };
+      }
+      if (value === JSONPOINTER_NOTHING) {
+        return { error: `nothing at '${input.pointer}' in the current document` };
+      }
+      return { value };
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_get_templates',
+    description: 'The Studio seed library: complete, boot-tested @jarenjs/app documents (a validated form, a charts dashboard, a routed mini-site). Without a name you get the list; with a name, the full document — load it with jaren_studio_write and adapt it with jaren_studio_patch.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { enum: STUDIO_TEMPLATES.map((t) => t.name) } },
+    },
+    execute: (input) => {
+      if (input.name === undefined) {
+        return STUDIO_TEMPLATES.map((t) => ({ name: t.name, title: t.title, lead: t.lead }));
+      }
+      const template = studioTemplate(input.name);
+      return template === undefined
+        ? { error: `no template named '${input.name}'`, names: STUDIO_TEMPLATES.map((t) => t.name) }
+        : { name: template.name, title: template.title, lead: template.lead, doc: template.doc };
+    },
+  });
+
   toolbox.add({
     name: 'jaren_save_experiment',
-    description: 'Save the current playground engine and inputs as a named experiment (the localStorage IDE store), so the user keeps what you built together. Returns the updated experiment names.',
+    description: 'Save what is on screen as a named experiment (the localStorage IDE store) so the user keeps what you built together: the current playground engine and inputs, or — on #/studio — the current studio document. Returns the updated experiment names.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', minLength: 1 } },
@@ -270,6 +377,17 @@ export const SYSTEM_PROMPT = [
   '5. When a run turns out well, offer to keep it: jaren_save_experiment stores it by name,',
   '   jaren_share_link copies a link that restores it.',
   '6. Keep replies to a sentence or two — the full output is already visible on the page.',
+  '',
+  'The Studio (#/studio) — where you author a whole application:',
+  'A studio document is a COMPLETE @jarenjs/app app — initial state, a JSLT view stylesheet',
+  'and named actions as one JSON value — validated by the jaren-app meta-schema and booted',
+  'live by the real app runtime. Its view may use the widgets form ({ schema, data }),',
+  'chart ({ config }), markdown ({ source }) and mermaid ({ source }).',
+  '7. Author via template + patch, never from scratch: jaren_get_templates for a seed,',
+  '   jaren_studio_write to load it, jaren_studio_read to inspect (use a pointer for one',
+  '   subtree), then small RFC 6902 patches with jaren_studio_patch.',
+  '8. Validation errors are instructions, not failures: each carries an instancePath into',
+  '   your document — repair exactly those paths and patch again.',
 ].join('\n');
 
 /** Chat turns sent back to the model per request (persisted transcripts can be long). */

@@ -176,6 +176,38 @@ export const ACTIONS = {
   // examples page: load an example into the playground and go there
   'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },
 
+  // the Studio: swapping the hosted document is ATOMIC — only an
+  // already-validated document reaches 'studio/doc' (the studio-parse
+  // effect and the assistant tools validate first); a failed validation
+  // lands in 'studio/errors' and the old document stays live
+  'studio/doc': {
+    patch: [
+      { op: 'replace', path: '/studio/doc', value: '$payload.doc' },
+      { op: 'replace', path: '/studio/errors', value: null },
+      { op: 'replace', path: '/studio/error', value: null },
+      { op: 'replace', path: '/studio/revision', value: { $add: ['$.studio.revision', 1] } },
+    ],
+  },
+  'studio/errors': {
+    patch: [{ op: 'replace', path: '/studio/errors', value: '$payload' }],
+  },
+  // boot/runtime failures from the nested app's own error sink (the
+  // host widget emits these — they never throw into the site's render)
+  'studio/error': {
+    patch: [{ op: 'replace', path: '/studio/error', value: '$payload' }],
+  },
+  'studio/clear': {
+    patch: [
+      { op: 'replace', path: '/studio/doc', value: null },
+      { op: 'replace', path: '/studio/errors', value: null },
+      { op: 'replace', path: '/studio/error', value: null },
+    ],
+  },
+  // the JSON editor commits on change (blur), like the data pane
+  'studio/text': { effects: [{ run: 'studio-parse', with: { text: '$event.value' } }] },
+  'studio/template': { effects: [{ run: 'studio-template', with: { name: '$payload' } }] },
+  'studio/download': { effects: [{ run: 'studio-download' }] },
+
   // the package-README dialog: open (fetch), receive, fail, close
   'readme/open': {
     patch: [

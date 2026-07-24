@@ -81,6 +81,16 @@ createSiteApp({
     return url;
   },
   storage: jsonStore(IDE_KEY),
+  // the Studio's "keep it" escape hatch: save the document as a file
+  download: (filename, text) => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    return true;
+  },
   // the AI assistant: real fetch to the user-chosen provider; settings
   // (including the bring-your-own key) and the conversation transcript
   // persisted locally and nowhere else

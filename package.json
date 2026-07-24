@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.18.1",
+  "version": "0.19.0",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
@@ -125,15 +125,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/app": "^0.18.1",
-    "@jarenjs/core": "^0.18.1",
-    "@jarenjs/formats": "^0.18.1",
-    "@jarenjs/forms": "^0.18.1",
-    "@jarenjs/json": "^0.18.1",
-    "@jarenjs/md": "^0.18.1",
-    "@jarenjs/refs": "^0.18.1",
-    "@jarenjs/validate": "^0.18.1",
-    "@jarenjs/view": "^0.18.1"
+    "@jarenjs/app": "^0.19.0",
+    "@jarenjs/core": "^0.19.0",
+    "@jarenjs/formats": "^0.19.0",
+    "@jarenjs/forms": "^0.19.0",
+    "@jarenjs/json": "^0.19.0",
+    "@jarenjs/md": "^0.19.0",
+    "@jarenjs/refs": "^0.19.0",
+    "@jarenjs/validate": "^0.19.0",
+    "@jarenjs/view": "^0.19.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

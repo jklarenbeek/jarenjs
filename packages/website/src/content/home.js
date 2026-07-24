@@ -39,6 +39,10 @@ export const HOME_CONTENT = {
       'Machine-repairable failures: stable codes plus a docPath pointer into the offending document',
     ],
   },
+  studio: {
+    title: 'The Studio: one prompt → website',
+    lead: 'A second, untrusted app document hosted next to the site\'s own: you — or the AI assistant — author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot, and the real app runtime runs it live. The AI writes JSON; Jaren validates it. No eval, no server, no scaffolding.',
+  },
   meta: {
     title: 'This site is the demo',
     lead: 'You are looking at an application whose state, view and actions are one JSON document: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, and the playground form is rendered by the standard forms stylesheet. No framework, no eval — the suite, all the way down.',

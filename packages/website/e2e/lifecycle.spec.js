@@ -27,7 +27,7 @@ test('the app boots with landmark semantics intact', async ({ page }) => {
   await expect(page.locator('nav#site-nav')).toBeVisible();
   await expect(page.locator('main.main')).toBeVisible();
   await expect(page.locator('h1').first()).toBeVisible();
-  await expect(page.locator('#site-nav .nav-link')).toHaveCount(7);
+  await expect(page.locator('#site-nav .nav-link')).toHaveCount(8);
 
   const toggle = page.locator('button[aria-controls="site-nav"]');
   await expect(toggle).toHaveAttribute('aria-label', 'Toggle navigation');
@@ -41,7 +41,7 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
   // a marker that survives only when navigation stays client-side
   await page.evaluate(() => { window.__jarenE2eMarker = 42; });
 
-  for (const label of ['Playground', 'Benchmarks', 'Charts', 'Docs', 'Examples', 'Calculator', 'Home']) {
+  for (const label of ['Playground', 'Studio', 'Benchmarks', 'Charts', 'Docs', 'Examples', 'Calculator', 'Home']) {
     await page.locator('#site-nav .nav-link', { hasText: label }).first().click();
     await expect(page.locator('main.main')).toBeVisible();
     await expect(page.locator('#site-nav .nav-link.active')).toHaveText(label);
