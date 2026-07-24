@@ -29,8 +29,46 @@ describe('ai — the toolbox', function () {
     assert.match(rejected.error, /invalid input for add/);
     assert.deepStrictEqual(rejected.inputSchema.required, ['a', 'b'],
       'the schema rides along so the model can self-correct');
+    assert.ok(Array.isArray(rejected.errors) && rejected.errors.length > 0,
+      'the validation errors ride along too');
+    assert.ok(rejected.errors.every((e) => typeof e.message === 'string'
+      && typeof e.instancePath === 'string'));
     // null/undefined args validate as an empty object
     assert.match(demoToolbox().execute('add', undefined).error, /invalid input/);
+  });
+
+  it('parses JSON-encoded strings where the schema wants structure', function () {
+    const toolbox = createToolbox();
+    toolbox.add({
+      name: 'echo',
+      description: 'Echo a document and a list.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          doc: { type: 'object' },
+          list: { type: 'array', items: { type: 'object' } },
+          note: { type: 'string' },
+        },
+        required: ['doc'],
+      },
+      execute: (input) => input,
+    });
+    // the classic weak-model mistake: nested JSON as a string argument
+    const result = toolbox.execute('echo', {
+      doc: '{"a": 1}',
+      list: '[{"op": "add"}]',
+      note: '{"not": "parsed"}',
+    });
+    assert.deepStrictEqual(result.doc, { a: 1 }, 'stringified object coerced');
+    assert.deepStrictEqual(result.list, [{ op: 'add' }], 'stringified array coerced');
+    assert.strictEqual(result.note, '{"not": "parsed"}',
+      'a property that wants a string keeps its string');
+    // a string that is not JSON still fails with the real errors and
+    // a hint naming the property that arrived stringified
+    const rejected = toolbox.execute('echo', { doc: 'not json' });
+    assert.match(rejected.error, /invalid input for echo/);
+    assert.ok(rejected.errors.length > 0);
+    assert.match(rejected.hint, /'doc' arrived as a JSON-encoded string/);
   });
 
   it('unknown tools and throwing tools answer with { error }, never a throw', async function () {

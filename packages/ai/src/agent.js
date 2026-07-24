@@ -68,7 +68,7 @@ export function createAgent(options) {
           role: 'assistant',
           content: reply.content !== ''
             ? reply.content
-            : `Stopped after ${maxToolRounds} tool rounds without a final answer.`,
+            : `Stopped after ${maxToolRounds} tool rounds without a final answer — the tool work so far has been applied; send another message to continue.`,
         };
         messages.push(message);
         return { message, messages, steps, stopReason: 'tool-limit' };

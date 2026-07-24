@@ -5,7 +5,7 @@ import * as assert from 'node:assert';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import {
-  validateAppDocument, loadStudioDocument,
+  validateAppDocument, loadStudioDocument, auditDocumentRender,
 } from '../../packages/website/src/boundaries/studio.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../../packages/website/src/content/appTemplates.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
@@ -352,6 +352,64 @@ describe('website — the Studio page', function () {
     fire(findButton(headless.container, 'Load'), 'click');
     headless.app.dispatch('studio/download');
     assert.strictEqual(headless.app.getState().ide.shared, 'download unavailable here');
+  });
+});
+
+describe('website — the Studio render audit (auditDocumentRender)', function () {
+  it('reports the widgets of every seed template with no problems', function () {
+    for (const template of STUDIO_TEMPLATES) {
+      const audit = auditDocumentRender(template.doc);
+      assert.deepStrictEqual(audit.problems, [], `${template.name} renders clean`);
+      assert.ok(audit.widgets.length > 0, `${template.name} hosts at least one widget`);
+    }
+  });
+
+  it('catches the valid-but-broken shapes the meta-schema accepts', function () {
+    const base = /** @type {any} */ (studioTemplate('form')).doc;
+
+    // a bare object where a vnode belongs (a model patch clobbered a child)
+    const clobbered = JSON.parse(JSON.stringify(base));
+    clobbered.view.rules[0].body[2] = { class: 'studio-app' };
+    const bare = auditDocumentRender(clobbered);
+    assert.ok(bare.problems.some((p) => /bare object is not a vnode/.test(p)), bare.problems.join('; '));
+
+    // a form widget whose schema resolves to nothing
+    const misfed = JSON.parse(JSON.stringify(base));
+    misfed.view.rules[0].body[4] = ['jaren-widget', { name: 'form', props: { schema: '$.nope' } }];
+    const feed = auditDocumentRender(misfed);
+    assert.ok(feed.problems.some((p) => /props\.schema did not resolve/.test(p)), feed.problems.join('; '));
+
+    // an unknown widget name
+    const unknown = JSON.parse(JSON.stringify(base));
+    unknown.view.rules[0].body[4] = ['jaren-widget', { name: 'fom', props: {} }];
+    const named = auditDocumentRender(unknown);
+    assert.ok(named.problems.some((p) => /unknown widget 'fom'/.test(p)), named.problems.join('; '));
+  });
+
+  it('rides along on the studio write/patch tool results', function () {
+    /** @type {any[]} */
+    let registered = [];
+    mountSite({
+      hash: '#/',
+      modelContext: { provideContext: ({ tools }) => { registered = tools; } },
+    });
+    const tool = (name) => registered.find((t) => t.name === name);
+    const seed = tool('jaren_get_templates').execute({ name: 'form' });
+
+    const written = tool('jaren_studio_write').execute({ doc: seed.doc });
+    assert.strictEqual(written.ok, true);
+    assert.deepStrictEqual(written.widgets, ['form'], 'a clean write reports its widgets');
+    assert.strictEqual(written.renderProblems, undefined);
+
+    // break the form widget's feed through a valid patch: the tool
+    // answers ok (the document IS valid and live) plus the problems
+    const patched = tool('jaren_studio_patch').execute({
+      patch: [{ op: 'replace', path: '/view/rules/0/body/4/1/props/schema', value: '$.nope' }],
+    });
+    assert.strictEqual(patched.ok, true);
+    assert.ok(patched.renderProblems.some((p) => /props\.schema did not resolve/.test(p)),
+      'the render audit surfaced the broken widget feed');
+    assert.match(patched.hint, /renders broken/);
   });
 });
 

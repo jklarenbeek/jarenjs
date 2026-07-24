@@ -25,8 +25,9 @@ import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenj
 
 import { runValidation } from './validator.js';
 import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES } from './engines.js';
-import { validateAppDocument } from './studio.js';
+import { validateAppDocument, auditDocumentRender } from './studio.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
+import { exampleSchemas } from '../content/schemas.js';
 
 /** Provider options for the settings select (BYOK: three shapes). */
 export const PROVIDER_OPTIONS = Object.entries(PROVIDERS)
@@ -42,6 +43,16 @@ export function isConfigured(s) {
   if (s.provider === 'custom') return s.baseUrl.trim() !== '';
   if (s.provider === 'openrouter') return s.apiKey.trim() !== '';
   return true; // local runtimes (Ollama, LM Studio) need no key
+}
+
+/** JSON text in, value out — non-JSON text stays the string it was. */
+function parseJsonText(text) {
+  try {
+    return JSON.parse(text);
+  }
+  catch {
+    return text;
+  }
 }
 
 /** Fill an engine's absent fields so `eng/load` replaces cleanly. */
@@ -89,16 +100,17 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_validate',
-    description: 'Validate a JSON document against a JSON Schema with the Jaren validating compiler, loading both into the playground so the user sees the result. Returns { valid, errors, draft, compileMs, validateMs }.',
+    description: 'Validate a JSON document against a JSON Schema with the Jaren validating compiler, loading both into the playground so the user sees the result. Pass `schema` as a real JSON object (not JSON text). Returns { valid, errors, draft, compileMs, validateMs }.',
     inputSchema: {
       type: 'object',
-      properties: { schema: {}, data: {} },
+      properties: { schema: { type: ['object', 'boolean'] }, data: {} },
       required: ['schema'],
     },
     execute: (input) => {
       const app = env.getApp();
       const schemaText = JSON.stringify(input.schema, null, 2);
-      const data = input.data ?? null;
+      // models often hand the document over as JSON text — accept it
+      const data = typeof input.data === 'string' ? parseJsonText(input.data) : (input.data ?? null);
       if (app !== null) {
         go('#/playground?engine=validate');
         app.dispatch('pg/example', { schemaText, data });
@@ -109,7 +121,7 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_run_engine',
-    description: `Run one of the Jaren playground engines (${engineKeys.join(', ')}) with text inputs (JSON values as JSON text), loading them into the playground so the user watches it run. Returns the render nodes the site itself shows, including errors with stable codes and docPaths.`,
+    description: `Run one of the Jaren playground engines (${engineKeys.join(', ')}) with text inputs (JSON values as JSON text), loading them into the playground so the user watches it run. JSON Schema validation is NOT an engine here — use jaren_validate for that. Returns the render nodes the site itself shows, including errors with stable codes and docPaths.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -174,14 +186,16 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_get_examples',
-    description: 'Get the site\'s working examples for one engine — each is { label, inputs } and runs as-is through jaren_run_engine. Before writing a program for an engine you have not used this conversation, fetch its examples and adapt one instead of guessing syntax. Pass `label` to get a single example.',
+    description: 'Get the site\'s working examples for one engine — each is { label, inputs } and runs as-is through jaren_run_engine (for engine \'validate\': { label, schema, data } for jaren_validate). Before writing a program for an engine you have not used this conversation, fetch its examples and adapt one instead of guessing syntax. Pass `label` to get a single example.',
     inputSchema: {
       type: 'object',
-      properties: { engine: { enum: engineKeys }, label: { type: 'string' } },
+      properties: { engine: { enum: [...engineKeys, 'validate'] }, label: { type: 'string' } },
       required: ['engine'],
     },
     execute: (input) => {
-      const all = ENGINE_EXAMPLES[input.engine] ?? [];
+      const all = input.engine === 'validate'
+        ? Object.values(exampleSchemas).map((e) => ({ label: e.name, schema: e.schema, data: e.data }))
+        : (ENGINE_EXAMPLES[input.engine] ?? []);
       if (input.label === undefined) return all;
       const hit = all.find((e) => e.label === input.label);
       return hit ?? { error: `no example labelled '${input.label}'`, labels: all.map((e) => e.label) };
@@ -208,7 +222,19 @@ export function createSiteToolbox(env) {
     if (app === null) return { error: 'the studio is not running here' };
     go('#/studio');
     app.dispatch('studio/doc', { doc });
-    return { ok: true, revision: app.getState().studio.revision };
+    // "it validates" is not "it renders": audit the first frame so a
+    // model that mangled a vnode or a widget's props hears about it
+    // now instead of reporting success over a broken mount
+    const audit = auditDocumentRender(doc);
+    return {
+      ok: true,
+      revision: app.getState().studio.revision,
+      widgets: audit.widgets,
+      ...(audit.problems.length === 0 ? {} : {
+        renderProblems: audit.problems,
+        hint: 'The document is live, but its first frame renders broken pieces — the paths index into the vnode tree your view produced. Repair the view (or the state it reads) and patch again.',
+      }),
+    };
   };
 
   toolbox.add({
@@ -366,6 +392,8 @@ export const SYSTEM_PROMPT = [
   ...Object.entries(ENGINE_DEFS).map(([key, def]) => `- ${key} — ${def.label}: ${def.lead}`),
   '',
   'How to work:',
+  '0. Tool arguments are JSON: pass objects and arrays as REAL JSON values, never as',
+  '   JSON-encoded strings (write {"doc": {…}}, not {"doc": "{…}"}).',
   '1. You help by DRIVING the playground with your tools, not by pasting long answers — every',
   '   tool call loads its inputs into the live playground, so the user watches it happen.',
   '2. Call jaren_get_state before editing, and build on what is already on screen. Use',
@@ -388,6 +416,12 @@ export const SYSTEM_PROMPT = [
   '   subtree), then small RFC 6902 patches with jaren_studio_patch.',
   '8. Validation errors are instructions, not failures: each carries an instancePath into',
   '   your document — repair exactly those paths and patch again.',
+  '9. A schema-driven form lives in state: the form template already renders /state/schema',
+  '   through its ONE form widget, so shape your form by replacing /state/schema and',
+  '   /state/data — never add a second form widget for the same schema, and keep the',
+  '   template\'s heading in step with your form\'s title.',
+  '10. End every turn with a short, finished summary of what is now on screen — never with',
+  '   an announcement of work you have not done.',
 ].join('\n');
 
 /** Chat turns sent back to the model per request (persisted transcripts can be long). */
@@ -438,9 +472,11 @@ export function createAssistantEffects(deps) {
       }
 
       // weak local models are first-class: enough rounds to read an
-      // engine's { error } result, fetch an example and try again
+      // engine's { error } result, fetch an example and try again —
+      // and a studio flow (template → write → patch → repair → save)
+      // legitimately runs long
       const agent = createAgent({
-        client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 8,
+        client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 12,
       });
       // build the turn from this effect's own snapshot: the ai/user
       // dispatch above is queued FIFO behind the running transaction,
@@ -454,7 +490,11 @@ export function createAssistantEffects(deps) {
         // back to 'Thinking…' between a tool's result and the next token
         onToolResult: () => dispatch('ai/activity', null),
       }).then(
-        (result) => dispatch('ai/reply', result.message.content),
+        // reasoning models sometimes return an empty final message —
+        // an honest placeholder beats an empty bubble
+        (result) => dispatch('ai/reply', result.message.content !== ''
+          ? result.message.content
+          : '*The model ended its turn without a reply — whatever it loaded is on screen; send another message to continue.*'),
         (err) => dispatch('ai/failed', err?.message ?? String(err)),
       );
     },

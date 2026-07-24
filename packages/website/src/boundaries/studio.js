@@ -166,6 +166,80 @@ const STUDIO_WIDGETS = {
 // effects and subs
 const compileTypeTest = createTypeTestCompiler();
 
+//#region the headless render audit
+
+/** Render problems reported per audit: enough to repair, bounded. */
+const MAX_RENDER_PROBLEMS = 8;
+
+/**
+ * Walk one rendered vnode with the renderer's own shape rules (text,
+ * skipped, `[tag, props?, ...children]`, non-string-head arrays splice
+ * as lists) and collect what a live mount would host: the widgets it
+ * names, and the shapes that render as junk even though the meta-schema
+ * accepted the document.
+ * @param {any} node
+ * @param {string} path - a JSON-pointer-ish trail into the rendered tree
+ * @param {{ widgets: string[], problems: string[] }} out
+ */
+function walkRenderedVnode(node, path, out) {
+  if (out.problems.length >= MAX_RENDER_PROBLEMS) return;
+  if (node == null || node === true || node === false) return; // skipped
+  if (typeof node === 'string' || typeof node === 'number') return; // text
+  if (!Array.isArray(node)) {
+    out.problems.push(`${path}: a bare object is not a vnode — it renders as nothing (expected ["tag", props, ...children] or text)`);
+    return;
+  }
+  if (typeof node[0] !== 'string') {
+    // a list: each item renders in place
+    for (let i = 0; i < node.length; i++) walkRenderedVnode(node[i], `${path}/${i}`, out);
+    return;
+  }
+  if (node[0] === 'jaren-widget') {
+    const props = (node[1] !== null && typeof node[1] === 'object' && !Array.isArray(node[1])) ? node[1] : {};
+    const name = props.name;
+    out.widgets.push(String(name));
+    if (STUDIO_WIDGETS[name] === undefined) {
+      out.problems.push(`${path}: unknown widget '${String(name)}' — available: ${Object.keys(STUDIO_WIDGETS).join(', ')}`);
+    }
+    else if (name === 'form' && (props.props?.schema === null || typeof props.props?.schema !== 'object')) {
+      out.problems.push(`${path}: the form widget's props.schema did not resolve to a JSON Schema object — the form renders an error instead of fields`);
+    }
+    else if (name === 'chart' && (props.props?.config === null || typeof props.props?.config !== 'object')) {
+      out.problems.push(`${path}: the chart widget's props.config did not resolve to a chart definition object`);
+    }
+    return;
+  }
+  const start = (node.length > 1 && node[1] !== null && typeof node[1] === 'object' && !Array.isArray(node[1])) ? 2 : 1;
+  for (let i = start; i < node.length; i++) walkRenderedVnode(node[i], `${path}/${i}`, out);
+}
+
+/**
+ * Render the document's first frame headlessly — the same stylesheet
+ * compiler and state the live host boots with — and report the widgets
+ * it hosts plus any render problems the meta-schema cannot see. "It
+ * validates" is not "it renders": a valid document can still name an
+ * unknown widget, hand the form widget a non-object schema, or place a
+ * bare object where a vnode belongs.
+ * @param {any} doc
+ * @returns {{ widgets: string[], problems: string[] }}
+ */
+export function auditDocumentRender(doc) {
+  /** @type {{ widgets: string[], problems: string[] }} */
+  const out = { widgets: [], problems: [] };
+  let vnode;
+  try {
+    vnode = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false })(doc.state);
+  }
+  catch (err) {
+    out.problems.push(`the view failed to render its first frame: ${message(err)}`);
+    return out;
+  }
+  walkRenderedVnode(vnode, '', out);
+  return out;
+}
+
+//#endregion
+
 /**
  * Validate a document against the meta-schema and boot it as an
  * isolated app: no effects, no subs, its own `onError` sink, the
