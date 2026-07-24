@@ -19,12 +19,13 @@ const toolTurn = (name, args) => sseBody([
   { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
 ]);
 
-/** A headless site with a scripted AI transport and in-memory settings. */
-function mountSite({ hash = '#/', aiSettings = null, responses = [], onFetch } = {}) {
+/** A headless site with a scripted AI transport and in-memory settings + transcript. */
+function mountSite({ hash = '#/', aiSettings = null, aiChat = null, responses = [], onFetch } = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
   let aiData = aiSettings;
+  let chatData = aiChat;
   const requests = [];
   const app = createSiteApp({
     node: container,
@@ -36,6 +37,7 @@ function mountSite({ hash = '#/', aiSettings = null, responses = [], onFetch } =
     navigate: (h) => routeCb(parseHash(h)),
     storage: { read: () => null, write: () => {} },
     aiStorage: { read: () => aiData, write: (data) => { aiData = JSON.parse(JSON.stringify(data)); } },
+    aiChat: { read: () => chatData, write: (data) => { chatData = JSON.parse(JSON.stringify(data)); } },
     aiFetch: (url, init) => {
       requests.push({ url, init });
       if (onFetch) return onFetch({ url, init, requests });
@@ -45,7 +47,10 @@ function mountSite({ hash = '#/', aiSettings = null, responses = [], onFetch } =
     },
     onError: (err) => { throw err; },
   });
-  return { app, container, go: (h) => routeCb(parseHash(h)), requests, settings: () => aiData };
+  return {
+    app, container, go: (h) => routeCb(parseHash(h)), requests,
+    settings: () => aiData, chat: () => chatData,
+  };
 }
 
 function find(node, pred) {
@@ -93,6 +98,37 @@ describe('website — the AI assistant panel', function () {
     fire(find(configured.container, (n) => n.attributes?.get('class') === 'ai-launch'), 'click');
     assert.doesNotMatch(serialize(configured.container), /ai-settings/, 'configured: settings hidden');
     assert.match(serialize(configured.container), /Ask me to validate/, 'the intro shows instead');
+  });
+
+  it('gates the composer on configuration: a setup intro instead of a dead chat', function () {
+    const unconfigured = mountSite();
+    fire(find(unconfigured.container, (n) => n.attributes?.get('class') === 'ai-launch'), 'click');
+    const html = serialize(unconfigured.container);
+    assert.doesNotMatch(html, /ai-composer/, 'no composer until the assistant can actually send');
+    assert.match(html, /Pick a provider above/, 'the intro points at the settings form');
+
+    const configured = mountSite({ aiSettings: CONFIGURED });
+    fire(find(configured.container, (n) => n.attributes?.get('class') === 'ai-launch'), 'click');
+    const configuredHtml = serialize(configured.container);
+    assert.match(configuredHtml, /ai-composer/, 'configured: the composer is live');
+    assert.doesNotMatch(configuredHtml, /Pick a provider above/);
+  });
+
+  it('keeps the settings form up while typing makes the config valid, until saved', function () {
+    const { app, container, settings } = mountSite();
+    fire(find(container, (n) => n.attributes?.get('class') === 'ai-launch'), 'click');
+    assert.strictEqual(app.getState().ai.settingsOpen, true,
+      'opening unconfigured pins the settings form open');
+
+    // typing a valid local config must not hide the form mid-edit
+    app.dispatch('ai/setting', { key: 'provider' }, { target: { value: 'ollama' } });
+    app.dispatch('ai/setting', { key: 'model' }, { target: { value: 'llama3.2' } });
+    assert.match(serialize(container), /ai-settings/, 'the form stays up until saved');
+    assert.strictEqual(settings(), null, 'nothing persisted before Save');
+
+    app.dispatch('ai/save-settings');
+    assert.doesNotMatch(serialize(container), /ai-settings/, 'Save closes the form');
+    assert.strictEqual(settings().model, 'llama3.2', 'Save persists the settings');
   });
 
   it('persists settings through the injected storage', function () {
@@ -145,6 +181,9 @@ describe('website — the AI assistant panel', function () {
     // two provider calls: the tool round, then the final answer
     assert.strictEqual(requests.length, 2);
     assert.strictEqual(requests[0].url, 'http://localhost:11434/v1/chat/completions');
+    const firstBody = JSON.parse(requests[0].init.body);
+    assert.strictEqual(firstBody.messages.at(-1).content, 'get every price',
+      'the just-typed user turn reaches the model (not just the pre-send transcript)');
     const secondBody = JSON.parse(requests[1].init.body);
     assert.strictEqual(secondBody.messages.some((m) => m.role === 'tool'), true,
       'the tool result was fed back to the model');
@@ -175,6 +214,52 @@ describe('website — the AI assistant panel', function () {
     assert.deepStrictEqual(app.getState().ai.messages, []);
     assert.strictEqual(app.getState().ai.status, 'idle');
   });
+
+  it('persists the transcript and restores it on the next boot', async function () {
+    const first = mountSite({
+      aiSettings: CONFIGURED,
+      responses: [textTurn('hello from the model')],
+    });
+    first.app.dispatch('ai/draft', null, { target: { value: 'hi' } });
+    first.app.dispatch('ai/send');
+    await settle(first.app);
+    assert.deepStrictEqual(first.chat().messages.map((m) => m.role), ['user', 'assistant'],
+      'both turns were mirrored to storage');
+
+    // a fresh boot against the same store resumes the conversation
+    const second = mountSite({ aiSettings: CONFIGURED, aiChat: first.chat() });
+    assert.deepStrictEqual(second.app.getState().ai.messages.map((m) => m.role),
+      ['user', 'assistant']);
+    fire(find(second.container, (n) => n.attributes?.get('class') === 'ai-launch'), 'click');
+    assert.match(serialize(second.container), /hello from the model/,
+      'the restored transcript renders');
+
+    // clearing wipes the persisted transcript too
+    second.app.dispatch('ai/clear');
+    assert.deepStrictEqual(second.chat().messages, []);
+  });
+
+  it('sends the engine-aware system prompt and only the last turns of a long transcript', async function () {
+    const seeded = [];
+    for (let i = 0; i < 24; i++) {
+      seeded.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `turn ${i}` });
+    }
+    const { app, requests } = mountSite({
+      aiSettings: CONFIGURED,
+      aiChat: { messages: seeded },
+      responses: [textTurn('ok')],
+    });
+    app.dispatch('ai/draft', null, { target: { value: 'latest' } });
+    app.dispatch('ai/send');
+    await settle(app);
+
+    const body = JSON.parse(requests[0].init.body);
+    assert.strictEqual(body.messages[0].role, 'system');
+    assert.match(body.messages[0].content, /JSONPath/, 'the engine list is generated in');
+    assert.match(body.messages[0].content, /jaren_get_examples/, 'the method mentions the example tool');
+    assert.strictEqual(body.messages.length, 21, 'the system turn + the last 20 chat turns');
+    assert.strictEqual(body.messages[body.messages.length - 1].content, 'latest');
+  });
 });
 
 describe('website — WebMCP over @jarenjs/ai', function () {
@@ -204,8 +289,8 @@ describe('website — WebMCP over @jarenjs/ai', function () {
     const tool = (name) => registered.find((t) => t.name === name);
     const names = registered.map((t) => t.name);
     for (const expected of ['jaren_validate', 'jaren_run_engine', 'jaren_list_engines',
-      'jaren_get_state', 'jaren_navigate', 'jaren_list_experiments',
-      'jaren_load_experiment', 'jaren_share_link']) {
+      'jaren_get_state', 'jaren_navigate', 'jaren_get_examples', 'jaren_save_experiment',
+      'jaren_list_experiments', 'jaren_load_experiment', 'jaren_share_link']) {
       assert.ok(names.includes(expected), `${expected} registered`);
     }
 
@@ -247,6 +332,26 @@ describe('website — WebMCP over @jarenjs/ai', function () {
     const nav = tool('jaren_navigate');
     nav.execute({ page: 'playground', params: { engine: 'jslt' } });
     assert.strictEqual(app.getState().route.params.engine, 'jslt');
+
+    // the example library: ready-to-run inputs per engine, by list or label
+    const examples = tool('jaren_get_examples');
+    const forPath = examples.execute({ engine: 'path' });
+    assert.ok(Array.isArray(forPath) && forPath.length > 0);
+    assert.strictEqual(typeof forPath[0].label, 'string');
+    assert.strictEqual(typeof forPath[0].inputs.selector, 'string');
+    assert.deepStrictEqual(examples.execute({ engine: 'path', label: forPath[0].label }), forPath[0]);
+    const miss = examples.execute({ engine: 'path', label: 'nope' });
+    assert.match(miss.error, /no example/);
+    assert.deepStrictEqual(miss.labels, forPath.map((e) => e.label));
+    assert.match(examples.execute({ engine: 'no-such' }).error, /invalid input/,
+      'Jaren guards the engine enum');
+
+    // saving what was built together, through the same IDE store
+    const saved = tool('jaren_save_experiment').execute({ name: 'from-chat' });
+    assert.strictEqual(saved.ok, true);
+    assert.ok(saved.names.includes('from-chat'), 'the new experiment is listed');
+    assert.match(tool('jaren_save_experiment').execute({ name: '' }).error, /invalid input/,
+      'Jaren rejects an empty name before the tool runs');
   });
 
   it('the built-in storage/settings defaults boot and persist without env wiring', function () {
@@ -267,5 +372,9 @@ describe('website — WebMCP over @jarenjs/ai', function () {
     app.dispatch('ai/setting', { key: 'model' }, { target: { value: 'm' } });
     app.dispatch('ai/save-settings');
     assert.strictEqual(app.getState().ai.settings.model, 'm');
+    // appending a turn runs the ai-persist effect through the no-op
+    // default transcript store without throwing
+    app.dispatch('ai/user', 'hello');
+    assert.strictEqual(app.getState().ai.messages.length, 1);
   });
 });

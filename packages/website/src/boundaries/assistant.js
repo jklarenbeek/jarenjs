@@ -22,7 +22,7 @@ import {
 } from '@jarenjs/ai';
 
 import { runValidation } from './validator.js';
-import { runEngine, ENGINE_DEFS } from './engines.js';
+import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES } from './engines.js';
 
 /** Provider options for the settings select (BYOK: three shapes). */
 export const PROVIDER_OPTIONS = Object.entries(PROVIDERS)
@@ -169,6 +169,39 @@ export function createSiteToolbox(env) {
   });
 
   toolbox.add({
+    name: 'jaren_get_examples',
+    description: 'Get the site\'s working examples for one engine — each is { label, inputs } and runs as-is through jaren_run_engine. Before writing a program for an engine you have not used this conversation, fetch its examples and adapt one instead of guessing syntax. Pass `label` to get a single example.',
+    inputSchema: {
+      type: 'object',
+      properties: { engine: { enum: engineKeys }, label: { type: 'string' } },
+      required: ['engine'],
+    },
+    execute: (input) => {
+      const all = ENGINE_EXAMPLES[input.engine] ?? [];
+      if (input.label === undefined) return all;
+      const hit = all.find((e) => e.label === input.label);
+      return hit ?? { error: `no example labelled '${input.label}'`, labels: all.map((e) => e.label) };
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_save_experiment',
+    description: 'Save the current playground engine and inputs as a named experiment (the localStorage IDE store), so the user keeps what you built together. Returns the updated experiment names.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', minLength: 1 } },
+      required: ['name'],
+    },
+    execute: (input) => {
+      const app = env.getApp();
+      if (app === null) return { error: 'the playground is not running here' };
+      app.dispatch('ide/name', null, { target: { value: input.name } });
+      app.dispatch('ide/save');
+      return { ok: true, names: app.getState().ide.names };
+    },
+  });
+
+  toolbox.add({
     name: 'jaren_list_experiments',
     description: 'List the saved playground experiments (the localStorage IDE store).',
     inputSchema: { type: 'object', properties: {} },
@@ -210,32 +243,50 @@ export function createSiteToolbox(env) {
   return toolbox;
 }
 
-/** The system prompt: what the assistant is and how it drives the site. */
+/**
+ * The system prompt: what the assistant is and how it drives the site.
+ * The engine list is generated from ENGINE_DEFS, so the prompt can
+ * never drift from the playground it steers.
+ */
 export const SYSTEM_PROMPT = [
-  'You are the Jaren playground assistant, embedded in the jarenjs website.',
-  'Jaren is a JSON toolkit: a JSON Schema validating compiler plus engines for JSONPath,',
-  'JSON Pointer, JSON Patch, the JSON Query language (XQuery 3.1 semantics as JSON), JSLT and',
-  'JTLT stylesheets, XQuery text, JOSL/JSONX (a streaming TOML superset), Markdown, Mermaid and charts.',
+  'You are the Jaren playground assistant, embedded in the jarenjs website. Jaren is a',
+  'browser-native JSON toolkit: every engine below runs right here with the real shipped',
+  'compilers — no server, no proxy — and Jaren\'s own JSON Schema validator checks each of',
+  'your tool calls before it runs.',
   '',
-  'You help the user explore these by DRIVING the playground with your tools, not by pasting long',
-  'answers. To validate something, call jaren_validate. To run any other engine, call jaren_run_engine',
-  'with that engine and its text inputs (JSON values are passed as JSON text). These tools load the',
-  'inputs into the live playground, so the user watches it happen. Call jaren_get_state first when the',
-  'user refers to what is already on screen. Use jaren_list_engines if you are unsure of an engine\'s',
-  'inputs.',
+  'The engines (JSON values are passed as JSON text):',
+  '- validate — JSON Schema: validate a document against a schema (use jaren_validate).',
+  ...Object.entries(ENGINE_DEFS).map(([key, def]) => `- ${key} — ${def.label}: ${def.lead}`),
   '',
-  'Keep replies short. After running a tool, explain the result in a sentence or two — the full output',
-  'is already visible on the page. Every engine runs entirely in the browser with the real shipped',
-  'compilers; there is no server.',
+  'How to work:',
+  '1. You help by DRIVING the playground with your tools, not by pasting long answers — every',
+  '   tool call loads its inputs into the live playground, so the user watches it happen.',
+  '2. Call jaren_get_state before editing, and build on what is already on screen. Use',
+  '   jaren_list_engines when you are unsure of an engine\'s input fields.',
+  '3. Writing a program for an engine you have not used in this conversation? Call',
+  '   jaren_get_examples first and adapt a working example — never guess syntax.',
+  '4. Engine errors come back as result nodes with stable codes and docPaths. Read them, fix',
+  '   the input, and run again — do not give up after one failing round.',
+  '5. When a run turns out well, offer to keep it: jaren_save_experiment stores it by name,',
+  '   jaren_share_link copies a link that restores it.',
+  '6. Keep replies to a sentence or two — the full output is already visible on the page.',
 ].join('\n');
 
+/** Chat turns sent back to the model per request (persisted transcripts can be long). */
+const HISTORY_WINDOW = 20;
+
+/** Chat turns kept in the persisted transcript (a localStorage slot, not an archive). */
+const SAVED_WINDOW = 100;
+
 /**
- * The assistant's impure effects: the streaming agent turn and the
- * settings persistence. Injected `aiFetch` keeps the whole thing
- * testable against a scripted transport.
+ * The assistant's impure effects: the streaming agent turn, the
+ * settings persistence and the transcript persistence. Injected
+ * `aiFetch` keeps the whole thing testable against a scripted
+ * transport.
  * @param {{ toolbox: any, getApp: () => any,
  *   aiFetch?: typeof fetch,
- *   aiStorage: { read: () => any, write: (data: any) => void } }} deps
+ *   aiStorage: { read: () => any, write: (data: any) => void },
+ *   aiChat: { read: () => any, write: (data: any) => void } }} deps
  */
 export function createAssistantEffects(deps) {
   return {
@@ -268,13 +319,22 @@ export function createAssistantEffects(deps) {
         return;
       }
 
+      // weak local models are first-class: enough rounds to read an
+      // engine's { error } result, fetch an example and try again
       const agent = createAgent({
-        client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 5,
+        client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 8,
       });
-      const history = app.getState().ai.messages.map((m) => ({ role: m.role, content: m.content }));
+      // build the turn from this effect's own snapshot: the ai/user
+      // dispatch above is queued FIFO behind the running transaction,
+      // so a getState() here would still miss the draft
+      const history = [...state.ai.messages, { role: 'user', content: draft }]
+        .slice(-HISTORY_WINDOW)
+        .map((m) => ({ role: m.role, content: m.content }));
       agent.send(history, {
         onDelta: (text) => dispatch('ai/delta', text),
         onToolCall: (call) => dispatch('ai/activity', call.name),
+        // back to 'Thinking…' between a tool's result and the next token
+        onToolResult: () => dispatch('ai/activity', null),
       }).then(
         (result) => dispatch('ai/reply', result.message.content),
         (err) => dispatch('ai/failed', err?.message ?? String(err)),
@@ -283,6 +343,24 @@ export function createAssistantEffects(deps) {
 
     'ai-save-settings': () => {
       deps.aiStorage.write(deps.getApp().getState().ai.settings);
+    },
+
+    // opening the panel unconfigured lands you in settings — pinned
+    // open, so the form does not hide the moment typing a model name
+    // makes the configuration valid (only Save closes and persists it)
+    'ai-ensure-settings': (props, dispatch) => {
+      const state = deps.getApp().getState();
+      if (state.ai.open && !isConfigured(state.ai.settings)) {
+        dispatch('ai/settings-open', true);
+      }
+    },
+
+    // the transcript mirror: every appended turn (and a clear) writes
+    // the visible messages through the injected store, so a reload
+    // resumes the conversation
+    'ai-persist': () => {
+      const messages = deps.getApp().getState().ai.messages;
+      deps.aiChat.write({ messages: messages.slice(-SAVED_WINDOW) });
     },
   };
 }

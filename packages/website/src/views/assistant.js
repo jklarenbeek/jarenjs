@@ -9,7 +9,8 @@
  */
 
 const settingsForm =
-  ['form', { class: 'ai-settings', on: { submit: 'ai/save-settings' } },
+  ['form', { class: 'ai-settings',
+    on: { submit: { action: 'ai/save-settings', preventDefault: true } } },
     ['p', { class: 'ai-hint' },
       'Bring your own key. Everything runs in your browser — your key is stored locally and sent only to the provider you choose, never to us.'],
     ['label', { class: 'ai-field' },
@@ -58,8 +59,16 @@ const intro =
     ],
   ];
 
+// unconfigured: no composer to type into yet — point at the settings
+// form above instead of presenting a chat that cannot send
+const setupIntro =
+  ['div', { class: 'ai-intro' },
+    ['p', {}, 'Pick a provider above, add a model (and a key for OpenRouter), then save — the chat opens right here. Nothing leaves your browser except the calls to the provider you choose.'],
+  ];
+
 const composer =
-  ['form', { class: 'ai-composer', on: { submit: 'ai/send' } },
+  ['form', { class: 'ai-composer',
+    on: { submit: { action: 'ai/send', preventDefault: true } } },
     ['textarea', {
       class: 'editor', rows: 2, spellcheck: 'false',
       placeholder: 'Ask the assistant…', value: '$.draft',
@@ -90,7 +99,7 @@ const panel =
     ],
     { $if: ['$.showSettings', settingsForm] },
     ['div', { class: 'ai-log' },
-      { $if: ['$.empty', intro] },
+      { $if: ['$.empty', { $if: ['$.configured', intro, setupIntro] }] },
       [{ $apply: '$.messages[*]' }],
       { $if: [{ $and: ['$.streaming', '$.pending'] },
         ['div', { class: 'ai-msg assistant' }, ['p', {}, '$.pending']]] },
@@ -100,7 +109,7 @@ const panel =
         ['p', { class: 'ai-activity' }, 'Thinking…']] },
       { $if: ['$.error', ['p', { class: 'ai-error' }, '$.error']] },
     ],
-    composer,
+    { $if: ['$.configured', composer] },
   ];
 
 export const ASSISTANT_RULES = [

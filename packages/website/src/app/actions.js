@@ -216,9 +216,16 @@ export const ACTIONS = {
   // lives only in the `ai` slice (never in share links or experiments).
   'ai/toggle': {
     patch: [{ op: 'replace', path: '/ai/open', value: { $not: '$.ai.open' } }],
+    // opening while unconfigured pins the settings form open (see
+    // ai-ensure-settings), so it cannot vanish mid-edit as typing
+    // makes the configuration valid
+    effects: [{ run: 'ai-ensure-settings' }],
   },
   'ai/settings-toggle': {
     patch: [{ op: 'replace', path: '/ai/settingsOpen', value: { $not: '$.ai.settingsOpen' } }],
+  },
+  'ai/settings-open': {
+    patch: [{ op: 'replace', path: '/ai/settingsOpen', value: '$payload' }],
   },
   'ai/setting': {
     patch: [{
@@ -235,7 +242,8 @@ export const ACTIONS = {
     patch: [{ op: 'replace', path: '/ai/draft', value: '$event.value' }],
   },
   'ai/send': { effects: [{ run: 'ai-send' }] },
-  // the streaming turn dispatches these back as it runs
+  // the streaming turn dispatches these back as it runs; every action
+  // that changes the transcript mirrors it to storage via ai-persist
   'ai/user': {
     patch: [
       { op: 'add', path: '/ai/messages/-', value: { role: 'user', content: '$payload' } },
@@ -245,6 +253,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/activity', value: null },
       { op: 'replace', path: '/ai/error', value: null },
     ],
+    effects: [{ run: 'ai-persist' }],
   },
   'ai/delta': {
     patch: [{ op: 'replace', path: '/ai/pending', value: { $concat: ['$.ai.pending', '$payload'] } }],
@@ -259,6 +268,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/status', value: 'idle' },
       { op: 'replace', path: '/ai/activity', value: null },
     ],
+    effects: [{ run: 'ai-persist' }],
   },
   'ai/failed': {
     patch: [
@@ -276,6 +286,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/activity', value: null },
       { op: 'replace', path: '/ai/error', value: null },
     ],
+    effects: [{ run: 'ai-persist' }],
   },
 
   // the generated form writes through the standard form actions

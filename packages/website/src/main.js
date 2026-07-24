@@ -13,6 +13,7 @@ const BASE = import.meta.env.BASE_URL;
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
 const AI_KEY = 'jaren-ai';
+const AI_CHAT_KEY = 'jaren-ai-chat';
 
 /** A localStorage-backed JSON slot; failures degrade to in-memory. */
 const jsonStore = (key) => ({
@@ -80,10 +81,12 @@ createSiteApp({
     return url;
   },
   storage: jsonStore(IDE_KEY),
-  // the AI assistant: real fetch to the user-chosen provider, settings
-  // (including the bring-your-own key) persisted locally and nowhere else
+  // the AI assistant: real fetch to the user-chosen provider; settings
+  // (including the bring-your-own key) and the conversation transcript
+  // persisted locally and nowhere else
   aiFetch: (url, init) => fetch(url, init),
   aiStorage: jsonStore(AI_KEY),
+  aiChat: jsonStore(AI_CHAT_KEY),
   modelContext: /** @type {any} */ (navigator).modelContext,
 });
 

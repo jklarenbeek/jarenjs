@@ -109,8 +109,9 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
     (`overscroll-behavior: contain`). While open, the app's `lock-scroll` effect sets
     `body.dialog-open { overflow: hidden; }` — the page never scrolls under a modal.
   - Touch targets, two tiers: dense in-flow chrome (chips, segments, tabs) ≥ `2.2rem`;
-    primary tap targets — the header toggles, the dialog close, docs section links and
-    README rows — ≥ `2.75rem` (the WCAG 2.5.8 / 44 px class).
+    primary tap targets — the header toggles, the dialog close, docs section links,
+    README rows, and the assistant launcher and panel icons — ≥ `2.75rem`
+    (the WCAG 2.5.8 / 44 px class).
 - Long-form content discipline: tables, SVG and images inside articles and the README
   dialog carry `max-width: 100%`; README tables scroll internally
   (`display: block; overflow-x: auto`); anchored headings carry

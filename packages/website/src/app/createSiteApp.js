@@ -52,6 +52,9 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   provider calls (default global fetch); injectable for tests.
  * @property {{ read: () => any, write: (data: any) => void }} [aiStorage]
  *   Persistence for the assistant settings (localStorage in the browser).
+ * @property {{ read: () => any, write: (data: any) => void }} [aiChat]
+ *   Persistence for the assistant transcript, so a reload resumes the
+ *   conversation (localStorage in the browser).
  * @property {number} [debounceMs] - Boundary-run debounce (default 250;
  *   0 = synchronous, for tests).
  * @property {(error: Error) => void} [onError]
@@ -91,6 +94,7 @@ export function createSiteApp(env) {
     store,
   });
   const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
+  const aiChat = env.aiChat ?? { read: () => null, write: () => {} };
 
   const effects = {
     'fetch-bench': (props, dispatch) => {
@@ -210,11 +214,11 @@ export function createSiteApp(env) {
   // live-rates effect (plus the `when`-gated rates-poll subscription),
   // and the AI assistant's streaming-turn + settings effects.
   Object.assign(effects, calcEditEffects, rates.effects,
-    createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage }));
+    createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat }));
 
   app = createApp({
     $app: '0.1',
-    state: createInitialState(env.initialTheme ?? 'light', ideNames(), aiStorage.read()),
+    state: createInitialState(env.initialTheme ?? 'light', ideNames(), aiStorage.read(), aiChat.read()),
     view: STYLESHEET,
     actions: ACTIONS,
     subs: [...SUBS, rates.subEntry],

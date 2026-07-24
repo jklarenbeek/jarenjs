@@ -42,9 +42,10 @@ export const DEFAULT_AI_SETTINGS = {
  * @param {string} [theme]
  * @param {string[]} [ideNames] - saved experiment names from storage
  * @param {any} [aiSettings] - persisted assistant settings, if any
+ * @param {any} [aiChat] - persisted assistant transcript, if any
  * @returns {any} a fresh initial state
  */
-export function createInitialState(theme = 'light', ideNames = [], aiSettings = null) {
+export function createInitialState(theme = 'light', ideNames = [], aiSettings = null, aiChat = null) {
   return {
     route: { page: 'home', params: {} },
     theme,
@@ -71,7 +72,9 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       open: false,
       settingsOpen: false,
       settings: { ...DEFAULT_AI_SETTINGS, ...(aiSettings ?? {}) },
-      messages: [],          // visible transcript: { role, content }
+      // visible transcript: { role, content }; restored from local
+      // storage so a page reload keeps the conversation
+      messages: Array.isArray(aiChat?.messages) ? aiChat.messages : [],
       draft: '',             // composer text
       pending: '',           // the assistant reply currently streaming
       status: 'idle',        // 'idle' | 'streaming' | 'error'

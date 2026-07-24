@@ -655,6 +655,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 /* ---- the AI assistant slide-out (@jarenjs/ai) ---- */
 .ai-launch {
   position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 150;
+  min-height: 2.75rem; /* primary tap target (DESIGN §5) */
   border: 1px solid var(--accent); border-radius: 999px;
   padding: var(--space-2) var(--space-4); font-size: 0.9rem; font-weight: 600;
   background: var(--accent); color: var(--accent-fg); cursor: pointer;
@@ -676,7 +677,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .ai-title { font-weight: 700; margin-right: auto; }
 .ai-icon {
   border: 0; background: transparent; color: var(--muted); cursor: pointer;
-  width: 2.2rem; height: 2.2rem; border-radius: var(--radius-sm); font-size: 1rem;
+  width: 2.75rem; height: 2.75rem; /* primary tap targets (DESIGN §5) */
+  border-radius: var(--radius-sm); font-size: 1rem;
 }
 .ai-icon:hover { color: var(--accent); background: var(--accent-soft); }
 .ai-settings {
@@ -714,6 +716,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .ai-panel {
     right: 0; bottom: 0; left: 0; width: 100vw;
     max-height: 85dvh; border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .ai-launch { right: var(--space-4); bottom: var(--space-4); }
 }
