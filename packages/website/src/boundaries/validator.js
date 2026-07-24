@@ -9,7 +9,7 @@
 import { JarenValidator, renderErrorMessage, compileMessageCatalog } from '@jarenjs/validate';
 import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jarenjs/formats';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
-import { nl } from '@jarenjs/locales';
+import { ar, de, es, fr, ja, ko, nl, pt, ru, tr, zhTW } from '@jarenjs/locales';
 
 const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
 
@@ -116,16 +116,33 @@ export function formViewFor(schemaText, data) {
   }
 }
 
-const nlCatalog = compileMessageCatalog(nl);
+/** The locale packs the switcher offers, compiled once ('en' is the built-in). */
+const CATALOGS = {
+  nl: compileMessageCatalog(nl),
+  fr: compileMessageCatalog(fr),
+  es: compileMessageCatalog(es),
+  pt: compileMessageCatalog(pt),
+  de: compileMessageCatalog(de),
+  ja: compileMessageCatalog(ja),
+  ko: compileMessageCatalog(ko),
+  'zh-tw': compileMessageCatalog(zhTW),
+  ru: compileMessageCatalog(ru),
+  tr: compileMessageCatalog(tr),
+  ar: compileMessageCatalog(ar),
+};
+
+/** The switcher's locale codes, in display order ('en' first). */
+export const LOCALES = ['en', 'nl', 'fr', 'es', 'pt', 'de', 'ja', 'ko', 'zh-tw', 'ru', 'tr', 'ar'];
 
 /**
  * Report-time localization: raw errors carry msgid + params; text
  * renders per locale without re-validating.
  */
 export function localizeErrors(errors, locale) {
-  if (locale !== 'nl') return errors;
+  const catalog = CATALOGS[locale];
+  if (catalog === undefined) return errors;
   return errors.map((error) => {
     if (error.msgid === undefined) return error;
-    return { ...error, message: renderErrorMessage(error, nlCatalog) };
+    return { ...error, message: renderErrorMessage(error, catalog) };
   });
 }

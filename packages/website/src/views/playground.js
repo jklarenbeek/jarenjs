@@ -8,6 +8,15 @@
  * experiments through the localStorage-backed ide-* effects.
  */
 
+import { LOCALES } from '../boundaries/validator.js';
+
+/** One segment button of the error-locale switcher. */
+const localeButton = (code) => ['button', {
+  type: 'button',
+  class: { $if: [{ $eq: ['$.locale', code] }, 'seg-btn active', 'seg-btn'] },
+  on: { click: { action: 'pg/locale', with: code } },
+}, code.toUpperCase()];
+
 const ideBar =
   ['div', { class: 'ide-bar' },
     ['input', {
@@ -83,18 +92,7 @@ const resultCard =
   ['div', { class: 'card pg-card result-card' },
     ['div', { class: 'card-head' },
       ['h3', {}, 'Validation'],
-      ['div', { class: 'seg' },
-        ['button', {
-          type: 'button',
-          class: { $if: [{ $eq: ['$.locale', 'en'] }, 'seg-btn active', 'seg-btn'] },
-          on: { click: { action: 'pg/locale', with: 'en' } },
-        }, 'EN'],
-        ['button', {
-          type: 'button',
-          class: { $if: [{ $eq: ['$.locale', 'nl'] }, 'seg-btn active', 'seg-btn'] },
-          on: { click: { action: 'pg/locale', with: 'nl' } },
-        }, 'NL'],
-      ],
+      ['div', { class: 'seg' }, ...LOCALES.map(localeButton)],
     ],
     { $if: [{ $eq: ['$.result.status', 'valid'] },
       ['p', { class: 'badge ok' }, 'Valid']] },

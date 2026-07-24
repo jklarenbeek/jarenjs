@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/locales",
   "private": false,
-  "version": "0.19.2",
+  "version": "0.19.3",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -11,9 +11,49 @@
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
+    "./ar": {
+      "types": "./dist/types/ar.d.ts",
+      "default": "./src/ar.js"
+    },
+    "./de": {
+      "types": "./dist/types/de.d.ts",
+      "default": "./src/de.js"
+    },
+    "./es": {
+      "types": "./dist/types/es.d.ts",
+      "default": "./src/es.js"
+    },
+    "./fr": {
+      "types": "./dist/types/fr.d.ts",
+      "default": "./src/fr.js"
+    },
+    "./ja": {
+      "types": "./dist/types/ja.d.ts",
+      "default": "./src/ja.js"
+    },
+    "./ko": {
+      "types": "./dist/types/ko.d.ts",
+      "default": "./src/ko.js"
+    },
     "./nl": {
       "types": "./dist/types/nl.d.ts",
       "default": "./src/nl.js"
+    },
+    "./pt": {
+      "types": "./dist/types/pt.d.ts",
+      "default": "./src/pt.js"
+    },
+    "./ru": {
+      "types": "./dist/types/ru.d.ts",
+      "default": "./src/ru.js"
+    },
+    "./tr": {
+      "types": "./dist/types/tr.d.ts",
+      "default": "./src/tr.js"
+    },
+    "./zh-tw": {
+      "types": "./dist/types/zh-tw.d.ts",
+      "default": "./src/zh-tw.js"
     },
     "./package.json": "./package.json"
   },

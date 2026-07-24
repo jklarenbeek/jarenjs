@@ -120,8 +120,10 @@ A catalog is a plain flat object:
 English catalogs are **built in**: validate's `messagesEn`
 (src/messages.js) and forms' `formsMessagesEn` (src/messages.js) — neither
 package gains a dependency. Non-English packs live in `@jarenjs/locales`
-and must have key parity with the built-in English (enforced by repo
-tests).
+(`nl`, `fr`, `es`, `pt`, `de`, `ja`, `ko`, `zhTW`, `ru`, `tr`, `ar` —
+each also a subpath export, e.g. `@jarenjs/locales/fr`,
+`@jarenjs/locales/zh-tw`) and must have key parity with the built-in
+English (enforced by repo tests).
 
 ### Pack authoring (globalization mechanics)
 

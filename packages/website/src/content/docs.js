@@ -36,8 +36,8 @@ export const DOCS_SECTIONS = [
   {
     id: 'error-handling', title: 'Errors & i18n',
     blocks: [
-      p('Every error is structured: instancePath, keyword, a stable msgid and raw params — human text renders at report time through a message catalog, so switching language never re-validates.'),
-      code("import { compileMessageCatalog, localizeErrors } from '@jarenjs/validate';\nimport { nl } from '@jarenjs/locales';\n\nconst catalog = compileMessageCatalog(nl);\nlocalizeErrors(result.errors, catalog);  // the same errors, Dutch text"),
+      p('Every error is structured: instancePath, keyword, a stable msgid and raw params — human text renders at report time through a message catalog, so switching language never re-validates. @jarenjs/locales ships packs for Dutch, French, Spanish, Portuguese, German, Japanese, Korean, Traditional Chinese (Taiwan), Russian, Turkish and Arabic; the switcher on the playground result card runs exactly this mechanism.'),
+      code("import { compileMessageCatalog, localizeErrors } from '@jarenjs/validate';\nimport { fr } from '@jarenjs/locales';  // nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar\n\nconst catalog = compileMessageCatalog(fr);\nlocalizeErrors(result.errors, catalog);  // the same errors, French text"),
       note('Schema-authored messages', 'The errorMessage keyword and its $msgid form keep even schema-authored texts translatable — see ERROR-MESSAGES.md in the validate package.'),
     ],
   },

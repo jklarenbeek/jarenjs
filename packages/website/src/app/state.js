@@ -58,7 +58,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       data: DEFAULT_DATA,
       dataTab: 'form',       // 'form' | 'json'
       dataError: null,       // parse error of the JSON pane, if any
-      locale: 'en',          // error-message locale: 'en' | 'nl'
+      locale: 'en',          // error-message locale: 'en' or a @jarenjs/locales pack (see LOCALES in boundaries/validator.js)
       result: null,          // validation result JSON from the boundary
     },
     eng: initialEngineInputs(),  // engine key -> text inputs

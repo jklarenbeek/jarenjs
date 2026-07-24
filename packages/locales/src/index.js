@@ -10,4 +10,14 @@
  * compile them with `compileMessageCatalog` from the consuming package.
  */
 
+export { ar } from './ar.js';
+export { de } from './de.js';
+export { es } from './es.js';
+export { fr } from './fr.js';
+export { ja } from './ja.js';
+export { ko } from './ko.js';
 export { nl } from './nl.js';
+export { pt } from './pt.js';
+export { ru } from './ru.js';
+export { tr } from './tr.js';
+export { zhTW } from './zh-tw.js';
