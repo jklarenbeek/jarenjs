@@ -119,7 +119,7 @@ export const ASSISTANT_RULES = [
       ['button', {
         type: 'button', class: 'ai-launch', title: 'Open the Jaren assistant',
         'aria-label': 'Open the Jaren assistant', on: { click: 'ai/toggle' },
-      }, '✦ Assistant'],
+      }, '✦', ['span', { class: 'ai-launch-label' }, ' Assistant']],
       { $if: ['$.open', panel] },
     ],
   },

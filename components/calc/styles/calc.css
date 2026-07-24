@@ -50,6 +50,15 @@
 }
 
 .calc-modes { display: flex; flex-wrap: wrap; gap: 6px; }
+/* narrow hosts: the five mode tabs become one scroll strip instead of
+   wrapping to a second row; the edge fade hints that the row scrolls */
+@media (max-width: 480px) {
+  .calc-modes {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    mask-image: linear-gradient(90deg, #000 92%, transparent);
+  }
+  .calc-mode { white-space: nowrap; flex: none; }
+}
 .calc-mode {
   padding: 6px 12px; border: 1px solid var(--calc-border); border-radius: 8px;
   background: var(--calc-panel); color: var(--calc-text); cursor: pointer; font-size: 13px;
@@ -80,7 +89,8 @@
 .calc-key-mem { font-size: 13px; }
 
 .calc-mem { display: flex; align-items: center; gap: 8px; }
-.calc-memval { color: var(--calc-muted); font-size: 13px; margin-left: auto; }
+/* the readout keeps a breath of air off the host's right edge */
+.calc-memval { color: var(--calc-muted); font-size: 13px; margin-left: auto; padding-right: 4px; }
 
 .calc-bases { display: grid; gap: 4px; background: var(--calc-panel); border: 1px solid var(--calc-border); border-radius: 10px; padding: 10px; font-family: ui-monospace, monospace; }
 .calc-baserow { display: flex; justify-content: space-between; gap: 12px; }

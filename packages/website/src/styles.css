@@ -755,3 +755,14 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   }
   .ai-launch { right: var(--space-4); bottom: var(--space-4); }
 }
+/* small phones: the labeled pill is wide enough to sit on the hero CTA
+   or the calculator plot at some fold positions — collapse it to a
+   round icon-only launcher (the aria-label carries the name; the
+   2.75rem primary tap target holds, DESIGN §5) */
+@media (max-width: 480px) {
+  .ai-launch {
+    width: 2.75rem; height: 2.75rem; padding: 0;
+    display: grid; place-items: center; font-size: 1.05rem;
+  }
+  .ai-launch-label { display: none; }
+}

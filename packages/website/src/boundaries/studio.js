@@ -172,6 +172,13 @@ const compileTypeTest = createTypeTestCompiler();
 const MAX_RENDER_PROBLEMS = 8;
 
 /**
+ * A tag `createElement` accepts: a letter, then letters, digits or
+ * hyphens. One-element arrays like `["hr"]` are valid void elements —
+ * the defect class is invalid tag NAMES, not array arity.
+ */
+const VALID_TAG = /^[a-zA-Z][a-zA-Z0-9-]*$/;
+
+/**
  * Walk one rendered vnode with the renderer's own shape rules (text,
  * skipped, `[tag, props?, ...children]`, non-string-head arrays splice
  * as lists) and collect what a live mount would host: the widgets it
@@ -192,6 +199,12 @@ function walkRenderedVnode(node, path, out) {
   if (typeof node[0] !== 'string') {
     // a list: each item renders in place
     for (let i = 0; i < node.length; i++) walkRenderedVnode(node[i], `${path}/${i}`, out);
+    return;
+  }
+  if (!VALID_TAG.test(node[0])) {
+    // this is a boot-stopper, not a cosmetic problem: the nested app
+    // dies on createElement and the whole stage ends empty
+    out.problems.push(`${path}: '${node[0]}' is not a valid element tag name — the app fails to boot on it (text belongs directly in the children, not wrapped in an array)`);
     return;
   }
   if (node[0] === 'jaren-widget') {

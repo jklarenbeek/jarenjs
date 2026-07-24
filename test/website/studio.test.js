@@ -384,6 +384,21 @@ describe('website — the Studio render audit (auditDocumentRender)', function (
     unknown.view.rules[0].body[4] = ['jaren-widget', { name: 'fom', props: {} }];
     const named = auditDocumentRender(unknown);
     assert.ok(named.problems.some((p) => /unknown widget 'fom'/.test(p)), named.problems.join('; '));
+
+    // an invalid tag name (a text fragment wrapped in an array) is a
+    // boot-stopper: createElement(' | ') throws in a real DOM
+    const invalidTag = JSON.parse(JSON.stringify(base));
+    invalidTag.view.rules[0].body.push([' | ']);
+    const tagged = auditDocumentRender(invalidTag);
+    assert.ok(tagged.problems.some((p) => /' \| ' is not a valid element tag name/.test(p)),
+      tagged.problems.join('; '));
+
+    // one-element arrays with a REAL tag are valid void elements —
+    // ['hr'] must never be flagged
+    const voidEl = JSON.parse(JSON.stringify(base));
+    voidEl.view.rules[0].body.push(['hr']);
+    assert.deepStrictEqual(auditDocumentRender(voidEl).problems, [],
+      "['hr'] is a legitimate void element");
   });
 
   it('rides along on the studio write/patch tool results', function () {
