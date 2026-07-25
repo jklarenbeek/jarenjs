@@ -14,9 +14,12 @@
  * line type breaks its path on unplottable samples.
  */
 
-import { svgRoot, rect, line as svgLine, textAt, textWidth, num } from '@jarenjs/view/helpers';
+import {
+  svgRoot, rect, line as svgLine, textAt, textWidth, num, coord, anchorForAngle,
+} from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, niceStep, formatTickValue } from '../core/axis.js';
-import { FS_TICK, FS_LABEL, annotateChart } from '../core/cartesian.js';
+import { FS_TICK, FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 
 /**
@@ -83,10 +86,6 @@ export function buildRadarAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a radar AST to a pure-vnode SVG: ring polygons and spokes for
  * the scale, one translucent polygon with vertex dots per series, a
@@ -108,12 +107,11 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
   const children = [];
 
   if (ast.title) {
-    children.push(textAt(cx, 24, ast.title, FS_LABEL + 3,
-      { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.text, class: 'chart-title' }));
+    children.push(chartTitle(cx, 24, ast.title, FS_LABEL + 3, t));
   }
 
-  const px = (angle, r) => round2(cx + R * r * Math.cos(angle));
-  const py = (angle, r) => round2(cy + R * r * Math.sin(angle));
+  const px = (angle, r) => coord(cx + R * r * Math.cos(angle));
+  const py = (angle, r) => coord(cy + R * r * Math.sin(angle));
   const ringPoints = (r) => ast.axes.map((a) => `${px(a.angle, r)},${py(a.angle, r)}`).join(' ');
 
   // Scale chrome: concentric ring polygons, one spoke per axis.
@@ -126,7 +124,7 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
     }
     else {
       children.push(['circle', {
-        cx: num(cx), cy: num(cy), r: round2(R * ring.r),
+        cx: num(cx), cy: num(cy), r: coord(R * ring.r),
         fill: 'none', stroke: t.grid, 'stroke-width': 1, class: 'chart-grid',
       }]);
     }
@@ -136,12 +134,12 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
   for (const axis of ast.axes) {
     children.push(svgLine(cx, cy, px(axis.angle, 1), py(axis.angle, 1),
       { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' }));
+    const anchor = anchorForAngle(axis.angle);
     const c = Math.cos(axis.angle);
-    const anchor = c > 0.3 ? 'start' : c < -0.3 ? 'end' : 'middle';
     const s = Math.sin(axis.angle);
     const dy = s > 0.3 ? FS_LABEL : s < -0.3 ? -4 : 4;
     children.push(textAt(
-      round2(cx + (R + 8) * c), round2(cy + (R + 8) * s + dy),
+      coord(cx + (R + 8) * c), coord(cy + (R + 8) * s + dy),
       axis.label, FS_LABEL,
       { 'text-anchor': anchor, fill: t.muted, class: 'chart-axis-label' }));
   }
@@ -188,8 +186,4 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-radar-chart',
     width, height, theme, children, (options.keyPrefix ?? 'radar-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

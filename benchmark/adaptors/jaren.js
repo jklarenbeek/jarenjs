@@ -61,6 +61,6 @@ export function setup(instance, schema, suiteName = undefined) {
   return instance.main.compile(schema);
 }
 
-export function run(validator, data, schema) {
+export function run(validator, data) {
   return validator(data);
 }

@@ -30,7 +30,7 @@
 // All runtime error conditions of the operator library (JQ2xxx,
 // QUERY-FORMAT.md section 10.3) are raised here.
 
-import { equalsJson } from '@jarenjs/core/object';
+import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
 import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import { JsonQueryRuntimeError } from './errors.js';
@@ -166,18 +166,10 @@ function itemNe(a, b) {
   return !equalsJson(a, b);
 }
 function itemLt(a, b) {
-  if (typeof a === 'number')
-    return typeof b === 'number' && a < b;
-  if (typeof a === 'string')
-    return typeof b === 'string' && compareCodePoints(a, b) < 0;
-  return false;
+  return compareJsonScalarLt(a, b);
 }
 function itemLe(a, b) {
-  if (typeof a === 'number')
-    return typeof b === 'number' && a <= b;
-  if (typeof a === 'string')
-    return typeof b === 'string' && compareCodePoints(a, b) <= 0;
-  return false;
+  return compareJsonScalarLt(a, b, true);
 }
 function itemGt(a, b) {
   return itemLt(b, a);

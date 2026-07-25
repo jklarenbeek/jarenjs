@@ -368,7 +368,7 @@ function compileLet(node) {
 // ($for x $for + $where equality) runs O(n*m). Hash joins (build a table
 // on one side of an equijoin), filter hoisting into the deepest binding
 // that covers the predicate's variables, and orderby/groupby fusion are
-// future optimizer work orders.
+// not implemented.
 //#endregion
 
 // D4 iteration step: an item that is an array contributes its members

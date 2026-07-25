@@ -15,8 +15,9 @@
  * width with the same value.
  */
 
-import { svgRoot, textAt, textWidth } from '@jarenjs/view/helpers';
-import { FS_LABEL, annotateChart } from '../core/cartesian.js';
+import { svgRoot, textAt, textWidth, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
+import { FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor, inkFor } from '../core/palette.js';
 
 /**
@@ -108,10 +109,6 @@ export function buildTreemapAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Worst (max) tile aspect ratio of the row `areas[start..end)` with
  * total area `sum` laid along a side of length `side`.
@@ -147,8 +144,7 @@ export function renderTreemapAST(ast, theme, hash, options = {}) {
   const children = [];
 
   if (ast.title) {
-    children.push(textAt(width / 2, 22, ast.title, 15,
-      { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.text, class: 'chart-title' }));
+    children.push(chartTitle(width / 2, 22, ast.title, 15, t));
   }
 
   const inset = 1;
@@ -161,12 +157,12 @@ export function renderTreemapAST(ast, theme, hash, options = {}) {
     const fill = seriesColor(i, palette);
     const share = `${(tile.frac * 100).toFixed(1)}%`;
     children.push(['rect', {
-      x: round2(x), y: round2(y),
-      width: round2(Math.max(0.5, w)), height: round2(Math.max(0.5, h)),
+      x: coord(x), y: coord(y),
+      width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
       fill, class: 'chart-treemap-tile',
     }, ['title', {}, `${tile.label}: ${tile.value} (${share})`]]);
     if (h >= FS_LABEL + 8 && textWidth(tile.label, FS_LABEL) <= w - 8) {
-      children.push(textAt(round2(x + 4), round2(y + FS_LABEL + 2), tile.label, FS_LABEL,
+      children.push(textAt(coord(x + 4), coord(y + FS_LABEL + 2), tile.label, FS_LABEL,
         { fill: inkFor(fill), class: 'chart-treemap-label' }));
     }
   }
@@ -175,8 +171,4 @@ export function renderTreemapAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-treemap-chart',
     width, height, theme, children, (options.keyPrefix ?? 'tree-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

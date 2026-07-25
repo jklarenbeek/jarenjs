@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The error vnode (design decision D7). The render path never
+ * @file The error vnode. The render path never
  * throws: a parse/layout failure becomes a clear error box — message +
  * offending line — mirroring Mermaid's own error box, keyed so the
  * patcher swaps it cleanly.

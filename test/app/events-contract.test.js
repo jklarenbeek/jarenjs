@@ -117,7 +117,7 @@ describe('declarative preventDefault/stopPropagation (APP-FORMAT §3.1)', functi
   });
 });
 
-describe('$event default members and prototype safety (A5)', function () {
+describe('$event default members and prototype safety', function () {
   it('requesting a default member never overwrites it with null', function () {
     const { app, container } = mount(
       captureDoc({ action: 'capture', event: ['value', 'key', 'type', 'checked'] }));
@@ -165,7 +165,7 @@ describe('$event default members and prototype safety (A5)', function () {
   });
 });
 
-describe('the vnode schema rejects malformed widget nodes (A5)', function () {
+describe('the vnode schema rejects malformed widget nodes', function () {
   const load = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
   const validate = new JarenValidator()
     .compile(load('../../packages/view/schemas/jaren-vnode.schema.json'));

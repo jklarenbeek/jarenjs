@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file A minimal 4×4 matrix kernel (Part A4) for the x·y·z plotter and
+ * @file A minimal 4×4 matrix kernel for the x·y·z plotter and
  * any future 3D consumer (Mermaid 3D is a candidate — see ROADMAP).
  *
  * Matrices are `Float64Array(16)` in **column-major** order (the WebGL /

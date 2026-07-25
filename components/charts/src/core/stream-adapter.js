@@ -279,6 +279,19 @@ function startsWith(path, prefix) {
   return true;
 }
 
+/**
+ * Lift a temporal coordinate to its epoch-millisecond number, passing every
+ * other value through untouched so a downstream `Number.isFinite` still
+ * decides what is plottable. Strictly the Date-only lift: unlike `numish` it
+ * does NOT coerce bigints or numeric strings, because a chart axis must not
+ * silently accept a string where the config asked for a number.
+ * @param {any} v
+ * @returns {any}
+ */
+export function numOf(v) {
+  return v instanceof Date ? v.getTime() : v;
+}
+
 function numish(v) {
   if (v instanceof Date) return v.getTime();
   if (typeof v === 'bigint') return Number(v);

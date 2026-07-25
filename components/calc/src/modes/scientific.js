@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The scientific mode kernel (D5): the standard keypad plus the
+ * @file The scientific mode kernel: the standard keypad plus the
  * A1 transcendentals as function-insert keys, constants, factorial and an
  * angle-mode toggle. It binds the same float environment as standard —
  * the transcendentals were already in it — so no formulas live here.

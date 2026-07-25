@@ -22,30 +22,12 @@
 // `readSteps` resolves either form; the callers own their walk loops so
 // each module raises its own error types.
 
-const hasOwn = Object.hasOwn;
+import { setObjectMember } from '@jarenjs/core/object';
 
-export function isJsonObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
+const hasOwn = Object.hasOwn;
 
 export function isContainer(v) {
   return typeof v === 'object' && v !== null;
-}
-
-// A member named '__proto__' must become an own data property, never a
-// prototype assignment (the setMember discipline of the query engine).
-export function setObjectMember(out, name, value) {
-  if (name === '__proto__') {
-    Object.defineProperty(out, name, {
-      value,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
-  }
-  else {
-    out[name] = value;
-  }
 }
 
 // Object spread copies an own '__proto__' data property as an own

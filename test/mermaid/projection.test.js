@@ -24,7 +24,7 @@ const STATE_SRC = `stateDiagram-v2
   Running --> Idle : stop
   Running --> [*]`;
 
-describe('the state ⇄ workflow semantic projection (D11/D12)', function () {
+describe('the state ⇄ workflow semantic projection', function () {
   const validateWorkflow = new JarenValidator().compile(workflowSchema);
 
   it('projects a state DiagramDocument to a schema-valid workflow', function () {

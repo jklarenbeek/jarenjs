@@ -6,9 +6,9 @@
  * A catalog is a plain flat object `{ [key]: closure | template string }`;
  * compile it with `compileMessageCatalog` from either consumer package
  * and hand it to `localizeErrors` (validate) or the `catalog` parameters
- * of `validateField` / `evaluateFormRules` (forms). This package has ZERO
- * dependencies - not even workspace ones; key parity with the built-in
- * English catalogs is enforced by tests in the repo, not by imports.
+ * of `validateField` / `evaluateFormRules` (forms). A pack imports only
+ * the shared rendering helpers; key parity with the built-in English
+ * catalogs is enforced by tests in the repo, not by imports.
  *
  * Globalization mechanics (the pack-authoring pattern - see
  * packages/validate/docs/ERROR-MESSAGES.md):
@@ -21,6 +21,12 @@
  * all held as module-level singletons (allocation discipline).
  */
 
+import {
+  formatMessageValue,
+  makeNumberRenderer,
+  makeTypeNamer,
+} from './helpers.js';
+
 //#region Intl singletons
 
 const numberFormat = new Intl.NumberFormat('tr-TR');
@@ -29,22 +35,8 @@ const listFormat = new Intl.ListFormat('tr', { style: 'long', type: 'disjunction
 /**
  * Render a numeric limit through the Turkish number format; non-numbers
  * (e.g. an unresolved $data pointer) render as-is.
- * @param {unknown} value - The limit
- * @returns {string}
  */
-function num(value) {
-  return typeof value === 'number' ? numberFormat.format(value) : String(value);
-}
-
-/**
- * Render a JSON value the way the forms English catalog does: quoted
- * strings, JSON for everything else.
- * @param {unknown} value - The value
- * @returns {string}
- */
-function formatValue(value) {
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
-}
+const num = makeNumberRenderer(numberFormat);
 
 /** Turkish names for the JSON Schema type keyword values. */
 const TYPE_NAMES = {
@@ -57,13 +49,8 @@ const TYPE_NAMES = {
   null: 'null',
 };
 
-/**
- * @param {string} type - A JSON Schema type name
- * @returns {string} The Turkish display name
- */
-function typeName(type) {
-  return TYPE_NAMES[type] ?? type;
-}
+/** Type keyword values under their Turkish display name. */
+const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
 
@@ -118,8 +105,8 @@ export const tr = {
   //#region @jarenjs/forms (second-person field voice)
   'form/required': 'Bu alan zorunludur',
   'form/type': (p) => `${typeName(p.type)} olmalıdır`,
-  'form/const': (p) => `${formatValue(p.constValue)} olmalıdır`,
-  'form/enum': (p) => `${Array.isArray(p.enumValues) ? listFormat.format(p.enumValues.map(formatValue)) : formatValue(p.enumValues)} değerlerinden biri olmalıdır`,
+  'form/const': (p) => `${formatMessageValue(p.constValue)} olmalıdır`,
+  'form/enum': (p) => `${Array.isArray(p.enumValues) ? listFormat.format(p.enumValues.map(formatMessageValue)) : formatMessageValue(p.enumValues)} değerlerinden biri olmalıdır`,
   'form/minLength': (p) => `En az ${num(p.limit)} karakter içermelidir (şu an ${num(p.len)})`,
   'form/maxLength': (p) => `En fazla ${num(p.limit)} karakter içermelidir (şu an ${num(p.len)})`,
   'form/pattern': '{pattern} desenine uymalıdır',

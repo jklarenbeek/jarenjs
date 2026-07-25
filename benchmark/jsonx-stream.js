@@ -24,8 +24,6 @@
  *   node benchmark/jsonx-stream.js --iterations 2000 --chunk 16
  */
 
-/* eslint-disable no-console */
-
 import { writeFileSync } from 'node:fs';
 
 import { parseJsonx, createJsonxStreamReader } from '@jarenjs/josl';

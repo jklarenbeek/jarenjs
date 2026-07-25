@@ -35,7 +35,7 @@
 //   JP2003 - the root of the document cannot be removed
 //   JP2004 - a `test` operation failed
 
-import { equalsJson } from '@jarenjs/core/object';
+import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 
 import {
   parseJSONPointer,
@@ -45,9 +45,7 @@ import {
 import { NOTHING, scanArrayIndex } from './segments.js';
 
 import {
-  isJsonObject,
   isContainer,
-  setObjectMember,
   cloneJson,
   makeState,
   ownedRoot,

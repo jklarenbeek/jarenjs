@@ -6,8 +6,11 @@
  *
  * Each pack is a plain flat object of message-key -> closure/template
  * entries (the catalog contract of
- * packages/validate/docs/ERROR-MESSAGES.md). Packs are zero-dependency;
- * compile them with `compileMessageCatalog` from the consuming package.
+ * packages/validate/docs/ERROR-MESSAGES.md); compile them with
+ * `compileMessageCatalog` from the consuming package. A pack holds its
+ * own translations and `Intl` singletons, and imports nothing but the
+ * rendering helpers of `./helpers.js` - never a consumer package, so
+ * either consumer can serve any pack.
  */
 
 export { ar } from './ar.js';

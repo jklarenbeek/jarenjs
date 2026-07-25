@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Return & risk statistics (Part A-fin): CAGR, holding-period
+ * @file Return & risk statistics: CAGR, holding-period
  * return, volatility, Sharpe ratio and maximum drawdown. Pure.
  */
 

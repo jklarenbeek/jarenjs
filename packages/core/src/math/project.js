@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file 3D → 2D projection helpers (Part A4), built on `Mat4` and the
+ * @file 3D → 2D projection helpers, built on `Mat4` and the
  * existing `Vec3f64`. Used by the x·y·z plotter to turn a rotated grid
  * of surface points into screen coordinates and to shade faces.
  */

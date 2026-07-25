@@ -9,6 +9,7 @@
  */
 
 import { LOCALES } from '../boundaries/validator.js';
+import { ideBar, ideNamesRule } from './ide.js';
 
 /** One segment button of the error-locale switcher. */
 const localeButton = (code) => ['button', {
@@ -17,23 +18,7 @@ const localeButton = (code) => ['button', {
   on: { click: { action: 'pg/locale', with: code } },
 }, code.toUpperCase()];
 
-const ideBar =
-  ['div', { class: 'ide-bar' },
-    ['input', {
-      type: 'text',
-      class: 'ide-name',
-      placeholder: 'Experiment name…',
-      value: '$.ide.name',
-      on: { input: 'ide/name' },
-    }],
-    ['button', { type: 'button', class: 'btn small', on: { click: 'ide/save' } }, 'Save'],
-    ['button', {
-      type: 'button', class: 'btn small', title: 'Copy a link that restores this experiment',
-      on: { click: 'ide/share' },
-    }, 'Share'],
-    { $if: ['$.ide.shared', ['span', { class: 'muted' }, '$.ide.shared']] },
-    ['div', { class: 'ide-list' }, [{ $apply: '$.ide.names[*]' }]],
-  ];
+const pgIdeBar = ideBar('Copy a link that restores this experiment');
 
 const schemaCard =
   ['div', { class: 'card pg-card' },
@@ -113,7 +98,7 @@ export const PLAYGROUND_RULES = [
       ['p', { class: 'page-lead' },
         'Every engine runs live in your browser with the real shipped compilers — no server, no eval. Save any state of an engine as a named experiment and recall it later.'],
       ['nav', { class: 'tabs' }, [{ $apply: '$.engines[*]' }]],
-      ideBar,
+      pgIdeBar,
       { $apply: '$.validate' },
       { $apply: '$.generic' },
     ],
@@ -125,19 +110,7 @@ export const PLAYGROUND_RULES = [
       class: { $if: ['$.active', 'tab active', 'tab'] },
     }, '$.label'],
   },
-  {
-    match: '$.ui.pg.ide.names[*]', mode: 'playground',
-    body: ['span', { class: 'ide-chip' },
-      ['button', {
-        type: 'button', class: 'ide-load', title: 'Load this experiment',
-        on: { click: { action: 'ide/load', with: '$.name' } },
-      }, '$.name'],
-      ['button', {
-        type: 'button', class: 'ide-delete', title: 'Delete this experiment',
-        on: { click: { action: 'ide/delete', with: '$.name' } },
-      }, '×'],
-    ],
-  },
+  ideNamesRule('$.ui.pg.ide.names[*]', 'playground'),
 
   // ---- the validate engine (special-cased: forms + i18n) ----
   {

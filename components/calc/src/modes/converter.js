@@ -1,11 +1,11 @@
 //@ts-check
 /**
- * @file The converter mode kernel (design decisions D12/D13). Contains
+ * @file The converter mode kernel. Contains
  * **no factors** — static dimensions call `@jarenjs/core/convert`'s
  * `convert(...)`, and the **currency** dimension calls the pure
  * `convertCurrency(value, from, to, rateTable)` with the live table from
- * `$.calc.rates`. The component's rates layer only supplies the table
- * (B7); this module never fetches.
+ * `$.calc.rates`. The component's rates layer is the only place that
+ * fetches a rate; this module never does.
  */
 
 import {

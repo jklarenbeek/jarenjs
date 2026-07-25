@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Interest math (Part A-fin): simple and compound interest, nominal
+ * @file Interest math: simple and compound interest, nominal
  * ↔ effective rate conversion, and continuous compounding. All pure.
  */
 

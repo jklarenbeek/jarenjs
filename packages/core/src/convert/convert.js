@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The static conversion engine (Part A-convert). Pure, single-pass,
+ * @file The static conversion engine. Pure, single-pass,
  * no per-call allocation. Rejects cross-dimension conversions with a
  * clear error.
  */

@@ -19,7 +19,7 @@
  */
 
 import { h, createDomRenderer } from '@jarenjs/view';
-import { hashContent } from './utils.js';
+import { hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
 import { walkAst } from './ast.js';
 import { buildPluginTables } from './parser.js';
 
@@ -276,38 +276,29 @@ function blockVnode(node, rctx, keyed) {
  * @returns {string}
  */
 function blockKey(node, rctx) {
-  const base = (hashValue(0x811c9dc5, node) >>> 0).toString(36);
+  const base = (hashValue(FNV1A_OFFSET_BASIS, node) >>> 0).toString(36);
   const seen = rctx.counts.get(base) ?? 0;
   rctx.counts.set(base, seen + 1);
   return seen === 0 ? base : base + ':' + seen;
 }
 
 /**
- * @param {number} h
- * @param {string} str
- * @returns {number}
- */
-function mixString(h, str) {
-  for (let i = 0; i < str.length; i++) {
-    h = ((h ^ str.charCodeAt(i)) * 0x01000193) >>> 0;
-  }
-  return h;
-}
-
-/**
  * FNV-1a over a JSON value's structure (deterministic member order —
  * the AST constructors build every node of a type with the same key
- * order).
- * @param {number} h
+ * order). The walk is md-specific — type tags are folded in with a
+ * `* 31` step so `{a: 1}` and `['a', 1]` differ — but every string is
+ * mixed through the suite's single `fnv1a` step, seeded with the hash
+ * so far.
+ * @param {number} h running unsigned 32-bit hash
  * @param {any} value
  * @returns {number}
  */
 function hashValue(h, value) {
   switch (typeof value) {
     case 'string':
-      return mixString((h * 31 + 1) >>> 0, value);
+      return fnv1a(value, (h * 31 + 1) >>> 0);
     case 'number':
-      return mixString((h * 31 + 2) >>> 0, String(value));
+      return fnv1a(String(value), (h * 31 + 2) >>> 0);
     case 'boolean':
       return ((h * 31 + (value ? 3 : 4)) * 0x01000193) >>> 0;
     default:
@@ -323,7 +314,7 @@ function hashValue(h, value) {
   }
   h = (h * 31 + 7) >>> 0;
   for (const key of Object.keys(value)) {
-    h = mixString(h, key);
+    h = fnv1a(key, h);
     h = hashValue(h, value[key]);
   }
   return h;

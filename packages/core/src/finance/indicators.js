@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Technical / trading indicators (Part A-fin) over a price or OHLC
+ * @file Technical / trading indicators over a price or OHLC
  * series. Every function returns an array **aligned** to the input (same
  * length), with `null` in warm-up positions where the indicator is not
  * yet defined. Single-pass where the math allows; `Float64Array` inputs

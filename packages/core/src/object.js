@@ -6,6 +6,7 @@ import {
   isBooleanType,
   isTypedArray,
 } from './index.js';
+import { compareCodePoints } from './string.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -156,6 +157,31 @@ export function equalsJson(a, b) {
 }
 
 /**
+ * Ordering of two JSON values per RFC 9535 section 2.3.5.2.2 — the
+ * ordering half of the comparison family whose equality half is
+ * `equalsJson`.
+ *
+ * Only two numbers or two strings order at all: numbers by value,
+ * strings by Unicode scalar values (`compareCodePoints`, not the native
+ * `<`). Every other pair — mismatched types, objects, arrays, booleans,
+ * null — is simply `false` in both directions, never an error.
+ *
+ * @param {any} a
+ * @param {any} b
+ * @param {boolean} [orEqual] when true test `<=` instead of `<`
+ * @returns {boolean}
+ */
+export function compareJsonScalarLt(a, b, orEqual = false) {
+  if (typeof a === 'number')
+    return typeof b === 'number' && (orEqual ? a <= b : a < b);
+  if (typeof a === 'string')
+    return typeof b === 'string' && (orEqual
+      ? compareCodePoints(a, b) <= 0
+      : compareCodePoints(a, b) < 0);
+  return false;
+}
+
+/**
  * Check if all items in an array are unique using deep equality
  * @param {any[]} arr - The array to check
  * @returns {boolean} True if all items are unique
@@ -243,6 +269,64 @@ export function stableStringify(value) {
     first = false;
   }
   return out + '}';
+}
+
+/**
+ * True for a JSON object — a non-null object that is not an array.
+ *
+ * This is the JSON data-model predicate, deliberately distinct from
+ * `isObjectType`: it treats `Map`, `Set`, `Date` and every other class
+ * instance as an object too, because at the JSON layer such a value has
+ * already been rejected or serialized before it gets here, and the only
+ * distinction that matters is object-vs-array.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isJsonObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Assign a member so that a key named `__proto__` becomes an own data
+ * property instead of reassigning the object's prototype. Every builder
+ * that turns untrusted names into members must go through this — a plain
+ * `out[name] = value` is a prototype-pollution hole for that one name.
+ *
+ * @param {Object} out target object
+ * @param {string} name member name, possibly attacker-controlled
+ * @param {any} value
+ */
+export function setObjectMember(out, name, value) {
+  if (name === '__proto__') {
+    Object.defineProperty(out, name, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  else {
+    out[name] = value;
+  }
+}
+
+/**
+ * Recursively `Object.freeze` a value and everything reachable from it,
+ * returning the value. Scalars pass through untouched. Assumes an acyclic
+ * structure (a JSON value); a cycle would recurse forever.
+ *
+ * @template T
+ * @param {T} value
+ * @returns {T} the same value, deeply frozen
+ */
+export function deepFreeze(value) {
+  if (typeof value !== 'object' || value === null)
+    return value;
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++)
+    deepFreeze(value[keys[i]]);
+  return Object.freeze(value);
 }
 
 /**

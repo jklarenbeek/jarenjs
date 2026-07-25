@@ -22,6 +22,7 @@ import { parseJSONPath, JSONPathSyntaxError } from '../path.js';
 import { isSingularSegments } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { JsonQueryCompileError } from './errors.js';
+import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 // The operator registry: `name -> { params, result, compile }`. Only
 // referenced inside functions (never at module evaluation time), so the
 // import cycle normalize.js <-> operators.js is initialization-safe.
@@ -107,10 +108,6 @@ function isVocabularyKey(key, ctx) {
 
 //#region helpers
 
-function isPlainObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
 function fail(code, message, docPath, options) {
   throw new JsonQueryCompileError(code, message, docPath, options);
 }
@@ -160,15 +157,6 @@ export function deepFreezeCopy(value) {
   for (let i = 0; i < keys.length; i++)
     out[keys[i]] = deepFreezeCopy(value[keys[i]]);
   return Object.freeze(out);
-}
-
-function deepFreeze(value) {
-  if (typeof value !== 'object' || value === null)
-    return value;
-  const keys = Object.keys(value);
-  for (let i = 0; i < keys.length; i++)
-    deepFreeze(value[keys[i]]);
-  return Object.freeze(value);
 }
 
 //#endregion
@@ -422,7 +410,7 @@ function makeRaw(value, docPath) {
 // One argument position of a registry operator, per its declared kind:
 // 'expr' normalizes an ordinary expression; 'raw' captures the value
 // verbatim, unevaluated; 'schema' is 'raw' plus a compiled type-test
-// predicate (the type-system work order's schema arguments); 'name'
+// predicate, for schema-literal arguments (`compileSchemaLiteral`); 'name'
 // captures a validated variable name string. 'raw', 'schema' and 'name'
 // produce inert `raw` nodes - compile-time data, never compiled.
 function normalizeArg(kind, value, argPath, scope, ctx, opPath) {
@@ -582,7 +570,7 @@ function bindPhraseName(name, phraseNames, bindPath) {
 }
 
 function requireBindingObject(clause, bindObj, clausePath) {
-  if (!isPlainObject(bindObj))
+  if (!isJsonObject(bindObj))
     fail('JQ0003', `'${clause}' takes an object of variable bindings`, clausePath);
   const names = Object.keys(bindObj);
   if (names.length === 0)
@@ -603,7 +591,7 @@ function normalizeLetBindings(letObj, letPath, scope, ctx, phraseNames, bindings
     const bindPath = letPath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     const source = letObj[name];
-    if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
+    if (isJsonObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
       return fail('JQ0003', "the extended '$in'/'$at' binding form is not available in '$let'", bindPath);
     const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
@@ -640,7 +628,7 @@ function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings
     let source = forObj[name];
     let sourcePath = bindPath;
     let atName = null;
-    if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at'))) {
+    if (isJsonObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at'))) {
       if (Object.keys(source).length !== 2 || !hasOwn(source, '$in') || !hasOwn(source, '$at'))
         return fail('JQ0003', "the extended binding form takes exactly the keys '$in' and '$at'", bindPath);
       atName = source.$at;
@@ -677,7 +665,7 @@ function normalizeOrderbySpec(spec, specPath, scope, ctx) {
   let emptyGreatest = false;
   let collation = null;
   let collationName = null;
-  if (isPlainObject(spec)
+  if (isJsonObject(spec)
     && (hasOwn(spec, '$key') || hasOwn(spec, '$dir') || hasOwn(spec, '$empty') || hasOwn(spec, '$collation'))) {
     const specKeys = Object.keys(spec);
     for (let i = 0; i < specKeys.length; i++) {
@@ -819,7 +807,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
   if (hasOwn(obj, '$as')) {
     const asPath = docPath + '/$as';
     const asObj = obj.$as;
-    if (!isPlainObject(asObj))
+    if (!isJsonObject(asObj))
       return fail('JQ0003', "'$as' takes an object of variable-name to schema members", asPath);
     const names = Object.keys(asObj);
     if (names.length === 0)
@@ -984,7 +972,7 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
     const bindPath = clausePath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     const source = bindObj[name];
-    if (isPlainObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
+    if (isJsonObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
       return fail('JQ0003', "the extended '$in'/'$at' binding form is not available in quantifiers", bindPath);
     const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
@@ -1009,7 +997,7 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
 // machinery. Violations are host programming errors (TypeError), not
 // JQ0xxx document errors.
 function validateExtensions(extensions) {
-  if (!isPlainObject(extensions))
+  if (!isJsonObject(extensions))
     throw new TypeError('options.extensions must be a plain object of operator entries');
   const names = Object.keys(extensions);
   for (let i = 0; i < names.length; i++) {
@@ -1029,7 +1017,7 @@ function validateExtensions(extensions) {
 // `name -> function`. Violations are host programming errors
 // (TypeError), like options.extensions.
 function validateNamedFunctions(value, what) {
-  if (!isPlainObject(value))
+  if (!isJsonObject(value))
     throw new TypeError(`options.${what} must be a plain object of named functions`);
   for (const name in value) {
     // the schema twins require non-empty names (minLength 1); the
@@ -1047,7 +1035,7 @@ function validateNamedFunctions(value, what) {
 // silent false guarantee. `steps`/`depth` need an instrumented
 // evaluation core and are rejected until that exists.
 function validateLimits(value) {
-  if (!isPlainObject(value))
+  if (!isJsonObject(value))
     throw new TypeError('options.limits must be a plain object');
   for (const name in value) {
     if (name === 'steps' || name === 'depth')
@@ -1128,7 +1116,7 @@ export function normalizeQuery(doc, options = {}) {
   let expr = doc;
   let rootPath = '';
   // the version envelope is only recognized at the top level (section 4)
-  if (isPlainObject(doc) && (hasOwn(doc, '$query') || hasOwn(doc, '$expr'))) {
+  if (isJsonObject(doc) && (hasOwn(doc, '$query') || hasOwn(doc, '$expr'))) {
     const keys = Object.keys(doc);
     let allDollar = true;
     for (let i = 0; i < keys.length; i++) {

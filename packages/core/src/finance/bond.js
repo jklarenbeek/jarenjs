@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Bond math (Part A-fin): price, yield-to-maturity, Macaulay and
+ * @file Bond math: price, yield-to-maturity, Macaulay and
  * modified duration, and convexity. Basic day-count only (level coupons,
  * whole periods to maturity); exotic conventions are out of scope.
  *

@@ -70,6 +70,32 @@ export function isHexDigitCode(c) {
 }
 
 /**
+ * Checks if a char code may start an unquoted name: an ASCII letter,
+ * `_`, or any non-ASCII code unit. Non-ASCII is admitted wholesale rather
+ * than by Unicode category, which is what the RFC 9535 shorthand member
+ * name and the XML Name productions both settle for in practice.
+ * @param {number} c - The char code
+ * @returns {boolean}
+ */
+export function isNameStartCode(c) {
+  return (c >= 0x41 && c <= 0x5A) // A-Z
+    || (c >= 0x61 && c <= 0x7A) // a-z
+    || c === CC_UNDERSCORE
+    || c >= 0x80; // any non-ASCII code unit
+}
+
+/**
+ * Checks if a char code may continue an unquoted name: a name start or an
+ * ASCII digit. Grammars that also admit `-`/`.` inside names (XML Name,
+ * for one) test those separately on top of this.
+ * @param {number} c - The char code
+ * @returns {boolean}
+ */
+export function isNameCharCode(c) {
+  return isNameStartCode(c) || isDigitCode(c);
+}
+
+/**
  * Checks if a char code is blank space per RFC 9535 (space, tab,
  * line feed or carriage return).
  * @param {number} c - The char code

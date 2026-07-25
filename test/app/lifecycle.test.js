@@ -25,7 +25,7 @@ function baseDoc() {
   };
 }
 
-describe('subscription startup as resource acquisition (A2)', function () {
+describe('subscription startup as resource acquisition', function () {
   it('a handler that throws while starting leaves the slot stopped (JA2013), and later reconciliation may retry', function () {
     const errors = [];
     const log = [];
@@ -93,7 +93,7 @@ describe('subscription startup as resource acquisition (A2)', function () {
   });
 });
 
-describe('boot as a transaction (A3)', function () {
+describe('boot as a transaction', function () {
   it('a boot-time subscription failure under the default sink rolls back and throws JA0007 with the cause chain', function () {
     const log = [];
     const doc = baseDoc();
@@ -163,7 +163,7 @@ describe('boot as a transaction (A3)', function () {
   });
 });
 
-describe('app.destroy() (A4)', function () {
+describe('app.destroy()', function () {
   it('unmounts widgets exactly once, empties the container, disposes handlers once, and is idempotent', function () {
     const { document, container } = createStubHost();
     const log = [];
@@ -223,7 +223,7 @@ describe('app.destroy() (A4)', function () {
   });
 });
 
-describe('createDomRenderer destroy (A4)', function () {
+describe('createDomRenderer destroy', function () {
   it('is idempotent, unmounts widgets once, and later renders are no-ops', function () {
     const { document, container } = createStubHost();
     const log = [];
@@ -267,7 +267,7 @@ describe('createDomRenderer destroy (A4)', function () {
   });
 });
 
-describe('task concurrency modes (B2)', function () {
+describe('task concurrency modes', function () {
   /** A manually settled runner recording calls. */
   function deferredRunner() {
     const calls = [];

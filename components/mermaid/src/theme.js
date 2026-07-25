@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Theme tokens (design decision D4). `createTheme` resolves a
+ * @file Theme tokens. `createTheme` resolves a
  * theme name (or overrides) into a flat token object of concrete colors
  * *and* a matching set of `--mm-*` CSS custom properties.
  *
@@ -143,8 +143,7 @@ export const HOST_VARS = {
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
-  if (nameOrOverrides === 'host') nameOrOverrides = { vars: HOST_VARS };
-  return resolveTheme(THEMES, 'mm', nameOrOverrides);
+  return resolveTheme(THEMES, 'mm', nameOrOverrides, HOST_VARS);
 }
 
 export { THEMES };

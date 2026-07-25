@@ -14,8 +14,6 @@
  *   node benchmark/charts.js --points 500 --iterations 2000
  */
 
-/* eslint-disable no-console */
-
 import { writeFileSync } from 'node:fs';
 
 import { compileChart, createChartSession } from '@jarenjs/charts';

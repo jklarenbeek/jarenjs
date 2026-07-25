@@ -21,7 +21,6 @@ import * as ajv from './adaptors/ajv.js';
 import * as jaren from './adaptors/jaren.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { glob } from 'glob';
 
 const DEFAULT_TEST_DRAFT = 'draft7';
 const DEFAULT_ITERATIONS = 1000;
@@ -75,7 +74,7 @@ async function discoverAvailableDrafts() {
             isSymlink: true,
             target: targetName,
           };
-        } catch (e) {
+        } catch {
           // Ignore broken symlinks
         }
       }
@@ -86,23 +85,6 @@ async function discoverAvailableDrafts() {
 
   discoveredDraftsCache = drafts;
   return drafts;
-}
-
-/**
- * Get list of supported draft names including discovered ones
- * @returns {string[]} Array of supported draft names
- */
-async function getSupportedDrafts() {
-  const available = await discoverAvailableDrafts();
-  const folderNames = Object.keys(available);
-
-  // Combine with known aliases
-  const allDrafts = new Set([
-    ...folderNames,
-    ...Object.keys(DRAFT_SCHEMA_MAP),
-  ]);
-
-  return Array.from(allDrafts).sort();
 }
 
 /**
@@ -379,9 +361,8 @@ function padStart(text, targetWidth) {
  * @param {Object} options - Output options
  * @param {string} schemaDraft - The schema draft version
  * @param {string} folderDraft - The test suite folder name
- * @param {Object} availableDrafts - Available drafts from discoverAvailableDrafts
  */
-function printConsoleTable(results, options, schemaDraft, folderDraft, availableDrafts) {
+function printConsoleTable(results, options, schemaDraft, folderDraft) {
   // Filter out errors and sort by ratio (slowest first)
   const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
@@ -411,7 +392,6 @@ function printConsoleTable(results, options, schemaDraft, folderDraft, available
   // Limit to top N if specified (but include errors)
   let displayResults;
   if (options.topN) {
-    const validCount = validResults.length;
     const topValid = sortedResults.slice(0, options.topN);
     displayResults = [...topValid, ...errorResults];
   } else {
@@ -729,7 +709,7 @@ async function profileDraft(draft, options, availableDrafts) {
 
   // Load tests
   const allTests = await loadTestSuiteJson(folderDraft);
-  const remotes = await loadRemoteJson(folderDraft);
+  const remotes = await loadRemoteJson();
 
   let results = [];
 
@@ -775,7 +755,6 @@ async function profileDraft(draft, options, availableDrafts) {
 async function main() {
   const options = await parseArgs();
   const availableDrafts = await discoverAvailableDrafts();
-  const supportedDrafts = await getSupportedDrafts();
 
   // Validate draft options
   const invalidDrafts = options.drafts.filter(d => !isValidDraft(d, availableDrafts));
@@ -824,7 +803,7 @@ async function main() {
     if (options.output === 'console') {
       const schemaDraft = getSchemaDraft(draft);
       const folderDraft = getDraftFolder(draft, availableDrafts);
-      printConsoleTable(draftResults, options, schemaDraft, folderDraft, availableDrafts);
+      printConsoleTable(draftResults, options, schemaDraft, folderDraft);
     }
 
     allResults.push(...draftResults);

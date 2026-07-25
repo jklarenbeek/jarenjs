@@ -13,35 +13,24 @@
  * owns the nested app).
  */
 
-const ideBar =
-  ['div', { class: 'ide-bar' },
-    ['input', {
-      type: 'text',
-      class: 'ide-name',
-      placeholder: 'Experiment name…',
-      value: '$.ide.name',
-      on: { input: 'ide/name' },
-    }],
-    ['button', { type: 'button', class: 'btn small', on: { click: 'ide/save' } }, 'Save'],
-    ['button', {
-      type: 'button', class: 'btn small', title: 'Copy a link that restores this document',
-      on: { click: 'ide/share' },
-    }, 'Share'],
-    ['button', {
-      type: 'button', class: 'btn small', title: 'Download the document as JSON',
-      on: { click: 'studio/download' },
-    }, 'Download'],
-    ['button', {
-      type: 'button', class: 'btn small', title: 'Discard the document and pick a template',
-      on: { click: 'studio/clear' },
-    }, 'New'],
-    { $if: ['$.ide.shared', ['span', { class: 'muted' }, '$.ide.shared']] },
-    ['div', { class: 'ide-list' }, [{ $apply: '$.ide.names[*]' }]],
-  ];
+import { ideBar, ideNamesRule } from './ide.js';
+
+// the Studio's bar carries two document-level buttons the playground
+// has no use for
+const studioIdeBar = ideBar('Copy a link that restores this document', [
+  ['button', {
+    type: 'button', class: 'btn small', title: 'Download the document as JSON',
+    on: { click: 'studio/download' },
+  }, 'Download'],
+  ['button', {
+    type: 'button', class: 'btn small', title: 'Discard the document and pick a template',
+    on: { click: 'studio/clear' },
+  }, 'New'],
+]);
 
 const editorCard =
   ['div', { class: 'card pg-card studio-editor' },
-    ideBar,
+    studioIdeBar,
     ['details', { class: 'details-card', open: true },
       ['summary', {}, 'Document (JSON)'],
       ['textarea', {
@@ -112,17 +101,5 @@ export const STUDIO_RULES = [
     match: '$.ui.studio.live', mode: 'studio',
     body: ['div', { key: 'studio-live', class: 'studio-grid' }, editorCard, stageCard],
   },
-  {
-    match: '$.ui.studio.live.ide.names[*]', mode: 'studio',
-    body: ['span', { class: 'ide-chip' },
-      ['button', {
-        type: 'button', class: 'ide-load', title: 'Load this experiment',
-        on: { click: { action: 'ide/load', with: '$.name' } },
-      }, '$.name'],
-      ['button', {
-        type: 'button', class: 'ide-delete', title: 'Delete this experiment',
-        on: { click: { action: 'ide/delete', with: '$.name' } },
-      }, '×'],
-    ],
-  },
+  ideNamesRule('$.ui.studio.live.ide.names[*]', 'studio'),
 ];

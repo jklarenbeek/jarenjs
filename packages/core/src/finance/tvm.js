@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Time Value of Money (Part A-fin). The five TVM quantities — N,
+ * @file Time Value of Money. The five TVM quantities — N,
  * I/Y, PV, PMT, FV — obey one identity; each function here solves for its
  * own variable. Sign convention follows the standard cash-flow model
  * (money in is positive, money out negative), matching Excel/HP-12C:

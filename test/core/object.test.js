@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
-import { equalsDeep, equalsJson, mergeMap, mergeSet, stableStringify } from '@jarenjs/core/object';
+import {
+  equalsDeep, equalsJson, mergeMap, mergeSet, stableStringify,
+  isJsonObject, setObjectMember, deepFreeze,
+} from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
 
@@ -350,5 +353,52 @@ describe('stableStringify', () => {
     assert.isTrue(stableStringify('x') === '"x"');
     assert.isTrue(stableStringify(1.5) === '1.5');
     assert.isTrue(stableStringify(null) === 'null');
+  });
+});
+
+describe('isJsonObject', () => {
+  it('separates objects from arrays and null', () => {
+    assert.isTrue(isJsonObject({}));
+    assert.isTrue(isJsonObject({ a: 1 }));
+    assert.isTrue(isJsonObject(Object.create(null)));
+    assert.isFalse(isJsonObject([]));
+    assert.isFalse(isJsonObject(null));
+    assert.isFalse(isJsonObject('x'));
+    assert.isFalse(isJsonObject(undefined));
+  });
+});
+
+describe('setObjectMember', () => {
+  it('assigns an ordinary member', () => {
+    const out = {};
+    setObjectMember(out, 'a', 1);
+    assert.isTrue(out.a === 1);
+  });
+
+  it('makes __proto__ an own data property instead of a prototype write', () => {
+    const out = {};
+    const payload = { polluted: true };
+    setObjectMember(out, '__proto__', payload);
+    assert.isTrue(Object.hasOwn(out, '__proto__'));
+    assert.isTrue(out['__proto__'] === payload);
+    assert.isTrue(Object.getPrototypeOf(out) === Object.prototype);
+    assert.isTrue({}.polluted === undefined);
+  });
+});
+
+describe('deepFreeze', () => {
+  it('freezes every reachable container and returns the value', () => {
+    const value = { a: { b: [1, { c: 2 }] } };
+    assert.isTrue(deepFreeze(value) === value);
+    assert.isTrue(Object.isFrozen(value));
+    assert.isTrue(Object.isFrozen(value.a));
+    assert.isTrue(Object.isFrozen(value.a.b));
+    assert.isTrue(Object.isFrozen(value.a.b[1]));
+  });
+
+  it('passes scalars through untouched', () => {
+    assert.isTrue(deepFreeze(1) === 1);
+    assert.isTrue(deepFreeze(null) === null);
+    assert.isTrue(deepFreeze('s') === 's');
   });
 });

@@ -4,7 +4,7 @@ import * as assert from 'node:assert/strict';
 
 import { parseMermaid, toMermaid } from '@jarenjs/mermaid';
 
-/** The fixed-point corpus (design decision D12). */
+/** The round-trip fixed-point corpus: `parseMermaid(toMermaid(doc))` deep-equals `doc.ast`. */
 const FIXTURES = [
   `flowchart TD
     A[Start] --> B{Is it?}

@@ -1,14 +1,14 @@
 //@ts-check
 /**
- * @file `@jarenjs/calc` — the ENGINE (part one of the two-layer package,
- * design decision D1). Pure functions over data — expression text ⇄ AST ⇄
+ * @file `@jarenjs/calc` — the ENGINE (part one of the two-layer
+ * package). Pure functions over data — expression text ⇄ AST ⇄
  * value, and AST/scene → pure-vnode SVG — that know only `@jarenjs/core`
  * and `@jarenjs/view`. It imports nothing from the component,
  * `@jarenjs/app`, `@jarenjs/forms` or the DOM. The boundary is one-way
  * (the component imports the engine, never the reverse).
  *
  * The signature duality mirrors the rest of the suite:
- * `parseExpression` ⇄ `toExpression` is a round-trip fixed point (D3).
+ * `parseExpression` ⇄ `toExpression` is a round-trip fixed point.
  */
 
 import { renderToString } from '@jarenjs/view';
@@ -41,7 +41,7 @@ export {
 /**
  * Render an expression to a plot vnode, choosing 2D or 3D by whether the
  * expression's free variables include a second axis. Error-safe: a parse
- * failure yields the error vnode (D2), never a throw.
+ * failure yields the error vnode, never a throw.
  *
  * @param {string} source
  * @param {{ kind?: '2d'|'3d', [k: string]: any }} [options]

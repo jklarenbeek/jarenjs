@@ -15,7 +15,8 @@
  * never `categories.indexOf` per cell — that is O(n²) for wide charts).
  */
 
-import { svgRoot } from '@jarenjs/view/helpers';
+import { svgRoot, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog, scaleBand } from '../core/scale.js';
 import { axisTicksLinear, axisTicksLog, niceStep, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart } from '../core/cartesian.js';
@@ -132,10 +133,6 @@ export function buildBarAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a bar AST to a pure-vnode SVG.
  * @param {BarAST} ast
@@ -176,7 +173,7 @@ export function renderBarAST(ast, theme, hash, options = {}) {
       h = (bar.v1 - bar.v0) * plot.h;
     }
     children.push(['rect', {
-      x: round2(x), y: round2(y), width: round2(Math.max(0.5, w)), height: round2(Math.max(0.5, h)),
+      x: coord(x), y: coord(y), width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
       fill, class: 'chart-bar',
     }]);
   }
@@ -188,8 +185,4 @@ export function renderBarAST(ast, theme, hash, options = {}) {
 /** In horizontal orientation the first category reads at the top. */
 function flipPos(tick) {
   return { pos: 1 - tick.pos, label: tick.label };
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

@@ -11,6 +11,7 @@
  * NaN/±Inf never reaches the emitted string.
  */
 
+import { Float64 } from '@jarenjs/core/math';
 import { h } from '../vnode.js';
 
 /** URL schemes permitted on a link `href`. */
@@ -38,6 +39,32 @@ export function sanitizeHref(url) {
  */
 export function num(n, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Quantize a coordinate to two decimals — the precision SVG geometry is
+ * emitted at, which keeps path data short and makes repeated renders of the
+ * same shape produce identical strings. Non-finite input passes straight
+ * through, so pair this with `num` wherever the value reaches an attribute.
+ * @param {number} v
+ * @returns {number}
+ */
+export function coord(v) {
+  return Float64.roundTo(v, 2);
+}
+
+/**
+ * The `text-anchor` for a label placed radially outward at `angle`
+ * (radians, 0 = east, y growing downward). Labels near the left or right
+ * of the circle read away from it (`end`/`start`); the deadband around
+ * ±90° keeps top and bottom labels centred rather than flipping anchor on
+ * a hair's difference in angle.
+ * @param {number} angle
+ * @returns {'start'|'end'|'middle'}
+ */
+export function anchorForAngle(angle) {
+  const c = Math.cos(angle);
+  return c > 0.3 ? 'start' : c < -0.3 ? 'end' : 'middle';
 }
 
 /**

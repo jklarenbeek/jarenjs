@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatNumber, parseNumber } from '@jarenjs/core/math';
 
-describe('#number format/parse (A5)', function () {
+describe('#number format/parse', function () {
   it('auto notation', () => {
     assert.equal(formatNumber(1234.5), '1234.5');
     assert.equal(formatNumber(0), '0');

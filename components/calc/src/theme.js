@@ -70,8 +70,7 @@ export const HOST_VARS = {
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
-  if (nameOrOverrides === 'host') nameOrOverrides = { vars: HOST_VARS };
-  return resolveTheme(THEMES, 'calc', nameOrOverrides);
+  return resolveTheme(THEMES, 'calc', nameOrOverrides, HOST_VARS);
 }
 
 export { THEMES };

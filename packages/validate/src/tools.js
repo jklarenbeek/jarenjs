@@ -23,6 +23,10 @@ import {
   isArrayish,
 } from '@jarenjs/core/array';
 
+import {
+  JSONPOINTER_NOTHING,
+} from '@jarenjs/json';
+
 //#region Object
 export function isBoolOrObjectClass(obj) {
   return isBooleanType(obj)
@@ -132,6 +136,18 @@ export function createIsSchemaTypeHandler(type, isStrict = false) {
 
   return undefined;
 }
+
+//#endregion
+
+//#region Data references
+
+/**
+ * The fallback resolver of the data-reference keywords (`data`, `$data`):
+ * a ref that fails the strict compile keeps the lax keyword semantics, so
+ * it resolves as not-found and the keyword asserts nothing.
+ * @returns {any} the JSON Pointer not-found sentinel
+ */
+export const resolveNothing = () => JSONPOINTER_NOTHING;
 
 //#endregion
 

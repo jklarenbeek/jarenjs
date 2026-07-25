@@ -2,7 +2,7 @@
 /**
  * @file The render dispatcher. Turns a `DiagramDocument` (or raw source)
  * into a pure-vnode SVG, choosing the specialized layout+render closure
- * per diagram type, and **never throws** (design decision D7): a
+ * per diagram type, and **never throws**: a
  * parse/layout error becomes an error vnode.
  */
 

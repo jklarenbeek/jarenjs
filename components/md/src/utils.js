@@ -6,11 +6,14 @@
  * keys, the document `meta.hash`, and the mermaid SVG cache are all keyed
  * by it — so md re-exports the suite's single `hashContent` from
  * `@jarenjs/core` rather than carrying its own copy; equal content hits
- * O(1) fast paths everywhere downstream. The remaining helpers are md's
- * own allocation-light scanner utilities.
+ * O(1) fast paths everywhere downstream. `fnv1a` is that same mixing
+ * step, exposed for the two callers that fold a hash incrementally (the
+ * streaming parser's chunks, the structural block-key walk) and so must
+ * seed it themselves from `FNV1A_OFFSET_BASIS`. The remaining helpers
+ * are md's own allocation-light scanner utilities.
  */
 
-export { hashContent } from '@jarenjs/core/string';
+export { hashContent, fnv1a, FNV1A_OFFSET_BASIS } from '@jarenjs/core/string';
 
 /**
  * Count leading space characters (U+0020 only; the scanner expands no

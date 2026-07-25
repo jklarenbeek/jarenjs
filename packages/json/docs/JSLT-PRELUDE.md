@@ -155,5 +155,5 @@ The intended consumers, in order:
 
 The groundwork this prelude assumed — schema literals inside query
 documents, the compile-time `compileTypeTest` hook, per-item validation
-semantics — shipped with the type-system work order; the next concrete step
+semantics — has since shipped in the query engine; the next concrete step
 is the `$apply` dispatch prototype behind a `jslt` module boundary.

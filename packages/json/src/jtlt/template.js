@@ -7,6 +7,7 @@
 
 import { JtltCompileError } from './errors.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 const hasOwn = Object.hasOwn;
 const ENVELOPE_KEYS = new Set(['$jtlt', 'output', 'rules']);
@@ -17,17 +18,13 @@ const OUTPUT_METHODS = new Set(['text', 'xml']);
 // built-in rules, which sit at -1e308 - beneath every user rule.
 export const RESERVED_PRIORITY_FLOOR = -1e307;
 
-function isObject(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function fail(code, message, docPath) {
   throw new JtltCompileError(code, message, docPath);
 }
 
 function normalizeRule(value, index, rulesPath) {
   const rulePath = rulesPath + '/' + index;
-  if (!isObject(value))
+  if (!isJsonObject(value))
     fail('TL0002', 'a template rule must be an object', rulePath);
 
   const keys = Object.keys(value);
@@ -51,7 +48,7 @@ function normalizeRule(value, index, rulesPath) {
         rulePath + '/priority');
   }
   const hasMatch = hasOwn(value, 'match');
-  if (hasMatch && typeof value.match !== 'string' && !isObject(value.match))
+  if (hasMatch && typeof value.match !== 'string' && !isJsonObject(value.match))
     fail('TL0002', "'match' must be a JSONPath string or an object", rulePath + '/match');
 
   return Object.freeze({
@@ -82,7 +79,7 @@ export function normalizeJtltTemplate(doc) {
     sourceRules = doc;
     rulesPath = '';
   }
-  else if (isObject(doc)) {
+  else if (isJsonObject(doc)) {
     const keys = Object.keys(doc);
     for (let i = 0; i < keys.length; i++) {
       if (!ENVELOPE_KEYS.has(keys[i]))

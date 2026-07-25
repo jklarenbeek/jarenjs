@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Gantt grammar → gantt AST: a schedule DAG (D11). Header
+ * @file Gantt grammar → gantt AST: a schedule DAG. Header
  * directives (`title`, `dateFormat`, `axisFormat`, `excludes`) go to
  * `meta`; `section` groups tasks; task rows keep their raw metadata
  * string (`:done, id, 2014-01-06, 3d`) verbatim, geometry-free.

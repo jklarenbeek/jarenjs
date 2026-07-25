@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file Evaluation environments — the operator/function binding sets the
- * compiler resolves against (design decision D5). The AST is neutral; an
+ * compiler resolves against. The AST is neutral; an
  * environment gives it meaning. `defaultEnv` covers standard/scientific
  * (float, `^` = power, angle-aware trig); `programmerEnv` overrides the
  * bitwise operators with `@jarenjs/core/math/word.js` word math and adds

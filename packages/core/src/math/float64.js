@@ -9,7 +9,7 @@ export const mathf64_cos = Math.cos;
 export const mathf64_atan2 = Math.atan2;
 export const mathf64_asin = Math.asin;
 
-// Transcendental completeness (Part A1). Free `Math.*` aliases, in the
+// Transcendental completeness. Free `Math.*` aliases, in the
 // module's existing naming style, so downstream packages bind them by
 // import instead of reaching for the global `Math`.
 export const mathf64_tan = Math.tan;
@@ -174,16 +174,6 @@ export class Float64 {
     return +((value - min) / (max - min));
   }
 
-  static lerp(norm = 0.0, min = 0.0, max = 0.0) {
-    norm = +norm; min = +min; max = +max;
-    return +((max - min) * (norm + min));
-  }
-
-  static map(value = 0.0, smin = 0.0, smax = 0.0, dmin = 0.0, dmax = 0.0) {
-    value = +value; smin = +smin; smax = +smax; dmin = +dmin; dmax = +dmax;
-    return +Float64.lerp(+Float64.norm(value, smin, smax), dmin, dmax);
-  }
-
   /**
    * Clamps a value between a checked boundary.
    * and can therefor handle swapped min/max arguments
@@ -262,8 +252,7 @@ export class Float64 {
   }
 
   static cosHp(r = 0.0) {
-    // High-precision polynomial cosine (Nick's approximation), now
-    // implemented (Part A1): previously this threw.
+    // High-precision polynomial cosine (Nick's approximation).
     //   template<typename T>
     // inline T cos(T x) noexcept
     // {
@@ -344,7 +333,7 @@ export class Float64 {
 
   //#endregion
 
-  //#region transcendental completeness (Part A1)
+  //#region transcendental completeness
 
   /**
    * The base-e logarithm of `x` in an arbitrary base.
@@ -447,16 +436,12 @@ export class Float64 {
 }
 
 /**
- * Standard linear remap of `v` from the source range `[smin, smax]` to the
- * destination range `[dmin, dmax]`. A degenerate source range collapses to
- * `dmin`.
- *
- * This is the interpolation-correct remap: `dmin + t·(dmax - dmin)` with
- * `t = (v - smin)/(smax - smin)`. It is deliberately distinct from the
- * legacy `Float64.map`, which composes `Float64.norm`/`Float64.lerp` with a
- * non-standard `lerp` formula (`(max - min)·(norm + min)`) and is therefore
- * unsuitable for screen/value interpolation. `Float64.map`'s quirk is left
- * unchanged for its existing consumers; new interpolation callers use this.
+ * Linear remap of `v` from the source range `[smin, smax]` to the destination
+ * range `[dmin, dmax]`: `dmin + t·(dmax - dmin)` with
+ * `t = (v - smin)/(smax - smin)`. A degenerate source range collapses to
+ * `dmin` rather than dividing by zero, so a constant-valued axis still maps to
+ * a drawable coordinate. Inverted destination ranges are supported, which is
+ * what screen-space y-flips need.
  *
  * @param {number} v
  * @param {number} smin
@@ -468,6 +453,42 @@ export class Float64 {
 export function remap(v, smin, smax, dmin, dmax) {
   if (smax === smin) return dmin;
   return dmin + ((v - smin) / (smax - smin)) * (dmax - dmin);
+}
+
+/**
+ * The "nice" axis step — 1, 2 or 5 times a power of ten — that covers `span`
+ * in roughly `count` steps, so a tick sequence reads as 0/2/4/6 rather than
+ * 0/1.7/3.4. `count` is floored at 1; pass a pre-divided per-step span and
+ * leave it at its default to get the ladder alone.
+ *
+ * The ladder is pure arithmetic with no domain guard: it is the caller who
+ * knows what a non-positive or non-finite `span` means for its axis, and
+ * different axes answer that differently.
+ *
+ * @param {number} span the domain span to cover
+ * @param {number} [count] desired number of steps (floored at 1)
+ * @returns {number}
+ */
+export function niceStep(span, count = 1) {
+  const raw = span / Math.max(1, count);
+  const base = Math.pow(10, Math.floor(Math.log10(raw)));
+  const unit = raw / base;
+  const factor = unit < 1.5 ? 1 : unit < 3 ? 2 : unit < 7 ? 5 : 10;
+  return factor * base;
+}
+
+/**
+ * Clamp a value into the unit interval `[0, 1]` — the fraction every
+ * unit-space geometry stage emits. `NaN` passes through as `NaN` rather
+ * than collapsing to a boundary, so a non-finite input stays visible to
+ * the caller instead of silently rendering at an edge; callers that want a
+ * drawable coordinate regardless guard with `Number.isFinite` first.
+ *
+ * @param {number} v
+ * @returns {number}
+ */
+export function clamp01(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
 /** Lanczos g=7 coefficients (shared, allocation-free). */

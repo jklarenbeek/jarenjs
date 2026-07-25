@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The expression AST (design decisions D2/D3). Monomorphic node
+ * @file The expression AST. Monomorphic node
  * constructors — one plain-object shape per kind — so the compiler and
  * printer branch on a single `type` tag and the reconciler/`deepEqual`
  * round-trip stays cheap. The AST is **geometry-free**: it carries no

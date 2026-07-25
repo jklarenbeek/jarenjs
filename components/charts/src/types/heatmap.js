@@ -17,7 +17,8 @@
  * rendering of "no measurement".
  */
 
-import { svgRoot } from '@jarenjs/view/helpers';
+import { svgRoot, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { SEQUENTIAL, sequentialColor } from '../core/palette.js';
@@ -117,10 +118,6 @@ export function buildHeatmapAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a heatmap AST to a pure-vnode SVG: inset cell rects colored by
  * the sequential ramp, a labeled min→max ramp key in the legend slot,
@@ -161,8 +158,8 @@ export function renderHeatmapAST(ast, theme, hash, options = {}) {
     const w = (cell.u1 - cell.u0) * plot.w - 2 * inset;
     const h = (cell.v1 - cell.v0) * plot.h - 2 * inset;
     children.push(['rect', {
-      x: round2(x), y: round2(y),
-      width: round2(Math.max(0.5, w)), height: round2(Math.max(0.5, h)),
+      x: coord(x), y: coord(y),
+      width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
       fill: sequentialColor(cell.t, ramp), class: 'chart-heat-cell',
     }, ['title', {},
       `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${formatTickValue(cell.value)}`]]);
@@ -170,8 +167,4 @@ export function renderHeatmapAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-heatmap-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'heat-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

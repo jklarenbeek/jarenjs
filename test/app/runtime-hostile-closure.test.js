@@ -73,7 +73,7 @@ function hostileMatrix() {
   ];
 }
 
-describe('total normalization at terminal teardown (P0)', () => {
+describe('total normalization at terminal teardown', () => {
   it('a dispose() throwing a revoked proxy cannot permanently abort destroy', () => {
     const { document, container } = createStubHost();
     const log = [];
@@ -171,7 +171,7 @@ describe('total normalization at terminal teardown (P0)', () => {
   });
 });
 
-describe('total normalization inside transactions (P0)', () => {
+describe('total normalization inside transactions', () => {
   it('a listener throwing a revoked proxy cannot break convergence', () => {
     const { document, container } = createStubHost();
     const seen = [];
@@ -285,7 +285,7 @@ describe('total normalization inside transactions (P0)', () => {
   });
 });
 
-describe('total task settlement (P1)', () => {
+describe('total task settlement', () => {
   /** Let the uniform promise boundary settle. */
   async function settled() {
     for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -348,7 +348,7 @@ describe('total task settlement (P1)', () => {
   });
 });
 
-describe('dual-failure frame settlement (P1)', () => {
+describe('dual-failure frame settlement', () => {
   const doc = {
     state: { n: 0 },
     view: [{ match: '$', body: ['main', {},

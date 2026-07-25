@@ -15,7 +15,7 @@ const DEFAULT_TEST_DRAFT = 'draft7';
 const CONF_SHOW_LOG_RESULT = 'Jaren';
 
 TestRunner.initialize(DEFAULT_TEST_DRAFT, jarenAdaptor, ajvAdaptor);
-const remotes = await loadRemoteJson(DEFAULT_TEST_DRAFT);
+const remotes = await loadRemoteJson();
 TestRunner.load(remotes);
 
 const jsonTests = await loadTestSuiteJson(DEFAULT_TEST_DRAFT);

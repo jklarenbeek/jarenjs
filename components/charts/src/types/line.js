@@ -27,10 +27,12 @@
  * returns that per-series geometry.
  */
 
-import { svgRoot, path as svgPath, circle, polylinePath } from '@jarenjs/view/helpers';
+import { svgRoot, path as svgPath, circle, polylinePath, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog, scaleTime } from '../core/scale.js';
 import { axisTicksLinear, axisTicksLog, formatTickValue, formatTimeTick } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
+import { numOf } from '../core/stream-adapter.js';
 import {
   normalizeDomainPolicy, resolveWindowX, resolveStepY, resolveStepYLog, resolvePinnedY,
 } from '../core/domain.js';
@@ -221,14 +223,6 @@ export function buildLineAST(data, config = {}) {
   };
 }
 
-function numOf(v) {
-  return v instanceof Date ? v.getTime() : v;
-}
-
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * @typedef {object} LineSeriesRender
  * @property {any} group the series' `<g>` vnode
@@ -252,8 +246,8 @@ function clamp01(v) {
 export function lineSeriesRender(s, si, plot, palette, markers) {
   const color = seriesColor(si, palette);
   const pixels = s.points.map((p) => p === null ? null : {
-    x: round2(plot.x + p.u * plot.w),
-    y: round2(plot.y + (1 - p.v) * plot.h),
+    x: coord(plot.x + p.u * plot.w),
+    y: coord(plot.y + (1 - p.v) * plot.h),
   });
   const d = polylinePath(pixels);
   const dots = [];
@@ -322,8 +316,4 @@ export function buildLineRender(ast, theme, hash, options = {}) {
  */
 export function renderLineAST(ast, theme, hash, options = {}) {
   return buildLineRender(ast, theme, hash, options).svg;
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

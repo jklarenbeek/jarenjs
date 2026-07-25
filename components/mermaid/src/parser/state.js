@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file State-diagram grammar (`stateDiagram-v2`) → state AST. Models
- * the finite state machine faithfully (D11): states, transitions
+ * the finite state machine faithfully: states, transitions
  * (`A --> B : event`), the `[*]` start/end pseudo-states, `state "x" as
  * s` descriptions and `s : desc` labels. This is the AST the flagship
  * `state ⇄ workflow` JSLT projection consumes.

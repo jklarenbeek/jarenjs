@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The error vnode (design decision D2: the render path is total —
- * it emits this instead of throwing). A small standalone `<svg>` that
+ * @file The error vnode. The render path is total — it emits this
+ * instead of throwing. A small standalone `<svg>` that
  * states the parse/eval error with its line/column when known.
  */
 

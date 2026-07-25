@@ -70,22 +70,16 @@ import {
   CC_UNDERSCORE,
   CC_PIPE,
   isDigitCode,
+  isNameStartCode,
+  isNameCharCode,
 } from '@jarenjs/core/scan';
+import { deepFreeze } from '@jarenjs/core/object';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
  * distinct from the JSON value `null`.
  */
 export const JSONPATH_NOTHING = NOTHING;
-
-function deepFreeze(value) {
-  if (typeof value !== 'object' || value === null)
-    return value;
-  const keys = Object.keys(value);
-  for (let i = 0; i < keys.length; i++)
-    deepFreeze(value[keys[i]]);
-  return Object.freeze(value);
-}
 
 /**
  * Error thrown when a JSONPath query is not valid RFC 9535 syntax
@@ -114,17 +108,6 @@ const FUNCTIONS = {
 //#endregion
 
 //#region parser
-
-function isNameFirstCode(c) {
-  return (c >= 0x41 && c <= 0x5A) // A-Z
-    || (c >= 0x61 && c <= 0x7A) // a-z
-    || c === CC_UNDERSCORE
-    || c >= 0x80; // any non-ASCII code unit
-}
-
-function isNameCharCode(c) {
-  return isNameFirstCode(c) || isDigitCode(c);
-}
 
 /**
  * Selects a named object member (RFC 9535 name selector).
@@ -253,7 +236,7 @@ export function parseJSONPath(source) {
 
   function parseMemberNameShorthand() {
     const start = pos;
-    if (!isNameFirstCode(cc(pos)))
+    if (!isNameStartCode(cc(pos)))
       fail('expected member name');
     while (pos < len) {
       const c = source.charCodeAt(pos);

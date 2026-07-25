@@ -140,6 +140,20 @@ from this file; items link to the document that motivates them where one exists.
 
 - [ ] **CommonMark conformance push** — 526/655 spec examples pass today (`npm run benchmark:markdown --score-only --verbose` lists the failures); the largest deliberate class is raw-HTML pass-through (the vnode format has no unescaped output), the rest are honest dialect gaps (link-label edge cases, exotic emphasis nestings, HTML block subtleties) worth picking off.
 - [ ] **Parse-speed workstream** — ~0.3 ms per 10 kB to AST; the block scan re-slices lines per container level and the inline phase re-buffers leaf text; a column-offset scanner (no intermediate slices) is the next lever toward the sub-200 µs target.
+- [ ] **Link and image URLs bypass `sanitizeHref`** — a genuine hole, found by the
+  2026-07-26 dedup sweep and reproduced: `to-vnode.js`'s `INLINE_RENDERERS` write
+  `{ href: node.url }` on an `<a>` and `{ src: node.url }` on an `<img>` verbatim from the
+  parsed AST, and nothing on that path (scanner link destination, reference definitions,
+  the DOM patcher, the SSR serializer) guards the scheme — so
+  `[x](javascript:alert(1))` renders an `<a href="javascript:…">`. `vbscript:` and
+  `data:text/html,…` get through the same way. The guard already exists one import away as
+  `sanitizeHref` in `@jarenjs/view/helpers`, and the dependency arrow already allows it.
+  Deliberately NOT fixed in the dedup pass, because applying it is a behavior change that
+  needs three decisions first: whether an `<img src>` should use the same allow-list (which
+  admits `mailto:`), whether a rejected URL drops the attribute or degrades the link to
+  plain text (these emit different vnodes), and a re-approval of every golden vnode/HTML
+  fixture containing a link. Raw-HTML `<a href="javascript:…">` is *not* affected — the
+  default `html: 'skip'` drops it and `html: 'text'` renders it as literal text.
 - [ ] **Sanitizer-backed raw HTML** — an opt-in `html` mode that parses raw HTML nodes into vnodes through an injected sanitizer, replacing today's skip/text-only choice.
 - [ ] **Streaming reference definitions** — the incremental parser binds `[ref]` links against definitions seen so far; a deferred-resolution pass at `end()` would close the gap with batch mode.
 
@@ -160,13 +174,28 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 ## @jarenjs/calc (calculator + shared numeric kernel)
 
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
-- [ ] **Retrofit `math/format.js`** — the website hand-rolls `formatMs` in `lib/format.js`; the core number formatter (`formatNumber`/`parseNumber`) can replace ad-hoc formatting suite-wide.
+- [~] **Retrofit `math/format.js`** — the website's own duplication is gone: `round3`,
+  `formatMs` and the one shared unscaled-millisecond renderer now have a single home in
+  `packages/website/src/lib/format.js`, and no site file open-codes
+  `Number(x.toPrecision(3))` any more. The core retrofit itself is **deliberately not
+  done and may never be right**: `formatNumber(v, { precision: 3 })` escapes to
+  exponential for `abs >= 1e21 || abs < 1e-6`, which the site's timing readouts must not
+  do. Any suite-wide adoption has to reckon with that escape per call site rather than
+  assume the two are interchangeable.
 - [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number` (values beyond 2^53 lose precision on read-back); the four-base display already stays exact via `word.js` BigInt. A BigInt-valued evaluation path would close the gap.
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
 
 ## @jarenjs/core (shared kernel)
 
-- [ ] **Fix or retire `Float64.map`/`Float64.lerp`** — the core `Float64.map`/`lerp` helpers use a non-standard interpolation formula that returns wrong results for screen/range mapping; consumers work around it locally and the correct `remap` (added during the dedup pass) now lives beside it. A latent core bug worth resolving before the two drift — either fix `Float64.map` in place (auditing existing consumers) or deprecate it in favor of `remap`.
+- [x] **Fix or retire `Float64.map`/`Float64.lerp`** — **retired**: both used a
+  non-standard interpolation formula (`lerp` computed `(max - min)·(norm + min)`
+  instead of `min + norm·(max - min)`, and `map` composed it) that returns wrong
+  results for any screen/range mapping with a non-zero destination minimum. An
+  audit found no consumer anywhere in the monorepo — only their own unit tests,
+  which happened to pin the `min = 0` cases where the formula coincides with the
+  correct one — so the two were deleted rather than fixed, leaving `remap` as the
+  single home for the concept. `Float64.norm` stays: it is correct, and it is the
+  bare `[0, 1]` normalization for callers that want the fraction, not a coordinate.
 
 ## LLM & structured-output profile
 
@@ -281,4 +310,17 @@ to end).
 - [ ] **`--cell-order` shuffle** — the 4-book singular cell reads higher than the 1000-book one run to run (JIT/IC noise across the cell sequence); a shuffle option would pin it down if it ever matters.
 - [ ] **Saxon-JS as an optional competitor** — noted and deliberately excluded so far (heavyweight SEF/XSLT toolchain for a zero-build workspace).
 - [ ] **Drop the fontoxpath baseline-subtraction hack if a compile-only API appears** — the jsonquery adaptor pre-converts XDM and subtracts a baseline because fontoxpath exposes no compile-only entry point; a future compile-only API would let the adaptor measure it fairly.
-- [ ] **Lint the benchmark workspace** — `benchmark/` sits outside the `npm run lint` glob; the tools follow house style but are not lint-enforced.
+- [x] **Lint the benchmark workspace** — **shipped**: `npm run lint` now covers
+  `benchmark`, `scripts`, the root `src` and the two root config files as well as
+  `packages`/`components`/`test`. Only the git submodules under `benchmark/`
+  (JSON-Schema-Test-Suite, qt3tests, jsonpath-compliance-test-suite, toml-test,
+  commonmark-spec) and the artifacts generated from them are ignored — the
+  previous blanket `benchmark/**` ignore also swallowed 30+ first-party tool
+  files, and the `scripts/**` rule override it shipped with had no effect because
+  `scripts` was never passed to eslint. Reporting to stdout is what these
+  programs are for, so `no-console` is off for CLI directories; every other
+  finding was fixed at the source (dead `#remotes` field, dead
+  `getSupportedDrafts`, a duplicated `@jarenjs/view` import, unused parameters
+  that no caller passed, unused catch bindings). The pre-push hook lost a
+  `lefthook` `include:` key that is not a lefthook option and read as if it
+  scoped the gate to the root `src/`.

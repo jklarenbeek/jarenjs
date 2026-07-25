@@ -144,10 +144,10 @@ no CDN global, no `innerHTML`.
   values are escaped by the view serializer, and only `http(s)`/relative
   link `href`s survive, so the SVG-injection surface the old `innerHTML`
   path carried is gone.
-- There is **no `hydrate`** — the render is already complete (mermaid
-  design decision D2). Optional client-only enhancements (pan/zoom) are
-  reserved for a future interactivity plugin.
-- The dependency arrow is **md → mermaid** (mermaid decision D9):
+- There is **no `hydrate`** — the render is already complete.
+  Optional client-only enhancements (pan/zoom) are reserved for a future
+  interactivity plugin.
+- The dependency arrow is **md → mermaid**:
   `@jarenjs/mermaid/plugin` returns a self-frozen `MdPlugin`-shaped
   object *without* importing `definePlugin`, so there is no cycle;
   `@jarenjs/md` re-exports it and adds `@jarenjs/mermaid` to its

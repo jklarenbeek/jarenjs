@@ -52,9 +52,10 @@ import {
   CC_AT,
   CC_LBRACKET,
   CC_RBRACKET,
-  CC_UNDERSCORE,
   CC_PIPE,
   isDigitCode,
+  isNameStartCode,
+  isNameCharCode,
 } from '@jarenjs/core/scan';
 
 const CC_HASH = 0x23;
@@ -245,16 +246,9 @@ function isEmptySeqExpr(e) {
 
 //#region parser
 
-function isNameFirstCode(c) {
-  return (c >= 0x41 && c <= 0x5A) // A-Z
-    || (c >= 0x61 && c <= 0x7A) // a-z
-    || c === CC_UNDERSCORE
-    || c >= 0x80; // any non-ASCII code unit
-}
-
 // XML NameChar, pragmatically: name start, digits, '-' and '.'
-function isNameCharCode(c) {
-  return isNameFirstCode(c) || isDigitCode(c) || c === CC_MINUS || c === CC_DOT;
+function isXmlNameCharCode(c) {
+  return isNameCharCode(c) || c === CC_MINUS || c === CC_DOT;
 }
 
 /**
@@ -320,7 +314,7 @@ export function parseXQuery(source) {
 
   function parseNCName() {
     const start = pos;
-    if (!isNameFirstCode(cc(pos)))
+    if (!isNameStartCode(cc(pos)))
       fail('expected a name');
     while (pos < len) {
       const c = source.charCodeAt(pos);
@@ -332,7 +326,7 @@ export function parseXQuery(source) {
         pos += 2;
         continue;
       }
-      if (!isNameCharCode(c))
+      if (!isXmlNameCharCode(c))
         break;
       pos++;
     }
@@ -344,7 +338,7 @@ export function parseXQuery(source) {
   function tryKeyword(word) {
     const save = pos;
     skipWS();
-    if (isNameFirstCode(cc(pos))) {
+    if (isNameStartCode(cc(pos))) {
       const at = pos;
       if (parseNCName() === word)
         return at;
@@ -356,7 +350,7 @@ export function parseXQuery(source) {
   function expectKeyword(word) {
     skipWS();
     const at = pos;
-    if (!isNameFirstCode(cc(pos)) || parseNCName() !== word)
+    if (!isNameStartCode(cc(pos)) || parseNCName() !== word)
       fail(`expected '${word}'`, at);
   }
 
@@ -371,7 +365,7 @@ export function parseXQuery(source) {
     const name = parseNCName();
     if (name === 'Q' && cc(pos) === CC_LBRACE)
       fail("unsupported construct 'URI-qualified name'", at);
-    if (cc(pos) === CC_COLON && isNameFirstCode(cc(pos + 1)))
+    if (cc(pos) === CC_COLON && isNameStartCode(cc(pos + 1)))
       fail("unsupported construct 'namespaced variable'", at);
     if (!VAR_NAME_RE.test(name))
       fail(`unsupported variable name '${name}'`, at);
@@ -446,7 +440,7 @@ export function parseXQuery(source) {
     // XQuery A.2.2: a numeric literal must not be followed directly by
     // '.' or a name start character (e.g. `10div 3` is not `10 div 3`)
     const n = cc(pos);
-    if (n === CC_DOT || isNameFirstCode(n))
+    if (n === CC_DOT || isNameStartCode(n))
       fail('a numeric literal must be followed by a delimiter');
     const value = Number(source.slice(start, pos));
     // an overflowing DoubleLiteral is a valid XQuery double (INF) but has
@@ -481,7 +475,7 @@ export function parseXQuery(source) {
   function parseExprSingle() {
     skipWS();
     const at = pos;
-    if (isNameFirstCode(cc(pos))) {
+    if (isNameStartCode(cc(pos))) {
       const save = pos;
       const ident = parseNCName();
       skipWS();
@@ -489,7 +483,7 @@ export function parseXQuery(source) {
       if (ident === 'for' || ident === 'let') {
         if (next === CC_DOLLAR)
           return parseFlwor(ident);
-        if (ident === 'for' && isNameFirstCode(next)) {
+        if (ident === 'for' && isNameStartCode(next)) {
           const save2 = pos;
           const w = parseNCName();
           pos = save2;
@@ -520,7 +514,7 @@ export function parseXQuery(source) {
     for (;;) {
       const save = pos;
       skipWS();
-      if (isNameFirstCode(cc(pos)) && parseNCName() === 'or') {
+      if (isNameStartCode(cc(pos)) && parseNCName() === 'or') {
         if (items === null)
           items = [first];
         items.push(parseAnd());
@@ -537,7 +531,7 @@ export function parseXQuery(source) {
     for (;;) {
       const save = pos;
       skipWS();
-      if (isNameFirstCode(cc(pos)) && parseNCName() === 'and') {
+      if (isNameStartCode(cc(pos)) && parseNCName() === 'and') {
         if (items === null)
           items = [first];
         items.push(parseComparison());
@@ -594,7 +588,7 @@ export function parseXQuery(source) {
         op = '$gt';
       }
     }
-    else if (isNameFirstCode(c)) {
+    else if (isNameStartCode(c)) {
       const ident = parseNCName();
       if (hasOwn(VALUE_COMPS, ident))
         op = VALUE_COMPS[ident];
@@ -641,7 +635,7 @@ export function parseXQuery(source) {
     const first = parseAdditive();
     const save = pos;
     skipWS();
-    if (isNameFirstCode(cc(pos)) && parseNCName() === 'to')
+    if (isNameStartCode(cc(pos)) && parseNCName() === 'to')
       return { '$range': [first, parseAdditive()] };
     pos = save;
     return first;
@@ -684,7 +678,7 @@ export function parseXQuery(source) {
         expr = { '$mul': [expr, parseUnary()] };
         continue;
       }
-      if (isNameFirstCode(c)) {
+      if (isNameStartCode(c)) {
         const ident = parseNCName();
         if (ident === 'div') {
           expr = { '$div': [expr, parseUnary()] };
@@ -763,7 +757,7 @@ export function parseXQuery(source) {
     }
     if (isDigitCode(c))
       return { index: parseLookupIndex() };
-    if (isNameFirstCode(c))
+    if (isNameStartCode(c))
       return { name: parseNCName() };
     if (c === CC_LPAREN)
       fail("unsupported construct 'parenthesized lookup key'");
@@ -774,7 +768,7 @@ export function parseXQuery(source) {
     const at = pos;
     while (isDigitCode(cc(pos)))
       pos++;
-    if (cc(pos) === CC_DOT || isNameFirstCode(cc(pos)))
+    if (cc(pos) === CC_DOT || isNameStartCode(cc(pos)))
       fail('expected an integer lookup key', at);
     const n = Number(source.slice(at, pos));
     if (!Number.isSafeInteger(n))
@@ -867,7 +861,7 @@ export function parseXQuery(source) {
       fail("unsupported construct 'node constructor'", at);
     if (c === CC_BACKTICK)
       fail("unsupported construct 'string constructor'", at);
-    if (isNameFirstCode(c))
+    if (isNameStartCode(c))
       return parseNamedPrimary(at);
     return fail('expected an expression');
   }
@@ -1021,7 +1015,7 @@ export function parseXQuery(source) {
     let name = parseNCName();
     let written = name;
     let prefix = null;
-    if (cc(pos) === CC_COLON && isNameFirstCode(cc(pos + 1))) {
+    if (cc(pos) === CC_COLON && isNameStartCode(cc(pos + 1))) {
       pos++;
       prefix = name;
       name = parseNCName();
@@ -1198,7 +1192,7 @@ export function parseXQuery(source) {
     for (;;) {
       skipWS();
       const at = pos;
-      if (!isNameFirstCode(cc(pos)))
+      if (!isNameStartCode(cc(pos)))
         fail('expected a FLWOR clause');
       const kw = parseNCName();
       if (kw === 'for' || kw === 'let') {
@@ -1244,7 +1238,7 @@ export function parseXQuery(source) {
     skipWS();
     if (cc(pos) === CC_DOLLAR)
       return;
-    if (kw === 'for' && isNameFirstCode(cc(pos))) {
+    if (kw === 'for' && isNameStartCode(cc(pos))) {
       const save = pos;
       const w = parseNCName();
       pos = save;
@@ -1533,7 +1527,7 @@ export function parseXQuery(source) {
     if (tryKeyword('xquery') < 0)
       return;
     skipWS();
-    if (!isNameFirstCode(cc(pos))) {
+    if (!isNameStartCode(cc(pos))) {
       pos = save;
       return;
     }
@@ -1598,7 +1592,7 @@ export function parseXQuery(source) {
       const save = pos;
       skipWS();
       const at = pos;
-      if (!isNameFirstCode(cc(pos))) {
+      if (!isNameStartCode(cc(pos))) {
         pos = save;
         return;
       }
@@ -1607,7 +1601,7 @@ export function parseXQuery(source) {
         skipWS();
         if (cc(pos) === CC_PERCENT)
           fail("unsupported construct 'annotation'");
-        if (!isNameFirstCode(cc(pos)))
+        if (!isNameStartCode(cc(pos)))
           fail('expected a declaration keyword');
         const kind = parseNCName();
         if (kind === 'variable') {
@@ -1618,7 +1612,7 @@ export function parseXQuery(source) {
       }
       if (w === 'import') {
         skipWS();
-        const kind = isNameFirstCode(cc(pos)) ? parseNCName() : 'declaration';
+        const kind = isNameStartCode(cc(pos)) ? parseNCName() : 'declaration';
         fail(`unsupported construct 'import ${kind}'`, at);
       }
       if (w === 'module')

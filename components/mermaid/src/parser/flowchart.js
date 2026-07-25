@@ -1,6 +1,7 @@
 //@ts-check
 /**
- * @file Flowchart grammar → flowchart AST (design decision D10 type 1).
+ * @file Flowchart grammar → flowchart AST. Flowchart and sequence are
+ * the two fully-modeled diagram types; this is the first.
  *
  * Char-code recursive descent over one statement at a time. Every
  * pattern regex is a module constant used with the sticky (`y`) flag so

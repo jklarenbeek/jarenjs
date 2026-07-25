@@ -42,9 +42,9 @@ import { parseJSONPath, compileJSONPath } from './path.js';
 
 import { scanArrayIndex, isSingularSegments } from './segments.js';
 
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
+
 import {
-  isJsonObject,
-  setObjectMember,
   makeState,
   ownedRoot,
   ownedChild,

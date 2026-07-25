@@ -34,6 +34,7 @@ import {
   JsltCompileError,
   JsltRuntimeError,
 } from './errors.js';
+import { setObjectMember } from '@jarenjs/core/object';
 
 const hasOwn = Object.hasOwn;
 const NO_RULE = Symbol('Jslt.NoRule');
@@ -716,20 +717,6 @@ function scanSetRules(mode, value, loc, depth, tctx, matched) {
     return bodyEvals[i](value, loc, depth, tctx);
   }
   return NO_RULE;
-}
-
-function setObjectMember(out, name, value) {
-  if (name === '__proto__') {
-    Object.defineProperty(out, name, {
-      value,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
-  }
-  else {
-    out[name] = value;
-  }
 }
 
 function describeLocation(loc) {

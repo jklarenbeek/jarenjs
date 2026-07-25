@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Number formatting and parsing (Part A5, design decision D9). The
+ * @file Number formatting and parsing. The
  * one place the suite formats a number for display: notation control
  * (auto/fixed/sci/eng), thousands grouping and radix output, plus a
  * radix-aware `parseNumber`. Radix I/O delegates to `math/word.js` so

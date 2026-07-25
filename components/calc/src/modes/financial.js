@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The financial mode kernel (design decision D7). Contains **no
+ * @file The financial mode kernel. Contains **no
  * formulas** — every number comes from `@jarenjs/core/finance`. This is
  * pure orchestration: the solve-for-unknown dispatcher (given any four of
  * {N, I/Y, PV, PMT, FV}, pick the core function for the fifth) plus thin

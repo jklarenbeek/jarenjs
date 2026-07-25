@@ -3,7 +3,7 @@
  * @file ER-diagram grammar → ER AST. Entity blocks
  * (`CUSTOMER { string name PK }`) and relationships
  * (`CUSTOMER ||--o{ ORDER : places`). Cardinality tokens are preserved
- * verbatim for a faithful, geometry-free model (D11).
+ * verbatim for a faithful, geometry-free model.
  */
 
 /** `LEFT <cardl>--<cardr> RIGHT : label` (relationship). */

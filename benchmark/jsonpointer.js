@@ -86,7 +86,7 @@ function legacyGetValueByJsonPointer(dataRoot, dataPath, pointer) {
       }
     }
     return { value: current, found: true };
-  } catch (e) {
+  } catch {
     return { value: undefined, found: false };
   }
 }
@@ -126,7 +126,7 @@ function legacyResolveRelativePointer(dataRoot, dataPath, relativePointer) {
       return legacyGetValueByJsonPointer(current, '', parsed.pointer);
     }
     return { value: current, found: true };
-  } catch (e) {
+  } catch {
     return { value: undefined, found: false };
   }
 }

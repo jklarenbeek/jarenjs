@@ -1,18 +1,20 @@
 //@ts-check
 /**
- * @file Sequence grammar → sequence AST (design decision D10 type 2).
+ * @file Sequence grammar → sequence AST. Flowchart and sequence are
+ * the two fully-modeled diagram types; this is the second.
  *
  * Line-oriented, with a block stack for loop/alt/opt/par/critical/break.
  * Explicitly declared participants keep their declaration order; a
  * message to an undeclared actor is legal (the layout pass creates the
  * lifeline), so the AST records only what the source states — faithful
- * and geometry-free (D11). Module-const regexes only.
+ * and geometry-free. Module-const regexes only.
  */
 
 import {
   seqParticipant, seqMessage, seqNote, seqActivation, seqBlock, sequenceAst,
 } from '../ast.js';
 import { fail } from '../errors.js';
+import { firstToken } from '../utils.js';
 
 /** A message: `A->>+B: text`. */
 const RE_MSG = /^([^-<>:]+?)\s*((?:-{1,2})(?:>>|>|x|\)))\s*([+-]?)\s*([^:]+?)\s*:\s*(.*)$/;
@@ -48,7 +50,7 @@ export function parseSequence(lines, lineOffset) {
     const line = lines[li].trim();
     if (line === '') continue;
     const lineNo = lineOffset + li + 1;
-    const firstWord = wordOf(line);
+    const firstWord = firstToken(line);
 
     if (line === 'autonumber') { autonumber = true; continue; }
 
@@ -151,15 +153,4 @@ function splitAlias(text) {
   const idx = text.indexOf(' as ');
   if (idx === -1) return { id: text.trim(), label: text.trim() };
   return { id: text.slice(0, idx).trim(), label: text.slice(idx + 4).trim() };
-}
-
-/**
- * The first whitespace-delimited word of a line.
- * @param {string} line
- * @returns {string}
- */
-function wordOf(line) {
-  let i = 0;
-  while (i < line.length && line.charCodeAt(i) !== 0x20 && line.charCodeAt(i) !== 0x09) i++;
-  return line.slice(0, i);
 }

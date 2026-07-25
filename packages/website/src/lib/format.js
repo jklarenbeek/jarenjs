@@ -2,6 +2,15 @@
 /** Number formatting for benchmark displays (ported from the website's utils). */
 
 /**
+ * The clock the boundaries time with: `performance` where it exists,
+ * `Date` in a plain Node process. Returns milliseconds.
+ */
+export const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
+
+/** A value as pretty-printed JSON — the site's one code-block format. */
+export const formatJson = (value) => JSON.stringify(value, null, 2);
+
+/**
  * Single-entry memoization on argument identity. The viewModel wraps
  * its derivations with this so an unchanged input slice returns the
  * PREVIOUS node by reference — which makes the JSLT memo (and through
@@ -39,6 +48,16 @@ export function formatMs(ms) {
   if (ms === null || ms === undefined || Number.isNaN(ms)) return '—';
   if (ms < 0.001) return `${round3(ms * 1e6)} ns`;
   if (ms < 1) return `${round3(ms * 1000)} µs`;
+  return `${round3(ms)} ms`;
+}
+
+/**
+ * Milliseconds always rendered in the ms unit — no µs/ns scaling.
+ * The playground's timing cards sit side by side (compile next to run,
+ * parse next to render), so they keep one unit: a reader compares the
+ * numbers directly instead of the units.
+ */
+export function formatMsUnscaled(ms) {
   return `${round3(ms)} ms`;
 }
 

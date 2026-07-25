@@ -5,7 +5,7 @@ import {
   toBase, fromBase, wordMask, WORD_BITS,
 } from '@jarenjs/core/math';
 
-describe('#word math (A2)', function () {
+describe('#word math', function () {
   it('WORD_BITS + wordMask', () => {
     assert.deepEqual([...WORD_BITS], [8, 16, 32, 64]);
     assert.equal(wordMask(8), 0xffn);

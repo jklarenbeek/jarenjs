@@ -1,8 +1,7 @@
 //@ts-check
 /**
- * @file The Calculator COMPONENT — part two of the package (design
- * decisions D1/D4/D10). Everything here is presentation + app glue; the
- * engine knows none of it. `createCalcComponent(options)` returns the
+ * @file The Calculator COMPONENT — part two of the package. Everything
+ * here is presentation + app glue; the engine knows none of it. `createCalcComponent(options)` returns the
  * pieces the site (and a standalone `createApp`) compose into one
  * `@jarenjs/app` document:
  *
@@ -12,7 +11,7 @@
  *  - `mode` + `rules` — the JSLT `calculator` view (keypad, display, tape,
  *    mode menu, plot panel, financial form, converter).
  *  - `effects` / `subs` / `subEntry` — the live-rates effect + `when`-gated
- *    poll (D13); the pure conversion stays in `@jarenjs/core/convert`.
+ *    poll; the pure conversion stays in `@jarenjs/core/convert`.
  *  - `viewModel(state)` (a.k.a. `contributeCalcViewModel`) — the derivation
  *    boundary: display string, live result, four-base views, plot vnode,
  *    forms model, converter options — none of it stored in state.

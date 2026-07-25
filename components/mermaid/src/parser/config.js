@@ -2,7 +2,7 @@
 /**
  * @file Config extraction: the leading `---` front-matter block and any
  * `%%{init: {...}}%%` directives → a plain-JSON `config` (MERMAID-FORMAT
- * §3, design decision D4).
+ * §3).
  *
  * The raw source is never consumed here — this returns the cleaned body
  * (front-matter, init directives and `%%` comments removed) plus the
@@ -12,7 +12,7 @@
  * Front-matter is a YAML subset. The engine may NOT statically import
  * `@jarenjs/md` (two-layer rule), so a small built-in subset parser is
  * the default; a host that already has `@jarenjs/md` can inject its
- * richer `parseFrontmatter` through `options.parseFrontmatter` (D4).
+ * richer `parseFrontmatter` through `options.parseFrontmatter`.
  */
 
 /** A leading front-matter fence: `---` on its own line at the very top. */

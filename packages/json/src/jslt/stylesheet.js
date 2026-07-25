@@ -5,16 +5,13 @@
 
 import { JsltCompileError } from './errors.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 const hasOwn = Object.hasOwn;
 const ENVELOPE_KEYS = new Set(['$jslt', 'rules', 'unmatched', 'modes']);
 const RULE_KEYS = new Set(['match', 'mode', 'priority', 'body']);
 const MATCH_KEYS = new Set(['path', 'schema']);
 const MODE_KEYS = new Set(['unmatched']);
-
-function isObject(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function fail(code, message, docPath) {
   throw new JsltCompileError(code, message, docPath);
@@ -25,7 +22,7 @@ function isDisposition(value) {
 }
 
 function normalizeModes(value, docPath) {
-  if (!isObject(value))
+  if (!isJsonObject(value))
     fail('JT0001', "'modes' must be an object", docPath);
   const modes = new Map();
   const names = Object.keys(value);
@@ -33,7 +30,7 @@ function normalizeModes(value, docPath) {
     const name = names[i];
     const modePath = docPath + '/' + encodeJSONPointerSegment(name);
     const config = value[name];
-    if (!isObject(config))
+    if (!isJsonObject(config))
       fail('JT0001', `mode '${name}' must be an object`, modePath);
     const keys = Object.keys(config);
     for (let j = 0; j < keys.length; j++) {
@@ -64,7 +61,7 @@ function normalizeMatch(value, matchPath) {
       schemaDocPath: '',
     });
   }
-  if (!isObject(value))
+  if (!isJsonObject(value))
     fail('JT0003', "'match' must be a JSONPath string or an object", matchPath);
 
   const keys = Object.keys(value);
@@ -93,7 +90,7 @@ function normalizeMatch(value, matchPath) {
 
 function normalizeRule(value, index, rulesPath) {
   const rulePath = rulesPath + '/' + index;
-  if (!isObject(value))
+  if (!isJsonObject(value))
     fail('JT0002', 'a stylesheet rule must be an object', rulePath);
 
   const keys = Object.keys(value);
@@ -148,7 +145,7 @@ export function normalizeJsltStylesheet(doc) {
     sourceRules = doc;
     rulesPath = '';
   }
-  else if (isObject(doc)) {
+  else if (isJsonObject(doc)) {
     const keys = Object.keys(doc);
     for (let i = 0; i < keys.length; i++) {
       if (!ENVELOPE_KEYS.has(keys[i]))

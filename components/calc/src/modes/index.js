@@ -2,7 +2,7 @@
 /**
  * @file Mode-kernel barrel. Each mode is a data-driven descriptor
  * (keypad/panel + function-binding env + formatter); switching mode is a
- * patch of `$.calc.mode` (D5).
+ * patch of `$.calc.mode`.
  */
 
 export { standardMode } from './standard.js';

@@ -11,8 +11,8 @@ const sync = (flush) => flush();
 /**
  * An accessible dialog skeleton (APP-FORMAT §8.4): opening moves focus
  * to the dialog's first control through a post-render intent; closing
- * restores it to the opener. This is the B9 dialog focus-lifecycle
- * contract exercised headlessly.
+ * restores it to the opener. The dialog focus-lifecycle contract,
+ * exercised headlessly.
  */
 function dialogDoc() {
   return {

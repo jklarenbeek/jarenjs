@@ -8,6 +8,8 @@ import {
   isWhitespaceCode,
   isAsciiLowerCode,
   isAsciiUpperCode,
+  isNameStartCode,
+  isNameCharCode,
 } from '@jarenjs/core/scan';
 
 const cc = (ch) => ch.charCodeAt(0);
@@ -41,5 +43,26 @@ describe('core/scan char-code predicates', function () {
     assert.equal(isAsciiUpperCode(cc('A')), true);
     assert.equal(isAsciiUpperCode(cc('Z')), true);
     assert.equal(isAsciiUpperCode(cc('a')), false);
+  });
+});
+
+describe('core/scan name-character predicates', function () {
+  it('isNameStartCode admits ASCII letters, underscore and any non-ASCII unit', function () {
+    for (const ch of ['A', 'Z', 'a', 'z', '_', 'é', '中']) {
+      assert.equal(isNameStartCode(cc(ch)), true, ch);
+    }
+    for (const ch of ['0', '9', '-', '.', ' ', '$']) {
+      assert.equal(isNameStartCode(cc(ch)), false, ch);
+    }
+  });
+
+  it('isNameCharCode adds the ASCII digits and nothing else', function () {
+    assert.equal(isNameCharCode(cc('0')), true);
+    assert.equal(isNameCharCode(cc('9')), true);
+    assert.equal(isNameCharCode(cc('a')), true);
+    // '-' and '.' belong to XML Name, not to this class; grammars that want
+    // them test for them on top of this predicate.
+    assert.equal(isNameCharCode(cc('-')), false);
+    assert.equal(isNameCharCode(cc('.')), false);
   });
 });

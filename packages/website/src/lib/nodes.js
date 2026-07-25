@@ -5,6 +5,9 @@
  * generic rule. This is the site's component library — as data.
  */
 
+/** A paragraph of prose. */
+export const p = (text) => ({ kind: 'p', text });
+
 /** A row of stat cards. */
 export const cards = (items) => ({
   kind: 'cards',

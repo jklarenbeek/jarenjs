@@ -35,9 +35,9 @@ import {
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
 
-// A ref that fails the strict compile keeps the lax keyword semantics:
-// it resolves as not-found and the keyword asserts nothing.
-const resolveNothing = () => JSONPOINTER_NOTHING;
+import {
+  resolveNothing,
+} from './tools.js';
 
 function compileRefResolver(ref) {
   try {

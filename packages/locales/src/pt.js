@@ -6,9 +6,9 @@
  * A catalog is a plain flat object `{ [key]: closure | template string }`;
  * compile it with `compileMessageCatalog` from either consumer package
  * and hand it to `localizeErrors` (validate) or the `catalog` parameters
- * of `validateField` / `evaluateFormRules` (forms). This package has ZERO
- * dependencies - not even workspace ones; key parity with the built-in
- * English catalogs is enforced by tests in the repo, not by imports.
+ * of `validateField` / `evaluateFormRules` (forms). A pack imports only
+ * the shared rendering helpers; key parity with the built-in English
+ * catalogs is enforced by tests in the repo, not by imports.
  *
  * Globalization mechanics (the pack-authoring pattern - see
  * packages/validate/docs/ERROR-MESSAGES.md):
@@ -19,42 +19,27 @@
  * all held as module-level singletons (allocation discipline).
  */
 
+import {
+  formatMessageValue,
+  makeNumberRenderer,
+  makePluralPicker,
+  makeTypeNamer,
+} from './helpers.js';
+
 //#region Intl singletons
 
 const pluralRules = new Intl.PluralRules('pt');
 const numberFormat = new Intl.NumberFormat('pt');
 const listFormat = new Intl.ListFormat('pt', { style: 'long', type: 'disjunction' });
 
-/**
- * Pick the Portuguese singular or plural noun form for a count.
- * @param {number} count - The count
- * @param {string} one - Singular form
- * @param {string} other - Plural form
- * @returns {string}
- */
-function plural(count, one, other) {
-  return pluralRules.select(count) === 'one' ? one : other;
-}
+/** Pick the Portuguese singular or plural noun form for a count. */
+const plural = makePluralPicker(pluralRules);
 
 /**
  * Render a numeric limit through the Portuguese number format;
  * non-numbers (e.g. an unresolved $data pointer) render as-is.
- * @param {unknown} value - The limit
- * @returns {string}
  */
-function num(value) {
-  return typeof value === 'number' ? numberFormat.format(value) : String(value);
-}
-
-/**
- * Render a JSON value the way the forms English catalog does: quoted
- * strings, JSON for everything else.
- * @param {unknown} value - The value
- * @returns {string}
- */
-function formatValue(value) {
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
-}
+const num = makeNumberRenderer(numberFormat);
 
 /** Portuguese names (with article) for the JSON Schema type keyword values. */
 const TYPE_NAMES = {
@@ -67,13 +52,8 @@ const TYPE_NAMES = {
   null: 'null',
 };
 
-/**
- * @param {string} type - A JSON Schema type name
- * @returns {string} The Portuguese display name, article included
- */
-function typeName(type) {
-  return TYPE_NAMES[type] ?? type;
-}
+/** Type keyword values under their Portuguese display name, article included. */
+const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
 
@@ -128,8 +108,8 @@ export const pt = {
   //#region @jarenjs/forms (second-person field voice)
   'form/required': 'Este campo é obrigatório',
   'form/type': (p) => `Deve ser ${typeName(p.type)}`,
-  'form/const': (p) => `Deve ser ${formatValue(p.constValue)}`,
-  'form/enum': (p) => `Deve ser ${Array.isArray(p.enumValues) ? listFormat.format(p.enumValues.map(formatValue)) : formatValue(p.enumValues)}`,
+  'form/const': (p) => `Deve ser ${formatMessageValue(p.constValue)}`,
+  'form/enum': (p) => `Deve ser ${Array.isArray(p.enumValues) ? listFormat.format(p.enumValues.map(formatMessageValue)) : formatMessageValue(p.enumValues)}`,
   'form/minLength': (p) => `Deve ter pelo menos ${num(p.limit)} ${plural(p.limit, 'caractere', 'caracteres')} (atualmente ${num(p.len)})`,
   'form/maxLength': (p) => `Deve ter no máximo ${num(p.limit)} ${plural(p.limit, 'caractere', 'caracteres')} (atualmente ${num(p.len)})`,
   'form/pattern': 'Deve corresponder ao padrão {pattern}',

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarenjs.dev/schemas/jaren-workflow/0.1",
   "title": "Jaren workflow / finite state machine",
-  "description": "The domain document a state DiagramDocument projects to via stylesheets/state-to-workflow.jslt.json (design decisions D11/D12). Draft-neutral. This is the machine an @jarenjs/app transition table drives: events are actions.",
+  "description": "The domain document a state DiagramDocument projects to via stylesheets/state-to-workflow.jslt.json. Draft-neutral. This is the machine an @jarenjs/app transition table drives: events are actions.",
   "type": "object",
   "required": ["initial", "states", "transitions"],
   "properties": {

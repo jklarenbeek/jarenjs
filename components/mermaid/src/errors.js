@@ -2,8 +2,8 @@
 /**
  * @file The engine's one error type. Parsers raise it with a 1-based
  * `line`/`column`; the render path (`diagramToVnode`/`renderMermaid`)
- * catches it and emits a clear error vnode instead of throwing (design
- * decision D7), so rendering is always total.
+ * catches it and emits a clear error vnode instead of throwing, so
+ * rendering is always total.
  */
 
 export class MermaidParseError extends Error {

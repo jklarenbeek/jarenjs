@@ -8,21 +8,11 @@
  * these functions return domain values only.
  */
 
-/**
- * The nice step (1, 2 or 5 times a power of ten) closest to covering
- * `span` in about `count` steps.
- * @param {number} span - Domain span (> 0)
- * @param {number} count - Desired tick count
- * @returns {number}
- */
-export function niceStep(span, count) {
-  const raw = span / Math.max(1, count);
-  const power = Math.floor(Math.log10(raw));
-  const base = Math.pow(10, power);
-  const unit = raw / base;
-  const factor = unit < 1.5 ? 1 : unit < 3 ? 2 : unit < 7 ? 5 : 10;
-  return factor * base;
-}
+import { niceStep } from '@jarenjs/core/math';
+
+// The 1/2/5 ladder is generic numeric math, so it lives in the kernel; it is
+// re-exported here because it is part of this module's tick vocabulary.
+export { niceStep };
 
 /**
  * Linear ticks: multiples of a nice step inside `[min, max]`.

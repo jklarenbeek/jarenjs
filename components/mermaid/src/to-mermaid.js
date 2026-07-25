@@ -1,14 +1,14 @@
 //@ts-check
 /**
- * @file Canonical Mermaid printer: AST → text (design decision D12,
- * MERMAID-FORMAT §5). The reverse arrow of `parseMermaid`, mirroring
+ * @file Canonical Mermaid printer: AST → text (MERMAID-FORMAT §5).
+ * The reverse arrow of `parseMermaid`, mirroring
  * `@jarenjs/md`'s `to-md.js`: one specialized closure per diagram type,
  * a **round-trip fixed point** — `parseMermaid(toMermaid(doc))`
  * deep-equals `doc.ast` for the fully-modeled types.
  *
  * The printer is *canonical*, not verbatim: it does not preserve source
  * whitespace or comments (the stored Markdown fence `value` gives
- * verbatim round-trip while a node is untransformed — D12). Its job is
+ * verbatim round-trip while a node is untransformed). Its job is
  * to re-emit an edited AST as editable Mermaid text.
  */
 

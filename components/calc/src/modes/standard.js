@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The standard mode kernel (design decision D5): a data-driven
+ * @file The standard mode kernel: a data-driven
  * keypad descriptor, the function-binding environment the compiler uses,
  * and a display formatter. A key is `{ label, k, tone?, span? }`; `k` is
  * the token appended to the expression entry, or a command (`=`, `C`,

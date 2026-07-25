@@ -78,8 +78,8 @@ const EMPTY_STATE = Object.freeze({});
  */
 
 /**
- * The submit/draft session of a form (blueprint contract B4): the
- * lifecycle state around one edited document. Everything is JSON — the
+ * The submit/draft session of a form: the lifecycle state around one
+ * edited document. Everything is JSON — the
  * session lives in app state; this option only folds it into the tree.
  *
  * Hidden-field policy: fields excluded by `x-form` `visible` rules keep

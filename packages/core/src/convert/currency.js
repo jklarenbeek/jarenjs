@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The pure currency-conversion primitive (Part A-convert, design
- * decision D12/D13). `convertCurrency` is deterministic and side-effect
+ * @file The pure currency-conversion primitive.
+ * `convertCurrency` is deterministic and side-effect
  * free: the caller supplies the `{ code: rate }` table; core NEVER
  * fetches it. This lives in core because the dividing line is **purity**,
  * not constant-vs-variable factors — this function is exactly as pure as

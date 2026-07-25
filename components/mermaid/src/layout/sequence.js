@@ -7,8 +7,8 @@
  * text metrics (no DOM) — pixel parity is a non-goal.
  */
 
-import { Float64 } from '@jarenjs/core/math';
 import { textWidth } from '@jarenjs/view/helpers';
+import { coord as round } from '../utils.js';
 
 const FONT_SIZE = 14;
 const ACTOR_H = 34;
@@ -176,5 +176,3 @@ export function layoutSequence(ast) {
     blocks: blocks.map((b) => ({ ...b, x: round(b.x), y: round(b.y), w: round(b.w), h: round(b.h), dividers: b.dividers.map((d) => ({ y: round(d.y), label: d.label })) })),
   };
 }
-
-const round = (n) => Float64.roundTo(n, 2);

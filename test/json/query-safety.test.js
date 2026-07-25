@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { JarenValidator } from '@jarenjs/validate';
 
-describe('query execution limits (B8)', function () {
+describe('query execution limits', function () {
   it('limits.sequenceItems bounds phrase materialization with a stable JQ2009', function () {
     const query = compileJsonQuery(
       { $for: { i: '$[*]' }, $return: '$i' },
@@ -46,7 +46,7 @@ describe('query execution limits (B8)', function () {
   });
 });
 
-describe('named collations (B8)', function () {
+describe('named collations', function () {
   const dutch = new Intl.Collator('nl').compare;
 
   it('$collation orders string keys through the registered compare function', function () {
@@ -81,7 +81,7 @@ describe('named collations (B8)', function () {
   });
 });
 
-describe('registered functions — $call (B8)', function () {
+describe('registered functions — $call', function () {
   const options = {
     functions: {
       upper: (s) => (typeof s === 'string' ? s.toUpperCase() : undefined),
@@ -123,7 +123,7 @@ describe('registered functions — $call (B8)', function () {
   });
 });
 
-describe('query.dependencies and query.explain() (B8)', function () {
+describe('query.dependencies and query.explain()', function () {
   it('reports externals, operators, functions and collations', function () {
     const query = compileJsonQuery({
       $for: { b: '$.books[*]' },
@@ -155,7 +155,7 @@ describe('query.dependencies and query.explain() (B8)', function () {
   });
 });
 
-describe('the schema twins accept $call and $collation (B8)', function () {
+describe('the schema twins accept $call and $collation', function () {
   const load = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
   const doc = {
     $for: { b: '$.books[*]' },

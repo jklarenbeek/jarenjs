@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Unit registry (Part A-convert). Fixed-factor unit definitions per
+ * @file Unit registry. Fixed-factor unit definitions per
  * **dimension**. Conversion is affine through the dimension's base unit:
  *
  *   base   = value * factor + offset

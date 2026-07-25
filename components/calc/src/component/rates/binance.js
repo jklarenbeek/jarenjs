@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The Binance rate adapter (alternative provider, D13). Reads
+ * @file The Binance rate adapter (alternative provider). Reads
  * `/api/v3/ticker/price` (crypto USDT pairs), no key. Same one-way rule:
  * fetch + normalize only; conversion is core's `convertCurrency`.
  */

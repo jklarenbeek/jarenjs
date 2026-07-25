@@ -33,14 +33,23 @@ import { kebabCase } from '@jarenjs/core/string';
  *   named token tables (must include a `default`)
  * @param {string} prefix the CSS-variable prefix (e.g. `mm`, `calc`),
  *   without the leading `--`
+ * The name `'host'` is reserved: it selects the component's own host-var
+ * map wholesale, which is how a consumer asks for "theme me from the page"
+ * without knowing which tokens are linkable. It resolves to
+ * `{ vars: hostVars }`, so a component that passes no `hostVars` simply has
+ * no `'host'` theme and falls back to `default` like any other unknown name.
+ *
  * @param {string | Record<string, any>} [nameOrOverrides]
+ * @param {Record<string, string>} [hostVars] the component's token key →
+ *   host custom-property map, used when `nameOrOverrides` is `'host'`
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
-export function resolveTheme(themes, prefix, nameOrOverrides = 'default') {
+export function resolveTheme(themes, prefix, nameOrOverrides = 'default', hostVars = undefined) {
   let name = 'default';
   let base = themes.default;
   let overrides = {};
   let vars = null;
+  if (nameOrOverrides === 'host' && hostVars) nameOrOverrides = { vars: hostVars };
   if (typeof nameOrOverrides === 'string') {
     name = themes[nameOrOverrides] ? nameOrOverrides : 'default';
     base = themes[name];

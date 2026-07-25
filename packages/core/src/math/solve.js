@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Generic, domain-free numeric root finders (Part A3). No finance
+ * @file Generic, domain-free numeric root finders. No finance
  * or geometry lives here; `@jarenjs/core/finance` builds NPV/IRR/rate on
  * top of these, the calculator's equation helpers on top of them too.
  *

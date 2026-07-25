@@ -69,8 +69,11 @@ Rules of the road:
    `form/*` key of forms' `formsMessagesEn`, plus `x-form/assert` and the
    `JQ2xxx` query runtime codes. The repo enforces this with tests
    (`test/locales/`); missing keys silently fall back to English.
-2. **Zero dependencies.** Packs must stay importable without dragging in
-   the validator - use only the platform.
+2. **Never depend on a consumer.** A pack must stay importable without
+   dragging in `@jarenjs/validate` or `@jarenjs/forms`, so that either one
+   can serve any pack. The platform and `@jarenjs/core` are the only things
+   a pack may reach for - core is where the shared value renderer lives, so
+   a pack cannot drift from the catalog contract by re-implementing it.
 3. **Use `Intl`, as module-level singletons.** `Intl.PluralRules` for
    plural categories (see `nl.js`: "1 teken" / "2 tekens"),
    `Intl.NumberFormat` for `{limit}`-style numbers, `Intl.ListFormat` for

@@ -74,7 +74,6 @@ export class TestRunner {
   }
 
   static #validators = [];
-  static #remotes = {};
 
   static initialize(draft, ...adaptors) {
     const validators = [];
@@ -87,8 +86,6 @@ export class TestRunner {
   }
 
   static load(remotes) {
-    // TODO: unload remotes
-    TestRunner.#remotes = remotes;
     for (let i = 0; i < TestRunner.#validators.length; ++i) {
       const validator = TestRunner.#validators[i];
       validator.load(remotes);

@@ -38,6 +38,7 @@
  * subtree removal.
  */
 
+import { kebabCase } from '@jarenjs/core/string';
 import {
   isTextNode,
   isElementNode,
@@ -835,9 +836,7 @@ export function styleToString(style) {
   for (const name in style) {
     const value = style[name];
     if (value == null || value === false) continue;
-    const cssName = name.startsWith('--')
-      ? name
-      : name.replace(/[A-Z]/g, (ch) => '-' + ch.toLowerCase());
+    const cssName = name.startsWith('--') ? name : kebabCase(name);
     out += (out === '' ? '' : ';') + cssName + ':' + String(value);
   }
   return out;

@@ -100,6 +100,8 @@ flowchart TB
             Base64["base64.js<br/>Base64 validation"]
             Punycode["punycode.js<br/>IDN encoding"]
             I18n["i18n.js<br/>Unicode category checks"]
+            IRegexp["iregexp.js<br/>I-Regexp (RFC 9485)"]
+            TextMisc["misc.js<br/>Assorted text testers"]
         end
 
         subgraph DateModule["Date Processing"]
@@ -109,24 +111,37 @@ flowchart TB
         subgraph MathModules["Mathematics"]
             MathIndex["math/index.js"]
             Int32Math["int32.js<br/>Fixed-point math"]
-            Float64Math["float64.js<br/>Float64 utilities"]
+            Float64Math["float64.js<br/>Float64 utilities, remap, clamp01"]
             Vec2I32["vec2i32.js<br/>2D integer vectors"]
             Vec2F64["vec2f64.js<br/>2D float vectors"]
             Vec3F64["vec3f64.js<br/>3D float vectors"]
+            Mat4Math["mat4.js<br/>4x4 matrices"]
+            ProjectMath["project.js<br/>3D to 2D projection"]
+            SolveMath["solve.js<br/>Numeric root finders"]
+            WordMath["word.js<br/>BigInt fixed-width words"]
+            FormatMath["format.js<br/>Number format/parse"]
+        end
+
+        subgraph DomainModules["Domain Kernels"]
+            ConvertIndex["convert/index.js<br/>Unit and currency conversion"]
+            FinanceIndex["finance/index.js<br/>TVM, bonds, cash flow, returns"]
         end
 
         subgraph FunctionModule["Function Utilities"]
             FunctionUtil["function.js<br/>trueThat, falseThat"]
         end
 
-        subgraph StringModule["String Utilities"]
-            StringUtil["string.js<br/>RegExp, grapheme counting"]
+        subgraph StringModules["String &amp; Scanning"]
+            StringUtil["string.js<br/>RegExp, grapheme counting, fnv1a"]
+            ScanUtil["scan.js<br/>Char-code classes for parsers"]
+            MessageUtil["message.js<br/>Message template/catalog compiler"]
+            ColorUtil["color.js<br/>Mixing, relative luminance"]
         end
     end
 
     CoreModule --> ScalarModules
     CoreModule --> CollectionModules
-    CoreModule --> StringModule
+    CoreModule --> StringModules
     CoreModule --> FunctionModule
 
     TextIndex --> Basic
@@ -136,12 +151,19 @@ flowchart TB
     TextIndex --> Base64
     TextIndex --> Punycode
     TextIndex --> I18n
+    TextIndex --> IRegexp
+    TextIndex --> TextMisc
 
     MathIndex --> Int32Math
     MathIndex --> Float64Math
     MathIndex --> Vec2I32
     MathIndex --> Vec2F64
     MathIndex --> Vec3F64
+    MathIndex --> Mat4Math
+    MathIndex --> ProjectMath
+    MathIndex --> SolveMath
+    MathIndex --> WordMath
+    MathIndex --> FormatMath
 
     style CorePackage fill:#e1f5fe
     style CoreModule fill:#bbdefb

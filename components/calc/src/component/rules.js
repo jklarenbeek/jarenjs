@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The `calculator` JSLT view (design decision D10). Rules render the
+ * @file The `calculator` JSLT view. Rules render the
  * viewModel document produced by `contributeCalcViewModel`. Convention
  * (mirrors the website views): `match` patterns are absolute from the
  * document root; `$apply` paths and body `$` are relative to the matched

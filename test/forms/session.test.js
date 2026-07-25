@@ -28,7 +28,7 @@ function child(node, key) {
   return node.children.find((c) => c.key === key);
 }
 
-describe('the form session contract (B4)', function () {
+describe('the form session contract', function () {
   it('without a session the tree is byte-identical to the sessionless shape', function () {
     const plain = tree({ name: 'Jo' });
     assert.ok(!('session' in plain));

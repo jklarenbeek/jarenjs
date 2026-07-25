@@ -23,7 +23,7 @@
  * property-tested, never assumed.
  */
 
-import { path as svgPath, circle } from '@jarenjs/view/helpers';
+import { path as svgPath, circle, coord } from '@jarenjs/view/helpers';
 import { hashContent } from '@jarenjs/core/string';
 import { stableStringify } from '@jarenjs/core/object';
 import { scaleLinear, scaleTime } from './scale.js';
@@ -192,8 +192,8 @@ function createLineSession(config, source, options) {
         parts.pen = false;
         continue;
       }
-      const px = round2(plot.x + vertex.u * plot.w);
-      const py = round2(plot.y + (1 - vertex.v) * plot.h);
+      const px = coord(plot.x + vertex.u * plot.w);
+      const py = coord(plot.y + (1 - vertex.v) * plot.h);
       parts.d = parts.d === '' ? `M${px} ${py}` : `${parts.d} ${parts.pen ? 'L' : 'M'}${px} ${py}`;
       parts.pen = true;
       if (markers) parts.dots.push(circle(px, py, 2.5, { fill: parts.color, class: 'chart-dot' }));
@@ -304,8 +304,4 @@ function createCandleSession(config, source, options) {
   }
 
   return { tick };
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

@@ -2,9 +2,9 @@
 /**
  * @file `parseMermaid`: detect the diagram type + config on the first
  * non-config line, dispatch to the type parser, and assemble the shared
- * `DiagramDocument` envelope (design decision D3).
+ * `DiagramDocument` envelope.
  *
- * Flowchart and sequence are fully modeled (D10). The remaining
+ * Flowchart and sequence are fully modeled. The remaining
  * first-class types (class, ER, state, gantt, pie) plug in through
  * `TYPE_PARSERS`; secondary types (mindmap, gitGraph, journey, timeline,
  * quadrantChart) parse-accept into a geometry-free `rawAst` and are
@@ -12,7 +12,7 @@
  */
 
 import { diagramDocument, rawAst } from '../ast.js';
-import { hashContent, toLines } from '../utils.js';
+import { hashContent, toLines, firstToken } from '../utils.js';
 import { parseMermaidConfig } from './config.js';
 import { parseFlowchart } from './flowchart.js';
 import { parseSequence } from './sequence.js';
@@ -105,17 +105,6 @@ export function parseMermaid(source, options = {}) {
     direction,
     title,
   });
-}
-
-/**
- * The first whitespace-delimited token of a line.
- * @param {string} line
- * @returns {string}
- */
-function firstToken(line) {
-  let i = 0;
-  while (i < line.length && line.charCodeAt(i) !== 0x20 && line.charCodeAt(i) !== 0x09) i++;
-  return line.slice(0, i);
 }
 
 /**

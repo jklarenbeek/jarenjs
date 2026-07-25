@@ -4,7 +4,7 @@ import { newtonRaphson, bisect, secant } from '@jarenjs/core/math';
 
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} !~= ${b}`);
 
-describe('#numeric root finders (A3)', function () {
+describe('#numeric root finders', function () {
   // f(x) = x^2 - 2  → root sqrt(2)
   const f = (x) => x * x - 2;
   const df = (x) => 2 * x;

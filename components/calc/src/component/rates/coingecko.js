@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The CoinGecko rate adapter (design decision D13). The **only**
+ * @file The CoinGecko rate adapter. The **only**
  * network code path for the default provider — it fetches and normalizes,
  * nothing more. The pure conversion is `@jarenjs/core/convert`'s
  * `convertCurrency`, never here. No API key; fiat *and* crypto in one

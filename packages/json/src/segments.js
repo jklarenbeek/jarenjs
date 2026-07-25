@@ -7,8 +7,8 @@
 // (value, normalized-path) pairs. This module is package-internal and is
 // deliberately not listed in the package exports.
 
-import { equalsJson } from '@jarenjs/core/object';
-import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
+import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
+import { countCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import {
   CC_TAB,
@@ -85,16 +85,6 @@ function cmpEquals(a, b) {
   if (a === NOTHING || b === NOTHING)
     return a === b;
   return equalsJson(a, b);
-}
-
-// numbers by value, strings by Unicode scalar values (RFC 9535
-// section 2.3.5.2.2); other types do not order
-function cmpLess(a, b) {
-  if (typeof a === 'number')
-    return typeof b === 'number' && a < b;
-  if (typeof a === 'string')
-    return typeof b === 'string' && compareCodePoints(a, b) < 0;
-  return false;
 }
 
 function countOwnKeys(obj) {
@@ -267,20 +257,20 @@ function compileComparison(expr) {
     case '!=':
       return (c, r) => !cmpEquals(left(c, r), right(c, r));
     case '<':
-      return (c, r) => cmpLess(left(c, r), right(c, r));
+      return (c, r) => compareJsonScalarLt(left(c, r), right(c, r));
     case '>':
-      return (c, r) => cmpLess(right(c, r), left(c, r));
+      return (c, r) => compareJsonScalarLt(right(c, r), left(c, r));
     case '<=':
       return (c, r) => {
         const a = left(c, r);
         const b = right(c, r);
-        return cmpLess(a, b) || cmpEquals(a, b);
+        return compareJsonScalarLt(a, b) || cmpEquals(a, b);
       };
     default: // '>='
       return (c, r) => {
         const a = left(c, r);
         const b = right(c, r);
-        return cmpLess(b, a) || cmpEquals(a, b);
+        return compareJsonScalarLt(b, a) || cmpEquals(a, b);
       };
   }
 }

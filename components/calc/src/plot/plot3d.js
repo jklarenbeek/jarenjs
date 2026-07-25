@@ -1,9 +1,9 @@
 //@ts-check
 /**
- * @file The x·y·z surface plotter (design decision D8). Samples
+ * @file The x·y·z surface plotter. Samples
  * `z = f(x, y)` on an N×N grid into `Vec3f64` model points, rotates them
  * (yaw/pitch) and projects them with the `core` `mat4`/`project.js`
- * kernel (A4), builds quad faces, **depth-sorts back-to-front (painter's
+ * kernel, builds quad faces, **depth-sorts back-to-front (painter's
  * algorithm)**, shades each quad by height and emits `<polygon>`s with an
  * optional wireframe. Deterministic and headless → golden-geometry tests.
  */

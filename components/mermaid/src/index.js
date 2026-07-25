@@ -4,7 +4,7 @@
  * the **engine** (part one): pure functions over data — text ⇄ AST ⇄
  * pure-vnode SVG — that know only the `@jarenjs/view` vnode shape. It
  * imports nothing from the component, `@jarenjs/app`, the DOM or
- * `@jarenjs/md` (the two-layer rule, design decision D1).
+ * `@jarenjs/md` (the two-layer rule).
  *
  * The pipeline mirrors `@jarenjs/md`:
  *
@@ -56,8 +56,8 @@ export function renderMermaid(source, options = {}) {
  */
 
 /**
- * Parse once and return a bundle of cached projections (design decision
- * D6). `toVnode`/`toSvgString`/`toText` each compute at most once; the
+ * Parse once and return a bundle of cached projections.
+ * `toVnode`/`toSvgString`/`toText` each compute at most once; the
  * vnode is returned by reference on repeat calls, so an unchanged
  * document patches in O(1) through the view reconciler.
  *
@@ -81,7 +81,7 @@ export function compileMermaid(source, options = {}) {
     doc,
     parseError,
     toVnode() {
-      // Error-safe (D7): a parse failure renders the error vnode, which
+      // Error-safe: a parse failure renders the error vnode, which
       // `diagramToVnode` produces when handed the original source.
       if (vnode === undefined) vnode = diagramToVnode(doc ?? source, options);
       return vnode;

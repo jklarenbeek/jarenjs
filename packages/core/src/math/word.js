@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file BigInt fixed-width word math (Part A2). The programmer-calculator
+ * @file BigInt fixed-width word math. The programmer-calculator
  * kernel: two's-complement integers of a fixed bit width (8/16/32/64),
  * signed or unsigned, with the bitwise/shift/rotate operators and
  * radix-string I/O a HEX/DEC/OCT/BIN calculator needs.

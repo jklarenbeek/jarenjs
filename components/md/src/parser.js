@@ -15,7 +15,7 @@
  * blocks while later chunks are still arriving (docs/LOADER.md §4).
  */
 
-import { countIndent, isBlankLine, expandTabs, hashContent } from './utils.js';
+import { countIndent, isBlankLine, expandTabs, hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
 import { parseFrontmatter } from './frontmatter.js';
 import {
   scanThematicBreak,
@@ -1331,7 +1331,7 @@ export function createIncrementalParser(options = {}) {
     ctx: parser.ctx,
   };
   let buffer = '';
-  let hash = 0x811c9dc5;
+  let hash = FNV1A_OFFSET_BASIS;
   /** null = undecided, false = none, otherwise resolved */
   /** @type {any} */
   let fmState = detect ? null : false;
@@ -1340,14 +1340,6 @@ export function createIncrementalParser(options = {}) {
   /** @type {'yaml'|'json'|'toml'|null} */
   let frontmatterLang = null;
   let emitted = 0;
-
-  /** @param {string} chunk */
-  const hashChunk = (chunk) => {
-    for (let i = 0; i < chunk.length; i++) {
-      hash ^= chunk.charCodeAt(i);
-      hash = (hash * 0x01000193) >>> 0;
-    }
-  };
 
   /**
    * Try to resolve frontmatter from the buffered head. Returns true
@@ -1398,7 +1390,9 @@ export function createIncrementalParser(options = {}) {
      * @returns {MdNode[]}
      */
     feed(chunk) {
-      hashChunk(chunk);
+      // fold the chunk into the running hash: seeding fnv1a with the
+      // accumulator makes the streamed hash equal the whole-source one
+      hash = fnv1a(chunk, hash);
       buffer += chunk;
       if (!resolveFrontmatter(false)) return [];
       buffer = feedLines(parser, buffer, false);

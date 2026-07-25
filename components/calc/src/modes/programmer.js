@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The programmer mode kernel (design decision D6). Binds the
+ * @file The programmer mode kernel. Binds the
  * word-math environment (`@jarenjs/core/math/word.js`) so `& | << >> ~`
  * and the `and/or/xor/not/shl/shr/rol/ror/mod` functions operate at the
  * chosen word size (8/16/32/64) and signedness. Literals are written with

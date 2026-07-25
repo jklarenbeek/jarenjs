@@ -41,15 +41,21 @@ export default [
     },
   },
   {
-    // CLI tooling: console output is intentional here
-    files: ['scripts/**/*.js'],
+    // CLI tooling: reporting to stdout is the whole point of these programs
+    files: ['scripts/**/*.js', 'benchmark/**/*.js', 'esbuild.config.js'],
     rules: {
       'no-console': 'off',
     },
   },
   {
-    // benchmark/ is vendored (qt3, third-party) + CLI tooling: its no-console /
-    // no-undef output is intentional and must stay out of the gate.
-    ignores: ['**/dist', 'build', '**/_*', '**/*.no-lint.*', 'benchmark/**'],
+    ignores: [
+      '**/dist', 'build', '**/_*', '**/*.no-lint.*',
+      // git submodules under benchmark/ (JSON-Schema-Test-Suite, qt3tests,
+      // jsonpath-compliance-test-suite, toml-test, commonmark-spec) plus the
+      // artifacts generated from them: third-party sources we do not style.
+      'benchmark/suite/**', 'benchmark/qt3tests/**', 'benchmark/jsonpath-suite/**',
+      'benchmark/toml-test-suite/**', 'benchmark/commonmark-spec/**',
+      'benchmark/qt3-json/**', 'benchmark/results/**',
+    ],
   },
 ];

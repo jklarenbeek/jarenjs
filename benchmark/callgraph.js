@@ -111,7 +111,7 @@ const warmupIterations = ${warmupIterations};
 
 async function runProfile() {
   const tests = await loadTestSuiteJson(draft);
-  const remotes = await loadRemoteJson(draft);
+  const remotes = await loadRemoteJson();
   
   TestRunner.initialize(draft, jaren);
   TestRunner.load(remotes);
@@ -224,7 +224,7 @@ function parseProfileOutput(output) {
 }
 
 // Extract call chains from bottom-up profile
-function extractCallChains(lines, maxDepth = 10) {
+function extractCallChains(lines) {
   const chains = [];
   const callTreeSection = [];
   let inBottomUp = false;
@@ -378,7 +378,6 @@ function formatCallTree(chains, maxFunctions, maxDepth) {
     output.push(line);
 
     // Add call chain with tree characters
-    let lastDepth = 0;
     for (let i = 0; i < chain.callees.length && i < maxDepth - 1; i++) {
       const node = chain.callees[i];
       // Skip native library entries
@@ -390,7 +389,6 @@ function formatCallTree(chains, maxFunctions, maxDepth) {
       const prefix = isLast ? '└─ ' : '├─ ';
       line = `${indent}${prefix}${node.percent.toFixed(1)}% ${cleanFunctionName(node.name)}`;
       output.push(line);
-      lastDepth = node.depth;
     }
 
     output.push('');
@@ -541,7 +539,7 @@ async function main() {
 
     // Extract and display call chains
     const lines = processedOutput.split('\n');
-    const chains = extractCallChains(lines, options.maxDepth);
+    const chains = extractCallChains(lines);
     const jarenChains = filterCallChains(chains);
 
     if (jarenChains.length > 0) {
@@ -600,7 +598,7 @@ async function main() {
     try {
       fs.unlinkSync(tempScriptPath);
       fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (e) {
+    } catch {
       // Ignore cleanup errors
     }
   }

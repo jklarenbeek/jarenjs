@@ -41,6 +41,7 @@ import stateToWorkflow from '@jarenjs/mermaid/stylesheets/state-to-workflow.jslt
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { cards, table, code, error, callout, details, markdown } from '../lib/nodes.js';
+import { now, formatJson, formatMsUnscaled } from '../lib/format.js';
 import {
   pathExamples, pointerExamples, patchExamples, queryExamples,
   jsltExamples, jtltExamples, xqueryExamples, joslExamples,
@@ -48,8 +49,6 @@ import {
 } from '../content/engineExamples.js';
 
 const compileTypeTest = createTypeTestCompiler();
-const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
-const J = (value) => JSON.stringify(value, null, 2);
 
 /** Parse a JSON input; returns `{ value }` or `{ node }` (an error node). */
 function parseJson(text, label) {
@@ -60,8 +59,6 @@ function parseJson(text, label) {
     return { node: error({ message: `${label}: ${/** @type {Error} */ (err).message}` }, 'Invalid JSON') };
   }
 }
-
-const ms = (t) => `${Number(t.toPrecision(3))} ms`;
 
 function timed(fn) {
   const start = now();
@@ -81,11 +78,11 @@ function runPath(inputs) {
     return [
       cards([
         { title: 'Matches', value: String(nodes.length) },
-        { title: 'Compile', value: ms(compiled.ms) },
-        { title: 'Run', value: ms(run.ms) },
+        { title: 'Compile', value: formatMsUnscaled(compiled.ms) },
+        { title: 'Run', value: formatMsUnscaled(run.ms) },
       ]),
-      code('Values', J(nodes.map((n) => n.value))),
-      code('Normalized paths', J(nodes.map((n) => n.path))),
+      code('Values', formatJson(nodes.map((n) => n.value))),
+      code('Normalized paths', formatJson(nodes.map((n) => n.path))),
     ];
   }
   catch (err) {
@@ -107,7 +104,7 @@ function runPointer(inputs) {
     if (value === JSONPOINTER_NOTHING) {
       return [callout('Nothing', 'The pointer addresses no value in this document (the NOTHING sentinel — a miss, not an error).')];
     }
-    return [code('Value', J(value), relative ? `relative to ${inputs.location}` : null)];
+    return [code('Value', formatJson(value), relative ? `relative to ${inputs.location}` : null)];
   }
   catch (err) {
     return [error(err, 'Pointer error')];
@@ -128,7 +125,7 @@ function runPatch(inputs) {
         if (patch.node) return [patch.node];
         const run = timed(() => applyMergePatch(doc, patch.value));
         return [
-          code('Result', J(run.value), run.value === doc ? '=== input (shared)' : ms(run.ms)),
+          code('Result', formatJson(run.value), run.value === doc ? '=== input (shared)' : formatMsUnscaled(run.ms)),
         ];
       }
       case 'write': {
@@ -153,7 +150,7 @@ function runPatch(inputs) {
           value = writer(doc, writeValue.value);
         }
         return [
-          code('Result', J(value),
+          code('Result', formatJson(value),
             value === doc ? '=== input (shared)' : (multi ? 'every match' : 'singular target')),
         ];
       }
@@ -163,8 +160,8 @@ function runPatch(inputs) {
         const jsonPatch = createJSONPatch(doc, target.value);
         const mergePatch = createMergePatch(doc, target.value);
         return [
-          code('JSON Patch (RFC 6902)', J(jsonPatch), `${jsonPatch.length} ops`),
-          code('Merge Patch (RFC 7396)', J(mergePatch)),
+          code('JSON Patch (RFC 6902)', formatJson(jsonPatch), `${jsonPatch.length} ops`),
+          code('Merge Patch (RFC 7396)', formatJson(mergePatch)),
         ];
       }
       default: {
@@ -174,11 +171,11 @@ function runPatch(inputs) {
         const run = timed(() => apply(doc));
         return [
           cards([
-            { title: 'Applied', value: ms(run.ms), note: 'copy-on-write, atomic' },
+            { title: 'Applied', value: formatMsUnscaled(run.ms), note: 'copy-on-write, atomic' },
             { title: 'Changed paths', value: String(run.value.changes.length), note: 'the change feed' },
           ]),
-          code('Result', J(run.value.doc)),
-          code('Changes', J(run.value.changes), 'invalidation-sound pointers'),
+          code('Result', formatJson(run.value.doc)),
+          code('Changes', formatJson(run.value.changes), 'invalidation-sound pointers'),
         ];
       }
     }
@@ -213,10 +210,10 @@ function runQuery(inputs) {
     return [
       cards([
         { title: 'Items', value: String(count) },
-        { title: 'Compile', value: ms(compiled.ms) },
-        { title: 'Run', value: ms(run.ms) },
+        { title: 'Compile', value: formatMsUnscaled(compiled.ms) },
+        { title: 'Run', value: formatMsUnscaled(run.ms) },
       ]),
-      code('Result', value === undefined ? '(empty sequence)' : J(value)),
+      code('Result', value === undefined ? '(empty sequence)' : formatJson(value)),
     ];
   }
   catch (err) {
@@ -234,10 +231,10 @@ function runJslt(inputs) {
     const run = timed(() => compiled.value(data.value));
     return [
       cards([
-        { title: 'Compile', value: ms(compiled.ms) },
-        { title: 'Transform', value: ms(run.ms), note: run.value === data.value ? '=== input (shared)' : null },
+        { title: 'Compile', value: formatMsUnscaled(compiled.ms) },
+        { title: 'Transform', value: formatMsUnscaled(run.ms), note: run.value === data.value ? '=== input (shared)' : null },
       ]),
-      code('Output', J(run.value), run.value === data.value ? 'proof of no change' : null),
+      code('Output', formatJson(run.value), run.value === data.value ? 'proof of no change' : null),
     ];
   }
   catch (err) {
@@ -254,7 +251,7 @@ function runJtlt(inputs) {
     const render = compileJtltStylesheet(template.value, { compileTypeTest });
     const run = timed(() => render(data.value));
     const nodes = [
-      code('Output', run.value === '' ? '(empty)' : run.value, `output "${render.output}" · ${ms(run.ms)}`),
+      code('Output', run.value === '' ? '(empty)' : run.value, `output "${render.output}" · ${formatMsUnscaled(run.ms)}`),
     ];
     // make the xml method's escaping contract VISIBLE: re-render the
     // same template as "text" and show what changed — or say honestly
@@ -271,7 +268,7 @@ function runJtlt(inputs) {
         // the comparison is best-effort illustration, never a failure
       }
     }
-    nodes.push(details('The compiled JSLT stylesheet', [code(null, J(render.stylesheet))]));
+    nodes.push(details('The compiled JSLT stylesheet', [code(null, formatJson(render.stylesheet))]));
     return nodes;
   }
   catch (err) {
@@ -293,8 +290,8 @@ function runXQuery(inputs) {
     const run = timed(() => fn(data.value, externals));
     const value = run.value;
     const out = [
-      code('Result', value === undefined ? '(empty sequence)' : J(value), ms(run.ms)),
-      details('The generated query document', [code(null, J(doc))]),
+      code('Result', value === undefined ? '(empty sequence)' : formatJson(value), formatMsUnscaled(run.ms)),
+      details('The generated query document', [code(null, formatJson(doc))]),
     ];
     if (unbound.length > 0) {
       out.unshift(callout('Unbound externals', `Free variables besides $doc: ${unbound.join(', ')}.`));
@@ -347,14 +344,14 @@ function runMarkdown(inputs) {
       cards([
         { title: 'Blocks', value: String(blockCount) },
         { title: 'AST nodes', value: String(nodeCount) },
-        { title: 'Compile', value: ms(compiledRun.ms), note: 'memoized by source' },
+        { title: 'Compile', value: formatMsUnscaled(compiledRun.ms), note: 'memoized by source' },
         { title: 'Frontmatter', value: doc.frontmatter === null ? 'none' : (doc.meta.frontmatterLang ?? 'yes') },
       ]),
       markdown('Rendered through @jarenjs/view', MD.view(source)),
-      details('AST (the JSON document)', [code(null, J(doc.ast))]),
+      details('AST (the JSON document)', [code(null, formatJson(doc.ast))]),
       details('Canonical Markdown (toMarkdown)', [code(null, toMarkdown(doc))]),
       ...(doc.frontmatter !== null
-        ? [details('Frontmatter (plain JSON)', [code(null, J(doc.frontmatter))])]
+        ? [details('Frontmatter (plain JSON)', [code(null, formatJson(doc.frontmatter))])]
         : []),
     ];
   }
@@ -372,18 +369,18 @@ function runMermaid(inputs) {
     const out = [
       cards([
         { title: 'Diagram', value: doc ? doc.diagram : 'error' },
-        { title: 'Compile', value: ms(compiledRun.ms), note: 'memoized by source' },
+        { title: 'Compile', value: formatMsUnscaled(compiledRun.ms), note: 'memoized by source' },
         { title: 'Hash', value: doc ? doc.meta.hash : '—' },
       ]),
       // The rendered SVG is a ready-made vnode; reuse the markdown
       // preview kind that splices a vnode in verbatim.
       markdown('Rendered to pure-vnode SVG (headless, SSR-able)', MERMAID.view(source)),
-      details('AST (geometry-free JSON document)', [code(null, J(doc ? doc.ast : String(compiled.parseError?.message ?? 'parse error')))]),
+      details('AST (geometry-free JSON document)', [code(null, formatJson(doc ? doc.ast : String(compiled.parseError?.message ?? 'parse error')))]),
       details('Canonical Mermaid (toMermaid round-trip)', [code(null, compiled.toText())]),
     ];
     if (doc && doc.diagram === 'state') {
       const workflow = transformJson(stateToWorkflow, doc);
-      out.push(details('Derived workflow / FSM (JSLT projection → @jarenjs/app)', [code(null, J(workflow))]));
+      out.push(details('Derived workflow / FSM (JSLT projection → @jarenjs/app)', [code(null, formatJson(workflow))]));
     }
     return out;
   }
@@ -535,39 +532,39 @@ export function runEngine(engine, inputs) {
 export const ENGINE_EXAMPLES = {
   path: pathExamples.map((e) => ({
     label: e.name,
-    inputs: { selector: e.selector, data: J(e.document) },
+    inputs: { selector: e.selector, data: formatJson(e.document) },
   })),
   pointer: pointerExamples.map((e) => ({
     label: e.name,
-    inputs: { mode: e.mode, pointer: e.pointer, location: e.location ?? '/store/book/0/title', data: J(e.document) },
+    inputs: { mode: e.mode, pointer: e.pointer, location: e.location ?? '/store/book/0/title', data: formatJson(e.document) },
   })),
   patch: patchExamples.map((e) => ({
     label: e.name,
     inputs: {
       mode: e.mode,
-      data: J(e.document),
-      patch: e.patch !== undefined ? J(e.patch) : '',
-      target: e.mode === 'diff' && e.target !== undefined ? J(e.target) : '',
+      data: formatJson(e.document),
+      patch: e.patch !== undefined ? formatJson(e.patch) : '',
+      target: e.mode === 'diff' && e.target !== undefined ? formatJson(e.target) : '',
       writeOp: e.writeOp ?? 'set',
       writeTarget: e.mode === 'write' && typeof e.target === 'string' ? e.target : '',
-      writeValue: e.value !== undefined ? J(e.value) : '',
+      writeValue: e.value !== undefined ? formatJson(e.value) : '',
     },
   })),
   query: queryExamples.map((e) => ({
     label: e.name,
-    inputs: { query: J(e.query), data: J(e.document), externals: e.externals !== undefined ? J(e.externals) : '' },
+    inputs: { query: formatJson(e.query), data: formatJson(e.document), externals: e.externals !== undefined ? formatJson(e.externals) : '' },
   })),
   jslt: jsltExamples.map((e) => ({
     label: e.name,
-    inputs: { stylesheet: J(e.stylesheet), data: J(e.document) },
+    inputs: { stylesheet: formatJson(e.stylesheet), data: formatJson(e.document) },
   })),
   jtlt: jtltExamples.map((e) => ({
     label: e.name,
-    inputs: { template: J(e.template), data: J(e.document) },
+    inputs: { template: formatJson(e.template), data: formatJson(e.document) },
   })),
   xquery: xqueryExamples.map((e) => ({
     label: e.name,
-    inputs: { text: e.text, data: J(e.document) },
+    inputs: { text: e.text, data: formatJson(e.document) },
   })),
   josl: joslExamples.map((e) => ({
     label: e.name,

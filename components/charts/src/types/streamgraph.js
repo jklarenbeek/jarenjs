@@ -16,7 +16,8 @@
  * text.
  */
 
-import { svgRoot } from '@jarenjs/view/helpers';
+import { svgRoot, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
@@ -103,10 +104,6 @@ export function buildStreamgraphAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a streamgraph AST to a pure-vnode SVG: one closed band path
  * per layer (top edge forward, bottom edge back), separated by the
@@ -134,8 +131,8 @@ export function renderStreamgraphAST(ast, theme, hash, options = {}) {
   for (let si = 0; si < ast.layers.length; si++) {
     const layer = ast.layers[si];
     if (layer.points.length === 0) continue;
-    const px = (p) => round2(plot.x + p.u * plot.w);
-    const py = (v) => round2(plot.y + (1 - v) * plot.h);
+    const px = (p) => coord(plot.x + p.u * plot.w);
+    const py = (v) => coord(plot.y + (1 - v) * plot.h);
     let d = '';
     for (let k = 0; k < layer.points.length; k++) {
       const p = layer.points[k];
@@ -155,8 +152,4 @@ export function renderStreamgraphAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-streamgraph-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'stream-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

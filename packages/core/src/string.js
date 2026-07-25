@@ -194,24 +194,45 @@ export function compareCodePoints(a, b) {
   return a.codePointAt(i) < b.codePointAt(i) ? -1 : 1;
 }
 
+/** FNV-1a 32-bit offset basis — the seed a fresh hash starts from. */
+export const FNV1A_OFFSET_BASIS = 0x811c9dc5;
+
+/**
+ * FNV-1a 32-bit hash of a string, as an unsigned 32-bit number. Not
+ * cryptographic — a stable, fast content fingerprint.
+ *
+ * Pass `seed` to continue an existing hash, which is what lets a caller
+ * fold a chunk stream or walk a tree without concatenating the pieces
+ * first: `fnv1a(b, fnv1a(a))` equals `fnv1a(a + b)`. Callers that just want
+ * a fingerprint string should use {@link hashContent} instead, so the whole
+ * suite agrees on one encoding.
+ *
+ * @param {string} str
+ * @param {number} [seed] running hash to continue, unsigned 32-bit
+ * @returns {number} unsigned 32-bit hash
+ */
+export function fnv1a(str, seed = FNV1A_OFFSET_BASIS) {
+  let hash = seed;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
 /**
  * FNV-1a 32-bit hash of a string, returned as an unsigned base-36 string
  * (at most 7 chars). Not cryptographic — a stable, fast content
  * fingerprint for cache keys and reconciliation keys. The suite's single
  * content-hash primitive: equal content produces the same fingerprint
  * (and therefore the same vnode `key`/memo key) everywhere downstream, so
- * do NOT invent a second hash.
+ * do NOT invent a second hash — {@link fnv1a} is the one mixing step.
  *
  * @param {string} str
  * @returns {string}
  */
 export function hashContent(str) {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
-  }
-  return hash.toString(36);
+  return fnv1a(str).toString(36);
 }
 
 /**

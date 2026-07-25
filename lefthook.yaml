@@ -1,14 +1,13 @@
+# Both commands run the repo-wide gate, so they are deliberately unscoped: a
+# per-file `glob` would let a change in one workspace push while breaking a
+# consumer in another.
 pre-push:
   parallel: true
   commands:
     lint:
       run: npm run lint
-      include: "./src/**/*.{js,jsx,ts,tsx}"
-      exclude: "node_modules"
     tests:
       run: npm run test
-      include: "./test/**/*.{js,jsx,ts,tsx}"
-      exclude: "node_modules"
 # EXAMPLE USAGE:
 #
 #   Refer for explanation to following link:

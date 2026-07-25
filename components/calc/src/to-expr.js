@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file `toExpression(ast)` — the canonical printer. It is a **round-trip
- * fixed point** (D3): `parseExpression(toExpression(ast))` deep-equals
+ * fixed point**: `parseExpression(toExpression(ast))` deep-equals
  * `ast` for every AST the parser can produce. Parentheses are emitted
  * from operator precedence/associativity only where removing them would
  * change the parse; numbers print in canonical decimal (the AST never

@@ -135,9 +135,11 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 
 ## 7. Component theming architecture
 
-Every SVG-emitting component (mermaid, calc plots) themes in **two layers**, resolved by
-the shared `resolveTheme` kernel (`@jarenjs/view/helpers`) behind each component's
-`createTheme`:
+Every SVG-emitting component (mermaid, calc plots, charts) themes in **two layers**,
+resolved by the shared `resolveTheme` kernel (`@jarenjs/view/helpers`) behind each
+component's `createTheme` — a one-line wrapper that supplies only what is genuinely the
+component's own: its `THEMES` tables, its `--<prefix>-*` variable prefix and its
+`HOST_VARS` link table:
 
 1. **Concrete presentation attributes** on every shape — `toSvgString()` is a valid,
    self-colored standalone image with no CSS at all.
@@ -156,8 +158,10 @@ through **host-linked themes**:
   token **live** (light/dark flips need no re-render — memoized vnodes stay valid);
   standalone, the fallback keeps the default theme.
 - The link tables are each component's `HOST_VARS` (in its `theme.js`), mapping token keys
-  to §2 host token names. Generic form: `resolveTheme`'s overrides object takes a reserved
-  `vars` key (`{ theme: 'dark', vars: {...} }` composes).
+  to §2 host token names; the component hands that table to `resolveTheme`, which owns the
+  reserved `'host'` name so all three components resolve it identically. Generic form:
+  `resolveTheme`'s overrides object takes a reserved `vars` key (`{ theme: 'dark',
+  vars: {...} }` composes).
 - The website passes `theme: 'host'` at its three embed points: the md `mermaidPlugin`,
   `createMermaidComponent`, and the calc viewmodel.
 

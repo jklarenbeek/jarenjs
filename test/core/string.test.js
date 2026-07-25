@@ -15,6 +15,8 @@ import {
   countCodePoints,
   compareCodePoints,
   hashContent,
+  fnv1a,
+  FNV1A_OFFSET_BASIS,
   kebabCase,
 } from '@jarenjs/core/string';
 
@@ -300,5 +302,26 @@ describe('kebabCase', () => {
     assert.deepEqual(kebabCase('background'), 'background');
     assert.deepEqual(kebabCase('line-color'), 'line-color');
     assert.deepEqual(kebabCase(''), '');
+  });
+});
+
+describe('fnv1a', () => {
+  it('is the mixing step hashContent renders', () => {
+    assert.isTrue(fnv1a('abc').toString(36) === hashContent('abc'));
+    assert.isTrue(fnv1a('').toString(36) === hashContent(''));
+  });
+
+  it('returns an unsigned 32-bit number', () => {
+    for (const s of ['', 'a', 'the quick brown fox', 'ÿĀ']) {
+      const h = fnv1a(s);
+      assert.isTrue(Number.isInteger(h));
+      assert.isTrue(h >= 0 && h <= 0xffffffff);
+    }
+  });
+
+  it('seeds so a chunked hash equals the whole-string hash', () => {
+    assert.isTrue(fnv1a('def', fnv1a('abc')) === fnv1a('abcdef'));
+    assert.isTrue(fnv1a('c', fnv1a('b', fnv1a('a'))) === fnv1a('abc'));
+    assert.isTrue(fnv1a('abc', FNV1A_OFFSET_BASIS) === fnv1a('abc'));
   });
 });

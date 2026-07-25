@@ -66,7 +66,7 @@ constant-vs-variable factors.
   `rates-poll` subscription (min-refresh debounce, last-good + static
   fallback, error routing). All network is here; core never fetches.
 
-## The app document (D4)
+## The app document
 
 State (`$.calc`) is plain JSON, immutable, copy-on-write via
 `@jarenjs/json/patch`. Keys dispatch `{action, with}` bindings; actions

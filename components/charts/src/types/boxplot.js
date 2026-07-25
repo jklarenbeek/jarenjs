@@ -15,7 +15,8 @@
  * category axis, `v` along the value axis.
  */
 
-import { svgRoot, line as svgLine } from '@jarenjs/view/helpers';
+import { svgRoot, line as svgLine, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleBand } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
@@ -150,10 +151,6 @@ export function buildBoxplotAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a boxplot AST to a pure-vnode SVG: capped whiskers, a
  * translucent box with a full-strength median line, outlier dots, and
@@ -187,24 +184,24 @@ export function renderBoxplotAST(ast, theme, hash, options = {}) {
     const capW = (x1 - x0) * 0.5;
     const y = (v) => plot.y + (1 - v) * plot.h;
     const whisker = { stroke: t.axis, 'stroke-width': 1, class: 'chart-box-whisker' };
-    children.push(svgLine(round2(cx), round2(y(box.loV)), round2(cx), round2(y(box.q1V)), whisker));
-    children.push(svgLine(round2(cx), round2(y(box.q3V)), round2(cx), round2(y(box.hiV)), whisker));
-    children.push(svgLine(round2(cx - capW / 2), round2(y(box.loV)), round2(cx + capW / 2), round2(y(box.loV)), whisker));
-    children.push(svgLine(round2(cx - capW / 2), round2(y(box.hiV)), round2(cx + capW / 2), round2(y(box.hiV)), whisker));
+    children.push(svgLine(coord(cx), coord(y(box.loV)), coord(cx), coord(y(box.q1V)), whisker));
+    children.push(svgLine(coord(cx), coord(y(box.q3V)), coord(cx), coord(y(box.hiV)), whisker));
+    children.push(svgLine(coord(cx - capW / 2), coord(y(box.loV)), coord(cx + capW / 2), coord(y(box.loV)), whisker));
+    children.push(svgLine(coord(cx - capW / 2), coord(y(box.hiV)), coord(cx + capW / 2), coord(y(box.hiV)), whisker));
     const s = box.stats;
     children.push(['rect', {
-      x: round2(x0), y: round2(y(box.q3V)),
-      width: round2(x1 - x0), height: round2(Math.max(1, y(box.q1V) - y(box.q3V))),
+      x: coord(x0), y: coord(y(box.q3V)),
+      width: coord(x1 - x0), height: coord(Math.max(1, y(box.q1V) - y(box.q3V))),
       fill: color, 'fill-opacity': 0.35, stroke: color, 'stroke-width': 1.5,
       class: 'chart-box',
     }, ['title', {},
       `${box.label} — min ${formatTickValue(s.min)}, q1 ${formatTickValue(s.q1)}, `
       + `median ${formatTickValue(s.med)}, q3 ${formatTickValue(s.q3)}, max ${formatTickValue(s.max)}`]]);
-    children.push(svgLine(round2(x0), round2(y(box.medV)), round2(x1), round2(y(box.medV)),
+    children.push(svgLine(coord(x0), coord(y(box.medV)), coord(x1), coord(y(box.medV)),
       { stroke: color, 'stroke-width': 2, class: 'chart-box-median' }));
     for (const v of box.outliersV) {
       children.push(['circle', {
-        cx: round2(cx), cy: round2(y(v)), r: 2.5,
+        cx: coord(cx), cy: coord(y(v)), r: 2.5,
         fill: color, 'fill-opacity': 0.75, class: 'chart-dot',
       }]);
     }
@@ -212,8 +209,4 @@ export function renderBoxplotAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-boxplot-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'box-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

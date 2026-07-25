@@ -1,7 +1,8 @@
 //@ts-check
 /**
- * @file Renderers for the remaining first-class types (D10 step 2) and
- * an honest placeholder for the deferred secondary types. Pie is
+ * @file Renderers for the first-class types beyond flowchart and
+ * sequence, and an honest placeholder for the deferred secondary
+ * types. Pie is
  * a real chart; class/ER/state/gantt render as structured panels — a
  * readable, geometry-light view that renders without error and so counts
  * honestly in the coverage scorecard. Secondary types (mindmap,

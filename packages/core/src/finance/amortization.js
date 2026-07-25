@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Loan amortization (Part A-fin). Given a principal, a periodic
+ * @file Loan amortization. Given a principal, a periodic
  * rate and a term, produce the period-by-period split of each payment
  * into interest and principal with the running balance.
  */

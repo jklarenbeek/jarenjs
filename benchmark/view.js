@@ -29,8 +29,7 @@
 import { writeFileSync } from 'node:fs';
 
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
-import { renderToString } from '@jarenjs/view';
-import { createDomRenderer } from '@jarenjs/view';
+import { createDomRenderer, renderToString } from '@jarenjs/view';
 import { h as hyperH, text as hyperText } from 'hyperapp';
 import { h as preactH } from 'preact';
 import preactRender from 'preact-render-to-string';

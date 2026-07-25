@@ -21,7 +21,7 @@ function resolveJson(basePath, baseUri = undefined) {
   };
 };
 
-export async function loadRemoteJson(draft) {
+export async function loadRemoteJson() {
   // Load ALL remotes, including every draft-specific directory, so that
   // cross-draft references (e.g. a draft2019-09 schema referencing
   // http://localhost:1234/draft2020-12/prefixItems.json) can resolve.

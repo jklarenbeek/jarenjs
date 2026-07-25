@@ -10,6 +10,8 @@
 export {
   sanitizeHref,
   num,
+  coord,
+  anchorForAngle,
   svgRoot,
   group,
   rect,

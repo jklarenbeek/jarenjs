@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The x·y plotter (design decision D8). `plot2d` compiles `f(x)`
+ * @file The x·y plotter. `plot2d` compiles `f(x)`
  * ONCE, samples the domain into `Float64Array` buffers, maps them to the
  * viewport with a standard linear remap, and emits axes/grid/ticks plus one
  * `<path>` polyline per series — breaking the path on NaN/±Inf and at
@@ -9,7 +9,7 @@
  * pure-vnode SVG.
  */
 
-import { Float64, remap } from '@jarenjs/core/math';
+import { Float64, remap, niceStep } from '@jarenjs/core/math';
 import { svgRoot, line, path, textAt, polylinePath } from '@jarenjs/view/helpers';
 import { parseExpression } from '../parser/index.js';
 import { compileExpr } from '../compile.js';
@@ -27,27 +27,16 @@ const DEFAULTS = {
 };
 
 /**
- * Pick a "nice" tick step near `raw` (1/2/5 × 10^k).
- * @param {number} raw
- * @returns {number}
- */
-function niceStep(raw) {
-  if (!(raw > 0)) return 1;
-  const exp = Math.floor(Math.log10(raw));
-  const base = Math.pow(10, exp);
-  const f = raw / base;
-  const nice = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10;
-  return nice * base;
-}
-
-/**
  * Evenly-spaced "nice" ticks spanning [min, max].
  * @param {number} min @param {number} max @param {number} count
  * @returns {number[]}
  */
 function niceTicks(min, max, count) {
   if (!(max > min)) return [min];
-  const step = niceStep((max - min) / count);
+  // A non-positive per-step span (a degenerate `count`) falls back to unit
+  // ticks rather than letting the ladder answer with NaN.
+  const raw = (max - min) / count;
+  const step = raw > 0 ? niceStep(raw) : 1;
   const start = Math.ceil(min / step) * step;
   const ticks = [];
   for (let v = start; v <= max + step * 1e-9; v += step) {

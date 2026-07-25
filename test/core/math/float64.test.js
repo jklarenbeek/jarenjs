@@ -16,6 +16,7 @@ import {
   mathf64_random,
   Float64,
   remap,
+  clamp01,
 } from '@jarenjs/core/math'
   //from '../../../packages/core/src/calc/float64.js';
 
@@ -155,7 +156,7 @@ describe('#Float64 primitives', function () {
   });
 
   it('Float64.cosHp', () => {
-    // now implemented (Part A1): a high-precision polynomial cosine
+    // Nick's polynomial approximation, accurate to ~2e-3 over the range
     for (const r of [0, 0.5, 1, Math.PI / 2, Math.PI, -1]) {
       assert.ok(Math.abs(Float64.cosHp(r) - Math.cos(r)) <= 2e-3);
     }
@@ -171,18 +172,6 @@ describe('#Float64 primitives', function () {
     assert.equal(Float64.norm(5, 0, 10), 0.5);
     assert.equal(Float64.norm(0, 0, 10), 0);
     assert.equal(Float64.norm(10, 0, 10), 1);
-  });
-
-  it('Float64.lerp', () => {
-    assert.equal(Float64.lerp(0.5, 0, 10), 5);
-    assert.equal(Float64.lerp(0, 0, 10), 0);
-    assert.equal(Float64.lerp(1, 0, 10), 10);
-  });
-
-  it('Float64.map', () => {
-    assert.equal(Float64.map(5, 0, 10, 0, 100), 50);
-    assert.equal(Float64.map(0, 0, 10, 0, 100), 0);
-    assert.equal(Float64.map(10, 0, 10, 0, 100), 100);
   });
 
   it('Float64.clamp', () => {
@@ -301,11 +290,28 @@ describe('#remap (interpolation-correct linear remap)', function () {
     assert.equal(remap(5, 3, 3, 7, 9), 7);
   });
 
-  it('differs from the legacy quirky Float64.map when dmin != 0', () => {
-    // Float64.map composes the non-standard lerp `(max-min)*(norm+min)`;
-    // remap is the standard `dmin + t*(dmax-dmin)`. With dmin=10 they part.
+  it('offsets by dmin rather than scaling it', () => {
     assert.equal(remap(5, 0, 10, 10, 20), 15);
-    assert.equal(Float64.map(5, 0, 10, 10, 20), 105);
+    assert.equal(remap(0, 0, 10, 10, 20), 10);
   });
 
+});
+
+describe('#clamp01', () => {
+  it('clamps into the unit interval', () => {
+    assert.equal(clamp01(-1), 0);
+    assert.equal(clamp01(0), 0);
+    assert.equal(clamp01(0.25), 0.25);
+    assert.equal(clamp01(1), 1);
+    assert.equal(clamp01(2), 1);
+  });
+
+  it('clamps the infinities to the boundaries', () => {
+    assert.equal(clamp01(Infinity), 1);
+    assert.equal(clamp01(-Infinity), 0);
+  });
+
+  it('passes NaN through instead of collapsing it to a boundary', () => {
+    assert.ok(Number.isNaN(clamp01(NaN)));
+  });
 });

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarenjs.dev/schemas/jaren-calc-state.schema.json",
   "title": "Jaren calc state slice",
-  "description": "The plain-JSON $.calc state slice (design decision D4). Draft-neutral.",
+  "description": "The plain-JSON $.calc state slice. Draft-neutral.",
   "type": "object",
   "properties": {
     "mode": { "enum": ["standard", "scientific", "programmer", "financial", "converter"] },

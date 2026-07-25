@@ -11,11 +11,11 @@
  *    patches in O(1) — the O(change) contract), `effects` entries for
  *    the app effect registry (`mermaid-render`, `mermaid-load`), and a
  *    `hydrate()` pass kept for API symmetry (a no-op in v1: the render is
- *    already complete, design decision D2);
+ *    already complete);
  *  - `styles/mermaid.css` — the component stylesheet.
  *
  * The boundary is one-way: the component imports the engine, never the
- * reverse (D1).
+ * reverse.
  */
 
 import { compileMermaid, diagramToVnode } from '../index.js';
@@ -33,7 +33,7 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  * @property {(source: string) => any} compile memoized compile
  * @property {(sourceOrDoc: any) => any} view memoized vnode projection
  * @property {Record<string, (props: any, dispatch: any) => any>} effects
- * @property {(container: any) => void} hydrate no-op in v1 (D2)
+ * @property {(container: any) => void} hydrate no-op in v1
  */
 
 /**
@@ -130,7 +130,7 @@ export function createMermaidComponent(options = {}) {
       },
     },
 
-    // Render is complete (D2); hydrate is reserved for optional
+    // Render is complete; hydrate is reserved for optional
     // client-only enhancements (pan/zoom) that are out of scope for v1.
     hydrate() {
       /* no-op */

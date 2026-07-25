@@ -21,7 +21,7 @@ import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
 import { callout, error } from '../lib/nodes.js';
-import { formatMs, formatRatio, memo1 } from '../lib/format.js';
+import { formatJson, formatMs, formatRatio, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
 
 const NAV = [
@@ -44,12 +44,12 @@ const PG_EXAMPLES = [
   { label: 'User', schemaText: DEFAULT_SCHEMA_TEXT, data: DEFAULT_DATA },
   {
     label: 'Conditional',
-    schemaText: JSON.stringify(exampleSchemas.conditional.schema, null, 2),
+    schemaText: formatJson(exampleSchemas.conditional.schema),
     data: exampleSchemas.conditional.data,
   },
   {
     label: 'Cross-field ($query)',
-    schemaText: JSON.stringify(exampleSchemas.queryKeyword.schema, null, 2),
+    schemaText: formatJson(exampleSchemas.queryKeyword.schema),
     data: exampleSchemas.queryKeyword.data,
   },
   {
@@ -222,7 +222,7 @@ const validateNode = memo1((schemaText, data, dataTab, dataError, locale, result
   examples: PG_EXAMPLES,
   schemaText,
   dataTab,
-  dataJson: JSON.stringify(data, null, 2),
+  dataJson: formatJson(data),
   dataError,
   locale,
   form: dataTab === 'form' ? formViewFor(schemaText, data) : null,
@@ -291,14 +291,14 @@ const STUDIO_PICKER = {
     name: t.name,
     title: t.title,
     lead: t.lead,
-    preview: JSON.stringify(t.doc, null, 2).split('\n').slice(0, 14).join('\n') + '\n…',
+    preview: formatJson(t.doc).split('\n').slice(0, 14).join('\n') + '\n…',
   })),
 };
 
 /** The host-widget props: reference-stable per (doc, revision). */
 const studioMount = memo1((doc, revision) => ({ doc, revision }));
 
-const studioEditorText = memo1((doc) => JSON.stringify(doc, null, 2));
+const studioEditorText = memo1((doc) => formatJson(doc));
 
 /** A failed validation report as the site's standard error nodes. */
 const studioErrorNodes = memo1((errors) => {
@@ -386,8 +386,6 @@ const docsPage = memo1((param) => {
   };
 });
 
-const J = (value) => JSON.stringify(value, null, 2);
-
 /** The primary input previewed on each example card, per engine. */
 const PREVIEW_FIELD = {
   path: 'selector', pointer: 'pointer', patch: 'patch', query: 'query',
@@ -406,8 +404,8 @@ const examplesPage = memo1((param) => {
   if (engine === 'validate') {
     items = Object.values(exampleSchemas).map((example) => ({
       label: example.name,
-      preview: J(example.schema),
-      payload: { validate: true, schemaText: J(example.schema), data: example.data },
+      preview: formatJson(example.schema),
+      payload: { validate: true, schemaText: formatJson(example.schema), data: example.data },
     }));
   }
   else {

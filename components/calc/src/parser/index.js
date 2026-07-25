@@ -20,7 +20,7 @@
  *   primary := number | const | ident | ident '(' args ')' | '(' or ')'
  *
  * Number bases (`0x`/`0o`/`0b`) and scientific notation are recognized at
- * the leaf; the AST keeps only the numeric value (D3).
+ * the leaf; the AST keeps only the numeric value.
  */
 
 import { num, constant, variable, unary, postfix, binary, call, isConstant } from '../ast.js';

@@ -25,10 +25,8 @@ import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 import chartSchema from '@jarenjs/charts/schemas/chart-definition.schema.json' with { type: 'json' };
 
 import { cards, code, error, callout, details, chart } from '../lib/nodes.js';
+import { now, formatJson, formatMsUnscaled } from '../lib/format.js';
 import { binanceInvitation } from './binance.js';
-
-const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
-const J = (value) => JSON.stringify(value, null, 2);
 
 const validateDefinition = new JarenValidator({ skipErrors: false, collectErrors: true })
   .compile(chartSchema);
@@ -102,13 +100,13 @@ export function runCharts(inputs) {
     return [
       cards([
         { title: 'Chart', value: String(config.type), note: `${format} source, schema-valid` },
-        { title: 'Parse (streaming reader)', value: ms(parseMs), note: `${events.length} document-order events` },
-        { title: 'Compile + render', value: ms(compileMs), note: 'geometry-free AST → pure-vnode SVG' },
+        { title: 'Parse (streaming reader)', value: formatMsUnscaled(parseMs), note: `${events.length} document-order events` },
+        { title: 'Compile + render', value: formatMsUnscaled(compileMs), note: 'geometry-free AST → pure-vnode SVG' },
       ]),
       chart(null, vnode, replaying
         ? 'Replay is running: the chart rebuilds as chunks arrive below.'
         : null),
-      details('Geometry-free AST (JSON)', [code(null, J(compiled.ast))]),
+      details('Geometry-free AST (JSON)', [code(null, formatJson(compiled.ast))]),
     ];
   }
   catch (err) {
@@ -213,7 +211,3 @@ export function chartsReplayActive() {
 }
 
 //#endregion
-
-function ms(t) {
-  return `${Number(t.toPrecision(3))} ms`;
-}

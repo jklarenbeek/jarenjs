@@ -11,113 +11,25 @@
  * hence the separate `form/*` key space next to the validator's document
  * voice ("must have required property 'x'").
  *
- * The template compiler is a deliberate ~40-line duplicate of the one in
- * `@jarenjs/validate` (messages.js): forms never imports the validator
- * (see index.js doctrine), and the catalog contract - identical on both
- * sides - is what keeps one locale pack (`@jarenjs/locales`) servicing
- * both packages.
+ * Forms and the validator must serve one locale pack
+ * (`@jarenjs/locales`) each from its own key space, without either
+ * package depending on the other - so the catalog contract they share
+ * (template syntax, compilation, value rendering) is kernel property in
+ * `@jarenjs/core/message`. Both compilers are re-exported here so a form
+ * consumer never has to reach past `@jarenjs/forms`.
  */
 
-//#region Message templates (duplicate of @jarenjs/validate, see above)
+import {
+  formatMessageValue,
+  compileMessageCatalog,
+} from '@jarenjs/core/message';
 
-/**
- * Render one interpolated parameter: `String(v)` for primitives,
- * `JSON.stringify(v)` for objects and arrays.
- * @param {unknown} value - The parameter value
- * @returns {string} The rendered value
- */
-function formatTemplateParam(value) {
-  return (value !== null && typeof value === 'object')
-    ? JSON.stringify(value)
-    : String(value);
-}
-
-/**
- * Compile a message template into a render closure. Template syntax:
- * `{name}` substitutes the params member `name`; an unknown name leaves
- * the placeholder literally; `{{` escapes a literal `{`.
- * @param {string} template - The template text
- * @returns {(params: object, error?: object) => string} The compiled render closure
- */
-export function compileMessageTemplate(template) {
-  /** @type {string[]} literal parts between placeholders */
-  const parts = [];
-  /** @type {string[]} placeholder names, one per gap between parts */
-  const names = [];
-  let literal = '';
-  for (let i = 0; i < template.length; ++i) {
-    if (template.charCodeAt(i) === 0x7b /* { */) {
-      if (template.charCodeAt(i + 1) === 0x7b) {
-        literal += '{';
-        i += 1;
-        continue;
-      }
-      const end = template.indexOf('}', i + 1);
-      if (end === -1) {
-        literal += template.slice(i);
-        break;
-      }
-      parts.push(literal);
-      literal = '';
-      names.push(template.slice(i + 1, end));
-      i = end;
-      continue;
-    }
-    literal += template[i];
-  }
-  parts.push(literal);
-
-  if (names.length === 0) {
-    const text = parts[0];
-    return function renderLiteralTemplate() { return text; };
-  }
-
-  return function renderMessageTemplate(params) {
-    let out = parts[0];
-    for (let i = 0; i < names.length; ++i) {
-      const name = names[i];
-      out += (params != null && name in params)
-        ? formatTemplateParam(params[name])
-        : `{${name}}`;
-      out += parts[i + 1];
-    }
-    return out;
-  };
-}
-
-/**
- * Compile a catalog-like object into a functions-only frozen catalog.
- * Entries may be render closures (kept as-is) or template strings
- * (compiled through {@link compileMessageTemplate}).
- * @param {Record<string, string | ((params: object, error?: object) => string)>} catalogLike - The catalog to compile
- * @returns {Readonly<Record<string, (params: object, error?: object) => string>>} The compiled catalog
- */
-export function compileMessageCatalog(catalogLike) {
-  /** @type {Record<string, (params: object, error?: object) => string>} */
-  const compiled = {};
-  const keys = Object.keys(catalogLike);
-  for (let i = 0; i < keys.length; ++i) {
-    const entry = catalogLike[keys[i]];
-    compiled[keys[i]] = typeof entry === 'function'
-      ? entry
-      : compileMessageTemplate(String(entry));
-  }
-  return Object.freeze(compiled);
-}
-
-//#endregion
+export {
+  compileMessageTemplate,
+  compileMessageCatalog,
+} from '@jarenjs/core/message';
 
 //#region English catalog
-
-/**
- * Render a value the way the field checks always have: quoted strings,
- * JSON for everything else.
- * @param {unknown} value - The value to render
- * @returns {string}
- */
-function formatValue(value) {
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
-}
 
 /**
  * The built-in English forms catalog. Key set = exactly the `form/*` keys
@@ -128,8 +40,8 @@ function formatValue(value) {
 export const formsMessagesEn = {
   'form/required': 'This field is required',
   'form/type': (p) => `Must be ${(p.type === 'integer' || p.type === 'array' || p.type === 'object') ? 'an' : 'a'} ${p.type}`,
-  'form/const': (p) => `Must be ${formatValue(p.constValue)}`,
-  'form/enum': (p) => `Must be one of: ${p.enumValues?.map(formatValue).join(', ')}`,
+  'form/const': (p) => `Must be ${formatMessageValue(p.constValue)}`,
+  'form/enum': (p) => `Must be one of: ${p.enumValues?.map(formatMessageValue).join(', ')}`,
   'form/minLength': (p) => `Must be at least ${p.limit} character${p.limit === 1 ? '' : 's'} (currently ${p.len})`,
   'form/maxLength': (p) => `Must be at most ${p.limit} character${p.limit === 1 ? '' : 's'} (currently ${p.len})`,
   'form/pattern': 'Must match pattern {pattern}',

@@ -4,7 +4,7 @@ import { Mat4, project3dTo2d, surfaceNormal, Vec3f64 } from '@jarenjs/core/math'
 
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} !~= ${b}`);
 
-describe('#Mat4 + projection (A4)', function () {
+describe('#Mat4 + projection', function () {
   it('identity', () => {
     const m = Mat4.identity();
     assert.equal(m.length, 16);

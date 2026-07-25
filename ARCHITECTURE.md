@@ -35,7 +35,7 @@ The sections from [Core Design Principles](#core-design-principles) onward descr
 
 ## Monorepo Layout
 
-The workspace is a dependency chain; every published workspace declares its Jaren dependencies as peer dependencies and carries **zero runtime dependencies** outside the repository. The graph below is the core library stack around the validator; the vnode presentation layer and the format components build on top of it (summarized in the table that follows):
+The workspace is a dependency chain; every published workspace declares its Jaren dependencies as ordinary `dependencies`, pinned to the shared version, and carries **zero runtime dependencies** outside the repository. "Zero dependencies" throughout this repo always means *outside the `@jarenjs` scope* — a package leaning on `@jarenjs/core` rather than re-implementing a primitive is the intended shape, not an exception to the rule. The graph below is the core library stack around the validator; the vnode presentation layer and the format components build on top of it (summarized in the table that follows):
 
 ```mermaid
 flowchart BT
@@ -65,7 +65,7 @@ flowchart BT
 | [`@jarenjs/formats`](packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](packages/formats/README.md)) |
 | [`@jarenjs/refs`](packages/refs) | Data-only meta-schema bundle | — |
 | [`@jarenjs/forms`](packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](packages/forms/README.md)) |
-| [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately dependency-free — key parity with the built-in English catalogs is enforced by repo tests, not imports | — (see its [README](packages/locales/README.md) and [ERROR-MESSAGES](packages/validate/docs/ERROR-MESSAGES.md)) |
+| [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](packages/locales/README.md) and [ERROR-MESSAGES](packages/validate/docs/ERROR-MESSAGES.md)) |
 | [`@jarenjs/view`](packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](packages/view/docs/VIEW-FORMAT.md) |
 | [`@jarenjs/app`](packages/app) | Applications as JSON documents; the compiled dispatch loop composing view (JSLT → vnodes) and json (query actions) | [APP-FORMAT](packages/app/docs/APP-FORMAT.md) |
 | [`@jarenjs/md`](components/md) | Markdown + frontmatter → JSON AST, rendered through view; a format component | [md ARCHITECTURE](components/md/ARCHITECTURE.md) |

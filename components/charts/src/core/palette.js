@@ -19,6 +19,7 @@
 
 import { resolveTheme } from '@jarenjs/view/helpers';
 import { lerpColor, relativeLuminance } from '@jarenjs/core/color';
+import { clamp01 } from '@jarenjs/core/math';
 
 /**
  * The categorical series palette (DESIGN.md §8 anchor order).
@@ -57,9 +58,9 @@ export const SEQUENTIAL = ['#60a5fa', '#3b82f6', '#2563eb', '#1e40af'];
  * @returns {string} a `#rrggbb` color
  */
 export function sequentialColor(t, ramp = SEQUENTIAL) {
-  if (!Number.isFinite(t)) t = 0;
-  else if (t < 0) t = 0;
-  else if (t > 1) t = 1;
+  // The finite guard is this ramp's own policy: a NaN magnitude reads as the
+  // low end rather than propagating, which `clamp01` deliberately does not do.
+  t = Number.isFinite(t) ? clamp01(t) : 0;
   const spans = ramp.length - 1;
   if (spans <= 0) return ramp[0];
   const at = t * spans;
@@ -128,8 +129,7 @@ export const HOST_VARS = {
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
-  if (nameOrOverrides === 'host') nameOrOverrides = { vars: HOST_VARS };
-  return resolveTheme(THEMES, 'chart', nameOrOverrides);
+  return resolveTheme(THEMES, 'chart', nameOrOverrides, HOST_VARS);
 }
 
 export { THEMES };

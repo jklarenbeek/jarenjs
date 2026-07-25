@@ -5,9 +5,9 @@
  * Every node is a plain JSON object born from a constructor so that all
  * nodes of a type share one hidden class — property access stays
  * monomorphic and the structural hash is deterministic (MERMAID-FORMAT
- * §4, design decision D5). The AST is deliberately **geometry-free**:
+ * §4). The AST is deliberately **geometry-free**:
  * layout is a separate pass, so the AST is a faithful, lossless
- * semantic model of the diagram's *meaning* (D11) — a directed graph
+ * semantic model of the diagram's *meaning* — a directed graph
  * (flowchart), an ordered interaction (sequence), a finite state machine
  * (state) — that other engines project via JSLT without ever seeing a
  * coordinate.
@@ -32,7 +32,7 @@ export const MERMAID_VERSION = '0.1';
  */
 
 /**
- * Assemble the shared DiagramDocument envelope (D3). Fresh per parse,
+ * Assemble the shared DiagramDocument envelope. Fresh per parse,
  * never mutated after return — share-friendly for JSLT/patch.
  * @param {string} diagram
  * @param {any} config

@@ -3,7 +3,7 @@
  * @file Class-diagram grammar → class AST. Supports `class Foo { … }`
  * bodies, `Foo : +member` line form, and relations
  * (`<|--`, `*--`, `o--`, `-->`, `..>`, `..|>`) with optional `: label`.
- * Geometry-free (D11): members and relations preserve declaration order.
+ * Geometry-free: members and relations preserve declaration order.
  */
 
 /** Relation operator between two class names, optional `: label`. */

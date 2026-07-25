@@ -10,7 +10,7 @@ import {
 
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} !~= ${b}`);
 
-describe('#Float64 transcendental completeness (A1)', function () {
+describe('#Float64 transcendental completeness', function () {
   it('exposes constants', () => {
     close(mathf64_E, Math.E);
     close(mathf64_LN2, Math.LN2);

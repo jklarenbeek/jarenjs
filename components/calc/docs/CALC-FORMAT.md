@@ -1,6 +1,6 @@
 # CALC-FORMAT — the `@jarenjs/calc` expression AST & mode contract
 
-`@jarenjs/calc` is a two-layer package (design decision D1): a pure
+`@jarenjs/calc` is a two-layer package: a pure
 **engine** (`src/*`, knows only `@jarenjs/core` + `@jarenjs/view`) and a
 **component** (`src/component/`, adds `@jarenjs/app` + `@jarenjs/forms`).
 This document is the engine contract.
@@ -30,7 +30,7 @@ The schema `schemas/jaren-calc-ast.schema.json` (draft-neutral) validates it.
 postfix `! %` → primary. Power binds tighter than unary minus
 (`-2^2 = -(2^2)`); `^` is exponentiation in **every** mode.
 
-### Round-trip fixed point (D3)
+### Round-trip fixed point
 
 `toExpression(ast)` is a canonical printer for which
 `parseExpression(toExpression(ast))` deep-equals `ast` across the fixture
@@ -56,7 +56,7 @@ overrides `& | << >> ~` with word-masked BigInt math from
 > `Number`; values beyond 2^53 lose precision when read back as a float —
 > the four-base display uses `word.js` on BigInt directly and stays exact.
 
-## Modes (D5)
+## Modes
 
 Each mode (`standard`, `scientific`, `programmer`, `financial`,
 `converter`) is a data-driven descriptor: a keypad/panel (`{ label, k,
@@ -67,7 +67,7 @@ formatter. `financial` holds **no formulas** (it orchestrates
 `converter` holds **no factors** (it orchestrates `@jarenjs/core/convert`
 via `convertValue`, currency included).
 
-## Plotting (D8)
+## Plotting
 
 `plot2d`/`plot3d` (and `calcToVnode`) produce pure-vnode SVG rooted at
 `['svg', …]`. They build a deterministic **scene** (geometry as plain JSON

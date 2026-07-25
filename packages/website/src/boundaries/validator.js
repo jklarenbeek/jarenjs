@@ -11,7 +11,7 @@ import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jar
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 import { ar, de, es, fr, ja, ko, nl, pt, ru, tr, zhTW } from '@jarenjs/locales';
 
-const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
+import { now } from '../lib/format.js';
 
 /** Friendly draft name from a schema's $schema declaration. */
 export function detectDraftName(schema) {

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The rates layer (design decision D13) — the component's impure
+ * @file The rates layer — the component's impure
  * half. It owns the `rates-fetch` effect and the `rates-poll`
  * subscription, choosing a provider adapter, debouncing to a min refresh
  * interval, and routing success/failure to app actions. It normalizes a

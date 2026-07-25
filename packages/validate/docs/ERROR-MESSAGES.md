@@ -136,8 +136,10 @@ Catalog entries are functions precisely so packs can use the platform:
 
 Hold these as module-level singletons (allocation discipline). **Bidi:**
 packs targeting RTL scripts should isolate interpolated user values with
-FSI/PDI (U+2068/U+2069) — the pack author's call, not core's. Packs have
-zero dependencies — not even workspace ones.
+FSI/PDI (U+2068/U+2069) — the pack author's call, not core's. A pack
+depends on nothing outside the Jaren suite, and inside it on nothing but
+`@jarenjs/core` — never on `@jarenjs/validate` or `@jarenjs/forms`, so
+either consumer can serve any pack.
 
 ## 5. Resolution precedence
 
@@ -241,7 +243,7 @@ catalog, default English, and every `FieldError` carries
 shipping in no runtime; adopting it would mean a runtime dependency or a
 homegrown MF2 engine for pluralization the platform already provides
 through `Intl.PluralRules`. Catalogs-as-functions cover the same ground
-with zero dependencies and full generality.
+with no runtime dependency beyond the platform, and with full generality.
 
 **Revisit trigger:** Intl.MessageFormat reaching TC39 Stage 3 or shipping
 in a major runtime. At that point, MF2 syntax could become a supported

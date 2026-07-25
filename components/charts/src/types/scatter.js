@@ -9,7 +9,8 @@
  *              xLabel?, yLabel? }
  */
 
-import { svgRoot, line as svgLine, circle, textAt } from '@jarenjs/view/helpers';
+import { svgRoot, line as svgLine, circle, textAt, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog } from '../core/scale.js';
 import { axisTicksLinear, axisTicksLog, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart, FS_TICK } from '../core/cartesian.js';
@@ -95,10 +96,6 @@ function axisFor(values, log) {
   return [scaleLinear(min, max === min ? min + 1 : max), ticks];
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a scatter AST to a pure-vnode SVG.
  * @param {ScatterAST} ast
@@ -122,7 +119,7 @@ export function renderScatterAST(ast, theme, hash, options = {}) {
   const { plot } = frame;
   const children = frame.children;
   if (ast.ref !== null) {
-    const y = round2(plot.y + (1 - ast.ref.v) * plot.h);
+    const y = coord(plot.y + (1 - ast.ref.v) * plot.h);
     children.push(svgLine(plot.x, y, plot.x + plot.w, y,
       { stroke: theme.tokens.muted, 'stroke-width': 1, 'stroke-dasharray': '4 3', class: 'chart-ref' }));
     if (ast.ref.label) {
@@ -132,16 +129,12 @@ export function renderScatterAST(ast, theme, hash, options = {}) {
   }
   for (const p of ast.points) {
     children.push(circle(
-      round2(plot.x + p.u * plot.w),
-      round2(plot.y + (1 - p.v) * plot.h),
+      coord(plot.x + p.u * plot.w),
+      coord(plot.y + (1 - p.v) * plot.h),
       3,
       { fill: toneColor(theme, p.tone, 0, palette), 'fill-opacity': 0.75, class: 'chart-dot' }));
   }
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-scatter-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'scatter-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

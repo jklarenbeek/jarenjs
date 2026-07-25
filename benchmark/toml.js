@@ -29,8 +29,6 @@
  * failures never affect the exit code.
  */
 
-/* eslint-disable no-console */
-
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';

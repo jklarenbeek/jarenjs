@@ -27,10 +27,12 @@
  * is the render variant that also returns that geometry.
  */
 
-import { svgRoot, line as svgLine } from '@jarenjs/view/helpers';
+import { svgRoot, line as svgLine, coord } from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleTime } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue, formatTimeTick } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
+import { numOf } from '../core/stream-adapter.js';
 import {
   normalizeDomainPolicy, resolveWindowX, resolveStepY, resolvePinnedY,
 } from '../core/domain.js';
@@ -180,14 +182,6 @@ export function buildCandlestickAST(data, config = {}) {
   };
 }
 
-function numOf(v) {
-  return v instanceof Date ? v.getTime() : v;
-}
-
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render one candle as its keyed `<g>` group: the wick line under the
  * body rect, up/down tones from the theme's win/loss pair.
@@ -207,11 +201,11 @@ export function candleRender(c, plot, theme) {
   const bodyTop = Math.min(yOpen, yClose);
   const bodyH = Math.max(1, Math.abs(yOpen - yClose));
   return ['g', { key: `c${c.t}`, class: 'chart-candle' },
-    svgLine(round2(x), round2(yHigh), round2(x), round2(yLow),
+    svgLine(coord(x), coord(yHigh), coord(x), coord(yLow),
       { stroke: color, 'stroke-width': 1, class: c.up ? 'chart-candle-up' : 'chart-candle-down' }),
     ['rect', {
-      x: round2(x - halfW), y: round2(bodyTop),
-      width: round2(halfW * 2), height: round2(bodyH),
+      x: coord(x - halfW), y: coord(bodyTop),
+      width: coord(halfW * 2), height: coord(bodyH),
       fill: color, class: c.up ? 'chart-candle-up' : 'chart-candle-down',
     }],
   ];
@@ -257,8 +251,4 @@ export function buildCandlestickRender(ast, theme, hash, options = {}) {
  */
 export function renderCandlestickAST(ast, theme, hash, options = {}) {
   return buildCandlestickRender(ast, theme, hash, options).svg;
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

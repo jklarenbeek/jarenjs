@@ -3,7 +3,7 @@
  * @file The engine's parse error, carrying a 1-based `line`/`column`
  * (the `fail(message, position)` idiom from `packages/json/src/path.js`,
  * adapted to line/column like the mermaid parser). The evaluate/render
- * path catches it and never rethrows into the app loop (D2).
+ * path catches it and never rethrows into the app loop.
  */
 
 export class CalcParseError extends Error {

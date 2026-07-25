@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Cash-flow analysis (Part A-fin): NPV, IRR, MIRR and their
+ * @file Cash-flow analysis: NPV, IRR, MIRR and their
  * date-indexed variants XNPV/XIRR. Built on `math/solve`. Cash flows are
  * arrays with element `t` occurring at period `t` (index 0 = now).
  */

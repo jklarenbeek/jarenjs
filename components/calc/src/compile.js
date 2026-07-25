@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file `compileExpr(ast, opts) → (scope) => number`. The second stage of
- * the two-stage compiler (D2): every dispatch decision — which operator
+ * the two-stage compiler: every dispatch decision — which operator
  * closure, which function, whether an identifier is a constant — is made
  * once, here, and baked into a nested closure. Evaluation then does no
  * lookups on the hot path. No `eval`, no `new Function` (CSP-safe).

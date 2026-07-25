@@ -67,7 +67,6 @@ import { TestRunner } from './runner.js';
 import * as ajv from './adaptors/ajv.js';
 import * as jaren from './adaptors/jaren.js';
 import fs from 'fs';
-import path from 'path';
 
 // Draft version mapping
 const DRAFT_MAP = {
@@ -405,7 +404,7 @@ async function runTestCase(test, options, draft, remotes, suiteName = undefined)
               console.log('\n');
               return true;
             }
-          } catch (e) {
+          } catch {
             // stdin might not be available
           }
         }
@@ -488,7 +487,7 @@ async function main() {
 
   // Load test suite
   const tests = await loadTestSuiteJson(draft);
-  const remotes = await loadRemoteJson(draft);
+  const remotes = await loadRemoteJson();
 
   // List files mode
   if (options.listFiles) {

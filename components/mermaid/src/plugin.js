@@ -1,14 +1,14 @@
 //@ts-check
 /**
- * @file The Markdown plugin — the md→mermaid dependency arrow (design
- * decision D9). `mermaidPlugin()` returns a **plain, self-frozen object**
+ * @file The Markdown plugin — the md→mermaid dependency arrow.
+ * `mermaidPlugin()` returns a **plain, self-frozen object**
  * shaped exactly like `@jarenjs/md`'s `MdPlugin` typedef, but it does
  * **not** import `definePlugin` from `@jarenjs/md` — so there is no
  * import cycle. `@jarenjs/md` re-exports this and adds `@jarenjs/mermaid`
  * to its dependencies; consumers who never use it tree-shake it away
  * (`sideEffects:false`).
  *
- * `render` is pure, synchronous and error-safe (D2/D7): a `mermaid`
+ * `render` is pure, synchronous and error-safe: a `mermaid`
  * fence becomes inline SVG with no injected instance and no `innerHTML`,
  * so a Markdown document renders to a full SVG string through SSR with
  * no browser — a capability the old injection wrapper lacked. There is
@@ -41,7 +41,7 @@ export function mermaidPlugin(options = {}) {
 
 /**
  * Refresh a `mermaid` fence node's source after a JSLT transform so the
- * generic Markdown fence printer re-emits the new diagram (D12). Because
+ * generic Markdown fence printer re-emits the new diagram. Because
  * there is no per-plugin `toMarkdown` hook, this is the primitive that
  * makes a transformed diagram round-trip through `toMarkdown`.
  *

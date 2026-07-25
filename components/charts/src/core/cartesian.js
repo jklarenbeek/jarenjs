@@ -46,6 +46,23 @@ export function fitLabel(label, maxWidth, fontSize) {
 }
 
 /**
+ * The chart title `<text>`: bold, centred on `x`, carrying the
+ * `chart-title` class the chart stylesheet hooks. Every chart type places
+ * its own title — the anchor point and size are part of each type's
+ * layout — so those stay the caller's, and only the styling is shared.
+ * @param {number} x anchor (the title centres on it)
+ * @param {number} y baseline
+ * @param {string} text
+ * @param {number} fontSize
+ * @param {Record<string,string>} tokens the resolved theme tokens
+ * @returns {any}
+ */
+export function chartTitle(x, y, text, fontSize, tokens) {
+  return textAt(x, y, text, fontSize,
+    { 'font-weight': 'bold', 'text-anchor': 'middle', fill: tokens.text, class: 'chart-title' });
+}
+
+/**
  * @typedef {{ticks: {pos: number, label: string}[], label?: string|null}} AxisAST
  */
 
@@ -81,8 +98,7 @@ export function cartesianFrame(params) {
   const children = [];
 
   if (params.title) {
-    children.push(textAt(width / 2, 22, params.title, FS_TITLE,
-      { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.text, class: 'chart-title' }));
+    children.push(chartTitle(width / 2, 22, params.title, FS_TITLE, t));
   }
 
   if (legend !== null && legend.length !== 0) {

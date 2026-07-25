@@ -62,9 +62,9 @@ so each computes at most once.
 | `src/layout/metrics.js` | `measureText` from a precomputed advance-width table (no `getBBox`) |
 | `src/layout/{flowchart,sequence}.js` | pure, deterministic `PositionedDiagram` scene graphs |
 | `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; `sanitizeHref` (the engine imports them, no local copy) |
-| `src/render/{flowchart,sequence,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the D7 error box |
+| `src/render/{flowchart,sequence,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the error box |
 | `src/theme.js` | `--mm-*` token tables resolved through the shared `@jarenjs/view/helpers` `resolveTheme` (concrete colors **and** CSS variables) |
-| `src/plugin.js` | the self-frozen Markdown plugin (D9) + `refreshMermaidFence` |
+| `src/plugin.js` | the self-frozen Markdown plugin + `refreshMermaidFence` |
 | `src/component/index.js` | `createMermaidComponent` (memoized `view()`, app effects, no-op hydrate) |
 
 ## Structural sharing, end to end
@@ -92,7 +92,7 @@ straight border-clipped edges. Sequence layout resolves lifelines,
 message y-advance, activation bars, notes and nested block frames. All
 pure and deterministic, so golden-JSON tests review any geometry drift.
 
-## SVG vnodes, not innerHTML (D2)
+## SVG vnodes, not innerHTML
 
 The old `@jarenjs/md` mermaid plugin injected a caller-supplied
 `mermaid` instance and swapped in `innerHTML` after mount. This engine

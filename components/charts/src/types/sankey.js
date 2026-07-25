@@ -16,8 +16,8 @@
  * growing downward (no axes — reading order wins, as in the treemap).
  */
 
-import { svgRoot, textAt } from '@jarenjs/view/helpers';
-import { FS_LABEL, annotateChart } from '../core/cartesian.js';
+import { svgRoot, textAt, coord } from '@jarenjs/view/helpers';
+import { FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 
 /**
@@ -210,19 +210,18 @@ export function renderSankeyAST(ast, theme, hash, options = {}) {
   const children = [];
 
   if (ast.title) {
-    children.push(textAt(width / 2, 22, ast.title, 15,
-      { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.text, class: 'chart-title' }));
+    children.push(chartTitle(width / 2, 22, ast.title, 15, t));
   }
 
-  const X = (x) => round2(pad + x * plotW);
-  const Y = (y) => round2(top + y * plotH);
+  const X = (x) => coord(pad + x * plotW);
+  const Y = (y) => coord(top + y * plotH);
 
   for (const link of ast.links) {
     const s = ast.nodes[link.source];
     const target = ast.nodes[link.target];
     const x0 = X(s.x1);
     const x1 = X(target.x0);
-    const mx = round2((x0 + x1) / 2);
+    const mx = coord((x0 + x1) / 2);
     children.push(['path', {
       d: `M${x0},${Y(link.sy0)} C${mx},${Y(link.sy0)} ${mx},${Y(link.ty0)} ${x1},${Y(link.ty0)} `
         + `L${x1},${Y(link.ty1)} C${mx},${Y(link.ty1)} ${mx},${Y(link.sy1)} ${x0},${Y(link.sy1)} Z`,
@@ -234,8 +233,8 @@ export function renderSankeyAST(ast, theme, hash, options = {}) {
     const node = ast.nodes[i];
     children.push(['rect', {
       x: X(node.x0), y: Y(node.y0),
-      width: round2((node.x1 - node.x0) * plotW),
-      height: round2(Math.max(1, (node.y1 - node.y0) * plotH)),
+      width: coord((node.x1 - node.x0) * plotW),
+      height: coord(Math.max(1, (node.y1 - node.y0) * plotH)),
       fill: seriesColor(i, palette), class: 'chart-sankey-node',
     }, ['title', {}, node.name]]);
     const onLeftHalf = (node.x0 + node.x1) / 2 < 0.5;
@@ -250,8 +249,4 @@ export function renderSankeyAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-sankey-chart',
     width, height, theme, children, (options.keyPrefix ?? 'sankey-') + hash);
   return annotateChart(svg, ast.title);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

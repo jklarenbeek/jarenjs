@@ -13,9 +13,12 @@
  * anchor (the brand blue).
  */
 
-import { svgRoot, path as svgPath, line as svgLine, textAt } from '@jarenjs/view/helpers';
+import {
+  svgRoot, path as svgPath, line as svgLine, textAt, coord, anchorForAngle,
+} from '@jarenjs/view/helpers';
+import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
-import { FS_TICK, toneColor, annotateChart } from '../core/cartesian.js';
+import { FS_TICK, toneColor, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL } from '../core/palette.js';
 
 /**
@@ -60,10 +63,6 @@ export function buildGaugeAST(data, config = {}) {
   };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
 /**
  * Render a gauge AST to a pure-vnode SVG: a semicircular track, the
  * value arc over it, outward tick marks with labels, and the value as
@@ -86,15 +85,14 @@ export function renderGaugeAST(ast, theme, hash, options = {}) {
   const children = [];
 
   if (ast.title) {
-    children.push(textAt(cx, 24, ast.title, 15,
-      { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.text, class: 'chart-title' }));
+    children.push(chartTitle(cx, 24, ast.title, 15, t));
   }
 
   // Dial angles run π (left) → 2π (right); the fill sweeps clockwise.
   const angleAt = (frac) => Math.PI + frac * Math.PI;
   const pointAt = (frac, r) => {
     const a = angleAt(frac);
-    return [round2(cx + r * Math.cos(a)), round2(cy + r * Math.sin(a))];
+    return [coord(cx + r * Math.cos(a)), coord(cy + r * Math.sin(a))];
   };
   const arcPath = (f0, f1) => {
     const [x0, y0] = pointAt(f0, R);
@@ -114,8 +112,7 @@ export function renderGaugeAST(ast, theme, hash, options = {}) {
     const [x1, y1] = pointAt(tick.frac, R + stroke / 2 + 8);
     children.push(svgLine(x0, y0, x1, y1, { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' }));
     const [lx, ly] = pointAt(tick.frac, R + stroke / 2 + 12);
-    const c = Math.cos(angleAt(tick.frac));
-    const anchor = c > 0.3 ? 'start' : c < -0.3 ? 'end' : 'middle';
+    const anchor = anchorForAngle(angleAt(tick.frac));
     children.push(textAt(lx, ly + (anchor === 'middle' ? -2 : 4), tick.label, FS_TICK,
       { 'text-anchor': anchor, fill: t.muted, class: 'chart-tick' }));
   }
@@ -130,8 +127,4 @@ export function renderGaugeAST(ast, theme, hash, options = {}) {
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-gauge-chart',
     width, height, theme, children, (options.keyPrefix ?? 'gauge-') + hash);
   return annotateChart(svg, ast.title ?? valueText);
-}
-
-function round2(v) {
-  return Math.round(v * 100) / 100;
 }

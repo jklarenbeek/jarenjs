@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Depreciation schedules (Part A-fin): straight-line,
+ * @file Depreciation schedules: straight-line,
  * declining-balance (double-declining when factor = 2) and
  * sum-of-years-digits. Each returns an array of per-period depreciation
  * amounts of length `life`.
