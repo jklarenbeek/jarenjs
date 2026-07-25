@@ -23,7 +23,12 @@ export const ACTIONS = {
     ],
     effects: {
       $if: [
-        { $eq: ['$payload.page', 'benchmarks'] },
+        // the home page shows measured headlines on its engine cards,
+        // so it needs the same meta.json the benchmarks overview reads
+        { $or: [
+          { $eq: ['$payload.page', 'benchmarks'] },
+          { $eq: ['$payload.page', 'home'] },
+        ] },
         [
           { run: 'fetch-bench', with: { name: 'meta' } },
           {

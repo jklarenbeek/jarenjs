@@ -236,3 +236,63 @@ export function resultTableBars(table, options = {}) {
     },
   };
 }
+
+/**
+ * Horizontal bars over `{label, ns}` timing rows (the view/charts
+ * benchmark shape). One series in one color: the bars are *nominal*
+ * categories — engines or scenarios — so their identity comes from the
+ * axis label, not from a hue, and the length is the whole message.
+ * Semantic win/loss tones are deliberately not used: on a timing chart
+ * "ours" is not automatically good, and DESIGN.md reserves those tokens
+ * for genuine status.
+ * @param {{label: string, ns: number}[]} rows
+ * @param {{title?: string, log?: boolean, valLabel?: string}} [options]
+ * @returns {ChartPair}
+ */
+export function timingBars(rows, options = {}) {
+  return {
+    config: {
+      type: 'bar',
+      title: options.title ?? null,
+      orient: 'h',
+      log: options.log === true,
+      valLabel: options.valLabel ?? 'ns/op',
+    },
+    data: {
+      categories: rows.map((r) => r.label),
+      series: [{
+        name: options.valLabel ?? 'ns/op',
+        values: rows.map((r) => (Number.isFinite(r.ns) ? r.ns : null)),
+      }],
+    },
+  };
+}
+
+/**
+ * Cross-suite ratio bars for the benchmarks overview: one bar per suite
+ * headline, tone by which side of parity it lands on — here the tones
+ * ARE semantic (a ratio below 1 is a genuine loss, reported as one).
+ * @param {{key: string, label: string, ratio: number|null}[]} headlines
+ * @param {{title?: string}} [options]
+ * @returns {ChartPair}
+ */
+export function headlineRatioBars(headlines, options = {}) {
+  const usable = headlines.filter((h) => Number.isFinite(h.ratio) && h.ratio > 0);
+  return {
+    config: {
+      type: 'bar',
+      title: options.title ?? null,
+      orient: 'h',
+      log: true,
+      valLabel: '× vs the fastest rival (log)',
+    },
+    data: {
+      categories: usable.map((h) => h.label),
+      series: [{
+        name: 'ratio',
+        values: usable.map((h) => h.ratio),
+        tones: usable.map((h) => (h.ratio >= 1 ? 'win' : 'loss')),
+      }],
+    },
+  };
+}

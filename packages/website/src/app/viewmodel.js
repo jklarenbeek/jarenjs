@@ -59,6 +59,42 @@ const PG_EXAMPLES = [
   },
 ];
 
+/** Home engine card → the benchmark headline that measures it. */
+const HOME_ENGINE_SUITE = {
+  validate: 'validate', path: 'jsonpath', pointer: 'jsonpointer', patch: 'jsonpatch',
+  query: 'jsonquery', jslt: 'jslt', josl: 'toml', charts: 'charts',
+  markdown: 'markdown', mermaid: 'mermaid',
+};
+
+/**
+ * The home content with its performance line taken from the generated
+ * benchmark run rather than from prose. A card whose engine has a
+ * headline shows that run's measured ratio; everything else — and the
+ * whole page before `meta.json` arrives, or if it fails to — keeps the
+ * static line, which is why those stay claims that cannot go stale.
+ * @param {any} state
+ * @returns {any}
+ */
+function homeContent(state) {
+  const headlines = state.bench?.meta?.headlines;
+  if (!Array.isArray(headlines) || headlines.length === 0) return HOME_CONTENT;
+  const byKey = new Map(headlines.map((h) => [h.key, h]));
+  return {
+    ...HOME_CONTENT,
+    engines: HOME_CONTENT.engines.map((engine) => {
+      const headline = byKey.get(HOME_ENGINE_SUITE[engine.key]);
+      if (headline === undefined || !Number.isFinite(headline.ratio)) return engine;
+      const speed = `${headline.ratio >= 100 ? Math.round(headline.ratio) : headline.ratio.toFixed(1)}×`;
+      return {
+        ...engine,
+        perf: headline.conformance
+          ? `${headline.conformance} conformance · ${speed} vs ${headline.rival}`
+          : `${speed} vs ${headline.rival}`,
+      };
+    }),
+  };
+}
+
 /**
  * @param {any} state
  * @returns {any} the view input document
@@ -68,7 +104,7 @@ export function viewModel(state) {
   /** @type {any} */
   const ui = { nav: deriveNav(page) };
 
-  if (page === 'home') ui.home = HOME_CONTENT;
+  if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
   if (page === 'playground') ui.pg = playgroundPage(state);

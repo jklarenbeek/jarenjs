@@ -402,6 +402,64 @@ function generateMarkdown(tmp, options) {
   };
 }
 
+/**
+ * The view suite: the cross-framework comparison (preact, hyperapp,
+ * preact-render-to-string) plus Jaren's own memo layers. The rows
+ * arrive pre-sorted and pre-labeled; only the timings need slimming.
+ */
+function generateView(tmp, options) {
+  const file = path.join(tmp, 'view.json');
+  try {
+    runTool([
+      'benchmark/view.js',
+      '--rows', String(options.quick ? 200 : 1000),
+      '--iterations', String(options.quick ? 50 : 500),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: view run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the comparison needs the hyperapp/preact/preact-render-to-string benchmark devDependencies)');
+    return null;
+  }
+  const raw = readJson(file);
+  const slim = (rows) => (rows ?? []).map((r) => ({ label: r.label, ns: sig4(r.ns) }));
+  return {
+    ...raw,
+    tables: Object.fromEntries(
+      Object.entries(raw.tables).map(([key, rows]) => [key, slim(rows)])),
+  };
+}
+
+/**
+ * The charts suite: per-type compile costs plus the session-vs-wholesale
+ * scaling rows (the O(change) evidence).
+ */
+function generateCharts(tmp, options) {
+  const file = path.join(tmp, 'charts.json');
+  try {
+    runTool([
+      'benchmark/charts.js',
+      '--iterations', String(options.quick ? 100 : 1000),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: charts run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    ...raw,
+    types: raw.types.map((r) => ({ label: r.label, ns: sig4(r.ns) })),
+    scaling: raw.scaling.map((r) => ({
+      ...r,
+      sessionNs: sig4(r.sessionNs),
+      wholesaleNs: sig4(r.wholesaleNs),
+    })),
+  };
+}
+
 function generateMermaid(tmp, options) {
   const file = path.join(tmp, 'mermaid.json');
   try {
@@ -473,6 +531,182 @@ function generateQt3() {
 
 //#endregion
 
+//#region overview headlines
+
+/** Display order of the overview's headline rows (the site's suite order). */
+const SUITE_ORDER = [
+  'validate', 'jsonpath', 'jsonquery', 'jslt', 'jsonpointer', 'jsonpatch',
+  'toml', 'markdown', 'mermaid', 'view', 'charts',
+];
+
+/** Geometric mean — the honest average of ratios (a 10× and a 0.1×
+ * average to parity, where an arithmetic mean would claim 5×). */
+function geoMean(values) {
+  const usable = values.filter((v) => Number.isFinite(v) && v > 0);
+  if (usable.length === 0) return null;
+  return Math.exp(usable.reduce((sum, v) => sum + Math.log(v), 0) / usable.length);
+}
+
+/** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
+function bestRival(engines, jarenKey) {
+  const rivals = Object.entries(engines ?? {})
+    .filter(([k, v]) => k !== jarenKey && Number.isFinite(v) && v > 0)
+    .map(([, v]) => v);
+  return rivals.length === 0 ? null : Math.min(...rivals);
+}
+
+/**
+ * One headline row per suite: the cross-suite summary the overview
+ * renders. `ratio` is always "× faster than the fastest rival" (> 1 is
+ * a win, the suite-wide convention); `conformance` is the correctness
+ * half. Every value is DERIVED from the generated data — nothing here
+ * is a hand-written number that can drift.
+ */
+function buildHeadlines(generated, meta) {
+  const out = [];
+  const add = (key, label, entry) => {
+    if (entry !== null && entry !== undefined) out.push({ key, label, ...entry });
+  };
+
+  if (generated.validate !== undefined) {
+    const o = generated.validate.summary.overall;
+    const c = meta.conformance.jsonSchema?.engineStats?.jaren ?? {};
+    const passed = Object.values(c).reduce((s, d) => s + (d.passed ?? 0), 0);
+    const failed = Object.values(c).reduce((s, d) => s + (d.failed ?? 0) + (d.errors ?? 0), 0);
+    add('validate', 'JSON Schema', {
+      ratio: o.jarenSuccessTime > 0 ? o.ajvSuccessTime / o.jarenSuccessTime : null,
+      rival: 'Ajv',
+      conformance: `${passed} / ${passed + failed}`,
+      note: 'official suite, every draft',
+    });
+  }
+  if (generated.jsonpath !== undefined) {
+    const rows = generated.jsonpath.profile?.rows ?? [];
+    add('jsonpath', 'JSONPath', {
+      ratio: geoMean(rows.map((r) => r.engines['json-p3'] / r.engines.jaren)),
+      rival: 'json-p3',
+      conformance: `${generated.jsonpath.compliance.total} / ${generated.jsonpath.compliance.total}`,
+      note: `RFC 9535 CTS, ${rows.length} queries`,
+    });
+  }
+  // `native` is hand-written JavaScript — a FLOOR reference, not a
+  // competing library. Ranking a compiler against it would be a
+  // category error, so the headline compares libraries and the native
+  // floor is reported separately in the suite tab.
+  for (const [key, label, rivalName] of [
+    ['jsonquery', 'JSON Query', 'fastest library rival'],
+    ['jslt', 'JSLT', 'JSONata'],
+  ]) {
+    if (generated[key] === undefined) continue;
+    const rows = generated[key].rows ?? [];
+    const ratios = [];
+    for (const r of rows) {
+      const libraries = Object.fromEntries(
+        Object.entries(r.engines ?? {}).filter(([k]) => k !== 'native'));
+      const best = bestRival(libraries, 'jaren');
+      if (best !== null && r.engines.jaren > 0) ratios.push(best / r.engines.jaren);
+    }
+    add(key, label, {
+      ratio: geoMean(ratios),
+      rival: rivalName,
+      conformance: null,
+      note: `${rows.length} scenario rows; hand-written JS is a separate floor`,
+    });
+  }
+  // A rival column is one that is not Jaren's own: these suites carry
+  // `jaren compiled` next to `jaren legacy`, and ranking Jaren against
+  // itself would invent a win.
+  for (const [key, label] of [['jsonpointer', 'JSON Pointer'], ['jsonpatch', 'JSON Patch']]) {
+    if (generated[key] === undefined) continue;
+    const ratios = [];
+    for (const t of generated[key].tables ?? []) {
+      const columns = t.columns ?? [];
+      const jarenAt = columns.findIndex((c) => /^jaren\b/i.test(c));
+      if (jarenAt < 0) continue;
+      for (const r of t.rows ?? []) {
+        const jaren = r.results[jarenAt];
+        const rivals = r.results.filter((v, i) => !/^jaren\b/i.test(columns[i] ?? '')
+          && Number.isFinite(v) && v > 0);
+        if (rivals.length !== 0 && jaren > 0) ratios.push(Math.min(...rivals) / jaren);
+      }
+    }
+    add(key, label, {
+      ratio: geoMean(ratios),
+      rival: 'the npm implementation',
+      conformance: key === 'jsonpatch' && generated.jsonpatch.conformance !== undefined
+        ? `${generated.jsonpatch.conformance.pass} / ${generated.jsonpatch.conformance.total}`
+        : null,
+      note: key === 'jsonpatch' ? 'official json-patch-tests' : 'compiled getters vs npm',
+    });
+  }
+  if (generated.toml !== undefined) {
+    const parse = generated.toml.profile?.parse ?? [];
+    add('toml', 'JOSL / TOML', {
+      ratio: geoMean(parse.map((p) => {
+        const best = bestRival(p.results, 'jaren');
+        return best === null || !(p.results.jaren > 0) ? null : best / p.results.jaren;
+      })),
+      rival: 'fastest rival',
+      conformance: `${generated.toml.compliance?.jaren?.pass ?? '?'} / ${generated.toml.compliance?.jaren?.total ?? '?'}`,
+      note: 'toml-test 1.0.0, the only full pass',
+    });
+  }
+  if (generated.markdown !== undefined) {
+    const render = generated.markdown.profile?.render ?? [];
+    add('markdown', 'Markdown', {
+      ratio: geoMean(render.map((p) => {
+        const best = bestRival(p.results, 'jaren-md');
+        return best === null || !(p.results['jaren-md'] > 0) ? null : best / p.results['jaren-md'];
+      })),
+      rival: 'fastest rival',
+      conformance: `${generated.markdown.scorecard?.['jaren-md']?.pass ?? '?'} / ${generated.markdown.examples ?? '?'}`,
+      note: 'CommonMark examples (no raw HTML by design)',
+    });
+  }
+  if (generated.mermaid !== undefined) {
+    const parse = generated.mermaid.profile?.parseJison ?? [];
+    const rendered = Object.values(generated.mermaid.scorecard ?? {})
+      .reduce((s, v) => s + (v.rendered ?? 0), 0);
+    const total = Object.values(generated.mermaid.scorecard ?? {})
+      .reduce((s, v) => s + (v.total ?? 0), 0);
+    add('mermaid', 'Mermaid', {
+      ratio: geoMean(parse.map((p) => {
+        const best = bestRival(p.results, 'jaren-mermaid');
+        return best === null || !(p.results['jaren-mermaid'] > 0) ? null : best / p.results['jaren-mermaid'];
+      })),
+      rival: 'mermaid (jison)',
+      conformance: total > 0 ? `${rendered} / ${total}` : null,
+      note: 'corpus diagrams rendered headless',
+    });
+  }
+  if (generated.view !== undefined) {
+    // The honest headline is NOT a win over preact — Jaren produces
+    // vnodes through a generic dispatcher and pays for it. What the
+    // architecture buys is the re-render path, so that is the number.
+    const frame = generated.view.tables?.frame ?? [];
+    const memo = frame.find((r) => r.label.includes('(memo)'));
+    const plain = frame.find((r) => r.label.includes('(no memo)'));
+    add('view', 'View', {
+      ratio: memo !== undefined && plain !== undefined && memo.ns > 0 ? plain.ns / memo.ns : null,
+      rival: 'its own no-memo frame',
+      conformance: null,
+      note: 'memo vs no-memo frame; raw vnode production is slower than preact',
+    });
+  }
+  if (generated.charts !== undefined) {
+    const big = generated.charts.scaling?.[generated.charts.scaling.length - 1];
+    add('charts', 'Charts', {
+      ratio: big !== undefined && big.sessionNs > 0 ? big.wholesaleNs / big.sessionNs : null,
+      rival: 'a wholesale re-render',
+      conformance: null,
+      note: big !== undefined ? `incremental tick at ${big.points}×${big.series} points` : '',
+    });
+  }
+  return out;
+}
+
+//#endregion
+
 async function main() {
   const options = parseArgs(process.argv);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-website-data-'));
@@ -507,6 +741,16 @@ async function main() {
     const mermaid = generateMermaid(tmp, options);
     if (mermaid !== null)
       generated.mermaid = mermaid;
+  }
+  if (!options.skip.has('view')) {
+    const view = generateView(tmp, options);
+    if (view !== null)
+      generated.view = view;
+  }
+  if (!options.skip.has('charts')) {
+    const charts = generateCharts(tmp, options);
+    if (charts !== null)
+      generated.charts = charts;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json
@@ -575,6 +819,14 @@ async function main() {
         : { examples: generated.mermaid.examples, scorecard: generated.mermaid.scorecard },
     },
   };
+  // Derived headline rows for the overview. Suites skipped this run
+  // keep their previous rows, so a partial regeneration never empties
+  // the summary — and each row records the run that produced it.
+  const freshHeadlines = buildHeadlines(generated, meta);
+  const carried = (previousMeta?.headlines ?? [])
+    .filter((h) => !freshHeadlines.some((f) => f.key === h.key));
+  meta.headlines = [...freshHeadlines.map((h) => ({ ...h, generated: meta.generated })), ...carried]
+    .sort((a, b) => SUITE_ORDER.indexOf(a.key) - SUITE_ORDER.indexOf(b.key));
   writeJson('meta.json', meta);
 
   fs.rmSync(tmp, { recursive: true, force: true });

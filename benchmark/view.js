@@ -26,6 +26,8 @@
  *   node benchmark/view.js --rows 5000 --iterations 200
  */
 
+import { writeFileSync } from 'node:fs';
+
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { renderToString } from '@jarenjs/view';
 import { createDomRenderer } from '@jarenjs/view';
@@ -45,6 +47,8 @@ const opt = (name, fallback) => {
 const ROWS = opt('rows', 1000);
 const ITERATIONS = opt('iterations', 500);
 const WARMUP = Math.max(10, Math.floor(ITERATIONS / 10));
+const OUTPUT = args.includes('--output') ? args[args.indexOf('--output') + 1] : null;
+const FILEPATH = args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null;
 
 //#endregion
 
@@ -161,15 +165,19 @@ console.log(`equivalence: jaren (plain & memo) === preact SSR for ${ROWS} rows, 
 
 console.log(`\nrows: ${ROWS}, iterations: ${ITERATIONS} (+${WARMUP} warmup), node ${process.version}`);
 
+/** Every measured table, kept for the `--output json` emit below. */
+const collected = {};
+
 // full view production: fresh state every iteration (memo cold)
 {
   const states = [buildState(ROWS), buildState(ROWS)];
-  printTable('view production — full build (state -> vnodes)', [
+  collected.build = [
     measure('preact h()', (i) => preactView(states[i & 1])),
     measure('hyperapp h()/text()', (i) => hyperappView(states[i & 1])),
     measure('jaren jslt (memo, cold)', (i) => jarenMemo(states[i & 1])),
     measure('jaren jslt (no memo)', (i) => jarenPlain(states[i & 1])),
-  ].sort((a, b) => a.ns - b.ns));
+  ].sort((a, b) => a.ns - b.ns);
+  printTable('view production — full build (state -> vnodes)', collected.build);
 }
 
 // one-row update: COW state, memo warm
@@ -179,7 +187,7 @@ console.log(`\nrows: ${ROWS}, iterations: ${ITERATIONS} (+${WARMUP} warmup), nod
   let plainState = buildState(ROWS);
   let hyperState = buildState(ROWS);
   let preactState = buildState(ROWS);
-  printTable(`view production — one COW row updated of ${ROWS}`, [
+  collected.update = [
     measure('jaren jslt (memo, warm)', (i) => {
       memoState = updateRow(memoState, i % ROWS);
       return jarenMemo(memoState);
@@ -196,17 +204,19 @@ console.log(`\nrows: ${ROWS}, iterations: ${ITERATIONS} (+${WARMUP} warmup), nod
       plainState = updateRow(plainState, i % ROWS);
       return jarenPlain(plainState);
     }),
-  ].sort((a, b) => a.ns - b.ns));
+  ].sort((a, b) => a.ns - b.ns);
+  printTable(`view production — one COW row updated of ${ROWS}`, collected.update);
 }
 
 // SSR
 {
   const memoSsrState = buildState(ROWS);
-  printTable('SSR — vnodes -> HTML string', [
+  collected.ssr = [
     measure('jaren renderToString (memo)', () => renderToString(jarenMemo(memoSsrState))),
     measure('jaren renderToString', () => renderToString(jarenPlain(state0))),
     measure('preact-render-to-string', () => preactRender(preactView(state0))),
-  ].sort((a, b) => a.ns - b.ns));
+  ].sort((a, b) => a.ns - b.ns);
+  printTable('SSR — vnodes -> HTML string', collected.ssr);
 }
 
 // end-to-end frame: view + DOM patch against the stub (jaren only)
@@ -221,10 +231,11 @@ console.log(`\nrows: ${ROWS}, iterations: ${ITERATIONS} (+${WARMUP} warmup), nod
       render(transform(state));
     };
   };
-  printTable(`frame cost — view + patch, one row updated of ${ROWS} (stub DOM; no cross-framework claim)`, [
+  collected.frame = [
     measure('jaren view+patch (memo)', frame(jarenMemo)),
     measure('jaren view+patch (no memo)', frame(jarenPlain)),
-  ].sort((a, b) => a.ns - b.ns));
+  ].sort((a, b) => a.ns - b.ns);
+  printTable(`frame cost — view + patch, one row updated of ${ROWS} (stub DOM; no cross-framework claim)`, collected.frame);
 }
 
 // the memo marker (VIEW-FORMAT §5.5): a reallocated parent over shared
@@ -246,8 +257,38 @@ console.log(`\nrows: ${ROWS}, iterations: ${ITERATIONS} (+${WARMUP} warmup), nod
   const memoRow = measure('memo-equal marker skip', () => render(tree('v1')));
   render(tree(undefined));
   const scanRow = measure('=== child scan (no memo)', () => render(tree(undefined)));
-  printTable(`memo marker — reallocated parent over ${ROWS * 10} shared children`,
-    [memoRow, scanRow]);
+  collected.memo = [memoRow, scanRow];
+  collected.memoChildren = ROWS * 10;
+  printTable(`memo marker — reallocated parent over ${ROWS * 10} shared children`, collected.memo);
+}
+
+if (OUTPUT === 'json') {
+  // The website-data shape (benchmark/website-data.js → view.json): the
+  // four measured tables plus the memo-marker pair, each row a
+  // {label, ns} the site renders as a grouped bar chart and a table.
+  const data = {
+    date: new Date().toISOString(),
+    node: process.version,
+    rows: ROWS,
+    iterations: ITERATIONS,
+    ssrChars: jarenHtml.length,
+    memoChildren: collected.memoChildren,
+    tables: {
+      build: collected.build,
+      update: collected.update,
+      ssr: collected.ssr,
+      frame: collected.frame,
+      memo: collected.memo,
+    },
+  };
+  const json = JSON.stringify(data, null, 2);
+  if (FILEPATH !== null) {
+    writeFileSync(FILEPATH, json);
+    console.log(`\nwrote ${FILEPATH}`);
+  }
+  else {
+    console.log(json);
+  }
 }
 
 console.log('\nMethodology: plain idiomatic views on every side; hyperapp and preact re-run the whole');

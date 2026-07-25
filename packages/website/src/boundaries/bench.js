@@ -16,6 +16,7 @@ import { createChartComponent } from '@jarenjs/charts/component';
 import {
   ratioDistributionBars, ratioScatter, conformanceBars,
   profileBars, matrixBars, passCountBars, querySpreadBars, resultTableBars,
+  timingBars, headlineRatioBars,
 } from '@jarenjs/charts/transforms/benchmark-adapter';
 
 /** Host-linked chart projections; view() memoizes per data object. */
@@ -35,6 +36,8 @@ export const SUITES = [
   { key: 'toml', label: 'JOSL / TOML' },
   { key: 'markdown', label: 'Markdown' },
   { key: 'mermaid', label: 'Mermaid' },
+  { key: 'view', label: 'View' },
+  { key: 'charts', label: 'Charts' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -59,18 +62,63 @@ export function deriveSuite(state, suite) {
     case 'toml': return toml(data);
     case 'markdown': return markdown(data);
     case 'mermaid': return mermaid(data);
+    case 'view': return view(data);
+    case 'charts': return chartsSuite(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
 
+/** The cross-suite ratio chart, rebuilt only when meta reloads. */
+const overviewCharts = memo1((meta) => {
+  const headlines = meta.headlines ?? [];
+  if (headlines.filter((h) => Number.isFinite(h.ratio)).length === 0) return [];
+  return [chartNode(
+    headlineRatioBars(headlines, { title: 'Speed vs the fastest rival, per suite (log)' }),
+    'One bar per suite; the axis is logarithmic and 1× is parity. Bars below parity are suites where a rival is faster — they are on the chart for the same reason the wins are.')];
+});
+
+/**
+ * The overview: what every suite measured, in one screen. Each row is
+ * DERIVED from that suite's generated data (benchmark/website-data.js
+ * `buildHeadlines`), so the summary cannot drift from the detail pages
+ * behind it — and a suite skipped in a partial regeneration carries its
+ * own older run date rather than borrowing this one.
+ */
 function overview(meta) {
+  const headlines = meta.headlines ?? [];
+  const runDate = (meta.generated ?? '').slice(0, 10);
   const out = [cards([
-    { title: 'Generated', value: (meta.generated ?? '').slice(0, 10), note: meta.node ?? '' },
+    { title: 'Generated', value: runDate || '—', note: `${meta.node ?? ''} · ${meta.quick ? 'quick run' : 'full run'}` },
     { title: 'Machine', value: meta.cpu ?? '—', note: meta.platform ?? '' },
-    { title: 'Suite version', value: meta.version ?? '—', note: meta.quick ? 'quick run' : 'full run' },
+    { title: 'Suite version', value: meta.version ?? '—', note: `${headlines.length} suites measured` },
   ])];
+
+  if (headlines.length !== 0) {
+    out.push(callout('How to read this page',
+      'Every number below is derived from the same generated run as the suite page behind it — nothing here is typed by hand. "Speed" is the geometric mean of the per-scenario ratios against the fastest rival library, so a 10× win and a 10× loss average to parity rather than to 5×. Hand-written JavaScript, where a suite measures it, is a floor reference rather than a rival, and is reported on the suite page instead.'));
+    out.push(...overviewCharts(meta));
+    out.push(table(
+      'Every suite — correctness and speed',
+      ['Suite', 'Conformance', 'Speed', 'vs', 'Measured'],
+      headlines.map((h) => ({
+        cells: [
+          h.label,
+          h.conformance ?? '—',
+          h.ratio === null || h.ratio === undefined ? '—' : formatRatio(h.ratio),
+          h.rival ?? '—',
+          (h.generated ?? '').slice(0, 10) || '—',
+        ],
+        strong: Number.isFinite(h.ratio) && h.ratio >= 10,
+      })),
+      'Conformance is passed / total on that suite\'s official test corpus where one exists. The "Measured" column is the run each row came from: a partial regeneration updates only the suites it ran.'));
+    out.push(details('What each headline means', headlines.map((h) => ({
+      kind: 'p',
+      text: `${h.label} — ${h.note ?? ''}`,
+    }))));
+  }
+
   const stats = meta.conformance?.jsonSchema?.engineStats;
-  if (stats !== undefined) {
+  if (stats !== undefined && stats !== null) {
     const drafts = Object.keys(stats.jaren ?? {});
     out.push(table(
       'JSON Schema conformance — official test suite',
@@ -80,7 +128,7 @@ function overview(meta) {
       })),
       'passed / failed / errors, optional format suites included'));
   }
-  if (meta.qt3 !== undefined) {
+  if (meta.qt3 !== undefined && meta.qt3 !== null) {
     const q = meta.qt3;
     out.push(cards([
       { title: 'QT3 cases', value: String(q.total ?? '—'), note: 'W3C XQuery/XPath 3.1 suite' },
@@ -488,3 +536,170 @@ function mermaid(data) {
   }
   return out;
 }
+
+//#region view + charts
+
+/** The view charts, rebuilt only when the suite data reloads. */
+const viewCharts = memo1((data) => {
+  const t = data.tables ?? {};
+  return {
+    build: chartNode(timingBars(t.build ?? [], {
+      title: 'View production — full build, ns per view (log)', log: true, valLabel: 'ns/op (log)',
+    })),
+    update: chartNode(timingBars(t.update ?? [], {
+      title: 'View production — one changed row, ns per view (log)', log: true, valLabel: 'ns/op (log)',
+    })),
+    ssr: chartNode(timingBars(t.ssr ?? [], {
+      title: 'SSR — vnodes to HTML string, ns per render', valLabel: 'ns/op',
+    })),
+    memo: chartNode(timingBars(t.memo ?? [], {
+      title: 'The memo marker — reallocated parent over shared children', valLabel: 'ns/frame',
+    })),
+  };
+});
+
+/**
+ * The view suite. This is the one page where Jaren does NOT lead, and
+ * it says so in the lead paragraph rather than burying it: producing
+ * vnodes through a generic JSLT dispatcher costs multiples of a
+ * hand-written `h()` call. What the architecture buys is the
+ * *re-render* path — proof-of-no-change instead of rebuild-and-diff —
+ * so both halves ship on the same page.
+ */
+function view(data) {
+  const t = data.tables ?? {};
+  const c = viewCharts(data);
+  const out = [];
+  const row = (rows, label) => rows.find((r) => r.label.includes(label));
+  const build = t.build ?? [];
+  const jarenBuild = row(build, 'no memo');
+  const preactBuild = row(build, 'preact');
+  const frame = t.frame ?? [];
+  const memoFrame = row(frame, '(memo)');
+  const plainFrame = row(frame, '(no memo)');
+  const memoPair = t.memo ?? [];
+
+  out.push(cards([
+    {
+      // formatRatio names the direction itself, so this reads
+      // "8.7× slower" — the honest label for the build path
+      title: 'Vnode production vs preact',
+      value: jarenBuild !== undefined && preactBuild !== undefined
+        ? formatRatio(preactBuild.ns / jarenBuild.ns)
+        : '—',
+      note: 'by design: a generic dispatcher, not a hand-written h()',
+    },
+    {
+      title: 'Frame with memo',
+      value: memoFrame !== undefined && plainFrame !== undefined
+        ? formatRatio(plainFrame.ns / memoFrame.ns)
+        : '—',
+      note: 'view + patch, one changed row — against its own no-memo path',
+    },
+    {
+      title: 'Memo-marker skip',
+      value: memoPair.length === 2 ? formatRatio(memoPair[1].ns / memoPair[0].ns) : '—',
+      note: `${data.memoChildren ?? '?'} shared children under a rebuilt parent`,
+    },
+  ]));
+  out.push(callout('What this suite measures — including where we lose',
+    'Jaren builds views by running a JSLT stylesheet over state, so producing a vnode tree from scratch costs several times a hand-written preact or hyperapp h() call. That is the honest price of views-as-data, and it is on this page. The trade is the re-render path: unchanged state returns the previous output by reference, so the patcher skips it instead of diffing it — the rows below measure both directions on the same 1000-row table, with SSR output asserted byte-identical to preact before timing.'));
+
+  out.push(c.build);
+  out.push(table('View production — full build (fresh state, memo cold)',
+    ['Engine', 'ns per view'],
+    build.map((r) => ({ cells: [r.label, formatNs(r.ns)], strong: r.label.startsWith('jaren') })),
+    `${data.rows ?? '?'} rows, ${data.iterations ?? '?'} iterations; lower is better.`));
+
+  out.push(c.update);
+  out.push(table('View production — one copy-on-write row updated',
+    ['Engine', 'ns per view'],
+    (t.update ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)], strong: r.label.startsWith('jaren') })),
+    'hyperapp and preact re-run the whole view function per change (their idiomatic default; both offer opt-in per-call-site memo wrappers). Jaren\'s memo is a compile option that needs no view changes.'));
+
+  out.push(c.ssr);
+  out.push(table('SSR — vnodes to an HTML string',
+    ['Engine', 'ns per render'],
+    (t.ssr ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)], strong: r.label.startsWith('jaren') })),
+    `Output equality is asserted before timing: every engine emits the same ${data.ssrChars ?? '?'}-character document.`));
+
+  out.push(table('Frame cost — view + DOM patch (Jaren only)',
+    ['Path', 'ns per frame'],
+    frame.map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
+    'Measured against the repository\'s DOM stub, so no cross-framework claim is made here — hyperapp and preact need a real DOM. The number shows what the reference-equality skip is worth end to end.'));
+
+  out.push(c.memo);
+  out.push(table('The memo marker (VIEW-FORMAT §5.5)',
+    ['Path', 'ns per frame'],
+    memoPair.map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
+    'When a producer rebuilds its tree but knows a region did not change, an equal `memo` prop skips that subtree outright — instead of walking every child to discover the reference-equality skips one at a time.'));
+  return out;
+}
+
+/** The charts suite charts, rebuilt only when the suite data reloads. */
+const chartsSuiteCharts = memo1((data) => ({
+  types: chartNode(timingBars(data.types ?? [], {
+    title: 'Compile + project, ns per chart (log)', log: true, valLabel: 'ns/op (log)',
+  })),
+  scaling: chartNode(profileBars(
+    (data.scaling ?? []).map((s) => ({
+      name: `${s.points} × ${s.series}`,
+      results: { 'incremental session': s.sessionNs, 'wholesale re-render': s.wholesaleNs },
+    })),
+    ['incremental session', 'wholesale re-render'],
+    { title: 'One appended point — session vs wholesale (log)', log: true, valLabel: 'ns/tick (log)' })),
+}));
+
+/** The charts suite: per-type cost, and the O(change) scaling evidence. */
+function chartsSuite(data) {
+  const c = chartsSuiteCharts(data);
+  const scaling = data.scaling ?? [];
+  const first = scaling[0];
+  const last = scaling[scaling.length - 1];
+  const out = [];
+  if (first !== undefined && last !== undefined) {
+    out.push(cards([
+      {
+        title: 'Incremental tick',
+        value: formatNs(last.sessionNs),
+        note: `one appended point at ${last.points}×${last.series}`,
+      },
+      {
+        title: 'Same tick, wholesale',
+        value: formatNs(last.wholesaleNs),
+        // not formatRatio: this is a cost multiple, not a "faster than"
+        // comparison, and the direction word would invert its meaning
+        note: `the same appended point re-rendered whole — ${Math.round(last.wholesaleNs / last.sessionNs)}× the session's cost`,
+      },
+      {
+        title: 'Flatness',
+        value: `${(last.sessionNs / first.sessionNs).toFixed(2)}×`,
+        note: `session tick at ${last.points} points ÷ at ${first.points} points`,
+      },
+    ]));
+  }
+  out.push(callout('Why the session tick does not grow',
+    'A chart AST stores positions as fractions of its domain, so a tick that moves the scales legitimately changes every mark — and re-rendering wholesale is then the correct output, not a failure. Declaring a domain policy (a quantized window, pinned or step-quantized bounds) keeps most ticks still, and the session then patches only the series that changed. Every tick is asserted byte-identical to a wholesale render of the same data.'));
+  out.push(c.scaling);
+  out.push(table('One appended point — incremental session vs wholesale re-render',
+    ['Points × series', 'Session tick', 'Wholesale tick', 'Ratio', 'Frames incremental'],
+    scaling.map((s) => ({
+      cells: [
+        `${s.points} × ${s.series}`,
+        formatNs(s.sessionNs),
+        formatNs(s.wholesaleNs),
+        formatRatio(s.sessionNs > 0 ? s.wholesaleNs / s.sessionNs : null),
+        `${s.incremental} of ${s.incremental + s.rebuilt}`,
+      ],
+      strong: true,
+    })),
+    'The session column is flat in the point count; the wholesale column is linear in it.'));
+  out.push(c.types);
+  out.push(table('Compile + project, per chart type',
+    ['Scenario', 'ns per chart'],
+    (data.types ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
+    `${data.iterations ?? '?'} iterations; definition plus data to a geometry-free AST to pure vnodes.`));
+  return out;
+}
+
+//#endregion

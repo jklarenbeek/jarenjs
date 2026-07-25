@@ -46,7 +46,7 @@ const DEMOS = [
   },
   {
     key: 'line',
-    blurb: 'The streaming-critical type: a live feed recompiles it per snapshot in ~170 µs at 100 points × 5 series.',
+    blurb: 'The streaming-critical type: a live feed appends to it through an incremental session, so a tick costs the same at 100 points as at 10 000.',
     config: {
       type: 'line',
       title: 'Throughput over a run',

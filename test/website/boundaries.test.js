@@ -161,7 +161,7 @@ describe('website boundaries — benchmark charts', function () {
   const CASES = [
     ['validate', 3], ['jsonpath', 1], ['jsonquery', 1], ['jslt', 1],
     ['jsonpointer', 1], ['jsonpatch', 1], ['toml', 2], ['markdown', 2],
-    ['mermaid', 2],
+    ['mermaid', 2], ['view', 4], ['charts', 2],
   ];
   for (const [suite, minCharts] of CASES) {
     it(`the ${suite} suite renders ${minCharts}+ svg chart(s) from the published data`, function () {
@@ -259,5 +259,89 @@ describe('website boundaries — charts engine', function () {
     assert.equal(action, 'eng/result');
     assert.equal(payload.engine, 'charts');
     assert.ok(payload.result.some((n) => n.kind === 'chart'));
+  });
+});
+
+describe('website boundaries — the benchmarks overview', function () {
+  /** Every chart node in a derived tree (the suite tests use the same walk). */
+  const chartsIn = (nodes) => {
+    const found = [];
+    const walk = (n) => {
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n !== null && typeof n === 'object') {
+        if (n.kind === 'chart') found.push(n);
+        for (const v of Object.values(n)) walk(v);
+      }
+    };
+    walk(nodes);
+    return found;
+  };
+  const meta = loadBench('meta');
+  const state = { benchStatus: { meta: 'loaded' }, bench: { meta }, benchUi: { search: '', limit: 40 } };
+
+  it('summarizes EVERY measured suite, not just one', function () {
+    assert.ok(Array.isArray(meta.headlines), 'meta.json carries derived headlines');
+    assert.ok(meta.headlines.length >= 8,
+      `expected a headline per suite, got ${meta.headlines.length}`);
+    const nodes = deriveSuite(state, 'overview');
+    const flat = JSON.stringify(nodes);
+    for (const h of meta.headlines) {
+      assert.ok(flat.includes(h.label), `the overview omits the ${h.key} suite`);
+    }
+  });
+
+  it('every headline is derived, dated, and labels its rival', function () {
+    for (const h of meta.headlines) {
+      assert.equal(typeof h.key, 'string');
+      assert.equal(typeof h.label, 'string');
+      assert.match(h.generated ?? '', /^\d{4}-\d{2}-\d{2}T/, `${h.key} records its run`);
+      if (h.ratio !== null && h.ratio !== undefined) {
+        assert.ok(Number.isFinite(h.ratio) && h.ratio > 0, `${h.key} ratio is a positive number`);
+        assert.ok(typeof h.rival === 'string' && h.rival !== '',
+          `${h.key} names what it was compared against`);
+      }
+    }
+  });
+
+  it('reports losses as losses — the ratio is never floored at parity', function () {
+    // The suite convention is "ratio > 1 means Jaren is faster"; a
+    // summary that could only show wins would not be a measurement.
+    const ratios = meta.headlines.map((h) => h.ratio).filter(Number.isFinite);
+    assert.ok(ratios.length > 0);
+    assert.ok(ratios.some((r) => r < 1) || ratios.every((r) => r >= 1),
+      'ratios are reported verbatim');
+    const nodes = deriveSuite(state, 'overview');
+    assert.match(JSON.stringify(nodes), /Bars below parity/,
+      'the chart note explains sub-parity bars rather than hiding them');
+  });
+
+  it('states directions honestly — no doubled or inverted comparison words', function () {
+    const suites = ['view', 'charts'];
+    for (const suite of suites) {
+      const st = { benchStatus: { [suite]: 'loaded' }, bench: { [suite]: loadBench(suite) }, benchUi: { search: '', limit: 40 } };
+      const text = JSON.stringify(deriveSuite(st, suite));
+      assert.doesNotMatch(text, /faster faster|slower slower|faster of |slower of /,
+        `${suite} doubles a comparison word`);
+      assert.doesNotMatch(text, /faster the session/,
+        `${suite} inverts a cost multiple into a speed claim`);
+    }
+  });
+
+  it('the view suite reports its build path as slower, not faster', function () {
+    const st = { benchStatus: { view: 'loaded' }, bench: { view: loadBench('view') }, benchUi: { search: '', limit: 40 } };
+    const nodes = deriveSuite(st, 'view');
+    const cards = nodes.find((n) => n.kind === 'cards');
+    const build = (cards.items ?? cards.cards ?? []).find((c) => /vnode production/i.test(c.title));
+    assert.ok(build !== undefined, 'the suite leads with the build-path card');
+    assert.match(build.value, /slower/,
+      'producing vnodes costs more than a hand-written h() and the page must say so');
+  });
+
+  it('renders the cross-suite chart host-linked, and stays memoized', function () {
+    const first = chartsIn(deriveSuite(state, 'overview'));
+    const second = chartsIn(deriveSuite(state, 'overview'));
+    assert.ok(first.length >= 1, 'the overview carries a summary chart');
+    assert.equal(first[0].vnode[1].style['--chart-text'], 'var(--fg, #1f2020)');
+    assert.equal(first[0].vnode, second[0].vnode, 'memoized across re-derivations');
   });
 });

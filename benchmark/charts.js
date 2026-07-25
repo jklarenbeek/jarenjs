@@ -16,6 +16,8 @@
 
 /* eslint-disable no-console */
 
+import { writeFileSync } from 'node:fs';
+
 import { compileChart, createChartSession } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
@@ -30,6 +32,8 @@ const POINTS = opt('points', 100);
 const SERIES = opt('series', 5);
 const ITERATIONS = opt('iterations', 1000);
 const WARMUP = Math.max(10, Math.floor(ITERATIONS / 10));
+const OUTPUT = args.includes('--output') ? args[args.indexOf('--output') + 1] : null;
+const FILEPATH = args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null;
 
 //#endregion
 
@@ -163,3 +167,33 @@ console.log(`\nsession flatness: tick @10000 ÷ tick @100 = ${flat.toFixed(2)}×
   + `(wholesale grows ${(sessionResults[2].wholesaleRow.ns / sessionResults[0].wholesaleRow.ns).toFixed(1)}×)`);
 
 //#endregion
+
+if (OUTPUT === 'json') {
+  // The website-data shape (benchmark/website-data.js → charts.json):
+  // per-type compile costs, and the session-vs-wholesale scaling rows
+  // that carry the O(change) story.
+  const data = {
+    date: new Date().toISOString(),
+    node: process.version,
+    points: POINTS,
+    series: SERIES,
+    iterations: ITERATIONS,
+    types: rows.map((r) => ({ label: r.label, ns: r.ns })),
+    scaling: sessionResults.map((r) => ({
+      points: r.points,
+      series: SERIES,
+      sessionNs: r.tickRow.ns,
+      wholesaleNs: r.wholesaleRow.ns,
+      incremental: r.modes.incremental,
+      rebuilt: r.modes.rebuilt,
+    })),
+  };
+  const json = JSON.stringify(data, null, 2);
+  if (FILEPATH !== null) {
+    writeFileSync(FILEPATH, json);
+    console.log(`\nwrote ${FILEPATH}`);
+  }
+  else {
+    console.log(json);
+  }
+}
