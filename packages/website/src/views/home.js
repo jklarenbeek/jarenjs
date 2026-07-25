@@ -21,7 +21,7 @@ export const HOME_RULES = [
         ],
       ],
       ['section', { class: 'container section' },
-        ['h2', {}, 'One stack, twelve engines'],
+        ['h2', {}, 'One stack, thirteen engines'],
         ['div', { class: 'engine-grid' }, [{ $apply: '$.engines[*]' }]],
       ],
       ['section', { class: 'container section' },

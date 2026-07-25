@@ -72,7 +72,7 @@ describe('website — the site as one app document', function () {
     const { container } = mountSite();
     const html = serialize(container);
     assert.match(html, /JSON all the way down/);
-    assert.match(html, /One stack, twelve engines/);
+    assert.match(html, /One stack, thirteen engines/);
     assert.match(html, /nav-link active/);
   });
 

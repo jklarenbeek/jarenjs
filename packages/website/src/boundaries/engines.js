@@ -253,10 +253,26 @@ function runJtlt(inputs) {
   try {
     const render = compileJtltStylesheet(template.value, { compileTypeTest });
     const run = timed(() => render(data.value));
-    return [
-      code('Output', run.value === '' ? '(empty)' : run.value, `${render.output} · ${ms(run.ms)}`),
-      details('The compiled JSLT stylesheet', [code(null, J(render.stylesheet))]),
+    const nodes = [
+      code('Output', run.value === '' ? '(empty)' : run.value, `output "${render.output}" · ${ms(run.ms)}`),
     ];
+    // make the xml method's escaping contract VISIBLE: re-render the
+    // same template as "text" and show what changed — or say honestly
+    // that this document's data gave the escaper nothing to do
+    if (render.output === 'xml') {
+      try {
+        const asText = compileJtltStylesheet(
+          { ...template.value, output: 'text' }, { compileTypeTest })(data.value);
+        nodes.push(asText === run.value
+          ? callout('XML escaping', 'The interpolated data contains none of & < > " \' — the xml and text methods render this document identically. Escaping applies to data, never to your literal markup.')
+          : details('What the xml method escaped (same template as output "text")', [code(null, asText)]));
+      }
+      catch {
+        // the comparison is best-effort illustration, never a failure
+      }
+    }
+    nodes.push(details('The compiled JSLT stylesheet', [code(null, J(render.stylesheet))]));
+    return nodes;
   }
   catch (err) {
     return [error(err, 'JTLT error')];
@@ -443,7 +459,7 @@ export const ENGINE_DEFS = {
   },
   jtlt: {
     label: 'JTLT',
-    lead: 'The tagged-pair text front-end: JSON to text, Markdown or XML.',
+    lead: 'The text front-end to JSLT: render JSON as Markdown, XML or source code — SQLite and PostgreSQL DDL included.',
     inputs: [
       { key: 'template', title: 'Template', control: 'json', rows: 12 },
       DATA_FIELD,

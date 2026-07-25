@@ -8,7 +8,7 @@
 export const HOME_CONTENT = {
   hero: {
     title: 'JSON all the way down',
-    lead: 'Jaren is a high-performance JSON toolchain: a fully conformant JSON Schema validating compiler surrounded by compiled engines for JSON Pointer, JSONPath, an XQuery-semantics JSON query language, JSLT stylesheets, schema-driven forms, a Markdown engine and a headless Mermaid diagram engine. Zero dependencies, eval-free, CSP-safe.',
+    lead: 'Jaren is a high-performance JSON toolchain: a fully conformant JSON Schema validating compiler surrounded by compiled engines for JSON Pointer, JSONPath, an XQuery-semantics JSON query language, JSLT stylesheets, JTLT text templates (Markdown, XML, SQL DDL), schema-driven forms, a Markdown engine and a headless Mermaid diagram engine. Zero dependencies, eval-free, CSP-safe.',
     install: 'npm install @jarenjs/validate',
     points: [
       '100% of the official JSON-Schema-Test-Suite, all benchmarked drafts',
@@ -23,6 +23,7 @@ export const HOME_CONTENT = {
     { key: 'patch', title: 'JSON Patch', blurb: 'RFC 6902 and RFC 7396 as copy-on-write appliers: atomic, structure-sharing, and a change feed of written paths.', perf: '5–170× vs clone-and-interpret' },
     { key: 'query', title: 'Jaren JSON Query', blurb: 'XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers — as JSON documents with JSONPath leaves.', perf: '14–215× vs fontoxpath, 10–63× vs JSONata' },
     { key: 'jslt', title: 'JSLT', blurb: 'The stylesheet layer: JSONPath matches position, JSON Schema matches shape, query documents produce output. Identity transforms return the input reference.', perf: 'proof-of-no-change in 24–81 ns' },
+    { key: 'jtlt', title: 'JTLT', blurb: 'The text sibling of JSLT: template rules render JSON as Markdown, XML or source code — schema-matched rules turn one table document into SQLite or PostgreSQL DDL, and the xml method escapes interpolated data while literal markup passes raw.', perf: 'a front-end, not a second engine: compiles to JSLT' },
     { key: 'forms', title: 'Forms', blurb: 'JSON Schema to a framework-agnostic field tree with three validation layers on one stack — per keystroke, cross-field, and authoritative on submit.', perf: 'this site renders forms with it' },
     { key: 'josl', title: 'JOSL', blurb: 'A strict TOML 1.0 superset with JavaScript-obvious values and streaming document-order events. The only engine in our benchmark passing the full toml-test suite — and the same reader family streams JSONX and strict JSON.', perf: '694/694 toml-test 1.0.0' },
     { key: 'charts', title: 'Charts', blurb: 'Headless SVG charts from JSON/JSONX/JOSL definitions: geometry-free ASTs, five chart types, schema-validated, and a stream adapter that builds charts live from the incremental readers — replay a document chunk by chunk, or go live on real market data.', perf: '162 µs per 100×5 line re-render' },

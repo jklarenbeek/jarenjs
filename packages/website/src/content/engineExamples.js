@@ -340,6 +340,57 @@ export const jsltExamples = [
   },
 ];
 
+/**
+ * One table document, two SQL dialects: the flagship JTLT use case.
+ * Type mapping is DISPATCH, not if-chains — schema-matched rules in a
+ * 'type' mode pick the column's SQL type (`$apply` of `'$'` is
+ * location-less, so the mode rules match by shape), and `priority`
+ * lets the dialect-specific overrides (identity pk, varchar(n)) win
+ * over the plain type rules.
+ */
+const DDL_DOCUMENT = {
+  database: 'shop',
+  tables: [
+    { name: 'customers', columns: [
+      { name: 'id', type: 'int', pk: true },
+      { name: 'email', type: 'string', maxLength: 254, nullable: false, unique: true },
+      { name: 'joined_on', type: 'date', nullable: false },
+      { name: 'notes', type: 'text' },
+    ] },
+    { name: 'orders', columns: [
+      { name: 'id', type: 'int', pk: true },
+      { name: 'customer_id', type: 'int', nullable: false, references: 'customers (id)' },
+      { name: 'total', type: 'decimal', nullable: false },
+      { name: 'placed_at', type: 'datetime', nullable: false },
+    ] },
+  ],
+};
+
+/** A schema-matched SQL type rule for the 'type' dispatch mode. */
+const sqlTypeRule = (type, sql) => ({
+  mode: 'type',
+  match: { schema: { required: ['type'], properties: { type: { const: type } } } },
+  body: [sql],
+});
+
+/** The dialect-independent skeleton: root banner, tables, column lines. */
+const ddlRules = (banner) => [
+  { match: '$', body: [banner, '$.database', '\n\n', { $apply: '$.tables[*]' }] },
+  { match: '$.tables[*]', body: [
+    'CREATE TABLE ', '$.name', ' (\n',
+    { $apply: '$.columns[*]' },
+    '  PRIMARY KEY (', '$.columns[?@.pk].name', ')\n);\n\n',
+  ] },
+  { match: '$.tables[*].columns[*]', body: [
+    '  ', '$.name', ' ',
+    { $apply: ['$', 'type'] },
+    { $if: [{ $eq: ['$.nullable', false] }, ' NOT NULL', ''] },
+    { $if: [{ $eq: ['$.unique', true] }, ' UNIQUE', ''] },
+    { $if: ['$.references', { $concat: [' REFERENCES ', '$.references'] }, ''] },
+    ',\n',
+  ] },
+];
+
 export const jtltExamples = [
   {
     name: 'Markdown book list',
@@ -348,6 +399,44 @@ export const jtltExamples = [
       { match: '$.store.book[*]', body: ['- **', '$.title', '** — ', '$.price', '\n'] },
     ],
     document: BOOKSTORE,
+  },
+  {
+    name: 'SQL DDL — SQLite',
+    template: {
+      $jtlt: '0.1',
+      rules: [
+        ...ddlRules('-- SQLite schema: '),
+        sqlTypeRule('int', 'INTEGER'),
+        sqlTypeRule('decimal', 'NUMERIC'),
+        { mode: 'type', body: ['TEXT'] },
+      ],
+    },
+    document: DDL_DOCUMENT,
+  },
+  {
+    name: 'SQL DDL — PostgreSQL',
+    template: {
+      $jtlt: '0.1',
+      rules: [
+        ...ddlRules('-- PostgreSQL schema: '),
+        {
+          mode: 'type', priority: 1,
+          match: { schema: { required: ['pk'], properties: { pk: { const: true } } } },
+          body: ['integer GENERATED ALWAYS AS IDENTITY'],
+        },
+        {
+          mode: 'type', priority: 1,
+          match: { schema: { required: ['maxLength'] } },
+          body: [{ $concat: ['varchar(', '$.maxLength', ')'] }],
+        },
+        sqlTypeRule('int', 'integer'),
+        sqlTypeRule('decimal', 'numeric(12,2)'),
+        sqlTypeRule('date', 'date'),
+        sqlTypeRule('datetime', 'timestamptz'),
+        { mode: 'type', body: ['text'] },
+      ],
+    },
+    document: DDL_DOCUMENT,
   },
   {
     name: 'XML: escaping + $raw',

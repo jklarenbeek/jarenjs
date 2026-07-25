@@ -35,6 +35,68 @@ describe('website boundaries — engines', function () {
     assert.match(html, /Derived workflow/, 'the state → workflow JSLT projection renders');
   });
 
+  it('every jtlt example runs to text output without an error node', function () {
+    for (const example of ENGINE_EXAMPLES.jtlt) {
+      const nodes = runEngine('jtlt', example.inputs);
+      assert.ok(!nodes.some((n) => n.kind === 'error'),
+        `'${example.label}' runs clean`);
+      assert.ok(nodes.some((n) => n.kind === 'code' && n.title === 'Output'),
+        `'${example.label}' emits an Output block`);
+    }
+  });
+
+  it('the DDL examples render dialect-correct SQL from one shared document', function () {
+    const example = (label) => ENGINE_EXAMPLES.jtlt.find((e) => e.label === label).inputs;
+
+    const sqlite = runEngine('jtlt', example('SQL DDL — SQLite'))
+      .find((n) => n.title === 'Output').text;
+    assert.match(sqlite, /CREATE TABLE customers \(/);
+    assert.match(sqlite, /^ {2}id INTEGER,$/m, 'schema-matched type rule fired');
+    assert.match(sqlite, /^ {2}email TEXT NOT NULL UNIQUE,$/m);
+    assert.match(sqlite, /^ {2}customer_id INTEGER NOT NULL REFERENCES customers \(id\),$/m);
+    assert.match(sqlite, /^ {2}PRIMARY KEY \(id\)$/m, 'the pk filter selector fired');
+
+    const pg = runEngine('jtlt', example('SQL DDL — PostgreSQL'))
+      .find((n) => n.title === 'Output').text;
+    assert.match(pg, /^ {2}id integer GENERATED ALWAYS AS IDENTITY,$/m,
+      'the priority-1 pk override beats the plain int rule');
+    assert.match(pg, /^ {2}email varchar\(254\) NOT NULL UNIQUE,$/m,
+      'maxLength dispatches to varchar(n) via $concat');
+    assert.match(pg, /^ {2}placed_at timestamptz NOT NULL,$/m);
+    assert.match(pg, /^ {2}total numeric\(12,2\) NOT NULL,$/m);
+  });
+
+  it('the xml output method escapes visibly and shows the text comparison', function () {
+    const example = ENGINE_EXAMPLES.jtlt.find((e) => e.label.startsWith('XML')).inputs;
+    const nodes = runEngine('jtlt', example);
+    const output = nodes.find((n) => n.title === 'Output');
+    assert.match(output.text, /Q&amp;A/, 'interpolated data is escaped');
+    assert.match(output.text, /<b>escaped attribute, raw body<\/b>/, '$raw passes markup through');
+    assert.match(output.badge, /output "xml"/, 'the badge names the method');
+    const comparison = nodes.find((n) => n.kind === 'details' && /escaped/.test(n.summary ?? ''));
+    assert.ok(comparison, 'the xml run shows what escaping changed');
+    assert.match(JSON.stringify(comparison), /Q&A/, 'the text rendering shows the unescaped data');
+
+    // a text-method template gets no escaping panel
+    const markdown = ENGINE_EXAMPLES.jtlt.find((e) => e.label === 'Markdown book list').inputs;
+    const textNodes = runEngine('jtlt', markdown);
+    assert.ok(!textNodes.some((n) => /escap/i.test(JSON.stringify(n))),
+      'text output carries no escaping panel');
+
+    // xml over data with nothing to escape says so instead of implying
+    // a difference that is not there
+    const clean = runEngine('jtlt', {
+      template: JSON.stringify({
+        $jtlt: '0.1', output: 'xml',
+        rules: [{ match: '$', body: ['<v>', '$.v', '</v>'] }],
+      }),
+      data: JSON.stringify({ v: 'plain' }),
+    });
+    const note = clean.find((n) => n.kind === 'callout');
+    assert.ok(note, 'the identical-render case gets a callout');
+    assert.match(note.text, /render this document identically/);
+  });
+
   it('an unknown engine returns a callout, not a crash', function () {
     const nodes = runEngine('nonesuch', {});
     assert.match(JSON.stringify(nodes), /Unknown engine/);
