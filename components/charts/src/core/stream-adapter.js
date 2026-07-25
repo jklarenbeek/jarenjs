@@ -31,6 +31,14 @@
  * are present; `getData()` returns a FRESH object shaped for
  * `compileChart(config, adapter.getData())`, so identity-keyed memos
  * re-render per snapshot.
+ *
+ * Change reporting (`{ changes: true }`): every snapshot mutation is
+ * also buffered as an RFC 6902 operation against the `getData()`
+ * shape, collected with `takeChanges()` — the feed the incremental
+ * chart session consumes. The contract is replay equivalence: applying
+ * a `takeChanges()` batch to the previous snapshot yields exactly the
+ * next one (`reset()` buffers a whole-document replace). The ops are
+ * plain data; this module never imports a patch applier.
  */
 
 /**
@@ -52,6 +60,8 @@
  * @property {string} [closeField]
  * @property {number} [maxPoints] ring-buffer size (line: per series;
  *  candlestick: total candles)
+ * @property {boolean} [changes] buffer RFC 6902 ops per snapshot
+ *  mutation for {@link StreamAdapter#takeChanges}
  */
 
 /**
@@ -63,6 +73,9 @@
  * @property {() => void} abortDocument discard the record in progress
  *  (a message that failed to parse)
  * @property {() => any} getData a fresh chart-data snapshot
+ * @property {() => {op: string, path: string, value?: any}[]} takeChanges
+ *  drain the buffered ops since the last call (requires
+ *  `{ changes: true }`; throws a TypeError otherwise)
  * @property {() => void} reset drop all accumulated state
  */
 
@@ -85,8 +98,9 @@ export function createStreamAdapter(chartType, config = {}) {
   const lowField = config.lowField ?? 'low';
   const closeField = config.closeField ?? 'close';
   const maxPoints = config.maxPoints ?? 500;
+  const track = config.changes === true;
 
-  /** @type {Map<string, {buf: any[], head: number}>} line series */
+  /** @type {Map<string, {buf: any[], head: number, index: number}>} line series */
   let series = new Map();
   /** @type {Map<string, number>} bar counts */
   let counts = new Map();
@@ -96,6 +110,18 @@ export function createStreamAdapter(chartType, config = {}) {
   let record = null;
   /** @type {string|number|null} current record index (path mode) */
   let index = null;
+  /** @type {{op: string, path: string, value?: any}[]} buffered snapshot ops */
+  let ops = [];
+
+  /** Position of a candle key in snapshot order (bounded by maxPoints). */
+  function candlePosition(key) {
+    let at = 0;
+    for (const k of candles.keys()) {
+      if (k === key) return at;
+      at++;
+    }
+    return -1;
+  }
 
   function flush() {
     if (record === null) return;
@@ -108,7 +134,18 @@ export function createStreamAdapter(chartType, config = {}) {
       const key = String(x);
       const add = yField === undefined ? 1 : Number(done[yField]);
       if (yField !== undefined && !Number.isFinite(add)) return;
+      const known = counts.has(key);
+      const at = known ? [...counts.keys()].indexOf(key) : counts.size;
       counts.set(key, (counts.get(key) ?? 0) + add);
+      if (track) {
+        if (known) {
+          ops.push({ op: 'replace', path: `/series/0/values/${at}`, value: counts.get(key) });
+        }
+        else {
+          ops.push({ op: 'add', path: '/categories/-', value: key });
+          ops.push({ op: 'add', path: '/series/0/values/-', value: counts.get(key) });
+        }
+      }
       return;
     }
     if (chartType === 'candlestick') {
@@ -118,20 +155,35 @@ export function createStreamAdapter(chartType, config = {}) {
       const close = numish(done[closeField]);
       if (![open, high, low, close].every(Number.isFinite)) return;
       const key = numish(x);
-      candles.set(key, { t: key, open, high, low, close });
-      if (candles.size > maxPoints)
+      const known = candles.has(key);
+      const at = track && known ? candlePosition(key) : -1;
+      const candle = { t: key, open, high, low, close };
+      candles.set(key, candle);
+      if (track) {
+        if (known) ops.push({ op: 'replace', path: `/candles/${at}`, value: candle });
+        else ops.push({ op: 'add', path: '/candles/-', value: candle });
+      }
+      if (candles.size > maxPoints) {
         candles.delete(candles.keys().next().value);
+        if (track) ops.push({ op: 'remove', path: '/candles/0' });
+      }
       return;
     }
     if (yField === undefined || done[yField] === undefined) return;
     const name = seriesField !== undefined ? String(done[seriesField] ?? '') : 'value';
     let s = series.get(name);
     if (s === undefined) {
-      s = { buf: [], head: 0 };
+      s = { buf: [], head: 0, index: series.size };
       series.set(name, s);
+      if (track) ops.push({ op: 'add', path: '/series/-', value: { name, points: [] } });
     }
-    s.buf.push({ x: numish(x), y: numish(done[yField]) });
-    if (s.buf.length - s.head > maxPoints) s.head++;
+    const point = { x: numish(x), y: numish(done[yField]) };
+    s.buf.push(point);
+    if (track) ops.push({ op: 'add', path: `/series/${s.index}/points/-`, value: point });
+    if (s.buf.length - s.head > maxPoints) {
+      s.head++;
+      if (track) ops.push({ op: 'remove', path: `/series/${s.index}/points/0` });
+    }
     // amortized compaction keeps the buffer bounded without O(n) shifts
     if (s.head > maxPoints) {
       s.buf = s.buf.slice(s.head);
@@ -185,6 +237,14 @@ export function createStreamAdapter(chartType, config = {}) {
     };
   }
 
+  /** The empty snapshot shape for this chart type (the replay base). */
+  function emptyData() {
+    if (chartType === 'bar')
+      return { categories: [], series: [{ name: yField ?? 'count', values: [] }] };
+    if (chartType === 'candlestick') return { candles: [] };
+    return { series: [] };
+  }
+
   return {
     onEvent,
     endDocument: flush,
@@ -193,12 +253,21 @@ export function createStreamAdapter(chartType, config = {}) {
       index = null;
     },
     getData,
+    takeChanges() {
+      if (!track)
+        throw new TypeError("createStreamAdapter: takeChanges() requires '{ changes: true }'");
+      const out = ops;
+      ops = [];
+      return out;
+    },
     reset() {
       series = new Map();
       counts = new Map();
       candles = new Map();
       record = null;
       index = null;
+      // one whole-document replace supersedes any uncollected ops
+      if (track) ops = [{ op: 'replace', path: '', value: emptyData() }];
     },
   };
 }

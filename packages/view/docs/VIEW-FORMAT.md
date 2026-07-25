@@ -81,11 +81,13 @@ produces. The same tagged-pair shape underlies the JTLT front-end.
 
 ## 3. Props
 
-Prop values MUST be JSON values. Three names are renderer instructions:
+Prop values MUST be JSON values. Four names are renderer instructions:
 
 - **`key`** — a string or number giving the element identity among its
   siblings (§5.3). Never rendered.
 - **`on`** — an object `{ [eventType]: binding }` (§4). Never rendered.
+- **`memo`** — a producer-owned subtree-stability marker (§5.5). Never
+  rendered.
 - **`style`** — a CSS declaration string, or an object of declarations.
   Object keys in camelCase are converted to kebab-case; keys starting
   with `--` pass through. `null`/`false` members are dropped.
@@ -166,6 +168,29 @@ reorder efficiency is only specified for fully keyed lists.
 An element with tag `svg` and its descendants are created in the SVG
 namespace. Re-entering HTML through `foreignObject` is not supported in
 0.1.
+
+### 5.5 The memo marker
+
+§5.1's fast path needs the *same object* on both sides, which a
+producer that rebuilds its tree cannot always give. The `memo` prop is
+the declared alternative: when two **same-node** element vnodes (§5.2 —
+equal tag, equal `key`) both carry a `memo` prop and the two values are
+equal by `Object.is`, a patching renderer MUST skip the subtree —
+no prop diff, no descent — exactly as if the vnodes were reference
+equal.
+
+- The equality is `Object.is` over the raw prop values — producers use
+  version counters, revision strings, or any stable token; an object
+  identity works exactly like §5.1.
+- `memo` is a **producer-owned correctness assertion**, `key`'s
+  sibling: equal markers on same-identity nodes promise the subtrees
+  render identically. A violated promise means stale output — the same
+  class of producer error as a duplicate key. An absent `memo` on
+  either side means the ordinary diff runs; `undefined` never matches.
+- The skip shares §5.1's soundness condition in the reference
+  renderer: while any widget is poisoned (§7.3) the marker is ignored,
+  so a memo-stable subtree can never leave a poisoned widget inert.
+- `memo` is never rendered and never serialized (§3, §6).
 
 ## 6. Serialization
 

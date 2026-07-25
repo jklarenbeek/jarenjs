@@ -5,6 +5,7 @@ import * as assert from 'node:assert/strict';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 import { compileChart } from '@jarenjs/charts';
 import { createStreamReader, createJsonxStreamReader } from '@jarenjs/josl';
+import { applyJSONPatch } from '@jarenjs/json/patch';
 
 const LINE_SPEC = {
   recordPath: ['run'],
@@ -204,5 +205,128 @@ describe('stream adapter — bar counts', function () {
       categories: ['a', 'b'],
       series: [{ name: 'ms', values: [5, 5] }],
     });
+  });
+});
+
+describe('stream adapter — change reporting (takeChanges)', function () {
+  /** Feed one JSON document per message (document boundary). */
+  function feedDoc(adapter, message) {
+    const reader = createJsonxStreamReader({ mode: 'json', onEvent: adapter.onEvent });
+    reader.feed(JSON.stringify(message));
+    reader.end();
+    adapter.endDocument();
+  }
+
+  /** The replay contract: prev + takeChanges() batch === next getData(). */
+  function assertReplay(adapter, feed) {
+    let prev = adapter.getData();
+    for (const step of feed) {
+      step();
+      const batch = adapter.takeChanges();
+      prev = applyJSONPatch(prev, batch);
+      assert.deepEqual(prev, adapter.getData());
+    }
+  }
+
+  it('line: appends, new series and eviction replay to the snapshot', function () {
+    const adapter = createStreamAdapter('line', {
+      recordBoundary: 'document', xField: 'i', yField: 'ops',
+      seriesField: 'suite', maxPoints: 3, changes: true,
+    });
+    const messages = [
+      { i: 1, suite: 'a', ops: 10 },
+      { i: 2, suite: 'a', ops: 12 },
+      { i: 1, suite: 'b', ops: 30 },
+      { i: 3, suite: 'a', ops: 14 },
+      { i: 4, suite: 'a', ops: 16 }, // evicts a's head (maxPoints 3)
+      { i: 5, suite: 'a', ops: 18 },
+    ];
+    assertReplay(adapter, messages.map((m) => () => feedDoc(adapter, m)));
+    assert.equal(adapter.getData().series[0].points.length, 3);
+  });
+
+  it('bar: new categories and count updates replay to the snapshot', function () {
+    const adapter = createStreamAdapter('bar', {
+      recordBoundary: 'document', xField: 'bucket', changes: true,
+    });
+    assertReplay(adapter, [
+      () => feedDoc(adapter, { bucket: 'win' }),
+      () => feedDoc(adapter, { bucket: 'loss' }),
+      () => feedDoc(adapter, { bucket: 'win' }),
+    ]);
+    assert.deepEqual(adapter.getData().series[0].values, [2, 1]);
+  });
+
+  it('candlestick: add, keyed upsert and eviction replay to the snapshot', function () {
+    const adapter = createStreamAdapter('candlestick', {
+      recordBoundary: 'document', xField: 't', maxPoints: 3, changes: true,
+    });
+    const k = (t, close) => ({ t, open: 100, high: 110, low: 95, close });
+    assertReplay(adapter, [
+      () => feedDoc(adapter, k(1000, 101)),
+      () => feedDoc(adapter, k(1000, 102)), // upsert, replaces in place
+      () => feedDoc(adapter, k(2000, 103)),
+      () => feedDoc(adapter, k(3000, 104)),
+      () => feedDoc(adapter, k(4000, 105)), // evicts t=1000
+      () => feedDoc(adapter, k(2000, 106)), // upsert at shifted position
+    ]);
+    assert.deepEqual(adapter.getData().candles.map((c) => c.t), [2000, 3000, 4000]);
+    assert.equal(adapter.getData().candles[0].close, 106);
+  });
+
+  it('an upsert op replaces at the candle\'s stable snapshot position', function () {
+    const adapter = createStreamAdapter('candlestick', {
+      recordBoundary: 'document', xField: 't', changes: true,
+    });
+    const k = (t, close) => ({ t, open: 1, high: 2, low: 0.5, close });
+    feedDoc(adapter, k(1000, 1));
+    feedDoc(adapter, k(2000, 1));
+    adapter.takeChanges();
+    feedDoc(adapter, k(1000, 1.5)); // not the newest — position 0
+    const batch = adapter.takeChanges();
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].op, 'replace');
+    assert.equal(batch[0].path, '/candles/0');
+  });
+
+  it('takeChanges() drains: a second call returns [], no events means []', function () {
+    const adapter = createStreamAdapter('line', {
+      recordBoundary: 'document', xField: 'i', yField: 'v', changes: true,
+    });
+    assert.deepEqual(adapter.takeChanges(), []);
+    feedDoc(adapter, { i: 1, v: 2 });
+    assert.ok(adapter.takeChanges().length > 0);
+    assert.deepEqual(adapter.takeChanges(), []);
+  });
+
+  it('reset() buffers one whole-document replace that supersedes prior ops', function () {
+    const adapter = createStreamAdapter('line', {
+      recordBoundary: 'document', xField: 'i', yField: 'v', changes: true,
+    });
+    const before = adapter.getData();
+    feedDoc(adapter, { i: 1, v: 2 }); // never collected
+    adapter.reset();
+    const batch = adapter.takeChanges();
+    assert.equal(batch.length, 1);
+    assert.deepEqual(batch[0], { op: 'replace', path: '', value: { series: [] } });
+    assert.deepEqual(applyJSONPatch(before, batch), adapter.getData());
+  });
+
+  it('an aborted document contributes no ops', function () {
+    const adapter = createStreamAdapter('line', {
+      recordBoundary: 'document', xField: 'i', yField: 'v', changes: true,
+    });
+    const reader = createJsonxStreamReader({ mode: 'json', onEvent: adapter.onEvent });
+    reader.feed('{"i": 9, "v": ');
+    adapter.abortDocument();
+    assert.deepEqual(adapter.takeChanges(), []);
+  });
+
+  it('without { changes: true } takeChanges() throws and nothing buffers', function () {
+    const adapter = createStreamAdapter('line', {
+      recordBoundary: 'document', xField: 'i', yField: 'v',
+    });
+    feedDoc(adapter, { i: 1, v: 2 });
+    assert.throws(() => adapter.takeChanges(), /changes: true/);
   });
 });

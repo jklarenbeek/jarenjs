@@ -52,7 +52,7 @@ import {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Props that are renderer instructions, never written to the DOM. */
-const SKIP_PROPS = { key: true, on: true };
+const SKIP_PROPS = { key: true, on: true, memo: true };
 
 /**
  * Widget-vnode props that configure the widget instead of the host
@@ -421,6 +421,19 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
       return patchWidgetNode(ctx, parent, node, oldV, newV, ns);
     }
     if (newV[0] === 'svg') ns = SVG_NS;
+    // the memo marker (§5.5): a producer-owned stability assertion —
+    // equal `memo` values on same-identity vnodes promise an identical
+    // subtree, so the diff skips it without touching props or
+    // children. `key`'s sibling: an instruction, never markup. It
+    // extends the `===` fast path across allocation boundaries (a
+    // rebuilt tree can still skip its unchanged regions) and shares
+    // its soundness condition — suspended while any widget is
+    // poisoned, so a memo-stable subtree can never hide one
+    const memo = propsOf(newV).memo;
+    if (memo !== undefined && Object.is(memo, propsOf(oldV).memo)
+      && ctx.poisonedCount === 0) {
+      return node;
+    }
     patchProps(ctx, node, propsOf(oldV), propsOf(newV), ns);
     patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), ns);
     return node;

@@ -227,6 +227,29 @@ console.log(`\nrows: ${ROWS}, iterations: ${ITERATIONS} (+${WARMUP} warmup), nod
   ].sort((a, b) => a.ns - b.ns));
 }
 
+// the memo marker (VIEW-FORMAT §5.5): a reallocated parent over shared
+// children — the plain diff walks every child to discover the ===
+// skips (O(n) scan, zero DOM work); an equal marker skips the subtree
+// without looking at one (O(1)). The vnode-level half of the
+// incremental-chart program, for producers that cannot preserve the
+// parent reference but can prove stability with a token.
+{
+  const children = Array.from({ length: ROWS * 10 },
+    (_, i) => ['span', { class: 'c' }, String(i)]);
+  const tree = (memo) => ['div', {},
+    memo === undefined
+      ? ['section', {}, ...children]
+      : ['section', { memo }, ...children]];
+  const { document, container } = createStubHost();
+  const render = createDomRenderer(container, { document });
+  render(tree('v1'));
+  const memoRow = measure('memo-equal marker skip', () => render(tree('v1')));
+  render(tree(undefined));
+  const scanRow = measure('=== child scan (no memo)', () => render(tree(undefined)));
+  printTable(`memo marker — reallocated parent over ${ROWS * 10} shared children`,
+    [memoRow, scanRow]);
+}
+
 console.log('\nMethodology: plain idiomatic views on every side; hyperapp and preact re-run the whole');
 console.log('view function per state change (their default; both offer opt-in per-site memo wrappers,');
 console.log("where Jaren's memo is a compile option requiring no view changes). DOM patching is");

@@ -10,6 +10,7 @@ import * as assert from 'node:assert/strict';
 
 import {
   compileChart,
+  buildLineAST, buildCandlestickAST,
   buildRadarAST, buildGaugeAST,
   buildBoxplotAST, quantileSorted, buildHeatmapAST,
   buildTreemapAST, buildStreamgraphAST, buildSankeyAST,
@@ -391,5 +392,139 @@ describe('sankey AST', function () {
     assert.match(svg, /<title>in1 → mid: 3<\/title>/);
     assert.match(svg, /chart-sankey-label/);
     assert.ok(!svg.includes('NaN'));
+  });
+});
+
+describe('line domain policies', function () {
+  const rising = Array.from({ length: 100 }, (_, i) => ({ x: i, y: 50 + 5 * Math.sin(i / 5) + i * 0.05 }));
+
+  it('every build resolves and records its domain', function () {
+    const ast = buildLineAST({ series: [{ name: 'a', points: [{ x: 0, y: 1 }, { x: 2, y: 3 }] }] }, { type: 'line' });
+    assert.deepEqual(ast.domain.x, [0, 2]);
+    assert.ok(ast.domain.y[0] <= 1 && ast.domain.y[1] >= 3);
+  });
+
+  it('pinned y bounds clamp out-of-range samples to the plot edge', function () {
+    const ast = buildLineAST(
+      { series: [{ name: 'a', points: [{ x: 0, y: -5 }, { x: 1, y: 5 }, { x: 2, y: 20 }] }] },
+      { type: 'line', domain: { y: { min: 0, max: 10 } } });
+    assert.deepEqual(ast.domain.y, [0, 10]);
+    assert.equal(ast.series[0].points[0].v, 0);
+    assert.equal(ast.series[0].points[1].v, 0.5);
+    assert.equal(ast.series[0].points[2].v, 1);
+  });
+
+  it('a pin pair that closes the domain falls back to the data extremes', function () {
+    const ast = buildLineAST(
+      { series: [{ name: 'a', points: [{ x: 0, y: 1 }, { x: 1, y: 9 }] }] },
+      { type: 'line', domain: { y: { min: 10, max: 10 } } });
+    assert.deepEqual(ast.domain.y, [1, 9]);
+  });
+
+  it('the x window drops older samples and quantizes its end to the slide', function () {
+    const pts = Array.from({ length: 101 }, (_, i) => ({ x: i, y: 1 }));
+    const ast = buildLineAST(
+      { series: [{ name: 'a', points: pts }] },
+      { type: 'line', domain: { x: { window: 40, slide: 10 } } });
+    assert.deepEqual(ast.domain.x, [60, 100]);
+    assert.equal(ast.series[0].points[59], null); // x=59 sits before the window
+    assert.notEqual(ast.series[0].points[60], null);
+    assert.equal(ast.series[0].points[100].u, 1);
+  });
+
+  it('windowed-out samples do not pin the y extremes', function () {
+    const ast = buildLineAST(
+      { series: [{ name: 'a', points: [{ x: 0, y: 1000 }, { x: 95, y: 5 }, { x: 100, y: 10 }] }] },
+      { type: 'line', domain: { x: { window: 40, slide: 10 } } });
+    assert.ok(ast.domain.y[1] < 1000);
+  });
+
+  it("y 'step' quantizes to nice multiples; log 'step' to decades", function () {
+    const ast = buildLineAST(
+      { series: [{ name: 'a', points: [{ x: 0, y: 47 }, { x: 1, y: 61 }] }] },
+      { type: 'line', domain: { y: 'step' } });
+    const [lo, hi] = ast.domain.y;
+    assert.ok(lo <= 47 && hi >= 61);
+    const step = (hi - lo) / Math.round((hi - lo) / 5);
+    assert.ok(Number.isFinite(step)); // quantized bounds, not raw extremes
+    assert.notDeepEqual(ast.domain.y, [47, 61]);
+    const logAst = buildLineAST(
+      { series: [{ name: 'a', points: [{ x: 0, y: 3 }, { x: 1, y: 700 }] }] },
+      { type: 'line', log: true, domain: { y: 'step' } });
+    assert.deepEqual(logAst.domain.y, [1, 1000]);
+  });
+
+  it('a non-positive pin under log is ignored, never a broken scale', function () {
+    const ast = buildLineAST(
+      { series: [{ name: 'a', points: [{ x: 0, y: 5 }, { x: 1, y: 50 }] }] },
+      { type: 'line', log: true, domain: { y: { min: -10, max: 100 } } });
+    assert.equal(ast.domain.y[0], 5);
+    assert.equal(ast.domain.y[1], 100);
+  });
+
+  it('the combined policy keeps the steady-state domain still (the stability contract)', function () {
+    const domainOf = (k, domain) => JSON.stringify(buildLineAST(
+      { series: [{ name: 'a', points: rising.slice(0, k) }] },
+      { type: 'line', domain }).domain);
+    let policyChanges = 0;
+    let bareChanges = 0;
+    let prevPolicy = null;
+    let prevBare = null;
+    for (let k = 51; k <= 100; k++) {
+      const withPolicy = domainOf(k, { y: 'step', x: { window: 40, slide: 10 } });
+      const bare = domainOf(k, undefined);
+      if (prevPolicy !== null && withPolicy !== prevPolicy) policyChanges++;
+      if (prevBare !== null && bare !== prevBare) bareChanges++;
+      prevPolicy = withPolicy;
+      prevBare = bare;
+    }
+    assert.ok(policyChanges <= 8, `steady-state domain changed ${policyChanges} times`);
+    assert.ok(bareChanges > 40, 'without a policy the domain moves nearly every append');
+  });
+
+  it('hostile domain configs resolve to no policy', function () {
+    for (const domain of [42, 'window', { x: { window: -1 } }, { y: { min: NaN } }, { y: 'stepp' }]) {
+      const ast = buildLineAST(
+        { series: [{ name: 'a', points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] }] },
+        { type: 'line', domain });
+      assert.deepEqual(ast.domain.x, [0, 1]);
+    }
+  });
+});
+
+describe('candlestick domain policies', function () {
+  const CANDLES = Array.from({ length: 10 }, (_, i) => ({
+    t: i * 60_000, open: 100 + i, high: 105 + i, low: 95 + i, close: 102 + i,
+  }));
+
+  it('records its resolved domain on every build', function () {
+    const ast = buildCandlestickAST({ candles: CANDLES }, { type: 'candlestick' });
+    assert.equal(ast.domain.x[0], 0);
+    assert.equal(ast.domain.x[1], 9 * 60_000);
+    assert.ok(ast.domain.y[0] <= 95 && ast.domain.y[1] >= 114);
+  });
+
+  it('the x window drops out-of-window candles entirely', function () {
+    const ast = buildCandlestickAST({ candles: CANDLES },
+      { type: 'candlestick', domain: { x: { window: 240_000, slide: 60_000 } } });
+    assert.equal(ast.candles.length, 5); // t = 300k..540k inclusive
+    assert.deepEqual(ast.domain.x, [300_000, 540_000]);
+  });
+
+  it('dropped candles do not pin the y extremes', function () {
+    const spiked = [{ t: 0, open: 1, high: 10_000, low: 1, close: 2 }, ...CANDLES.slice(1)];
+    const ast = buildCandlestickAST({ candles: spiked },
+      { type: 'candlestick', domain: { x: { window: 240_000, slide: 60_000 } } });
+    assert.ok(ast.domain.y[1] < 10_000);
+  });
+
+  it("pinned and 'step' y bounds resolve like the line type", function () {
+    const pinned = buildCandlestickAST({ candles: CANDLES },
+      { type: 'candlestick', domain: { y: { min: 90, max: 120 } } });
+    assert.deepEqual(pinned.domain.y, [90, 120]);
+    const stepped = buildCandlestickAST({ candles: CANDLES },
+      { type: 'candlestick', domain: { y: 'step' } });
+    assert.ok(stepped.domain.y[0] <= 95 && stepped.domain.y[1] >= 114);
+    assert.notDeepEqual(stepped.domain.y, [95, 114]);
   });
 });

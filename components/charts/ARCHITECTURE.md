@@ -84,6 +84,42 @@ Two distinct mechanisms, per DESIGN.md:
 Engine render code contains no hex literals; every color comes from the
 palette constant or a theme token.
 
+## Incremental sessions (`src/core/session.js`)
+
+`createChartSession` is the O(change) counterpart to `compileChart`'s
+wholesale pipeline, for `line` and `candlestick`. Three properties make
+it sound rather than merely fast:
+
+1. **Stillness is tested exactly, never guessed.** The session
+   re-resolves the scale domains from the updated extremes using the
+   *same exported helpers the wholesale build uses*
+   (`scanLineExtremes`/`resolveLineDomains`, `scanCandleExtremes`/
+   `resolveCandleDomains`) and compares against the AST's recorded
+   `domain`. One implementation of the bounds decision, so the two
+   paths cannot drift.
+2. **Anything unclassifiable rebuilds.** Only in-place point traffic
+   (line appends/evictions, candle upserts) is incremental. A moved
+   domain, a new series, a candle count change (band widths shift), a
+   reset, or an op shape the session does not recognize all fall back
+   to a wholesale rebuild — reported as `mode: 'rebuilt'`.
+3. **Untouched output keeps its references.** Each series renders as
+   one `<g class="chart-series">` and each candle as one keyed
+   `<g class="chart-candle">`, so a still frame replaces exactly the
+   touched groups in a shallow-copied root; every sibling is the same
+   array reference, which the view patcher skips in O(1) (VIEW-FORMAT
+   §5.1). A line append also extends the path `d` string by one token
+   instead of re-joining every point.
+
+Domain-stability policies (`src/core/domain.js`) are what make ticks
+still often enough to matter: quantized sliding windows and pinned or
+step-quantized value bounds. Quantization — not hidden state — is the
+mechanism, so resolution stays pure.
+
+The correctness oracle is byte equality against the wholesale render,
+asserted after every tick in the property tests
+(`test/charts/session.test.js`), including under log axes, null
+samples, ring-buffer eviction and resets.
+
 ## Memoization (the honest story)
 
 - `hashContent` takes a **string**. It is used only on the

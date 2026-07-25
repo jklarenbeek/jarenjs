@@ -26,10 +26,10 @@ const VOID_ELEMENTS = new Set([
 ]);
 
 /** Props that never serialize to markup. */
-const SKIP_PROPS = new Set(['key', 'on']);
+const SKIP_PROPS = new Set(['key', 'on', 'memo']);
 
 /** Widget-vnode props that configure the widget, not the host element. */
-const WIDGET_SKIP_PROPS = new Set(['key', 'on', 'name', 'props', 'tag']);
+const WIDGET_SKIP_PROPS = new Set(['key', 'on', 'memo', 'name', 'props', 'tag']);
 
 /**
  * Escape text content: `&`, `<`, `>`.

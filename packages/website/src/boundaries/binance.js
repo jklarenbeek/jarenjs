@@ -33,7 +33,7 @@
  */
 
 import { createJsonxStreamReader } from '@jarenjs/josl';
-import { compileChart } from '@jarenjs/charts';
+import { compileChart, createChartSession } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
 import { cards, error, callout, chart, more } from '../lib/nodes.js';
@@ -46,6 +46,17 @@ const STREAMS = [
   ...SYMBOLS.map((s) => `${s.toLowerCase()}@miniTicker`),
   `${KLINE_SYMBOL.toLowerCase()}@kline_1m`,
 ];
+
+/** The kline chart definition. The step-quantized y domain keeps the
+ * scales still while the open candle's prices wiggle inside it, so the
+ * incremental session patches one candle group per update instead of
+ * recompiling the chart. */
+const KLINE_CONFIG = {
+  type: 'candlestick',
+  title: `${KLINE_SYMBOL} — 1m candles`,
+  yLabel: 'USDT',
+  domain: { y: 'step' },
+};
 
 /**
  * The socket-free feed core: message text in, chart data out. Testable
@@ -71,7 +82,10 @@ export function createBinanceFeed() {
     lowField: 'l',
     closeField: 'c',
     maxPoints: 60,
+    changes: true,
   });
+  const klineSession = createChartSession(KLINE_CONFIG, klines, { theme: 'host' });
+  const klineModes = { unchanged: 0, incremental: 0, rebuilt: 0 };
   let messages = 0;
   let drops = 0;
 
@@ -117,6 +131,14 @@ export function createBinanceFeed() {
 
     priceData: () => price.getData(),
     klineData: () => klines.getData(),
+    /** The kline chart through the incremental session: one candle
+     * group patches per update when the step domain holds. */
+    klineVnode() {
+      const result = klineSession.tick();
+      klineModes[result.mode]++;
+      return result.vnode;
+    },
+    klineModes: () => ({ ...klineModes }),
     stats: () => ({ messages, drops }),
   };
 }
@@ -142,12 +164,10 @@ export function binanceNodes(feed, status, note) {
   }
   const klineData = feed.klineData();
   if (klineData.candles.length > 0) {
-    nodes.push(chart(null, compileChart({
-      type: 'candlestick',
-      title: `${KLINE_SYMBOL} — 1m candles`,
-      yLabel: 'USDT',
-    }, klineData, { theme: 'host' }).toVnode(),
-    'Seeded from one REST klines call, updated live; the open candle re-renders as it moves.'));
+    const modes = feed.klineModes();
+    nodes.push(chart(null, feed.klineVnode(),
+      'Seeded from one REST klines call, updated live through the incremental session — '
+      + `the open candle patches in place (${modes.incremental} incremental / ${modes.rebuilt} rebuilt frames so far).`));
   }
   return nodes;
 }

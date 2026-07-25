@@ -16,7 +16,8 @@
 
 /* eslint-disable no-console */
 
-import { compileChart } from '@jarenjs/charts';
+import { compileChart, createChartSession } from '@jarenjs/charts';
+import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
 //#region options
 
@@ -102,3 +103,63 @@ if (POINTS === 100 && SERIES === 5 && lineNs >= budgetNs) {
   process.exit(1);
 }
 console.log(`\nstreaming budget: line ${POINTS}×${SERIES} compile+toVnode = ${fmt(lineNs)} (target < 2 ms at 100×5)`);
+
+//#region incremental session
+
+/**
+ * The session claim: one appended point costs O(1), independent of how
+ * many points are already on screen. The domain policy (pinned y, a
+ * window whose slide quantum the run never crosses) keeps every
+ * measured tick on the incremental path — the printed mode counters
+ * prove it; the wholesale row beside it is what the identity-memo
+ * component pays for the same tick.
+ */
+function sessionBench(points) {
+  const config = {
+    type: 'line', title: 'Live', x: 'time',
+    domain: { y: { min: 0, max: 200 }, x: { window: 1e15, slide: 1e15 } },
+  };
+  const adapter = createStreamAdapter('line', {
+    recordBoundary: 'document', xField: 'x', yField: 'y', seriesField: 's',
+    maxPoints: points + ITERATIONS + WARMUP + 16, changes: true,
+  });
+  let x = 1_721_556_000_000;
+  const feed = (s, y) => {
+    adapter.onEvent({ type: 'pair', path: ['x'], key: 'x', value: x });
+    adapter.onEvent({ type: 'pair', path: ['s'], key: 's', value: s });
+    adapter.onEvent({ type: 'pair', path: ['y'], key: 'y', value: y });
+    adapter.endDocument();
+  };
+  for (let i = 0; i < points; i++) {
+    for (let s = 0; s < SERIES; s++) feed(`s${s}`, 100 + (i % 50));
+    x += 1000;
+  }
+  const session = createChartSession(config, adapter);
+  session.tick();
+  const modes = { unchanged: 0, incremental: 0, rebuilt: 0 };
+  const tickRow = measure(`line session tick @ ${points}×${SERIES} (1 append)`, (i) => {
+    feed('s0', 100 + (i % 50));
+    x += 1000;
+    modes[session.tick().mode]++;
+  });
+  const wholesaleRow = measure(`line wholesale tick @ ${points}×${SERIES}`,
+    () => compileChart(config, adapter.getData()).toVnode());
+  return { tickRow, wholesaleRow, modes };
+}
+
+const sessionRows = [];
+const sessionResults = [];
+for (const points of [100, 1000, 10000]) {
+  const result = sessionBench(points);
+  sessionResults.push({ points, ...result });
+  sessionRows.push(result.tickRow, result.wholesaleRow);
+}
+printTable('incremental session (adapter feed + tick)', sessionRows);
+for (const r of sessionResults) {
+  console.log(`  @ ${String(r.points).padEnd(5)} modes: ${r.modes.incremental} incremental / ${r.modes.rebuilt} rebuilt`);
+}
+const flat = sessionResults[2].tickRow.ns / sessionResults[0].tickRow.ns;
+console.log(`\nsession flatness: tick @10000 ÷ tick @100 = ${flat.toFixed(2)}× `
+  + `(wholesale grows ${(sessionResults[2].wholesaleRow.ns / sessionResults[0].wholesaleRow.ns).toFixed(1)}×)`);
+
+//#endregion

@@ -136,6 +136,57 @@ WebSocket message each — `endDocument()` closes the record;
 `bar` (live counts/sums) and `candlestick` (keyed by open time;
 re-delivered keys replace their candle — exchange kline semantics).
 
+## Incremental sessions (O(1) ticks)
+
+A snapshot re-render is O(n): every point is re-projected because a
+unit-space AST stores positions as *fractions of the domain*, so a
+tick that moves the scales legitimately changes every mark. Declare a
+**domain policy** and most ticks stop moving them — then
+`createChartSession` patches only what changed:
+
+```js
+const adapter = createStreamAdapter('line', { …, changes: true });
+const session = createChartSession({
+  type: 'line',
+  domain: { y: 'step', x: { window: 60_000, slide: 15_000 } },
+}, adapter);
+
+reader.feed(chunk);
+const { vnode, mode } = session.tick();  // 'incremental' | 'rebuilt' | 'unchanged'
+```
+
+`{ changes: true }` makes the adapter buffer its mutations as RFC 6902
+ops (`takeChanges()`); the session applies them to the previous AST and
+rebuilds only the touched series — every other child stays
+**reference-equal**, so the patcher skips it in O(1). Domain policies:
+
+| policy | effect |
+|---|---|
+| `x: { window, slide }` | sliding window whose end is quantized to `slide` — the domain moves once per quantum, not per sample |
+| `y: { min, max }` | pinned bounds; out-of-range samples clamp to the plot edge |
+| `y: 'step'` | bounds snap outward to nice-number steps (decades under `log`) |
+
+**The fallback is the design, not a failure mode.** When the domain
+*does* move — or a new series appears, or the source resets — the
+session rebuilds wholesale, because that is the correct rendering of a
+frame whose scales moved. `mode` reports which path ran. The
+correctness contract is byte equality: every tick's vnode serializes
+identically to a wholesale `compileChart()` of the same data, which is
+property-tested over thousands of random frames rather than assumed.
+
+Measured (`npm run benchmark:charts`, one appended point):
+
+| points × series | session tick | wholesale tick |
+|---|---|---|
+| 100 × 5 | ~8 µs | ~319 µs |
+| 1 000 × 5 | ~4.6 µs | ~1.03 ms |
+| 10 000 × 5 | ~4.2 µs | ~11.3 ms |
+
+The session tick is *flat* in n (10 000 points cost no more than 100)
+while the wholesale tick grows 35×. Supported types: `line` (appends
+and ring-buffer evictions) and `candlestick` (keyed kline upserts —
+one candle group re-renders). The website's Binance demo runs on it.
+
 ## Mermaid interop
 
 `@jarenjs/mermaid` delegates its `pie` diagrams here (the arrow is

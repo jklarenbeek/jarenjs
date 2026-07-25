@@ -61,6 +61,7 @@
           "markers": { "type": "boolean" },
           "xLabel": { "type": ["string", "null"] },
           "yLabel": { "type": ["string", "null"] },
+          "domain": { "$ref": "#/$defs/domainPolicy" },
           "series": {
             "type": "array",
             "items": { "$ref": "#/$defs/lineSeries" }
@@ -74,6 +75,7 @@
         "properties": {
           "xLabel": { "type": ["string", "null"] },
           "yLabel": { "type": ["string", "null"] },
+          "domain": { "$ref": "#/$defs/domainPolicy" },
           "candles": {
             "type": "array",
             "items": { "$ref": "#/$defs/candle" }
@@ -345,6 +347,32 @@
         "source": { "type": ["string", "integer"] },
         "target": { "type": ["string", "integer"] },
         "value": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "domainPolicy": {
+      "description": "domain-stability policy: a quantized sliding x window and/or pinned or step-quantized y bounds, so most streaming ticks keep the scales still",
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "object",
+          "required": ["window"],
+          "properties": {
+            "window": { "type": "number", "exclusiveMinimum": 0 },
+            "slide": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "y": {
+          "anyOf": [
+            { "const": "step" },
+            {
+              "type": "object",
+              "properties": {
+                "min": { "type": "number" },
+                "max": { "type": "number" }
+              }
+            }
+          ]
+        }
       }
     }
   }

@@ -16,6 +16,7 @@
 import { hashContent } from '@jarenjs/core/string';
 import { stableStringify } from '@jarenjs/core/object';
 import { compileChart } from '../core/chart.js';
+import { createChartSession } from '../core/session.js';
 
 /**
  * @typedef {object} ChartComponentOptions
@@ -25,6 +26,9 @@ import { compileChart } from '../core/chart.js';
  * @typedef {object} ChartComponent
  * @property {(config: any, data?: any) => import('../core/chart.js').CompiledChart} compile
  * @property {(config: any, data?: any) => any} view memoized vnode projection
+ * @property {(config: any, source: import('../core/session.js').ChartSessionSource)
+ *   => import('../core/session.js').ChartSession} createSession incremental
+ *   session bound to this component's theme
  * @property {Record<string, (props: any, dispatch: any) => any>} effects
  */
 
@@ -51,6 +55,10 @@ export function createChartComponent(options = {}) {
 
   return {
     compile,
+
+    createSession(config, source) {
+      return createChartSession(config, source, compileOptions);
+    },
 
     view(config, data = config) {
       if (config === null || config === undefined) return null;

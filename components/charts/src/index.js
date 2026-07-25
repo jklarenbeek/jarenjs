@@ -36,3 +36,4 @@ export { buildTreemapAST, renderTreemapAST } from './types/treemap.js';
 export { buildStreamgraphAST, renderStreamgraphAST } from './types/streamgraph.js';
 export { buildSankeyAST, renderSankeyAST } from './types/sankey.js';
 export { createStreamAdapter } from './core/stream-adapter.js';
+export { createChartSession } from './core/session.js';

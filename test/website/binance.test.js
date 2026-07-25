@@ -9,6 +9,9 @@ import { describe, it, afterEach } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
+import { compileChart } from '@jarenjs/charts';
+import { renderToString } from '@jarenjs/view';
+
 import {
   createBinanceFeed, binanceNodes, binanceInvitation,
   binanceToggle, binanceSync, binanceLiveActive, stopBinance,
@@ -219,5 +222,51 @@ describe('binance connection lifecycle (stub socket)', function () {
     binanceToggle((action, payload) => dispatched.push([action, payload]));
     assert.strictEqual(binanceLiveActive(), false);
     assert.match(JSON.stringify(dispatched), /WebSocket is not available/);
+  });
+});
+
+describe('binance klines through the incremental session', function () {
+  it('the rendered candlestick is byte-identical to a wholesale compile', function () {
+    const feed = createBinanceFeed();
+    feed.seedKlines(REST_KLINES);
+    // the exact definition the boundary renders (step-quantized y)
+    const config = {
+      type: 'candlestick', title: 'BTCUSDT — 1m candles',
+      yLabel: 'USDT', domain: { y: 'step' },
+    };
+    for (let i = 0; i < 12; i++) {
+      // the open candle moves, then a new minute opens — the real feed shape
+      const t = 1721556000000 + Math.floor(i / 4) * 60_000;
+      feed.handleMessage(KLINE(i, t, 64123.4, 64140 + i, 64100 - i, 64110 + i, false));
+      const sessionVnode = feed.klineVnode();
+      const wholesale = compileChart(config, feed.klineData(), { theme: 'host' }).toVnode();
+      assert.strictEqual(renderToString(sessionVnode), renderToString(wholesale),
+        `kline frame ${i} diverged from the wholesale render`);
+    }
+  });
+
+  it('open-candle updates patch incrementally under the step domain', function () {
+    const feed = createBinanceFeed();
+    feed.seedKlines(REST_KLINES);
+    feed.handleMessage(KLINE(1, 1721556000000, 64123.4, 64140.0, 64100.0, 64110.0, false));
+    feed.klineVnode(); // the frame that admits the new candle
+    // the open candle ticks inside the quantized domain: no rebuild
+    for (let i = 0; i < 6; i++) {
+      feed.handleMessage(KLINE(10 + i, 1721556000000, 64123.4, 64140.0, 64100.0, 64112 + i * 0.5, false));
+      feed.klineVnode();
+    }
+    const modes = feed.klineModes();
+    assert.ok(modes.incremental >= 6,
+      `expected the open candle to patch in place, got ${JSON.stringify(modes)}`);
+  });
+
+  it('the live caption reports the session mode counters', function () {
+    const feed = createBinanceFeed();
+    feed.seedKlines(REST_KLINES);
+    feed.handleMessage(MINITICKER('BTCUSDT', 1000, 64000));
+    const nodes = binanceNodes(feed, 'live');
+    const candle = nodes.filter((n) => n.kind === 'chart')[1];
+    assert.match(candle.note, /incremental session/);
+    assert.match(candle.note, /\d+ incremental \/ \d+ rebuilt frames/);
   });
 });

@@ -27,7 +27,7 @@ The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.js
 - **list** — an array whose first item is *not* a string is spliced into its parent's children (exactly the shape a JSLT `[{"$apply": "$.todos[*]"}]` body produces);
 - **skipped** — `null` and booleans render nothing, so `{"$if": ...}` conditions compose without wrapper nodes.
 
-Three props are special: `key` (reconciliation identity), `on` (event bindings — opaque JSON handed to the renderer's `onEvent` hook, never functions), and `style` (string or object). Everything else writes through to the DOM as a property when the node has one, as an attribute otherwise; `true` renders a bare attribute, `false`/`null` remove it.
+Four props are special: `key` (reconciliation identity), `on` (event bindings — opaque JSON handed to the renderer's `onEvent` hook, never functions), `memo` (a subtree-stability marker — see the performance contract), and `style` (string or object). Everything else writes through to the DOM as a property when the node has one, as an attribute otherwise; `true` renders a bare attribute, `false`/`null` remove it.
 
 ## Usage
 
@@ -107,6 +107,8 @@ Import the whole barrel (`@jarenjs/view/helpers`) or a single module (`@jarenjs/
 The patcher's first check is `oldVnode === newVnode` — a reference-equal subtree is skipped in O(1), unexamined. This is designed to meet the JSLT engine's structural sharing and its `memo` option (an unchanged input subtree flows to the output by reference; `@jarenjs/app` compiles every view with `memo: true`), so views re-render in time proportional to what changed, not to the size of the page. Vnodes are never mutated or annotated by the renderer: frozen documents, cached documents and shared subtrees are always safe.
 
 Measured, not claimed (`npm run benchmark:view`, 1000-row table, Node v22, 2026-07-18; output equality with preact asserted before timing): an **unchanged document re-renders in O(1)** (the memoized transform returns the previous output by reference and the patcher skips it whole). For a one-row COW update, the memo cuts the end-to-end frame (view + patch) by **1.7×**; producing vnodes from scratch costs ~790 µs through the generic JSLT dispatcher versus ~90 µs for preact's `h()` and ~170 µs for hyperapp's — the honestly measured cost of views-as-data, with per-frame match-prepass pruning the next engine milestone (see ROADMAP). SSR lands within 1.8–2.8× of `preact-render-to-string` on byte-identical output.
+
+When a producer cannot preserve the reference — it rebuilds its tree but knows a region did not change — the **`memo` prop** says so declaratively (VIEW-FORMAT §5.5): two same-node vnodes carrying equal `memo` values skip reconciliation exactly like reference-equal ones. It is a producer-owned assertion, `key`'s sibling: equal markers promise identical subtrees, and a violated promise means stale output. Measured on a reallocated parent over 10 000 shared children: ~448 µs to scan for `===` skips versus ~41 µs with the marker (10.9×). `@jarenjs/charts`' streaming sessions are the reference consumer.
 
 Children reconcile with a head/tail sweep plus a key map for the middle: keyed siblings move their real DOM nodes instead of recreating them; unkeyed siblings patch positionally. Event bindings are data stored on the node behind one shared proxy listener per event type — re-rendering rebinds by assignment, never through `addEventListener`.
 
