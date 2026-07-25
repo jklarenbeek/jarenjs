@@ -3,7 +3,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import {
-  sanitizeHref,
   num,
   svgRoot,
   group,
@@ -33,26 +32,6 @@ describe('view/helpers — num', () => {
   it('honours a custom fallback', () => {
     assert.equal(num(NaN, 1), 1);
     assert.equal(num(Infinity, 42), 42);
-  });
-});
-
-describe('view/helpers — sanitizeHref', () => {
-  it('permits safe schemes', () => {
-    assert.equal(sanitizeHref('https://ok.test'), 'https://ok.test');
-    assert.equal(sanitizeHref('http://ok.test'), 'http://ok.test');
-    assert.equal(sanitizeHref('mailto:a@b.c'), 'mailto:a@b.c');
-    assert.equal(sanitizeHref('#anchor'), '#anchor');
-    assert.equal(sanitizeHref('/path'), '/path');
-    assert.equal(sanitizeHref('./rel'), './rel');
-  });
-  it('rejects dangerous or non-string input', () => {
-    assert.equal(sanitizeHref('javascript:alert(1)'), null);
-    assert.equal(sanitizeHref('data:text/html,x'), null);
-    assert.equal(sanitizeHref(42), null);
-    assert.equal(sanitizeHref(null), null);
-  });
-  it('trims before testing', () => {
-    assert.equal(sanitizeHref('  https://ok.test  '), 'https://ok.test');
   });
 });
 

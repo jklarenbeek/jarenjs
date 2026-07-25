@@ -140,20 +140,25 @@ from this file; items link to the document that motivates them where one exists.
 
 - [ ] **CommonMark conformance push** — 526/655 spec examples pass today (`npm run benchmark:markdown --score-only --verbose` lists the failures); the largest deliberate class is raw-HTML pass-through (the vnode format has no unescaped output), the rest are honest dialect gaps (link-label edge cases, exotic emphasis nestings, HTML block subtleties) worth picking off.
 - [ ] **Parse-speed workstream** — ~0.3 ms per 10 kB to AST; the block scan re-slices lines per container level and the inline phase re-buffers leaf text; a column-offset scanner (no intermediate slices) is the next lever toward the sub-200 µs target.
-- [ ] **Link and image URLs bypass `sanitizeHref`** — a genuine hole, found by the
-  2026-07-26 dedup sweep and reproduced: `to-vnode.js`'s `INLINE_RENDERERS` write
-  `{ href: node.url }` on an `<a>` and `{ src: node.url }` on an `<img>` verbatim from the
-  parsed AST, and nothing on that path (scanner link destination, reference definitions,
-  the DOM patcher, the SSR serializer) guards the scheme — so
-  `[x](javascript:alert(1))` renders an `<a href="javascript:…">`. `vbscript:` and
-  `data:text/html,…` get through the same way. The guard already exists one import away as
-  `sanitizeHref` in `@jarenjs/view/helpers`, and the dependency arrow already allows it.
-  Deliberately NOT fixed in the dedup pass, because applying it is a behavior change that
-  needs three decisions first: whether an `<img src>` should use the same allow-list (which
-  admits `mailto:`), whether a rejected URL drops the attribute or degrades the link to
-  plain text (these emit different vnodes), and a re-approval of every golden vnode/HTML
-  fixture containing a link. Raw-HTML `<a href="javascript:…">` is *not* affected — the
-  default `html: 'skip'` drops it and `html: 'text'` renders it as literal text.
+- [x] **Link and image URLs bypassed URL filtering** — **fixed**: `[x](javascript:alert(1))`
+  rendered a live `<a href="javascript:…">`, and `vbscript:`, `file:` and `data:text/html`
+  got through the same way, on `<img src>` too. The three open decisions resolved as
+  follows. (1) **The existing `sanitizeHref` was the wrong tool** — it is an *allow-list*
+  that also rejects a scheme-less relative reference, so `[a](image.png)` and
+  `[a](docs/guide.md)` would have silently lost their href; authored prose needs a
+  *deny-list*. `@jarenjs/view/helpers` now carries both policies side by side in
+  `helpers/url.js`, with the file explaining which to reach for. (2) **One policy for both
+  `href` and `src`**, with a `data:image/<raster>` carve-out so inline images keep working;
+  `image/svg+xml` is excluded because an SVG can carry script. (3) **A rejected URL drops
+  only its own attribute** — the element and its children stay, so no authored text is lost.
+  The scheme is read the way a browser reads it (whitespace and control characters inside it
+  ignored), so a tab spliced into `javascript:` does not get through. The AST keeps the URL
+  verbatim, so `toMarkdown` still round-trips it — only the vnode is filtered. No fixture
+  needed re-approval and the CommonMark scorecard is unchanged at 526/655.
+  `options.sanitizeUrl` replaces the policy wholesale for trusted content, and is part of
+  the vnode memo's cache identity so a policy change cannot serve a stale vnode. Normative
+  wording is MD-FORMAT §4.3; PLUGINS.md §5 makes `ctx.sanitizeUrl` a MUST for plugins that
+  emit a URL from document content, since a plugin `render` shadows the core emitter.
 - [ ] **Sanitizer-backed raw HTML** — an opt-in `html` mode that parses raw HTML nodes into vnodes through an injected sanitizer, replacing today's skip/text-only choice.
 - [ ] **Streaming reference definitions** — the incremental parser binds `[ref]` links against definitions seen so far; a deferred-resolution pass at `end()` would close the gap with batch mode.
 

@@ -15,10 +15,16 @@
  *
  * Raw HTML nodes are dropped by default (`options.html: 'text'` shows
  * them literally) — the vnode format has no unescaped output, which is
- * the safe default for untrusted Markdown.
+ * the safe default for untrusted Markdown. Link and image URLs are
+ * filtered on the same principle: a destination whose scheme can execute
+ * (`javascript:`, `vbscript:`) or stand in for a document
+ * (`data:text/html`, `file:`) loses its attribute rather than reaching
+ * the page. The AST keeps the URL verbatim, so `toMarkdown` still
+ * round-trips what the author wrote — only the vnode is filtered.
  */
 
 import { h, createDomRenderer } from '@jarenjs/view';
+import { sanitizeUrl as defaultSanitizeUrl } from '@jarenjs/view/helpers';
 import { hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
 import { walkAst } from './ast.js';
 import { buildPluginTables } from './parser.js';
@@ -31,11 +37,16 @@ import { buildPluginTables } from './parser.js';
  * @typedef {object} MdVnodeOptions
  * @property {any[]} [plugins] plugin set (must match the parse set for claimed nodes)
  * @property {'skip'|'text'} [html] raw HTML handling (default 'skip')
+ * @property {(url: string) => (string|null)} [sanitizeUrl] link/image URL
+ *   filter, replacing the default deny-list; return the URL to emit, or
+ *   `null` to drop the attribute. Supply one only to widen the policy for
+ *   trusted content (a custom scheme, say) — it is the whole guard.
  */
 
 /**
  * The render context threaded through one emission.
  * @typedef {{ tables: any, html: 'skip'|'text', options: MdVnodeOptions,
+ *   sanitizeUrl: (url: string) => (string|null),
  *   hash: (str: string) => string, counts: Map<string, number> }} RenderCtx
  */
 
@@ -80,15 +91,17 @@ const INLINE_RENDERERS = {
   strikethrough: (node, rctx) => intoVnode(['del', {}], node.children, rctx),
   inlineCode: (node) => ['code', {}, node.value],
   link: (node, rctx) => {
-    const props = node.title == null
-      ? { href: node.url }
-      : { href: node.url, title: node.title };
+    // A rejected destination drops the attribute and keeps the element:
+    // the link text stays readable, it just is not clickable.
+    const href = rctx.sanitizeUrl(node.url);
+    const props = href === null ? {} : { href };
+    if (node.title != null) props.title = node.title;
     return intoVnode(['a', props], node.children, rctx);
   },
-  image: (node) => {
-    const props = node.title == null
-      ? { src: node.url, alt: node.alt }
-      : { src: node.url, alt: node.alt, title: node.title };
+  image: (node, rctx) => {
+    const src = rctx.sanitizeUrl(node.url);
+    const props = src === null ? { alt: node.alt } : { src, alt: node.alt };
+    if (node.title != null) props.title = node.title;
     return ['img', props];
   },
   break: () => ['br', {}],
@@ -252,7 +265,10 @@ function blockVnode(node, rctx, keyed) {
   /** @type {WeakMap<MdNode, any>} */
   const memo = rctx.tables.vnodeMemo;
   const cached = memo.get(node);
-  if (cached !== undefined && cached.keyed === keyed && cached.html === rctx.html) {
+  // The memo outlives one emission (a CompiledMd carries it), so every
+  // option that changes the output has to be part of the cache identity.
+  if (cached !== undefined && cached.keyed === keyed && cached.html === rctx.html
+    && cached.sanitizeUrl === rctx.sanitizeUrl) {
     return cached.vnode;
   }
   const plugin = rctx.tables.renders.get(node.type);
@@ -262,7 +278,7 @@ function blockVnode(node, rctx, keyed) {
   if (keyed && Array.isArray(vnode) && typeof vnode[0] === 'string') {
     vnode = withKey(vnode, blockKey(node, rctx));
   }
-  memo.set(node, { vnode, keyed, html: rctx.html });
+  memo.set(node, { vnode, keyed, html: rctx.html, sanitizeUrl: rctx.sanitizeUrl });
   return vnode;
 }
 
@@ -357,6 +373,9 @@ export function mdToVnode(docOrCompiled, options = {}) {
   const rctx = {
     tables,
     html: options.html === 'text' ? 'text' : 'skip',
+    sanitizeUrl: typeof options.sanitizeUrl === 'function'
+      ? options.sanitizeUrl
+      : defaultSanitizeUrl,
     options,
     hash: hashContent,
     counts: new Map(),
@@ -403,7 +422,11 @@ export function createMdRenderer(options) {
     }
     const vnode = typeof docOrCompiled.toVnode === 'function'
       ? docOrCompiled.toVnode()
-      : mdToVnode(docOrCompiled, { plugins: options.plugins, html: options.html });
+      : mdToVnode(docOrCompiled, {
+        plugins: options.plugins,
+        html: options.html,
+        sanitizeUrl: options.sanitizeUrl,
+      });
     domRender(vnode);
     if (tables.hydrates.size === 0) return;
     const index = hydrateIndex(docOrCompiled, tables);

@@ -191,6 +191,27 @@ createApp(appDoc, {
   the vnodes. Frontmatter members bind as externals via
   `compiled.externals()`.
 
+### Untrusted Markdown
+
+Two filters run when an AST becomes vnodes, on the same principle: the
+vnode format has no unescaped output, so nothing authored reaches the page
+as markup or as a live URL.
+
+- **Raw HTML** is dropped (`options.html: 'text'` shows it as literal text
+  instead — never as elements).
+- **Link and image URLs** whose scheme can execute (`javascript:`,
+  `vbscript:`) or stand in for a document (`file:`, `data:` other than a
+  raster image) lose their `href`/`src`; the element and its text stay, so
+  nothing the author wrote disappears. Relative references — `image.png`,
+  `docs/guide.md` — are not schemes and pass untouched. The AST keeps the
+  URL verbatim, so `toMarkdown` still round-trips it.
+
+`options.sanitizeUrl` — `(url) => string | null` — replaces the URL policy
+wholesale when a host needs a custom scheme in trusted content. It is the
+whole guard, so widen it deliberately. Plugin `render` functions shadow the
+core emitter and own the rule for URLs they emit; `ctx.sanitizeUrl` is the
+active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.md) §4.3).
+
 ## Performance contract
 
 Measured, not claimed — `npm run benchmark:markdown`, 2026-07-19, Node

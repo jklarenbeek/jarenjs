@@ -112,7 +112,15 @@ synchronous — SSR through `renderToString` and the DOM patcher both
 call it, and its output for equal input SHOULD be reference-equal
 (cache by `node` reference or content hash) so re-patches hit the O(1)
 fast path. `h` is `@jarenjs/view`'s element constructor; `ctx` carries
-`{ options, hash }` where `hash(str)` is the package content hash.
+`{ options, hash, sanitizeUrl }` where `hash(str)` is the package content
+hash.
+
+A plugin `render` **shadows the core emitter for its node type**, so the
+core's URL filtering does not run for it. A plugin that writes an
+`href`/`src` from document content MUST put it through
+`ctx.sanitizeUrl(url)` — the active policy, host override included — and
+drop the attribute when it returns `null` (MD-FORMAT §4.3). A URL the
+plugin composes itself from a trusted constant needs no filtering.
 
 Anything asynchronous or DOM-dependent goes in
 `hydrate(el, node, ctx)`, which `createMdRenderer` invokes **after**

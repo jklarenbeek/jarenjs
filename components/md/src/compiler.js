@@ -82,7 +82,11 @@ export function compileMarkdown(sourceOrDoc, options = {}) {
 
     toVnode() {
       if (vnode === undefined) {
-        vnode = mdToVnode(compiled, { plugins: options.plugins, html: options.html });
+        vnode = mdToVnode(compiled, {
+          plugins: options.plugins,
+          html: options.html,
+          sanitizeUrl: options.sanitizeUrl,
+        });
       }
       return vnode;
     },

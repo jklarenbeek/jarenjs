@@ -168,14 +168,39 @@ unchanged where possible.
 | `emphasis` | `children` | `*x*` / `_x_` |
 | `strong` | `children` | `**x**` / `__x__` |
 | `strikethrough` | `children` | `~~x~~` (GFM) |
-| `link` | `url`, `title` (string or `null`), `children` | inline links and autolinks |
-| `image` | `url`, `title` (string or `null`), `alt` (string) | `alt` is plain text |
+| `link` | `url`, `title` (string or `null`), `children` | inline links and autolinks; `url` is verbatim, filtered at render (§4.3) |
+| `image` | `url`, `title` (string or `null`), `alt` (string) | `alt` is plain text; `url` as for `link` |
 | `inlineCode` | `value` | backtick spans |
 | `break` | — | hard break (two spaces or `\` before newline) |
 | `softBreak` | — | an in-paragraph newline |
 | `html` | `value` | a raw inline HTML span |
 
-### 4.3 Plugin and custom nodes
+### 4.3 URL safety (normative)
+
+A `link`/`image` `url` in the AST is **verbatim**: whatever the author
+wrote, so that `toMarkdown` round-trips it (§5) and a transformation can
+inspect or rewrite it. Filtering happens one step later, when the AST is
+projected to vnodes.
+
+An emitter MUST NOT write a `url` into an `href`/`src` when its scheme can
+execute script (`javascript:`, `vbscript:`) or stand in for a document of
+its own (`file:`, and `data:` other than a raster image type). On
+rejection it MUST drop **only that attribute**, keeping the element and
+its children, so no authored text is lost. A scheme-less relative
+reference (`image.png`, `docs/guide.md`) is not a scheme and MUST pass.
+
+The scheme MUST be read the way a browser reads it, not as a literal
+prefix: ASCII whitespace and control characters inside it are ignored, so
+a tab spliced into `javascript:` does not get a URL through.
+
+`mdToVnode` implements this with `sanitizeUrl` from
+`@jarenjs/view/helpers`. `options.sanitizeUrl` replaces the policy
+wholesale — `(url) => string | null` — which is how a host widens it for a
+custom scheme in trusted content. **A plugin `render` bypasses the core
+emitter entirely, so a plugin that writes its own `href`/`src` owns this
+rule for the URLs it emits.**
+
+### 4.4 Plugin and custom nodes
 
 A compiled-in plugin (see [PLUGINS.md](PLUGINS.md)) MAY emit nodes of
 any `type` it declares — e.g. `{ "type": "mermaid", "value": "...",

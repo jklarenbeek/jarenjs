@@ -14,22 +14,6 @@
 import { Float64 } from '@jarenjs/core/math';
 import { h } from '../vnode.js';
 
-/** URL schemes permitted on a link `href`. */
-const RE_SAFE_URL = /^(https?:|mailto:|#|\/|\.)/i;
-
-/**
- * Reject `javascript:`/`data:` and other non-http(s) URLs, returning the
- * trimmed URL when it is safe or `null` otherwise. A view-layer safety
- * helper for link hrefs written into vnodes.
- * @param {any} url
- * @returns {string|null}
- */
-export function sanitizeHref(url) {
-  if (typeof url !== 'string') return null;
-  const trimmed = url.trim();
-  return RE_SAFE_URL.test(trimmed) ? trimmed : null;
-}
-
 /**
  * Clamp a value to a finite number (defends the geometry against
  * NaN/±Inf).

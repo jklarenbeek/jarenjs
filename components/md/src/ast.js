@@ -166,7 +166,7 @@ export function softBreak() {
 
 /**
  * The generic escape hatch for constructs without a compiled-in plugin
- * vocabulary (MD-FORMAT §4.3).
+ * vocabulary (MD-FORMAT §4.4).
  * @param {string} name
  * @param {any} data
  * @param {MdNode[]} [children]

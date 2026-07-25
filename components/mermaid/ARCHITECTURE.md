@@ -61,7 +61,7 @@ so each computes at most once.
 | `src/to-mermaid.js` | canonical AST → text printer (round-trip fixed point) |
 | `src/layout/metrics.js` | `measureText` from a precomputed advance-width table (no `getBBox`) |
 | `src/layout/{flowchart,sequence}.js` | pure, deterministic `PositionedDiagram` scene graphs |
-| `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; `sanitizeHref` (the engine imports them, no local copy) |
+| `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; the `sanitizeHref`/`sanitizeUrl` URL policies (the engine imports them, no local copy) |
 | `src/render/{flowchart,sequence,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the error box |
 | `src/theme.js` | `--mm-*` token tables resolved through the shared `@jarenjs/view/helpers` `resolveTheme` (concrete colors **and** CSS variables) |
 | `src/plugin.js` | the self-frozen Markdown plugin + `refreshMermaidFence` |
