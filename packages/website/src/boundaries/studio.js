@@ -40,6 +40,7 @@ import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { typ
 
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
+import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
 
 /** Schema errors kept per report: enough to repair, bounded for state. */
 const MAX_ERRORS = 20;
@@ -220,10 +221,54 @@ function walkRenderedVnode(node, path, out) {
     else if (name === 'chart' && (props.props?.config === null || typeof props.props?.config !== 'object')) {
       out.problems.push(`${path}: the chart widget's props.config did not resolve to a chart definition object`);
     }
+    if (name === 'form' && typeof props.props?.schema?.title === 'string' && props.props.schema.title !== '') {
+      out.formTitles.push(props.props.schema.title);
+    }
     return;
+  }
+  if (node[0] === 'h1' || node[0] === 'h2' || node[0] === 'h3') {
+    const start = (node.length > 1 && node[1] !== null && typeof node[1] === 'object' && !Array.isArray(node[1])) ? 2 : 1;
+    let text = '';
+    for (let i = start; i < node.length; i++) {
+      if (typeof node[i] === 'string') text += node[i];
+    }
+    if (text.trim() !== '') out.headings.push(text.trim());
   }
   const start = (node.length > 1 && node[1] !== null && typeof node[1] === 'object' && !Array.isArray(node[1])) ? 2 : 1;
   for (let i = start; i < node.length; i++) walkRenderedVnode(node[i], `${path}/${i}`, out);
+}
+
+/**
+ * The seed templates' rendered headings, each mapped to the form
+ * titles that seed legitimately pairs them with — the reference for
+ * the stale-heading note below. Built lazily from the templates
+ * themselves so it can never drift from the seed library.
+ * @type {Map<string, Set<string>> | null}
+ */
+let seedHeadings = null;
+
+function getSeedHeadings() {
+  if (seedHeadings === null) {
+    seedHeadings = new Map();
+    for (const template of STUDIO_TEMPLATES) {
+      /** @type {{ widgets: string[], problems: string[], headings: string[], formTitles: string[] }} */
+      const out = { widgets: [], problems: [], headings: [], formTitles: [] };
+      try {
+        walkRenderedVnode(
+          compileJsltStylesheet(template.doc.view, { compileTypeTest, memo: false })(template.doc.state),
+          '', out);
+      }
+      catch {
+        continue; // a seed that fails to render simply contributes nothing
+      }
+      for (const heading of out.headings) {
+        const titles = seedHeadings.get(heading) ?? new Set();
+        for (const title of out.formTitles) titles.add(title);
+        seedHeadings.set(heading, titles);
+      }
+    }
+  }
+  return seedHeadings;
 }
 
 /**
@@ -233,22 +278,42 @@ function walkRenderedVnode(node, path, out) {
  * validates" is not "it renders": a valid document can still name an
  * unknown widget, hand the form widget a non-object schema, or place a
  * bare object where a vnode belongs.
+ *
+ * `notes` are soft semantic observations, not failures — today one
+ * rule: a SEED template's heading still on screen while the form's
+ * schema title has moved on (the repurposed-template leftover). The
+ * rule deliberately keys on the seed headings so a pristine template,
+ * or an authored heading of the user's own, never trips it.
  * @param {any} doc
- * @returns {{ widgets: string[], problems: string[] }}
+ * @returns {{ widgets: string[], problems: string[], notes: string[] }}
  */
 export function auditDocumentRender(doc) {
-  /** @type {{ widgets: string[], problems: string[] }} */
-  const out = { widgets: [], problems: [] };
+  /** @type {{ widgets: string[], problems: string[], headings: string[], formTitles: string[] }} */
+  const out = { widgets: [], problems: [], headings: [], formTitles: [] };
   let vnode;
   try {
     vnode = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false })(doc.state);
   }
   catch (err) {
     out.problems.push(`the view failed to render its first frame: ${message(err)}`);
-    return out;
+    return { widgets: out.widgets, problems: out.problems, notes: [] };
   }
   walkRenderedVnode(vnode, '', out);
-  return out;
+
+  /** @type {string[]} */
+  const notes = [];
+  const markers = getSeedHeadings();
+  for (const heading of out.headings) {
+    const seedTitles = markers.get(heading);
+    if (seedTitles === undefined) continue;
+    const departed = out.formTitles.find((title) => !seedTitles.has(title)
+      && !heading.toLowerCase().includes(title.toLowerCase()));
+    if (departed !== undefined) {
+      notes.push(`the heading "${heading}" is still the seed template's while the form is now titled "${departed}" — patch the heading to match the repurposed form`);
+      break;
+    }
+  }
+  return { widgets: out.widgets, problems: out.problems, notes };
 }
 
 //#endregion

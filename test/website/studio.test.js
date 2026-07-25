@@ -401,6 +401,32 @@ describe('website — the Studio render audit (auditDocumentRender)', function (
       "['hr'] is a legitimate void element");
   });
 
+  it('notes a seed heading left stale over a repurposed form — and only that', function () {
+    const base = /** @type {any} */ (studioTemplate('form')).doc;
+
+    // pristine seed: heading and title are the seed's own pair — silent
+    assert.deepStrictEqual(auditDocumentRender(base).notes, []);
+
+    // schema retitled, seed heading kept: the run-3 leftover — noted
+    const repurposed = JSON.parse(JSON.stringify(base));
+    repurposed.state.schema.title = 'Mental Health Check-in';
+    const noted = auditDocumentRender(repurposed);
+    assert.strictEqual(noted.notes.length, 1);
+    assert.match(noted.notes[0], /"Create your account"/);
+    assert.match(noted.notes[0], /"Mental Health Check-in"/);
+    assert.deepStrictEqual(noted.problems, [], 'a note is not a problem');
+
+    // heading patched along with the title — silent again
+    const kept = JSON.parse(JSON.stringify(repurposed));
+    kept.view.rules[0].body[2] = ['h2', {}, 'Mental Health Check-in'];
+    assert.deepStrictEqual(auditDocumentRender(kept).notes, []);
+
+    // an authored heading of the user's own never trips the rule
+    const authored = JSON.parse(JSON.stringify(repurposed));
+    authored.view.rules[0].body[2] = ['h2', {}, 'Weekly wellbeing form'];
+    assert.deepStrictEqual(auditDocumentRender(authored).notes, []);
+  });
+
   it('rides along on the studio write/patch tool results', function () {
     /** @type {any[]} */
     let registered = [];
@@ -425,6 +451,18 @@ describe('website — the Studio render audit (auditDocumentRender)', function (
     assert.ok(patched.renderProblems.some((p) => /props\.schema did not resolve/.test(p)),
       'the render audit surfaced the broken widget feed');
     assert.match(patched.hint, /renders broken/);
+
+    // the soft note rides along too: retitle the schema (restoring the
+    // widget feed first) and the stale seed heading gets called out
+    const retitled = tool('jaren_studio_patch').execute({
+      patch: [
+        { op: 'replace', path: '/view/rules/0/body/4/1/props/schema', value: '$.schema' },
+        { op: 'replace', path: '/state/schema/title', value: 'Sleep survey' },
+      ],
+    });
+    assert.strictEqual(retitled.ok, true);
+    assert.strictEqual(retitled.renderProblems, undefined);
+    assert.match(retitled.renderNotes[0], /"Sleep survey"/);
   });
 });
 

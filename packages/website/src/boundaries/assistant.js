@@ -235,6 +235,9 @@ export function createSiteToolbox(env) {
         renderProblems: audit.problems,
         hint: 'The document is live, but its first frame renders broken pieces — the paths index into the vnode tree your view produced. Repair the view (or the state it reads) and patch again.',
       }),
+      // soft observations (stale seed heading over a repurposed form):
+      // worth a follow-up patch, never a failure
+      ...(audit.notes.length === 0 ? {} : { renderNotes: audit.notes }),
     };
   };
 
@@ -475,10 +478,12 @@ export function createAssistantEffects(deps) {
       // weak local models are first-class: enough rounds to read an
       // engine's { error } result, fetch an example and try again —
       // and a studio flow (template → write → patch → repair → save)
-      // legitimately runs long. The history budget keeps long studio
-      // sessions inside a small local context window (~6k tokens).
+      // legitimately runs past a dozen rounds on a small model. The
+      // history budget keeps those long sessions inside a small local
+      // context window (~6k tokens), which is what makes the higher
+      // cap affordable.
       const agent = createAgent({
-        client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 12,
+        client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 16,
         historyBudget: 24_000,
       });
       // build the turn from this effect's own snapshot: the ai/user

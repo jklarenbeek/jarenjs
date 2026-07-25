@@ -35,10 +35,12 @@ test('the assistant opens as an on-screen sheet, gated on configuration', async 
   expect(icon.width, 'panel icons meet the 44px class').toBeGreaterThanOrEqual(43);
   expect(icon.height).toBeGreaterThanOrEqual(43);
 
-  // configuring a local provider brings the composer to life
+  // configuring a local provider brings the composer to life (the
+  // settings row holds Save AND Test connection — target by name)
   await page.locator('.ai-settings select').selectOption('ollama');
   await page.getByPlaceholder('qwen/qwen3-4b · llama3.2 · …').fill('qwen3:4b');
-  await page.locator('.ai-settings .btn').tap();
+  await expect(page.getByRole('button', { name: 'Test connection' })).toBeVisible();
+  await page.getByRole('button', { name: 'Save' }).tap();
   await expect(page.locator('.ai-composer')).toBeVisible();
   await expect(page.locator('.ai-settings')).toHaveCount(0);
 });
