@@ -108,6 +108,14 @@ const assistantView = memo1((ai) => {
       model: s.model,
       apiKey: s.apiKey,
       needsKey: s.provider === 'openrouter' || s.provider === 'custom',
+      probe: {
+        status: ai.probe.status,
+        detail: ai.probe.detail,
+        busy: ai.probe.status === 'busy',
+        ok: ai.probe.status === 'ok',
+        fail: ai.probe.status === 'fail',
+        models: ai.probe.models.map((id) => ({ id })),
+      },
     },
     providers: PROVIDER_OPTIONS.map((p) => ({ ...p, selected: p.value === s.provider })),
     empty: ai.messages.length === 0,
@@ -117,6 +125,11 @@ const assistantView = memo1((ai) => {
     // the reply currently streaming in (plain text: it changes per token)
     streaming: ai.status === 'streaming',
     pending: ai.pending,
+    // the quiet-phase label: reasoning models think before they speak,
+    // and watching the thinking grow beats a blind spinner
+    thinkingLabel: ai.reasoningChars > 0
+      ? `Thinking… (${ai.reasoningChars} characters of reasoning)`
+      : 'Thinking…',
   };
 });
 

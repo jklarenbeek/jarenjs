@@ -9,8 +9,9 @@
  */
 
 export { AiError } from './errors.js';
-export { PROVIDERS, resolveEndpoint } from './providers.js';
+export { PROVIDERS, resolveEndpoint, probeProvider } from './providers.js';
 export { createSseDecoder } from './sse.js';
 export { createChatClient, createStreamAccumulator } from './client.js';
+export { createStructuredOutput } from './structured.js';
 export { createToolbox, registerModelContext } from './toolbox.js';
 export { createAgent } from './agent.js';

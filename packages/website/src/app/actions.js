@@ -260,11 +260,26 @@ export const ACTIONS = {
     patch: [{ op: 'replace', path: '/ai/settingsOpen', value: '$payload' }],
   },
   'ai/setting': {
+    patch: [
+      {
+        op: 'add',
+        path: { $concat: ['/ai/settings/', '$payload.key'] },
+        value: '$event.value',
+      },
+      // an edited connection voids the last probe verdict
+      { op: 'replace', path: '/ai/probe', value: { status: 'idle', detail: null, models: [] } },
+    ],
+  },
+  'ai/probe': {
     patch: [{
-      op: 'add',
-      path: { $concat: ['/ai/settings/', '$payload.key'] },
-      value: '$event.value',
+      op: 'replace',
+      path: '/ai/probe',
+      value: { status: 'busy', detail: null, models: [] },
     }],
+    effects: [{ run: 'ai-probe' }],
+  },
+  'ai/probe-result': {
+    patch: [{ op: 'replace', path: '/ai/probe', value: '$payload' }],
   },
   'ai/save-settings': {
     patch: [{ op: 'replace', path: '/ai/settingsOpen', value: false }],
@@ -284,11 +299,17 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/status', value: 'streaming' },
       { op: 'replace', path: '/ai/activity', value: null },
       { op: 'replace', path: '/ai/error', value: null },
+      { op: 'replace', path: '/ai/reasoningChars', value: 0 },
     ],
     effects: [{ run: 'ai-persist' }],
   },
   'ai/delta': {
     patch: [{ op: 'replace', path: '/ai/pending', value: { $concat: ['$.ai.pending', '$payload'] } }],
+  },
+  // reasoning models stream thinking before (or instead of) content;
+  // the panel shows its growing size while nothing visible arrives
+  'ai/reasoning': {
+    patch: [{ op: 'replace', path: '/ai/reasoningChars', value: { $add: ['$.ai.reasoningChars', '$payload'] } }],
   },
   'ai/activity': {
     patch: [{ op: 'replace', path: '/ai/activity', value: '$payload' }],

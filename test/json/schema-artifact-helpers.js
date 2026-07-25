@@ -99,6 +99,73 @@ export function draftNeutralSubsetViolations(schema) {
 }
 
 /**
+ * Mechanically derive the LLM-profile twin of a canonical schema
+ * artifact: the lowest-common-denominator relaxation for provider
+ * structured-output subsets that do not enforce `patternProperties`,
+ * `propertyNames` or asserted `format`s — and that support `anyOf` but
+ * not `oneOf` (every `oneOf` becomes `anyOf`; the canonical grammar
+ * discriminates its branches by the removed name constraints, so
+ * exactly-one would fail on its own relaxation). Each removed
+ * constraint is restated in the node's `description` (the model still
+ * reads it), and the canonical schema remains the local-validation
+ * authority. The transform is a pure RELAXATION: every canonical-valid
+ * document is profile-valid; the reverse is deliberately not
+ * guaranteed.
+ * @param {object} schema - canonical draft 2020-12 artifact
+ * @returns {object} mechanically derived LLM-profile twin
+ */
+export function deriveLlmProfile(schema) {
+  function note(key, value) {
+    if (key === 'format')
+      return `(LLM profile: the '${value}' format assertion is relaxed here; the canonical schema enforces it)`;
+    return '(LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)';
+  }
+
+  function walk(node) {
+    if (Array.isArray(node))
+      return node.map(walk);
+    if (node === null || typeof node !== 'object')
+      return node;
+    const out = {};
+    const notes = [];
+    for (const key of Object.keys(node)) {
+      if (key === 'patternProperties' || key === 'propertyNames' || key === 'format') {
+        notes.push(note(key, node[key]));
+        continue;
+      }
+      if (key === 'oneOf') {
+        // exactly-one becomes at-least-one: the canonical grammar
+        // discriminates its oneOf branches by the very name
+        // constraints removed above, and strict provider subsets
+        // (OpenAI's included) support anyOf but not oneOf
+        if (Object.hasOwn(node, 'anyOf'))
+          throw new TypeError('LLM-profile derivation: a node carries both oneOf and anyOf');
+        out.anyOf = walk(node.oneOf);
+        continue;
+      }
+      out[key] = walk(node[key]);
+    }
+    if (notes.length > 0) {
+      out.description = out.description === undefined
+        ? notes.join(' ')
+        : `${out.description} ${notes.join(' ')}`;
+    }
+    return out;
+  }
+
+  const twin = walk(schema);
+  twin.$id = schema.$id + '/llm-profile';
+  twin.title = schema.title + ' (LLM profile)';
+  twin.description = 'LLM-profile relaxation of the canonical grammar for provider '
+    + 'structured-output subsets that do not enforce patternProperties, propertyNames '
+    + 'or asserted formats. Every canonical-valid document validates here; the reverse '
+    + 'is NOT guaranteed - always validate generated documents against the canonical '
+    + 'schema locally before compiling. '
+    + (schema.description ?? '');
+  return twin;
+}
+
+/**
  * Derive the complete query-expression grammar used by JSLT rule bodies.
  * The copied query definitions are extended only by the body-local
  * `$apply` phrase; the published query artifacts remain unchanged. Throws

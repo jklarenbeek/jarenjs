@@ -20,13 +20,20 @@ import { AiError } from './errors.js';
  * URL (the caller must supply one). The local runtimes get `/v1`
  * appended automatically when the URL carries no path — pasting
  * `http://localhost:11434` just works.
- * @type {Record<string, { label: string, baseUrl: string | null, local: boolean }>}
+ *
+ * `structured` names the strongest structured-output tier the provider
+ * reliably speaks on this wire: `'json_schema'` (schema-constrained
+ * decoding), `'json'` (JSON mode without a schema), or `null` (assume
+ * nothing — the schema travels in the prompt). Either way the caller
+ * validates locally; the tier only decides how much the server helps.
+ * @type {Record<string, { label: string, baseUrl: string | null,
+ *   local: boolean, structured: 'json_schema' | 'json' | null }>}
  */
 export const PROVIDERS = {
-  openrouter: { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', local: false },
-  ollama: { label: 'Ollama', baseUrl: 'http://localhost:11434/v1', local: true },
-  lmstudio: { label: 'LM Studio', baseUrl: 'http://localhost:1234/v1', local: true },
-  custom: { label: 'OpenAI-compatible', baseUrl: null, local: false },
+  openrouter: { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', local: false, structured: 'json_schema' },
+  ollama: { label: 'Ollama', baseUrl: 'http://localhost:11434/v1', local: true, structured: 'json' },
+  lmstudio: { label: 'LM Studio', baseUrl: 'http://localhost:1234/v1', local: true, structured: 'json_schema' },
+  custom: { label: 'OpenAI-compatible', baseUrl: null, local: false, structured: null },
 };
 
 /**
@@ -56,6 +63,59 @@ export function resolveEndpoint(options = {}) {
   Object.assign(headers, options.headers);
 
   return { provider, url: `${base}/chat/completions`, headers, model: options.model ?? '' };
+}
+
+/**
+ * Probe a provider before the first turn: can this key/URL answer, and
+ * which models does it offer? GETs the OpenAI-compatible `/models`
+ * listing (OpenRouter, Ollama and LM Studio all serve it) with the
+ * same resolved auth the chat call would use. Never throws — the
+ * result object is the settings-UI contract.
+ * @param {{ provider?: string, baseUrl?: string, apiKey?: string,
+ *   headers?: Record<string, string>, fetch?: typeof fetch,
+ *   timeoutMs?: number }} [options]
+ * @returns {Promise<{ ok: true, models: string[] } |
+ *   { ok: false, status?: number, error: string }>}
+ */
+export async function probeProvider(options = {}) {
+  /** @type {ReturnType<typeof resolveEndpoint>} */
+  let endpoint;
+  try {
+    endpoint = resolveEndpoint(options);
+  }
+  catch (err) {
+    return { ok: false, error: /** @type {Error} */ (err).message };
+  }
+  const url = endpoint.url.replace(/\/chat\/completions$/, '/models');
+  const fetchFn = options.fetch ?? ((u, init) => globalThis.fetch(u, init));
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchFn(url, {
+      method: 'GET',
+      headers: endpoint.headers,
+      signal: controller.signal,
+    });
+    if (response.ok !== true)
+      return { ok: false, status: response.status, error: `HTTP ${response.status} from ${url}` };
+    const payload = await response.json();
+    const models = Array.isArray(payload?.data)
+      ? payload.data.map((m) => m?.id).filter((id) => typeof id === 'string')
+      : [];
+    return { ok: true, models };
+  }
+  catch (err) {
+    return {
+      ok: false,
+      error: controller.signal.aborted
+        ? `no answer from ${url} within ${timeoutMs} ms`
+        : /** @type {any} */ (err)?.message ?? String(err),
+    };
+  }
+  finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

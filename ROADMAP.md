@@ -13,30 +13,17 @@ from this file; items link to the document that motivates them where one exists.
 ## Release milestones
 
 - 🎉 1.0 Stable release
-  - [ ] **AI bot workflow and bootstrap prompt** — productionize the context-free,
-    work-order development workflow that built this monorepo so it can be re-run and
-    shared. That workflow ran entirely from local, gitignored scratch files (now
-    removed); reconstructing it as a committed, reusable harness means capturing its
-    four moving parts:
-    - a **program router** — the "what we are building" charter, the ordered table of
-      work orders with their dependencies and execution order, and the fixed design
-      decisions (D-numbers) an executor must not reopen;
-    - one **work order per step** — each self-contained so it can be executed in a
-      *fresh session with no conversation context*: everything the executor needs is
-      the router, the referenced work order, and the repo itself, ending in an
-      acceptance checklist;
-    - one **session record per step** — Summary / Files / Decisions & divergences /
-      Test & benchmark output / Open issues, written after the work is done and green;
-    - a **handoff note** — carries state (open follow-ups, prelude status,
-      cross-package handoffs) from one session to the next.
-
-    Operator conventions the workflow assumes: work lands on `main` for review; code
-    and docs never point at the scratch work-order/record files (module headers
-    describe the current role, not the extraction history). Shipping this milestone
-    means committing a sanitized, reusable version — the bootstrap prompt plus the
-    router/work-order/record/handoff templates and their conventions — so a fresh AI
-    session can pick up a work order, execute it against the codebase, run the suite,
-    and emit a session record without any prior context.
+  - [x] **AI bot workflow and bootstrap prompt** — **shipped as `workflow/`**: the
+    context-free, work-order development workflow that built this monorepo, committed
+    as a sanitized, reusable harness. `BOOTSTRAP.md` is the fresh-session prompt;
+    `ROUTER.template.md`, `WORK-ORDER.template.md`, `SESSION-RECORD.template.md` and
+    `HANDOFF.template.md` are the four moving parts; `CONVENTIONS.md` binds the rules
+    (immutable D-numbers, work lands on `main` uncommitted, every work order ends on
+    the full green gate, committed artifacts never reference scratch files, records
+    carry numbers not adjectives). Proven, not asserted: `workflow/examples/` holds a
+    real work order executed by a fresh session from the bootstrap alone, with the
+    session record it produced — a run that also caught four dead-code findings the
+    main line had deferred, exactly the honesty the workflow exists for.
 - 1.1
   - [ ] [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md) proposal
   - [ ] JSON Schema standard output formats (`list`/`hierarchical` wrappers, `evaluationPath`/`schemaLocation` renames) — the remaining half of [Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output); the structured params + keyed messages are exactly what that format wants
@@ -63,7 +50,7 @@ from this file; items link to the document that motivates them where one exists.
   giving up the guarantee.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
-- [ ] **Additional locale packs** — the catalog contract and key-parity tests make each pack mechanical; `nl` is the reference implementation.
+- [x] **Additional locale packs** — **shipped**: eleven packs (`nl`, `fr`, `es`, `pt`, `de`, `ja`, `ko`, `zhTW`, `ru`, `tr`, `ar`), each a subpath export with key parity, exact-render and end-to-end tests; the Arabic pack renders limit comparisons as phrases (an ASCII operator between RTL text and a number displays bidi-flipped) with a first-strong-isolate fallback for unknown operators, and the playground's locale switcher is generated from the catalog map so packs and buttons cannot drift.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
 - [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.
@@ -182,23 +169,28 @@ fences inline, SSR-safe, replacing the old injection wrapper.
 
 ## LLM & structured-output profile
 
-- [ ] **An "LLM profile" of the query/JSLT schema twins** — a simplified lowest-common-denominator variant for structured-output implementations that do not enforce recursive references, `patternProperties`, `propertyNames` or asserted formats; trades grammar precision for universal provider support. See the [LLM sections](packages/json/README.md#generating-queries-with-llms) for why local validation is required either way.
+- [x] **An "LLM profile" of the query/JSLT schema twins** — **shipped**: `jaren-query.llm-profile.schema.json` and `jaren-jslt.llm-profile.schema.json`, mechanically derived pure relaxations (`patternProperties`/`propertyNames`/asserted `format`s removed with each constraint restated in the nearest `description`; every `oneOf` becomes `anyOf`, which strict provider subsets require and which the canonical grammar's own name-discriminated branches make necessary). Tests pin byte-stable regeneration, the relaxation property over a corpus plus the site examples, and the documented catch-it-locally pipeline. See the [LLM sections](packages/json/README.md#generating-queries-with-llms).
 
 ## @jarenjs/ai (browser-side AI, published)
 
 Browser-side AI that makes sense with bring-your-own-key: one
 OpenAI-compatible chat client (OpenRouter / Ollama / LM Studio / any
 compatible URL, `fetch` injected), an incremental SSE decoder, a tool
-registry whose inputs `@jarenjs/validate` checks before every call, a
-bounded agent loop, and WebMCP (`navigator.modelContext`) registration
-of the same tools. The website's assistant and its WebMCP bridge both
-run on it; the playground engines are the toolbox, so Jaren validates
-the model's own tool calls.
+registry whose inputs `@jarenjs/validate` checks before every call —
+rejections carry the real validation errors (instancePath/keyword/
+message), stringified-JSON arguments are coerced where the schema wants
+structure, and unparseable ones get a named hint, because weak models
+routinely JSON-encode nested arguments — a bounded agent loop, and
+WebMCP (`navigator.modelContext`) registration of the same tools. The
+website's assistant and its WebMCP bridge both run on it; the
+playground and studio tools are the toolbox, so Jaren validates the
+model's own tool calls.
 
-- [ ] **Structured-output mode** — thread the query/JSLT/JOSL schema twins into a `response_format`/JSON-Schema constrained-decoding request helper, validated locally with the same validator that guards the tools.
-- [ ] **Retry/backoff + rate-limit surfacing** — the client reports `AI0002` verbatim today; a small retry policy (429/5xx with jittered backoff) belongs in the client, not each caller.
-- [ ] **Token-budget compaction** — the agent truncates oversized tool results; a history-compaction pass (summarize the middle, keep the tail) would let long sessions run against small local context windows.
-- [ ] **Provider capability probes** — optional `list models`/health calls per provider so the settings UI can validate a key/URL before the first turn.
+- [x] **Structured-output mode** — **shipped**: `complete({ responseFormat })` emits the `response_format`/`json_schema` wire shape, and `createStructuredOutput` covers every provider tier (schema-constrained decoding → JSON mode → schema-in-prompt, per the `PROVIDERS` capability field), parses the reply, validates it locally with `@jarenjs/validate`, and sends instancePath'd errors back for a bounded repair loop. The end-to-end test generates a query document against the published twin and compiles it with the real engine.
+- [x] **Retry/backoff + rate-limit surfacing** — **shipped**: network failures and 408/429/5xx retry with jittered exponential backoff (`retry: { attempts, baseMs, maxMs }`), `Retry-After` (seconds or HTTP-date) wins over the computed delay capped at `maxMs`, a request never retries after the first streamed delta reached the caller, aborts cancel the backoff, and `AI0002` carries `status`/`attempts`/`retryAfterMs`.
+- [x] **Token-budget compaction** — **shipped**: `createAgent({ historyBudget })` compacts each request over budget — system prompt, first user message and the largest tail always survive; the dropped middle becomes one deterministic synopsis message (a host `compaction` hook may replace it); cuts land only on tool-round boundaries so `tool_calls`/`tool` pairing stays wire-legal, property-tested against adversarial histories.
+- [x] **Provider capability probes** — **shipped**: `probeProvider` GETs the OpenAI-compatible `/models` listing with the chat call's exact auth and never throws; the website settings gained a "Test connection" button, a status line, and a model-name datalist filled by a successful probe.
+- [x] **Reasoning-stream surfacing** — **shipped**: `delta.reasoning`/`reasoning_details` stream through `onReasoning` and accumulate onto `message.reasoning` (absent when none), the agent forwards the hook and keeps reasoning off the wire transcript, and the website shows the growing thinking size plus an honest reasoning-only placeholder instead of an empty bubble.
 
 ## @jarenjs/josl (published)
 
@@ -210,7 +202,7 @@ experimental label and joined it to the release train.
 
 - [ ] **Single-walk scanner** — fold the chunk cutter and the logical-line parser into one pass; the cutter's second scan over every character is the main share of smol-toml's remaining ~1.9x parse-speed edge (`npm run benchmark:toml`).
 - [ ] **CST mode** — preserve comments, key order aesthetics and formatting for faithful document rewriting, not just data round-trips.
-- [ ] **JOSL/JSONX grammar as JSON Schema** — publish the language surface as a schema twin for LLM constrained decoding, like the query/JSLT grammars.
+- [x] **JOSL/JSONX grammar for LLM generation** — **decided and shipped**: JOSL is a text format, so the useful artifact is a JSON-Schema twin over the parsed *data model* — `schemas/jaren-josl-data.schema.json` (root table; strings, finite numbers, booleans, `null`, arrays, nested tables; native date/time scalars deliberately excluded since they parse to platform `Date` values JSON cannot carry). The model emits JSON, `stringifyJosl` renders canonical text, and the round trip is test-pinned. A GBNF-class raw-text grammar for llama.cpp-family constrained sampling is recorded as future work in the README, waiting on a concrete consumer.
 - [ ] **Partial-string streaming events** — a `text-partial` event for progressive display of long strings as they stream in (the hook is noted in jsonx-stream.js; not implemented).
 
 ## @jarenjs/charts (charts + streaming, shipped 2026-07-21)

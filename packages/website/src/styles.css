@@ -725,6 +725,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .ai-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: 0.85rem; }
 .ai-field > span { color: var(--muted); }
 .ai-settings .btn { align-self: flex-start; }
+.ai-settings-actions { display: flex; gap: var(--space-2); }
 .ai-log {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4);

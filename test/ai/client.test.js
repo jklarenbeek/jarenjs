@@ -198,6 +198,267 @@ describe('ai — the chat client', function () {
   });
 });
 
+describe('ai — reasoning streams', function () {
+  it('streams reasoning through onReasoning and onto message.reasoning', async function () {
+    const body = sseBody([
+      delta({ reasoning: 'Let me think. ' }),
+      delta({ reasoning_details: [{ type: 'reasoning.text', text: 'Two steps.' }] }),
+      delta({ content: 'Answer.' }, 'stop'),
+    ]);
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+    const thinking = [];
+    const deltas = [];
+    const result = await client.complete({
+      messages: [{ role: 'user', content: 'q' }],
+      onReasoning: (t) => thinking.push(t),
+      onDelta: (t) => deltas.push(t),
+    });
+    assert.deepStrictEqual(thinking, ['Let me think. ', 'Two steps.']);
+    assert.deepStrictEqual(deltas, ['Answer.']);
+    assert.strictEqual(result.message.content, 'Answer.');
+    assert.strictEqual(result.message.reasoning, 'Let me think. Two steps.');
+  });
+
+  it('a reasoning-only turn keeps content empty but exposes the reasoning', async function () {
+    const body = sseBody([delta({ reasoning: 'thought a lot' }, 'stop')]);
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+    const result = await client.complete({ messages: [{ role: 'user', content: 'q' }] });
+    assert.strictEqual(result.message.content, '');
+    assert.strictEqual(result.message.reasoning, 'thought a lot');
+  });
+
+  it('a plain turn carries no reasoning member at all', async function () {
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      fetch: () => Promise.resolve(new Response(
+        JSON.stringify({ choices: [{ message: { content: 'plain' } }] }), { status: 200 })),
+    });
+    const result = await client.complete({ messages: [{ role: 'user', content: 'q' }], stream: false });
+    assert.strictEqual('reasoning' in result.message, false);
+  });
+});
+
+describe('ai — the retry policy', function () {
+  /** A client over a scripted sequence of fetch outcomes. */
+  function scriptedClient(outcomes, retryOptions = {}) {
+    /** @type {number[]} */
+    const delays = [];
+    let call = 0;
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { random: () => 1, sleep: (ms) => { delays.push(ms); return Promise.resolve(); }, ...retryOptions },
+      fetch: () => {
+        const outcome = outcomes[Math.min(call++, outcomes.length - 1)];
+        if (outcome instanceof Error) return Promise.reject(outcome);
+        return Promise.resolve(outcome);
+      },
+    });
+    return { client, delays, calls: () => call };
+  }
+
+  const ok = () => new Response(
+    JSON.stringify({ choices: [{ message: { content: 'recovered' } }] }), { status: 200 });
+
+  it('retries 429 then succeeds, recording the attempt count', async function () {
+    const { client, delays, calls } = scriptedClient([
+      new Response('slow down', { status: 429 }),
+      ok(),
+    ]);
+    const result = await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.strictEqual(result.message.content, 'recovered');
+    assert.strictEqual(calls(), 2);
+    assert.deepStrictEqual(delays, [500], 'first backoff = baseMs · 2⁰ · full jitter(random=1)');
+  });
+
+  it('exhausts attempts on persistent 500s and reports them on AI0002', async function () {
+    const { client, delays, calls } = scriptedClient([
+      new Response('boom', { status: 500 }),
+    ]);
+    await assert.rejects(client.complete({ messages: [{ role: 'user', content: 'x' }] }),
+      (err) => err instanceof AiError && err.code === 'AI0002'
+        && err.status === 500 && err.attempts === 3);
+    assert.strictEqual(calls(), 3);
+    assert.deepStrictEqual(delays, [500, 1000], 'exponential backoff between the three tries');
+  });
+
+  it('honors Retry-After seconds over the computed backoff, capped by maxMs', async function () {
+    const { client, delays } = scriptedClient([
+      new Response('later', { status: 429, headers: { 'retry-after': '2' } }),
+      ok(),
+    ]);
+    await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.deepStrictEqual(delays, [2000]);
+
+    const capped = scriptedClient([
+      new Response('later', { status: 429, headers: { 'retry-after': '60' } }),
+      ok(),
+    ], { maxMs: 4000 });
+    await capped.client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.deepStrictEqual(capped.delays, [4000], 'Retry-After capped at maxMs');
+  });
+
+  it('honors a Retry-After HTTP-date, capped by maxMs when the date is far off', async function () {
+    const { client, delays } = scriptedClient([
+      new Response('later', {
+        status: 429,
+        headers: { 'retry-after': new Date(Date.now() + 3000).toUTCString() },
+      }),
+      ok(),
+    ]);
+    await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.strictEqual(delays.length, 1);
+    // HTTP-date resolution is one second and the clock moves between
+    // header construction and parsing; the floor still proves the date
+    // was used — the jitterless computed backoff would be 500
+    assert.ok(delays[0] >= 1500 && delays[0] <= 3000,
+      `delay ${delays[0]} must derive from the date, in [1500, 3000]`);
+
+    const capped = scriptedClient([
+      new Response('later', {
+        status: 429,
+        headers: { 'retry-after': new Date(Date.now() + 60000).toUTCString() },
+      }),
+      ok(),
+    ], { maxMs: 4000 });
+    await capped.client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.deepStrictEqual(capped.delays, [4000], 'a far-future date is capped at maxMs');
+  });
+
+  it('retries a thrown network error, never a 401', async function () {
+    const { client, calls } = scriptedClient([
+      new TypeError('fetch failed'),
+      ok(),
+    ]);
+    const result = await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.strictEqual(result.message.content, 'recovered');
+    assert.strictEqual(calls(), 2);
+
+    const denied = scriptedClient([new Response('no', { status: 401 })]);
+    await assert.rejects(denied.client.complete({ messages: [{ role: 'user', content: 'x' }] }),
+      (err) => err instanceof AiError && err.status === 401 && err.attempts === 1);
+    assert.strictEqual(denied.calls(), 1, '401 is not retried');
+  });
+
+  it('never retries after the first streamed delta reached the caller', async function () {
+    // attempt 1 streams one delta, then the connection dies mid-read
+    let call = 0;
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { sleep: () => Promise.resolve() },
+      fetch: () => {
+        call++;
+        let pulls = 0;
+        const stream = new ReadableStream({
+          pull(controller) {
+            pulls++;
+            if (pulls === 1) {
+              controller.enqueue(new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+            }
+            else {
+              controller.error(new Error('connection reset'));
+            }
+          },
+        });
+        return Promise.resolve(new Response(stream, { status: 200 }));
+      },
+    });
+    const deltas = [];
+    await assert.rejects(client.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      onDelta: (t) => deltas.push(t),
+    }), /connection reset/);
+    assert.deepStrictEqual(deltas, ['partial']);
+    assert.strictEqual(call, 1, 'the failed stream was not replayed');
+  });
+
+  it('an abort during backoff rejects promptly with the abort reason', async function () {
+    const controller = new AbortController();
+    const { client } = scriptedClient([
+      new Response('busy', { status: 503 }),
+      ok(),
+    ], {
+      sleep: (ms, signal) => {
+        // the default sleep contract: reject on abort — simulate the
+        // abort arriving while waiting
+        controller.abort();
+        return signal?.aborted
+          ? Promise.reject(new Error('aborted-during-backoff'))
+          : Promise.resolve();
+      },
+    });
+    await assert.rejects(client.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      signal: controller.signal,
+      stream: false,
+    }), /aborted-during-backoff/);
+  });
+
+  it('the default sleep really waits between attempts and honors an abort', async function () {
+    // no injected sleep: the built-in timer-based backoff runs (tiny
+    // baseMs keeps the test fast)
+    let call = 0;
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { baseMs: 1, maxMs: 2, random: () => 0 },
+      fetch: () => {
+        call++;
+        return Promise.resolve(call === 1
+          ? new Response('busy', { status: 503 })
+          : new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 }));
+      },
+    });
+    const result = await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.strictEqual(result.message.content, 'ok');
+    assert.strictEqual(call, 2);
+
+    // an already-aborted signal makes the default sleep reject with
+    // the abort reason instead of waiting out the backoff
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { baseMs: 1 },
+      fetch: () => Promise.resolve(new Response('busy', { status: 503 })),
+    });
+    await assert.rejects(aborted.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      signal: controller.signal,
+      stream: false,
+    }), (err) => /** @type {any} */ (err)?.name === 'AbortError');
+
+    // an abort ARRIVING mid-backoff cancels the pending timer promptly
+    // (a long baseMs proves the sleep was cut short, not waited out)
+    const midway = new AbortController();
+    const slow = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { baseMs: 60_000, random: () => 1 },
+      fetch: () => Promise.resolve(new Response('busy', { status: 503 })),
+    });
+    const pending = assert.rejects(slow.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      signal: midway.signal,
+      stream: false,
+    }), (err) => /** @type {any} */ (err)?.name === 'AbortError');
+    setTimeout(() => midway.abort(), 5);
+    await pending;
+  });
+
+  it('retry: { attempts: 1 } disables retrying entirely', async function () {
+    const { client, calls } = scriptedClient([new Response('x', { status: 503 })],
+      { attempts: 1 });
+    await assert.rejects(client.complete({ messages: [{ role: 'user', content: 'x' }] }),
+      (err) => err instanceof AiError && err.attempts === 1);
+    assert.strictEqual(calls(), 1);
+  });
+});
+
 describe('ai — the stream accumulator', function () {
   it('tolerates garbage chunks and missing pieces', function () {
     const acc = createStreamAccumulator();

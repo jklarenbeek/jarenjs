@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { PROVIDERS, resolveEndpoint, AiError } from '@jarenjs/ai';
+import { PROVIDERS, resolveEndpoint, probeProvider, AiError } from '@jarenjs/ai';
 
 describe('ai — provider endpoint resolution', function () {
   it('resolves the three presets to their chat URLs', function () {
@@ -76,5 +76,73 @@ describe('ai — provider endpoint resolution', function () {
         assert.match(resolveEndpoint({ provider: key }).url, /\/chat\/completions$/);
       }
     }
+  });
+});
+
+describe('ai — provider capability probes', function () {
+  it('a healthy provider answers with its model ids', async function () {
+    /** @type {any} */
+    let seen = null;
+    const result = await probeProvider({
+      provider: 'openrouter', apiKey: 'sk-x',
+      fetch: (url, init) => {
+        seen = { url, init };
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [{ id: 'qwen/qwen3-4b' }, { id: 'meta/llama-3' }, { broken: true }],
+        }), { status: 200 }));
+      },
+    });
+    assert.deepStrictEqual(result, { ok: true, models: ['qwen/qwen3-4b', 'meta/llama-3'] });
+    assert.strictEqual(seen.url, 'https://openrouter.ai/api/v1/models');
+    assert.strictEqual(seen.init.method, 'GET');
+    assert.strictEqual(seen.init.headers.authorization, 'Bearer sk-x',
+      'the probe authenticates exactly like a chat turn');
+  });
+
+  it('a rejected key reports the status without throwing', async function () {
+    const result = await probeProvider({
+      provider: 'openrouter', apiKey: 'bad',
+      fetch: () => Promise.resolve(new Response('denied', { status: 401 })),
+    });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(/** @type {any} */ (result).status, 401);
+    assert.match(/** @type {any} */ (result).error, /401/);
+  });
+
+  it('a network failure and an invalid configuration both come back as { ok: false }', async function () {
+    const down = await probeProvider({
+      provider: 'ollama',
+      fetch: () => Promise.reject(new TypeError('fetch failed')),
+    });
+    assert.strictEqual(down.ok, false);
+    assert.match(/** @type {any} */ (down).error, /fetch failed/);
+
+    const misconfigured = await probeProvider({ provider: 'custom' });
+    assert.strictEqual(misconfigured.ok, false);
+    assert.match(/** @type {any} */ (misconfigured).error, /baseUrl/);
+  });
+
+  it('falls back to the global fetch when none is injected', async function () {
+    const original = globalThis.fetch;
+    globalThis.fetch = /** @type {any} */ (() => Promise.resolve(new Response(
+      JSON.stringify({ data: [{ id: 'global-model' }] }), { status: 200 })));
+    try {
+      const result = await probeProvider({ provider: 'ollama' });
+      assert.deepStrictEqual(result, { ok: true, models: ['global-model'] });
+    }
+    finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('a hung server times out through the probe signal', async function () {
+    const result = await probeProvider({
+      provider: 'ollama', timeoutMs: 20,
+      fetch: (url, init) => new Promise((resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    });
+    assert.strictEqual(result.ok, false);
+    assert.match(/** @type {any} */ (result).error, /within 20 ms/);
   });
 });

@@ -19,6 +19,7 @@
 
 import {
   createChatClient, createAgent, createToolbox, registerModelContext, PROVIDERS,
+  probeProvider,
 } from '@jarenjs/ai';
 
 import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
@@ -474,9 +475,11 @@ export function createAssistantEffects(deps) {
       // weak local models are first-class: enough rounds to read an
       // engine's { error } result, fetch an example and try again —
       // and a studio flow (template → write → patch → repair → save)
-      // legitimately runs long
+      // legitimately runs long. The history budget keeps long studio
+      // sessions inside a small local context window (~6k tokens).
       const agent = createAgent({
         client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 12,
+        historyBudget: 24_000,
       });
       // build the turn from this effect's own snapshot: the ai/user
       // dispatch above is queued FIFO behind the running transaction,
@@ -486,21 +489,43 @@ export function createAssistantEffects(deps) {
         .map((m) => ({ role: m.role, content: m.content }));
       agent.send(history, {
         onDelta: (text) => dispatch('ai/delta', text),
+        onReasoning: (text) => dispatch('ai/reasoning', text.length),
         onToolCall: (call) => dispatch('ai/activity', call.name),
         // back to 'Thinking…' between a tool's result and the next token
         onToolResult: () => dispatch('ai/activity', null),
       }).then(
-        // reasoning models sometimes return an empty final message —
-        // an honest placeholder beats an empty bubble
+        // an empty final message is a model quirk worth an honest line —
+        // and a reasoning-only turn deserves to say what happened
         (result) => dispatch('ai/reply', result.message.content !== ''
           ? result.message.content
-          : '*The model ended its turn without a reply — whatever it loaded is on screen; send another message to continue.*'),
+          : result.message.reasoning !== undefined
+            ? '*The model spent the whole turn reasoning without a final reply — send another message to continue.*'
+            : '*The model ended its turn without a reply — whatever it loaded is on screen; send another message to continue.*'),
         (err) => dispatch('ai/failed', err?.message ?? String(err)),
       );
     },
 
     'ai-save-settings': () => {
       deps.aiStorage.write(deps.getApp().getState().ai.settings);
+    },
+
+    // the settings "Test connection" button: one /models probe with the
+    // exact auth a chat turn would use; the result object drives the
+    // status line and the model-name datalist
+    'ai-probe': (props, dispatch) => {
+      const s = deps.getApp().getState().ai.settings;
+      probeProvider({
+        provider: s.provider,
+        baseUrl: s.baseUrl,
+        apiKey: s.apiKey,
+        fetch: deps.aiFetch,
+      }).then((result) => dispatch('ai/probe-result', result.ok
+        ? {
+          status: 'ok',
+          detail: `Connected — ${result.models.length} model${result.models.length === 1 ? '' : 's'} available.`,
+          models: result.models.slice(0, 100),
+        }
+        : { status: 'fail', detail: result.error, models: [] }));
     },
 
     // opening the panel unconfigured lands you in settings — pinned

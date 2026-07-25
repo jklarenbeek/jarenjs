@@ -378,3 +378,92 @@ describe('website — WebMCP over @jarenjs/ai', function () {
     assert.strictEqual(app.getState().ai.messages.length, 1);
   });
 });
+
+describe('website — the settings connection probe', function () {
+  it('a successful probe reports the model count and fills the datalist', async function () {
+    const { app, container, requests } = mountSite({
+      aiSettings: { provider: 'openrouter', baseUrl: '', model: '', apiKey: 'sk-t' },
+      onFetch: ({ url }) => {
+        assert.match(url, /\/models$/, 'the probe GETs the models listing');
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [{ id: 'qwen/a' }, { id: 'qwen/b' }],
+        }), { status: 200 }));
+      },
+    });
+    app.dispatch('ai/probe');
+    assert.strictEqual(app.getState().ai.probe.status, 'busy', 'busy while in flight');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const probe = app.getState().ai.probe;
+    assert.strictEqual(probe.status, 'ok');
+    assert.match(probe.detail, /2 models available/);
+    assert.deepStrictEqual(probe.models, ['qwen/a', 'qwen/b']);
+    assert.strictEqual(requests.length, 1);
+
+    // the panel renders the verdict and the datalist options
+    app.dispatch('ai/toggle');
+    app.dispatch('ai/settings-open', true);
+    const html = serialize(container);
+    assert.match(html, /2 models available/);
+    assert.match(html, /datalist/);
+    assert.match(html, /qwen\/b/);
+  });
+
+  it('a failed probe surfaces the error, and editing a setting resets the verdict', async function () {
+    const { app, container } = mountSite({
+      aiSettings: { provider: 'openrouter', baseUrl: '', model: 'm', apiKey: 'bad' },
+      onFetch: () => Promise.resolve(new Response('denied', { status: 401 })),
+    });
+    app.dispatch('ai/probe');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(app.getState().ai.probe.status, 'fail');
+    assert.match(app.getState().ai.probe.detail, /401/);
+
+    app.dispatch('ai/toggle');
+    app.dispatch('ai/settings-open', true);
+    assert.match(serialize(container), /HTTP 401/);
+
+    // touching any connection setting voids the stale verdict
+    app.dispatch('ai/setting', { key: 'apiKey' }, { target: { value: 'sk-new' } });
+    assert.strictEqual(app.getState().ai.probe.status, 'idle');
+    assert.strictEqual(app.getState().ai.probe.detail, null);
+  });
+});
+
+describe('website — reasoning-model streaming', function () {
+  const reasoningTurn = (thinking, content) => sseBody([
+    { choices: [{ delta: { role: 'assistant', reasoning: thinking } }] },
+    ...(content === '' ? [] : [{ choices: [{ delta: { content } }] }]),
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+  ]);
+
+  it('counts streamed reasoning and shows it in the thinking line', async function () {
+    const { app } = mountSite({
+      aiSettings: CONFIGURED,
+      responses: [reasoningTurn('let me think this through', 'Done.')],
+    });
+    app.dispatch('ai/toggle');
+    app.dispatch('ai/draft', null, { target: { value: 'question' } });
+    app.dispatch('ai/send');
+    await settle(app);
+
+    const state = app.getState();
+    assert.strictEqual(state.ai.reasoningChars, 'let me think this through'.length);
+    assert.strictEqual(state.ai.messages.at(-1).content, 'Done.');
+  });
+
+  it('a reasoning-only turn gets the honest reasoning placeholder', async function () {
+    const { app, container } = mountSite({
+      aiSettings: CONFIGURED,
+      responses: [reasoningTurn('thought hard, said nothing', '')],
+    });
+    app.dispatch('ai/toggle');
+    app.dispatch('ai/draft', null, { target: { value: 'question' } });
+    app.dispatch('ai/send');
+    await settle(app);
+
+    assert.match(app.getState().ai.messages.at(-1).content,
+      /spent the whole turn reasoning/);
+    assert.match(serialize(container), /reasoning/);
+  });
+});

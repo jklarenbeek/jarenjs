@@ -183,6 +183,30 @@ stringifyJsonx(v, { mode: 'json' });     // delegates to JSON.stringify
 | `@jarenjs/josl/jsonx` | `parseJsonx`, `stringifyJsonx` |
 | `@jarenjs/josl/jsonx-stream` | `createJsonxStreamReader`, `parseJsonxStream` |
 | `@jarenjs/josl/values` | `LocalDate`, `LocalTime`, `LocalDateTime` |
+| `@jarenjs/josl/schemas/*` | schema artifacts (`jaren-josl-data.schema.json`) |
+
+## Generating JOSL with LLMs
+
+JOSL is a *text* format, so "hand the grammar to a constrained decoder"
+has two possible shapes, and they serve different providers:
+
+1. **A JSON Schema over the data model** — the model emits JSON, and
+   `stringifyJosl` renders canonical JOSL text. This works with every
+   `json_schema`-capable provider today and composes directly with
+   `@jarenjs/ai`'s `createStructuredOutput`. It is what this package
+   ships: [`schemas/jaren-josl-data.schema.json`](./schemas/jaren-josl-data.schema.json)
+   describes the JSON-safe JOSL document (a root table of strings,
+   finite numbers, booleans, `null`, arrays and nested tables), and
+   `parseJosl(stringifyJosl(doc))` round-trips every document in it
+   exactly. JOSL's native date/time scalars parse to platform `Date`
+   values, which JSON cannot carry — represent them as strings and
+   parse downstream.
+2. **A character-level grammar (GBNF class) over raw JOSL text** — for
+   engines that constrain token sampling directly (llama.cpp family).
+   Exact on the text surface, but unverifiable in this repository's
+   test rig and unsupported by the hosted-API providers. Deliberately
+   NOT shipped until a concrete consumer appears; the data-model twin
+   above covers the practical need.
 
 ## Compliance & speed
 

@@ -79,6 +79,12 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     ai: {
       open: false,
       settingsOpen: false,
+      // the settings "Test connection" probe: idle | busy | ok | fail,
+      // a human detail line, and the model ids a successful probe found
+      probe: { status: 'idle', detail: null, models: [] },
+      // reasoning characters streamed this turn (thinking models emit
+      // reasoning before - or instead of - visible content)
+      reasoningChars: 0,
       settings: { ...DEFAULT_AI_SETTINGS, ...(aiSettings ?? {}) },
       // visible transcript: { role, content }; restored from local
       // storage so a page reload keeps the conversation

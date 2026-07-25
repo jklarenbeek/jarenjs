@@ -154,4 +154,139 @@ describe('ai — the agent loop', function () {
     assert.deepStrictEqual(chunks, ['par', 'tial']);
     assert.strictEqual(result.message.content, 'partial');
   });
+
+  it('forwards onReasoning and exposes reasoning on the result, never the transcript', async function () {
+    const client = {
+      complete: async ({ onReasoning }) => {
+        onReasoning?.('hmm');
+        return {
+          message: { role: 'assistant', content: 'done', toolCalls: null, reasoning: 'hmm' },
+          finishReason: 'stop',
+        };
+      },
+    };
+    const agent = createAgent({ client: /** @type {any} */ (client) });
+    const thinking = [];
+    const result = await agent.send([{ role: 'user', content: 'x' }],
+      { onReasoning: (t) => thinking.push(t) });
+    assert.deepStrictEqual(thinking, ['hmm']);
+    assert.strictEqual(result.message.reasoning, 'hmm');
+    assert.strictEqual(result.message.content, 'done');
+    const last = result.messages[result.messages.length - 1];
+    assert.strictEqual('reasoning' in last, false,
+      'the wire transcript stays clean for the next request');
+  });
+});
+
+describe('ai — history compaction', function () {
+  /** A long adversarial history: tool rounds, plain turns, big results. */
+  function longHistory(rounds) {
+    const messages = [{ role: 'user', content: 'build me a questionnaire' }];
+    for (let i = 0; i < rounds; i++) {
+      messages.push({
+        role: 'assistant', content: '',
+        tool_calls: [
+          { id: `a${i}`, type: 'function', function: { name: 'jaren_studio_patch', arguments: `{"patch":[{"op":"add","path":"/q${i}"}]}` } },
+          { id: `b${i}`, type: 'function', function: { name: 'jaren_studio_read', arguments: '{}' } },
+        ],
+      });
+      messages.push({ role: 'tool', tool_call_id: `a${i}`, name: 'jaren_studio_patch', content: `{"ok":true,"revision":${i}}` });
+      messages.push({ role: 'tool', tool_call_id: `b${i}`, name: 'jaren_studio_read', content: 'x'.repeat(400) });
+      messages.push({ role: 'assistant', content: `round ${i} done, on to the next step` });
+    }
+    messages.push({ role: 'user', content: 'now add a sleep question' });
+    return messages;
+  }
+
+  /** A client capturing what actually went on the wire. */
+  function capturingClient() {
+    /** @type {any[][]} */
+    const wires = [];
+    return {
+      wires,
+      client: {
+        complete: async ({ messages }) => {
+          wires.push(messages);
+          return final('ok');
+        },
+      },
+    };
+  }
+
+  it('under budget the history passes through by reference', async function () {
+    const { wires, client } = capturingClient();
+    const agent = createAgent({ client: /** @type {any} */ (client), historyBudget: 1_000_000 });
+    const history = longHistory(2);
+    await agent.send(history);
+    assert.strictEqual(wires[0].length, history.length + 1, 'system + untouched history');
+  });
+
+  it('over budget: pairing survives, pins survive, budget is respected', async function () {
+    const { wires, client } = capturingClient();
+    const agent = createAgent({
+      client: /** @type {any} */ (client),
+      system: 'You are the assistant.',
+      historyBudget: 4_000,
+    });
+    const history = longHistory(12);
+    const result = await agent.send(history);
+    const wire = wires[0];
+
+    // pins: system first, then the first user message
+    assert.strictEqual(wire[0].role, 'system');
+    assert.strictEqual(wire[1].content, 'build me a questionnaire');
+
+    // budget respected (the synopsis reserve keeps a small margin)
+    const size = wire.reduce((n, m) => n + JSON.stringify(m).length, 0);
+    assert.ok(size <= 4_000, `wire size ${size} within the budget`);
+
+    // wire-format integrity: every tool reply has its assistant call
+    // in the same request, and every call has its reply
+    const callIds = new Set(wire.flatMap((m) =>
+      Array.isArray(m.tool_calls) ? m.tool_calls.map((c) => c.id) : []));
+    for (const m of wire) {
+      if (m.role === 'tool') assert.ok(callIds.has(m.tool_call_id), `orphan tool reply ${m.tool_call_id}`);
+    }
+    for (const id of callIds) {
+      assert.ok(wire.some((m) => m.role === 'tool' && m.tool_call_id === id), `unanswered call ${id}`);
+    }
+
+    // the synopsis names the dropped tool activity
+    const synopsis = wire.find((m) => typeof m.content === 'string' && m.content.startsWith('[Earlier context'));
+    assert.ok(synopsis, 'a synopsis message replaced the dropped middle');
+    assert.match(synopsis.content, /jaren_studio_patch/);
+    assert.match(synopsis.content, /→/);
+
+    // the latest user turn survived in the tail
+    assert.ok(wire.some((m) => m.content === 'now add a sleep question'));
+
+    // the RETURNED transcript is the full, uncompacted history
+    assert.strictEqual(result.messages.length, history.length + 2,
+      'system + full history + the final reply');
+  });
+
+  it('a custom compaction hook receives exactly the dropped rounds', async function () {
+    const { wires, client } = capturingClient();
+    /** @type {any[][] | null} */
+    let seen = null;
+    const agent = createAgent({
+      client: /** @type {any} */ (client),
+      historyBudget: 4_000,
+      compaction: (dropped) => {
+        seen = dropped;
+        return 'CUSTOM SUMMARY';
+      },
+    });
+    await agent.send(longHistory(12));
+    const wire = wires[0];
+    assert.ok(wire.some((m) => m.content === 'CUSTOM SUMMARY'));
+    assert.ok(Array.isArray(seen) && seen.length > 0);
+    for (const unit of /** @type {any[][]} */ (seen)) {
+      assert.ok(Array.isArray(unit) && unit.length > 0, 'each dropped round is a message unit');
+      if (unit[0].role === 'assistant' && Array.isArray(unit[0].tool_calls)) {
+        assert.ok(unit.slice(1).every((m) => m.role === 'tool'),
+          'tool rounds travel whole into the hook');
+      }
+    }
+  });
 });

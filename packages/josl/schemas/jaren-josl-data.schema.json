@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-josl-data/0.1",
+  "title": "JOSL document data model (JSON-safe subset)",
+  "description": "The JSON-safe data model of a JOSL document, for LLM structured output: a model emits JSON matching this schema and stringifyJosl renders canonical JOSL text (parseJosl round-trips it exactly). The subset is deliberate - JOSL's native date/time scalars parse to platform Date values, which JSON cannot carry; represent them as strings and parse downstream. The root is a table (object), exactly as in TOML.",
+  "type": "object",
+  "additionalProperties": { "$ref": "#/$defs/value" },
+  "$defs": {
+    "value": {
+      "description": "Any JSON-safe JOSL value: scalars, arrays, or nested tables.",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" },
+        { "type": "array", "items": { "$ref": "#/$defs/value" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" } }
+      ]
+    }
+  }
+}

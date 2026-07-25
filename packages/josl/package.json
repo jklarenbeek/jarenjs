@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/josl",
   "private": false,
-  "version": "0.19.4",
+  "version": "0.19.5",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -42,6 +42,7 @@
   "files": [
     "dist/types/",
     "src/",
+    "schemas/",
     "FORMAT.md"
   ],
   "exports": {
@@ -77,9 +78,10 @@
       "types": "./dist/types/values.d.ts",
       "default": "./src/values.js"
     },
+    "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.19.4"
+    "@jarenjs/core": "^0.19.5"
   }
 }

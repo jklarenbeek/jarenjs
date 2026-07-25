@@ -41,12 +41,23 @@ const settingsForm =
     ['label', { class: 'ai-field' },
       ['span', {}, 'Model'],
       ['input', {
-        type: 'text', class: 'editor line', spellcheck: 'false',
+        type: 'text', class: 'editor line', spellcheck: 'false', list: 'ai-models',
         placeholder: 'qwen/qwen3-4b · llama3.2 · …', value: '$.settings.model',
         on: { input: { action: 'ai/setting', with: { key: 'model' } } },
       }],
+      // a successful probe fills this in: the input becomes a picker
+      ['datalist', { id: 'ai-models' }, [{ $apply: '$.settings.probe.models[*]' }]],
     ],
-    ['button', { type: 'submit', class: 'btn small' }, 'Save'],
+    ['div', { class: 'ai-settings-actions' },
+      ['button', { type: 'submit', class: 'btn small' }, 'Save'],
+      ['button', {
+        type: 'button', class: 'btn small',
+        disabled: { $if: ['$.settings.probe.busy', 'disabled', false] },
+        on: { click: 'ai/probe' },
+      }, { $if: ['$.settings.probe.busy', 'Testing…', 'Test connection'] }],
+    ],
+    { $if: ['$.settings.probe.ok', ['p', { class: 'ai-hint' }, '$.settings.probe.detail']] },
+    { $if: ['$.settings.probe.fail', ['p', { class: 'ai-error' }, '$.settings.probe.detail']] },
   ];
 
 const intro =
@@ -106,7 +117,7 @@ const panel =
       { $if: ['$.activity',
         ['p', { class: 'ai-activity' }, 'Running ', ['code', {}, '$.activity'], '…']] },
       { $if: [{ $and: [{ $eq: ['$.status', 'streaming'] }, { $not: '$.pending' }, { $not: '$.activity' }] },
-        ['p', { class: 'ai-activity' }, 'Thinking…']] },
+        ['p', { class: 'ai-activity' }, '$.thinkingLabel']] },
       { $if: ['$.error', ['p', { class: 'ai-error' }, '$.error']] },
     ],
     { $if: ['$.configured', composer] },
@@ -126,6 +137,10 @@ export const ASSISTANT_RULES = [
   {
     match: '$.ui.assistant.providers[*]', mode: 'assistant',
     body: ['option', { value: '$.value', selected: '$.selected' }, '$.label'],
+  },
+  {
+    match: '$.ui.assistant.settings.probe.models[*]', mode: 'assistant',
+    body: ['option', { value: '$.id' }],
   },
   {
     match: "$.ui.assistant.messages[?@.role == 'user']", mode: 'assistant',
