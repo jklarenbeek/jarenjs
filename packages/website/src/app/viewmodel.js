@@ -21,7 +21,7 @@ import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
 import { callout, error } from '../lib/nodes.js';
-import { formatMs, memo1 } from '../lib/format.js';
+import { formatMs, formatRatio, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
 
 const NAV = [
@@ -84,12 +84,14 @@ function homeContent(state) {
     engines: HOME_CONTENT.engines.map((engine) => {
       const headline = byKey.get(HOME_ENGINE_SUITE[engine.key]);
       if (headline === undefined || !Number.isFinite(headline.ratio)) return engine;
-      const speed = `${headline.ratio >= 100 ? Math.round(headline.ratio) : headline.ratio.toFixed(1)}×`;
+      // formatRatio names the direction, so a sub-parity suite reads
+      // "2.3× slower than …" rather than the cryptic "0.4× vs …"
+      const speed = `${formatRatio(headline.ratio)} than ${headline.rival}`;
       return {
         ...engine,
         perf: headline.conformance
-          ? `${headline.conformance} conformance · ${speed} vs ${headline.rival}`
-          : `${speed} vs ${headline.rival}`,
+          ? `${headline.conformance} conformance · ${speed}`
+          : speed,
       };
     }),
   };

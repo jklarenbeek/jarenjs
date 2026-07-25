@@ -379,7 +379,37 @@ const tomlCharts = memo1((data) => ({
       valLabel: 'ms/op',
     }))
     : undefined,
+  streamDocument: Array.isArray(data.stream?.document)
+    ? chartNode(timingBars(data.stream.document, {
+      title: 'Incremental document — ns per parse (log)', log: true, valLabel: 'ns/op (log)',
+    }))
+    : undefined,
 }));
+
+/**
+ * The JSONX / strict-JSON streaming reader rows. `JSON.parse` is the
+ * baseline and it wins on raw text — it is a native full-text parser.
+ * The point of the comparison is what it costs to gain what
+ * `JSON.parse` cannot do at all: accept a document in arbitrary chunks
+ * and emit document-order events while it arrives.
+ */
+function streamingRows(stream, charts) {
+  if (stream === undefined || stream === null) return [];
+  const out = [callout('Streaming JSON — what the delta buys',
+    `JSON.parse is the baseline here and it is faster on complete text: it is a native full-text parser with no incremental input and no events. The reader's delta is the price of accepting a document in arbitrary chunks — split mid-escape, mid-number, mid-keyword — and emitting document-order pair events as it arrives, which is what the live Binance feed and the playground replay run on. Result equality with JSON.parse is asserted before timing.`)];
+  out.push(table(
+    `Message feed — one ${stream.messageBytes ?? '?'} B document per reader`,
+    ['Path', 'ns per document'],
+    (stream.message ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
+    'The WebSocket shape: many small complete documents, a fresh reader each. Reader construction is a flat object allocation, which is why there is no reset()-for-reuse API.'));
+  if (charts.streamDocument !== undefined) out.push(charts.streamDocument);
+  out.push(table(
+    `Incremental document — ${stream.documentBytes ?? '?'} B in ${stream.chunks ?? '?'} chunks of ${stream.chunkBytes ?? '?'} B`,
+    ['Path', 'ns per parse'],
+    (stream.document ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
+    'The LLM token-output shape: one large document arriving in small pieces. The last row is the streaming path doing what no full-text parser can.'));
+  return out;
+}
 
 function toml(data) {
   const out = [];
@@ -405,6 +435,7 @@ function toml(data) {
       })),
       'smol-toml keeps a raw-throughput edge; Jaren is the only engine passing the complete suite while streaming.'));
   }
+  out.push(...streamingRows(data.stream, tomlCharts(data)));
   return out;
 }
 

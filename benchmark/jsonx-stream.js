@@ -26,6 +26,8 @@
 
 /* eslint-disable no-console */
 
+import { writeFileSync } from 'node:fs';
+
 import { parseJsonx, createJsonxStreamReader } from '@jarenjs/josl';
 import { deepStrictEqual } from 'node:assert';
 
@@ -38,6 +40,8 @@ const opt = (name, fallback) => {
 };
 const ITERATIONS = opt('iterations', 1000);
 const CHUNK = opt('chunk', 16);
+const OUTPUT = args.includes('--output') ? args[args.indexOf('--output') + 1] : null;
+const FILEPATH = args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null;
 const WARMUP = Math.max(10, Math.floor(ITERATIONS / 10));
 
 //#endregion
@@ -119,18 +123,44 @@ console.log(`equivalence: stream (single + ${LARGE_CHUNKS.length}-chunk) === JSO
 console.log(`\nmessage: ${MESSAGE.length} B, document: ${LARGE.length} B, `
   + `chunk: ${CHUNK} B, iterations: ${ITERATIONS} (+${WARMUP} warmup), node ${process.version}`);
 
-printTable(`message feed — one ${MESSAGE.length} B document per reader`, [
+const messageRows = [
   measure('JSON.parse', () => JSON.parse(MESSAGE)),
   measure('parseJsonx (json mode)', () => parseJsonx(MESSAGE, { mode: 'json' })),
   measure('stream reader per document', () => streamParse([MESSAGE], { mode: 'json' })),
-].sort((a, b) => a.ns - b.ns));
+].sort((a, b) => a.ns - b.ns);
+printTable(`message feed — one ${MESSAGE.length} B document per reader`, messageRows);
 
-printTable(`incremental document — ${LARGE.length} B in ${LARGE_CHUNKS.length} chunks`, [
+const documentRows = [
   measure('JSON.parse (whole text)', () => JSON.parse(LARGE)),
   measure('parseJsonx (whole text)', () => parseJsonx(LARGE, { mode: 'json' })),
   measure('stream reader (whole text)', () => streamParse([LARGE], { mode: 'json' })),
   measure(`stream reader (${CHUNK} B chunks)`, () => streamParse(LARGE_CHUNKS, { mode: 'json' })),
-].sort((a, b) => a.ns - b.ns));
+].sort((a, b) => a.ns - b.ns);
+printTable(`incremental document — ${LARGE.length} B in ${LARGE_CHUNKS.length} chunks`, documentRows);
+
+if (OUTPUT === 'json') {
+  // The website-data shape (benchmark/website-data.js → the JOSL suite's
+  // `stream` block): the two consumption shapes, each a {label, ns} list.
+  const data = {
+    date: new Date().toISOString(),
+    node: process.version,
+    iterations: ITERATIONS,
+    messageBytes: MESSAGE.length,
+    documentBytes: LARGE.length,
+    chunkBytes: CHUNK,
+    chunks: LARGE_CHUNKS.length,
+    message: messageRows,
+    document: documentRows,
+  };
+  const json = JSON.stringify(data, null, 2);
+  if (FILEPATH !== null) {
+    writeFileSync(FILEPATH, json);
+    console.log(`\nwrote ${FILEPATH}`);
+  }
+  else {
+    console.log(json);
+  }
+}
 
 console.log('\nMethodology: strict-JSON mode throughout so JSON.parse is an apples-to-apples');
 console.log('baseline; a fresh reader per document is the intended usage for message feeds');

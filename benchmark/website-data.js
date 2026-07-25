@@ -369,6 +369,29 @@ function generateToml(tmp, options) {
   };
 }
 
+/**
+ * The JSONX/strict-JSON streaming reader, measured against native
+ * `JSON.parse`. It rides the JOSL suite (same package, a second
+ * capability) rather than adding a tab.
+ */
+function generateJsonxStream(tmp, options) {
+  const file = path.join(tmp, 'jsonx-stream.json');
+  try {
+    runTool([
+      'benchmark/jsonx-stream.js',
+      '--iterations', String(options.quick ? 100 : 1000),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: jsonx-stream run failed (${e.message}); the streaming rows will be omitted.`);
+    return null;
+  }
+  const raw = readJson(file);
+  const slim = (rows) => (rows ?? []).map((r) => ({ label: r.label, ns: sig4(r.ns) }));
+  return { ...raw, message: slim(raw.message), document: slim(raw.document) };
+}
+
 function generateMarkdown(tmp, options) {
   const file = path.join(tmp, 'markdown.json');
   try {
@@ -594,7 +617,7 @@ function buildHeadlines(generated, meta) {
   // category error, so the headline compares libraries and the native
   // floor is reported separately in the suite tab.
   for (const [key, label, rivalName] of [
-    ['jsonquery', 'JSON Query', 'fastest library rival'],
+    ['jsonquery', 'JSON Query', 'the fastest library rival'],
     ['jslt', 'JSLT', 'JSONata'],
   ]) {
     if (generated[key] === undefined) continue;
@@ -646,7 +669,7 @@ function buildHeadlines(generated, meta) {
         const best = bestRival(p.results, 'jaren');
         return best === null || !(p.results.jaren > 0) ? null : best / p.results.jaren;
       })),
-      rival: 'fastest rival',
+      rival: 'the fastest rival',
       conformance: `${generated.toml.compliance?.jaren?.pass ?? '?'} / ${generated.toml.compliance?.jaren?.total ?? '?'}`,
       note: 'toml-test 1.0.0, the only full pass',
     });
@@ -658,7 +681,7 @@ function buildHeadlines(generated, meta) {
         const best = bestRival(p.results, 'jaren-md');
         return best === null || !(p.results['jaren-md'] > 0) ? null : best / p.results['jaren-md'];
       })),
-      rival: 'fastest rival',
+      rival: 'the fastest rival',
       conformance: `${generated.markdown.scorecard?.['jaren-md']?.pass ?? '?'} / ${generated.markdown.examples ?? '?'}`,
       note: 'CommonMark examples (no raw HTML by design)',
     });
@@ -729,8 +752,12 @@ async function main() {
     generated.jsonpatch = generateJsonPatch(tmp, options);
   if (!options.skip.has('toml')) {
     const toml = generateToml(tmp, options);
-    if (toml !== null)
-      generated.toml = toml;
+    if (toml !== null) {
+      const stream = options.skip.has('jsonx-stream')
+        ? null
+        : generateJsonxStream(tmp, options);
+      generated.toml = stream === null ? toml : { ...toml, stream };
+    }
   }
   if (!options.skip.has('markdown')) {
     const markdown = generateMarkdown(tmp, options);
