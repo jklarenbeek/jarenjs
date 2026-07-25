@@ -18,6 +18,7 @@
  */
 
 import { resolveTheme } from '@jarenjs/view/helpers';
+import { lerpColor, relativeLuminance } from '@jarenjs/core/color';
 
 /**
  * The categorical series palette (DESIGN.md §8 anchor order).
@@ -34,6 +35,48 @@ export const CATEGORICAL = ['#2563eb', '#f59e0b', '#0d9488', '#dc2626', '#16a34a
  */
 export function seriesColor(i, palette = CATEGORICAL) {
   return palette[i % palette.length];
+}
+
+/**
+ * The sequential magnitude ramp: one hue (the brand blue family),
+ * light→dark, for value-carrying fills (heatmap cells). A concrete
+ * constant like {@link CATEGORICAL}, not a theme token. The stops keep
+ * monotone perceptual lightness with visible step gaps, and both ends
+ * stay legible against the light and the dark site surface (the ramp
+ * does not flip with the theme).
+ * @type {readonly string[]}
+ */
+export const SEQUENTIAL = ['#60a5fa', '#3b82f6', '#2563eb', '#1e40af'];
+
+/**
+ * Continuous color for a normalized magnitude: `t` in [0,1] maps onto
+ * the ramp by piecewise-linear interpolation between its stops
+ * (clamped; non-finite `t` reads as 0).
+ * @param {number} t - Normalized magnitude (0 = low, 1 = high)
+ * @param {readonly string[]} [ramp] - Ramp stops, light→dark
+ * @returns {string} a `#rrggbb` color
+ */
+export function sequentialColor(t, ramp = SEQUENTIAL) {
+  if (!Number.isFinite(t)) t = 0;
+  else if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const spans = ramp.length - 1;
+  if (spans <= 0) return ramp[0];
+  const at = t * spans;
+  const i = Math.min(spans - 1, Math.floor(at));
+  return lerpColor(ramp[i], ramp[i + 1], at - i);
+}
+
+/**
+ * A legible ink for text set INSIDE a concrete fill (treemap tiles):
+ * near-black on light fills, white on dark ones. Keyed off the fill's
+ * luminance, not the theme — the fill is a palette constant, so the
+ * right ink is too.
+ * @param {string} fillHex - The `#rrggbb` fill under the text
+ * @returns {string}
+ */
+export function inkFor(fillHex) {
+  return relativeLuminance(fillHex) > 0.4 ? '#1f2020' : '#ffffff';
 }
 
 /** @type {Record<string, Record<string, string>>} */

@@ -801,6 +801,35 @@ export const chartsExamples = [
     }, null, 2),
   },
   {
+    name: 'Heatmap (JSON)',
+    format: 'json',
+    stream: 'off',
+    source: JSON.stringify({
+      type: 'heatmap',
+      title: 'Speed ratio by scenario × scale (log)',
+      log: true,
+      xLabels: ['4 books', '100 books', '1000 books'],
+      yLabels: ['singular', 'filter', 'join'],
+      values: [[220, 80, 12], [90, 30, 6], [15, 4, 1.2]],
+    }, null, 2),
+  },
+  {
+    name: 'Sankey (JSON)',
+    format: 'json',
+    stream: 'off',
+    source: JSON.stringify({
+      type: 'sankey',
+      title: 'Where visits go',
+      links: [
+        { source: 'search', target: 'home', value: 40 },
+        { source: 'social', target: 'home', value: 15 },
+        { source: 'home', target: 'docs', value: 30 },
+        { source: 'home', target: 'playground', value: 20 },
+        { source: 'docs', target: 'github', value: 8 },
+      ],
+    }, null, 2),
+  },
+  {
     name: 'Replay — JOSL [[run]]',
     format: 'josl',
     stream: 'replay',

@@ -24,14 +24,17 @@ import { CATEGORICAL } from '../core/palette.js';
  * @property {'pie'} type
  * @property {string|null} title
  * @property {number} total
+ * @property {number|null} inner donut hole radius as a fraction of the outer radius (null = solid pie)
  * @property {PieSliceAST[]} slices
  */
 
 /**
  * Build the geometry-free pie AST: labels/values → fractions and
- * accumulated start/end angles, starting at 12 o'clock.
+ * accumulated start/end angles, starting at 12 o'clock. `config.donut`
+ * turns the pie into a donut: `true` uses the default hole fraction,
+ * a number in (0, 1) sets it directly.
  * @param {{slices?: {label: string, value: number}[]}} data
- * @param {{title?: string|null}} [config]
+ * @param {{title?: string|null, donut?: boolean|number}} [config]
  * @returns {PieAST}
  */
 export function buildPieAST(data, config = {}) {
@@ -51,10 +54,15 @@ export function buildPieAST(data, config = {}) {
     });
     angle = next;
   }
+  const donut = config.donut;
+  const inner = donut === true ? 0.55
+    : typeof donut === 'number' && donut > 0 && donut < 1 ? donut
+      : null;
   return {
     type: 'pie',
     title: config.title ?? null,
     total,
+    inner,
     slices,
   };
 }
@@ -91,6 +99,8 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   const R = 130;
   const cx = R + 20;
   const cy = R + 40;
+  const inner = ast.inner ?? null;
+  const r = inner === null ? 0 : R * inner;
   const slices = [];
   for (let i = 0; i < ast.slices.length; i++) {
     const s = ast.slices[i];
@@ -100,8 +110,13 @@ export function renderPieAST(ast, theme, hash, options = {}) {
     const y2 = cy + R * Math.sin(s.end);
     const large = s.frac > 0.5 ? 1 : 0;
     const color = palette[i % palette.length];
-    slices.push(path(
-      `M${num(cx)},${num(cy)} L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} Z`,
+    const d = inner === null
+      ? `M${num(cx)},${num(cy)} L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} Z`
+      : `M${num(cx + r * Math.cos(s.start))},${num(cy + r * Math.sin(s.start))} `
+        + `L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} `
+        + `L${num(cx + r * Math.cos(s.end))},${num(cy + r * Math.sin(s.end))} `
+        + `A${num(r)},${num(r)} 0 ${large} 0 ${num(cx + r * Math.cos(s.start))},${num(cy + r * Math.sin(s.start))} Z`;
+    slices.push(path(d,
       { fill: color, stroke: sliceStroke, 'stroke-width': 1, class: sliceClass }));
   }
 

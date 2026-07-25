@@ -44,6 +44,12 @@
 .chart-grid { stroke: var(--chart-grid); }
 .chart-axis { stroke: var(--chart-axis); }
 .chart-ref { stroke: var(--chart-muted); }
+.chart-gauge-track { stroke: var(--chart-grid); }
+.chart-gauge-value { fill: var(--chart-text); }
+.chart-box-whisker { stroke: var(--chart-axis); }
+.chart-stream-band { stroke: var(--chart-slice-stroke); }
+.chart-sankey-link { fill: var(--chart-muted); }
+.chart-sankey-label { fill: var(--chart-text); }
 .chart-candle-up { stroke: var(--chart-win); }
 rect.chart-candle-up { fill: var(--chart-win); stroke: none; }
 .chart-candle-down { stroke: var(--chart-loss); }

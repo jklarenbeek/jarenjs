@@ -208,16 +208,51 @@ experimental label and joined it to the release train.
 ## @jarenjs/charts (charts + streaming, shipped 2026-07-21)
 
 Headless charts: definition + data → geometry-free AST → pure-vnode
-SVG, five types (pie/bar/line/scatter/candlestick), a stream adapter
-over the josl readers' unified events, benchmark-page charts across
-every suite, a playground engine with chunked replay, and the Binance
-live demo (strict-JSON reader end to end). Backlog, each item waiting
-for a consumer:
+SVG, twelve types, a stream adapter over the josl readers' unified
+events, benchmark-page charts across every suite, a playground engine
+with chunked replay, and the Binance live demo (strict-JSON reader end
+to end).
 
-- [ ] **More chart types** — radar, treemap, sankey, gauge, boxplot, streamgraph, a donut variant of pie.
-- [ ] **Heatmap for the scenario matrices** — the jsonquery/jslt benchmark matrices ship as grouped bars; a heatmap is the alternative if they ever read poorly.
+- [x] **More chart types** — **shipped**: `radar`, `gauge`, `boxplot`
+  (raw samples summarized with linear-interpolated quartiles and Tukey
+  1.5·IQR whiskers, or precomputed five-number summaries trusted as
+  given), `treemap` (squarified in aspect-scaled space so optimized
+  ratios are the rendered ones), `streamgraph` (silhouette baseline),
+  `sankey` (nodes collected from links, cycle-closing links dropped,
+  longest-path layering, one global value→height scale) and the donut
+  variant of pie (`donut: true` or a hole fraction; the solid pie stays
+  byte-identical, preserving mermaid parity). Every type follows the
+  two-stage geometry-free contract, is schema-covered, golden-pinned,
+  and demoed on the /charts page.
+- [x] **Heatmap for the scenario matrices** — **shipped** as the
+  `heatmap` type: category × category cells on the new `SEQUENTIAL`
+  ramp (single-hue blue, light→dark, monotone lightness, legible on
+  both surfaces), linear or log normalization, per-cell value hover
+  text, and a min→max ramp key riding the frame legend.
+- [ ] **Per-mark hover titles for the first five types** — types added
+  after the first five carry a `<title>` per value mark (bar rects,
+  slices, points); retrofitting the original five is a deliberate
+  golden-fixture regeneration (and a mermaid-parity decision for pie),
+  so it waits for that call.
 - [ ] **JSON-Patch-based O(1) incremental re-render** — blocked on partial re-render support in `@jarenjs/app`; today the projection re-renders wholesale per snapshot (162 µs for a 100×5 line chart, `npm run benchmark:charts`).
-- [ ] **Tooltip interactivity beyond SVG `<title>`/CSS hover** — blocked on app action wiring for pointer events.
+- [ ] **Tooltip interactivity beyond SVG `<title>`/CSS hover** — still
+  waiting on chart-side binding emission and a consumer; the app half
+  thinned since this was filed (`eventFields` now carries pointer
+  coordinates), so what remains is emitting bindings from chart marks
+  and a floating-tooltip host pattern.
+- [ ] **Streaming accumulators for the new types** — the stream adapter
+  covers `line`/`bar`/`candlestick`; a `heatmap` accumulator (live
+  scenario counts) and a `gauge` accumulator (latest-value) are the
+  natural next consumers of the same unified `pair` events.
+- [ ] **Radial tick strategy for many-axis radars** — past ~12 axes the
+  spoke labels crowd; an every-other-label or leader-line strategy is
+  the fix if a consumer hits it.
+- [ ] **Sankey crossing reduction** — nodes stack in input order within
+  a layer (like mermaid's dagre-lite, crossing minimization deferred);
+  barycenter ordering is the known next lever.
+- [ ] **Nested treemap** — the tiles are flat `{label, value}`; one
+  hierarchy level (group borders, group-first squarify) would cover
+  package→module breakdowns.
 
 ## Benchmarks, tooling & website
 

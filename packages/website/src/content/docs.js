@@ -199,7 +199,7 @@ export const DOCS_SECTIONS = [
   {
     id: 'charts', title: 'Charts',
     blocks: [
-      p('Headless charts: @jarenjs/charts compiles a definition document plus its data into a geometry-free AST (fractions, angles, unit coordinates — no pixels) and renders pure-vnode SVG through @jarenjs/view. Five types — pie, bar, line, scatter, candlestick — themed by host-linked tokens; the Benchmarks page charts and the mermaid pie are this engine.'),
+      p('Headless charts: @jarenjs/charts compiles a definition document plus its data into a geometry-free AST (fractions, angles, unit coordinates — no pixels) and renders pure-vnode SVG through @jarenjs/view. Twelve types — pie (and donut), bar, line, scatter, candlestick, radar, gauge, boxplot, heatmap, treemap, streamgraph, sankey — themed by host-linked tokens; the Benchmarks page charts and the mermaid pie are this engine.'),
       code("import { compileChart } from '@jarenjs/charts';\nconst compiled = compileChart({ type: 'pie', title: 'Pets',\n  slices: [{ label: 'Dogs', value: 40 }, { label: 'Cats', value: 25 }] });\ncompiled.ast;           // geometry-free JSON\ncompiled.toSvgString(); // standalone SVG"),
       p('The stream adapter turns the josl readers’ unified events into live chart data: records assemble as their fields arrive (path mode for one big document in chunks, document mode for many small messages), with ring-buffer eviction and identity-keyed memo re-renders. The playground replay demo and the Binance live feed are both this one code path.'),
       {

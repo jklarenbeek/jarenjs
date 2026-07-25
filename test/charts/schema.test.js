@@ -18,6 +18,26 @@ const FIXTURES = [
   { type: 'pie', slices: [{ label: 'x', value: 1 }] },
   { type: 'pie', title: null, slices: [] },
   { type: 'pie', title: 'Memo' },
+  { type: 'pie', donut: true, slices: [{ label: 'a', value: 1 }] },
+  { type: 'pie', donut: 0.4, slices: [{ label: 'a', value: 1 }] },
+  { type: 'radar', max: 10, axes: ['a', 'b', 'c'], series: [{ name: 's', values: [1, null, 3] }] },
+  { type: 'gauge', value: 87.4, min: 0, max: 100, unit: '%', tone: 'win' },
+  {
+    type: 'boxplot', valLabel: 'ms', boxes: [
+      { label: 'raw', values: [1, 2, 3] },
+      { label: 'summary', min: 1, q1: 2, med: 3, q3: 4, max: 5, outliers: [9] },
+    ],
+  },
+  {
+    type: 'heatmap', log: true, xLabels: ['x1'], yLabels: ['y1', 'y2'],
+    values: [[1], [null]],
+  },
+  { type: 'treemap', aspect: 1.6, items: [{ label: 'a', value: 2 }] },
+  { type: 'streamgraph', xs: [0, 1], series: [{ name: 'a', values: [1, 2] }] },
+  {
+    type: 'sankey', nodes: ['a', { name: 'b' }],
+    links: [{ source: 'a', target: 1, value: 3 }],
+  },
 ];
 
 describe('the chart-definition JSON Schema', function () {
@@ -35,5 +55,20 @@ describe('the chart-definition JSON Schema', function () {
     assert.equal(validate({}), false);
     assert.equal(validate({ type: 'pie', slices: [{ label: 'a' }] }), false);
     assert.equal(validate({ type: 'pie', slices: [{ label: 'a', value: -1 }] }), false);
+  });
+
+  it('rejects malformed new-type documents', function () {
+    // a numeric donut must be a fraction strictly inside (0, 1)
+    assert.equal(validate({ type: 'pie', donut: 1.5, slices: [] }), false);
+    assert.equal(validate({ type: 'radar', max: 0 }), false);
+    assert.equal(validate({ type: 'gauge', value: 'high' }), false);
+    // a box needs raw values or the full five-number summary
+    assert.equal(validate({ type: 'boxplot', boxes: [{ label: 'x' }] }), false);
+    assert.equal(validate({ type: 'boxplot', boxes: [{ label: 'x', min: 1, q1: 2 }] }), false);
+    assert.equal(validate({ type: 'heatmap', values: [[1], 'row'] }), false);
+    assert.equal(validate({ type: 'treemap', items: [{ label: 'a', value: 0 }] }), false);
+    assert.equal(validate({ type: 'streamgraph', xs: ['monday'] }), false);
+    assert.equal(validate({ type: 'sankey', links: [{ source: 'a', target: 'b' }] }), false);
+    assert.equal(validate({ type: 'sankey', links: [{ source: 'a', target: 'b', value: 0 }] }), false);
   });
 });

@@ -36,6 +36,17 @@ Every chart type is one file in `src/types/` exporting two stages:
 returns cached projections (`ast`, `toVnode()`, `toSvgString()`), the
 `compileMermaid` bundle shape.
 
+Twelve types follow the contract: the original five (`pie` — donut
+variant included — `bar`, `line`, `scatter`, `candlestick`) plus
+`radar`, `gauge`, `boxplot`, `heatmap`, `treemap`, `streamgraph` and
+`sankey`. Cartesian types share `cartesianFrame`; `radar`/`gauge` are
+polar around their own centers; `treemap`/`sankey` lay out in the unit
+square with `y` growing downward (no axes — reading order wins). Types
+added after the first five give every value-carrying mark a `<title>`
+child (native SSR-safe hover text); the first five keep their
+byte-stable output, so per-mark titles there would be a deliberate
+golden-fixture regeneration.
+
 ## Scales and axes (`src/core/`)
 
 Scales are pure `domain -> (value) => [0,1]` closures — construction
@@ -54,7 +65,13 @@ Two distinct mechanisms, per DESIGN.md:
 - The **categorical palette** (`CATEGORICAL`) is a concrete constant in
   the suite anchor order — not theme tokens (DESIGN.md §8). It is the
   palette the mermaid pie always used, so pies render byte-identically
-  through either package.
+  through either package. Its magnitude counterpart is **`SEQUENTIAL`**,
+  a single-hue blue ramp (light→dark, monotone perceptual lightness,
+  both ends legible on the light and the dark surface) sampled
+  continuously by `sequentialColor(t)` — the heatmap's cell fill. Text
+  set *inside* a concrete fill (treemap tile labels) picks its ink with
+  `inkFor(fill)` by fill luminance, not by theme — the fill is a
+  constant, so the legible ink is too.
 - The **semantic tokens** (text, muted, grid, axis, win/loss,
   sliceStroke) resolve through the shared `resolveTheme` kernel with
   the `chart` prefix. `createTheme('host')` links them to the site

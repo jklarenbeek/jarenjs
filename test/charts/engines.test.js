@@ -53,6 +53,58 @@ const GOLDEN_CONFIGS = {
       { t: 1721556120000, open: 105, high: 109, low: 103, close: 109 },
     ],
   },
+  'donut.golden.svg': {
+    type: 'pie', title: 'Donut fixture', donut: true,
+    slices: [{ label: 'a', value: 3 }, { label: 'b', value: 2 }, { label: 'c', value: 1 }],
+  },
+  'radar.golden.svg': {
+    type: 'radar', title: 'Radar fixture', max: 10,
+    axes: ['speed', 'size', 'a11y', 'docs', 'tests'],
+    series: [
+      { name: 'jaren', values: [9, 8, 7, 8, 9] },
+      { name: 'rival', values: [6, 9, 5, 4, 7] },
+    ],
+  },
+  'gauge.golden.svg': {
+    type: 'gauge', title: 'Gauge fixture', value: 87.4, unit: '%', tone: 'win',
+  },
+  'boxplot.golden.svg': {
+    type: 'boxplot', title: 'Boxplot fixture', valLabel: 'ms',
+    boxes: [
+      { label: 'jaren', values: [1, 2, 2, 3, 3, 3, 4, 4, 5, 6, 14] },
+      { label: 'rival', min: 4, q1: 7, med: 9, q3: 12, max: 15, outliers: [30] },
+    ],
+  },
+  'heatmap.golden.svg': {
+    type: 'heatmap', title: 'Heatmap fixture', log: true,
+    xLabels: ['4 books', '100 books', '1000 books'],
+    yLabels: ['singular', 'filter', 'join'],
+    values: [[220, 80, 12], [90, 30, 6], [15, 4, 1.2]],
+  },
+  'treemap.golden.svg': {
+    type: 'treemap', title: 'Treemap fixture',
+    items: [
+      { label: 'validate', value: 42 }, { label: 'json', value: 25 },
+      { label: 'view', value: 18 }, { label: 'md', value: 15 },
+    ],
+  },
+  'streamgraph.golden.svg': {
+    type: 'streamgraph', title: 'Streamgraph fixture', xLabel: 't',
+    xs: [0, 1, 2, 3],
+    series: [
+      { name: 'a', values: [2, 4, 3, 5] },
+      { name: 'b', values: [1, 2, 4, 2] },
+    ],
+  },
+  'sankey.golden.svg': {
+    type: 'sankey', title: 'Sankey fixture',
+    links: [
+      { source: 'search', target: 'home', value: 40 },
+      { source: 'social', target: 'home', value: 15 },
+      { source: 'home', target: 'docs', value: 30 },
+      { source: 'home', target: 'playground', value: 20 },
+    ],
+  },
 };
 
 describe('engine golden SVGs', function () {
@@ -62,8 +114,11 @@ describe('engine golden SVGs', function () {
     });
   }
 
-  it('the dispatcher knows all five types', function () {
-    assert.deepEqual(chartTypes(), ['pie', 'bar', 'line', 'scatter', 'candlestick']);
+  it('the dispatcher knows every type', function () {
+    assert.deepEqual(chartTypes(), [
+      'pie', 'bar', 'line', 'scatter', 'candlestick',
+      'radar', 'gauge', 'boxplot', 'heatmap', 'treemap', 'streamgraph', 'sankey',
+    ]);
   });
 });
 

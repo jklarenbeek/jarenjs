@@ -23,6 +23,13 @@ import { buildBarAST, renderBarAST } from '../types/bar.js';
 import { buildLineAST, renderLineAST } from '../types/line.js';
 import { buildScatterAST, renderScatterAST } from '../types/scatter.js';
 import { buildCandlestickAST, renderCandlestickAST } from '../types/candlestick.js';
+import { buildRadarAST, renderRadarAST } from '../types/radar.js';
+import { buildGaugeAST, renderGaugeAST } from '../types/gauge.js';
+import { buildBoxplotAST, renderBoxplotAST } from '../types/boxplot.js';
+import { buildHeatmapAST, renderHeatmapAST } from '../types/heatmap.js';
+import { buildTreemapAST, renderTreemapAST } from '../types/treemap.js';
+import { buildStreamgraphAST, renderStreamgraphAST } from '../types/streamgraph.js';
+import { buildSankeyAST, renderSankeyAST } from '../types/sankey.js';
 
 /** @type {Record<string, {build: (data: any, config: any) => any, render: (ast: any, theme: any, hash: string, options?: any) => any}>} */
 const TYPES = {
@@ -31,6 +38,13 @@ const TYPES = {
   line: { build: buildLineAST, render: renderLineAST },
   scatter: { build: buildScatterAST, render: renderScatterAST },
   candlestick: { build: buildCandlestickAST, render: renderCandlestickAST },
+  radar: { build: buildRadarAST, render: renderRadarAST },
+  gauge: { build: buildGaugeAST, render: renderGaugeAST },
+  boxplot: { build: buildBoxplotAST, render: renderBoxplotAST },
+  heatmap: { build: buildHeatmapAST, render: renderHeatmapAST },
+  treemap: { build: buildTreemapAST, render: renderTreemapAST },
+  streamgraph: { build: buildStreamgraphAST, render: renderStreamgraphAST },
+  sankey: { build: buildSankeyAST, render: renderSankeyAST },
 };
 
 /**

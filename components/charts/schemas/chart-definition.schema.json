@@ -7,7 +7,7 @@
   "required": ["type"],
   "properties": {
     "type": {
-      "enum": ["pie", "bar", "line", "scatter", "candlestick"]
+      "enum": ["pie", "bar", "line", "scatter", "candlestick", "radar", "gauge", "boxplot", "heatmap", "treemap", "streamgraph", "sankey"]
     },
     "title": {
       "type": ["string", "null"]
@@ -19,6 +19,12 @@
       "if": { "properties": { "type": { "const": "pie" } } },
       "then": {
         "properties": {
+          "donut": {
+            "description": "true for the default hole fraction, or the hole radius as a fraction of the outer radius",
+            "type": ["boolean", "number"],
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1
+          },
           "slices": {
             "type": "array",
             "items": { "$ref": "#/$defs/slice" }
@@ -88,6 +94,125 @@
           "points": {
             "type": "array",
             "items": { "$ref": "#/$defs/point" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "radar" } } },
+      "then": {
+        "properties": {
+          "max": { "type": "number", "exclusiveMinimum": 0 },
+          "axes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "series": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/valueSeries" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "gauge" } } },
+      "then": {
+        "properties": {
+          "value": { "type": "number" },
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "unit": { "type": ["string", "null"] },
+          "tone": { "$ref": "#/$defs/tone" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "boxplot" } } },
+      "then": {
+        "properties": {
+          "catLabel": { "type": ["string", "null"] },
+          "valLabel": { "type": ["string", "null"] },
+          "boxes": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/box" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "heatmap" } } },
+      "then": {
+        "properties": {
+          "log": { "type": "boolean" },
+          "xLabel": { "type": ["string", "null"] },
+          "yLabel": { "type": ["string", "null"] },
+          "xLabels": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "yLabels": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "values": {
+            "description": "values[yi][xi], row-major from the top row; null marks a missing cell",
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": ["number", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "treemap" } } },
+      "then": {
+        "properties": {
+          "aspect": { "type": "number", "exclusiveMinimum": 0 },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/treemapItem" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "streamgraph" } } },
+      "then": {
+        "properties": {
+          "xLabel": { "type": ["string", "null"] },
+          "xs": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "series": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/valueSeries" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "sankey" } } },
+      "then": {
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": { "name": { "type": "string" } }
+                }
+              ]
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/sankeyLink" }
           }
         }
       }
@@ -165,6 +290,61 @@
         "high": { "type": "number" },
         "low": { "type": "number" },
         "close": { "type": "number" }
+      }
+    },
+    "valueSeries": {
+      "description": "a named series of index-aligned values (radar axes / streamgraph samples)",
+      "type": "object",
+      "required": ["name", "values"],
+      "properties": {
+        "name": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "box": {
+      "description": "one boxplot category: raw samples in `values`, or a precomputed five-number summary",
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "type": ["number", "null"] }
+        },
+        "min": { "type": "number" },
+        "q1": { "type": "number" },
+        "med": { "type": "number" },
+        "q3": { "type": "number" },
+        "max": { "type": "number" },
+        "outliers": {
+          "type": "array",
+          "items": { "type": "number" }
+        }
+      },
+      "anyOf": [
+        { "required": ["values"] },
+        { "required": ["min", "q1", "med", "q3", "max"] }
+      ]
+    },
+    "treemapItem": {
+      "type": "object",
+      "required": ["label", "value"],
+      "properties": {
+        "label": { "type": "string" },
+        "value": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "sankeyLink": {
+      "description": "a flow from source to target; endpoints are node names or node indexes",
+      "type": "object",
+      "required": ["source", "target", "value"],
+      "properties": {
+        "source": { "type": ["string", "integer"] },
+        "target": { "type": ["string", "integer"] },
+        "value": { "type": "number", "exclusiveMinimum": 0 }
       }
     }
   }

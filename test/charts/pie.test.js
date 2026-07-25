@@ -31,6 +31,38 @@ describe('pie AST', function () {
   });
 });
 
+describe('donut variant', function () {
+  it('config.donut true uses the default hole fraction; a number sets it', function () {
+    assert.equal(buildPieAST({ slices: [] }, {}).inner, null);
+    assert.equal(buildPieAST({ slices: [] }, { donut: true }).inner, 0.55);
+    assert.equal(buildPieAST({ slices: [] }, { donut: 0.4 }).inner, 0.4);
+  });
+
+  it('rejects out-of-range hole fractions (solid pie fallback)', function () {
+    assert.equal(buildPieAST({ slices: [] }, { donut: 0 }).inner, null);
+    assert.equal(buildPieAST({ slices: [] }, { donut: 1 }).inner, null);
+    assert.equal(buildPieAST({ slices: [] }, { donut: -2 }).inner, null);
+  });
+
+  it('renders annular slices: two arcs, no line to the center', function () {
+    const svg = compileChart({
+      type: 'pie', donut: true,
+      slices: [{ label: 'a', value: 3 }, { label: 'b', value: 1 }],
+    }).toSvgString();
+    const d = /d="([^"]+)"/.exec(svg)?.[1] ?? '';
+    assert.match(d, /A130,130 /);
+    assert.match(d, /A71.5,71.5 /); // the inner arc at 0.55 × R
+    assert.doesNotMatch(d, /M150,170 /); // never starts at the center point
+  });
+
+  it('a solid pie stays byte-identical when donut is absent', function () {
+    const config = { type: 'pie', slices: [{ label: 'x', value: 1 }] };
+    const svg = compileChart(config).toSvgString();
+    assert.match(svg, /M150,170 L/); // slice paths still start at the center
+    assert.doesNotMatch(svg, /A71.5/);
+  });
+});
+
 describe('pie render', function () {
   it('compileChart produces a cached svg vnode and string', function () {
     const compiled = compileChart({ type: 'pie', title: 'Pets', slices: [{ label: 'Dogs', value: 3 }, { label: 'Cats', value: 1 }] });

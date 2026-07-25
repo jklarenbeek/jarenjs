@@ -22,10 +22,17 @@ export {
   niceStep, axisTicksLinear, axisTicksLog, axisTicksOrdinal,
   formatTickValue, formatTimeTick,
 } from './core/axis.js';
-export { CATEGORICAL, seriesColor, createTheme, THEMES, HOST_VARS } from './core/palette.js';
+export { CATEGORICAL, SEQUENTIAL, seriesColor, sequentialColor, inkFor, createTheme, THEMES, HOST_VARS } from './core/palette.js';
 export { buildPieAST, renderPieAST } from './types/pie.js';
 export { buildBarAST, renderBarAST } from './types/bar.js';
 export { buildLineAST, renderLineAST } from './types/line.js';
 export { buildScatterAST, renderScatterAST } from './types/scatter.js';
 export { buildCandlestickAST, renderCandlestickAST } from './types/candlestick.js';
+export { buildRadarAST, renderRadarAST } from './types/radar.js';
+export { buildGaugeAST, renderGaugeAST } from './types/gauge.js';
+export { buildBoxplotAST, renderBoxplotAST, quantileSorted } from './types/boxplot.js';
+export { buildHeatmapAST, renderHeatmapAST } from './types/heatmap.js';
+export { buildTreemapAST, renderTreemapAST } from './types/treemap.js';
+export { buildStreamgraphAST, renderStreamgraphAST } from './types/streamgraph.js';
+export { buildSankeyAST, renderSankeyAST } from './types/sankey.js';
 export { createStreamAdapter } from './core/stream-adapter.js';
