@@ -69,8 +69,10 @@ const COMPARISON_PHRASES = {
 
 /**
  * Render a limit comparison; an unexpected operator falls back to the
- * symbol wrapped in a first-strong-isolate (U+2066/U+2069) so it still
- * reads left-to-right inside the RTL sentence.
+ * symbol wrapped in a left-to-right isolate (U+2066 LRI … U+2069 PDI) so
+ * it still reads left-to-right inside the RTL sentence. LRI rather than
+ * the first-strong FSI on purpose: an operator has no strong character
+ * for FSI to sample, so the direction has to be stated outright.
  * @param {{ comparison: string, limit: unknown }} p - The message params
  * @returns {string}
  */

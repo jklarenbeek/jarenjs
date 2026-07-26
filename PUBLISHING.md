@@ -58,6 +58,15 @@ Review and commit the resulting manifest changes. The release gate runs lint, al
 npm run release:check
 ```
 
+CI runs this same gate on **Linux and Windows both**, because a
+Windows-only failure is a release failure — packed-consumer portability,
+glob quoting and newline normalization are all platform classes of defect
+that a Linux-only green hides. A separate `browser` job runs the website's
+Playwright suite in Chromium, Firefox and WebKit. QT3 conformance and the
+dead-code audit are deliberately *not* part of this gate (they need the
+`qt3tests` submodule and a long coverage pass); they are separate evidence
+runs, so a green CI does not silently imply them.
+
 ## Publish
 
 **Bun is mandatory for a release.** The release gate's packed-consumer

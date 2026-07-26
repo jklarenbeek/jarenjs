@@ -1310,6 +1310,20 @@ emit a bespoke query DSL as free text and parsing it hopefully — and the
 trade is: grammar errors eliminated by construction, semantic errors reduced
 to a machine-checkable, machine-repairable residue.
 
+Provider structured-output modes support different JSON Schema subsets
+regardless of the draft they advertise, and the strict ones enforce neither
+`patternProperties`/`propertyNames` nor asserted `format`s and reject
+`oneOf`. For those, a third artifact ships beside the two of §12.1:
+`packages/json/schemas/jaren-query.llm-profile.schema.json`, `$id`
+`https://jarenjs.dev/schemas/jaren-query/0.1/llm-profile` — a mechanically
+derived, pure *relaxation* in which those constraints are removed (each
+restated in the nearest `description`, which the model still reads) and
+every `oneOf` becomes `anyOf`. Every canonical-valid query document
+validates under the profile; the reverse is deliberately not guaranteed.
+Hand the profile to the decoder, keep validating locally against the
+canonical schema — the package [README](../README.md#generating-queries-with-llms)
+walks the full pipeline.
+
 Because query documents are plain JSON, they also travel well through the
 rest of an LLM toolchain: function-call arguments, retrieval filters, and
 audit logs all speak JSON already, and a generated query can be validated,

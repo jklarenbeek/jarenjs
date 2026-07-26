@@ -553,7 +553,7 @@ flowchart TB
             Standard["Standard math<br/>sqrt, pow, sin, cos"]
             GCD["GCD calculation"]
             InverseSqrt["Fast inverse square root<br/>(Quake III algorithm)"]
-            Interpolation["Interpolation<br/>lerp, norm, map"]
+            Interpolation["Normalization<br/>norm (free export: remap)"]
         end
 
         subgraph Vec2I32["vec2i32.js"]

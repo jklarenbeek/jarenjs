@@ -32,3 +32,35 @@ npm run deploy               # benchmark:generate + build + gh-pages publish
 | Styling | `src/styles.css` | hand-rolled CSS, light + dark |
 
 Tests live in `test/website/` at the repository root (`npm run test:website`) and drive the complete site headless — routing, every engine, the IDE round-trip, WebMCP tool execution, benchmark search against the real generated data, SSR — on the same DOM stub the view package uses. Production build: `npm run build` (Vite, no plugins); ~39 kB gzipped site chunk (including all example and docs content) + ~67 kB for the entire Jaren suite.
+
+## Browser tests
+
+The headless suite above runs against a DOM stub. `packages/website/e2e/`
+additionally runs a **Playwright** suite against the **built** site in real
+Chromium, Firefox and WebKit — this package is the repository's production
+`createApp` consumer, so it is where the app and view runtimes meet a real
+engine's scheduling, event loop and history stack.
+
+```bash
+npm run test:browser         # from the repository root: builds the site, then runs all three engines
+```
+
+What it asserts: boot with landmark semantics, client-side navigation
+mount/unmount lifecycle, keyboard activation of the router, rapid
+widget/view route churn with history back, the assistant and studio flows,
+and mobile layout — every test also asserting **zero page errors** under
+real engine scheduling. The `browser` CI job runs all three engines on
+every push.
+
+> **Local runs on a host without Playwright's shared libraries** (common on
+> Fedora-family and other non-Debian distributions) fail at browser launch,
+> not in the test. Run the suite inside an Ubuntu container instead — e.g.
+> `distrobox enter ubuntu-playwright -- npm run test:browser`. CI uses the
+> Playwright image and needs no such workaround.
+
+This suite covers the **lifecycle** half of the app/view real-browser
+matrix. The **accessibility** half — dialog focus traps and focus
+restoration under an actual screen reader, AT semantics,
+`prefers-reduced-motion` — is not covered yet and is tracked in
+[ROADMAP.md](../../ROADMAP.md); [APP-FORMAT](../app/docs/APP-FORMAT.md) §8.5
+states the contracts it will have to prove.

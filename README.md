@@ -191,7 +191,9 @@ I will look up what that means, later...
 
 - [HOWTO.md](HOWTO.md) — practical usage guide: installation profiles, options, formats, `$ref` patterns, performance tips, pitfalls, API reference.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the monorepo fits together and the shared compile-to-closures design; each package links its own deeper ARCHITECTURE document from there.
-- [ROADMAP.md](ROADMAP.md) — release milestones and everything still to be done or optimized, per package.
+- [ROADMAP.md](ROADMAP.md) — release milestones and the open work per package. It lists what is *not* done: shipped capability is documented in the package docs, not there.
+- [REFACTOR.md](REFACTOR.md) — the reusable codebase-health playbook: find duplication, collapse it into the right parent package, repair drifted documentation, and the gate a pass must end on.
+- [workflow/](workflow/) — the context-free, work-order development workflow this monorepo was built with, committed as a reusable harness. [`CONVENTIONS.md`](workflow/CONVENTIONS.md) binds the rules, [`BOOTSTRAP.md`](workflow/BOOTSTRAP.md) is the fresh-session prompt, and [`examples/`](workflow/examples/) holds a real work order executed from the bootstrap alone together with the session record it produced.
 - [DESIGN.md](DESIGN.md) — the visual design system and UI/UX constraints for the website and the visual components: brand palette, token vocabulary, spacing scale, breakpoints, accessibility rules and the host-linked theming architecture.
 - [PUBLISHING.md](PUBLISHING.md) — npm authentication, synchronized versioning, release checks and publishing the twelve public workspaces.
 - [benchmark/README.md](benchmark/README.md) — the complete measuring and debugging toolbox: conformance suites, profilers, the test-failure debugger, code coverage, call graphs, and the QT3 scorecard.
@@ -201,7 +203,9 @@ For detailed API documentation beyond that, visit our official documentation. Wh
 
 ## 📅 Roadmap
 
-The roadmap moved to its own document: [ROADMAP.md](ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with every open item and optimization opportunity recorded during development, grouped per package — from the JSLT single-walk matcher optimizer and query hash joins to lazy `$range`, the `propertyDependencies` proposal and JSON Schema standard output formats.
+The roadmap lives in its own document: [ROADMAP.md](ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with the open work per package — from the JSLT single-walk matcher optimizer and query hash joins to lazy `$range`, the `propertyDependencies` proposal and JSON Schema standard output formats.
+
+It deliberately lists **only what is still open**. When something ships, its knowledge moves into the document a reader would actually reach for — the package `README`, its `ARCHITECTURE.md`, the format spec — and the entry leaves the roadmap. That is what keeps it a plan you can act on rather than a changelog you have to read past; the record of *when* something shipped is in the git history and the release tags.
 
 ## 🤝 Contributing to Jaren
 
@@ -220,7 +224,7 @@ We welcome contributions from the community! Here's how you can help:
 3. Add Tests: Increase our test coverage.
 4. Implement New Features: Pick an item from our [roadmap](ROADMAP.md) and submit a pull request.
 
-Run the test suite with `npm test` (per package: `npm run test:core`, `npm run test:json`, `npm run test:validate`) and lint with `npm run lint`; the [benchmark workspace](benchmark/README.md) documents how to reproduce every performance and conformance claim.
+Run the test suite with `npm test` (per package: `npm run test:core`, `npm run test:json`, `npm run test:validate`) and lint with `npm run lint` — the lint gate covers `packages`, `components`, `test`, `benchmark`, `scripts` and the root config files, and is expected to pass at **zero errors and zero warnings**, so a new warning is a finding to fix rather than noise to live with. `npm run test:browser` additionally drives the built website through real Chromium, Firefox and WebKit ([how to run it](packages/website/README.md#browser-tests)). The [benchmark workspace](benchmark/README.md) documents how to reproduce every performance and conformance claim.
 
 ## ❓ Frequently Asked Questions
 

@@ -234,9 +234,10 @@ cutter's second pass (a single-walk scanner is the roadmap).
 
 ## Status
 
-Published alongside the rest of the suite. Remaining roadmap: single-walk char
+Published alongside the rest of the suite, the JSON-Schema data twin for
+constrained decoding included. Remaining roadmap: single-walk char
 scanning (fold the cutter and the line parser into one pass), a CST
-mode that preserves comments and formatting, partial-string streaming
-events for progressive LLM text display, and a JOSL grammar published
-as a JSON Schema for LLM constrained decoding, like the query/JSLT
-grammars.
+mode that preserves comments and formatting, and partial-string streaming
+events for progressive LLM text display. A GBNF-class raw-text grammar
+for llama.cpp-family constrained sampling stays deferred until a concrete
+consumer appears (see above).

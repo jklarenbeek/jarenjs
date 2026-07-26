@@ -62,3 +62,12 @@ first consumer; Mermaid 3D is a candidate — see ROADMAP).
 group, radix, decimal })` and radix-aware `parseNumber(str, { radix })`
 (recognizes `0x`/`0o`/`0b` prefixes, grouping separators and scientific
 notation; returns `NaN` on failure). Radix I/O delegates to `word.js`.
+
+> **`notation: 'auto'` is not a drop-in for a fixed-unit readout.** The auto
+> branch escapes to exponential once `abs(value) >= 1e21` or
+> `abs(value) < 1e-6`, so `formatNumber(v, { precision: 3 })` is *not*
+> interchangeable with a plain `Number(v.toPrecision(3))`. A caller that
+> appends its own unit — `"0.0509 ms"` — wants the value never to become
+> `5.09e-5`, and must either pass `notation: 'fixed'` or keep its own
+> rounder. The website's timing helpers keep their own for exactly this
+> reason.

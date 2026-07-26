@@ -53,6 +53,15 @@ function toEngineering(value, precision) {
 
 /**
  * Format a number for display.
+ *
+ * `notation: 'auto'` (the default) is NOT a drop-in for a fixed-unit
+ * readout: the auto branch escapes to exponential once
+ * `abs(value) >= 1e21` or `abs(value) < 1e-6`, so
+ * `formatNumber(v, { precision: 3 })` is not interchangeable with a
+ * plain `Number(v.toPrecision(3))`. A caller that appends its own unit
+ * - `"0.0509 ms"` - wants the value never to become `5.09e-5`, and must
+ * either pass `notation: 'fixed'` or keep its own rounder. See
+ * packages/core/docs/MATH.md.
  * @param {number} value
  * @param {FormatOptions} [opts]
  * @returns {string}

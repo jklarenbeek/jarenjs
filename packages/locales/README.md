@@ -83,12 +83,37 @@ Rules of the road:
 4. **Bidi.** Packs targeting RTL scripts should isolate interpolated user
    values with FSI/PDI (U+2068/U+2069) so a Latin value cannot reorder
    the surrounding text. That call belongs to the pack author, not core.
+   The harder rule, paid for by `ar.js`: **an ASCII comparison operator
+   placed between RTL text and a number displays flipped** - the
+   operator is bidi-neutral, so `>=` before a Latin-digit limit reorders
+   and reads as `=<`. Never interpolate `{comparison}` as a symbol.
+   Arabic therefore renders the four operators validate emits for
+   `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum` as whole
+   **phrases** ("يجب ألا تقل القيمة عن 2" - "the value must not be less
+   than 2"), and falls back for an operator it does not know to the
+   symbol wrapped in a directional isolate (U+2066 … U+2069) so it at
+   least still reads left-to-right inside the RTL sentence. Do the same
+   before shipping a Hebrew, Farsi or Urdu pack, and always eyeball the
+   rendered strings - a flipped operator is silently *valid* text.
 5. **Voice.** Validate keys speak about the document ("must have required
    property 'x'"); `form/*` keys speak to the person filling the field
    ("This field is required"). Keep both voices.
 
 ## Available packs
 
-| Export | Locale |
-|--------|--------|
-| `nl` | Dutch (Nederlands) |
+| Export | Subpath | Locale |
+|--------|---------|--------|
+| `ar` | `./ar` | Arabic (العربية) - RTL |
+| `de` | `./de` | German (Deutsch) |
+| `es` | `./es` | Spanish (Español) |
+| `fr` | `./fr` | French (Français) |
+| `ja` | `./ja` | Japanese (日本語) |
+| `ko` | `./ko` | Korean (한국어) |
+| `nl` | `./nl` | Dutch (Nederlands) |
+| `pt` | `./pt` | Portuguese (Português) |
+| `ru` | `./ru` | Russian (Русский) |
+| `tr` | `./tr` | Turkish (Türkçe) |
+| `zhTW` | `./zh-tw` | Traditional Chinese, Taiwan (繁體中文) |
+
+The named export is the locale tag camel-cased (`zhTW`), the subpath keeps
+the tag itself (`@jarenjs/locales/zh-tw`).

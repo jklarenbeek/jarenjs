@@ -10,9 +10,11 @@
  *  - a browser-hosted agent over WebMCP (`registerModelContext()`
  *    publishes the same tools on `navigator.modelContext`).
  *
- * `execute` never throws for content-level problems: an unknown tool,
- * invalid input or a throwing tool comes back as `{ error }` — a
- * result the calling model can read and recover from.
+ * `execute` never throws for content-level problems: an unknown tool
+ * or a throwing tool comes back as `{ error }`, invalid input as
+ * `{ error, errors, inputSchema }` plus a `hint` where the model sent
+ * JSON-encoded text for a structured property — results the calling
+ * model can read and recover from.
  */
 
 import { JarenValidator } from '@jarenjs/validate';
@@ -128,7 +130,11 @@ export function createToolbox(options = {}) {
   /**
    * Dispatch one call. Synchronous tools answer synchronously (WebMCP
    * hosts call `execute` directly); a promise-returning tool resolves
-   * to its value with rejections folded into `{ error }`.
+   * to its value with rejections folded into `{ error }`. A rejected
+   * call answers `{ error, errors, inputSchema }` — the first
+   * `MAX_INPUT_ERRORS` validation errors plus the schema to re-read —
+   * with a `hint` added when a property wanting structure arrived as
+   * unparseable JSON text.
    * @param {string} name
    * @param {any} args
    */

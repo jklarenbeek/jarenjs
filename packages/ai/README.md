@@ -62,6 +62,9 @@ backoff immediately. The final `AI0002` reports what happened: `status`, `attemp
 `reasoning_details`) reaches the caller through `onReasoning`, and the final message
 carries a `reasoning` member — so a reasoning-only turn (empty `content`, non-empty
 `reasoning`) is distinguishable from an empty one instead of rendering as a blank bubble.
+The agent attaches `reasoning` to the **returned** message only: the transcript it
+accumulates never carries it, so a host that persists `messages` and sends them back next
+turn keeps a clean wire history.
 
 **Probe before the first turn.** `probeProvider({ provider, baseUrl, apiKey })` GETs the
 provider's `/models` listing with exactly the auth a chat call would use and never throws:
@@ -113,6 +116,14 @@ registerModelContext(toolbox);
 Every call is validated against the tool's schema by `@jarenjs/validate` before the tool
 runs. `execute` never throws for content-level problems — unknown tool, invalid input, or
 a throwing tool all come back as `{ error }` results the model can read and correct.
+
+Weak models routinely JSON-*encode* a nested argument. Where the schema wants an object or
+an array and a parseable JSON string arrived, the toolbox parses it and validates the
+parsed value, so the tool sees what the model meant instead of a type error. A rejected
+call answers `{ error, errors, inputSchema }` — up to eight validation errors as
+`{ instancePath, keyword, message }`, plus the tool's own schema to re-read — and adds a
+named `hint` when a property that wanted structure arrived as JSON text that does not
+parse, naming the offending properties.
 
 ## The agent loop
 

@@ -852,9 +852,19 @@ Schema subsets regardless of the draft they advertise. In particular,
 recursive references, `patternProperties`, `propertyNames`, `format`, and
 some composition keywords may be restricted or treated as annotations.
 Always validate a generated stylesheet locally against the full artifact
-before calling `compileJsltStylesheet`. A simplified lowest-common-
-denominator LLM profile could trade precision for broader provider support,
-but no such third artifact is defined in version 0.1.
+before calling `compileJsltStylesheet`.
+
+For those strict subsets a third artifact ships,
+[`../schemas/jaren-jslt.llm-profile.schema.json`](../schemas/jaren-jslt.llm-profile.schema.json)
+(`$id` `https://jarenjs.dev/schemas/jaren-jslt/0.1/llm-profile`): a
+mechanically derived, pure *relaxation* of the canonical artifact.
+`patternProperties`, `propertyNames` and asserted `format`s are removed —
+each restated in the nearest `description`, which the model still reads —
+and every `oneOf` becomes `anyOf`. The guarantee runs one way only: every
+canonical-valid stylesheet validates under the profile, the reverse is
+deliberately *not* guaranteed. The profile is what you hand the provider's
+constrained decoder; the canonical artifact remains the authority, so the
+local validate-then-compile step above stays mandatory.
 
 Stylesheets remain ordinary JSON throughout the toolchain: they can be
 function-call arguments, retrieved rule sets, reviewed diffs, audit-log

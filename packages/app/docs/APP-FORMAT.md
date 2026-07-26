@@ -500,9 +500,18 @@ accessible patterns are expressible as data.
   behavior of their subtree — the renderer guarantees only mount/
   update/unmount-exactly-once (VIEW-FORMAT §7/§8); everything inside
   is the widget contract's responsibility.
-- These contracts are tested headlessly in this repository; a real
-  Chromium/Firefox/WebKit matrix is CI follow-up work, tracked in the
-  roadmap, not silently claimed.
+- These contracts are tested headlessly in this repository, and the
+  **lifecycle** half is additionally exercised against a real
+  Chromium/Firefox/WebKit matrix on every push (see
+  [the website's browser suite](../../website/README.md#browser-tests)):
+  boot with landmark semantics, client-side navigation mount/unmount,
+  keyboard activation of the router, and rapid route churn, each
+  asserting zero page errors under real engine scheduling. What that
+  matrix does **not** yet cover — and this document does not claim — is
+  the **accessibility** half: dialog focus traps and focus restoration
+  under an actual screen reader, AT semantics, and
+  `prefers-reduced-motion`. Those remain open and are tracked in the
+  roadmap.
 
 ## 9. Tasks and host concurrency
 

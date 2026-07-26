@@ -80,7 +80,12 @@ export function buildPieAST(data, config = {}) {
 
 /**
  * Render a pie AST to a pure-vnode SVG: angles → arc paths, plus a
- * swatch legend with percentages and an optional title.
+ * swatch legend with percentages and an optional title. With
+ * `ast.inner === null` (no `donut` in the config) the slice path is
+ * emitted by the same wedge template as before the donut variant
+ * existed — solid-pie output is byte-stable, which is what keeps the
+ * mermaid delegation byte-identical; the annular geometry lives
+ * entirely in the other branch.
  * @param {PieAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash content hash for the vnode key

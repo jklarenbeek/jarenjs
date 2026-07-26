@@ -131,8 +131,14 @@ const CATALOGS = {
   ar: compileMessageCatalog(ar),
 };
 
-/** The switcher's locale codes, in display order ('en' first). */
-export const LOCALES = ['en', 'nl', 'fr', 'es', 'pt', 'de', 'ja', 'ko', 'zh-tw', 'ru', 'tr', 'ar'];
+/**
+ * The switcher's locale codes, in display order: the built-in English
+ * first, then every compiled pack in `CATALOGS` order.
+ *
+ * Derived rather than listed, so a pack added above cannot end up without
+ * a button, and a button cannot end up without a pack.
+ */
+export const LOCALES = ['en', ...Object.keys(CATALOGS)];
 
 /**
  * Report-time localization: raw errors carry msgid + params; text

@@ -140,7 +140,14 @@ same design the view/app stack is built on:
 2. **The vnode emitter is memoized per node reference.** Same AST node
    → same vnode reference (a `WeakMap` on the plugin-table object), so
    a transformed document only re-emits the blocks that actually
-   changed.
+   changed. The memo outlives one emission — a `CompiledMd` carries it
+   — so its cache identity is the node *plus every option that changes
+   the output*: `keyed`, `html` and `sanitizeUrl` are stored with the
+   entry and compared on hit. Re-emitting the same compiled document
+   with `html: 'text'`, or with a different sanitizer, therefore can
+   never be served a vnode the previous option produced. `sanitizeUrl`
+   is compared by function identity, so pass a stable reference (the
+   default one is) rather than a fresh closure per render.
 3. **Block vnodes carry content-hash keys** (structural FNV-1a, no
    intermediate JSON string), so the keyed patcher reorders moved
    blocks instead of rebuilding them, and equal content keeps its key
