@@ -382,6 +382,34 @@ function lastSegmentOf(dataPath, end) {
 }
 
 /**
+ * Read and validate the `hashIndex` compile option, defaulting to the
+ * historical `'string'`. An unknown value is rejected rather than ignored:
+ * silently falling back would hand a caller who meant `'number'` the exact
+ * behavior they were opting out of.
+ * @param {{ hashIndex?: string }} [options]
+ * @returns {'string'|'number'}
+ */
+function readHashIndexOption(options) {
+  if (options === undefined || options === null)
+    return 'string';
+  const mode = options.hashIndex;
+  if (mode === undefined || mode === 'string')
+    return 'string';
+  if (mode === 'number')
+    return 'number';
+  throw new TypeError(
+    `hashIndex must be 'string' or 'number', got ${JSON.stringify(mode)}`);
+}
+
+/**
+ * The exclusive end of the *parent* of the location `dataPath.slice(0, end)`,
+ * or -1 when that location is the root and so has no parent.
+ */
+function parentEndOf(dataPath, end) {
+  return end === 0 ? -1 : dataPath.lastIndexOf('/', end - 1);
+}
+
+/**
  * Walk `root` along the location path prefix `path.slice(0, end)`.
  * Segments are decoded lazily per hop (escape-free segments are sliced
  * directly; array indexes are scanned in place without allocating).
@@ -426,35 +454,63 @@ function walkPointerPrefix(root, path, end) {
  * once; per call only `dataPath` - the current location in `dataRoot` as
  * an RFC 6901 pointer - varies.
  *
- * Two properties of the `#` form are worth knowing before you rely on it:
- *
- * - It resolves to the member name or array index **as a string**, where
- *   the draft specifies the *number* for an array position. This matches
- *   the historical behavior the validator's `$data` keyword relies on, so
- *   `{"$data": "0#"}` compared against a number-typed keyword sees a
- *   string. Deliberate; a spec-faithful numeric mode would be opt-in.
- * - It answers from `dataPath` alone and never walks `dataRoot`, so it
- *   does not verify that the location exists — the caller is expected to
- *   pass a location it actually reached. That is what keeps it a string
- *   operation (tens of nanoseconds) instead of a document walk. The
- *   non-`#` form must walk, because it returns the value.
- *
  * The root has no name: `0#` there yields `JSONPOINTER_NOTHING`, not `''`,
  * so it stays distinguishable from the member named `''` (`{"": 1}` at
  * `/`), which is a name a document can genuinely have.
  *
+ * ### The `#` form and `hashIndex`
+ *
+ * Relative JSON Pointer says `#` yields the member *name* for an object
+ * member and the *index* — a number — for an array element. Telling those
+ * apart requires looking at the container, so the two modes cost different
+ * things and you choose per compile:
+ *
+ * - `hashIndex: 'string'` (**default**) answers from `dataPath` alone and
+ *   never touches `dataRoot`: an array position comes back as the string
+ *   `'1'`. This is the historical behavior the validator's `$data` keyword
+ *   relies on, and it is a string operation — tens of nanoseconds.
+ * - `hashIndex: 'number'` is the draft's answer. It walks to the parent of
+ *   the location to see whether it is an array, and returns `1` rather than
+ *   `'1'` when it is. Object member names are unaffected. When the parent
+ *   cannot be reached (the location does not exist in `dataRoot`) it falls
+ *   back to the string, because nothing proves the position is an index.
+ *
+ * Neither mode verifies that the location itself exists; the caller is
+ * expected to pass a location it actually reached. The non-`#` form must
+ * walk regardless, because it returns the value.
+ *
  * @param {string} pointer - The relative pointer (e.g. `1/sibling`, `0#`)
+ * @param {{ hashIndex?: 'string'|'number' }} [options] - `hashIndex`
+ *   selects what the `#` form yields for an array position (default
+ *   `'string'`)
  * @returns {RelativeJsonPointerResolver} resolver returning
  *   the addressed value, or `JSONPOINTER_NOTHING`
  * @throws {JSONPointerSyntaxError} When the pointer is not valid
+ * @throws {TypeError} When `hashIndex` is neither `'string'` nor `'number'`
  * @example
  * const resolve = compileRelativeJSONPointer('1/limits');
  * resolve({ limits: { min: 2 } , value: 5 }, '/value'); // { min: 2 }
+ * @example
+ * const spec = compileRelativeJSONPointer('0#', { hashIndex: 'number' });
+ * spec({ a: ['x', 'y'] }, '/a/1'); // 1  (the number, per the draft)
  */
-export function compileRelativeJSONPointer(pointer) {
+export function compileRelativeJSONPointer(pointer, options = undefined) {
   const { levels, hash, segments } = parseRelativeJSONPointer(pointer);
+  const numericHash = readHashIndexOption(options) === 'number';
   if (hash) {
-    return function relativeHashResolver(dataRoot, dataPath) {
+    if (!numericHash) {
+      return function relativeHashResolver(dataRoot, dataPath) {
+        if (typeof dataPath !== 'string')
+          dataPath = '';
+        else if (dataPath.length !== 0 && dataPath.charCodeAt(0) !== CC_SLASH)
+          return NOTHING;
+        const end = trimLevels(dataPath, levels);
+        if (end < 0)
+          return NOTHING;
+        return lastSegmentOf(dataPath, end);
+      };
+    }
+    return function relativeHashIndexResolver(dataRoot, dataPath) {
       if (typeof dataPath !== 'string')
         dataPath = '';
       else if (dataPath.length !== 0 && dataPath.charCodeAt(0) !== CC_SLASH)
@@ -462,7 +518,19 @@ export function compileRelativeJSONPointer(pointer) {
       const end = trimLevels(dataPath, levels);
       if (end < 0)
         return NOTHING;
-      return lastSegmentOf(dataPath, end);
+      const name = lastSegmentOf(dataPath, end);
+      if (name === NOTHING)
+        return NOTHING;
+      // An index is only an index when its container is an array; the name
+      // of a `{"1": …}` member is the string "1" in every mode.
+      const parentEnd = parentEndOf(dataPath, end);
+      if (parentEnd < 0)
+        return name;
+      const parent = walkPointerPrefix(dataRoot, dataPath, parentEnd);
+      if (!Array.isArray(parent))
+        return name;
+      const index = scanArrayIndex(name, 0, name.length);
+      return index < 0 ? name : index;
     };
   }
   const getter = compileSegmentsGetter(segments);
@@ -486,19 +554,25 @@ export function compileRelativeJSONPointer(pointer) {
  * Pointer, a leading `/` an absolute JSON Pointer, and `''` the root.
  *
  * @param {string} ref - The reference string
+ * @param {{ hashIndex?: 'string'|'number' }} [options] - forwarded to
+ *   {@link compileRelativeJSONPointer}; only the relative forms read it
  * @returns {RelativeJsonPointerResolver} resolver returning
  *   the addressed value, or `JSONPOINTER_NOTHING`
  * @throws {JSONPointerSyntaxError} When the reference is none of the
  *   accepted forms
+ * @throws {TypeError} When `hashIndex` is neither `'string'` nor `'number'`
  */
-export function compileDataRef(ref) {
+export function compileDataRef(ref, options = undefined) {
   if (typeof ref !== 'string')
     throw new JSONPointerSyntaxError('a data reference must be a string', String(ref), 0);
+  // Validate the option even on the forms that ignore it, so a typo is a
+  // compile-time error wherever it appears rather than only on `N#` refs.
+  readHashIndexOption(options);
   if (ref.length === 0)
     return getRoot;
   const c = ref.charCodeAt(0);
   if (isDigitCode(c))
-    return compileRelativeJSONPointer(ref);
+    return compileRelativeJSONPointer(ref, options);
   if (c === CC_SLASH)
     return compileSegmentsGetter(scanSegments(ref, 0));
   throw new JSONPointerSyntaxError('a data reference must be empty, a JSON Pointer or a Relative JSON Pointer', ref, 0);

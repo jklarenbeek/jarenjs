@@ -63,6 +63,34 @@ const getName = compileRelativeJSONPointer('0#');
 getName(doc, '/limits/min'); // 'min' (the member name of the location)
 ```
 
+The `#` form has two modes, chosen once at compile time, because the spec's
+answer and the fast answer are not the same thing. Relative JSON Pointer says
+`#` yields the member *name* for an object member and the *index* — a number —
+for an array element, and telling those apart means looking at the container:
+
+```javascript
+const asString = compileRelativeJSONPointer('0#');                        // default
+const asNumber = compileRelativeJSONPointer('0#', { hashIndex: 'number' });
+
+asString({ a: ['x', 'y'] }, '/a/1'); // '1'  — string, answered from the path alone
+asNumber({ a: ['x', 'y'] }, '/a/1'); // 1    — number, the draft's answer
+asNumber({ o: { 1: 'v' } }, '/o/1'); // '1'  — a member named "1" is still a name
+```
+
+`hashIndex: 'string'` is the default and never touches the document, which is
+what keeps it a string operation of tens of nanoseconds; it is also what the
+validator's `$data` keyword has always seen, so `{"$data": "0#"}` compared
+against a number-typed keyword gets a string. `hashIndex: 'number'` walks to the
+parent of the location to check whether it is an array, and falls back to the
+string when that parent cannot be reached — nothing proves a position is an
+index. An unknown mode is a `TypeError` at compile time rather than a silent
+fallback. `compileDataRef` forwards the option.
+
+Neither mode verifies the location itself exists: the caller passes a location
+it actually reached. The root has no name, so `0#` there is
+`JSONPOINTER_NOTHING` and stays distinguishable from the member a document can
+genuinely name `''`.
+
 `compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
 
 The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`) and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.

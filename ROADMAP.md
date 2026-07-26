@@ -72,17 +72,13 @@ delete it or fix it.
   `stableStringify` in `@jarenjs/core/object` instead follows `JSON.stringify`
   conventions (`NaN` → `null`, `undefined` members dropped). Neither validates
   ill-formed strings.
-- [ ] **Relative pointer `0#` numeric-index mode** — the hash form returns the
-  member name or array index of the location as a *string*, matching the
-  historical `$data` behavior the validator relies on; every draft revision
-  resolves an array position to a *number*, so `{"$data": "0#"}` compared
-  against a number-typed keyword sees a string. The parse already carries the
-  `hash` flag to branch on, but neither `compileRelativeJSONPointer` nor
-  `compileDataRef` takes an options argument, so this needs an opt-in mode
-  threaded through both. If it lands, two sibling divergences deserve the same
-  treatment: own-property-only reads (`/toString` → `NOTHING`) and the strict
-  array-index parse that rejects `01`/`1abc`/`1e0`, both deliberate and
-  documented in the package ARCHITECTURE.
+- [ ] **Opt-in modes for the remaining pointer divergences** — `hashIndex`
+  established the pattern (a compile-time option, spec answer available, fast
+  historical answer the default). Two siblings could take the same treatment if
+  a consumer ever needs them: own-property-only reads (`/toString` →
+  `NOTHING`) and the strict array-index parse that rejects `01`/`1abc`/`1e0`.
+  Both are deliberate and documented in the package ARCHITECTURE; neither has a
+  requester, so this is a shape to reuse rather than work to schedule.
 - [ ] **Relative pointer index manipulation (`0+1`, `1-1`)** — added by
   draft-bhutton-relative-json-pointer-00 and not accepted by the parser. Jaren
   is conformant to draft-handrews-01, the revision JSON Schema 2020-12
@@ -95,6 +91,21 @@ delete it or fix it.
   prefix/suffix trim plus index-wise recursion, so a mid-array insertion degrades
   to a run of per-index `replace` ops. Correct, but not minimal; an LCS mode would
   emit the insertion. Relevant to anyone shipping patches over the wire.
+- [ ] **Give the relative resolver the ancestor the caller already has** — the
+  one remaining structural inefficiency in addressing, and the only lead that
+  survived measurement. `compileRelativeJSONPointer` receives `(dataRoot,
+  dataPath)` and re-walks the location *string* from the root on every call,
+  re-scanning and re-slicing segments the validator had in hand when it
+  descended there. Four cheaper fixes were measured and rejected: a
+  prototype-guarded read instead of `Object.hasOwn` (faster in isolation,
+  **slower** in the real polymorphic walk), per-segment closure chains (slower),
+  caching the parsed location path (2.3× on repeat but **2× worse** when the
+  path varies, which is the array-iteration case that matters), and flattening
+  cons-string paths (no effect). What is left is an API that lets a caller pass
+  the ancestor value directly, which means threading it through the validator's
+  descent — real blast radius, so it wants deciding before doing. Note this
+  would not help JSLT or JTLT: they use `segments.js` for runtime addressing and
+  touch `pointer.js` only for compile-time error paths.
 - [ ] **Optional codegen backend** — compile hot queries to source via
   `new Function` where CSP allows, reusing the same frozen AST and semantics, with
   the closure compiler staying the default. The no-`eval` rule is absolute in this

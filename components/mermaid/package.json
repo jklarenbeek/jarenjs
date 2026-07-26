@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/mermaid",
   "private": false,
-  "version": "0.19.14",
+  "version": "0.19.15",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -69,8 +69,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/charts": "^0.19.14",
-    "@jarenjs/core": "^0.19.14",
-    "@jarenjs/view": "^0.19.14"
+    "@jarenjs/charts": "^0.19.15",
+    "@jarenjs/core": "^0.19.15",
+    "@jarenjs/view": "^0.19.15"
   }
 }

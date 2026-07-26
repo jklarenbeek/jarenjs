@@ -1,5 +1,5 @@
 import { describe, it } from 'node:test';
-import { strictEqual, deepStrictEqual } from 'node:assert';
+import { strictEqual, deepStrictEqual, throws } from 'node:assert';
 import * as assert from '../assert.node.js';
 
 import {
@@ -207,6 +207,62 @@ describe('compileRelativeJSONPointer', () => {
     // also collide with a real member name, which a document can have.
     strictEqual(compileRelativeJSONPointer('0#')(doc, ''), NOTHING);
     strictEqual(compileRelativeJSONPointer('0#')({ '': 1 }, '/'), '');
+  });
+
+  describe("hashIndex: 'number'", () => {
+    const nums = { a: ['x', 'y', 'z'], o: { 1: 'member' }, deep: { list: [{ q: 1 }] } };
+    const num = (p) => compileRelativeJSONPointer(p, { hashIndex: 'number' });
+
+    it('should yield the draft number for an array position', () => {
+      strictEqual(num('0#')(nums, '/a/1'), 1);
+      strictEqual(num('0#')(nums, '/a/0'), 0);
+      strictEqual(num('0#')(nums, '/a/2'), 2);
+      strictEqual(num('1#')(nums, '/deep/list/0/q'), 0);
+    });
+
+    it('should keep an object member a string even when it looks like an index', () => {
+      // `{"1": …}` is a member named "1", not element 1: only the container
+      // decides, which is why this mode has to look at the parent at all.
+      strictEqual(num('0#')(nums, '/o/1'), '1');
+      strictEqual(num('0#')(nums, '/a'), 'a');
+      strictEqual(num('1#')(nums, '/a/1'), 'a');
+    });
+
+    it('should fall back to the string when the parent cannot be reached', () => {
+      // Nothing proves the position is an index, so do not invent a number.
+      strictEqual(num('0#')(nums, '/nosuch/3'), '3');
+      strictEqual(num('0#')({}, '/a/1'), '1');
+    });
+
+    it('should agree with the default mode everywhere except array positions', () => {
+      strictEqual(num('0#')(nums, ''), NOTHING);
+      strictEqual(num('0#')({ '': 1 }, '/'), '');
+      strictEqual(num('2#')(nums, '/a/1'), NOTHING);
+    });
+
+    it('should leave the default and the explicit string mode unchanged', () => {
+      for (const opts of [undefined, {}, { hashIndex: 'string' }]) {
+        strictEqual(compileRelativeJSONPointer('0#', opts)(nums, '/a/1'), '1');
+        strictEqual(compileRelativeJSONPointer('0#', opts)(nums, '/o/1'), '1');
+      }
+    });
+
+    it('should reject an unknown mode at compile time', () => {
+      // Falling back silently would hand a caller who meant 'number' exactly
+      // the behavior they were opting out of.
+      for (const bad of ['numeric', 'Number', 1, null, true]) {
+        throws(() => compileRelativeJSONPointer('0#', { hashIndex: bad }), TypeError);
+        throws(() => compileDataRef('0#', { hashIndex: bad }), TypeError);
+        // even on the ref forms that never read it
+        throws(() => compileDataRef('/absolute', { hashIndex: bad }), TypeError);
+        throws(() => compileDataRef('', { hashIndex: bad }), TypeError);
+      }
+    });
+
+    it('should be forwarded by compileDataRef', () => {
+      strictEqual(compileDataRef('0#', { hashIndex: 'number' })(nums, '/a/1'), 1);
+      strictEqual(compileDataRef('0#')(nums, '/a/1'), '1');
+    });
   });
 
   it('should return NOTHING when levels exceed the depth', () => {
