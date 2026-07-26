@@ -23,14 +23,10 @@
 
 import {
   isValidUri,
-  isValidUriFull,
   isValidUriRef,
-  isValidUriRefFull,
   isValidUriTemplate,
   isValidUrl,
-  isValidUrlFull,
   isValidEmail,
-  isValidEmailFull,
   isValidIdnEmail,
   isValidHostname,
   isValidIdnHostname,
@@ -54,6 +50,7 @@ import {
   isValidBase64,
   isValidCountryAlpha2,
   isValidIBAN,
+  isValidIRegexp,
 } from '@jarenjs/core/text';
 
 import {
@@ -118,20 +115,17 @@ export const stringFormatTesters = {
   'color': isValidHexColor,
   // Regex
   'regex': isStringRegExp,
+  'iregexp': isValidIRegexp,
   // URI
   'uri': isValidUri,
-  'uri--full': isValidUriFull,
   'uri-reference': isValidUriRef,
-  'uri-reference--full': isValidUriRefFull,
   'uri-template': isValidUriTemplate,
   'url': isValidUrl,
-  'url--full': isValidUrlFull,
   // IRI
   'iri': isValidIRI,
   'iri-reference': isValidIRIRef,
   // Email
   'email': isValidEmail,
-  'email--full': isValidEmailFull,
   'idn-email': isValidIdnEmail,
   // Hostname
   'hostname': isValidHostname,

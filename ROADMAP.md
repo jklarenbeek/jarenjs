@@ -163,13 +163,6 @@ delete it or fix it.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
-## @jarenjs/formats
-
-- [ ] **`iregexp` format** — register an I-Regexp (RFC 9485) string format backed by `isValidIRegexp` from `@jarenjs/core/text` (the implementation already exists and powers JSONPath's `match()`/`search()`).
-- [ ] **Tests for `country2` and `iban`** — both formats ship without tests (flagged in their format list entries).
-- [ ] **Char-code IRI/IRI-reference validator** — `isValidIRI` falls back to a heavily backtracking alternation regex for non-ASCII and bracketed inputs (microseconds per call). The RFC 3339 date/time testers are allocation-free char-code parsers; the IRI family is the remaining regex monster. Ajv does not implement `iri` at all, so this is about absolute cost for real consumers, not a benchmark ratio.
-- [ ] **`idn-hostname` punycode cost** — validation of a Unicode hostname costs ~1.6 µs, dominated by the genuine IDNA work (per-label punycode decode plus a whole-string `toASCII` re-encode for the ACE shape check). The redundant double decode is already gone; anything further means reworking the punycode encoder itself. Ajv errors on this format, so the same fairness note as `iri` applies.
-
 ## @jarenjs/forms
 
 - [ ] **Rule dependency memoization** — every `evaluateFormRules` call re-evaluates every rule; the compiler already sees each rule's paths, so a dirty-pointer index (changed pointer → affected rules) is the obvious next step once forms get large.

@@ -8,11 +8,8 @@ import {
   isValidHostname,
   isValidIdnHostname,
   isValidUrl,
-  isValidUrlFull,
   isValidUri,
-  isValidUriFull,
   isValidUriRef,
-  isValidUriRefFull,
   isValidUriTemplate,
   isValidIRI,
   isValidIRIRef,
@@ -113,6 +110,49 @@ describe('isValidIdnHostname', () => {
     assert.isFalse(isValidIdnHostname(''));
     assert.isFalse(isValidIdnHostname('a'.repeat(256))); // too long
   });
+
+  it('should accept any number of labels', () => {
+    assert.isTrue(isValidIdnHostname('a.b'));
+    assert.isTrue(isValidIdnHostname('www.sub.example.com'));
+    assert.isTrue(isValidIdnHostname('a.b.c.d.e.f.g'));
+    assert.isTrue(isValidIdnHostname('xn--r8jz45g.example.co.uk'));
+    assert.isTrue(isValidIdnHostname('例え.テスト.example.jp'));
+  });
+
+  it('should reject a hyphen at either end of a label', () => {
+    assert.isFalse(isValidIdnHostname('-a.com'));
+    assert.isFalse(isValidIdnHostname('a-.com'));
+    assert.isFalse(isValidIdnHostname('ab.a-'));
+    assert.isFalse(isValidIdnHostname('ab.-a.com'));
+  });
+
+  it('should reject empty labels and over-long ones', () => {
+    assert.isFalse(isValidIdnHostname('a..b'));
+    assert.isFalse(isValidIdnHostname('example.'), 'a trailing root dot');
+    assert.isFalse(isValidIdnHostname('.example'));
+    assert.isTrue(isValidIdnHostname('x'.repeat(63) + '.com'));
+    assert.isFalse(isValidIdnHostname('x'.repeat(64) + '.com'));
+  });
+
+  it('should accept every hostname that isValidHostname accepts', () => {
+    // An IDN hostname is a hostname that may additionally carry U-labels,
+    // so the ASCII grammar has to be a subset. It was not: the ACE shape
+    // was checked with a whole-name pattern that only admitted two or
+    // three labels, so `www.sub.example.com` failed here while passing
+    // isValidHostname.
+    const parts = ['a', 'ab', 'www', 'sub', 'example', 'com', 'co', 'uk', 'x9', '123'];
+    for (const a of parts) {
+      for (const b of parts) {
+        for (const c of parts) {
+          for (const name of [a, `${a}.${b}`, `${a}.${b}.${c}`, `${a}.${b}.${c}.com`]) {
+            if (!isValidHostname(name)) continue;
+            assert.isTrue(isValidIdnHostname(name),
+              `${name} is a hostname but not an IDN hostname`);
+          }
+        }
+      }
+    }
+  });
 });
 
 describe('isValidUrl', () => {
@@ -128,34 +168,30 @@ describe('isValidUrl', () => {
   });
 });
 
-describe('isValidUrlFull', () => {
-  it('should return true for valid URLs', () => {
-    assert.isTrue(isValidUrlFull('https://example.com'));
-    assert.isTrue(isValidUrlFull('http://example.com:8080/path?query=1'));
-  });
-
-  it('should handle complex URLs', () => {
-    assert.isTrue(isValidUrlFull('https://user:pass@example.com:8080/path?query=1#frag'));
-  });
-});
-
 describe('isValidUri', () => {
   it('should return true for valid URIs', () => {
     assert.isTrue(isValidUri('http://example.com'));
     assert.isTrue(isValidUri('https://example.com/path'));
     assert.isTrue(isValidUri('ftp://files.example.com'));
+    assert.isTrue(isValidUri('https://example.com:8080/path'));
+    assert.isTrue(isValidUri('mailto:foo@bar.com'), 'a non-hierarchical scheme');
+    assert.isTrue(isValidUri('urn:isbn:0451450523'));
   });
 
   it('should return false for invalid URIs', () => {
     assert.isFalse(isValidUri('not-a-uri'));
     assert.isFalse(isValidUri('#fragment-only'));
+    assert.isFalse(isValidUri('http://example.com:abc'), 'a non-numeric port');
+    assert.isFalse(isValidUri('http://x/%zz'), 'malformed percent-encoding');
+    assert.isFalse(isValidUri('http://x/a|b'), 'a character outside the grammar');
   });
-});
 
-describe('isValidUriFull', () => {
-  it('should return true for valid URIs', () => {
-    assert.isTrue(isValidUriFull('http://example.com'));
-    assert.isTrue(isValidUriFull('https://example.com:8080/path'));
+  it('should reject the non-ASCII characters that make a string an IRI', () => {
+    // RFC 3986 is an ASCII grammar throughout; the ucschar ranges are
+    // what RFC 3987 adds on top of it.
+    assert.isFalse(isValidUri('https://例え.jp/テスト'));
+    assert.isFalse(isValidUri('http://x/é'));
+    assert.isTrue(isValidIRI('https://例え.jp/テスト'), 'the same string is a valid IRI');
   });
 });
 
@@ -165,13 +201,34 @@ describe('isValidUriRef', () => {
     assert.isTrue(isValidUriRef('/path/to/resource'));
     assert.isTrue(isValidUriRef('path/to/resource'));
     assert.isTrue(isValidUriRef('#fragment'));
+    assert.isTrue(isValidUriRef(''), 'the empty reference');
+    assert.isTrue(isValidUriRef('../a/b'));
+  });
+
+  it('should return false for malformed references', () => {
+    assert.isFalse(isValidUriRef('a\\b'));
+    assert.isFalse(isValidUriRef('<a>'));
+    assert.isFalse(isValidUriRef('%2'));
+    assert.isFalse(isValidUriRef('1http://x'), 'a colon in the first segment');
   });
 });
 
-describe('isValidUriRefFull', () => {
-  it('should return true for valid URI references', () => {
-    assert.isTrue(isValidUriRefFull('http://example.com'));
-    assert.isTrue(isValidUriRefFull('/path'));
+describe('URI and IRI relate as sub- and superset', () => {
+  it('accepts every URI as an IRI', () => {
+    // RFC 3987 widens one character class of RFC 3986 and adds nothing
+    // else, so a URI is an IRI by construction. The two answered from
+    // unrelated patterns before they shared a scanner, and disagreed.
+    const cases = [
+      'http://example.com', 'https://example.com:8080/p?q=1#f', 'mailto:foo@bar.com',
+      'urn:isbn:1', 'http://[::1]/x', 'a:', 'http://x/a%20b', '/path', 'path', '#f', '',
+      '../a', 'http://user:pw@host/p', 'ftp://x/y', 'http://x/(a)', "http://x/a'b",
+    ];
+    for (const c of cases) {
+      if (isValidUri(c))
+        assert.isTrue(isValidIRI(c), `${JSON.stringify(c)} is a URI but not an IRI`);
+      if (isValidUriRef(c))
+        assert.isTrue(isValidIRIRef(c), `${JSON.stringify(c)} is a URI reference but not an IRI reference`);
+    }
   });
 });
 
@@ -192,10 +249,72 @@ describe('isValidIRI', () => {
   it('should return true for valid IRIs', () => {
     assert.isTrue(isValidIRI('http://example.com'));
     assert.isTrue(isValidIRI('https://example.com/path'));
+    assert.isTrue(isValidIRI('http://user:pw@example.com:8080/p?q=1#f'));
   });
 
   it('should return true for IRIs with unicode', () => {
     assert.isTrue(isValidIRI('https://例え.jp/テスト'));
+  });
+
+  it('should accept a scheme whose path is not hierarchical', () => {
+    // ihier-part admits ipath-rootless and ipath-empty, so a scheme need
+    // not be followed by "//" at all.
+    assert.isTrue(isValidIRI('mailto:foo@bar.com'));
+    assert.isTrue(isValidIRI('urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66'));
+    assert.isTrue(isValidIRI('tel:+31-20-1234567'));
+    assert.isTrue(isValidIRI('news:comp.lang.js'));
+    assert.isTrue(isValidIRI('a:'), 'an empty path is a path');
+  });
+
+  it('should accept the bracketed host forms', () => {
+    assert.isTrue(isValidIRI('http://[2001:0db8:85a3:0000:0000:8a2e:0370:7334]'));
+    assert.isTrue(isValidIRI('http://[::1]/x'));
+    assert.isTrue(isValidIRI('http://[v7.fe80::a]/x'), 'IPvFuture');
+    assert.isFalse(isValidIRI('http://[::1/x'), 'an unclosed literal');
+    assert.isFalse(isValidIRI('http://[not-an-address]/x'));
+  });
+
+  it('should reject an unbracketed IPv6 authority', () => {
+    // The colons read as a port, which admits only digits.
+    assert.isFalse(isValidIRI('http://2001:0db8:85a3:0000:0000:8a2e:0370:7334'));
+  });
+
+  it('should require a scheme', () => {
+    assert.isFalse(isValidIRI('/abc'));
+    assert.isFalse(isValidIRI('âππ'));
+    assert.isFalse(isValidIRI('//example.com/a'));
+  });
+
+  it('should reject malformed percent-encoding', () => {
+    // pct-encoded = "%" HEXDIG HEXDIG, so a truncated or non-hex escape
+    // is not a character at all.
+    for (const bad of ['%', '%A', '%AG', '%GA', '%%', 'a%']) {
+      assert.isFalse(isValidIRI('http://x/' + bad), `path ${JSON.stringify(bad)}`);
+    }
+    assert.isTrue(isValidIRI('http://x/%41'));
+    assert.isTrue(isValidIRI('http://x/a%20b'));
+  });
+
+  it('should reject characters outside every production', () => {
+    for (const bad of ['\\', '<', '>', '{', '}', '|', '^', '"', '`', ' ']) {
+      assert.isFalse(isValidIRI('http://x/a' + bad + 'b'), `path ${JSON.stringify(bad)}`);
+    }
+  });
+
+  it('should place ucschar and iprivate by production', () => {
+    // ucschar is iunreserved and so belongs anywhere; iprivate is
+    // admitted by iquery alone.
+    assert.isTrue(isValidIRI('http://x/\u{10000}'), 'a supplementary-plane ucschar');
+    assert.isFalse(isValidIRI('http://x/\u{1FFFE}'), 'a noncharacter is not a ucschar');
+    assert.isTrue(isValidIRI('http://x/?a='), 'iprivate in the query');
+    assert.isFalse(isValidIRI('http://x/'), 'iprivate is not in a path');
+    assert.isFalse(isValidIRI('http://x/#'), 'iprivate is not in a fragment');
+  });
+
+  it('should reject unpaired surrogates', () => {
+    assert.isFalse(isValidIRI('http://x/\uD800'));
+    assert.isFalse(isValidIRI('http://x/\uDC00'));
+    assert.isFalse(isValidIRI('http://x/\uD800a'));
   });
 });
 
@@ -203,5 +322,25 @@ describe('isValidIRIRef', () => {
   it('should return true for valid IRI references', () => {
     assert.isTrue(isValidIRIRef('http://example.com'));
     assert.isTrue(isValidIRIRef('/path'));
+    assert.isTrue(isValidIRIRef('//example.com/a'), 'a network-path reference');
+    assert.isTrue(isValidIRIRef('âππ'), 'a relative path');
+    assert.isTrue(isValidIRIRef('#ƒrägmênt'), 'a bare fragment');
+    assert.isTrue(isValidIRIRef(''), 'the empty reference');
+    assert.isTrue(isValidIRIRef('../a/b'));
+  });
+
+  it('should reject a colon in the first segment of a relative reference', () => {
+    // RFC 3986 section 4.2: such a segment would be read as a scheme.
+    assert.isFalse(isValidIRIRef('1http://x'));
+    assert.isFalse(isValidIRIRef('+http://x'));
+    assert.isTrue(isValidIRIRef('./1http:x'), 'a later segment may hold a colon');
+  });
+
+  it('should apply the same character rules as isValidIRI', () => {
+    assert.isFalse(isValidIRIRef('a\\b'));
+    assert.isFalse(isValidIRIRef('<a>'));
+    assert.isFalse(isValidIRIRef('a|b'));
+    assert.isFalse(isValidIRIRef('%zz'));
+    assert.isFalse(isValidIRIRef('#ƒräg\\mênt'));
   });
 });

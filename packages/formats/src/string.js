@@ -183,6 +183,19 @@ export const compileColorFormat = createStringFormatCompiler('color', stringForm
  */
 export const compileRegexFormat = createStringFormatCompiler('regex', stringFormatTesters['regex']);
 
+/**
+ * Compiles a validator for the 'iregexp' format.
+ * Validates that a string is a valid I-Regexp (RFC 9485) pattern - the
+ * interoperable subset that carries the same meaning across regexp
+ * dialects. Stricter than 'regex': shorthand classes (\d, \w), lazy
+ * quantifiers, anchors and lookaround are all rejected.
+ *
+ * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ */
+export const compileIRegexpFormat = createStringFormatCompiler('iregexp', stringFormatTesters['iregexp']);
+
 // =============================================================================
 // URI Format Compilers
 // =============================================================================
@@ -200,16 +213,6 @@ export const compileRegexFormat = createStringFormatCompiler('regex', stringForm
 export const compileUriFormat = createStringFormatCompiler('uri', stringFormatTesters['uri']);
 
 /**
- * Compiles a validator for the 'uri--full' format.
- * Validates absolute URI strings with stricter checking.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileUriFullFormat = createStringFormatCompiler('uri--full', stringFormatTesters['uri--full']);
-
-/**
  * Compiles a validator for the 'uri-reference' format.
  * Validates URI reference strings (absolute or relative) per RFC 3986.
  *
@@ -218,16 +221,6 @@ export const compileUriFullFormat = createStringFormatCompiler('uri--full', stri
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
 export const compileUriReferenceFormat = createStringFormatCompiler('uri-reference', stringFormatTesters['uri-reference']);
-
-/**
- * Compiles a validator for the 'uri-reference--full' format.
- * Validates URI reference strings with stricter checking.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileUriReferenceFullFormat = createStringFormatCompiler('uri-reference--full', stringFormatTesters['uri-reference--full']);
 
 /**
  * Compiles a validator for the 'uri-template' format.
@@ -248,16 +241,6 @@ export const compileUriTemplateFormat = createStringFormatCompiler('uri-template
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
 export const compileUrlFormat = createStringFormatCompiler('url', stringFormatTesters['url']);
-
-/**
- * Compiles a validator for the 'url--full' format.
- * Validates URL strings with stricter checking.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileUrlFullFormat = createStringFormatCompiler('url--full', stringFormatTesters['url--full']);
 
 // =============================================================================
 // IRI Format Compilers (Internationalized Resource Identifiers)
@@ -298,16 +281,6 @@ export const compileIriReferenceFormat = createStringFormatCompiler('iri-referen
  * compileEmailFormat(schemaObj, { format: 'email' })('user@example.com'); // true
  */
 export const compileEmailFormat = createStringFormatCompiler('email', stringFormatTesters['email']);
-
-/**
- * Compiles a validator for the 'email--full' format.
- * Validates email address strings with stricter checking.
- *
- * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
- * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
- * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
- */
-export const compileEmailFullFormat = createStringFormatCompiler('email--full', stringFormatTesters['email--full']);
 
 /**
  * Compiles a validator for the 'idn-email' format.
@@ -510,20 +483,17 @@ export const formatValidators = {
   'color': compileColorFormat,
   // Regex
   'regex': compileRegexFormat,
+  'iregexp': compileIRegexpFormat,
   // URI
   'uri': compileUriFormat,
-  'uri--full': compileUriFullFormat,
   'uri-reference': compileUriReferenceFormat,
-  'uri-reference--full': compileUriReferenceFullFormat,
   'uri-template': compileUriTemplateFormat,
   'url': compileUrlFormat,
-  'url--full': compileUrlFullFormat,
   // IRI
   'iri': compileIriFormat,
   'iri-reference': compileIriReferenceFormat,
   // Email
   'email': compileEmailFormat,
-  'email--full': compileEmailFullFormat,
   'idn-email': compileIdnEmailFormat,
   // Hostname
   'hostname': compileHostnameFormat,

@@ -50,11 +50,6 @@ export function isValidEmail(str) {
     && isValidEmailDomain(str.slice(at + 1));
 }
 
-const CONST_REGEXP_EMAIL_FULL = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
-export function isValidEmailFull(str) {
-  return CONST_REGEXP_EMAIL_FULL.test(str);
-}
-
 const CONST_REGEXP_IDNEMAIL = /^[^@]+@[^@]+\.[^@]+$/;
 export function isValidIdnEmail(str) {
   return CONST_REGEXP_IDNEMAIL.test(str);

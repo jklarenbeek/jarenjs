@@ -19,6 +19,7 @@ number in a README performance table names the command that produced it.
 | [`callgraph.js`](./callgraph.js) | Call-graph generation via the Node.js profiler | Analyzing hot paths and call chains |
 | [`jsonpath.js`](./jsonpath.js) | JSONPath RFC 9535 compliance + performance vs json-p3 | Verifying/benchmarking the JSONPath compiler |
 | [`jsonpointer.js`](./jsonpointer.js) | Compiled JSON Pointer performance | Benchmarking pointer/`$data` resolution |
+| [`formats.js`](./formats.js) | String `format` validation vs ajv-formats | Benchmarking the format testers |
 | [`jsonquery.js`](./jsonquery.js) | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking FLWOR joins, grouping, reshaping |
 | [`jslt.js`](./jslt.js) | JSLT performance vs native JS/JSONata | Benchmarking identity sharing, recursive dispatch, modes |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
@@ -264,6 +265,26 @@ Options:
 ```
 
 npm shortcuts: `npm run benchmark:jsonpath`, `npm run benchmark:jsonpath:profile`.
+
+## formats.js — string formats vs ajv-formats
+
+Benchmarks `@jarenjs/formats` against
+[`ajv-formats`](https://www.npmjs.com/package/ajv-formats), compiled
+validator to compiled validator, in two tables: the formats both engines
+implement (where a ratio means something) and the formats only Jaren
+implements — the internationalized `iri`/`idn-hostname` family and Jaren's
+extras — where Ajv has no validator and the column reads `n/a`.
+
+Each scenario carries a value that must be accepted and one that must be
+rejected, and both engines are checked against both before being timed: an
+engine that waves the invalid value through is not doing the work being
+measured, so its column is dropped rather than reported. That check is what
+keeps a format Ajv silently ignores from appearing as an Ajv win.
+
+```bash
+npm run benchmark:formats
+node benchmark/formats.js --filter iri
+```
 
 ## jsonpointer.js — compiled JSON Pointer performance
 

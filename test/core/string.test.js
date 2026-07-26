@@ -12,6 +12,8 @@ import {
   getSegmenter,
   isAsciiString,
   getStringLength,
+  toCodePoints,
+  fromCodePoints,
   countCodePoints,
   compareCodePoints,
   hashContent,
@@ -213,6 +215,56 @@ describe('getStringLength', () => {
   it('should handle empty string', () => {
     assert.deepEqual(getStringLength(''), 0);
     assert.deepEqual(getStringLength('', true), 0);
+  });
+});
+
+describe('toCodePoints / fromCodePoints', () => {
+  it('should decode ASCII and BMP characters', () => {
+    assert.deepEqual(toCodePoints(''), []);
+    assert.deepEqual(toCodePoints('abc'), [0x61, 0x62, 0x63]);
+    assert.deepEqual(toCodePoints('héllo'), [0x68, 0xE9, 0x6C, 0x6C, 0x6F]);
+    assert.deepEqual(toCodePoints('日本語'), [0x65E5, 0x672C, 0x8A9E]);
+  });
+
+  it('should decode a surrogate pair into one code point', () => {
+    assert.deepEqual(toCodePoints('🎉'), [0x1F389]);
+    assert.deepEqual(toCodePoints('a\u{10000}b'), [0x61, 0x10000, 0x62]);
+  });
+
+  it('should keep a lone surrogate as its own code point', () => {
+    // Not replaced: a caller validating text has to be able to see it.
+    assert.deepEqual(toCodePoints('\uD800'), [0xD800]);
+    assert.deepEqual(toCodePoints('\uDC00'), [0xDC00]);
+    assert.deepEqual(toCodePoints('a\uD800b'), [0x61, 0xD800, 0x62]);
+    assert.deepEqual(toCodePoints('\uDC00\uD800'), [0xDC00, 0xD800], 'reversed pair');
+  });
+
+  it('should agree with countCodePoints on length', () => {
+    for (const s of ['', 'abc', 'héllo', '🎉', 'a\u{10000}b', '\uD800', 'a\uD800b', '例え.テスト']) {
+      assert.deepEqual(toCodePoints(s).length, countCodePoints(s), JSON.stringify(s));
+    }
+  });
+
+  it('should round-trip through fromCodePoints', () => {
+    for (const s of ['', 'a', 'abc', 'héllo', '日本語', '🎉', 'a\u{10000}b',
+      '\uD800', '\uDC00', 'a\uD800b', 'x'.repeat(9), 'é'.repeat(40)]) {
+      assert.deepEqual(fromCodePoints(toCodePoints(s)), s, JSON.stringify(s));
+    }
+  });
+
+  it('should round-trip across every fromCodePoints strategy', () => {
+    // Short runs concatenate, medium ones spread, long ones spread in
+    // chunks - the seams are what this checks.
+    for (const len of [0, 1, 7, 8, 9, 4095, 4096, 4097, 9000]) {
+      const codes = Array.from({ length: len }, (_, i) => 0x4E00 + (i % 0x100));
+      assert.deepEqual(toCodePoints(fromCodePoints(codes)), codes, `length ${len}`);
+    }
+  });
+
+  it('should not mutate the argument array', () => {
+    const codes = [0x61, 0x62, 0x63];
+    assert.deepEqual(fromCodePoints(codes), 'abc');
+    assert.deepEqual(codes, [0x61, 0x62, 0x63]);
   });
 });
 

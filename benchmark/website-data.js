@@ -12,6 +12,7 @@
  *   jsonpath.json     jsonpath.js       — CTS compliance + per-query profile vs json-p3
  *   jsonquery.json    jsonquery.js      — scenario matrix vs fontoxpath/jsonata (+ sources)
  *   jslt.json         jslt.js           — scenario matrix vs native JS/JSONata (+ sources)
+ *   formats.json      formats.js        — string `format` validation vs ajv-formats
  *   jsonpointer.json  jsonpointer.js    — compiled vs legacy vs jsonpointer npm
  *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
  *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
@@ -47,7 +48,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, jsonpointer, jsonpatch, toml, markdown, mermaid, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, markdown, mermaid, qt3');
         process.exit(0);
         break;
       default:
@@ -296,6 +297,27 @@ async function generateJslt(tmp, options) {
       key,
       ...meta,
       sources: sources[key],
+    })),
+  };
+}
+
+function generateFormats(tmp, options) {
+  const file = path.join(tmp, 'formats.json');
+  runTool([
+    'benchmark/formats.js',
+    '--iterations', String(options.quick ? 20_000 : 200_000),
+    '--output', 'json', '--filepath', file,
+  ]);
+  const raw = readJson(file);
+  if (raw === null) return null;
+  return {
+    ...raw,
+    tables: raw.tables.map((table) => ({
+      ...table,
+      rows: table.rows.map((row) => ({
+        ...row,
+        results: row.results.map((ns) => (ns === null ? null : sig4(ns))),
+      })),
     })),
   };
 }
@@ -558,7 +580,7 @@ function generateQt3() {
 
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
-  'validate', 'jsonpath', 'jsonquery', 'jslt', 'jsonpointer', 'jsonpatch',
+  'validate', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'markdown', 'mermaid', 'view', 'charts',
 ];
 
@@ -639,7 +661,11 @@ function buildHeadlines(generated, meta) {
   // A rival column is one that is not Jaren's own: these suites carry
   // `jaren compiled` next to `jaren legacy`, and ranking Jaren against
   // itself would invent a win.
-  for (const [key, label] of [['jsonpointer', 'JSON Pointer'], ['jsonpatch', 'JSON Patch']]) {
+  for (const [key, label, rival, note] of [
+    ['formats', 'Formats', 'ajv-formats', 'formats both engines implement'],
+    ['jsonpointer', 'JSON Pointer', 'the npm implementation', 'compiled getters vs npm'],
+    ['jsonpatch', 'JSON Patch', 'the npm implementation', 'official json-patch-tests'],
+  ]) {
     if (generated[key] === undefined) continue;
     const ratios = [];
     for (const t of generated[key].tables ?? []) {
@@ -655,11 +681,11 @@ function buildHeadlines(generated, meta) {
     }
     add(key, label, {
       ratio: geoMean(ratios),
-      rival: 'the npm implementation',
-      conformance: key === 'jsonpatch' && generated.jsonpatch.conformance !== undefined
-        ? `${generated.jsonpatch.conformance.pass} / ${generated.jsonpatch.conformance.total}`
+      rival,
+      conformance: generated[key].conformance != null
+        ? `${generated[key].conformance.pass} / ${generated[key].conformance.total}`
         : null,
-      note: key === 'jsonpatch' ? 'official json-patch-tests' : 'compiled getters vs npm',
+      note,
     });
   }
   if (generated.toml !== undefined) {
@@ -746,6 +772,8 @@ async function main() {
     generated.jsonquery = await generateJsonQuery(tmp, options);
   if (!options.skip.has('jslt'))
     generated.jslt = await generateJslt(tmp, options);
+  if (!options.skip.has('formats'))
+    generated.formats = generateFormats(tmp, options);
   if (!options.skip.has('jsonpointer'))
     generated.jsonpointer = generateJsonPointer(tmp, options);
   if (!options.skip.has('jsonpatch'))

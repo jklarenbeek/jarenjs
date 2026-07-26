@@ -1,6 +1,6 @@
 # @jarenjs/formats
 
-Format validators for the JSON Schema `format` keyword, built on the text validators of [`@jarenjs/core`](../core). Includes all standard string formats (`date-time`, `date`, `time`, `duration`, `email`, `idn-email`, `hostname`, `idn-hostname`, `ipv4`, `ipv6`, `uri`, `uri-reference`, `uri-template`, `iri`, `iri-reference`, `uuid`, `regex`) plus many extras (`isbn10`, `mac`, `base64`, `alpha`, `color`, ...) and numeric formats (`int8` ... `uint64`, `float16` ... `float64`).
+Format validators for the JSON Schema `format` keyword, built on the text validators of [`@jarenjs/core`](../core). Includes all standard string formats (`date-time`, `date`, `time`, `duration`, `email`, `idn-email`, `hostname`, `idn-hostname`, `ipv4`, `ipv6`, `uri`, `uri-reference`, `uri-template`, `iri`, `iri-reference`, `uuid`, `regex`) plus many extras (`iregexp`, `isbn10`, `mac`, `base64`, `alpha`, `color`, ...) and numeric formats (`int8` ... `uint64`, `float16` ... `float64`).
 
 The JSON addressing formats are grouped separately in `jsonFormats`: `json-pointer`, `json-pointer-uri-fragment` and `relative-json-pointer` (RFC 6901), and `json-path`, which validates query strings against the complete [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) grammar using the parser of the JSONPath compiler in `@jarenjs/json`.
 
@@ -44,18 +44,14 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 
 #### 🗨 Formats for url's, hostnames and emails
 
-- `url` | full URL
-- `url--full` | same as `url`, but more comprehensive — uses the dotted-host FULL grammar (a host must carry a dotted TLD), so a single-label authority like `http://localhost:8080` **fails** `url--full` while passing `url`
-- `uri` | full URI
-- `uri--full` | same as `uri`, but more comprehensive
-- `uri-reference` | URI reference, including full and relative URIs
-- `uri-reference--full` | same as `uri-reference`, but more comprehensive
+- `url` | http/https URL — a `uri` narrowed to the web schemes, so it must carry an authority and the RFC 3986 grammar still applies (`http://localhost:8080` and `http://127.0.0.1/` are URLs; `http://x/a|b` is not)
+- `uri` | full URI according to [RFC3986](https://datatracker.ietf.org/doc/html/rfc3986), parsed against the grammar by character code — an ASCII grammar throughout, so a string carrying non-ASCII characters is an `iri` and not a `uri`
+- `uri-reference` | URI reference, absolute or relative, according to [RFC3986](https://datatracker.ietf.org/doc/html/rfc3986)
 - `uri-template` | URI template according to [RFC6570](https://datatracker.ietf.org/doc/html/rfc6570)
-- `iri` | full URI with international characters
-- `iri-reference` | full URI reference with with international characters
+- `iri` | full URI with international characters, according to [RFC3987](https://datatracker.ietf.org/doc/html/rfc3987) — parsed against the grammar by character code, so percent-encoding must be well formed and `iprivate` is accepted in the query only
+- `iri-reference` | full IRI reference, absolute or relative, according to [RFC3987](https://datatracker.ietf.org/doc/html/rfc3987)
 
-- `email` | email address
-- `email--full` | same as email, but more comprehensive
+- `email` | email address according to [RFC5321](https://datatracker.ietf.org/doc/html/rfc5321), including quoted-string local parts and `[192.0.2.1]` / `[IPv6:::1]` address literals
 - `hostname` | host name according to [RFC1034](https://datatracker.ietf.org/doc/html/rfc1034#section-3.5)
 - `idn-hostname` | host name with international characters
 - `idn-email` | email address with international characters
@@ -92,14 +88,15 @@ These are grouped in `jsonFormats`.
 - `lowercase` | allow only lower case alpha characters
 - `color` | web color hex string (starts with #, must be 3 or 6 hax characters)
 - `regex` | tests whether a string is a valid regular expression
+- `iregexp` | tests whether a string is a valid I-Regexp according to [RFC9485](https://www.rfc-editor.org/rfc/rfc9485.html) — the interoperable subset that means the same thing in every regexp dialect, so it is stricter than `regex`: shorthand classes (`\d`, `\w`), lazy quantifiers, anchors and lookaround are all rejected
 - `base64` | base64 encoded data
 - `byte` | same as `base64` format
 
 - `isbn10` | International Standard Book Number 10 digit number
 - `isbn13` | International Standard Book Number 13 digit number
 
-- `country2` | Country code by alpha-2 according to ISO3166-1 _!No tests exists!_
-- `iban` | International Bank Account Number _!No tests exists!_
+- `country2` | country code by alpha-2 according to [ISO3166-1](https://www.iso.org/iso-3166-country-codes.html) — the 249 assigned codes plus `XK`, the user-assigned code for Kosovo; matched case-insensitively
+- `iban` | International Bank Account Number according to [ISO13616](https://www.iso.org/standard/81090.html) — checks the country's registered length, the alphanumeric body and the ISO 7064 MOD 97-10 check digits, so a transposed digit is caught; accepts both the compact electronic format (`NL91ABNA0417164300`) and the print format grouped in fours (`NL91 ABNA 0417 1643 00`)
 
 ### ✍ Formats for numbers
 

@@ -130,6 +130,16 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(JSON.stringify(nodes), /json-patch-tests/, 'the conformance note renders');
   });
 
+  it('derives the formats suite from the generated data', function () {
+    const state = { benchStatus: { formats: 'loaded' }, bench: { formats: loadBench('formats') }, benchUi: {} };
+    const nodes = deriveSuite(state, 'formats');
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    const text = JSON.stringify(nodes);
+    assert.match(text, /optional\/format suite/, 'the conformance card renders');
+    assert.match(text, /Formats only Jaren implements/, 'the jaren-only table is published, not hidden');
+    assert.match(text, /idn-hostname/, 'the internationalized formats are listed');
+  });
+
   it('derives the TOML suite from the generated data', function () {
     const state = { benchStatus: { toml: 'loaded' }, bench: { toml: loadBench('toml') }, benchUi: {} };
     const nodes = deriveSuite(state, 'toml');

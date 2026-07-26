@@ -55,7 +55,9 @@ isValidIPv6('::ffff:192.168.0.1');        // true
 isValidUriTemplate('/users{/id}{?q}');    // true (RFC 6570)
 ```
 
-Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostnames, IDN hostnames, IPv4/IPv6, MAC, URI/URL/IRI and references, URI templates), `identifiers` (UUID, GUID, C/HTML/CSS identifiers), `iregexp` (I-Regexp / RFC 9485 validation and translation to `RegExp`: `isValidIRegexp`, `compileIRegexp`), `base64`, `basic` (alpha, numeric, hex, web colors), `misc` (ISBN-10/13, ISO 3166 country codes, IBAN), `i18n` (Unicode script tests and IDNA context checks) and a complete `punycode` implementation.
+Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostnames, IDN hostnames, IPv4/IPv6, MAC, URI/URL/IRI and references, URI templates), `identifiers` (UUID, GUID, C/HTML/CSS identifiers), `iregexp` (I-Regexp / RFC 9485 validation and translation to `RegExp`: `isValidIRegexp`, `compileIRegexp`), `base64`, `basic` (alpha, numeric, hex, web colors), `misc` (ISBN-10/13, ISO 3166 country codes, ISO 13616 IBAN including its MOD 97-10 check digits), `i18n` (Unicode script tests and IDNA context checks) and `punycode` (the RFC 3492 codec, `punycodeEncode`/`punycodeDecode`, plus the domain-level `domainToASCII`/`domainToUnicode`).
+
+`host` answers `uri`, `uri-reference`, `iri` and `iri-reference` from one character-code scanner: RFC 3987 is RFC 3986 with the unreserved class widened by `ucschar` and `iprivate` admitted in the query, so both grammars are the same walk with one flag. That is what makes every URI an IRI by construction rather than by coincidence.
 
 ## Dates, numbers and math
 

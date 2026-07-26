@@ -3,7 +3,6 @@ import * as assert from '../../assert.node.js';
 
 import {
   isValidEmail,
-  isValidEmailFull,
   isValidIdnEmail,
 } from '@jarenjs/core/text/email';
 
@@ -32,26 +31,6 @@ describe('isValidEmail', () => {
   it('should return false for multiple @ signs', () => {
     assert.isFalse(isValidEmail('user@@example.com'));
     assert.isFalse(isValidEmail('user@foo@example.com'));
-  });
-});
-
-describe('isValidEmailFull', () => {
-  it('should return true for valid email addresses', () => {
-    assert.isTrue(isValidEmailFull('user@example.com'));
-    assert.isTrue(isValidEmailFull('user.name@example.com'));
-    assert.isTrue(isValidEmailFull('user@sub.example.com'));
-  });
-
-  it('should have stricter validation', () => {
-    // The full validator has stricter rules
-    assert.isTrue(isValidEmailFull('user@example.co.uk'));
-  });
-
-  it('should return false for invalid email addresses', () => {
-    assert.isFalse(isValidEmailFull('user'));
-    assert.isFalse(isValidEmailFull('user@'));
-    assert.isFalse(isValidEmailFull('@example.com'));
-    assert.isFalse(isValidEmailFull(''));
   });
 });
 

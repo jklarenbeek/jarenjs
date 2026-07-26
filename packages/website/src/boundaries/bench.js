@@ -31,6 +31,7 @@ export const SUITES = [
   { key: 'jsonpath', label: 'JSONPath' },
   { key: 'jsonquery', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
+  { key: 'formats', label: 'Formats' },
   { key: 'jsonpointer', label: 'JSON Pointer' },
   { key: 'jsonpatch', label: 'JSON Patch' },
   { key: 'toml', label: 'JOSL / TOML' },
@@ -57,6 +58,7 @@ export function deriveSuite(state, suite) {
     case 'jsonpath': return jsonpath(data, state.benchUi);
     case 'jsonquery': return scenarioMatrix(data, 'query documents');
     case 'jslt': return scenarioMatrix(data, 'stylesheets');
+    case 'formats': return formatsSuite(data);
     case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
     case 'toml': return toml(data);
@@ -348,6 +350,20 @@ function genericTables(data, note) {
       t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
       note),
   ]);
+}
+
+function formatsSuite(data) {
+  const out = [];
+  if (data.conformance != null) {
+    out.push(cards([{
+      title: 'Conformance',
+      value: `${data.conformance.pass} / ${data.conformance.total}`,
+      note: `official optional/format suite, ${data.conformance.formats} formats`,
+    }]));
+  }
+  out.push(...genericTables(data,
+    'Nanoseconds for one accepted plus one rejected value; lower is better. A dash is a format that engine does not implement, or one it accepts the invalid value for.'));
+  return out;
 }
 
 function patch(data) {

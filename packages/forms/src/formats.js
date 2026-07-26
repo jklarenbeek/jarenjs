@@ -41,7 +41,6 @@ const FORM_HINTS = {
 
   // -- email
   'email': { control: 'email', placeholder: 'user@example.com' },
-  'email--full': { control: 'email', placeholder: 'user@example.com' },
   'idn-email': { control: 'email', placeholder: 'user@example.com' },
 
   // -- hosts and addresses
@@ -53,12 +52,9 @@ const FORM_HINTS = {
 
   // -- uris
   'uri': { control: 'url', placeholder: 'https://example.com/path' },
-  'uri--full': { control: 'url', placeholder: 'https://example.com/path' },
   'uri-reference': { placeholder: '/relative/path' },
-  'uri-reference--full': { placeholder: '/relative/path' },
   'uri-template': { placeholder: '/users/{id}' },
   'url': { control: 'url', placeholder: 'https://example.com' },
-  'url--full': { control: 'url', placeholder: 'https://example.com' },
   'iri': { control: 'url', placeholder: 'https://example.com/päth' },
   'iri-reference': { placeholder: '/relative/päth' },
 
@@ -77,6 +73,7 @@ const FORM_HINTS = {
 
   // -- misc
   'regex': { placeholder: '^[a-z]+$' },
+  'iregexp': { placeholder: '[a-z]+' },
   'base64': { control: 'textarea', placeholder: 'SGVsbG8=' },
   'byte': { control: 'textarea', placeholder: 'SGVsbG8=' },
   'alpha': { placeholder: 'alpha' },

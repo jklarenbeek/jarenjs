@@ -17,8 +17,8 @@ import {
 // for format-name -> predicate bindings. Every compiler registry must
 // stay in one-to-one correspondence with its tester group, so the
 // validator's format compilers and @jarenjs/forms' preemptive field
-// validation can never drift apart again (they did: 'iso-time' and
-// 'url--full' disagreed before this table existed).
+// validation can never drift apart again (they did: 'iso-time' and the
+// since-removed 'url--full' disagreed before this table existed).
 
 describe('Format tester registry', function () {
   const groups = [
@@ -53,10 +53,13 @@ describe('Format tester registry', function () {
     assert.isFalse(formatTesters['time']('12:30:00'), 'RFC 3339 time requires an offset');
   });
 
-  it("should test 'url--full' with the full URL grammar, not the simple one", function () {
-    assert.isTrue(formatTesters['url--full']('http://example.com/'));
-    assert.isTrue(formatTesters['url']('http://localhost:8080/x'));
-    assert.isFalse(formatTesters['url--full']('http://localhost:8080/x'), 'the full grammar requires a dotted host');
+  it("should test 'url' as a URI narrowed to the web schemes", function () {
+    assert.isTrue(formatTesters['url']('http://example.com/'));
+    assert.isTrue(formatTesters['url']('http://localhost:8080/x'), 'a single-label authority is a host');
+    assert.isFalse(formatTesters['url']('ftp://example.com/'), 'not a web scheme');
+    assert.isFalse(formatTesters['url']('example.com'), 'no scheme');
+    assert.isFalse(formatTesters['url']('http://x/a|b'), 'a URL is a URI, so the grammar still applies');
+    assert.isTrue(formatTesters['uri']('ftp://example.com/'), 'which uri accepts');
   });
 
   it('should test number formats against numbers', function () {

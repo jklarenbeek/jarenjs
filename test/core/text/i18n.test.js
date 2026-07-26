@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import * as assert from '../../assert.node.js';
 
+import { toCodePoints } from '@jarenjs/core/string';
+
 import {
   isLatinLowercaseL,
   isGreek,
@@ -140,14 +142,26 @@ describe('isCombiningMark', () => {
 });
 
 describe('checkContextualRules', () => {
+  // Takes a label's code points, like its sibling checkDigitMixing.
+  const rules = (label) => checkContextualRules(toCodePoints(label));
+
   it('should return true for valid labels', () => {
-    assert.isTrue(checkContextualRules('hello'));
-    assert.isTrue(checkContextualRules('example'));
+    assert.isTrue(rules('hello'));
+    assert.isTrue(rules('example'));
   });
 
   it('should handle middle dot rule for Catalan', () => {
-    assert.isTrue(checkContextualRules('abc·def')); // · has l on both sides in regex test, but 'c' is not l
+    assert.isTrue(rules('abc·def')); // · has l on both sides in regex test, but 'c' is not l
     // Actually this returns false because checkContextualRules expects specific patterns
+  });
+
+  it('should reject a script-bound character out of context', () => {
+    assert.isTrue(rules('α͵β'), 'Greek keraia followed by Greek');
+    assert.isFalse(rules('a͵b'), 'Greek keraia not followed by Greek');
+    assert.isTrue(rules('א׳'), 'Hebrew geresh after a Hebrew letter');
+    assert.isFalse(rules('a׳b'), 'Hebrew geresh not preceded by Hebrew');
+    assert.isTrue(rules('א״ב'), 'Hebrew gershayim after a Hebrew letter');
+    assert.isFalse(rules('a״b'), 'Hebrew gershayim not preceded by Hebrew');
   });
 });
 

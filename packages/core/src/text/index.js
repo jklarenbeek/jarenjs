@@ -9,3 +9,4 @@ export * from './i18n.js';
 export * from './identifiers.js';
 export * from './iregexp.js';
 export * from './misc.js';
+export * from './punycode.js';

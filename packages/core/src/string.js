@@ -172,6 +172,72 @@ export function countCodePoints(str) {
 }
 
 /**
+ * Decode a string into its Unicode code points (surrogate-pair aware).
+ *
+ * `Array.from(str).map(c => c.codePointAt(0))` computes the same thing
+ * but allocates a string per character on the way; this reads the code
+ * units directly. An unpaired surrogate is kept as its own code point
+ * rather than replaced, so the result round-trips through
+ * {@link fromCodePoints} and a caller validating text can see the lone
+ * surrogate and reject it.
+ *
+ * @param {string} str - The string to decode
+ * @returns {number[]} The code points, in order
+ */
+export function toCodePoints(str) {
+  const slen = str.length;
+  const out = [];
+  for (let i = 0; i < slen; i++) {
+    const c = str.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < slen) {
+      const d = str.charCodeAt(i + 1);
+      if (d >= 0xDC00 && d <= 0xDFFF) {
+        out.push((c - 0xD800) * 0x400 + (d - 0xDC00) + 0x10000);
+        i++;
+        continue;
+      }
+    }
+    out.push(c);
+  }
+  return out;
+}
+
+/**
+ * Fewer code points than this and appending one at a time beats
+ * spreading the array into `String.fromCodePoint`, whose argument-list
+ * setup then costs more than the concatenations it saves. Measured
+ * crossover; the two are within a few percent either side of it.
+ */
+const CODE_POINT_SPREAD_MIN = 8;
+
+/** Code points per spread, so a large array cannot overflow the stack. */
+const CODE_POINT_SPREAD_CHUNK = 4096;
+
+/**
+ * Build a string from Unicode code points - the inverse of
+ * {@link toCodePoints}.
+ *
+ * @param {number[]} codePoints - The code points to encode
+ * @returns {string} The resulting string
+ */
+export function fromCodePoints(codePoints) {
+  const len = codePoints.length;
+  if (len < CODE_POINT_SPREAD_MIN) {
+    let out = '';
+    for (let i = 0; i < len; i++)
+      out += String.fromCodePoint(codePoints[i]);
+    return out;
+  }
+  if (len <= CODE_POINT_SPREAD_CHUNK)
+    return String.fromCodePoint(...codePoints);
+
+  let out = '';
+  for (let i = 0; i < len; i += CODE_POINT_SPREAD_CHUNK)
+    out += String.fromCodePoint(...codePoints.slice(i, i + CODE_POINT_SPREAD_CHUNK));
+  return out;
+}
+
+/**
  * Compare two strings by Unicode scalar values (code points), per
  * RFC 9535 section 2.3.5.2.2. This differs from JavaScript's native
  * `<`, which compares UTF-16 code units and orders surrogate pairs

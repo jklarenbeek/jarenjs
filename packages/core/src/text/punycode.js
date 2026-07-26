@@ -1,407 +1,319 @@
-// @ts-nocheck
-// Copyright Mathias Bynens <https://mathiasbynens.be/>
-// https://github.com/bestiejs/punycode.js/blob/master/punycode.js
-
-export const punycodeVersion = '2.1.0';
-
-/** Highest positive signed 32-bit float value */
-const maxInt = 2147483647; // aka. 0x7FFFFFFF or 2^31-1
-
-/** Bootstring parameters */
-const base = 36;
-const tMin = 1;
-const tMax = 26;
-const skew = 38;
-const damp = 700;
-const initialBias = 72;
-const initialN = 128; // 0x80
-const delimiter = '-'; // '\x2D'
-
-/** Regular expressions */
-const regexPunycode = /^xn--/;
-const regexNonASCII = /[^\0-\x7E]/; // non-ASCII chars
-const regexSeparators = /[\x2E\u3002\uFF0E\uFF61]/g; // RFC 3490 separators
-
-/** Error messages */
-const errors = {
-  'overflow': 'Overflow: input needs wider integers to process',
-  'not-basic': 'Illegal input >= 0x80 (not a basic code point)',
-  'invalid-input': 'Invalid input',
-};
-
-/** Convenience shortcuts */
-const baseMinusTMin = base - tMin;
-const floor = Math.floor;
-const stringFromCharCode = String.fromCharCode;
-
-/*--------------------------------------------------------------------------*/
+//@ts-check
 
 /**
- * A generic error utility function.
- * @private
- * @param {String} type The error type.
- * @returns {Error} Throws a `RangeError` with the applicable error message.
+ * Punycode - the Bootstring encoding of Unicode for IDNA (RFC 3492) -
+ * and the domain-level conversions built on it.
+ *
+ * Two layers, because they are used at different granularities:
+ * `punycodeEncode`/`punycodeDecode` are the codec for ONE label and know
+ * nothing about domains, while `domainToASCII`/`domainToUnicode` walk a
+ * domain name (or the domain half of an email address) label by label
+ * and apply the `xn--` prefix convention. `isValidIdnHostname` in
+ * `host.js` splits labels itself and so calls the codec directly; the
+ * domain pair is for callers holding a whole name.
+ *
+ * The `flag` parameter of RFC 3492's digit encoder is omitted: it
+ * selects uppercase output, and IDNA A-labels are lowercase.
  */
-function error(type) {
-  throw new RangeError(errors[type]);
+
+import {
+  toCodePoints,
+  fromCodePoints,
+} from '../string.js';
+
+/** Bootstring parameters (RFC 3492 section 5). */
+const BASE = 36;
+const T_MIN = 1;
+const T_MAX = 26;
+const SKEW = 38;
+const DAMP = 700;
+const INITIAL_BIAS = 72;
+const INITIAL_N = 128; // the first non-basic code point
+const DELIMITER = '-';
+const MAX_INT = 0x7FFFFFFF; // the largest positive signed 32-bit value
+
+const BASE_MINUS_T_MIN = BASE - T_MIN;
+
+/** The ACE prefix that marks an encoded label. */
+const ACE_PREFIX = 'xn--';
+
+/**
+ * Whether the code point separates labels. IDNA (RFC 3490 section 3.1)
+ * accepts three full-stop variants besides the ASCII one.
+ * @param {number} code - A UTF-16 code unit
+ * @returns {boolean} True for a label separator
+ */
+function isLabelSeparator(code) {
+  return code === 0x2E // '.'
+    || code === 0x3002 // ideographic full stop
+    || code === 0xFF0E // fullwidth full stop
+    || code === 0xFF61; // halfwidth ideographic full stop
 }
 
 /**
- * A generic `Array#map` utility function.
- * @private
- * @param {Array} array The array to iterate over.
- * @param {Function} fn The function that gets called for every array
- * item.
- * @returns {Array} A new array of values returned by the callback function.
+ * The numeric value of a basic code point used as a Bootstring digit, or
+ * `BASE` when the code point is not a digit at all.
+ * @param {number} code - A basic (ASCII) code point
+ * @returns {number} The digit value 0..35, or BASE
  */
-function map(array, fn) {
-  const result = [];
-  let length = array.length;
-  while (length--) {
-    result[length] = fn(array[length]);
-  }
-  return result;
+function basicToDigit(code) {
+  if (code - 0x30 < 0x0A) return code - 0x16; // '0'-'9' -> 26..35
+  if (code - 0x41 < 0x1A) return code - 0x41; // 'A'-'Z' -> 0..25
+  if (code - 0x61 < 0x1A) return code - 0x61; // 'a'-'z' -> 0..25
+  return BASE;
 }
 
 /**
- * A simple `Array#map`-like wrapper to work with domain name strings or email
- * addresses.
- * @private
- * @param {String} domain The domain name or email address.
- * @param {Function} fn The function that gets called for every
- * character.
- * @returns {String} A new string of characters returned by the callback
- * function.
+ * The basic code point representing a Bootstring digit: 0..25 map to
+ * 'a'-'z', 26..35 to '0'-'9'.
+ * @param {number} digit - A digit value 0..35
+ * @returns {number} The code point
  */
-function mapDomain(domain, fn) {
-  const parts = domain.split('@');
-  let result = '';
-  if (parts.length > 1) {
-    // In email addresses, only the domain name should be punycoded. Leave
-    // the local part (i.e. everything up to `@`) intact.
-    result = parts[0] + '@';
-    domain = parts[1];
-  }
-  // Avoid `split(regex)` for IE8 compatibility. See #17.
-  domain = domain.replace(regexSeparators, '\x2E');
-  const labels = domain.split('.');
-  const encoded = map(labels, fn).join('.');
-  return result + encoded;
+function digitToBasic(digit) {
+  return digit + 22 + 75 * (digit < 26 ? 1 : 0);
 }
 
 /**
- * Creates an array containing the numeric code points of each Unicode
- * character in the string. While JavaScript uses UCS-2 internally,
- * this function will convert a pair of surrogate halves (each of which
- * UCS-2 exposes as separate characters) into a single code point,
- * matching UTF-16.
- * @see `punycode.ucs2.encode`
- * @see <https://mathiasbynens.be/notes/javascript-encoding>
- * @memberOf punycode.ucs2
- * @name decode
- * @param {String} string The Unicode input string (UCS-2).
- * @returns {Array} The new array of code points.
- */
-export function ucs2decode(string) {
-  const output = [];
-  let counter = 0;
-  const length = string.length;
-  while (counter < length) {
-    const value = string.charCodeAt(counter++);
-    if (value >= 0xD800 && value <= 0xDBFF && counter < length) {
-      // It's a high surrogate, and there is a next character.
-      const extra = string.charCodeAt(counter++);
-      if ((extra & 0xFC00) === 0xDC00) { // Low surrogate.
-        output.push(((value & 0x3FF) << 10) + (extra & 0x3FF) + 0x10000);
-      } else {
-        // It's an unmatched surrogate; only append this code unit, in case the
-        // next code unit is the high surrogate of a surrogate pair.
-        output.push(value);
-        counter--;
-      }
-    } else {
-      output.push(value);
-    }
-  }
-  return output;
-}
-
-/**
- * Creates a string based on an array of numeric code points.
- * @see `punycode.ucs2.decode`
- * @memberOf punycode.ucs2
- * @name encode
- * @param {Array} codePoints The array of numeric code points.
- * @returns {String} The new Unicode string (UCS-2).
- */
-export const ucs2encode = array => String.fromCodePoint(...array);
-
-/**
- * Converts a basic code point into a digit/integer.
- * @see `digitToBasic()`
- * @private
- * @param {Number} codePoint The basic numeric code point value.
- * @returns {Number} The numeric value of a basic code point (for use in
- * representing integers) in the range `0` to `base - 1`, or `base` if
- * the code point does not represent a value.
- */
-export function basicToDigit(codePoint) {
-  if (codePoint - 0x30 < 0x0A) {
-    return codePoint - 0x16;
-  }
-  if (codePoint - 0x41 < 0x1A) {
-    return codePoint - 0x41;
-  }
-  if (codePoint - 0x61 < 0x1A) {
-    return codePoint - 0x61;
-  }
-  return base;
-}
-
-/**
- * Converts a digit/integer into a basic code point.
- * @see `basicToDigit()`
- * @private
- * @param {Number} digit The numeric value of a basic code point.
- * @returns {Number} The basic code point whose value (when used for
- * representing integers) is `digit`, which needs to be in the range
- * `0` to `base - 1`. If `flag` is non-zero, the uppercase form is
- * used; else, the lowercase form is used. The behavior is undefined
- * if `flag` is non-zero and `digit` has no uppercase form.
- */
-export function digitToBasic(digit, flag) {
-  //  0..25 map to ASCII a..z or A..Z
-  // 26..35 map to ASCII 0..9
-  return digit + 22 + 75 * (digit < 26) - ((flag !== 0) << 5);
-}
-
-/**
- * Bias adaptation function as per section 3.4 of RFC 3492.
- * https://tools.ietf.org/html/rfc3492#section-3.4
- * @private
+ * Bias adaptation (RFC 3492 section 6.1).
+ * @param {number} delta - The delta just encoded or decoded
+ * @param {number} numPoints - Code points handled so far, plus one
+ * @param {boolean} firstTime - Whether this is the first adaptation
+ * @returns {number} The new bias
  */
 function adapt(delta, numPoints, firstTime) {
+  delta = firstTime ? Math.floor(delta / DAMP) : delta >> 1;
+  delta += Math.floor(delta / numPoints);
   let k = 0;
-  delta = firstTime ? floor(delta / damp) : delta >> 1;
-  delta += floor(delta / numPoints);
-  for (/* no initialization */; delta > baseMinusTMin * tMax >> 1; k += base) {
-    delta = floor(delta / baseMinusTMin);
-  }
-  return floor(k + (baseMinusTMin + 1) * delta / (delta + skew));
+  for (; delta > ((BASE_MINUS_T_MIN * T_MAX) >> 1); k += BASE)
+    delta = Math.floor(delta / BASE_MINUS_T_MIN);
+  return Math.floor(k + (BASE_MINUS_T_MIN + 1) * delta / (delta + SKEW));
 }
 
 /**
- * Converts a Punycode string of ASCII-only symbols to a string of Unicode
- * symbols.
- * @memberOf punycode
- * @param {String} input The Punycode string of ASCII-only symbols.
- * @returns {String} The resulting string of Unicode symbols.
+ * Decode a Punycode string to Unicode. The input is a bare encoded
+ * label - the `xn--` prefix, if any, belongs to the caller.
+ *
+ * @param {string} input - The Punycode-encoded text
+ * @returns {string} The decoded Unicode text
+ * @throws {RangeError} On a non-basic input character, a truncated digit
+ *   sequence, or an integer overflow
+ * @example
+ * punycodeDecode('bcher-kva'); // 'bücher'
  */
-export function decode(input) {
-  // Don't use UCS-2.
-  const output = [];
+export function punycodeDecode(input) {
   const inputLength = input.length;
+  const output = [];
   let i = 0;
-  let n = initialN;
-  let bias = initialBias;
+  let n = INITIAL_N;
+  let bias = INITIAL_BIAS;
 
-  // Handle the basic code points: let `basic` be the number of input code
-  // points before the last delimiter, or `0` if there is none, then copy
-  // the first basic code points to the output.
-
-  let basic = input.lastIndexOf(delimiter);
-  if (basic < 0) {
-    basic = 0;
-  }
+  // Everything before the last delimiter is literal basic code points.
+  let basic = input.lastIndexOf(DELIMITER);
+  if (basic < 0) basic = 0;
 
   for (let j = 0; j < basic; ++j) {
-    // if it's not a basic code point
-    if (input.charCodeAt(j) >= 0x80) {
-      error('not-basic');
-    }
-    output.push(input.charCodeAt(j));
+    const code = input.charCodeAt(j);
+    if (code >= 0x80)
+      throw new RangeError('Illegal input >= 0x80 (not a basic code point)');
+    output.push(code);
   }
 
-  // Main decoding loop: start just after the last delimiter if any basic code
-  // points were copied; start at the beginning otherwise.
-
-  for (let index = basic > 0 ? basic + 1 : 0; index < inputLength; /* no final expression */) {
-    // `index` is the index of the next character to be consumed.
-    // Decode a generalized variable-length integer into `delta`,
-    // which gets added to `i`. The overflow checking is easier
-    // if we increase `i` as we go, then subtract off its starting
-    // value at the end to obtain `delta`.
+  for (let index = basic > 0 ? basic + 1 : 0; index < inputLength;) {
+    // Decode a generalized variable-length integer into `i`. Overflow is
+    // easier to check by growing `i` as we go and taking the difference
+    // at the end than by tracking the delta separately.
     const oldi = i;
-    for (let w = 1, k = base; /* no condition */; k += base) {
-      if (index >= inputLength) {
-        error('invalid-input');
-      }
+    for (let w = 1, k = BASE; ; k += BASE) {
+      if (index >= inputLength) throw new RangeError('Invalid input');
 
       const digit = basicToDigit(input.charCodeAt(index++));
-      if (digit >= base || digit > floor((maxInt - i) / w)) {
-        error('overflow');
-      }
+      if (digit >= BASE || digit > Math.floor((MAX_INT - i) / w))
+        throw new RangeError('Overflow: input needs wider integers to process');
 
       i += digit * w;
-      const t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
-      if (digit < t) {
-        break;
-      }
+      const t = k <= bias ? T_MIN : (k >= bias + T_MAX ? T_MAX : k - bias);
+      if (digit < t) break;
 
-      const baseMinusT = base - t;
-      if (w > floor(maxInt / baseMinusT)) {
-        error('overflow');
-      }
-
+      const baseMinusT = BASE - t;
+      if (w > Math.floor(MAX_INT / baseMinusT))
+        throw new RangeError('Overflow: input needs wider integers to process');
       w *= baseMinusT;
     }
 
     const out = output.length + 1;
     bias = adapt(i - oldi, out, oldi === 0);
 
-    // `i` was supposed to wrap around from `out` to `0`,
-    // incrementing `n` each time, so we'll fix that now:
-    if (floor(i / out) > maxInt - n) {
-      error('overflow');
-    }
+    // `i` was meant to wrap from `out` to 0, carrying into `n` each time.
+    if (Math.floor(i / out) > MAX_INT - n)
+      throw new RangeError('Overflow: input needs wider integers to process');
 
-    n += floor(i / out);
+    n += Math.floor(i / out);
     i %= out;
 
-    // Insert `n` at position `i` of the output.
     output.splice(i++, 0, n);
   }
 
-  return String.fromCodePoint(...output);
+  return fromCodePoints(output);
 }
 
 /**
- * Converts a string of Unicode symbols (e.g. a domain name label) to a
- * Punycode string of ASCII-only symbols.
- * @memberOf punycode
- * @param {String} input The string of Unicode symbols.
- * @returns {String} The resulting Punycode string of ASCII-only symbols.
+ * Encode Unicode text as Punycode. The result is a bare encoded label -
+ * prefixing it with `xn--` is the caller's job.
+ *
+ * @param {string} str - The Unicode text
+ * @returns {string} The Punycode-encoded text
+ * @throws {RangeError} On an integer overflow
+ * @example
+ * punycodeEncode('bücher'); // 'bcher-kva'
  */
-export function encode(str) {
-  const output = [];
-
-  // Convert the input in UCS-2 to an array of Unicode code points.
-  const input = ucs2decode(str);
-
-  // Cache the length.
+export function punycodeEncode(str) {
+  const input = toCodePoints(str);
   const inputLength = input.length;
 
-  // Initialize the state.
-  let n = initialN;
+  // Appended to directly rather than collected in an array and joined:
+  // every character is written once and never revisited.
+  let output = '';
+  let n = INITIAL_N;
   let delta = 0;
-  let bias = initialBias;
+  let bias = INITIAL_BIAS;
 
-  // Handle the basic code points.
-  for (const currentValue of input) {
-    if (currentValue < 0x80) {
-      output.push(stringFromCharCode(currentValue));
+  // The basic code points are copied out in order, then separated from
+  // the encoded remainder by the delimiter.
+  let basicLength = 0;
+  for (let j = 0; j < inputLength; j++) {
+    if (input[j] < 0x80) {
+      output += String.fromCharCode(input[j]);
+      basicLength++;
     }
   }
+  if (basicLength) output += DELIMITER;
 
-  const basicLength = output.length;
   let handledCPCount = basicLength;
-
-  // `handledCPCount` is the number of code points that have been handled;
-  // `basicLength` is the number of basic code points.
-
-  // Finish the basic string with a delimiter unless it's empty.
-  if (basicLength) {
-    output.push(delimiter);
-  }
-
-  // Main encoding loop:
   while (handledCPCount < inputLength) {
-    // All non-basic code points < n have been handled already. Find the next
-    // larger one:
-    let m = maxInt;
-    for (const currentValue of input) {
-      if (currentValue >= n && currentValue < m) {
-        m = currentValue;
-      }
+    // Every non-basic code point below `n` is already encoded; find the
+    // next one up.
+    let m = MAX_INT;
+    for (let j = 0; j < inputLength; j++) {
+      const value = input[j];
+      if (value >= n && value < m) m = value;
     }
 
-    // Increase `delta` enough to advance the decoder's <n,i> state to <m,0>,
-    // but guard against overflow.
-    const handledCPCountPlusOne = handledCPCount + 1;
-    if (m - n > floor((maxInt - delta) / handledCPCountPlusOne)) {
-      error('overflow');
-    }
+    const handledPlusOne = handledCPCount + 1;
+    if (m - n > Math.floor((MAX_INT - delta) / handledPlusOne))
+      throw new RangeError('Overflow: input needs wider integers to process');
 
-    delta += (m - n) * handledCPCountPlusOne;
+    delta += (m - n) * handledPlusOne;
     n = m;
 
-    for (const currentValue of input) {
-      if (currentValue < n && ++delta > maxInt) {
-        error('overflow');
-      }
-      if (currentValue === n) {
-        // Represent delta as a generalized variable-length integer.
-        let q = delta;
-        for (let k = base; /* no condition */; k += base) {
-          const t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
-          if (q < t) {
-            break;
-          }
-          const qMinusT = q - t;
-          const baseMinusT = base - t;
-          output.push(
-            stringFromCharCode(digitToBasic(t + qMinusT % baseMinusT, 0)),
-          );
-          q = floor(qMinusT / baseMinusT);
-        }
+    for (let j = 0; j < inputLength; j++) {
+      const value = input[j];
+      if (value < n && ++delta > MAX_INT)
+        throw new RangeError('Overflow: input needs wider integers to process');
+      if (value !== n) continue;
 
-        output.push(stringFromCharCode(digitToBasic(q, 0)));
-        bias = adapt(delta, handledCPCountPlusOne, handledCPCount === basicLength);
-        delta = 0;
-        ++handledCPCount;
+      // Write `delta` as a generalized variable-length integer.
+      let q = delta;
+      for (let k = BASE; ; k += BASE) {
+        const t = k <= bias ? T_MIN : (k >= bias + T_MAX ? T_MAX : k - bias);
+        if (q < t) break;
+        const qMinusT = q - t;
+        const baseMinusT = BASE - t;
+        output += String.fromCharCode(digitToBasic(t + qMinusT % baseMinusT));
+        q = Math.floor(qMinusT / baseMinusT);
       }
+
+      output += String.fromCharCode(digitToBasic(q));
+      bias = adapt(delta, handledPlusOne, handledCPCount === basicLength);
+      delta = 0;
+      ++handledCPCount;
     }
 
     ++delta;
     ++n;
   }
-  return output.join('');
+  return output;
 }
 
 /**
- * Converts a Punycode string representing a domain name or an email address
- * to Unicode. Only the Punycoded parts of the input will be converted, i.e.
- * it doesn't matter if you call it on a string that has already been
- * converted to Unicode.
- * @memberOf punycode
- * @param {String} input The Punycoded domain name or email address to
- * convert to Unicode.
- * @returns {String} The Unicode representation of the given Punycode
- * string.
+ * Walk a domain name label by label, converting each with `convert` and
+ * rejoining on ASCII full stops.
+ *
+ * In an email address only the domain is converted; the local part is
+ * left exactly as written. Splitting on the FIRST "@" and converting
+ * only what follows the second segment matches RFC 3490's assumption of
+ * a single "@" - a malformed address with more is not a case this
+ * conversion is defined for.
+ *
+ * @param {string} domain - A domain name or email address
+ * @param {(label: string) => string} convert - The per-label conversion
+ * @returns {string} The converted domain
  */
-export function toUnicode(input) {
-  return mapDomain(input, function iterateMapDomain(string) {
-    return regexPunycode.test(string)
-      ? decode(string.slice(4).toLowerCase())
-      : string;
-  });
+function mapLabels(domain, convert) {
+  let prefix = '';
+  const parts = domain.split('@');
+  if (parts.length > 1) {
+    prefix = parts[0] + '@';
+    domain = parts[1];
+  }
+
+  let out = prefix;
+  let start = 0;
+  const end = domain.length;
+  for (let i = 0; i <= end; i++) {
+    if (i < end && !isLabelSeparator(domain.charCodeAt(i))) continue;
+    out += convert(domain.slice(start, i));
+    if (i < end) out += '.';
+    start = i + 1;
+  }
+  return out;
 }
 
 /**
- * Converts a Unicode string representing a domain name or an email address to
- * Punycode. Only the non-ASCII parts of the domain name will be converted,
- * i.e. it doesn't matter if you call it with a domain that's already in
- * ASCII.
- * @memberOf punycode
- * @param {String} input The domain name or email address to convert, as a
- * Unicode string.
- * @returns {String} The Punycode representation of the given domain name or
- * email address.
+ * Whether the label carries the ACE prefix, in any case.
+ * @param {string} label - A domain label
+ * @returns {boolean} True when the label starts with `xn--`
  */
-export function toASCII(input) {
-  return mapDomain(input, function iterateMapDomain(string) {
-    return regexNonASCII.test(string)
-      ? 'xn--' + encode(string)
-      : string;
+function hasAcePrefix(label) {
+  return label.length >= 4
+    && (label.charCodeAt(0) | 0x20) === 0x78 // 'x'
+    && (label.charCodeAt(1) | 0x20) === 0x6E // 'n'
+    && label.charCodeAt(2) === 0x2D // '-'
+    && label.charCodeAt(3) === 0x2D;
+}
+
+/**
+ * Convert a domain name or email address to its Unicode form, decoding
+ * every `xn--` label. Labels that are not encoded are left alone, so
+ * calling this on an already-Unicode name is harmless.
+ *
+ * @param {string} input - The domain name or email address
+ * @returns {string} The Unicode form
+ * @example
+ * domainToUnicode('xn--bcher-kva.example'); // 'bücher.example'
+ */
+export function domainToUnicode(input) {
+  return mapLabels(input, (label) => hasAcePrefix(label)
+    ? punycodeDecode(label.slice(4).toLowerCase())
+    : label);
+}
+
+/**
+ * Convert a domain name or email address to its ASCII (ACE) form,
+ * encoding every label that carries non-ASCII characters. Labels that
+ * are already ASCII are left alone, so calling this on an ASCII name is
+ * harmless.
+ *
+ * @param {string} input - The domain name or email address
+ * @returns {string} The ACE form
+ * @example
+ * domainToASCII('bücher.example'); // 'xn--bcher-kva.example'
+ */
+export function domainToASCII(input) {
+  return mapLabels(input, (label) => {
+    for (let i = 0; i < label.length; i++) {
+      if (label.charCodeAt(i) > 0x7E)
+        return ACE_PREFIX + punycodeEncode(label);
+    }
+    return label;
   });
 }

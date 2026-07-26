@@ -98,11 +98,19 @@ export function isCombiningMark(code) {
          code === 0x0903;   // Devanagari Sign Visarga
 }
 
-// Check contextual rules for a label
-export function checkContextualRules(label) {
-  const chars = Array.from(label);
-  const codes = chars.map(c => c.codePointAt(0));
-
+/**
+ * Check the IDNA contextual rules for a label (RFC 5892 appendix A):
+ * the characters that are only permitted next to particular scripts.
+ *
+ * Takes the label's code points rather than the label, matching
+ * `checkDigitMixing` - callers validating a label have already decoded
+ * it, and decoding it a second time here was the only reason this
+ * needed the string at all.
+ *
+ * @param {number[]} codes - The label's Unicode code points
+ * @returns {boolean} True when every contextual rule holds
+ */
+export function checkContextualRules(codes) {
   for (let i = 0; i < codes.length; i++) {
     const code = codes[i];
 

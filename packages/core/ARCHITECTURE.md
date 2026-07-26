@@ -95,10 +95,10 @@ flowchart TB
             TextIndex["text/index.js"]
             Basic["basic.js<br/>Alpha, numeric, hex"]
             Email["email.js<br/>Email validation"]
-            Host["host.js<br/>URL, IP, hostname"]
+            Host["host.js<br/>URL, IP, hostname, URI/IRI"]
             Identifiers["identifiers.js<br/>UUID, GUID"]
             Base64["base64.js<br/>Base64 validation"]
-            Punycode["punycode.js<br/>IDN encoding"]
+            Punycode["punycode.js<br/>Punycode codec + IDNA"]
             I18n["i18n.js<br/>Unicode category checks"]
             IRegexp["iregexp.js<br/>I-Regexp (RFC 9485)"]
             TextMisc["misc.js<br/>Assorted text testers"]
@@ -479,12 +479,11 @@ flowchart TB
 
         subgraph EmailModule["email.js"]
             Email["isValidEmail()<br/>Basic RFC 5322"]
-            EmailFull["isValidEmailFull()<br/>Comprehensive"]
             IDNEmail["isValidIdnEmail()<br/>Internationalized"]
         end
 
         subgraph HostModule["host.js"]
-            URL["isValidUrl() / isValidUrlFull()"]
+            URL["isValidUrl()<br/>Web-scheme URI"]
             URI["isValidUri() / isValidUriFull()"]
             IPv4["isValidIPv4()"]
             IPv6["isValidIPv6()"]
@@ -493,16 +492,14 @@ flowchart TB
         end
 
         subgraph Base64Module["base64.js"]
-            B64["isValidBase64()<br/>Multiple implementations"]
-            B64Fast["isValidBase64Fast()<br/>Optimized"]
-            B64Full["isValidBase64Full()<br/>Strict padding"]
+            B64["isValidBase64()<br/>RFC 4648"]
         end
 
         subgraph PunycodeModule["punycode.js"]
-            ToASCII["toASCII()<br/>Unicode → Punycode"]
-            ToUnicode["toUnicode()<br/>Punycode → Unicode"]
-            Encode["encode()<br/>Raw encoding"]
-            Decode["decode()<br/>Raw decoding"]
+            Encode["punycodeEncode()<br/>One label, RFC 3492"]
+            Decode["punycodeDecode()<br/>One label, RFC 3492"]
+            ToASCII["domainToASCII()<br/>Whole name → ACE"]
+            ToUnicode["domainToUnicode()<br/>ACE → Unicode"]
         end
 
         subgraph I18nModule["i18n.js"]
@@ -512,13 +509,13 @@ flowchart TB
             Hebrew["isHebrew()"]
             Arabic["isArabicIndicDigit()"]
             CJK["isHiragana() / isKatakana() / isHan()"]
-            Contextual["checkContextualRules()<br/>IDN label rules"]
+            Contextual["checkContextualRules()<br/>IDN label rules, over code points"]
         end
 
         subgraph Misc["misc.js"]
             ISBN["ISBN-10 / ISBN-13 validation"]
             Country["isValidCountryAlpha2()<br/>ISO 3166-1"]
-            IBAN["isValidIBAN()"]
+            IBAN["isValidIBAN()<br/>ISO 13616 + MOD 97-10"]
         end
     end
 ```

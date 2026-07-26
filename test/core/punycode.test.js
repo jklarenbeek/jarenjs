@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
 import * as punycode from '../../packages/core/src/text/punycode.js';
+import { toCodePoints, fromCodePoints } from '../../packages/core/src/string.js';
 
 const testData = {
 	'strings': [
@@ -244,11 +245,11 @@ const testData = {
 	]
 };
 
-describe('punycode.ucs2.decode', function() {
+describe('string.toCodePoints', function() {
 	for (const object of testData.ucs2) {
 		it(object.description, function() {
 			assert.deepEqual(
-				punycode.ucs2decode(object.encoded),
+				toCodePoints(object.encoded),
 				object.decoded,
 				object.description
 			);
@@ -257,7 +258,7 @@ describe('punycode.ucs2.decode', function() {
 	it('throws RangeError: Illegal input >= 0x80 (not a basic code point)', function() {
 		assert.throws(
 			function() {
-				punycode.decode('\x81-');
+				punycode.punycodeDecode('\x81-');
 			},
 			RangeError
 		);
@@ -265,68 +266,68 @@ describe('punycode.ucs2.decode', function() {
 	it('throws RangeError: Overflow: input needs wider integers to process', function() {
 		assert.throws(
 			function() {
-				punycode.decode('\x81');
+				punycode.punycodeDecode('\x81');
 			},
 			RangeError
 		);
 	});
 });
 
-describe('punycode.ucs2.encode', function() {
+describe('string.fromCodePoints', function() {
 	for (const object of testData.ucs2) {
 		it(object.description, function() {
 			assert.deepEqual(
-				punycode.ucs2encode(object.decoded),
+				fromCodePoints(object.decoded),
 				object.encoded
 			);
 		});
 	}
 	const codePoints = [0x61, 0x62, 0x63];
-	const result = punycode.ucs2encode(codePoints);
+	const result = fromCodePoints(codePoints);
 	it('does not mutate argument array', function() {
 		assert.deepEqual(result, 'abc');
 		assert.deepEqual(codePoints, [0x61, 0x62, 0x63]);
 	});
 });
 
-describe('punycode.decode', function() {
+describe('punycodeDecode', function() {
 	for (const object of testData.strings) {
 		it(object.description || object.encoded, function() {
 			assert.deepEqual(
-				punycode.decode(object.encoded),
+				punycode.punycodeDecode(object.encoded),
 				object.decoded
 			);
 		});
 	}
 	it('handles uppercase Z', function() {
-		assert.deepEqual(punycode.decode('ZZZ'), '\u7BA5');
+		assert.deepEqual(punycode.punycodeDecode('ZZZ'), '\u7BA5');
 	});
 	it.skip('throws RangeError: Invalid input', function() {
 		assert.throws(
 			function() {
-				punycode.decode('ls8h=');
+				punycode.punycodeDecode('ls8h=');
 			},
 			RangeError
 		);
 	});
 });
 
-describe('punycode.encode', function() {
+describe('punycodeEncode', function() {
 	for (const object of testData.strings) {
 		it(object.description || object.decoded, function() {
 			assert.deepEqual(
-				punycode.encode(object.decoded),
+				punycode.punycodeEncode(object.decoded),
 				object.encoded
 			);
 		});
 	}
 });
 
-describe('punycode.toUnicode', function() {
+describe('domainToUnicode', function() {
 	for (const object of testData.domains) {
 		it(object.description || object.encoded, function() {
 			assert.deepEqual(
-				punycode.toUnicode(object.encoded),
+				punycode.domainToUnicode(object.encoded),
 				object.decoded
 			);
 		});
@@ -334,22 +335,22 @@ describe('punycode.toUnicode', function() {
 	for (const object of testData.strings) {
 		it('does not convert names (or other strings) that don\'t start with `xn--`', function() {
 			assert.deepEqual(
-				punycode.toUnicode(object.encoded),
+				punycode.domainToUnicode(object.encoded),
 				object.encoded
 			);
 			assert.deepEqual(
-				punycode.toUnicode(object.decoded),
+				punycode.domainToUnicode(object.decoded),
 				object.decoded
 			);
 		});
 	}
 });
 
-describe('punycode.toASCII', function() {
+describe('domainToASCII', function() {
 	for (const object of testData.domains) {
 		it.skip(object.description || object.decoded, function() {
 			assert.deepEqual(
-				punycode.toASCII(object.decoded),
+				punycode.domainToASCII(object.decoded),
 				object.encoded
 			);
 		});
@@ -357,7 +358,7 @@ describe('punycode.toASCII', function() {
 	for (const object of testData.strings) {
 		it('does not convert domain names (or other strings) that are already in ASCII', function() {
 			assert.deepEqual(
-				punycode.toASCII(object.encoded),
+				punycode.domainToASCII(object.encoded),
 				object.encoded
 			);
 		});
@@ -365,7 +366,7 @@ describe('punycode.toASCII', function() {
 	for (const object of testData.separators) {
 		it('supports IDNA2003 separators for backwards compatibility', function() {
 			assert.deepEqual(
-				punycode.toASCII(object.decoded),
+				punycode.domainToASCII(object.decoded),
 				object.encoded
 			);
 		});

@@ -4,7 +4,7 @@ import {
 } from '@jarenjs/core';
 
 import {
-  isValidBase64Fast,
+  isValidBase64,
 } from '@jarenjs/core/text';
 
 import {
@@ -21,7 +21,7 @@ export function compileContentEncoding(schemaObj, jsonSchema) {
     return function validateBase64(data, dataPath) {
       // contentEncoding only applies to strings - ignore non-strings
       if (!isStringType(data)) return true;
-      return isValidBase64Fast(data)
+      return isValidBase64(data)
         || addError(data, dataPath);
     };
   }
@@ -50,7 +50,7 @@ export function compileContentMediaType(schemaObj, jsonSchema) {
       return function validateBase64JsonContent(data, dataPath) {
         if (!isStringType(data)) return true;
         // Check valid base64 first before decoding
-        if (!isValidBase64Fast(data)) return addError(data, dataPath);
+        if (!isValidBase64(data)) return addError(data, dataPath);
         const decoded = Buffer.from(data, 'base64').toString('utf8');
         return isValidJSON(decoded) || addError(data, dataPath);
       }
