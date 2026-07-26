@@ -32,7 +32,8 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | JSON Merge Patch ([RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396)) | `compileMergePatch`, `applyMergePatch`, `createMergePatch` |
 | Write operations | `compileJSONPointerSetter`/`Inserter`/`Remover`, `compileJSONPathSetter`/`Inserter`/`Remover`, one-shot `setAtJSONPointer`, `removeAtJSONPath`, ..., `JsonWriteError` |
 | Addressing bridge | `jsonPointerFromJSONPath`, `jsonPathFromJSONPointer` |
-| JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict` |
+| JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict`, `isValidJSONPathSegments` |
+| Canonical JSON ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)) | `canonicalizeJson`, `JsonCanonicalizeError` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
 | Jaren JTLT | `compileJtltStylesheet`, `renderText`, `JtltCompileError`, `JtltRuntimeError` |
@@ -119,6 +120,21 @@ applyJSONPatch(a, createJSONPatch(a, b)); // deep-equals b
 
 Because an application only clones the spine it writes through — and clones it once, no matter how many operations touch the same region — the compiled applier beats the usual clone-and-interpret shape by 5–170x depending on document size (`npm run benchmark:jsonpatch`). Two options tune the copy discipline, mirroring JSLT's `share`/`fresh` dispositions: `values: 'fresh'` deep-copies inserted operation values per application (the default `'share'` inserts them by reference, so treat results as immutable), and `mutate: true` patches in place for the last bit of speed at the cost of atomicity.
 
+`createJSONPatch(source, target)` trims each array's deep-equal common prefix and suffix and pairs the rest up index-wise, which is linear and already minimal for in-place edits and head/tail insertions — but turns a mid-array insertion into a run of per-index replaces. `createJSONPatch(source, target, { arrayDiff: 'minimal' })` aligns the changed middle instead, so the insertion is one `add`:
+
+```javascript
+const before = [{ id: 1 }, { id: 2 }, { id: 3, n: 0 }];
+const after = [{ id: 1 }, { id: 9 }, { id: 2 }, { id: 3, n: 1 }];
+
+createJSONPatch(before, after);
+// 4 ops: replace /1/id, replace /2/id, remove /2/n, add /3
+
+createJSONPatch(before, after, { arrayDiff: 'minimal' });
+// 2 ops: add /1 {id:9}, replace /3/n 1
+```
+
+The alignment minimizes the patch itself (edit distance with substitutions — *not* a longest common subsequence, which maximizes kept elements and so pays a delete plus an insert on a permutation where one rewrite would do), and therefore never takes more steps than the default. It stays opt-in because it is O(m·n) in the length of the changed middle; past a fixed budget a single array falls back to the linear diff, so the option can never make a large diff quadratic. Both modes reproduce `target` exactly.
+
 A third option makes the engine a **change feed**: `changes: true` specializes the applier to return `{ doc, changes }`, where `changes` holds one JSON Pointer per successful write, in application order. The reported pointers are *invalidation-sound* — object writes, array replaces and appends report the written location itself; shifting array inserts and removes report the parent array; a root write reports `''` — which is exactly the primitive dirty-path consumers (view re-rendering in `@jarenjs/app`, rule dependency memoization in `@jarenjs/forms`) need. `test` operations report nothing, and the option costs nothing when off: the tracking branch is compiled out of the applier.
 
 [RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396) merge patches ride the same machinery: `compileMergePatch(patch)` pre-splits the patch into remove/set/merge plans, and applying is identity-preserving — a merge that changes nothing returns the target by reference, so it doubles as a cheap change detector. `createMergePatch(source, target)` emits the merge patch (with the RFC's documented `null`-member representability caveat), and `applyMergePatch(doc, patch)` is the one-shot form.
@@ -173,12 +189,36 @@ query(other);  // compiled once, reusable on any document
 | `query(data)` / `query.values(data)` | array of matched values, in document order |
 | `query.first(data)` | the first matched value, or `undefined` |
 | `query.exists(data)` | `true` when at least one node matches |
+| `query.iterate(data)` | a generator yielding matched values on demand, in document order |
 | `query.nodes(data)` | array of `{ path, value }` pairs with normalized paths |
 | `query.paths(data)` | array of normalized paths (RFC 9535 §2.7), e.g. `$['store']['book'][0]['title']` |
 | `query.source` | the original query string |
 | `query.ast` | the parsed query AST (deeply frozen) |
 
 For one-off queries there is `queryJSONPath(source, data)`, which keeps a cache of compiled queries (512 entries, FIFO), and `isValidJSONPathStrict(source)` for a boolean grammar check — this is what the `json-path` format in [`@jarenjs/formats`](../formats) uses.
+
+`first`, `exists` and `iterate` are one lazy walk: they stop at the first node they need instead of building the whole nodelist, so `q.first(doc)` on `$.items[?@.price < 10].name` over 10 000 items costs about 2 µs where `q.values(doc)` costs about 240 µs. Nothing is buffered along the way — a filter evaluates its predicate only until one passes, and a descendant segment abandons the walk mid-subtree.
+
+#### Custom function extensions
+
+`compileJSONPath(source, { pathFunctions })` registers function extensions ([RFC 9535 §2.4](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)) alongside the five built-ins. An entry declares its parameter and result types, which is what lets the parser type-check call sites the same way it checks `length()` or `match()`:
+
+```js
+const pathFunctions = {
+  is_even: {
+    params: ['value'],      // 'value' | 'nodes' | 'logical'
+    returns: 'logical',
+    evaluate: (v) => typeof v === 'number' && v % 2 === 0,
+  },
+};
+
+const q = compileJSONPath('$.items[?is_even(@.n)].n', { pathFunctions });
+q({ items: [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }] }); // [2, 4]
+```
+
+A `value` parameter arrives as a JSON value or `JSONPATH_NOTHING`, a `nodes` parameter as an array of the selected values, a `logical` parameter as a boolean — and a `logical` parameter accepts the full filter grammar at the call site, so `both(@.a > 1, !@.b)` parses. A name that would redefine a built-in is rejected (§2.4.1), and a malformed registry raises a `TypeError`.
+
+The same option reaches everywhere a path string is embedded: the JSONPath-addressed writers, `compileJsonQuery`, and JSLT match paths and rule bodies. The `json-path` and `json-path-segments` string formats deliberately do **not** see it — a format is a property of the string, so it has to mean the same thing in every schema regardless of which extensions a host installed.
 
 ### Supported syntax
 
@@ -560,7 +600,7 @@ Unmatched nodes follow the XSLT built-in template rules, restated for JSON: cont
 
 ## Roadmap
 
-This package's roadmap lives in the repository-wide [ROADMAP](../../ROADMAP.md), under its `@jarenjs/json` sections: the query filter optimizer and hash joins, lazy sequences, the JSLT single-walk matcher, write operations and JSON Patch, custom JSONPath function extensions, canonical JSON, XQuery front-end `xs:*` casts, and more. Recently landed from that list: JSON Schema as the query type system (`$valid`/`$assert`/`$as`), the inverse [`$query` keyword](../validate/README.md) in the validator, compiled JSON Pointers, and the complete JSLT template layer.
+This package's roadmap lives in the repository-wide [ROADMAP](../../ROADMAP.md), under its `@jarenjs/json` sections: the query filter optimizer and hash joins, lazy sequences, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: custom JSONPath function extensions, early-exit iteration (`query.iterate`), the `json-path-segments` format, canonical JSON (RFC 8785), and the minimal array-diff mode for `createJSONPatch`.
 
 ## Development
 

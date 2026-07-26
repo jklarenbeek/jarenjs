@@ -219,7 +219,7 @@
       "pattern": "^\\$($|[.\\[])"
     },
     "variablePathString": {
-      "description": "A variable-rooted path: '$name' with name matching [A-Za-z_][A-Za-z0-9_]*, optionally followed by RFC 9535 segments. Only the head is pattern-checked; the full segment grammar is enforced by the compiler (JQ0004).",
+      "description": "A variable-rooted path: '$name' with name matching [A-Za-z_][A-Za-z0-9_]*, optionally followed by RFC 9535 segments. The pattern checks the head; the json-path-segments format asserts the full segment grammar where format assertion is enabled (the compiler enforces it either way, JQ0004). (LLM profile: the 'json-path-segments' format assertion is relaxed here; the canonical schema enforces it)",
       "type": "string",
       "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*($|[.\\[])"
     },

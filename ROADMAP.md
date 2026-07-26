@@ -38,40 +38,6 @@ delete it or fix it.
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](packages/json/ARCHITECTURE.md).
 
-- [ ] **Custom JSONPath function extensions** — a registry per RFC 9535 §2.4 with
-  declared parameter/return types, so user functions get the same compile-time
-  well-typedness checks as the five built-ins. Today `FUNCTIONS` in `src/path.js`
-  is a module-private table with a single lookup site and no mutation path, and
-  `compileJSONPath(source)` takes no options argument — so the work is as much
-  about threading a registry through every entry point (`compileJSONPath`,
-  `queryJSONPath`, `isValidJSONPathStrict`, the query normalizer's
-  `parsePathString`, `write.js`, the JSLT dispatcher) as about the registry
-  itself. It also forces a decision the single table currently avoids: the
-  `json-path` **string format** resolves to `isValidJSONPathStrict`, so a
-  registry means deciding whose extensions a format assertion validates against.
-- [ ] **Early-exit iteration for non-singular queries** — `query.first()` and
-  `query.exists()` already ship, and for *singular* queries they are already
-  allocation-free. For non-singular ones both call `runSegmentsV` and materialize
-  the entire nodelist before looking at one element. Making them stop at the first
-  hit, and adding `query.iterate(data)` as a generator yielding nodes on demand,
-  is the open half. (`compileExists` in `src/segments.js` has the same fallback,
-  so it is not a ready-made implementation.)
-- [ ] **`json-path-segments` format for variable-rooted paths** — the query schema
-  pattern-checks only the *head* of a variable-rooted path string (`$b.price[…]`);
-  the full segment grammar is enforced later by the compiler (`JQ0004`). An
-  absolute path gets `"format": "json-path"` and therefore schema-time
-  well-formedness; a variable-rooted one gets nothing equivalent. A
-  `json-path-segments` format would close that asymmetry — and would have to be
-  applied across all six schema twins that replicate the definition.
-- [ ] **Canonical JSON (RFC 8785 / JCS)** — deterministic serialization for hashing
-  and signing. Two near-duplicate starting points exist and a JCS item has to
-  reconcile them as well as add the strictness: `stableKeyString` in the query
-  runtime deliberately emits `NaN`/`Infinity` bare (so `NaN` groups with `NaN`,
-  per XQuery) where JCS requires rejecting those inputs, and serializes numbers
-  with a raw `String(n)` rather than the number-to-string discipline JCS mandates;
-  `stableStringify` in `@jarenjs/core/object` instead follows `JSON.stringify`
-  conventions (`NaN` → `null`, `undefined` members dropped). Neither validates
-  ill-formed strings.
 - [ ] **Opt-in modes for the remaining pointer divergences** — `hashIndex`
   established the pattern (a compile-time option, spec answer available, fast
   historical answer the default). Two siblings could take the same treatment if
@@ -87,10 +53,6 @@ delete it or fix it.
   dialect gate so the `relative-json-pointer` format tester keeps rejecting it
   until the suite moves. `test/json/pointer-format.test.js` pins the current
   answer and is what should fail first when that happens.
-- [ ] **Minimal array diffs in `createJSONPatch`** — the array diff is a
-  prefix/suffix trim plus index-wise recursion, so a mid-array insertion degrades
-  to a run of per-index `replace` ops. Correct, but not minimal; an LCS mode would
-  emit the insertion. Relevant to anyone shipping patches over the wire.
 - [ ] **Give the relative resolver the ancestor the caller already has** — the
   one remaining structural inefficiency in addressing, and the only lead that
   survived measurement. `compileRelativeJSONPointer` receives `(dataRoot,

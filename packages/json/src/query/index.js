@@ -64,6 +64,12 @@ const hasOwn = Object.hasOwn;
  * @property {Record<string, (a: string, b: string) => number>} [collations]
  *   Registry of named pure compare functions for `$orderby`'s
  *   `$collation` member (QUERY-FORMAT.md section 6.6).
+ * @property {Record<string, import('../path.js').JSONPathFunction>} [pathFunctions]
+ *   Registry of custom JSONPath function extensions (RFC 9535 section
+ *   2.4), available inside the filters of every path string the
+ *   document contains. Deliberately separate from `functions`: that
+ *   registry extends the query vocabulary through `$call`, this one
+ *   extends the RFC 9535 grammar the path strings are written in.
  * @property {JsonQueryLimits} [limits] - Enforced output caps; the
  *   unenforced `steps`/`depth` are rejected with a TypeError.
  */

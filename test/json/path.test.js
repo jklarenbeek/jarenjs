@@ -7,6 +7,7 @@ import {
   queryJSONPath,
   isValidJSONPathStrict,
   JSONPathSyntaxError,
+  JSONPATH_NOTHING,
 } from '@jarenjs/json';
 
 // The bookstore example from RFC 9535, section 1.5
@@ -476,6 +477,83 @@ describe('compiled query API', () => {
     assert.isFalse(missing.exists(bookstore));
   });
 
+  it('should yield matches lazily through iterate', () => {
+    const q = compileJSONPath('$..price');
+    assert.deepEqual([...q.iterate(bookstore)], q.values(bookstore));
+    assert.deepEqual([...compileJSONPath('$.missing').iterate(bookstore)], []);
+    // singular queries iterate too, yielding at most one node
+    const singular = compileJSONPath('$.store.book[1].title');
+    assert.deepEqual([...singular.iterate(bookstore)], ['Sword of Honour']);
+    assert.deepEqual([...compileJSONPath('$.store.book[9]').iterate(bookstore)], []);
+  });
+
+  it('should stop iterating without visiting the rest of the document', () => {
+    // a getter that throws past the first element proves the walk stops:
+    // an eager nodelist would read every member
+    let reads = 0;
+    const items = [{ id: 0 }, { id: 1 }, { id: 2 }];
+    const doc = {
+      items: items.map((item, i) => Object.defineProperty({}, 'id', {
+        enumerable: true,
+        get() {
+          reads++;
+          if (i > 0)
+            throw new Error('read past the first match');
+          return item.id;
+        },
+      })),
+    };
+    const q = compileJSONPath('$.items[*].id');
+    assert.deepEqual(q.first(doc), 0);
+    assert.isTrue(q.exists(doc));
+    assert.deepEqual(reads, 2);
+    const it = q.iterate(doc);
+    assert.deepEqual(it.next().value, 0);
+    assert.throws(() => it.next(), /read past the first match/);
+  });
+
+  it('should iterate every selector kind lazily', () => {
+    // the lazy walk is a second compilation of the same selectors, so
+    // each kind needs its own check that it agrees with values mode
+    const doc = {
+      items: [{ n: 0 }, { n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }],
+      o: { a: 1, b: 2 },
+    };
+    for (const source of [
+      '$.items[2].n',            // index
+      '$.items[-2].n',           // negative index
+      '$.items[9].n',            // index out of range
+      '$.items[1:4].n',          // slice
+      '$.items[::2].n',          // slice with a step
+      '$.items[4:1:-1].n',       // reverse slice
+      '$.items[0:3:0].n',        // step 0 selects nothing
+      "$.items[0, 2, 'x'].n",    // multiple selectors in one segment
+      '$..n',                    // descendant
+      '$.o[*]',                  // wildcard over an object
+      '$[*][*].n',               // wildcard chain
+    ]) {
+      const q = compileJSONPath(source);
+      assert.deepEqual([...q.iterate(doc)], q.values(doc), source);
+      assert.deepEqual(q.first(doc), q.values(doc)[0], source);
+      assert.deepEqual(q.exists(doc), q.values(doc).length > 0, source);
+    }
+  });
+
+  it('should early-exit a filter without testing every candidate', () => {
+    let tested = 0;
+    const doc = {
+      items: Array.from({ length: 50 }, (_, i) => ({
+        get price() {
+          tested++;
+          return i;
+        },
+      })),
+    };
+    assert.isTrue(compileJSONPath('$.items[?@.price >= 0].price').exists(doc));
+    // one predicate evaluation, plus the one that reads the match
+    assert.deepEqual(tested, 2);
+  });
+
   it('should select the root document with $', () => {
     assert.deepEqual(compileJSONPath('$')(bookstore), [bookstore]);
     assert.deepEqual(compileJSONPath('$')(null), [null]);
@@ -710,5 +788,161 @@ describe('isValidJSONPathStrict', () => {
     assert.isFalse(isValidJSONPathStrict(null));
     assert.isFalse(isValidJSONPathStrict(42));
     assert.isFalse(isValidJSONPathStrict(undefined));
+  });
+});
+
+describe('custom function extensions (RFC 9535 section 2.4)', () => {
+  const pathFunctions = {
+    upper: {
+      params: ['value'],
+      returns: 'value',
+      evaluate: (v) => (typeof v === 'string' ? v.toUpperCase() : undefined),
+    },
+    is_even: {
+      params: ['value'],
+      returns: 'logical',
+      evaluate: (v) => typeof v === 'number' && v % 2 === 0,
+    },
+    both: {
+      params: ['logical', 'logical'],
+      returns: 'logical',
+      evaluate: (a, b) => a && b,
+    },
+    first_two: {
+      params: ['nodes'],
+      returns: 'nodes',
+      evaluate: (nodes) => nodes.slice(0, 2),
+    },
+    sum3: {
+      params: ['value', 'value', 'value'],
+      returns: 'value',
+      evaluate: (a, b, c) => a + b + c,
+    },
+    answer: {
+      params: [],
+      returns: 'value',
+      evaluate: () => 42,
+    },
+  };
+  const options = { pathFunctions };
+  const doc = { items: [{ n: 1, s: 'a' }, { n: 2, s: 'b' }, { n: 3, s: 'c' }, { n: 4, s: 'd' }] };
+  const groups = { groups: [[1, 2, 3], [4], []] };
+
+  it('should call a ValueType extension in a comparison', () => {
+    assert.deepEqual(compileJSONPath("$.items[?upper(@.s) == 'B'].n", options)(doc), [2]);
+    assert.deepEqual(compileJSONPath("$.items[?upper(@.s) == upper('c')].n", options)(doc), [3]);
+    assert.deepEqual(compileJSONPath('$.items[?sum3(@.n, 1, 2) == 5].n', options)(doc), [2]);
+    // a nullary extension takes its own call shape
+    assert.deepEqual(compileJSONPath('$.items[?answer() == 42].n', options)(doc), [1, 2, 3, 4]);
+    assert.deepEqual(compileJSONPath('$.items[?answer() == 0].n', options)(doc), []);
+  });
+
+  it('should use a LogicalType extension as a test expression', () => {
+    assert.deepEqual(compileJSONPath('$.items[?is_even(@.n)].n', options)(doc), [2, 4]);
+    assert.deepEqual(compileJSONPath('$.items[?!is_even(@.n)].n', options)(doc), [1, 3]);
+    assert.deepEqual(
+      compileJSONPath('$.items[?is_even(@.n) && @.n > 2].n', options)(doc), [4]);
+  });
+
+  it('should give a LogicalType parameter the whole logical-expr grammar', () => {
+    assert.deepEqual(compileJSONPath('$.items[?both(@.n > 1, @.n < 4)].n', options)(doc), [2, 3]);
+    assert.deepEqual(
+      compileJSONPath("$.items[?both(@.n > 1 && @.s != 'x', !is_even(@.n))].n", options)(doc), [3]);
+  });
+
+  it('should accept and produce NodesType', () => {
+    assert.deepEqual(
+      compileJSONPath('$.groups[?count(first_two(@[*])) == 2]', options)(groups), [[1, 2, 3]]);
+    assert.deepEqual(
+      compileJSONPath('$.groups[?value(first_two(@[*])) == 4]', options)(groups), [[4]]);
+    // a NodesType function as a test expression is true for a non-empty result
+    assert.deepEqual(
+      compileJSONPath('$.groups[?first_two(@[*])]', options)(groups), [[1, 2, 3], [4]]);
+    assert.deepEqual(
+      compileJSONPath('$.groups[?count(first_two(first_two(@[*]))) == 2]', options)(groups),
+      [[1, 2, 3]]);
+  });
+
+  it('should pass Nothing to a ValueType parameter', () => {
+    const nothing = {
+      pathFunctions: {
+        is_nothing: {
+          params: ['value'],
+          returns: 'logical',
+          evaluate: (v) => v === JSONPATH_NOTHING,
+        },
+      },
+    };
+    assert.deepEqual(compileJSONPath('$.items[?is_nothing(@.missing)].n', nothing)(doc),
+      [1, 2, 3, 4]);
+    assert.deepEqual(compileJSONPath('$.items[?is_nothing(@.n)].n', nothing)(doc), []);
+  });
+
+  it('should treat an undefined ValueType result as Nothing', () => {
+    // upper() returns undefined for a non-string, and Nothing compares
+    // equal only to Nothing
+    assert.deepEqual(compileJSONPath('$.items[?upper(@.n) == upper(@.missing)].n', options)(doc),
+      [1, 2, 3, 4]);
+  });
+
+  it('should type-check extension call sites like a built-in', () => {
+    assert.throws(() => compileJSONPath('$[?is_even(@.n, 1)]', options), JSONPathSyntaxError);
+    assert.throws(() => compileJSONPath('$[?upper(@.s)]', options), JSONPathSyntaxError);
+    assert.throws(() => compileJSONPath('$[?is_even(@.n) == true]', options), JSONPathSyntaxError);
+    assert.throws(() => compileJSONPath('$[?upper(@.items[*])]', options), JSONPathSyntaxError);
+  });
+
+  it('should only know extensions when they are passed', () => {
+    assert.throws(() => compileJSONPath('$.items[?is_even(@.n)].n'), JSONPathSyntaxError);
+    assert.isFalse(isValidJSONPathStrict('$[?is_even(@.n)]'));
+    assert.isTrue(isValidJSONPathStrict('$[?is_even(@.n)]', options));
+  });
+
+  it('should never resolve a function name through the prototype chain', () => {
+    for (const source of ['$[?constructor(@)]', '$[?valueof(@)]', '$[?__proto__(@)]']) {
+      assert.throws(() => compileJSONPath(source), JSONPathSyntaxError);
+      assert.throws(() => compileJSONPath(source, options), JSONPathSyntaxError);
+    }
+  });
+
+  it('should reject an invalid registry', () => {
+    const bad = (functions) => () => compileJSONPath('$', { pathFunctions: functions });
+    assert.throws(bad([]), TypeError);
+    assert.throws(bad({ Bad: { params: [], returns: 'value', evaluate: () => 1 } }), TypeError);
+    assert.throws(bad({ '9x': { params: [], returns: 'value', evaluate: () => 1 } }), TypeError);
+    // section 2.4.1: an extension must not redefine a built-in
+    assert.throws(bad({ length: { params: ['value'], returns: 'value', evaluate: () => 1 } }),
+      TypeError);
+    assert.throws(bad({ true: { params: [], returns: 'value', evaluate: () => 1 } }), TypeError);
+    assert.throws(bad({ ok: null }), TypeError);
+    assert.throws(bad({ ok: { params: 'value', returns: 'value', evaluate: () => 1 } }), TypeError);
+    assert.throws(bad({ ok: { params: ['nope'], returns: 'value', evaluate: () => 1 } }), TypeError);
+    assert.throws(bad({ ok: { params: [], returns: 'nope', evaluate: () => 1 } }), TypeError);
+    assert.throws(bad({ ok: { params: [], returns: 'value' } }), TypeError);
+    // a registry error is the host's bug, so it is not swallowed as "invalid string"
+    assert.throws(() => isValidJSONPathStrict('$', { pathFunctions: [] }), TypeError);
+  });
+
+  it('should reject a NodesType extension that does not return an array', () => {
+    const liar = {
+      pathFunctions: {
+        bad: { params: ['nodes'], returns: 'nodes', evaluate: () => 'oops' },
+      },
+    };
+    const q = compileJSONPath('$.groups[?count(bad(@[*])) == 0]', liar);
+    assert.throws(() => q(groups), TypeError);
+  });
+
+  it('should cache one-shot queries per registry', () => {
+    assert.deepEqual(queryJSONPath('$.items[?is_even(@.n)].n', doc, options), [2, 4]);
+    assert.deepEqual(queryJSONPath('$.items[?is_even(@.n)].n', doc, options), [2, 4]);
+    // the same source without the registry is a different compilation
+    assert.throws(() => queryJSONPath('$.items[?is_even(@.n)].n', doc), JSONPathSyntaxError);
+  });
+
+  it('should leave the built-in AST shape unchanged', () => {
+    const ast = parseJSONPath('$[?length(@) > 0]');
+    assert.deepEqual(Object.keys(ast.segments[0].selectors[0].expr.left),
+      ['kind', 'name', 'args', 'returns']);
   });
 });

@@ -56,7 +56,7 @@ function composeDocPath(base, inner) {
 // modes matching the same path share the object, so the per-call
 // `.paths(root)` enumeration is computed once per transform (see
 // getQueryPaths), not once per mode.
-function compileMatchPath(rule, pathQueryCache) {
+function compileMatchPath(rule, pathQueryCache, pathOptions) {
   const match = rule.match;
   if (match === null || match.path === null)
     return null;
@@ -64,7 +64,7 @@ function compileMatchPath(rule, pathQueryCache) {
   if (cached !== undefined)
     return cached;
   try {
-    const query = compileJSONPath(match.path);
+    const query = compileJSONPath(match.path, pathOptions);
     pathQueryCache.set(match.path, query);
     return query;
   }
@@ -188,7 +188,7 @@ function wrapBodyCompileError(rule, error) {
     composeDocPath(rule.bodyDocPath, error.docPath), error);
 }
 
-function compileBody(rule, compileTypeTest, tableBox, targetModes) {
+function compileBody(rule, compileTypeTest, tableBox, targetModes, pathOptions) {
   const ruleBox = {
     mode: rule.mode,
     locSlot: -1,
@@ -203,6 +203,7 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes) {
     normalized = normalizeQuery(rule.body, {
       compileTypeTest,
       extensions: { '$apply': applyEntry },
+      pathFunctions: pathOptions === undefined ? undefined : pathOptions.pathFunctions,
     });
     ruleBox.locSlot = normalized.frameSize;
     ruleBox.depthSlot = normalized.frameSize + 1;
@@ -414,7 +415,7 @@ function makeBodyEvaluator(rule, body, userSlots) {
   };
 }
 
-function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled) {
+function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, pathOptions) {
   const rules = model.rules;
   const temporary = new Array(rules.length);
   const externalNames = [];
@@ -425,11 +426,11 @@ function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled
   let pathRuleCount = 0;
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i];
-    const pathQuery = compileMatchPath(rule, pathQueryCache);
+    const pathQuery = compileMatchPath(rule, pathQueryCache, pathOptions);
     if (pathQuery !== null)
       pathRuleCount++;
     const test = compileMatchSchema(rule, compileTypeTest);
-    const body = compileBody(rule, compileTypeTest, tableBox, targetModes);
+    const body = compileBody(rule, compileTypeTest, tableBox, targetModes, pathOptions);
     readsPath = readsPath || body.readsPath;
     const userExternals = body.userExternals;
     for (let j = 0; j < userExternals.length; j++) {
@@ -931,13 +932,19 @@ export function compileJsltDispatch(model, options = {}) {
   if (!Number.isInteger(maxDepth) || maxDepth < 0)
     throw new TypeError('options.maxDepth must be a non-negative integer');
   const memoEnabled = options.memo === true;
+  // JSONPath function extensions reach both places a stylesheet embeds
+  // a path: the rules' match paths, and the path strings inside rule
+  // bodies (through the query normalizer).
+  const pathOptions = options.pathFunctions == null
+    ? undefined
+    : { pathFunctions: options.pathFunctions };
 
   const tableBox = {
     dispatch: null,
     needsLoc: false,
   };
   const targetModes = new Set();
-  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled);
+  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, pathOptions);
   tableBox.needsLoc = model.anyPathRule || compiled.readsPath;
   const built = buildModes(model, compiled.rules, targetModes);
   const modes = built.modes;

@@ -103,4 +103,32 @@ describe('Schema JSON Formats', function () {
     });
   });
 
+  describe('#formatJsonPathSegments()', function () {
+    it('should validate format: \'json-path-segments\'', function () {
+      const validate = compiler.compile({
+        format: 'json-path-segments'
+      });
+
+      assert.isTrue(validate(undefined), 'undefined is true');
+      assert.isTrue(validate(null), 'null is true');
+      assert.isTrue(validate('$book'), 'a bare variable reference');
+      assert.isTrue(validate('$b2_x'), 'digits and underscores in the name');
+      assert.isTrue(validate('$book.price'), 'a shorthand name segment');
+      assert.isTrue(validate("$book['price'][0]"), 'bracketed segments');
+      assert.isTrue(validate('$book..price'), 'a descendant segment');
+      assert.isTrue(validate('$b[?@.isbn]'), 'a filter selector');
+      assert.isTrue(validate("$b[?match(@.category, 'fic.*')]"), 'a built-in function extension');
+      assert.isTrue(validate('$b[?@.a == $.c]'), 'an absolute query inside a filter');
+      assert.isFalse(validate('$'), 'the document root is json-path, not json-path-segments');
+      assert.isFalse(validate('$.price'), 'an absolute path has no variable name');
+      assert.isFalse(validate('$9book'), 'a name may not start with a digit');
+      assert.isFalse(validate('book.price'), 'a variable-rooted path starts with $');
+      assert.isFalse(validate('$book.price['), 'an unterminated segment');
+      assert.isFalse(validate('$book[01]'), 'leading zeros are not allowed in an index');
+      assert.isFalse(validate('$b[?length(@)]'), 'a ValueType function is not a test expression');
+      assert.isFalse(validate('$b[?nosuch(@)]'), 'an unregistered function extension');
+      assert.isFalse(validate('$book '), 'trailing whitespace is not allowed');
+    });
+  });
+
 });

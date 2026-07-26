@@ -161,6 +161,7 @@ function generateJsonPath(tmp, options) {
       rows: profile.rows.map(round),
       compileRow: round(profile.compileRow),
       scaleRows: profile.scaleRows.map(round),
+      earlyExitRows: (profile.earlyExitRows ?? []).map(round),
     },
   };
 }

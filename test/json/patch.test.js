@@ -453,6 +453,89 @@ describe('createJSONPatch', () => {
   });
 });
 
+describe("createJSONPatch arrayDiff: 'minimal'", () => {
+  const minimal = { arrayDiff: 'minimal' };
+
+  function roundtrip(source, target) {
+    const patch = createJSONPatch(source, target, minimal);
+    const input = structuredClone(source);
+    deepStrictEqual(applyJSONPatch(input, patch), target);
+    deepStrictEqual(input, source, 'the source document must not be touched');
+    // never worse than the default strategy
+    assert.isTrue(patch.length <= createJSONPatch(source, target).length);
+    return patch;
+  }
+
+  it('emits a mid-array insertion as one add', () => {
+    // the default degrades to a run of per-index replaces here, because
+    // the changed tail element stops the common-suffix trim
+    const before = [{ id: 1 }, { id: 2 }, { id: 3, n: 0 }];
+    const after = [{ id: 1 }, { id: 9 }, { id: 2 }, { id: 3, n: 1 }];
+    deepStrictEqual(roundtrip(before, after), [
+      { op: 'add', path: '/1', value: { id: 9 } },
+      { op: 'replace', path: '/3/n', value: 1 },
+    ]);
+    deepStrictEqual(createJSONPatch(before, after).length, 4);
+  });
+
+  it('emits a mid-array deletion as one remove', () => {
+    deepStrictEqual(roundtrip([1, 2, 3, 4, 'x'], [1, 3, 4, 'y']), [
+      { op: 'remove', path: '/1' },
+      { op: 'replace', path: '/3', value: 'y' },
+    ]);
+  });
+
+  it('keeps an in-place edit a replace rather than a remove plus an add', () => {
+    deepStrictEqual(roundtrip([{ a: 1 }, { b: 2 }], [{ a: 1 }, { b: 3 }]),
+      [{ op: 'replace', path: '/1/b', value: 3 }]);
+  });
+
+  it('agrees with the default where the default is already minimal', () => {
+    for (const [source, target] of [
+      [[1, 2], [1, 2, 3, 4]],
+      [[1, 2, 3], [1]],
+      [[2, 3], [1, 2, 3]],
+      [[1, 2, 3], [2, 3]],
+      [[], [1]],
+      [[1], []],
+      [[1, 2, 3], [1, 2, 3]],
+    ]) {
+      deepStrictEqual(createJSONPatch(source, target, minimal), createJSONPatch(source, target));
+    }
+  });
+
+  it('applies to nested arrays too', () => {
+    deepStrictEqual(roundtrip({ a: { b: [1, 2, 3, 4, 'x'] } }, { a: { b: [1, 9, 2, 3, 4, 'y'] } }), [
+      { op: 'add', path: '/a/b/1', value: 9 },
+      { op: 'replace', path: '/a/b/5', value: 'y' },
+    ]);
+  });
+
+  it('round-trips interleaved insertions, deletions and edits', () => {
+    roundtrip([1, 2, 3, 4, 5, 6], [0, 1, 3, 4, 9, 6, 7]);
+    roundtrip(['a', 'b', 'c'], ['c', 'b', 'a']);
+    roundtrip([{ k: 1 }, { k: 2 }, { k: 3 }], [{ k: 3 }, { k: 1 }, { k: 2 }]);
+    roundtrip([1, 1, 1, 2], [1, 2, 1, 1]);
+    roundtrip([null, false, 0, ''], ['', 0, false, null]);
+  });
+
+  it('falls back to the index-wise diff above the cell budget', () => {
+    // 2000x2000 exceeds the LCS table budget, so this answers with the
+    // linear strategy - a larger patch, still exactly reproducing target
+    const source = Array.from({ length: 2000 }, (_, i) => ({ i }));
+    const target = [{ i: -1 }, ...source.slice(0, 1999)];
+    const patch = createJSONPatch(source, target, minimal);
+    deepStrictEqual(applyJSONPatch(source, patch), target);
+    deepStrictEqual(patch.length, createJSONPatch(source, target).length);
+  });
+
+  it('rejects an unknown mode', () => {
+    assert.throws(() => createJSONPatch([], [], { arrayDiff: 'nope' }), TypeError);
+    // an absent option is the default, not an error
+    deepStrictEqual(createJSONPatch([1], [2], {}), createJSONPatch([1], [2]));
+  });
+});
+
 //#endregion
 
 //#region JSON Merge Patch (RFC 7396)

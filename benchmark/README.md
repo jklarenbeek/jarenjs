@@ -259,10 +259,26 @@ Options:
   --iterations, -i N     Iterations per profiled query (default: 1000)
   --top N                Show top N slowest queries in profile mode (default: 15)
   --scale                Add synthetic 1000-item document scenarios to the profile
+                         (full nodelist, plus first-match/exists early exit)
   --engines a,b          Engines to run (default: jaren,json-p3)
   --output, -o FORMAT    Output format: console, csv, json (default: console)
   --filepath, -f PATH    Output file path for csv/json
 ```
+
+`--scale` prints two tables over the same synthetic document. The first
+asks each engine for the whole nodelist; the second asks only for the
+first match, or whether any match exists. Read them against each other:
+the gap between a row and its twin is what early exit saves.
+
+Rival selection matters more than usual there, because *how* you ask an
+engine for one answer changes the number by an order of magnitude. So
+`first`/`exists` are declared as several routes per engine and each is
+timed on the **fastest of its own** — json-p3's purpose-built `match()`
+is beaten by its plain `query()` on a singular selector and by its
+`lazyQuery()` generator on a descendant one, and picking any single one
+of those for it would have decided the comparison. The singular selector
+is carried as a control row: it addresses one node either way, so a
+result there that looks like a win would mean the harness is wrong.
 
 npm shortcuts: `npm run benchmark:jsonpath`, `npm run benchmark:jsonpath:profile`.
 

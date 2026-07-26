@@ -38,6 +38,10 @@ export { JsltCompileError, JsltRuntimeError } from './errors.js';
  *   root references inside match-path filters); everything else runs
  *   normally. Memoized outputs MUST be treated as immutable, and the
  *   cache retains the previous transform's outputs (two generations).
+ * @param {Record<string, import('../path.js').JSONPathFunction>}
+ *   [options.pathFunctions] - custom JSONPath function extensions (RFC
+ *   9535 section 2.4), available in rule match paths and in the path
+ *   strings inside rule bodies
  * @returns {function} reusable `transform(data, externals?)` function
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @example
@@ -75,11 +79,16 @@ function cachedTransform(stylesheet, options) {
     STYLESHEET_CACHE.set(stylesheet, record);
   }
 
+  // Every option that changes what compiles has to be part of the cache
+  // key, or a second call with different options silently reuses the
+  // first compilation.
   const compileTypeTest = typeof options?.compileTypeTest === 'function'
     ? options.compileTypeTest
     : null;
   const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
-  if (compileTypeTest === null && maxDepth === 1024) {
+  const memo = options?.memo === true;
+  const pathFunctions = options?.pathFunctions == null ? null : options.pathFunctions;
+  if (compileTypeTest === null && maxDepth === 1024 && !memo && pathFunctions === null) {
     if (record.defaultTransform === null)
       record.defaultTransform = compileJsltStylesheet(stylesheet);
     return record.defaultTransform;
@@ -92,11 +101,12 @@ function cachedTransform(stylesheet, options) {
   }
   for (let i = 0; i < variants.length; i++) {
     const variant = variants[i];
-    if (variant.compileTypeTest === compileTypeTest && variant.maxDepth === maxDepth)
+    if (variant.compileTypeTest === compileTypeTest && variant.maxDepth === maxDepth
+      && variant.memo === memo && variant.pathFunctions === pathFunctions)
       return variant.transform;
   }
   const transform = compileJsltStylesheet(stylesheet, options);
-  variants.push({ compileTypeTest, maxDepth, transform });
+  variants.push({ compileTypeTest, maxDepth, memo, pathFunctions, transform });
   return transform;
 }
 
@@ -111,6 +121,9 @@ function cachedTransform(stylesheet, options) {
  * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
  *   [options.compileTypeTest] - schema type-test compiler
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
+ * @param {boolean} [options.memo=false] - memoize rule outputs
+ * @param {Record<string, import('../path.js').JSONPathFunction>}
+ *   [options.pathFunctions] - custom JSONPath function extensions
  * @returns {any} `undefined`, one JSON item, or an array of result items
  * @throws {import('./errors.js').JsltCompileError} when compilation fails
  * @throws {import('./errors.js').JsltRuntimeError} when dispatch fails

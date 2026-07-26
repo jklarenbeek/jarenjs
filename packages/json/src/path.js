@@ -30,6 +30,8 @@ import {
   compileSingularGetter,
   compileSegmentV,
   runSegmentsV,
+  compileSegmentG,
+  runSegmentsG,
   compileSegmentP,
   runSegmentsP,
   scanArrayIndex,
@@ -96,14 +98,90 @@ export class JSONPathSyntaxError extends SyntaxError {
 
 // Built-in function extensions (RFC 9535 section 2.4).
 // Parameter/return types: 'value' = ValueType, 'nodes' = NodesType,
-// 'logical' = LogicalType.
+// 'logical' = LogicalType. Null-prototype, so an inherited member name
+// (`constructor`, `tostring`) is an unknown function and not a
+// half-formed descriptor.
 const FUNCTIONS = {
+  __proto__: null,
   length: { params: ['value'], returns: 'value' },
   count: { params: ['nodes'], returns: 'value' },
   match: { params: ['value', 'value'], returns: 'logical' },
   search: { params: ['value', 'value'], returns: 'logical' },
   value: { params: ['nodes'], returns: 'value' },
 };
+
+// function-name = LCALPHA *(LCALPHA / "_" / DIGIT)   (RFC 9535 2.4.1)
+const RE_FUNCTION_NAME = /^[a-z][a-z0-9_]*$/;
+const TYPE_NAMES = ['value', 'nodes', 'logical'];
+
+// Registries are validated once and memoized on the registry object, so
+// compiling a thousand queries against one registry validates it once.
+const FUNCTION_TABLES = new WeakMap();
+
+function registryError(message) {
+  return new TypeError(`options.pathFunctions: ${message}`);
+}
+
+function validateType(type, what) {
+  if (!TYPE_NAMES.includes(type))
+    throw registryError(`${what} must be one of ${TYPE_NAMES.join(', ')}`);
+}
+
+/**
+ * Validate a registry of custom function extensions and merge it over
+ * the built-ins. A registry entry declares its parameter and result
+ * types exactly like a built-in, which is what lets the parser apply
+ * the same well-typedness rules (RFC 9535 section 2.4.3) to it.
+ * @param {object} functions - name to `{ params, returns, evaluate }`
+ * @returns {object} the merged, null-prototype function table
+ */
+function resolveFunctionTable(functions) {
+  const cached = FUNCTION_TABLES.get(functions);
+  if (cached !== undefined)
+    return cached;
+  const table = { __proto__: null, ...FUNCTIONS };
+  for (const name of Object.keys(functions)) {
+    const def = functions[name];
+    if (!RE_FUNCTION_NAME.test(name))
+      throw registryError(`'${name}' is not a valid function name`);
+    // section 2.4.1: an extension must not redefine a built-in, and a
+    // literal keyword would be unreadable as a call
+    if (FUNCTIONS[name] !== undefined)
+      throw registryError(`'${name}' is a built-in function`);
+    if (name === 'true' || name === 'false' || name === 'null')
+      throw registryError(`'${name}' is a literal, not a function name`);
+    if (def === null || typeof def !== 'object')
+      throw registryError(`'${name}' must be a { params, returns, evaluate } object`);
+    if (!Array.isArray(def.params))
+      throw registryError(`'${name}'.params must be an array of parameter types`);
+    for (let i = 0; i < def.params.length; i++)
+      validateType(def.params[i], `'${name}'.params[${i}]`);
+    validateType(def.returns, `'${name}'.returns`);
+    if (typeof def.evaluate !== 'function')
+      throw registryError(`'${name}'.evaluate must be a function`);
+    table[name] = {
+      params: [...def.params],
+      returns: def.returns,
+      evaluate: def.evaluate,
+    };
+  }
+  Object.freeze(table);
+  FUNCTION_TABLES.set(functions, table);
+  return table;
+}
+
+// Resolve the function table a parse should use. The overwhelmingly
+// common call has no options at all and reaches the built-ins directly.
+function functionTableOf(options) {
+  if (options == null)
+    return FUNCTIONS;
+  const functions = options.pathFunctions;
+  if (functions == null)
+    return FUNCTIONS;
+  if (typeof functions !== 'object' || Array.isArray(functions))
+    throw registryError('must be a plain object of function extensions');
+  return resolveFunctionTable(functions);
+}
 
 //#endregion
 
@@ -185,6 +263,7 @@ const FUNCTIONS = {
  *   values: (data: any) => any[],
  *   first: (data: any) => any,
  *   exists: (data: any) => boolean,
+ *   iterate: (data: any) => Generator<any>,
  *   nodes: (data: any) => JSONPathNode[],
  *   paths: (data: any) => string[],
  *   source: string,
@@ -193,15 +272,42 @@ const FUNCTIONS = {
  */
 
 /**
+ * A custom JSONPath function extension (RFC 9535 section 2.4). The
+ * declared types are what the parser type-checks call sites against
+ * (section 2.4.3), exactly as it does for the five built-ins.
+ *
+ * `evaluate` receives one argument per declared parameter: a `value`
+ * parameter arrives as a JSON value or `JSONPATH_NOTHING`, a `nodes`
+ * parameter as an array of the selected values, a `logical` parameter
+ * as a boolean. Its result must match `returns` - a `value` function
+ * may return `undefined` to mean Nothing.
+ * @typedef {Object} JSONPathFunction
+ * @property {('value'|'nodes'|'logical')[]} params - Declared parameter types
+ * @property {'value'|'nodes'|'logical'} returns - Declared result type
+ * @property {(...args: any[]) => any} evaluate - The implementation
+ */
+
+/**
+ * Options accepted by the JSONPath entry points.
+ * @typedef {Object} JSONPathOptions
+ * @property {Record<string, JSONPathFunction>} [pathFunctions] - Custom
+ *   function extensions, by name. A name must match the RFC's
+ *   `function-name` production and must not redefine a built-in.
+ */
+
+/**
  * Parse a JSONPath query string into an AST.
  * @param {string} source - The JSONPath expression (e.g. `$.store.book[?@.price < 10].title`)
+ * @param {JSONPathOptions} [options] - Parse options
  * @returns {JSONPathAst} The parsed query AST
  * @throws {JSONPathSyntaxError} When the query violates the RFC 9535 grammar
+ * @throws {TypeError} When `options.pathFunctions` is not a valid registry
  */
-export function parseJSONPath(source) {
+export function parseJSONPath(source, options = undefined) {
   if (typeof source !== 'string')
     throw new JSONPathSyntaxError('query must be a string', String(source), 0);
 
+  const FUNCS = functionTableOf(options);
   const len = source.length;
   let pos = 0;
 
@@ -768,7 +874,7 @@ export function parseJSONPath(source) {
   }
 
   function parseFunctionExpr(name, at) {
-    const def = FUNCTIONS[name];
+    const def = FUNCS[name];
     if (def === undefined)
       fail(`unknown function '${name}'`, at);
     pos++; // consume '('
@@ -776,7 +882,12 @@ export function parseJSONPath(source) {
     const args = [];
     if (cc(pos) !== CC_RPAREN) {
       for (;;) {
-        args.push(parseFunctionArg());
+        // argument parsing is type-directed: a LogicalType parameter
+        // takes the whole logical-expr production (RFC 9535 2.4.3), so
+        // `!`, `(`, comparisons and `&&`/`||` are only legal there
+        args.push(def.params[args.length] === 'logical'
+          ? { kind: 'logical', expr: parseLogicalOr() }
+          : parseFunctionArg());
         skipWS();
         if (cc(pos) === CC_COMMA) {
           pos++;
@@ -805,15 +916,22 @@ export function parseJSONPath(source) {
           continue;
         fail(`argument ${i + 1} of '${name}' must be of type ValueType`, at);
       }
-      else { // 'nodes'
+      else if (param === 'nodes') {
         if (arg.kind === 'query')
           continue;
         if (arg.kind === 'func' && arg.returns === 'nodes')
           continue;
         fail(`argument ${i + 1} of '${name}' must be a query (NodesType)`, at);
       }
+      // 'logical': parseLogicalOr only produces well-typed logical
+      // expressions, and it already rejects a ValueType function there
     }
-    return { kind: 'func', name, args, returns: def.returns };
+    const node = { kind: 'func', name, args, returns: def.returns };
+    if (def.evaluate !== undefined) {
+      node.params = def.params;
+      node.evaluate = def.evaluate;
+    }
+    return node;
   }
 
   //#endregion
@@ -849,6 +967,9 @@ export function parseJSONPath(source) {
  * - `query(data)` / `query.values(data)` - array of matched values
  * - `query.first(data)` - first matched value, or `undefined`
  * - `query.exists(data)` - true when the query selects at least one node
+ * - `query.iterate(data)` - a generator yielding matched values on
+ *   demand, in document order; `first`/`exists` are one pull of it, so
+ *   none of the three builds a nodelist it does not need
  * - `query.nodes(data)` - array of `{ path, value }` with normalized paths
  * - `query.paths(data)` - array of normalized paths (RFC 9535 section 2.7)
  * - `query.source` - the original query string
@@ -856,18 +977,20 @@ export function parseJSONPath(source) {
  *   compiled path mode must agree with the eagerly compiled value mode)
  *
  * @param {string} source - The JSONPath expression
+ * @param {JSONPathOptions} [options] - Compile options
  * @returns {JSONPathQuery} The compiled query function
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
+ * @throws {TypeError} When `options.pathFunctions` is not a valid registry
  * @example
  * const q = compileJSONPath('$.store.book[?@.price < 10].title');
  * q(data); // ['Sayings of the Century', 'Moby Dick']
  * q.paths(data); // ["$['store']['book'][0]['title']", ...]
  */
-export function compileJSONPath(source) {
-  const ast = deepFreeze(parseJSONPath(source));
+export function compileJSONPath(source, options = undefined) {
+  const ast = deepFreeze(parseJSONPath(source, options));
   const segments = ast.segments;
 
-  let values, first, exists;
+  let values, first, exists, iterate;
   if (isSingularSegments(segments)) {
     const getter = compileSingularGetter(segments, false);
     values = (data) => {
@@ -879,15 +1002,29 @@ export function compileJSONPath(source) {
       return v === NOTHING ? undefined : v;
     };
     exists = (data) => getter(data, data) !== NOTHING;
+    iterate = function* iterateSingular(data) {
+      const v = getter(data, data);
+      if (v !== NOTHING)
+        yield v;
+    };
   }
   else {
     const segs = segments.map(compileSegmentV);
     values = (data) => runSegmentsV(segs, data, data);
-    first = (data) => {
-      const result = runSegmentsV(segs, data, data);
-      return result.length !== 0 ? result[0] : undefined;
+    // the lazy chain is a second compilation of the same selectors, so
+    // it is built on first use - a query that only ever calls values()
+    // never pays for it
+    let gens = null;
+    iterate = (data) => {
+      if (gens === null)
+        gens = segments.map(compileSegmentG);
+      return runSegmentsG(gens, 0, data, data);
     };
-    exists = (data) => runSegmentsV(segs, data, data).length !== 0;
+    first = (data) => {
+      const r = iterate(data).next();
+      return r.done ? undefined : r.value;
+    };
+    exists = (data) => !iterate(data).next().done;
   }
 
   // nodes mode is compiled lazily; value-only queries never pay for it
@@ -902,6 +1039,7 @@ export function compileJSONPath(source) {
   query.values = values;
   query.first = first;
   query.exists = exists;
+  query.iterate = iterate;
   query.nodes = (data) => {
     const { vals, paths } = runNodes(data);
     const nodes = new Array(vals.length);
@@ -917,23 +1055,38 @@ export function compileJSONPath(source) {
 
 const QUERY_CACHE = new Map();
 const QUERY_CACHE_LIMIT = 512;
+// One cache per registry, because the same source compiles differently
+// under different extensions; keyed weakly so a registry that goes out
+// of scope takes its compiled queries with it.
+const REGISTRY_CACHES = new WeakMap();
 
 /**
  * Apply a JSONPath query to a JSON value in one call. Compiled queries
  * are cached (FIFO, 512 entries), so repeated calls with the same query
- * string reuse the compiled function.
+ * string reuse the compiled function. A query compiled against a
+ * function-extension registry is cached under that registry.
  * @param {string} source - The JSONPath expression
  * @param {any} data - The JSON value to query
+ * @param {JSONPathOptions} [options] - Compile options
  * @returns {any[]} Array of matched values
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
  */
-export function queryJSONPath(source, data) {
-  let query = QUERY_CACHE.get(source);
+export function queryJSONPath(source, data, options = undefined) {
+  let cache = QUERY_CACHE;
+  const functions = options == null ? null : options.pathFunctions;
+  if (functions != null) {
+    cache = REGISTRY_CACHES.get(functions);
+    if (cache === undefined) {
+      cache = new Map();
+      REGISTRY_CACHES.set(functions, cache);
+    }
+  }
+  let query = cache.get(source);
   if (query === undefined) {
-    query = compileJSONPath(source);
-    if (QUERY_CACHE.size >= QUERY_CACHE_LIMIT)
-      QUERY_CACHE.delete(QUERY_CACHE.keys().next().value);
-    QUERY_CACHE.set(source, query);
+    query = compileJSONPath(source, options);
+    if (cache.size >= QUERY_CACHE_LIMIT)
+      cache.delete(cache.keys().next().value);
+    cache.set(source, query);
   }
   return query(data);
 }
@@ -942,21 +1095,86 @@ export function queryJSONPath(source, data) {
  * Validates a JSONPath expression strictly against the RFC 9535 grammar,
  * including well-typedness of function expressions. Unlike the heuristic
  * `isValidJSONPath` in basic.js, this uses the full parser.
+ *
+ * Without options this recognizes the five built-in functions and
+ * nothing else, which is what the registered `json-path` string format
+ * asserts: a format is a property of the string itself, so it must mean
+ * the same thing in every schema, independent of which extensions some
+ * host happens to have installed. Pass `options.pathFunctions` to
+ * validate against a registry instead - a host that wants its
+ * extensions asserted registers a tester bound to them.
+ *
  * @param {string} str - The JSONPath expression to validate
+ * @param {JSONPathOptions} [options] - Compile options
  * @returns {boolean} True when the string is a valid RFC 9535 query
  * @example
  * isValidJSONPathStrict('$.store.book[?@.price < 10]'); // true
  * isValidJSONPathStrict('$.store.book[0 5]'); // false
  * isValidJSONPathStrict('@.name'); // false (queries start at $)
  */
-export function isValidJSONPathStrict(str) {
+export function isValidJSONPathStrict(str, options = undefined) {
   if (typeof str !== 'string')
     return false;
   try {
-    parseJSONPath(str);
+    parseJSONPath(str, options);
     return true;
   }
-  catch {
+  catch (error) {
+    // a malformed registry is the host's bug, not the string's
+    if (!(error instanceof JSONPathSyntaxError))
+      throw error;
+    return false;
+  }
+}
+
+/**
+ * The head of a variable-rooted path string: `$` followed by a variable
+ * name. The Jaren query format writes a path relative to a bound
+ * variable as `$name` plus ordinary RFC 9535 segments, and the query
+ * normalizer splits on exactly this production - so schema-time
+ * validation and compile-time parsing agree on where the segments start.
+ */
+export const RE_JSONPATH_VARIABLE_HEAD = /^\$([A-Za-z_][A-Za-z0-9_]*)/;
+
+/**
+ * Validates a variable-rooted path string: `$name`, optionally followed
+ * by RFC 9535 segments (`$book.price`, `$b[?@.isbn]`, `$item`).
+ *
+ * This is the counterpart of `isValidJSONPathStrict` for paths whose
+ * root is a bound variable rather than the document. Such a string is
+ * not a valid RFC 9535 query - the RFC's root identifier is `$` alone -
+ * so it can only be checked by recognizing the head and validating the
+ * tail as segments, which is what the query normalizer does before it
+ * raises `JQ0004`. Without this, a schema could only pattern-check the
+ * head and had to leave the segment grammar to the compiler.
+ *
+ * @param {string} str - The variable-rooted path string to validate
+ * @param {JSONPathOptions} [options] - Parse options
+ * @returns {boolean} True when the string is a well-formed variable-rooted path
+ * @example
+ * isValidJSONPathSegments('$book.price'); // true
+ * isValidJSONPathSegments('$book'); // true (no segments)
+ * isValidJSONPathSegments('$book.price['); // false (unterminated segment)
+ * isValidJSONPathSegments('$.price'); // false (no variable name; that is json-path)
+ */
+export function isValidJSONPathSegments(str, options = undefined) {
+  if (typeof str !== 'string')
+    return false;
+  const head = RE_JSONPATH_VARIABLE_HEAD.exec(str);
+  if (head === null)
+    return false;
+  const rest = str.slice(head[0].length);
+  if (rest === '')
+    return true;
+  try {
+    // the tail is validated by parsing it under a substituted root,
+    // exactly as the normalizer compiles it
+    parseJSONPath('$' + rest, options);
+    return true;
+  }
+  catch (error) {
+    if (!(error instanceof JSONPathSyntaxError))
+      throw error;
     return false;
   }
 }

@@ -35,7 +35,7 @@
 //   JP2003 - the root of the document cannot be removed
 //   JP2004 - a `test` operation failed
 
-import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
+import { equalsJson, isJsonObject, setObjectMember, stableStringify } from '@jarenjs/core/object';
 
 import {
   parseJSONPointer,
@@ -599,14 +599,14 @@ function appendPointer(path, key) {
   return path + '/' + encodeJSONPointerSegment(key);
 }
 
-function diffObject(src, tgt, path, out) {
+function diffObject(src, tgt, path, out, lcs) {
   for (const key in src) {
     if (!hasOwn(src, key))
       continue;
     if (!hasOwn(tgt, key))
       out.push({ op: 'remove', path: appendPointer(path, key) });
     else
-      diffValue(src[key], tgt[key], appendPointer(path, key), out);
+      diffValue(src[key], tgt[key], appendPointer(path, key), out, lcs);
   }
   for (const key in tgt) {
     if (hasOwn(tgt, key) && !hasOwn(src, key))
@@ -614,12 +614,145 @@ function diffObject(src, tgt, path, out) {
   }
 }
 
-// Pragmatic array diff: trim the deep-equal common prefix and suffix,
-// recurse index-wise over the overlap of the middle, then append adds or
-// repeated removes for the length difference. Linear, and minimal for
-// in-place edits and head/tail insertions; a mid-array insertion
-// degrades to per-index replaces (correct, not minimal).
-function diffArray(src, tgt, path, out) {
+// Emit the ops for one gap between two aligned (deep-equal) elements:
+// `sRun` source elements at src[si...] became `tRun` target elements at
+// tgt[ti...]. Overlapping positions are diffed in place - an edited
+// element stays one `replace` rather than a remove plus an add - and the
+// length difference is appended or removed.
+//
+// `cur` is the position of src[si] in the document as the ops so far
+// have left it: an `add` shifts everything after it right (so the next
+// insert goes one further along), while repeated `remove`s all land on
+// the same index (each one shifts the rest left onto it).
+function diffArrayGap(src, si, sRun, tgt, ti, tRun, cur, path, out, lcs) {
+  const both = sRun < tRun ? sRun : tRun;
+  for (let k = 0; k < both; k++)
+    diffValue(src[si + k], tgt[ti + k], path + '/' + (cur + k), out, lcs);
+  if (tRun > both) {
+    for (let k = both; k < tRun; k++)
+      out.push({ op: 'add', path: path + '/' + (cur + k), value: tgt[ti + k] });
+    return cur + tRun;
+  }
+  const at = path + '/' + (cur + both);
+  for (let k = both; k < sRun; k++)
+    out.push({ op: 'remove', path: at });
+  return cur + both;
+}
+
+// Cell budget for the alignment table: beyond this the quadratic
+// alignment costs more than the ops it saves, so the index-wise diff
+// answers instead - still correct, just not minimal.
+const ALIGN_MAX_CELLS = 1 << 20;
+
+// Intern one element's stable serialization to an integer id, so the
+// alignment's inner loop compares integers instead of walking two
+// subtrees. The ids only ever act as a filter: different ids mean
+// certainly different values, equal ids still have to pass the real
+// comparison - so a collision costs one wasted comparison and can never
+// align two unequal elements.
+function internElement(ids, value) {
+  const key = stableStringify(value);
+  let id = ids.get(key);
+  if (id === undefined) {
+    id = ids.size;
+    ids.set(key, id);
+  }
+  return id;
+}
+
+// Align src[s0,s1) with tgt[t0,t1) and emit the ops for the alignment.
+//
+// The cost model is the patch itself: keeping a deep-equal pair is free,
+// rewriting one position in place is one step, and so is inserting or
+// deleting a single element. Minimizing that is edit distance WITH
+// substitutions, not a longest common subsequence - LCS maximizes kept
+// elements, which is a different thing and loses on a permutation, where
+// it pays a delete plus an insert for what one rewrite covers.
+//
+// Because pairing every overlapping position is itself a valid
+// alignment, the result never takes more steps than the index-wise diff.
+//
+// `cur` tracks where the current source element sits in the document as
+// the ops emitted so far have left it: an insert shifts the rest right,
+// a delete shifts it left onto the same index.
+function diffArrayAligned(src, s0, s1, tgt, t0, t1, path, out, lcs) {
+  const m = s1 - s0;
+  const n = t1 - t0;
+  const ids = new Map();
+  const sk = new Int32Array(m);
+  const tk = new Int32Array(n);
+  for (let i = 0; i < m; i++)
+    sk[i] = internElement(ids, src[s0 + i]);
+  for (let j = 0; j < n; j++)
+    tk[j] = internElement(ids, tgt[t0 + j]);
+
+  // backward DP, so the alignment replays front to back - the order the
+  // ops have to be emitted in
+  const width = n + 1;
+  const dp = new Uint32Array((m + 1) * width);
+  const last = m * width;
+  for (let j = n - 1; j >= 0; j--)
+    dp[last + j] = n - j;
+  for (let i = m - 1; i >= 0; i--) {
+    const row = i * width;
+    const next = row + width;
+    dp[row + n] = m - i;
+    const key = sk[i];
+    for (let j = n - 1; j >= 0; j--) {
+      const same = key === tk[j] && equalsJson(src[s0 + i], tgt[t0 + j]);
+      let best = dp[next + j + 1] + (same ? 0 : 1);
+      const del = dp[next + j] + 1;
+      if (del < best)
+        best = del;
+      const ins = dp[row + j + 1] + 1;
+      if (ins < best)
+        best = ins;
+      dp[row + j] = best;
+    }
+  }
+
+  let i = 0;
+  let j = 0;
+  let cur = s0;
+  while (i < m && j < n) {
+    const row = i * width;
+    const next = row + width;
+    const same = sk[i] === tk[j] && equalsJson(src[s0 + i], tgt[t0 + j]);
+    const best = dp[row + j];
+    if (best === dp[next + j + 1] + (same ? 0 : 1)) {
+      if (!same)
+        diffValue(src[s0 + i], tgt[t0 + j], path + '/' + cur, out, lcs);
+      i++;
+      j++;
+      cur++;
+    }
+    else if (best === dp[next + j] + 1) {
+      out.push({ op: 'remove', path: path + '/' + cur });
+      i++;
+    }
+    else {
+      out.push({ op: 'add', path: path + '/' + cur, value: tgt[t0 + j] });
+      j++;
+      cur++;
+    }
+  }
+  for (; i < m; i++)
+    out.push({ op: 'remove', path: path + '/' + cur });
+  for (; j < n; j++, cur++)
+    out.push({ op: 'add', path: path + '/' + cur, value: tgt[t0 + j] });
+}
+
+// Array diff. Both modes first trim the deep-equal common prefix and
+// suffix, which alone makes in-place edits and head/tail insertions
+// minimal and bounds the work to the changed middle.
+//
+// What differs is the middle. The default pairs it up index-wise, which
+// is linear but turns a mid-array insertion into a run of per-index
+// replaces (correct, not minimal). `arrayDiff: 'minimal'` aligns the
+// middle instead, so an insertion or deletion is emitted as one op and
+// only genuinely changed positions are rewritten - at O(m*n) time and
+// space in the size of that middle.
+function diffArray(src, tgt, path, out, lcs) {
   const slen = src.length;
   const tlen = tgt.length;
   const minLen = slen < tlen ? slen : tlen;
@@ -634,31 +767,29 @@ function diffArray(src, tgt, path, out) {
   }
   const sMid = sEnd - start;
   const tMid = tEnd - start;
-  const mid = sMid < tMid ? sMid : tMid;
-  for (let i = 0; i < mid; i++)
-    diffValue(src[start + i], tgt[start + i], path + '/' + (start + i), out);
-  if (tMid > mid) {
-    for (let i = start + mid; i < tEnd; i++)
-      out.push({ op: 'add', path: path + '/' + i, value: tgt[i] });
+  if (sMid === 0 && tMid === 0)
+    return;
+
+  // one run of pure inserts or pure deletes needs no alignment, and the
+  // budget keeps a large middle from turning quadratic
+  if (!lcs || sMid === 0 || tMid === 0 || (sMid + 1) * (tMid + 1) > ALIGN_MAX_CELLS) {
+    diffArrayGap(src, start, sMid, tgt, start, tMid, start, path, out, lcs);
+    return;
   }
-  else if (sMid > mid) {
-    const at = path + '/' + (start + mid);
-    for (let i = mid; i < sMid; i++)
-      out.push({ op: 'remove', path: at });
-  }
+  diffArrayAligned(src, start, sEnd, tgt, start, tEnd, path, out, lcs);
 }
 
-function diffValue(src, tgt, path, out) {
+function diffValue(src, tgt, path, out, lcs) {
   if (src === tgt)
     return;
   const sArr = Array.isArray(src);
   const tArr = Array.isArray(tgt);
   if (sArr && tArr) {
-    diffArray(src, tgt, path, out);
+    diffArray(src, tgt, path, out, lcs);
     return;
   }
   if (!sArr && !tArr && isContainer(src) && isContainer(tgt)) {
-    diffObject(src, tgt, path, out);
+    diffObject(src, tgt, path, out, lcs);
     return;
   }
   if (!equalsJson(src, tgt))
@@ -672,21 +803,50 @@ function diffValue(src, tgt, path, out) {
  *
  * Objects diff member-wise; arrays trim the common prefix/suffix and
  * diff the middle index-wise, so in-place edits and head/tail
- * insertions produce minimal patches while arbitrary mid-array
- * reorderings fall back to correct (but larger) replaces. Emitted
- * `value` members share references with `target`.
+ * insertions produce minimal patches while a mid-array insertion falls
+ * back to correct (but larger) per-index replaces. Emitted `value`
+ * members share references with `target`.
+ *
+ * `arrayDiff: 'minimal'` aligns the changed middle instead, so a
+ * mid-array insertion or deletion is emitted as one `add`/`remove` —
+ * the smallest patch, which is what matters when patches go over the
+ * wire. The alignment minimizes the patch itself (edit distance with
+ * substitutions, not a longest common subsequence: LCS maximizes kept
+ * elements, which costs a delete plus an insert on a permutation where
+ * one rewrite would do), so it never takes more alignment steps than
+ * the index-wise pairing.
+ *
+ * It is opt-in because it costs O(m*n) time and space in the length of
+ * that middle, against the default's linear pass; above a fixed cell
+ * budget a single array falls back to the index-wise diff, so the mode
+ * never turns a large diff quadratic. Both modes produce patches that
+ * reproduce `target` exactly.
  *
  * @param {any} source - The original document
  * @param {any} target - The desired document
+ * @param {{ arrayDiff?: 'index' | 'minimal' }} [options] - `arrayDiff`
+ *   selects the array strategy: `'index'` (default) or `'minimal'`
  * @returns {JsonPatchOperation[]} The patch document (empty when equal)
+ * @throws {TypeError} When `arrayDiff` is not a known mode
  * @example
  * createJSONPatch({ a: 1, b: 2 }, { a: 1, b: 3, c: 4 });
  * // [{ op: 'replace', path: '/b', value: 3 },
  * //  { op: 'add', path: '/c', value: 4 }]
+ * @example
+ * const before = [{ id: 1 }, { id: 2 }, { id: 3, n: 0 }];
+ * const after = [{ id: 1 }, { id: 9 }, { id: 2 }, { id: 3, n: 1 }];
+ * createJSONPatch(before, after, { arrayDiff: 'minimal' });
+ * // [{ op: 'add', path: '/1', value: { id: 9 } },
+ * //  { op: 'replace', path: '/3/n', value: 1 }]
  */
-export function createJSONPatch(source, target) {
+export function createJSONPatch(source, target, options = undefined) {
+  const mode = options == null || options.arrayDiff === undefined
+    ? 'index'
+    : options.arrayDiff;
+  if (mode !== 'index' && mode !== 'minimal')
+    throw new TypeError(`unknown 'arrayDiff' option '${mode}'`);
   const out = [];
-  diffValue(source, target, '', out);
+  diffValue(source, target, '', out, mode === 'minimal');
   return out;
 }
 

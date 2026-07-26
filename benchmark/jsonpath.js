@@ -45,6 +45,15 @@ const WARMUP_ITERATIONS = 100;
 // query(compiled, document) returns the nodelist as an array of values;
 // paths(compiled, document) is optional and must return RFC 9535
 // normalized paths (only engines that produce them are checked).
+//
+// `first`/`exists` are ARRAYS of routes to the same answer, and the
+// early-exit profile reports the FASTEST of an engine's routes per
+// selector. Picking one route per engine ourselves would decide the
+// result: json-p3's match() is its purpose-built first-match call, yet
+// its plain query() beats it on a singular selector and its lazyQuery()
+// generator beats it on a descendant one. Measuring every route and
+// taking the best means a rival can never be made to look slow by a
+// choice of ours, and the same rule is applied to Jaren.
 const ENGINE_LOADERS = {
   jaren: async () => {
     const { compileJSONPath } = await import('@jarenjs/json');
@@ -54,6 +63,15 @@ const ENGINE_LOADERS = {
       compile: (selector) => compileJSONPath(selector),
       query: (compiled, document) => compiled(document),
       paths: (compiled, document) => compiled.paths(document),
+      first: [
+        (compiled, document) => compiled.first(document),
+        (compiled, document) => compiled.iterate(document).next().value,
+        (compiled, document) => compiled(document)[0],
+      ],
+      exists: [
+        (compiled, document) => compiled.exists(document),
+        (compiled, document) => compiled(document).length !== 0,
+      ],
     };
   },
   'json-p3': async () => {
@@ -64,6 +82,16 @@ const ENGINE_LOADERS = {
       compile: (selector) => p3.compile(selector),
       query: (compiled, document) => compiled.query(document).values(),
       // json-p3 paths are dotted (e.g. $.a[0]), not RFC-normalized; skip
+      first: [
+        (compiled, document) => compiled.match(document),
+        (compiled, document) => compiled.lazyQuery(document).next().value,
+        (compiled, document) => compiled.query(document).values()[0],
+      ],
+      exists: [
+        (compiled, document) => compiled.match(document) !== undefined,
+        (compiled, document) => compiled.lazyQuery(document).next().done === false,
+        (compiled, document) => !compiled.query(document).empty(),
+      ],
     };
   },
 };
@@ -308,6 +336,20 @@ const SCALE_QUERIES = [
   '$..value',
 ];
 
+// Selectors for the early-exit scenarios, run against the same document
+// as SCALE_QUERIES so the two tables read directly against each other:
+// what the full nodelist costs, and what only wanting the first answer
+// costs. The singular selector is the control - it addresses one node
+// either way, so there is nothing for early exit to win there.
+const EARLY_EXIT_QUERIES = [
+  '$.items[42].name',
+  '$.items[*].id',
+  '$.items[?@.price < 10].name',
+  '$..value',
+];
+
+const EARLY_EXIT_OPS = ['first', 'exists'];
+
 function runProfile(engines, tests, options) {
   const rows = [];
 
@@ -340,14 +382,16 @@ function runProfile(engines, tests, options) {
 
   // synthetic large-document scenarios
   const scaleRows = [];
+  const earlyExitRows = [];
   if (options.scale) {
     const document = makeScaleDocument(1000);
+    const scaleIterations = Math.max(100, Math.floor(options.iterations / 10));
     for (const selector of SCALE_QUERIES) {
       const row = { name: 'scale(1000 items)', selector, engines: {} };
       for (const engine of engines) {
         try {
           const compiled = engine.compile(selector);
-          row.engines[engine.key] = measureNsPerOp(() => engine.query(compiled, document), Math.max(100, Math.floor(options.iterations / 10)));
+          row.engines[engine.key] = measureNsPerOp(() => engine.query(compiled, document), scaleIterations);
         }
         catch {
           row.engines[engine.key] = null;
@@ -355,13 +399,43 @@ function runProfile(engines, tests, options) {
       }
       scaleRows.push(row);
     }
+
+    for (const op of EARLY_EXIT_OPS) {
+      for (const selector of EARLY_EXIT_QUERIES) {
+        const row = { name: op, selector, label: `${op}: ${selector}`, engines: {} };
+        for (const engine of engines) {
+          const routes = engine[op];
+          // no early-exit entry point at all: the engine has no answer
+          // here that is not the full nodelist, and saying so is the point
+          if (routes === undefined) {
+            row.engines[engine.key] = null;
+            continue;
+          }
+          let best = null;
+          for (const run of routes) {
+            try {
+              const compiled = engine.compile(selector);
+              const ns = measureNsPerOp(() => run(compiled, document), scaleIterations);
+              if (best === null || ns < best)
+                best = ns;
+            }
+            catch {
+              // this route cannot run this selector; the others may
+            }
+          }
+          row.engines[engine.key] = best;
+        }
+        earlyExitRows.push(row);
+      }
+    }
   }
 
-  return { rows, compileRow, scaleRows };
+  return { rows, compileRow, scaleRows, earlyExitRows };
 }
 
 function printProfileTable(engines, rows, title) {
-  const selWidth = Math.min(56, Math.max(28, ...rows.map((r) => r.selector.length + 2)));
+  const labelOf = (row) => row.label ?? row.selector;
+  const selWidth = Math.min(56, Math.max(28, ...rows.map((r) => labelOf(r).length + 2)));
   const colWidth = Math.max(14, ...engines.map((e) => e.name.length + 2));
 
   console.log(`\n${title}\n`);
@@ -369,7 +443,8 @@ function printProfileTable(engines, rows, title) {
   console.log('-'.repeat(selWidth + colWidth * engines.length + 10));
 
   for (const row of rows) {
-    const selector = row.selector.length > selWidth - 2 ? row.selector.slice(0, selWidth - 5) + '...' : row.selector;
+    const label = labelOf(row);
+    const selector = label.length > selWidth - 2 ? label.slice(0, selWidth - 5) + '...' : label;
     const cols = engines.map((e) => {
       const ns = row.engines[e.key];
       return padLeft(ns === null ? 'n/a' : formatNs(ns), colWidth);
@@ -382,7 +457,7 @@ function printProfileTable(engines, rows, title) {
 }
 
 function printProfile(engines, profile, options) {
-  const { rows, compileRow, scaleRows } = profile;
+  const { rows, compileRow, scaleRows, earlyExitRows } = profile;
 
   // summary: totals and mean ratio vs jaren
   console.log(`\nJSONPath query profile: ${rows.length} CTS queries, ${options.iterations} iterations each\n`);
@@ -428,6 +503,16 @@ function printProfile(engines, profile, options) {
   if (scaleRows.length > 0)
     printProfileTable(engines, scaleRows, 'Synthetic 1000-item document scenarios');
 
+  if (earlyExitRows.length > 0) {
+    printProfileTable(engines, earlyExitRows,
+      'Early exit on the same 1000-item document (first match / any match)');
+    console.log('\n  Compare against the table above: those rows build the whole nodelist,');
+    console.log('  these ask only for the first answer. Each engine is timed on the');
+    console.log('  FASTEST of its own routes to that answer, so no rival is held to a');
+    console.log('  route it would not use. A singular selector addresses one node either');
+    console.log('  way and is the control row: there is nothing there for early exit to win.');
+  }
+
   console.log();
 }
 
@@ -457,7 +542,7 @@ function writeResults(mode, engines, data, options) {
     }
     else {
       lines.push(['name', 'selector', ...engines.map((e) => `${e.name} ns/op`)].join(','));
-      for (const row of [...data.rows, ...data.scaleRows])
+      for (const row of [...data.rows, ...data.scaleRows, ...data.earlyExitRows])
         lines.push([JSON.stringify(row.name), JSON.stringify(row.selector), ...engines.map((e) => row.engines[e.key] ?? '')].join(','));
     }
     content = lines.join('\n') + '\n';
@@ -524,6 +609,7 @@ Options:
   --iterations, -i N     Iterations per profiled query (default: ${DEFAULT_ITERATIONS})
   --top N                Show top N slowest queries in profile mode (default: 15)
   --scale                Add synthetic 1000-item document scenarios to the profile
+                         (full nodelist, plus first-match/exists early exit)
   --engines a,b          Engines to run (default: ${Object.keys(ENGINE_LOADERS).join(',')})
   --output, -o FORMAT    Output format: console, csv, json (default: console)
   --filepath, -f PATH    Output file path for csv/json

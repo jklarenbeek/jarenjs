@@ -90,6 +90,7 @@ import {
   isValidJSONPointerUriFragment,
   isValidRelativeJSONPointer,
   isValidJSONPathStrict,
+  isValidJSONPathSegments,
 } from '@jarenjs/json';
 
 /** @typedef {(value: string) => boolean} StringFormatTester */
@@ -158,6 +159,7 @@ export const jsonFormatTesters = {
   'json-pointer-uri-fragment': isValidJSONPointerUriFragment,
   'relative-json-pointer': isValidRelativeJSONPointer,
   'json-path': isValidJSONPathStrict,
+  'json-path-segments': isValidJSONPathSegments,
 };
 
 /**

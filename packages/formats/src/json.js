@@ -71,6 +71,31 @@ export const compileRelativeJsonPointerFormat = createStringFormatCompiler('rela
  */
 export const compileJsonPathFormat = createStringFormatCompiler('json-path', jsonFormatTesters['json-path']);
 
+/**
+ * Compiles a validator for the 'json-path-segments' format.
+ * Validates a *variable-rooted* path string: `$name` followed by
+ * optional RFC 9535 segments (`$book.price[?@.isbn]`). Such a string is
+ * not a valid RFC 9535 query — the RFC's root identifier is `$` alone —
+ * so `json-path` would reject it; this format is what gives the Jaren
+ * query format's variable-rooted paths the same schema-time
+ * well-formedness that absolute paths get from `json-path`.
+ *
+ * Both formats recognize the five built-in function extensions and no
+ * others: a format is a property of the string itself, so it must mean
+ * the same thing in every schema regardless of which custom extensions
+ * a particular host registered.
+ *
+ * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
+ * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
+ * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
+ * @example
+ * compileJsonPathSegmentsFormat(schemaObj, { format: 'json-path-segments' })('$book.price'); // true
+ * compileJsonPathSegmentsFormat(schemaObj, { format: 'json-path-segments' })('$book'); // true
+ * compileJsonPathSegmentsFormat(schemaObj, { format: 'json-path-segments' })('$.price'); // false (that is json-path)
+ * compileJsonPathSegmentsFormat(schemaObj, { format: 'json-path-segments' })('$book.price['); // false
+ */
+export const compileJsonPathSegmentsFormat = createStringFormatCompiler('json-path-segments', jsonFormatTesters['json-path-segments']);
+
 // =============================================================================
 // Aggregated Format Validators Object
 // =============================================================================
@@ -87,4 +112,5 @@ export const formatValidators = {
   'relative-json-pointer': compileRelativeJsonPointerFormat,
   // JSONPath
   'json-path': compileJsonPathFormat,
+  'json-path-segments': compileJsonPathSegmentsFormat,
 };

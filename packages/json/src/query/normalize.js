@@ -18,7 +18,7 @@
 // allocating in the same frame). Free names become external parameters,
 // collected in order of first appearance.
 
-import { parseJSONPath, JSONPathSyntaxError } from '../path.js';
+import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '../path.js';
 import { isSingularSegments } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { JsonQueryCompileError } from './errors.js';
@@ -76,7 +76,9 @@ export function sumCard(a, b) {
 const hasOwn = Object.hasOwn;
 
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const VAR_HEAD_RE = /^\$([A-Za-z_][A-Za-z0-9_]*)/;
+// The '$name' head of a variable-rooted path string; shared with the
+// json-path-segments format tester so both split at the same point.
+const VAR_HEAD_RE = RE_JSONPATH_VARIABLE_HEAD;
 
 // FLWOR clause keys (QUERY-FORMAT.md section 6.1) and quantifier keys
 // (section 7). Clauses apply in the fixed semantic order of section 6.1
@@ -163,9 +165,9 @@ export function deepFreezeCopy(value) {
 
 //#region strings (Rule 2)
 
-function parsePathString(source, original, docPath) {
+function parsePathString(source, original, docPath, ctx) {
   try {
-    return parseJSONPath(source);
+    return parseJSONPath(source, ctx.pathOptions);
   }
   catch (e) {
     /* c8 ignore next 2 -- parseJSONPath only throws syntax errors */
@@ -216,7 +218,7 @@ function normalizeString(s, docPath, scope, ctx) {
   if (c1 === 0x24) // '$$' escape: drop exactly one leading '$'
     return makeLiteral(s.slice(1), docPath);
   if (c1 === 0x2E || c1 === 0x5B) { // '$.' | '$[' | '$..' - absolute path
-    const ast = parsePathString(s, s, docPath);
+    const ast = parsePathString(s, s, docPath, ctx);
     return makePathNode('$', 0, false, CARD_ONE, ast.segments, docPath);
   }
   const m = VAR_HEAD_RE.exec(s);
@@ -229,7 +231,7 @@ function normalizeString(s, docPath, scope, ctx) {
     return Object.freeze({ kind: 'var', card: ref.card, docPath, slot: ref.slot, external: ref.external, name });
   // variable-rooted path: the grammar is RFC 9535 with the root identifier
   // replaced by the variable reference - parse with a substituted '$'
-  const ast = parsePathString('$' + rest, s, docPath);
+  const ast = parsePathString('$' + rest, s, docPath, ctx);
   return makePathNode(name, ref.slot, ref.external, ref.card, ast.segments, docPath);
 }
 
@@ -1108,9 +1110,16 @@ export function normalizeQuery(doc, options = {}) {
   const functions = options.functions == null ? null : validateNamedFunctions(options.functions, 'functions');
   const collations = options.collations == null ? null : validateNamedFunctions(options.collations, 'collations');
   const limits = options.limits == null ? null : validateLimits(options.limits);
+  // JSONPath function extensions are a separate registry from
+  // options.functions ($call's host functions): they extend the RFC 9535
+  // grammar inside path strings, not the query vocabulary. Built once
+  // per compile so parsePathString hands the parser the same object.
+  const pathOptions = options.pathFunctions == null
+    ? undefined
+    : { pathFunctions: options.pathFunctions };
   const ctx = {
     nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
-    functions, collations, limits,
+    functions, collations, limits, pathOptions,
     usedOps: new Set(), usedFunctions: new Set(), usedCollations: new Set(),
   };
   let expr = doc;

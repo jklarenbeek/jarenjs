@@ -307,6 +307,10 @@ function leafRemove(parent, name, index, dataPath, lenient) {
  *   token), an object otherwise — and REPLACES a scalar or `null` found
  *   on the spine. The schema-less form-data discipline (@jarenjs/forms
  *   `setValueAtPointer` is this option plus undefined-deletes).
+ * @property {Record<string, import('./path.js').JSONPathFunction>} [pathFunctions]
+ *   Custom JSONPath function extensions, for the JSONPath-addressed
+ *   writers only. A pointer-addressed target is a singular query, which
+ *   has no filters and so no function calls.
  */
 
 /**
@@ -544,7 +548,7 @@ function applyAtNodes(query, root, mutate, leaf) {
  * addVat(doc, (price) => price * 1.21);
  */
 export function compileJSONPathSetter(path, options = undefined) {
-  const query = compileJSONPath(path);
+  const query = compileJSONPath(path, options);
   const mutate = parseMutate(options);
   return function setAtMatches(root, value) {
     return applyAtNodes(query, root, mutate, (state, p) => {
@@ -571,7 +575,7 @@ export function compileJSONPathSetter(path, options = undefined) {
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
  */
 export function compileJSONPathInserter(path, options = undefined) {
-  const query = compileJSONPath(path);
+  const query = compileJSONPath(path, options);
   const mutate = parseMutate(options);
   return function insertAtMatches(root, value) {
     return applyAtNodes(query, root, mutate, (state, p) => {
@@ -602,7 +606,7 @@ export function compileJSONPathInserter(path, options = undefined) {
  * dropExpensive(doc); // matched books removed, everything else shared
  */
 export function compileJSONPathRemover(path, options = undefined) {
-  const query = compileJSONPath(path);
+  const query = compileJSONPath(path, options);
   const mutate = parseMutate(options);
   return function removeMatches(root) {
     return applyAtNodes(query, root, mutate, (state, p) => {

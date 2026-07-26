@@ -3,15 +3,19 @@ import { getStringLength } from '@jarenjs/core/string';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import {
+  canonicalizeJson,
   compileDataRef,
   compileJSONPath,
   compileJSONPointer,
+  createJSONPatch,
   parseJSONPath,
   parseRelativeJSONPointer,
 } from '@jarenjs/json';
 import type {
   JSONPathAst,
+  JSONPathFunction,
   JSONPathNode,
+  JSONPathOptions,
   JSONPathQuery,
   JSONPathSegment,
   JSONPathSelector,
@@ -87,6 +91,17 @@ const nodes: JSONPathNode[] = pathQuery.nodes({ users: [{ name: 'Jaren' }] });
 void pathQuery.ast.relative;
 void nodes.map((node) => `${node.path}=${JSON.stringify(node.value)}`);
 void selectors.length;
+void [...pathQuery.iterate({ users: [{ name: 'Jaren' }] })];
+const isEven: JSONPathFunction = {
+  params: ['value'],
+  returns: 'logical',
+  evaluate: (v: unknown) => typeof v === 'number' && v % 2 === 0,
+};
+const pathOptions: JSONPathOptions = { pathFunctions: { is_even: isEven } };
+void compileJSONPath('$.users[?is_even(@.age)].name', pathOptions);
+const canonical: string = canonicalizeJson({ b: 1, a: 2 });
+void canonical;
+void createJSONPatch([1, 2], [1, 9, 2], { arrayDiff: 'minimal' });
 const getName: JsonPointerGetter = compileJSONPointer('/name');
 getName({ name: 'Jaren' });
 const relPtr: RelativeJsonPointer = parseRelativeJSONPointer('1/sibling');

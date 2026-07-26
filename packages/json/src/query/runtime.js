@@ -138,8 +138,11 @@ export function describeItem(v) {
 /**
  * Deterministic serialization of one JSON item, for `$groupby` keys
  * (QUERY-FORMAT.md section 6.5) — **engine-internal**, not an interchange
- * format (related to the roadmap's canonical-JSON item). It exists solely
- * so that deep-equal items (D2) map to the same string:
+ * format. For interchange (hashing, signing) use `canonicalizeJson`
+ * (canonical.js, RFC 8785), which is deliberately NOT this function: JCS
+ * rejects `NaN`/`Infinity` outright, where grouping needs them to be
+ * representable so that `NaN` groups with `NaN`. This exists solely so
+ * that deep-equal items (D2) map to the same string:
  *
  *   - object members serialize sorted by key (code-unit order), so key
  *     order never matters;

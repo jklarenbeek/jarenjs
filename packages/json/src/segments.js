@@ -150,6 +150,13 @@ export function runSegmentsV(segs, start, root) {
 /**
  * Compile an existence test for a filter query; singular queries never
  * materialize nodelists.
+ *
+ * The non-singular case builds its nodelist rather than pulling the
+ * lazy chain (compileSegmentG), even though it only needs one node: a
+ * filter runs this per candidate node, where nodelists are a handful of
+ * items and generator setup costs more than the pushes it saves - it
+ * benched ~9x slower on `$.items[?@.tags[*]]` over 2000 items. Laziness
+ * pays at the top of a query, not inside a filter.
  * @returns {(current: any, root: any) => boolean}
  */
 export function compileExists(query) {
@@ -173,6 +180,17 @@ function compileComparable(node) {
   return compileValueFunction(node);
 }
 
+// getter producing a NodesType result (an array of the selected values).
+// The argument is a filter query or a nodes-returning extension.
+function compileNodesGetter(arg) {
+  if (arg.kind !== 'query')
+    return compileUserFunction(arg);
+  const query = arg.query;
+  const segs = query.segments.map(compileSegmentV);
+  const relative = query.relative;
+  return (current, root) => runSegmentsV(segs, relative ? current : root, root);
+}
+
 function compileValueFunction(func) {
   switch (func.name) {
     case 'length': {
@@ -189,30 +207,95 @@ function compileValueFunction(func) {
       };
     }
     case 'count': {
-      const query = func.args[0].query;
-      if (isSingularSegments(query.segments)) {
-        const getter = compileSingularGetter(query.segments, query.relative);
+      const arg = func.args[0];
+      if (arg.kind === 'query' && isSingularSegments(arg.query.segments)) {
+        const getter = compileSingularGetter(arg.query.segments, arg.query.relative);
         return (current, root) => (getter(current, root) === NOTHING ? 0 : 1);
       }
-      const segs = query.segments.map(compileSegmentV);
-      const relative = query.relative;
-      return (current, root) => runSegmentsV(segs, relative ? current : root, root).length;
+      const get = compileNodesGetter(arg);
+      return (current, root) => get(current, root).length;
     }
     case 'value': {
-      const query = func.args[0].query;
-      if (isSingularSegments(query.segments))
-        return compileSingularGetter(query.segments, query.relative);
-      const segs = query.segments.map(compileSegmentV);
-      const relative = query.relative;
+      const arg = func.args[0];
+      if (arg.kind === 'query' && isSingularSegments(arg.query.segments))
+        return compileSingularGetter(arg.query.segments, arg.query.relative);
+      // eager for the same reason as compileExists: this runs per
+      // candidate node inside a filter
+      const get = compileNodesGetter(arg);
       return (current, root) => {
-        const result = runSegmentsV(segs, relative ? current : root, root);
+        const result = get(current, root);
         return result.length === 1 ? result[0] : NOTHING;
       };
     }
-    /* c8 ignore next 2 -- guarded by the parser's well-typedness checks */
     default:
-      throw new Error(`JSONPath: function '${func.name}' does not return ValueType`);
+      return compileUserFunction(func);
   }
+}
+
+// Compile a registered function extension (RFC 9535 section 2.4).
+// Arguments are marshalled to their declared types - ValueType is a
+// JSON value or NOTHING, NodesType an array of values, LogicalType a
+// boolean - and the result is checked against the declared return type,
+// because a registry entry that lies about its type would otherwise
+// corrupt the comparison rules further up.
+function compileUserFunction(func) {
+  /* c8 ignore next 2 -- guarded by the parser's well-typedness checks */
+  if (typeof func.evaluate !== 'function')
+    throw new Error(`JSONPath: function '${func.name}' has no implementation`);
+  const evaluate = func.evaluate;
+  const name = func.name;
+  const params = func.params;
+  const gets = new Array(func.args.length);
+  for (let i = 0; i < gets.length; i++) {
+    const arg = func.args[i];
+    gets[i] = params[i] === 'value'
+      ? compileComparable(arg)
+      : params[i] === 'nodes'
+        ? compileNodesGetter(arg)
+        : compileLogicalExpr(arg.expr);
+  }
+
+  let call;
+  switch (gets.length) {
+    case 0:
+      call = () => evaluate();
+      break;
+    case 1: {
+      const a = gets[0];
+      call = (c, r) => evaluate(a(c, r));
+      break;
+    }
+    case 2: {
+      const a = gets[0];
+      const b = gets[1];
+      call = (c, r) => evaluate(a(c, r), b(c, r));
+      break;
+    }
+    default:
+      call = (c, r) => {
+        const argv = new Array(gets.length);
+        for (let i = 0; i < gets.length; i++)
+          argv[i] = gets[i](c, r);
+        return evaluate(...argv);
+      };
+  }
+
+  if (func.returns === 'logical')
+    return (c, r) => call(c, r) === true;
+  if (func.returns === 'value') {
+    // a function may legitimately return Nothing; `undefined` is not a
+    // JSON value, so it is the natural spelling of it
+    return (c, r) => {
+      const v = call(c, r);
+      return v === undefined ? NOTHING : v;
+    };
+  }
+  return (c, r) => {
+    const v = call(c, r);
+    if (!Array.isArray(v))
+      throw new TypeError(`JSONPath: function '${name}' must return an array of nodes (NodesType)`);
+    return v;
+  };
 }
 
 function compileRegexTest(func, fullMatch) {
@@ -309,8 +392,17 @@ export function compileLogicalExpr(expr) {
     }
     case 'exists':
       return compileExists(expr.query);
-    case 'ftest':
-      return compileRegexTest(expr.func, expr.func.name === 'match');
+    case 'ftest': {
+      const func = expr.func;
+      if (func.name === 'match' || func.name === 'search')
+        return compileRegexTest(func, func.name === 'match');
+      // a registered extension as a test expression: LogicalType is the
+      // answer itself, NodesType is true for a non-empty nodelist
+      const fn = compileUserFunction(func);
+      if (func.returns === 'logical')
+        return fn;
+      return (c, r) => fn(c, r).length > 0;
+    }
     default: // 'cmp'
       return compileComparison(expr);
   }
@@ -319,6 +411,29 @@ export function compileLogicalExpr(expr) {
 //#endregion
 
 //#region segment compilation (values mode)
+
+// Resolve a slice selector's bounds against an array length (RFC 9535
+// section 2.3.4.2.2) for a `for (i = sliceFrom; i != sliceTo; i += step)`
+// walk - exclusive at `sliceTo` in both directions. The two results are
+// handed back through module scope rather than an object or a pair,
+// because this runs once per input node on every slice selector in all
+// three segment modes and must not allocate. Read them immediately; no
+// slice applier calls anything in between.
+let sliceFrom = 0;
+let sliceTo = 0;
+
+function sliceBounds(start, end, step, len) {
+  const s = start === null ? (step > 0 ? 0 : len - 1) : (start < 0 ? len + start : start);
+  const e = end === null ? (step > 0 ? len : -1) : (end < 0 ? len + end : end);
+  if (step > 0) {
+    sliceFrom = s < 0 ? 0 : (s > len ? len : s);
+    sliceTo = e < 0 ? 0 : (e > len ? len : e);
+  }
+  else {
+    sliceFrom = s < -1 ? -1 : (s > len - 1 ? len - 1 : s);
+    sliceTo = e < -1 ? -1 : (e > len - 1 ? len - 1 : e);
+  }
+}
 
 // selector-node functions: (value, output, root) => void
 
@@ -372,19 +487,13 @@ export function compileSelectorNodeV(sel) {
         const len = v.length;
         if (len === 0)
           return;
-        // bounds per RFC 9535 section 2.3.4.2.2
-        const s = start === null ? (step > 0 ? 0 : len - 1) : (start < 0 ? len + start : start);
-        const e = end === null ? (step > 0 ? len : -1) : (end < 0 ? len + end : end);
+        sliceBounds(start, end, step, len);
         if (step > 0) {
-          const lower = s < 0 ? 0 : (s > len ? len : s);
-          const upper = e < 0 ? 0 : (e > len ? len : e);
-          for (let i = lower; i < upper; i += step)
+          for (let i = sliceFrom; i < sliceTo; i += step)
             out.push(v[i]);
         }
         else {
-          const upper = s < -1 ? -1 : (s > len - 1 ? len - 1 : s);
-          const lower = e < -1 ? -1 : (e > len - 1 ? len - 1 : e);
-          for (let i = upper; i > lower; i += step)
+          for (let i = sliceFrom; i > sliceTo; i += step)
             out.push(v[i]);
         }
       };
@@ -423,15 +532,21 @@ export function descendV(v, output, root, apply) {
   }
 }
 
+// Combine a segment's selectors into one (value, output, root) => void
+// applier; a single selector is its own applier.
+function compileSelectorsV(seg) {
+  const fns = seg.selectors.map(compileSelectorNodeV);
+  if (fns.length === 1)
+    return fns[0];
+  return (v, out, root) => {
+    for (let i = 0; i < fns.length; i++)
+      fns[i](v, out, root);
+  };
+}
+
 // segment functions: (input, output, root) => void
 export function compileSegmentV(seg) {
-  const fns = seg.selectors.map(compileSelectorNodeV);
-  const apply = fns.length === 1
-    ? fns[0]
-    : (v, out, root) => {
-      for (let i = 0; i < fns.length; i++)
-        fns[i](v, out, root);
-    };
+  const apply = compileSelectorsV(seg);
   if (seg.descendant) {
     return (input, output, root) => {
       for (let i = 0; i < input.length; i++)
@@ -442,6 +557,153 @@ export function compileSegmentV(seg) {
     for (let i = 0; i < input.length; i++)
       apply(input[i], output, root);
   };
+}
+
+//#endregion
+
+//#region segment compilation (lazy values mode)
+// The same selectors as values mode, pulled one node at a time instead
+// of pushed into a nodelist. A consumer that stops early (`first`,
+// `exists`, `value()`'s two-node test) never visits the rest of the
+// document: a filter evaluates its predicate only until a node passes,
+// a wildcard reads only the children actually pulled, and a descendant
+// segment abandons the walk mid-subtree.
+//
+// Nothing here is buffered - every applier yields directly - so the
+// laziness is per node, not per segment. Enumeration order is identical
+// to runSegmentsV: a segment maps each input node to its outputs in
+// order and concatenates them, so pulling the chain depth-first visits
+// exactly the sequence values mode builds breadth-first.
+
+// selector-node functions: (value, root) => Generator<any>
+
+function compileSelectorNodeG(sel) {
+  switch (sel.kind) {
+    case 'name': {
+      const name = sel.name;
+      return function* nameG(v) {
+        if (typeof v === 'object' && v !== null && !Array.isArray(v) && hasOwn(v, name))
+          yield v[name];
+      };
+    }
+    case 'index': {
+      const index = sel.index;
+      return function* indexG(v) {
+        if (!Array.isArray(v))
+          return;
+        const idx = index < 0 ? v.length + index : index;
+        if (idx >= 0 && idx < v.length)
+          yield v[idx];
+      };
+    }
+    case 'wildcard':
+      return function* wildcardG(v) {
+        if (Array.isArray(v)) {
+          yield* v;
+        }
+        else if (typeof v === 'object' && v !== null) {
+          for (const key in v) {
+            if (hasOwn(v, key))
+              yield v[key];
+          }
+        }
+      };
+    case 'slice': {
+      const start = sel.start;
+      const end = sel.end;
+      const step = sel.step === null ? 1 : sel.step;
+      if (step === 0)
+        return function* emptySliceG() { };
+      return function* sliceG(v) {
+        if (!Array.isArray(v))
+          return;
+        const len = v.length;
+        if (len === 0)
+          return;
+        sliceBounds(start, end, step, len);
+        // read the bounds out before the first yield: a suspended
+        // generator must not depend on the shared scratch surviving
+        const from = sliceFrom;
+        const to = sliceTo;
+        if (step > 0) {
+          for (let i = from; i < to; i += step)
+            yield v[i];
+        }
+        else {
+          for (let i = from; i > to; i += step)
+            yield v[i];
+        }
+      };
+    }
+    default: { // 'filter'
+      const pred = compileLogicalExpr(sel.expr);
+      return function* filterG(v, root) {
+        if (Array.isArray(v)) {
+          for (let i = 0; i < v.length; i++) {
+            if (pred(v[i], root))
+              yield v[i];
+          }
+        }
+        else if (typeof v === 'object' && v !== null) {
+          for (const key in v) {
+            if (hasOwn(v, key) && pred(v[key], root))
+              yield v[key];
+          }
+        }
+      };
+    }
+  }
+}
+
+function* descendG(v, root, apply) {
+  yield* apply(v, root);
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++)
+      yield* descendG(v[i], root, apply);
+  }
+  else if (typeof v === 'object' && v !== null) {
+    for (const key in v) {
+      if (hasOwn(v, key))
+        yield* descendG(v[key], root, apply);
+    }
+  }
+}
+
+/**
+ * Compile a segment into its lazy form: a generator function yielding
+ * the nodes one input value contributes, in document order.
+ * @param {object} seg - a parsed query segment
+ * @returns {(value: any, root: any) => Generator<any>}
+ */
+export function compileSegmentG(seg) {
+  const fns = seg.selectors.map(compileSelectorNodeG);
+  const apply = fns.length === 1
+    ? fns[0]
+    : function* applyG(v, root) {
+      for (let i = 0; i < fns.length; i++)
+        yield* fns[i](v, root);
+    };
+  if (seg.descendant)
+    return function* segmentDescendantG(v, root) { yield* descendG(v, root, apply); };
+  return apply;
+}
+
+/**
+ * Lazily enumerate the nodelist a compiled segment chain selects,
+ * yielding values in document order.
+ * @param {Function[]} gens - segment generators from compileSegmentG
+ * @param {number} i - the segment to apply (0 to start the chain)
+ * @param {any} value - the value this segment applies to
+ * @param {any} root - the query root (`$` inside embedded filters)
+ * @returns {Generator<any>}
+ */
+export function* runSegmentsG(gens, i, value, root) {
+  if (i === gens.length) {
+    yield value;
+    return;
+  }
+  for (const v of gens[i](value, root))
+    yield* runSegmentsG(gens, i + 1, v, root);
 }
 
 //#endregion
@@ -537,20 +799,15 @@ export function compileSelectorNodeP(sel) {
         const len = v.length;
         if (len === 0)
           return;
-        const s = start === null ? (step > 0 ? 0 : len - 1) : (start < 0 ? len + start : start);
-        const e = end === null ? (step > 0 ? len : -1) : (end < 0 ? len + end : end);
+        sliceBounds(start, end, step, len);
         if (step > 0) {
-          const lower = s < 0 ? 0 : (s > len ? len : s);
-          const upper = e < 0 ? 0 : (e > len ? len : e);
-          for (let i = lower; i < upper; i += step) {
+          for (let i = sliceFrom; i < sliceTo; i += step) {
             outV.push(v[i]);
             outP.push(p + '[' + i + ']');
           }
         }
         else {
-          const upper = s < -1 ? -1 : (s > len - 1 ? len - 1 : s);
-          const lower = e < -1 ? -1 : (e > len - 1 ? len - 1 : e);
-          for (let i = upper; i > lower; i += step) {
+          for (let i = sliceFrom; i > sliceTo; i += step) {
             outV.push(v[i]);
             outP.push(p + '[' + i + ']');
           }

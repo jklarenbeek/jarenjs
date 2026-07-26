@@ -262,6 +262,19 @@ function jsonpath(data, benchUi) {
           formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
       }))));
   }
+
+  // Same document as the scale table, asking only for the first answer.
+  // Each engine is timed on the fastest of its own routes to it, so the
+  // rival is never held to a route it would not use.
+  const earlyExit = data.profile?.earlyExitRows ?? [];
+  if (earlyExit.length > 0) {
+    out.push(table('Early exit — first match / any match (1000 items)',
+      ['Operation', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
+      earlyExit.map((r) => ({
+        cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
+          formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
+      }))));
+  }
   return out;
 }
 

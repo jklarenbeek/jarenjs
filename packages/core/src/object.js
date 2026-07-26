@@ -246,6 +246,11 @@ export function isUniqueDeepArray(arr) {
  * cache/memo/fingerprint key regardless of key insertion order).
  * Non-JSON values follow `JSON.stringify` semantics (undefined members
  * are dropped, undefined roots return undefined).
+ *
+ * That leniency is what makes it a memo key and not an interchange
+ * format: dropping a member changes the document. For output that is
+ * hashed or signed, use `canonicalizeJson` (`@jarenjs/json/canonical`,
+ * RFC 8785), which rejects every non-JSON input instead of coercing it.
  * @param {*} value - The value to serialize
  * @returns {string|undefined} Deterministic JSON text
  */
