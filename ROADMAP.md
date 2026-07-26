@@ -72,15 +72,25 @@ delete it or fix it.
   `stableStringify` in `@jarenjs/core/object` instead follows `JSON.stringify`
   conventions (`NaN` → `null`, `undefined` members dropped). Neither validates
   ill-formed strings.
-- [ ] **Relative pointer `0#` fidelity flag** — the hash form returns the member
-  name or array index of the location as a *string*, matching the historical
-  `$data` behavior the validator relies on; draft-luff resolves an array position
-  to a *number*. The parse already carries the `hash` flag to branch on, but
-  neither `compileRelativeJSONPointer` nor `compileDataRef` takes an options
-  argument. If this lands, two sibling divergences deserve the same treatment:
-  own-property-only reads (`/toString` → `NOTHING`) and the strict array-index
-  parse that rejects `01`/`1abc`/`1e0`, both deliberate and documented in the
-  package ARCHITECTURE.
+- [ ] **Relative pointer `0#` numeric-index mode** — the hash form returns the
+  member name or array index of the location as a *string*, matching the
+  historical `$data` behavior the validator relies on; every draft revision
+  resolves an array position to a *number*, so `{"$data": "0#"}` compared
+  against a number-typed keyword sees a string. The parse already carries the
+  `hash` flag to branch on, but neither `compileRelativeJSONPointer` nor
+  `compileDataRef` takes an options argument, so this needs an opt-in mode
+  threaded through both. If it lands, two sibling divergences deserve the same
+  treatment: own-property-only reads (`/toString` → `NOTHING`) and the strict
+  array-index parse that rejects `01`/`1abc`/`1e0`, both deliberate and
+  documented in the package ARCHITECTURE.
+- [ ] **Relative pointer index manipulation (`0+1`, `1-1`)** — added by
+  draft-bhutton-relative-json-pointer-00 and not accepted by the parser. Jaren
+  is conformant to draft-handrews-01, the revision JSON Schema 2020-12
+  normatively references, and the official format suite still asserts
+  `+1/foo/bar` **invalid** — so this cannot be implemented alone: it needs a
+  dialect gate so the `relative-json-pointer` format tester keeps rejecting it
+  until the suite moves. `test/json/pointer-format.test.js` pins the current
+  answer and is what should fail first when that happens.
 - [ ] **Minimal array diffs in `createJSONPatch`** — the array diff is a
   prefix/suffix trim plus index-wise recursion, so a mid-array insertion degrades
   to a run of per-index `replace` ops. Correct, but not minimal; an LCS mode would

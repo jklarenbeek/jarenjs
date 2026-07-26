@@ -1,13 +1,21 @@
 //#region JSON Pointer (RFC 6901) + Relative JSON Pointer
 // JSON Pointer: https://datatracker.ietf.org/doc/html/rfc6901
-// Relative JSON Pointer:
-// https://datatracker.ietf.org/doc/html/draft-luff-relative-json-pointer-00
+// Relative JSON Pointer: draft-handrews-relative-json-pointer-01, the
+// revision JSON Schema 2020-12 normatively references:
+// https://datatracker.ietf.org/doc/html/draft-handrews-relative-json-pointer-01
+//
+// The newer draft-bhutton-relative-json-pointer-00 adds an index-
+// manipulation form (`0+1`, `1-1`) that this grammar deliberately does not
+// accept: the official format suite still asserts `+1/foo/bar` INVALID, so
+// accepting it would have to arrive together with a dialect gate for the
+// `relative-json-pointer` format tester.
 //
 // This module implements JSON Pointer as a two-stage compiler, mirroring
 // the JSONPath engine in path.js:
 //
 //   1. `parseJSONPointer` / `parseRelativeJSONPointer` - strict, single-pass
-//      char-code parsers enforcing the full RFC 6901 / draft-luff grammar.
+//      char-code parsers enforcing the full RFC 6901 / relative-pointer
+//      grammar.
 //   2. `compileJSONPointer` / `compileRelativeJSONPointer` /
 //      `compileDataRef` - compile the parsed form into specialized getter
 //      closures. All decisions (member name decoding, array index parsing,
@@ -255,6 +263,28 @@ function compileSegmentsGetter(segments) {
       return v === NOTHING ? NOTHING : hop(v, name1, index1);
     };
   }
+  const name2 = segments[2];
+  const index2 = scanArrayIndex(name2, 0, name2.length);
+  if (slen === 3) {
+    return function pointerGetter3(root) {
+      const v0 = hop(root, name0, index0);
+      if (v0 === NOTHING) return NOTHING;
+      const v1 = hop(v0, name1, index1);
+      return v1 === NOTHING ? NOTHING : hop(v1, name2, index2);
+    };
+  }
+  const name3 = segments[3];
+  const index3 = scanArrayIndex(name3, 0, name3.length);
+  if (slen === 4) {
+    return function pointerGetter4(root) {
+      const v0 = hop(root, name0, index0);
+      if (v0 === NOTHING) return NOTHING;
+      const v1 = hop(v0, name1, index1);
+      if (v1 === NOTHING) return NOTHING;
+      const v2 = hop(v1, name2, index2);
+      return v2 === NOTHING ? NOTHING : hop(v2, name3, index3);
+    };
+  }
   const names = segments;
   const indexes = new Array(slen);
   for (let i = 0; i < slen; i++)
@@ -334,11 +364,15 @@ function decodeSegmentRange(source, start, end, tilde) {
 /**
  * The last segment of `dataPath.slice(0, end)`, decoded lazily: the
  * common escape-free case allocates nothing beyond the result slice.
- * At the root (`end === 0`) the name of the location is `''`.
+ *
+ * The root (`end === 0`) has no name, so it yields NOTHING rather than
+ * `''` — `''` is a member name a document can genuinely have (`{"": 1}`
+ * at `/`), and returning it for the root too would make the two
+ * indistinguishable to the caller.
  */
 function lastSegmentOf(dataPath, end) {
   if (end === 0)
-    return '';
+    return NOTHING;
   const start = dataPath.lastIndexOf('/', end - 1) + 1;
   for (let i = start; i < end; i++) {
     if (dataPath.charCodeAt(i) === CC_TILDE)
@@ -390,10 +424,24 @@ function walkPointerPrefix(root, path, end) {
  *
  * The relative part (level count, `#` form, trailing segments) compiles
  * once; per call only `dataPath` - the current location in `dataRoot` as
- * an RFC 6901 pointer - varies. The `#` form resolves to the member name
- * or array index of the location **as a string** (`''` at the root),
- * matching the historical behavior relied on by the validator's `$data`
- * keyword.
+ * an RFC 6901 pointer - varies.
+ *
+ * Two properties of the `#` form are worth knowing before you rely on it:
+ *
+ * - It resolves to the member name or array index **as a string**, where
+ *   the draft specifies the *number* for an array position. This matches
+ *   the historical behavior the validator's `$data` keyword relies on, so
+ *   `{"$data": "0#"}` compared against a number-typed keyword sees a
+ *   string. Deliberate; a spec-faithful numeric mode would be opt-in.
+ * - It answers from `dataPath` alone and never walks `dataRoot`, so it
+ *   does not verify that the location exists — the caller is expected to
+ *   pass a location it actually reached. That is what keeps it a string
+ *   operation (tens of nanoseconds) instead of a document walk. The
+ *   non-`#` form must walk, because it returns the value.
+ *
+ * The root has no name: `0#` there yields `JSONPOINTER_NOTHING`, not `''`,
+ * so it stays distinguishable from the member named `''` (`{"": 1}` at
+ * `/`), which is a name a document can genuinely have.
  *
  * @param {string} pointer - The relative pointer (e.g. `1/sibling`, `0#`)
  * @returns {RelativeJsonPointerResolver} resolver returning

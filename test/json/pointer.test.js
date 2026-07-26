@@ -110,6 +110,28 @@ describe('compileJSONPointer', () => {
     strictEqual(get('/m~0n', rfc6901), 8);
   });
 
+  it('should resolve pointers of every specialized arity, and beyond', () => {
+    // The compiler unrolls 0-4 segments and falls back to a loop from 5 on.
+    // Each arity is a separate getter, so each needs its own case — a hit and
+    // a miss — or a broken branch hides behind its neighbours.
+    const deep = { a: { b: { c: { d: { e: { f: 'six' } } } } }, arr: [[[['nested']]]] };
+    strictEqual(get('/a', deep), deep.a);
+    strictEqual(get('/a/b', deep), deep.a.b);
+    strictEqual(get('/a/b/c', deep), deep.a.b.c);
+    strictEqual(get('/a/b/c/d', deep), deep.a.b.c.d);
+    strictEqual(get('/a/b/c/d/e', deep), deep.a.b.c.d.e);
+    strictEqual(get('/a/b/c/d/e/f', deep), 'six');
+    strictEqual(get('/arr/0/0/0/0', deep), 'nested');
+
+    strictEqual(get('/a/x', deep), NOTHING);
+    strictEqual(get('/a/b/x', deep), NOTHING);
+    strictEqual(get('/a/b/c/x', deep), NOTHING);
+    strictEqual(get('/a/b/c/d/x', deep), NOTHING);
+    strictEqual(get('/a/b/c/d/e/x', deep), NOTHING);
+    strictEqual(get('/a/b/c/d/e/f/g', deep), NOTHING); // a scalar has no children
+    strictEqual(get('/x/b/c/d/e/f', deep), NOTHING); // miss on the first hop
+  });
+
   it('should return NOTHING for missing members and bad indexes', () => {
     strictEqual(get('/nosuch', rfc6901), NOTHING);
     strictEqual(get('/foo/2', rfc6901), NOTHING);
@@ -177,8 +199,14 @@ describe('compileRelativeJSONPointer', () => {
 
   it('should resolve at the root', () => {
     strictEqual(compileRelativeJSONPointer('0')(doc, ''), doc);
-    strictEqual(compileRelativeJSONPointer('0#')(doc, ''), '');
     strictEqual(compileRelativeJSONPointer('0/foo/1')(doc, ''), 'baz');
+  });
+
+  it('should give the root no name, keeping it distinct from the member named ""', () => {
+    // The draft says evaluating '#' at the root fails. Returning '' would
+    // also collide with a real member name, which a document can have.
+    strictEqual(compileRelativeJSONPointer('0#')(doc, ''), NOTHING);
+    strictEqual(compileRelativeJSONPointer('0#')({ '': 1 }, '/'), '');
   });
 
   it('should return NOTHING when levels exceed the depth', () => {
