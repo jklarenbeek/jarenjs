@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/josl",
   "private": false,
-  "version": "0.20.3",
+  "version": "0.20.4",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -54,6 +54,14 @@
       "types": "./dist/types/parse.d.ts",
       "default": "./src/parse.js"
     },
+    "./cst": {
+      "types": "./dist/types/cst.d.ts",
+      "default": "./src/cst.js"
+    },
+    "./gbnf": {
+      "types": "./dist/types/gbnf.d.ts",
+      "default": "./src/gbnf.js"
+    },
     "./stream": {
       "types": "./dist/types/stream.d.ts",
       "default": "./src/stream.js"
@@ -82,6 +90,6 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.20.3"
+    "@jarenjs/core": "^0.20.4"
   }
 }

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import {
   parseToml,
+  createStreamReader,
   JoslSyntaxError,
   LocalDate,
   LocalTime,
@@ -161,3 +162,49 @@ describe('josl: toml-test compliance (invalid)', () => {
     });
   }
 });
+
+//#region chunked compliance
+// parseToml() drives the whole-document path, where the parser finds each
+// logical line's end itself. Chunk feeding drives the cutter instead, and
+// only these cases exercise it against the official suite — a chunk size
+// of 1 splits every token, multi-line string and array at every position.
+
+function feedInChunks(text, size) {
+  const reader = createStreamReader({ mode: 'toml' });
+  for (let i = 0; i < text.length; i += size)
+    reader.feed(text.slice(i, i + size));
+  return reader.end();
+}
+
+describe('josl: toml-test compliance, chunk-fed (valid)', () => {
+  for (const file of listTomlFiles('valid')) {
+    it(file, () => {
+      const text = readFileSync(join(SUITE, file), 'utf8');
+      const expected = JSON.parse(readFileSync(join(SUITE, file.replace(/\.toml$/, '.json')), 'utf8'));
+      for (const size of [1, 7]) {
+        const diffs = [];
+        deepMatches(feedInChunks(text, size), expected, '', diffs);
+        ok(diffs.length === 0, `chunk size ${size}:\n${diffs.join('\n')}`);
+      }
+    });
+  }
+});
+
+describe('josl: toml-test compliance, chunk-fed (invalid)', () => {
+  for (const file of listTomlFiles('invalid')) {
+    it(file, { skip: SKIP.has(file) ? 'byte-level encoding case, unreachable from a JS string' : false }, () => {
+      const text = readFileSync(join(SUITE, file), 'utf8');
+      let error = null;
+      try {
+        feedInChunks(text, 1);
+      }
+      catch (e) {
+        error = e;
+      }
+      ok(error instanceof JoslSyntaxError,
+        `expected a JoslSyntaxError, got ${error === null ? 'success' : error}`);
+    });
+  }
+});
+
+//#endregion

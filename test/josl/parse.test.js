@@ -4,6 +4,7 @@ import { deepStrictEqual, strictEqual, throws, ok } from 'node:assert';
 import {
   parseJosl,
   parseToml,
+  createStreamReader,
   JoslSyntaxError,
   LocalDate,
   LocalTime,
@@ -314,6 +315,42 @@ describe('josl: error quality', () => {
     catch (e) {
       strictEqual(e.line, 3);
       strictEqual(e.column, 3);
+    }
+  });
+  // Whole-document parsing and chunk feeding find logical-line ends by
+  // different means; they must still report a failure at the same place.
+  it('reports the same position whole-document and chunk-fed', () => {
+    const cases = [
+      'good = 1\nbad = null',
+      'arr = [\n  1,\n  what,\n]',
+      '[a]\n[a]\n',
+      'x = """\nline\n"""\ny = ?\n',
+      '# lead\n\n[t]\nk = "unterminated\n',
+      'k = 1 oops\n',
+    ];
+    for (const text of cases) {
+      let whole = null;
+      let chunked = null;
+      try {
+        parseJosl(text, { mode: 'toml' });
+      }
+      catch (e) {
+        whole = e;
+      }
+      try {
+        const reader = createStreamReader({ mode: 'toml' });
+        for (const ch of text)
+          reader.feed(ch);
+        reader.end();
+      }
+      catch (e) {
+        chunked = e;
+      }
+      ok(whole !== null, `expected ${JSON.stringify(text)} to fail`);
+      ok(chunked !== null, `expected chunk-fed ${JSON.stringify(text)} to fail`);
+      strictEqual(chunked.message, whole.message, `message for ${JSON.stringify(text)}`);
+      strictEqual(chunked.line, whole.line, `line for ${JSON.stringify(text)}`);
+      strictEqual(chunked.column, whole.column, `column for ${JSON.stringify(text)}`);
     }
   });
 });

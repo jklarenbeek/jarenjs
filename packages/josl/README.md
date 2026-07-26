@@ -88,12 +88,36 @@ The unified event vocabulary:
 | `object-start` / `object-end` | jsonx | `path`, `line` | `{` opened / `}` closed |
 | `array-start` / `array-end` | jsonx | `path`, `line` | `[` opened / `]` closed |
 | `table` / `table-array` / `root-item` | josl | `path`, `line` (+`index`) | a header line completes |
+| `text-partial` | jsonx | `path`, `text`, `line` | more of a string arrived (opt-in) |
 
 Paths are absolute (strings for keys, numbers for indices), so events
 are directly JSON-Pointer-able. In the JSONX reader a container value
 does NOT additionally fire `pair`/`item` — its start/end events carry
 that; in the line-oriented JOSL reader inline tables arrive as
 completed `pair` values and containers have no end events.
+
+### Progressive text
+
+Scalars normally fire once, on completion — but a long string in an LLM
+response is worth showing as it arrives. `partialText: true` adds
+`text-partial` events carrying the *delta* since the previous one,
+already unescaped:
+
+```js
+const reader = createJsonxStreamReader({
+  partialText: true,
+  onEvent(e) {
+    if (e.type === 'text-partial') process.stdout.write(e.text); // append
+    if (e.type === 'pair') console.log('\ncomplete:', e.path.join('/'));
+  },
+});
+```
+
+A value's deltas add up to exactly its string — nothing is left over in
+the closing `pair`/`item` event, which still carries the whole value as
+the completion signal. Deltas never split an escape or a surrogate pair,
+so appending them to a display is always safe. Object keys emit none: a
+key has no path until it is complete.
 
 ### Streaming charts with @jarenjs/charts
 
@@ -158,6 +182,35 @@ The writer validates what the reader would reject (duplicate keys and
 headers, root table/array mixing, TOML downleveling) and shares its
 serialization with `stringifyJosl`, so both produce identical text.
 
+## Editing a document (CST)
+
+`parseJosl` + `stringifyJosl` round-trips *data*. When the document
+itself matters — a config file a human wrote, with comments and
+alignment — parse it as a CST instead. Reprinting an untouched document
+returns the original bytes; an edit changes only the value's own bytes:
+
+```js
+import { parseTomlCst } from '@jarenjs/josl/cst';
+
+const doc = parseTomlCst(readFileSync('config.toml', 'utf8'));
+doc.set(['server', 'port'], 9090);
+writeFileSync('config.toml', doc.toString());
+```
+
+```diff
+  [server]
+  host   = "localhost"  # keep me
+- port   = 8080
++ port   = 9090
+```
+
+`get`/`set`/`delete` take absolute paths (numbers index an array of
+tables); `set` on a key that does not exist appends it to the section
+its path names, not to the end of the file. `toJSON()` gives the value
+model, recomputed from the text after an edit so it can never drift
+from the bytes. Byte-identical reprinting is verified against every
+document in the official toml-test valid corpus.
+
 ## JSONX
 
 ```js
@@ -177,6 +230,8 @@ stringifyJsonx(v, { mode: 'json' });     // delegates to JSON.stringify
 | Subpath | What |
 | --- | --- |
 | `@jarenjs/josl/parse` | `parseJosl`, `parseToml` |
+| `@jarenjs/josl/cst` | `parseJoslCst`, `parseTomlCst`, `JoslCstDocument` |
+| `@jarenjs/josl/gbnf` | `toGbnf`, `tomlToGbnf` |
 | `@jarenjs/josl/stream` | `createStreamReader`, `parseJoslStream` |
 | `@jarenjs/josl/stringify` | `stringifyJosl`, `stringifyToml`, `formatValue`, `formatSection` |
 | `@jarenjs/josl/write` | `createStreamWriter`, `stringifyJoslChunks` |
@@ -203,10 +258,30 @@ has two possible shapes, and they serve different providers:
    parse downstream.
 2. **A character-level grammar (GBNF class) over raw JOSL text** — for
    engines that constrain token sampling directly (llama.cpp family).
-   Exact on the text surface, but unverifiable in this repository's
-   test rig and unsupported by the hosted-API providers. Deliberately
-   NOT shipped until a concrete consumer appears; the data-model twin
-   above covers the practical need.
+   `toGbnf()` emits it; `toGbnf({ mode: 'toml' })` drops the JOSL-only
+   value forms.
+
+   ```js
+   import { toGbnf } from '@jarenjs/josl/gbnf';
+
+   await llama({ grammar: toGbnf(), prompt });   // emits JOSL text directly
+   ```
+
+   A context-free grammar carries syntax only. Duplicate keys, a header
+   that reopens a table, `2026-02-30` — every rule that needs to
+   remember what the document already said, or to range-check a value
+   inside a well-formed token, stays `parseJosl`'s job. Constrained
+   sampling narrows the model to well-formed text; it does not make the
+   parser optional.
+
+   The grammar is checked both ways by `test/josl/gbnf.test.js`, which
+   reads it back and recognizes text with an Earley parser: it accepts
+   all 210 documents in the official toml-test valid corpus, rejects 400
+   of the 499 invalid ones (the remaining 99 fail on exactly the
+   semantic rules above), and 3000 seeded derivations per mode all parse.
+   That last direction is the one that matters for sampling — a model
+   steered by this grammar cannot be walked into text the parser
+   rejects.
 
 ## Compliance & speed
 
@@ -221,23 +296,33 @@ cannot be expressed once input is already a JS string.
 against `smol-toml`, `@iarna/toml` and `toml`. Representative run
 (accept/reject compliance, 694 cases; Node 22):
 
-| engine | compliance | parse, 1k-record doc | parse, suite corpus |
-| --- | --- | --- | --- |
-| **jaren** | **100.0%** | 10.8 ms | 1.33 ms |
-| smol-toml | 96.8% | 5.6 ms | 0.80 ms |
-| @iarna/toml | 93.4% | 11.3 ms | 2.20 ms |
-| toml | 98.6% | 37.3 ms | 4.76 ms |
+| engine | compliance | parse, 1k-record doc | parse, small doc | parse, suite corpus |
+| --- | --- | --- | --- | --- |
+| **jaren** | **100.0%** | 7.4 ms | **0.014 ms** | 0.91 ms |
+| smol-toml | 96.8% | **5.7 ms** | 0.021 ms | **0.80 ms** |
+| @iarna/toml | 93.4% | 11.4 ms | 0.029 ms | 2.13 ms |
+| toml | 98.6% | 38.4 ms | 0.080 ms | 4.83 ms |
 
 jaren is the only engine at 100% and the only one that parses chunk
-streams; smol-toml's remaining speed edge is the price of the streaming
-cutter's second pass (a single-walk scanner is the roadmap).
+streams. Whole-document parsing walks the source once — the value
+parsers already stop at the newlines TOML forbids a construct from
+crossing, so with the whole text in hand the parser finds each logical
+line's end itself and the cutter's separate pass is not needed. That is
+worth ~1.45× over the two-pass version and puts jaren ahead on small
+documents; on the 90 KB record stream smol-toml still leads, by ~1.3×
+rather than the ~1.9× it led by before. Chunk feeding keeps the cutter,
+because only a side-effect-free pre-pass can decide whether a line is
+complete when a chunk may stop mid-token — and it is held to the same
+694 cases, fed one character at a time.
+
+Stringify is the honest loss: 6.9 ms against smol-toml's 2.7 ms on the
+same document, roughly level with `@iarna/toml`. Nothing has been done
+about it yet.
 
 ## Status
 
-Published alongside the rest of the suite, the JSON-Schema data twin for
-constrained decoding included. Remaining roadmap: single-walk char
-scanning (fold the cutter and the line parser into one pass), a CST
-mode that preserves comments and formatting, and partial-string streaming
-events for progressive LLM text display. A GBNF-class raw-text grammar
-for llama.cpp-family constrained sampling stays deferred until a concrete
-consumer appears (see above).
+Published alongside the rest of the suite. Both constrained-decoding
+twins ship — the JSON-Schema one over the data model and the GBNF one
+over the text — along with the CST mode, progressive `text-partial`
+events and single-walk whole-document parsing. Stringify speed is the
+open item: see the table above.

@@ -230,3 +230,97 @@ describe('jsonx-stream: async convenience', () => {
     deepStrictEqual(await parseJsonxStream(llmish()), parseJsonx(doc));
   });
 });
+
+//#region partial text
+
+// Deltas for progressive display. Feeding one character at a time is the
+// worst case a token stream can produce, so every escape, surrogate pair
+// and chunk boundary gets exercised by construction.
+function partialsOf(doc, size = 1) {
+  const events = [];
+  const reader = createJsonxStreamReader({
+    partialText: true,
+    onEvent: (e) => events.push(e),
+  });
+  for (let i = 0; i < doc.length; i += size)
+    reader.feed(doc.slice(i, i + size));
+  const root = reader.end();
+  return { events, root };
+}
+
+function joinedText(events, path) {
+  return events
+    .filter((e) => e.type === 'text-partial' && e.path.join(' ') === path.join(' '))
+    .map((e) => e.text)
+    .join('');
+}
+
+describe('jsonx-stream: text-partial events', () => {
+  it('is off unless asked for', () => {
+    const events = [];
+    const reader = createJsonxStreamReader({ onEvent: (e) => events.push(e) });
+    for (const ch of '{"a": "hello"}')
+      reader.feed(ch);
+    reader.end();
+    strictEqual(events.some((e) => e.type === 'text-partial'), false);
+  });
+  it('deltas concatenate to the completed string', () => {
+    const { events, root } = partialsOf('{"msg": "hello world"}');
+    strictEqual(joinedText(events, ['msg']), 'hello world');
+    deepStrictEqual(root, { msg: 'hello world' });
+  });
+  it('carries the same path the pair event will use', () => {
+    const { events } = partialsOf('{"a": {"b": "xy"}}');
+    const partial = events.find((e) => e.type === 'text-partial');
+    const pair = events.find((e) => e.type === 'pair');
+    deepStrictEqual(partial.path, ['a', 'b']);
+    deepStrictEqual(pair.path, ['a', 'b']);
+  });
+  it('indexes array elements', () => {
+    const { events } = partialsOf('["ab", "cd"]');
+    strictEqual(joinedText(events, [0]), 'ab');
+    strictEqual(joinedText(events, [1]), 'cd');
+  });
+  it('unescapes deltas and never splits an escape', () => {
+    const { events, root } = partialsOf('{"s": "a\\u0041b\\tc\\"d"}');
+    strictEqual(joinedText(events, ['s']), 'aAb\tc"d');
+    deepStrictEqual(root, { s: 'aAb\tc"d' });
+    for (const e of events)
+      if (e.type === 'text-partial')
+        ok(!e.text.includes('\\'), `raw escape leaked into a delta: ${JSON.stringify(e.text)}`);
+  });
+  it('never splits a surrogate pair across two deltas', () => {
+    const { events, root } = partialsOf('{"e": "x\\uD83D\\uDE00y"}');
+    strictEqual(joinedText(events, ['e']), 'x\u{1F600}y');
+    deepStrictEqual(root, { e: 'x\u{1F600}y' });
+    for (const e of events) {
+      if (e.type !== 'text-partial')
+        continue;
+      const last = e.text.charCodeAt(e.text.length - 1);
+      ok(!(last >= 0xD800 && last <= 0xDBFF), 'a delta ended on a lone high surrogate');
+      const first = e.text.charCodeAt(0);
+      ok(!(first >= 0xDC00 && first <= 0xDFFF), 'a delta started on a lone low surrogate');
+    }
+  });
+  it('emits nothing for object keys', () => {
+    const { events } = partialsOf('{"a long key here": 1}');
+    strictEqual(events.some((e) => e.type === 'text-partial'), false);
+  });
+  it('agrees with the completed value at every chunk size', () => {
+    const doc = '{"a": "one \\u00e9 two", "b": ["three", "fo\\nur"], "c": 5}';
+    for (const size of [1, 2, 3, 5, 8, 13]) {
+      const { events, root } = partialsOf(doc, size);
+      deepStrictEqual(root, parseJsonx(doc));
+      strictEqual(joinedText(events, ['a']), root.a);
+      strictEqual(joinedText(events, ['b', 0]), root.b[0]);
+      strictEqual(joinedText(events, ['b', 1]), root.b[1]);
+    }
+  });
+  it('handles a root-level string', () => {
+    const { events, root } = partialsOf('"just a string"');
+    strictEqual(root, 'just a string');
+    strictEqual(joinedText(events, []), 'just a string');
+  });
+});
+
+//#endregion

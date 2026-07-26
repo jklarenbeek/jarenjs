@@ -236,10 +236,16 @@ delete it or fix it.
 
 ## @jarenjs/josl
 
-- [ ] **Single-walk scanner** — fold the chunk cutter and the logical-line parser into one pass; the cutter's second scan over every character is the main share of smol-toml's remaining ~1.9× parse-speed edge (`npm run benchmark:toml`).
-- [ ] **CST mode** — preserve comments, key order aesthetics and formatting for faithful document rewriting, not just data round-trips.
-- [ ] **Partial-string streaming events** — a `text-partial` event for progressive display of long strings as they stream in (the hook is noted in `jsonx-stream.js`; not implemented).
-- [ ] **GBNF-class raw-text grammar** — for llama.cpp-family constrained sampling. The JSON-Schema twin over the parsed data model ships and covers the hosted-API providers; a raw-text grammar is unverifiable in this repository's test rig, so it waits on a concrete consumer.
+- [ ] **Stringify speed** — `stringifyJosl` runs ~2.5× behind `smol-toml`
+  on the 1k-record document (6.9 ms vs 2.7 ms, `npm run benchmark:toml
+  --profile`), roughly level with `@iarna/toml`. Parsing has had two
+  optimization passes and now leads on small documents; the writer has had
+  none, and is the larger relative gap of the two.
+- [ ] **Streaming CST** — `parseJoslCst` records source spans, which only
+  the whole-document driver produces; the cutter has the same slices in
+  hand but reports them per cut line, without the terminator. Rewriting a
+  document implies having all of it, so this waits for a consumer that
+  genuinely edits a stream.
 
 ## Benchmarks & tooling
 

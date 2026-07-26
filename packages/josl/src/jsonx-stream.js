@@ -28,8 +28,18 @@
 // A document whose root is a single scalar emits no events; the value is
 // available from `end()` (and `root()` once complete).
 //
-// Future hook (not implemented): a `{type:'text-partial'}` event for
-// progressive display of long strings as they stream in.
+// With `partialText: true` a string value additionally emits
+//
+//   {type:'text-partial', path, text, line}     - more of a string arrived
+//
+// each time a chunk leaves it unterminated, plus a closing one when it
+// completes. `text` is the *delta* since the previous event, already
+// unescaped, so a progressive display appends it directly and a value's
+// deltas always add up to exactly its string — there is no tail left over
+// in the `pair`/`item` event, which still carries the whole value as the
+// completion signal. Deltas never split a surrogate pair or an escape.
+// Object keys emit none: a key has no path until it is complete, and half
+// a key is not something to display.
 
 import {
   CC_TAB,
@@ -56,6 +66,7 @@ import { setKey } from './util.js';
 import {
   isValueEndCode,
   decodeString,
+  decodeStringSpan,
   matchDateTime,
   matchNumber,
   matchWord,
@@ -80,10 +91,15 @@ export class JsonxMachine {
    * @param {'jsonx'|'json'} [options.mode] - 'json' rejects every JSONX
    *  extension (bigint, regexp, datetime, non-finite, separators, +)
    * @param {(event: JsonxStreamEvent) => void} [options.onEvent] - Event sink
+   * @param {boolean} [options.partialText] - Also emit `text-partial`
+   *  deltas while a string value is still arriving
    */
   constructor(options = {}) {
     this.mode = options.mode === 'json' ? 'json' : 'jsonx';
     this.onEvent = options.onEvent ?? null;
+    this.partialText = options.partialText === true;
+    this.partialFrom = -1; // body offset the next text-partial delta starts at
+    this.partialHold = ''; // lone high surrogate held back for the next delta
     this.buf = '';
     this.pos = 0; // consumed up to here; stalls at the pending token start
     this.state = ST_VALUE;
@@ -292,6 +308,8 @@ export class JsonxMachine {
     this.lineStart -= pos;
     if (this.scanPos >= 0)
       this.scanPos -= pos;
+    if (this.partialFrom >= 0)
+      this.partialFrom -= pos;
   }
 
   //#endregion
@@ -311,9 +329,20 @@ export class JsonxMachine {
     }
     if (c === CC_DQUOTE) {
       const end = this.scanString(buf, pos);
-      if (end < 0)
+      if (end < 0) {
+        if (this.partialText)
+          this.emitPartialText(buf, pos, buf.length, true);
         return -1;
-      this.completeScalar(decodeString(buf, pos, this.errCb)[0]);
+      }
+      const value = decodeString(buf, pos, this.errCb)[0];
+      if (this.partialText) {
+        // the closing delta completes the run, so the deltas for a string
+        // always add up to its value — with no tail left in the pair event
+        this.emitPartialText(buf, pos, end - 1, false);
+        this.partialFrom = -1;
+        this.partialHold = '';
+      }
+      this.completeScalar(value);
       return end;
     }
     if (c === CC_SLASH) {
@@ -368,6 +397,39 @@ export class JsonxMachine {
       return;
     if (!isValueEndCode(buf.charCodeAt(pos)))
       this.errAt(pos, 'unexpected character after value');
+  }
+
+  // Emit the string text that arrived since the last delta. `stop` is the
+  // end of what may be decoded — the buffer's end while the string is
+  // still open, or its closing quote once it has arrived.
+  emitPartialText(buf, pos, stop, open) {
+    if (this.onEvent === null)
+      return;
+    if (this.partialFrom < 0)
+      this.partialFrom = pos + 1;
+    const [decoded, reached] = decodeStringSpan(
+      buf, this.partialFrom, stop, this.errCb, open);
+    this.partialFrom = reached;
+    let text = this.partialHold + decoded;
+    this.partialHold = '';
+    // never split a surrogate pair across two deltas: a display appending
+    // them one at a time would render a replacement character
+    const last = text.charCodeAt(text.length - 1);
+    if (open && last >= 0xD800 && last <= 0xDBFF) {
+      this.partialHold = text.slice(-1);
+      text = text.slice(0, -1);
+    }
+    if (text.length !== 0)
+      this.onEvent({ type: 'text-partial', path: this.valuePath(), text, line: this.curLine });
+  }
+
+  // Absolute path the value being read will land at.
+  valuePath() {
+    const stack = this.stack;
+    if (stack.length === 0)
+      return [];
+    const frame = stack[stack.length - 1];
+    return this.path.concat(frame.array ? frame.value.length : frame.key);
   }
 
   completeScalar(value) {
@@ -592,6 +654,7 @@ export class JsonxMachine {
  *    path: JsonxStreamPath, line: number}
  * | {type: 'pair', path: JsonxStreamPath, key: string, value: *, line: number}
  * | {type: 'item', path: JsonxStreamPath, index: number, value: *, line: number}
+ * | {type: 'text-partial', path: JsonxStreamPath, text: string, line: number}
  * )} JsonxStreamEvent
  */
 
@@ -601,6 +664,8 @@ export class JsonxMachine {
  * @param {'jsonx'|'json'} [options.mode] - 'json' rejects every JSONX
  *  extension and matches `JSON.parse` for accepted documents
  * @param {(event: JsonxStreamEvent) => void} [options.onEvent] - Event sink
+ * @param {boolean} [options.partialText] - Also emit `text-partial` deltas
+ *  while a string value is still arriving, for progressive display
  * @returns {{feed(chunk: string): void, end(): *, root(): *}} The reader:
  *  `feed` accepts chunks that may split any token, `end` flushes,
  *  validates completeness and returns the root, `root` peeks at the

@@ -1,6 +1,8 @@
 //#region JOSL parse
-// Whole-document parsing is the streaming machine fed a single chunk, so
-// both entry points share one grammar implementation (machine.js).
+// Whole-document parsing and streaming share one grammar implementation
+// (machine.js) and differ only in how a logical line's end is found: with
+// the whole text in hand the parser discovers it as it goes, while a chunk
+// stream needs the cutter's side-effect-free pre-pass first.
 
 import { JoslMachine } from './machine.js';
 
@@ -16,7 +18,7 @@ import { JoslMachine } from './machine.js';
  * @throws {import('./errors.js').JoslSyntaxError} On invalid input
  */
 export function parseJosl(text, options = undefined) {
-  return new JoslMachine(options).feed(text).end();
+  return new JoslMachine(options).parseAll(text);
 }
 
 /**
@@ -26,7 +28,7 @@ export function parseJosl(text, options = undefined) {
  * @returns {object} The root table
  */
 export function parseToml(text, options = undefined) {
-  return new JoslMachine({ ...options, mode: 'toml' }).feed(text).end();
+  return new JoslMachine({ ...options, mode: 'toml' }).parseAll(text);
 }
 
 export { JoslSyntaxError } from './errors.js';

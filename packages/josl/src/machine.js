@@ -40,6 +40,10 @@ import {
   CC_BACKSLASH,
   CC_RBRACKET,
   CC_UNDERSCORE,
+  CC_0,
+  CC_LOWER_B,
+  CC_LOWER_O,
+  CC_LOWER_X,
   CC_PLUS,
   CC_LBRACE,
   CC_RBRACE,
@@ -74,6 +78,25 @@ const S_ML_BASIC = 3; // """..."""
 const S_ML_LITERAL = 4; // '''...'''
 const S_COMMENT = 5;
 
+// Runs of characters that cannot end a logical line or change the cutter's
+// state. The cutter skips them with the regex engine rather than stepping
+// per character, which is what keeps its pass cheap next to the parser's.
+// `\n` stays in every stop set so the cutter can count the physical lines a
+// logical line spans without a separate walk over it.
+// The basic/literal classes serve both the single- and multi-line states:
+// a `'` is inert inside a basic string and a `"` inside a literal one.
+const RUN_NONE = /[^\n"'#[\]]*/y;
+const RUN_BASIC = /[^\n"\\]*/y;
+const RUN_LITERAL = /[^\n']*/y;
+
+// Advance past a run of inert characters. `test` on a `*` pattern always
+// matches (possibly empty) and, unlike `exec`, allocates no match object.
+function skipRun(re, buf, pos) {
+  re.lastIndex = pos;
+  re.test(buf);
+  return re.lastIndex;
+}
+
 // Datetime / number token patterns. Sticky (y) so they match in place at
 // the current position without slicing the logical line.
 const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/y;
@@ -86,6 +109,17 @@ const RE_NUM = /[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?
 function stickyExec(re, line, pos) {
   re.lastIndex = pos;
   return re.exec(line);
+}
+
+// Whether `pos` is a position a value may legally end at. Separate from
+// the machine's throwing `checkValueEnd` so the number scanner can test a
+// candidate token without committing to it.
+function atValueEnd(line, pos) {
+  if (pos >= line.length)
+    return true;
+  const c = line.charCodeAt(pos);
+  return c === CC_SPACE || c === CC_TAB || c === CC_LF || c === CC_CR
+    || c === CC_COMMA || c === CC_RBRACKET || c === CC_RBRACE || c === CC_HASH;
 }
 
 const INT64_MIN = -(2n ** 63n);
@@ -103,12 +137,22 @@ export class JoslMachine {
   constructor(options = {}) {
     this.mode = options.mode === 'toml' ? 'toml' : 'josl';
     this.onEvent = options.onEvent ?? null;
+    // Logical-line sink used by the CST layer: reports each line's source
+    // span, and the span of a pair's value inside it, so a rewriter can
+    // replace a value without disturbing the bytes around it.
+    this.onLine = options.onLine ?? null;
+    this.lineValueStart = -1;
+    this.lineValueEnd = -1;
     // chunk cutter state
     this.buf = '';
     this.scanPos = 0;
     this.scanState = S_NONE;
     this.scanDepth = 0;
+    this.scanNl = 0; // newlines seen inside the logical line being cut
     this.startLine = 1; // physical line where the current logical line begins
+    // Absolute physical line of `this.line`'s index 0, so error positions
+    // read the same whether `this.line` is one cut line or the whole source.
+    this.lineOrigin = 1;
     this.started = false;
     this.ended = false;
     // document state
@@ -159,7 +203,51 @@ export class JoslMachine {
       const line = this.buf;
       this.buf = '';
       this.scanPos = 0;
+      this.lineOrigin = this.startLine;
       this.parseLine(line);
+    }
+    return this.root();
+  }
+
+  /**
+   * Parse a complete document in one pass. Every value parser already stops
+   * at the newlines TOML forbids a construct from crossing, so with the
+   * whole text in hand the parser finds each logical line's end itself and
+   * the cutter's separate pass over the source is not needed. `feed`/`end`
+   * keep the cutter because a chunk can stop mid-token, where only a
+   * side-effect-free pre-pass can decide whether a line is complete.
+   * @param {string} text - The entire document
+   * @returns {*} The completed root value
+   */
+  parseAll(text) {
+    if (this.started || this.ended)
+      throw new Error('parseAll cannot be mixed with feed()/end()');
+    this.started = true;
+    this.ended = true;
+    if (text.charCodeAt(0) === 0xFEFF)
+      text = text.slice(1);
+    // positions are offsets into the whole source, which starts at line 1
+    this.lineOrigin = 1;
+    const tracking = this.onEvent !== null;
+    const len = text.length;
+    let pos = 0;
+    while (pos < len) {
+      this.lineValueStart = -1;
+      this.lineValueEnd = -1;
+      const end = this.parseLine(text, pos);
+      const next = end < len && text.charCodeAt(end) === CC_LF ? end + 1 : end;
+      if (this.onLine !== null)
+        this.onLine(pos, next, this.lineValueStart, this.lineValueEnd);
+      if (tracking) {
+        // only events need the logical line's own number; errors derive
+        // theirs from lineOrigin and the offset
+        let n = this.startLine;
+        for (let i = pos; i < next; ++i)
+          if (text.charCodeAt(i) === CC_LF)
+            n++;
+        this.startLine = n;
+      }
+      pos = next;
     }
     return this.root();
   }
@@ -191,17 +279,24 @@ export class JoslMachine {
     let lineStart = 0;
     let state = this.scanState;
     let depth = this.scanDepth;
+    let nl = this.scanNl;
     const ended = this.ended;
     outer:
     while (pos < buf.length) {
-      const c = buf.charCodeAt(pos);
       switch (state) {
-        case S_NONE:
+        case S_NONE: {
+          pos = skipRun(RUN_NONE, buf, pos);
+          if (pos >= buf.length)
+            break outer;
+          const c = buf.charCodeAt(pos);
           if (c === CC_LF) {
             if (depth === 0) {
-              this.cutLine(buf, lineStart, pos);
+              this.cutLine(buf, lineStart, pos, nl);
               lineStart = pos + 1;
+              nl = 0;
             }
+            else
+              nl++;
             pos++;
             break;
           }
@@ -229,59 +324,82 @@ export class JoslMachine {
             depth--;
           pos++;
           break;
-        case S_COMMENT:
-          if (c === CC_LF) {
-            if (depth === 0) {
-              this.cutLine(buf, lineStart, pos);
-              lineStart = pos + 1;
-            }
-            state = S_NONE;
+        }
+        case S_COMMENT: {
+          // nothing but the newline can end a comment, so jump straight to it
+          const at = buf.indexOf('\n', pos);
+          if (at < 0) {
+            pos = buf.length;
+            break outer;
           }
-          pos++;
+          if (depth === 0) {
+            this.cutLine(buf, lineStart, at, nl);
+            lineStart = at + 1;
+            nl = 0;
+          }
+          else
+            nl++;
+          state = S_NONE;
+          pos = at + 1;
           break;
+        }
         case S_BASIC:
-        case S_LITERAL:
+        case S_LITERAL: {
+          const basic = state === S_BASIC;
+          pos = skipRun(basic ? RUN_BASIC : RUN_LITERAL, buf, pos);
+          if (pos >= buf.length)
+            break outer;
+          const c = buf.charCodeAt(pos);
           if (c === CC_LF) {
             // unterminated single-line string: the line parser reports it
             state = S_NONE;
             if (depth === 0) {
-              this.cutLine(buf, lineStart, pos);
+              this.cutLine(buf, lineStart, pos, nl);
               lineStart = pos + 1;
+              nl = 0;
             }
+            else
+              nl++;
             pos++;
             break;
           }
-          if (state === S_BASIC && c === CC_BACKSLASH) {
+          if (basic && c === CC_BACKSLASH) {
             if (pos + 1 >= buf.length && !ended)
               break outer;
             pos += 2;
             break;
           }
-          if (c === (state === S_BASIC ? CC_DQUOTE : CC_SQUOTE))
-            state = S_NONE;
+          state = S_NONE; // the run only stops on the closing quote
           pos++;
           break;
+        }
         case S_ML_BASIC:
         case S_ML_LITERAL: {
-          if (state === S_ML_BASIC && c === CC_BACKSLASH) {
+          const basic = state === S_ML_BASIC;
+          pos = skipRun(basic ? RUN_BASIC : RUN_LITERAL, buf, pos);
+          if (pos >= buf.length)
+            break outer;
+          const c = buf.charCodeAt(pos);
+          if (c === CC_LF) {
+            nl++; // multi-line strings carry newlines inside the logical line
+            pos++;
+            break;
+          }
+          if (basic && c === CC_BACKSLASH) {
             if (pos + 1 >= buf.length && !ended)
               break outer;
             pos += 2;
             break;
           }
-          const q = state === S_ML_BASIC ? CC_DQUOTE : CC_SQUOTE;
-          if (c === q) {
-            let run = pos;
-            while (run < buf.length && buf.charCodeAt(run) === q)
-              run++;
-            if (run === buf.length && run - pos < 3 && !ended)
-              break outer; // quote run may continue in the next chunk
-            if (run - pos >= 3)
-              state = S_NONE;
-            pos = run;
-            break;
-          }
-          pos++;
+          const q = basic ? CC_DQUOTE : CC_SQUOTE;
+          let run = pos;
+          while (run < buf.length && buf.charCodeAt(run) === q)
+            run++;
+          if (run === buf.length && run - pos < 3 && !ended)
+            break outer; // quote run may continue in the next chunk
+          if (run - pos >= 3)
+            state = S_NONE;
+          pos = run;
           break;
         }
       }
@@ -294,16 +412,20 @@ export class JoslMachine {
       this.scanPos = pos;
     this.scanState = state;
     this.scanDepth = depth;
+    this.scanNl = nl;
   }
 
-  cutLine(buf, start, nlPos) {
-    let line = buf.slice(start, nlPos);
-    if (line.endsWith('\r'))
-      line = line.slice(0, -1);
-    const lines = countNewlines(line) + 1;
-    if (line.length !== 0)
-      this.parseLine(line);
-    this.startLine += lines;
+  // `innerNl` is how many newlines the cutter already counted inside this
+  // logical line, so the physical-line bookkeeping costs no extra walk.
+  cutLine(buf, start, nlPos, innerNl) {
+    const end = nlPos > start && buf.charCodeAt(nlPos - 1) === CC_CR
+      ? nlPos - 1
+      : nlPos;
+    if (end > start) {
+      this.lineOrigin = this.startLine;
+      this.parseLine(buf.slice(start, end));
+    }
+    this.startLine += innerNl + 1;
   }
 
   //#endregion
@@ -314,7 +436,7 @@ export class JoslMachine {
     const line = this.line;
     throw new JoslSyntaxError(
       message,
-      this.startLine + countNewlines(line, Math.min(pos, line.length)),
+      this.lineOrigin + countNewlines(line, Math.min(pos, line.length)),
       columnOf(line, Math.min(pos, line.length)),
       hint);
   }
@@ -328,20 +450,25 @@ export class JoslMachine {
 
   //#region logical line parser
 
-  parseLine(line) {
+  // Parses one logical line and returns the offset it ended at: the index
+  // of the terminating newline, or the end of the text. A cut line carries
+  // no terminator, so the newline branches only fire for the whole-document
+  // driver, which parses straight out of the source.
+  parseLine(line, pos = 0) {
     this.line = line;
-    let pos = this.skipWs(line, 0);
+    pos = this.skipWs(line, pos);
     if (pos >= line.length)
-      return;
+      return pos;
     const c = line.charCodeAt(pos);
-    if (c === CC_HASH) {
-      this.checkComment(line, pos);
-      return;
-    }
+    if (c === CC_LF)
+      return pos;
+    if (c === CC_CR && line.charCodeAt(pos + 1) === CC_LF)
+      return pos + 1;
+    if (c === CC_HASH)
+      return this.checkComment(line, pos);
     if (c === CC_LBRACKET)
-      this.parseHeader(line, pos);
-    else
-      this.parsePair(line, pos);
+      return this.parseHeader(line, pos);
+    return this.parsePair(line, pos);
   }
 
   skipWs(line, pos) {
@@ -371,13 +498,20 @@ export class JoslMachine {
     return pos;
   }
 
+  // Consumes the rest of the logical line and returns the offset it ended
+  // at, so the whole-document driver knows where the next one begins.
   expectLineEnd(line, pos) {
     pos = this.skipWs(line, pos);
-    if (pos < line.length) {
-      if (line.charCodeAt(pos) !== CC_HASH)
-        this.err(pos, 'unexpected content after expression');
-      this.checkComment(line, pos);
-    }
+    if (pos >= line.length)
+      return pos;
+    const c = line.charCodeAt(pos);
+    if (c === CC_LF)
+      return pos;
+    if (c === CC_CR && line.charCodeAt(pos + 1) === CC_LF)
+      return pos + 1;
+    if (c !== CC_HASH)
+      this.err(pos, 'unexpected content after expression');
+    return this.checkComment(line, pos);
   }
 
   // pos sits on '#'; validates comment content and returns the position
@@ -410,8 +544,7 @@ export class JoslMachine {
         && p + 1 < line.length && line.charCodeAt(p + 1) === CC_RBRACKET) {
         // [[]] — JOSL root array element
         this.openRootItem(p);
-        this.expectLineEnd(line, p + 2);
-        return;
+        return this.expectLineEnd(line, p + 2);
       }
       const [keys, after] = this.parseKeys(line, pos);
       p = after;
@@ -420,14 +553,13 @@ export class JoslMachine {
         || line.charCodeAt(p + 1) !== CC_RBRACKET)
         this.err(p, "expected ']]' to close array-of-tables header");
       this.openArrayTable(keys, p);
-      this.expectLineEnd(line, p + 2);
-      return;
+      return this.expectLineEnd(line, p + 2);
     }
     const [keys, after] = this.parseKeys(line, pos);
     if (after >= line.length || line.charCodeAt(after) !== CC_RBRACKET)
       this.err(after, "expected ']' to close table header");
     this.openTable(keys, after);
-    this.expectLineEnd(line, after + 1);
+    return this.expectLineEnd(line, after + 1);
   }
 
   headerBase() {
@@ -560,6 +692,10 @@ export class JoslMachine {
       this.err(p, "expected '=' after key", 'a key-value pair looks like: key = value');
     p = this.skipWs(line, p + 1);
     const [value, afterValue] = this.parseValue(line, p);
+    if (this.onLine !== null) {
+      this.lineValueStart = p;
+      this.lineValueEnd = afterValue;
+    }
     this.assignPair(keys, value, pos);
     if (this.onEvent !== null)
       this.emit({
@@ -569,7 +705,7 @@ export class JoslMachine {
         value,
         line: this.startLine,
       });
-    this.expectLineEnd(line, afterValue);
+    return this.expectLineEnd(line, afterValue);
   }
 
   assignPair(keys, value, pos) {
@@ -671,11 +807,7 @@ export class JoslMachine {
   }
 
   checkValueEnd(line, pos) {
-    if (pos >= line.length)
-      return pos;
-    const c = line.charCodeAt(pos);
-    if (c === CC_SPACE || c === CC_TAB || c === CC_LF || c === CC_CR
-      || c === CC_COMMA || c === CC_RBRACKET || c === CC_RBRACE || c === CC_HASH)
+    if (atValueEnd(line, pos))
       return pos;
     this.err(pos, 'unexpected character after value');
   }
@@ -1087,9 +1219,32 @@ export class JoslMachine {
   }
 
   parseNumber(line, pos) {
-    let m = stickyExec(RE_HEX, line, pos)
-      ?? stickyExec(RE_OCT, line, pos)
-      ?? stickyExec(RE_BIN, line, pos);
+    const c0 = line.charCodeAt(pos);
+    // Plain decimal integers dominate real documents. A digit run that ends
+    // the value cannot hold a radix prefix, an underscore, a fraction or the
+    // bigint suffix, so it needs none of the token regexes below. Anything
+    // else — including a leading zero, which TOML forbids — falls through so
+    // the regexes keep producing the established value and error positions.
+    if (isDigitCode(c0)) {
+      let p = pos + 1;
+      while (p < line.length && isDigitCode(line.charCodeAt(p)))
+        p++;
+      if ((p - pos === 1 || c0 !== CC_0) && atValueEnd(line, p)) {
+        const source = line.slice(pos, p);
+        return [this.intValue(pos, source, false, source), p];
+      }
+    }
+    // Radix prefixes are the only tokens those three patterns can match.
+    let m = null;
+    if (c0 === CC_0) {
+      const c1 = line.charCodeAt(pos + 1);
+      if (c1 === CC_LOWER_X)
+        m = stickyExec(RE_HEX, line, pos);
+      else if (c1 === CC_LOWER_O)
+        m = stickyExec(RE_OCT, line, pos);
+      else if (c1 === CC_LOWER_B)
+        m = stickyExec(RE_BIN, line, pos);
+    }
     if (m !== null) {
       const big = this.bigIntCheck(pos, m[1]);
       const stripped = (big ? m[0].slice(0, -1) : m[0]).replace(/_/g, '');

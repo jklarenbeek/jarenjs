@@ -112,14 +112,37 @@ export function decodeEscape(text, pos, err) {
  * @returns {[string, number]} The value and the offset after the close quote
  */
 export function decodeString(text, pos, err) {
-  let p = pos + 1;
+  const [out, p] = decodeStringSpan(text, pos + 1, text.length, err, false);
+  if (p < text.length) // stopped on the closing quote
+    return [out, p + 1];
+  err(p, 'unterminated string', "close the string with '\"'");
+}
+
+/**
+ * Decode the body of a string between two offsets, stopping at the closing
+ * quote (which it does not consume) or at `stop`. In `partial` mode it also
+ * stops before an escape that is not complete within the span, so a
+ * still-arriving string can be decoded as far as it is safe to.
+ * @param {string} text - Source text
+ * @param {number} from - Offset of the first body character
+ * @param {number} stop - Exclusive end offset
+ * @param {JsonxErrCallback} err - Error reporter
+ * @param {boolean} partial - Whether the span may end mid-escape
+ * @returns {[string, number]} The decoded text and the offset reached
+ */
+export function decodeStringSpan(text, from, stop, err, partial) {
+  let p = from;
   let out = '';
   let chunk = p;
-  while (p < text.length) {
+  while (p < stop) {
     const c = text.charCodeAt(p);
     if (c === CC_DQUOTE)
-      return [out + text.slice(chunk, p), p + 1];
+      break;
     if (c === CC_BACKSLASH) {
+      // the longest escape is \uXXXX; anything shorter than that near the
+      // span's end may simply not have arrived yet
+      if (partial && p + (text.charCodeAt(p + 1) === 0x75 ? 6 : 2) > stop)
+        break;
       out += text.slice(chunk, p);
       const [dec, np] = decodeEscape(text, p, err);
       out += dec;
@@ -131,7 +154,7 @@ export function decodeString(text, pos, err) {
       err(p, 'control characters must be escaped in strings');
     p++;
   }
-  err(p, 'unterminated string', "close the string with '\"'");
+  return [out + text.slice(chunk, p), p];
 }
 
 /**
