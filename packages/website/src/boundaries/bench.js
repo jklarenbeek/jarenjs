@@ -35,6 +35,7 @@ export const SUITES = [
   { key: 'jsonpointer', label: 'JSON Pointer' },
   { key: 'jsonpatch', label: 'JSON Patch' },
   { key: 'toml', label: 'JOSL / TOML' },
+  { key: 'csv', label: 'CSV' },
   { key: 'markdown', label: 'Markdown' },
   { key: 'mermaid', label: 'Mermaid' },
   { key: 'view', label: 'View' },
@@ -62,6 +63,7 @@ export function deriveSuite(state, suite) {
     case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
     case 'toml': return toml(data);
+    case 'csv': return csv(data);
     case 'markdown': return markdown(data);
     case 'mermaid': return mermaid(data);
     case 'view': return view(data);
@@ -465,6 +467,92 @@ function toml(data) {
       'smol-toml keeps a raw-throughput edge; Jaren is the only engine passing the complete suite while streaming.'));
   }
   out.push(...streamingRows(data.stream, tomlCharts(data)));
+  return out;
+}
+
+
+/** The CSV charts, rebuilt only when the suite data reloads. */
+const csvCharts = memo1((data) => ({
+  parse: Array.isArray(data.profile?.rows)
+    ? chartNode(profileBars(data.profile.rows, data.engines ?? [], {
+      title: 'Parse to string arrays — ms per document',
+      valLabel: 'ms/op',
+    }))
+    : undefined,
+}));
+
+/**
+ * CSV. The acceptance corpus is tiny and everyone passes it, so the
+ * interesting tables are the other two: what each parser does to a
+ * DAMAGED document, and where the speed actually goes.
+ */
+function csv(data) {
+  const out = [];
+  const engines = data.engines ?? [];
+
+  if (data.spectrum !== undefined) {
+    out.push(table(
+      'csv-spectrum acceptance suite',
+      ['Engine', 'Passing'],
+      engines.filter((e) => data.spectrum[e] !== undefined).map((engine) => ({
+        cells: [engine, `${data.spectrum[engine].pass} / ${data.spectrum[engine].total}`],
+        strong: engine === 'jaren',
+      })),
+      'The de-facto corpus, and every parser here passes it — which is why it is the '
+      + 'floor rather than the story. Its twelfth fixture is excluded: the expectation '
+      + 'contradicts its own input, so no parser can satisfy it.'));
+  }
+
+  if (Array.isArray(data.healing)) {
+    const cols = Object.keys(data.healing[0]?.results ?? {});
+    out.push(table(
+      'Damaged documents — does the record structure survive?',
+      ['Damage', ...cols],
+      data.healing.map((row) => ({
+        cells: [row.damage, ...cols.map((c) => row.results[c])],
+      })),
+      '"kept" = every record still has the column count the header implies. "threw" = the '
+      + 'document was rejected. "hung" = no answer within 5s. A ragged record stays ragged '
+      + 'everywhere, because no parser can invent a cell that was never written — the '
+      + 'difference is that repair mode SAYS so, with a code, a line and a column, where '
+      + 'the others heal silently or reject the file.'));
+  }
+
+  const profile = data.profile;
+  if (profile !== undefined && profile !== null) {
+    const { parse: parseChart } = csvCharts(data);
+    if (parseChart !== undefined) out.push(parseChart);
+    const timing = (rows, title, note) => table(
+      title,
+      ['Document', ...engines],
+      (rows ?? []).map((row) => ({
+        cells: [row.name, ...engines.map((e) => formatMs(row.results[e]))],
+      })),
+      note);
+    out.push(timing(profile.rows, `Parse to string arrays (${profile.iterations} iterations)`,
+      'udsv is the honest loss and it is not close on plain data. It earns it: udsv compiles '
+      + 'a parser per schema with new Function. Nothing in this suite does, anywhere, because '
+      + 'everything here has to run under a strict Content-Security-Policy — the same trade '
+      + 'the schema validator and the query engine record. Against every parser that also '
+      + 'avoids codegen, jaren leads.'));
+    out.push(timing(profile.objects, 'Parse to header-keyed objects',
+      'Objects cost more than arrays everywhere: a key per cell instead of a slot.'));
+    out.push(timing(profile.streaming, 'Incremental read, 64 KB chunks',
+      'Only synchronous incremental readers appear here. fast-csv, csv-parser and csvtojson '
+      + 'are stream-only, so timing them beside these would measure Node streams rather than '
+      + 'a CSV grammar. Streaming costs about 1.6x the wholesale path for a structural '
+      + 'reason: whole-document parsing walks the source once, while a chunk stream needs a '
+      + 'side-effect-free cutter pass first because a chunk can stop mid-field.'));
+    if (profile.stringify !== undefined) {
+      out.push(table('Stringify', ['Engine', 'ms per pass'],
+        engines.filter((e) => profile.stringify[e] != null).map((engine) => ({
+          cells: [engine, formatMs(profile.stringify[engine])],
+          strong: engine === 'jaren',
+        })),
+        'Writing quotes a field only when it has to: the delimiter, a quote, a newline, or '
+        + 'edge whitespace a lenient reader might trim.'));
+    }
+  }
   return out;
 }
 

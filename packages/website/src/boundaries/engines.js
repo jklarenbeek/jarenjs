@@ -32,6 +32,7 @@ import { compileJsltStylesheet, transformJson } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
+import { parseCsvDocument, stringifyCsv, sniffCsvDialect } from '@jarenjs/josl/csv';
 import { toMarkdown } from '@jarenjs/md';
 import { md as MD } from './markdown.js';
 import { mermaid as MERMAID } from './mermaid.js';
@@ -44,7 +45,7 @@ import { cards, table, code, error, callout, details, markdown } from '../lib/no
 import { now, formatJson, formatMsUnscaled } from '../lib/format.js';
 import {
   pathExamples, pointerExamples, patchExamples, queryExamples,
-  jsltExamples, jtltExamples, xqueryExamples, joslExamples,
+  jsltExamples, jtltExamples, xqueryExamples, joslExamples, csvExamples,
   markdownExamples, mermaidExamples, chartsExamples,
 } from '../content/engineExamples.js';
 
@@ -303,6 +304,74 @@ function runXQuery(inputs) {
   }
 }
 
+// A cell is shown as-is when it is text; only the typed values (numbers,
+// bigints, booleans, dates) are rendered through the JSONX writer, so a
+// plain CSV table does not come back wrapped in quotes.
+function csvCell(value) {
+  if (value === undefined) return '—';
+  return typeof value === 'string' ? value : stringifyJsonx(value);
+}
+
+function runCsv(inputs) {
+  const options = {
+    repair: inputs.repair === 'repair',
+    headers: inputs.headers === 'auto' ? 'auto' : inputs.headers !== 'false',
+    typed: inputs.typed === 'on',
+    delimiter: !inputs.delimiter || inputs.delimiter === 'auto'
+      ? 'auto'
+      : (inputs.delimiter === 'tab' ? '\t' : inputs.delimiter),
+  };
+  const shown = (d) => (d === '\t' ? 'tab' : d);
+  try {
+    const doc = parseCsvDocument(inputs.text, options);
+    const sniff = sniffCsvDialect(inputs.text);
+    const fields = doc.fields;
+    const rows = doc.rows;
+    const out = [];
+
+    out.push(table('Dialect', ['Property', 'Value'], [
+      { cells: ['delimiter', shown(doc.dialect.delimiter)] },
+      { cells: ['header row', String(doc.dialect.headers)] },
+      { cells: ['sniffed', `${shown(sniff.delimiter)} · ${sniff.width} columns · confidence ${sniff.confidence.toFixed(2)} · header ${sniff.headers}`] },
+      { cells: ['records', String(rows.length)] },
+    ], 'The sniffer scores each candidate delimiter by how consistently it divides records, and calls a header only when the first row looks unlike the rest.'));
+
+    const columns = fields ?? Array.from(
+      { length: rows.reduce((n, r) => Math.max(n, r.length), 0) },
+      (unusedValue, i) => `#${i + 1}`);
+    out.push(table(`Records (${rows.length})`, columns,
+      rows.slice(0, 50).map((row) => ({
+        cells: columns.map((name, i) => csvCell(fields === null ? row[i] : row[name])),
+      })),
+      fields === null
+        ? 'Headers off: records are arrays, which allocate less than objects.'
+        : 'An em dash marks a column this record did not carry — absent, not empty.'));
+
+    if (doc.repairs.length !== 0) {
+      out.push(table(`Repairs (${doc.repairs.length})`, ['Code', 'Line', 'Col', 'What was read'],
+        doc.repairs.map((r) => ({ cells: [r.code, String(r.line), String(r.column), r.message] })),
+        'Strict mode throws on the first of these, carrying the same code.'));
+    }
+    else if (options.repair) {
+      out.push(callout('Nothing to repair',
+        'The document is already RFC 4180 — repair mode changed nothing about it.'));
+    }
+
+    out.push(details('Round trip (stringifyCsv)', [
+      code(null, stringifyCsv(rows, { fields: fields ?? undefined, newline: '\n' })),
+    ]));
+    return out;
+  }
+  catch (e) {
+    return [
+      error(e, 'CSV'),
+      callout('Switch to repair mode',
+        'Strict mode rejects anything RFC 4180 forbids. Repair mode reads the document '
+        + 'anyway and reports every fix it had to make, with a code, a line and a column.'),
+    ];
+  }
+}
+
 function runJosl(inputs) {
   try {
     const events = [];
@@ -497,6 +566,18 @@ export const ENGINE_DEFS = {
     ],
     run: runJosl,
   },
+  csv: {
+    label: 'CSV',
+    lead: 'RFC 4180 strict by default; repair mode reads damaged CSV anyway and reports every fix with a code, a line and a column. The delimiter and the header row can be sniffed from the text.',
+    inputs: [
+      { key: 'repair', title: 'Mode', control: 'select', options: ['strict', 'repair'] },
+      { key: 'headers', title: 'Header row', control: 'select', options: ['true', 'false', 'auto'] },
+      { key: 'delimiter', title: 'Delimiter', control: 'select', options: ['auto', ',', ';', 'tab', '|'] },
+      { key: 'typed', title: 'Typed values', control: 'select', options: ['off', 'on'] },
+      { key: 'text', title: 'CSV', control: 'code', rows: 12 },
+    ],
+    run: runCsv,
+  },
   charts: {
     label: 'Charts',
     lead: 'Headless SVG charts from a JSON / JSONX / JOSL definition: validated by JSON Schema, parsed through the incremental streaming readers, rendered as pure vnodes — flip stream to replay and watch the chart build as chunks arrive.',
@@ -569,6 +650,13 @@ export const ENGINE_EXAMPLES = {
   josl: joslExamples.map((e) => ({
     label: e.name,
     inputs: { text: e.text, mode: e.mode ?? 'josl' },
+  })),
+  csv: csvExamples.map((e) => ({
+    label: e.name,
+    inputs: {
+      text: e.text, repair: e.repair, headers: e.headers,
+      delimiter: e.delimiter, typed: e.typed,
+    },
   })),
   markdown: markdownExamples.map((e) => ({
     label: e.name,

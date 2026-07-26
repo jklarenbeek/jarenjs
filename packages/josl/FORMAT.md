@@ -158,6 +158,62 @@ when brace syntax is the better fit:
 reports the same document-order `open` / `value` / `close` events with
 absolute paths.
 
+## CSV
+
+CSV is not a JOSL dialect and has no shared grammar with it — it lives in
+this package because it has the same *shape of problem*: a record-oriented
+text format that has to be readable a chunk at a time, and a value model
+that JSON cannot express. What it shares is the machine architecture
+(`parseAll` and `feed`/`end` run one record parser) and the value types.
+
+There is no CSV specification worth conforming to. RFC 4180 describes a
+narrow dialect that real exporters routinely violate, and it ships no test
+suite. So the contract here is stated rather than referenced:
+
+**Reading is strict by default.** The eight conditions below throw a
+`CsvSyntaxError` with a stable `CSV1xxx` code, a line and a column.
+`repair: true` reads each one the way that loses the least and records it
+under the same code — the modes differ in what happens, never in the
+diagnosis.
+
+| code | condition | repair-mode reading |
+| --- | --- | --- |
+| `CSV1001` | a quoted field is never closed | close at end of input |
+| `CSV1002` | text after a closing quote | field closed; absorb the text |
+| `CSV1003` | an unescaped quote inside a quoted field | the quote is literal |
+| `CSV1004` | record shorter than the header | missing columns stay absent |
+| `CSV1005` | record longer than the header | widen the header once |
+| `CSV1006` | a bare carriage return | ends the record |
+| `CSV1007` | a duplicate header name | suffix (`a`, `a_2`) |
+| `CSV1008` | an empty header name | synthesize (`column_3`) |
+
+`CSV1002` and `CSV1003` describe the same byte read two ways. The reader
+chooses by scanning for another quote before the next delimiter or
+terminator: one found means the quote is text (`"he said "hi" ok"` keeps
+its content), none found means the field had closed (`"abc"junk,d` keeps
+its two columns). Column count breaks the tie, because a lost field
+boundary corrupts every value after it while a mangled cell corrupts one.
+
+**Deliberate readings**, each chosen because the alternative destroys
+information that cannot be recovered downstream:
+
+- A blank line is a record of one empty field (RFC 4180 has no blank
+  line). `skipEmptyLines` drops them, and repair mode turns it on.
+- A trailing terminator does not produce a final empty record.
+- A quoted cell is never trimmed and never coerced: the quotes are the
+  author marking the content as text.
+- A missing column is **absent**, not empty — `undefined` says the record
+  did not carry it, `''` would claim it carried nothing.
+- `typed: true` promotes an integer beyond 2^53 to bigint rather than
+  rounding, reads unambiguous ISO-8601 as the value classes above, and
+  leaves anything with a leading zero a string.
+- A BOM is stripped without comment; it is an encoding mark, not data.
+
+**Writing** quotes a field only when it contains the delimiter, the quote
+character, a newline, or edge whitespace a lenient reader might trim. The
+default terminator is CRLF, per RFC 4180 §2.1 and what spreadsheet
+software expects.
+
 ## Compliance notes
 
 - Strict TOML mode passes the complete official

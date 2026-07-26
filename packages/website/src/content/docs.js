@@ -195,6 +195,24 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'csv', title: 'CSV',
+    blocks: [
+      p('The same machine shape as JOSL, applied to the format the world exports by accident. One grammar path serves both directions — parseCsv walks the source once, and the chunk reader runs a side-effect-free cutter first because a chunk can stop mid-field — so a document read in pieces and the same document read whole produce identical rows.'),
+      code(null, "import { parseCsv, parseCsvDocument } from '@jarenjs/josl/csv';\nimport { iterateCsvStream } from '@jarenjs/josl/csv-stream';\n\nparseCsv('a,b\\n1,2');                     // [['a','b'], ['1','2']]\nparseCsv('a,b\\n1,2', { headers: true });  // [{ a: '1', b: '2' }]\n\n// rows as they complete, never holding the table\nfor await (const row of iterateCsvStream(response.body, { headers: true }))\n  await save(row);"),
+      p('Reading is strict by default: anything RFC 4180 forbids throws a CsvSyntaxError with a stable CSV1xxx code, a line and a column. repair: true reads the same damage the way that loses the least and logs it under the SAME code, so moving between the modes never means re-learning the diagnosis.'),
+      code(null, "const doc = parseCsvDocument('a,b\\n\"he said \"hi\" ok\",2\\n', {\n  repair: true, headers: true,\n});\ndoc.rows;    // [{ a: 'he said \"hi\" ok', b: '2' }]\ndoc.repairs; // [{ code: 'CSV1003', line: 2, column: 10, message: … }, …]"),
+      p('Two of those codes describe the same byte read two ways, and the reader decides by looking for another quote before the next delimiter: \'"he said "hi" ok"\' keeps its text, while \'"abc"junk,d\' keeps its column count — a lost field boundary corrupts every value after it, where a mangled cell corrupts one. A record shorter than its header leaves the missing columns absent rather than empty, because undefined says the record did not carry the column while an empty string would claim it carried nothing.'),
+      p('delimiter: \'auto\' sniffs the dialect by scoring each candidate on how consistently it divides records, and calls a header row only when the first record looks unlike the rest — a table that is text all the way down gives no evidence, and inventing a header there would silently eat a data row. typed: true uses the package value model rather than JSON\'s: an integer past 2^53 becomes a bigint instead of rounding, ISO dates become the same LocalDate/LocalDateTime a JOSL document yields, and 007 stays a string.'),
+      {
+        kind: 'callout',
+        title: 'Try it',
+        text: 'The CSV tab in the playground has a deliberately broken document: flip mode from strict to repair to watch it parse anyway and list every fix with its code, line and column.',
+        href: '#/playground?engine=csv',
+        link: 'Open the playground',
+      },
+    ],
+  },
+  {
     id: 'charts', title: 'Charts',
     blocks: [
       p('Headless charts: @jarenjs/charts compiles a definition document plus its data into a geometry-free AST (fractions, angles, unit coordinates — no pixels) and renders pure-vnode SVG through @jarenjs/view. Twelve types — pie (and donut), bar, line, scatter, candlestick, radar, gauge, boxplot, heatmap, treemap, streamgraph, sankey — themed by host-linked tokens; the Benchmarks page charts and the mermaid pie are this engine.'),

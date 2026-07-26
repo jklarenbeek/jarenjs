@@ -21,7 +21,24 @@ export { createStreamWriter, stringifyJoslChunks } from './write.js';
 export { toGbnf, tomlToGbnf } from './gbnf.js';
 export { parseJsonx, stringifyJsonx } from './jsonx.js';
 export { createJsonxStreamReader, parseJsonxStream } from './jsonx-stream.js';
-export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError } from './errors.js';
+export {
+  parseCsv,
+  parseCsvDocument,
+  stringifyCsv,
+  stringifyCsvChunks,
+  sniffCsvDialect,
+  formatCsvValue,
+  coerceCsvValue,
+  CSV_CODES,
+} from './csv.js';
+export {
+  createCsvStreamReader,
+  parseCsvStream,
+  iterateCsvStream,
+  createCsvStreamWriter,
+  CsvStreamWriter,
+} from './csv-stream.js';
+export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError, CsvSyntaxError } from './errors.js';
 export {
   LocalDate,
   LocalTime,

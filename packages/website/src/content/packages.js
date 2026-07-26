@@ -24,7 +24,7 @@ const ENTRIES = [
   { name: '@jarenjs/mermaid', dir: 'components/mermaid', blurb: 'A native, headless Mermaid clone: diagrams-as-code to pure-vnode SVG.' },
   { name: '@jarenjs/calc', dir: 'components/calc', blurb: 'A multi-mode calculator with x·y/x·y·z plots — apps as JSON on a pure core kernel.' },
   { name: '@jarenjs/charts', dir: 'components/charts', blurb: 'Headless charts: definitions to geometry-free ASTs to pure-vnode SVG, streamable.' },
-  { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset, plus incremental JSON/JSONX readers.' },
+  { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset, incremental JSON/JSONX readers, and a self-healing CSV reader/writer.' },
   { name: '@jarenjs/ai', dir: 'packages/ai', blurb: 'Browser-side AI: one OpenAI-compatible client (OpenRouter/Ollama/LM Studio), a Jaren-guarded tool registry, a bounded agent loop and WebMCP.' },
 ];
 

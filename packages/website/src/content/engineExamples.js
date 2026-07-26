@@ -553,6 +553,64 @@ export const querySchemaExample = {
 };
 
 /**
+ * CSV playground examples. `text` is CSV source; `repair` switches the
+ * reader between strict RFC 4180 and self-healing, and the damaged
+ * examples are the point of the tab.
+ */
+export const csvExamples = [
+  {
+    name: 'RFC 4180',
+    repair: 'strict',
+    headers: 'true',
+    delimiter: 'auto',
+    typed: 'off',
+    text: `id,name,note
+1,Ada,"quoted, with a comma"
+2,Grace,"a doubled "" quote"
+3,Alan,"a field that spans
+two lines"
+`,
+  },
+  {
+    name: 'Damaged — self-healing',
+    repair: 'repair',
+    headers: 'true',
+    delimiter: 'auto',
+    typed: 'off',
+    text: `id,name,note
+1,Ada,"never closed
+2,Grace,"ok"trailing text
+3,Alan,"he said "hi" today"
+4,Edsger
+5,Barbara,extra,column
+`,
+  },
+  {
+    name: 'European dialect (sniffed)',
+    repair: 'strict',
+    headers: 'auto',
+    delimiter: 'auto',
+    typed: 'on',
+    text: `stad;inwoners;opgericht
+Amsterdam;921402;1275-10-27
+Rotterdam;651446;1340-06-07
+Den Haag;548320;1248-01-01
+`,
+  },
+  {
+    name: 'Typed values',
+    repair: 'strict',
+    headers: 'true',
+    delimiter: ',',
+    typed: 'on',
+    text: `sku,price,postcode,huge,active,when
+A-1,19.95,01234,123456789012345678901234567890,true,2026-07-27
+A-2,4.5,00042,7,false,2026-07-27T08:30:00Z
+`,
+  },
+];
+
+/**
  * JOSL playground examples. `text` is JOSL/TOML source (not JSON), `mode`
  * selects the reader dialect: 'josl' (superset) or 'toml' (strict 1.0).
  */

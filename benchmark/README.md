@@ -282,6 +282,44 @@ result there that looks like a win would mean the harness is wrong.
 
 npm shortcuts: `npm run benchmark:jsonpath`, `npm run benchmark:jsonpath:profile`.
 
+## csv.js — CSV conformance, self-healing and performance
+
+Scores `@jarenjs/josl`'s CSV reader against the sync-capable CSV parsers
+on npm: the [csv-spectrum](https://www.npmjs.com/package/csv-spectrum)
+acceptance corpus, a self-healing scorecard over damaged documents, and
+parse / incremental-read / stringify throughput.
+
+```bash
+node benchmark/csv.js                  # conformance + healing scorecard
+node benchmark/csv.js --verbose        # show every failing case
+node benchmark/csv.js --profile        # add the timing tables
+node benchmark/csv.js --engines jaren,udsv
+```
+
+Rival selection decides these numbers, so it is deliberate:
+
+- **`udsv` is the rival that matters.** It has a fraction of papaparse's
+  downloads but it is the acknowledged JS speed leader and the only other
+  parser with a *synchronous* incremental API. Benchmarking against
+  papaparse alone would be picking a soft target — and udsv wins the
+  parse rows, which is reported rather than buried.
+- **`fast-csv`, `csv-parser`, `csvtojson` and `neat-csv` are excluded**
+  because they are stream-only: their rows arrive on a later tick, so
+  timing them beside a synchronous parser measures Node's stream
+  machinery, not a CSV grammar.
+- **Nothing is timed until it agrees with jaren on the result.** A parser
+  that quietly produced fewer rows would otherwise post the best number.
+- `location_coordinates`, the twelfth csv-spectrum fixture, is excluded
+  and the reason printed: its expectation contradicts its own input, so
+  no parser can satisfy it.
+
+The healing scorecard runs **each probe in a child process with a
+deadline**, because udsv loops forever on a record shorter than its
+header and an in-process probe would take the whole benchmark down with
+it. A hang is a result worth reporting, not a crash.
+
+npm shortcuts: `npm run benchmark:csv`, `npm run benchmark:csv:profile`.
+
 ## formats.js — string formats vs ajv-formats
 
 Benchmarks `@jarenjs/formats` against

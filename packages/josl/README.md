@@ -3,7 +3,8 @@
 **JOSL — JavaScript Obvious Streaming Language.**
 TOML 1.0, backward compatible, extended with JavaScript's obvious value
 types (`null`, bigint, regexp, datetimes) and a streamable `[[]]` root
-array — plus **JSONX**, the same extensions over JSON. Built for
+array — plus **JSONX**, the same extensions over JSON, and a **CSV**
+reader/writer that heals damaged input instead of guessing at it. Built for
 LLM-to-LLM pipelines: chunk-feedable parsing, document-order events,
 machine-repairable errors with line/column and a `hint`.
 
@@ -237,8 +238,117 @@ stringifyJsonx(v, { mode: 'json' });     // delegates to JSON.stringify
 | `@jarenjs/josl/write` | `createStreamWriter`, `stringifyJoslChunks` |
 | `@jarenjs/josl/jsonx` | `parseJsonx`, `stringifyJsonx` |
 | `@jarenjs/josl/jsonx-stream` | `createJsonxStreamReader`, `parseJsonxStream` |
+| `@jarenjs/josl/csv` | `parseCsv`, `parseCsvDocument`, `stringifyCsv`, `sniffCsvDialect` |
+| `@jarenjs/josl/csv-stream` | `createCsvStreamReader`, `parseCsvStream`, `iterateCsvStream`, `createCsvStreamWriter` |
 | `@jarenjs/josl/values` | `LocalDate`, `LocalTime`, `LocalDateTime` |
 | `@jarenjs/josl/schemas/*` | schema artifacts (`jaren-josl-data.schema.json`) |
+
+## CSV
+
+The same machine shape as JOSL, applied to the format the world exports
+by accident: one grammar path, wholesale and streaming, and a reader that
+tells you what it had to fix.
+
+```javascript
+import { parseCsv, parseCsvDocument, stringifyCsv } from '@jarenjs/josl/csv';
+import { createCsvStreamReader, iterateCsvStream } from '@jarenjs/josl/csv-stream';
+
+parseCsv('a,b\n1,2');                     // [['a','b'], ['1','2']]
+parseCsv('a,b\n1,2', { headers: true });  // [{ a: '1', b: '2' }]
+
+// rows as they complete, without ever holding the table
+for await (const row of iterateCsvStream(response.body, { headers: true }))
+  await save(row);
+```
+
+**Strict by default.** Anything RFC 4180 forbids throws a
+`CsvSyntaxError` carrying a `CSV1xxx` code, a line and a column — the
+same machine-repairable error shape the JOSL parser uses.
+
+**`repair: true` heals instead, and says so.** Every repair lands in a log
+with the same code the strict error would have carried, so moving between
+the modes never means re-learning the diagnosis:
+
+```javascript
+const doc = parseCsvDocument('a,b\n"he said "hi" ok",2\n', {
+  repair: true, headers: true,
+});
+doc.rows;    // [{ a: 'he said "hi" ok', b: '2' }]
+doc.repairs; // [{ code: 'CSV1003', line: 2, column: 10, message: … }, …]
+```
+
+| code | condition | how it is read |
+| --- | --- | --- |
+| `CSV1001` | a quoted field is never closed | close it at the end, keep the text |
+| `CSV1002` | text after a closing quote | the field closed; absorb the stray text |
+| `CSV1003` | an unescaped quote inside a quoted field | the quote is literal |
+| `CSV1004` | a record shorter than the header | the columns stay **absent**, not empty |
+| `CSV1005` | a record longer than the header | widen the header once |
+| `CSV1006` | a bare carriage return | it ends the record (old-Mac endings) |
+| `CSV1007` | a duplicate header name | suffix it (`a`, `a_2`) |
+| `CSV1008` | an empty header name | name it (`column_3`) |
+
+`CSV1002` and `CSV1003` are the same damage read two ways, and the reader
+decides between them by looking for another quote before the next
+delimiter. `"he said "hi" ok"` keeps its text; `"abc"junk,d` keeps its
+**column count**, because a consumer indexes by column and a lost
+boundary corrupts every field after it.
+
+A short record leaves its missing columns absent rather than empty:
+reading `undefined` says *this record did not carry the column*, where
+`''` would claim it carried an empty one.
+
+**Dialect sniffing.** `delimiter: 'auto'` scores each candidate by how
+consistently it divides records — a real separator splits every record
+the same way, a coincidental one splits them arbitrarily. Header
+detection asks whether the first record looks unlike the rest, and
+answers *no* when the table is text all the way down, because inventing a
+header there would silently eat a data row.
+
+**Typed values are the package's, not JSON's.** `typed: true` promotes an
+integer past 2^53 to a **bigint** instead of rounding it, reads ISO dates
+as the same `LocalDate`/`LocalDateTime` a JOSL document yields, and
+leaves `007` a string — a zero-padded id does not survive becoming a
+Number. A quoted cell is never coerced: the quotes are the author saying
+this is text.
+
+### CSV compliance & speed
+
+`npm run benchmark:csv` scores the reader on
+[csv-spectrum](https://www.npmjs.com/package/csv-spectrum), the de-facto
+acceptance corpus, and on a scorecard of damaged documents.
+
+| engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |
+| --- | --- | --- | --- | --- |
+| **jaren** | **11/11** | 3.0 ms | 3.4 ms | 1.8 ms |
+| udsv | 11/11 | **1.5 ms** | **2.9 ms** | **1.0 ms** |
+| papaparse | 11/11 | 5.6 ms | 7.9 ms | 2.2 ms |
+| csv-parse | 11/11 | 19.8 ms | 13.4 ms | 12.5 ms |
+| d3-dsv | 11/11 | 4.5 ms | 6.2 ms | 2.7 ms |
+| @vanillaes/csv | n/a | 7.7 ms | 10.1 ms | 5.5 ms |
+
+(The suite's twelfth fixture, `location_coordinates`, is excluded: its
+expectation is a bare object where every other case is an array, its
+phone number disagrees with its own CSV, and its degree sign is already
+U+FFFD in the source bytes. No parser can satisfy it.)
+
+**udsv is the honest loss, and it is not close on plain data: ~2× on the
+record stream, ~1.2× on quoted.** It earns it — udsv compiles a parser
+per schema with `new Function`. This package does not, anywhere, by house
+rule: everything here runs under a strict Content-Security-Policy, where
+runtime codegen is unavailable. That is the same trade the schema
+validator and the query engine make, and it is a trade rather than an
+excuse — against every parser that also avoids codegen, jaren leads.
+
+Streaming costs about 1.6× the wholesale path (5.9 ms vs 3.0 ms on the
+record stream) and the reason is structural: whole-document parsing walks
+the source once, because with the whole text in hand the record parser
+finds each record's end itself. A chunk stream cannot — a chunk may stop
+mid-field — so `feed` runs a side-effect-free cutter first and the source
+is walked twice.
+
+Stringify leads everything that offers one: 3.6 ms against papaparse's
+6.1 ms and d3-dsv's 4.2 ms.
 
 ## Generating JOSL with LLMs
 

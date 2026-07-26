@@ -43,7 +43,7 @@ function find(node, pred) {
 describe('website — the generic engine playgrounds', function () {
   it('renders every engine tab live from its descriptor', function () {
     const { container, go } = mountSite();
-    for (const engine of ['path', 'pointer', 'patch', 'query', 'jslt', 'jtlt', 'xquery', 'josl', 'markdown']) {
+    for (const engine of ['path', 'pointer', 'patch', 'query', 'jslt', 'jtlt', 'xquery', 'josl', 'csv', 'markdown']) {
       go(`#/playground?engine=${engine}`);
       const html = serialize(container);
       assert.match(html, /pg-grid two/, `${engine}: input/result grid renders`);
@@ -102,6 +102,22 @@ describe('website — the generic engine playgrounds', function () {
     assert.match(edited, /Live /, 'the preview re-rendered from the edit');
     assert.match(edited, /<em>edit<\/em>/, 'inline emphasis rendered');
     assert.strictEqual(app.getState().eng.markdown.source, '# Live *edit*\n\n- re-parsed\n');
+  });
+
+  it('csv engine: the damaged example is read and every fix reported', function () {
+    const { container, go } = mountSite();
+    go('#/playground?engine=csv');
+    const chips = [];
+    find(container, (n) => {
+      if (n.attributes?.get('class') === 'chip') chips.push(n);
+      return false;
+    });
+    // the second CSV example is deliberately broken; strict mode throws on
+    // it, so loading it proves repair mode reads it AND names the damage
+    fire(chips[1], 'click');
+    const html = serialize(container);
+    assert.match(html, /Repairs/, 'the repair table renders');
+    assert.match(html, /CSV100\d/, 'each fix carries its diagnosis code');
   });
 
   it('example chips load complete input sets', function () {

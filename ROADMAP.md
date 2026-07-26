@@ -198,6 +198,13 @@ delete it or fix it.
 
 ## @jarenjs/josl
 
+- [ ] **CSV parse speed against a codegen parser** — `udsv` reads the 10k
+  record stream in ~1.5 ms against the CSV reader's ~3.0 ms, because it
+  compiles a parser per schema with `new Function`. The no-codegen rule is
+  absolute in this package, so closing that gap means finding it in the
+  closure-compiled shape: the remaining per-cell cost is the `slice` per
+  field and the object build per record. This is the same trade the
+  validator and query engine record under their own codegen-backend items.
 - [ ] **Stringify speed** — `stringifyJosl` runs ~2.5× behind `smol-toml`
   on the 1k-record document (6.9 ms vs 2.7 ms, `npm run benchmark:toml
   --profile`), roughly level with `@iarna/toml`. Parsing has had two

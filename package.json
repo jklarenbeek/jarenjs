@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.20.5",
+  "version": "0.20.6",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
@@ -68,6 +68,8 @@
     "benchmark": "node ./benchmark/index.js",
     "benchmark:jsonpath": "node ./benchmark/jsonpath.js",
     "benchmark:toml": "node ./benchmark/toml.js",
+    "benchmark:csv": "node ./benchmark/csv.js",
+    "benchmark:csv:profile": "node ./benchmark/csv.js --profile",
     "benchmark:jsonx-stream": "node ./benchmark/jsonx-stream.js",
     "benchmark:charts": "node ./benchmark/charts.js",
     "benchmark:jsonpath:profile": "node ./benchmark/jsonpath.js --profile --scale",
@@ -126,15 +128,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/app": "^0.20.5",
-    "@jarenjs/core": "^0.20.5",
-    "@jarenjs/formats": "^0.20.5",
-    "@jarenjs/forms": "^0.20.5",
-    "@jarenjs/json": "^0.20.5",
-    "@jarenjs/md": "^0.20.5",
-    "@jarenjs/refs": "^0.20.5",
-    "@jarenjs/validate": "^0.20.5",
-    "@jarenjs/view": "^0.20.5"
+    "@jarenjs/app": "^0.20.6",
+    "@jarenjs/core": "^0.20.6",
+    "@jarenjs/formats": "^0.20.6",
+    "@jarenjs/forms": "^0.20.6",
+    "@jarenjs/json": "^0.20.6",
+    "@jarenjs/md": "^0.20.6",
+    "@jarenjs/refs": "^0.20.6",
+    "@jarenjs/validate": "^0.20.6",
+    "@jarenjs/view": "^0.20.6"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

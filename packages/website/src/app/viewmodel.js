@@ -62,7 +62,7 @@ const PG_EXAMPLES = [
 /** Home engine card → the benchmark headline that measures it. */
 const HOME_ENGINE_SUITE = {
   validate: 'validate', path: 'jsonpath', pointer: 'jsonpointer', patch: 'jsonpatch',
-  query: 'jsonquery', jslt: 'jslt', josl: 'toml', charts: 'charts',
+  query: 'jsonquery', jslt: 'jslt', josl: 'toml', csv: 'csv', charts: 'charts',
   markdown: 'markdown', mermaid: 'mermaid',
 };
 
@@ -389,7 +389,7 @@ const docsPage = memo1((param) => {
 /** The primary input previewed on each example card, per engine. */
 const PREVIEW_FIELD = {
   path: 'selector', pointer: 'pointer', patch: 'patch', query: 'query',
-  jslt: 'stylesheet', jtlt: 'template', xquery: 'text', josl: 'text',
+  jslt: 'stylesheet', jtlt: 'template', xquery: 'text', josl: 'text', csv: 'text',
   markdown: 'source', mermaid: 'source', charts: 'source',
 };
 

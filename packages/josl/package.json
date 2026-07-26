@@ -1,12 +1,12 @@
 {
   "name": "@jarenjs/josl",
   "private": false,
-  "version": "0.20.5",
+  "version": "0.20.6",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
   "sideEffects": false,
-  "description": "JOSL - JavaScript Obvious Streaming Language. A TOML 1.0 backward-compatible data language with null, bigint, regexp, datetimes and root arrays as first class citizens, plus JSONX, the same extensions over JSON - with incremental streaming readers for JOSL, TOML, JSONX and strict JSON.",
+  "description": "JOSL - JavaScript Obvious Streaming Language. A TOML 1.0 backward-compatible data language with null, bigint, regexp, datetimes and root arrays as first class citizens, plus JSONX, the same extensions over JSON, and a self-healing CSV reader/writer - with incremental streaming readers for JOSL, TOML, JSONX, strict JSON and CSV.",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -27,6 +27,7 @@
     "toml",
     "jsonx",
     "json",
+    "csv",
     "streaming",
     "incremental",
     "real-time",
@@ -82,6 +83,14 @@
       "types": "./dist/types/jsonx-stream.d.ts",
       "default": "./src/jsonx-stream.js"
     },
+    "./csv": {
+      "types": "./dist/types/csv.d.ts",
+      "default": "./src/csv.js"
+    },
+    "./csv-stream": {
+      "types": "./dist/types/csv-stream.d.ts",
+      "default": "./src/csv-stream.js"
+    },
     "./values": {
       "types": "./dist/types/values.d.ts",
       "default": "./src/values.js"
@@ -90,6 +99,6 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.20.5"
+    "@jarenjs/core": "^0.20.6"
   }
 }

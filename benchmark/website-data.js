@@ -48,7 +48,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, markdown, mermaid, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, qt3');
         process.exit(0);
         break;
       default:
@@ -392,6 +392,41 @@ function generateToml(tmp, options) {
   };
 }
 
+function generateCsv(tmp, options) {
+  const file = path.join(tmp, 'csv.json');
+  try {
+    runTool([
+      'benchmark/csv.js', '--profile',
+      '--iterations', String(options.quick ? 10 : 40),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: csv run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
+  const raw = readJson(file);
+  const round = (rows) => (rows ?? []).map((row) => ({
+    name: row.name,
+    results: Object.fromEntries(Object.entries(row.results).map(([k, v]) => [k, sig4(v)])),
+  }));
+  return {
+    date: raw.date,
+    node: raw.node,
+    engines: raw.engines,
+    spectrum: raw.spectrum,
+    healing: raw.healing,
+    profile: raw.profile === null ? null : {
+      iterations: raw.profile.iterations,
+      rows: round(raw.profile.rows),
+      objects: round(raw.profile.objects),
+      streaming: round(raw.profile.streaming),
+      stringify: Object.fromEntries(
+        Object.entries(raw.profile.stringify).map(([k, v]) => [k, sig4(v)])),
+    },
+  };
+}
+
 /**
  * The JSONX/strict-JSON streaming reader, measured against native
  * `JSON.parse`. It rides the JOSL suite (same package, a second
@@ -588,7 +623,7 @@ function generateQt3() {
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
   'validate', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
-  'toml', 'markdown', 'mermaid', 'view', 'charts',
+  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts',
 ];
 
 /** Geometric mean — the honest average of ratios (a 10× and a 0.1×
@@ -707,6 +742,19 @@ function buildHeadlines(generated, meta) {
       note: 'toml-test 1.0.0, the only full pass',
     });
   }
+  if (generated.csv !== undefined) {
+    const rows = generated.csv.profile?.rows ?? [];
+    const spectrum = generated.csv.spectrum?.jaren;
+    add('csv', 'CSV', {
+      ratio: geoMean(rows.map((p) => {
+        const best = bestRival(p.results, 'jaren');
+        return best === null || !(p.results.jaren > 0) ? null : best / p.results.jaren;
+      })),
+      rival: 'the fastest rival',
+      conformance: spectrum === undefined ? null : `${spectrum.pass} / ${spectrum.total}`,
+      note: 'csv-spectrum; udsv leads on raw parse (it uses new Function)',
+    });
+  }
   if (generated.markdown !== undefined) {
     const render = generated.markdown.profile?.render ?? [];
     add('markdown', 'Markdown', {
@@ -794,6 +842,11 @@ async function main() {
       generated.toml = stream === null ? toml : { ...toml, stream };
     }
   }
+  if (!options.skip.has('csv')) {
+    const csv = generateCsv(tmp, options);
+    if (csv !== null)
+      generated.csv = csv;
+  }
   if (!options.skip.has('markdown')) {
     const markdown = generateMarkdown(tmp, options);
     if (markdown !== null)
@@ -873,6 +926,9 @@ async function main() {
       toml: generated.toml === undefined
         ? (previousMeta?.conformance?.toml ?? null)
         : generated.toml.compliance,
+      csv: generated.csv === undefined
+        ? (previousMeta?.conformance?.csv ?? null)
+        : generated.csv.spectrum,
       markdown: generated.markdown === undefined
         ? (previousMeta?.conformance?.markdown ?? null)
         : { examples: generated.markdown.examples, scorecard: generated.markdown.scorecard },

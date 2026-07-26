@@ -147,6 +147,16 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(JSON.stringify(nodes), /toml-test 1\.0\.0 compliance/, 'the compliance table renders');
   });
 
+  it('derives the CSV suite from the generated data', function () {
+    const state = { benchStatus: { csv: 'loaded' }, bench: { csv: loadBench('csv') }, benchUi: {} };
+    const nodes = deriveSuite(state, 'csv');
+    const text = JSON.stringify(nodes);
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    assert.match(text, /csv-spectrum acceptance suite/, 'the acceptance table renders');
+    assert.match(text, /Damaged documents/, 'the self-healing scorecard renders');
+    assert.match(text, /new Function/, 'the udsv loss is explained rather than hidden');
+  });
+
   it('a suite whose data failed to load renders the error callout', function () {
     const nodes = deriveSuite({ benchStatus: { toml: 'error' }, bench: {}, benchUi: {} }, 'toml');
     assert.match(JSON.stringify(nodes), /Data unavailable/);
@@ -171,7 +181,7 @@ describe('website boundaries — benchmark charts', function () {
   const CASES = [
     ['validate', 3], ['jsonpath', 1], ['jsonquery', 1], ['jslt', 1],
     ['jsonpointer', 1], ['jsonpatch', 1], ['toml', 2], ['markdown', 2],
-    ['mermaid', 2], ['view', 4], ['charts', 2],
+    ['mermaid', 2], ['view', 4], ['charts', 2], ['csv', 1],
   ];
   for (const [suite, minCharts] of CASES) {
     it(`the ${suite} suite renders ${minCharts}+ svg chart(s) from the published data`, function () {
