@@ -202,13 +202,8 @@ delete it or fix it.
 
 ## @jarenjs/charts
 
-- [ ] **Per-mark hover titles for the first five types** — types added after the first five carry a `<title>` per value mark (bar rects, slices, points); retrofitting the original five is a deliberate golden-fixture regeneration (and a mermaid-parity decision for pie), so it waits for that call.
-- [ ] **Sessions for the remaining streaming shapes** — `bar` (live counts/sums) is the next accumulator with an obvious incremental path; the other nine types re-render wholesale, which is correct and, at their sizes, cheap.
-- [ ] **Streaming accumulators for the new types** — the stream adapter covers `line`/`bar`/`candlestick`; a `heatmap` accumulator (live scenario counts) and a `gauge` accumulator (latest-value) are the natural next consumers of the same unified `pair` events.
-- [ ] **Tooltip interactivity beyond SVG `<title>`/CSS hover** — the app half has thinned (`eventFields` now carries pointer coordinates), so what remains is emitting bindings from chart marks and a floating-tooltip host pattern.
-- [ ] **Radial tick strategy for many-axis radars** — past ~12 axes the spoke labels crowd; an every-other-label or leader-line strategy is the fix if a consumer hits it.
-- [ ] **Sankey crossing reduction** — nodes stack in input order within a layer (like mermaid's dagre-lite, crossing minimization deferred); barycenter ordering is the known next lever.
-- [ ] **Nested treemap** — the tiles are flat `{label, value}`; one hierarchy level (group borders, group-first squarify) would cover package→module breakdowns.
+- [ ] **Sessions for the remaining nine types** — `line`, `bar` and `candlestick` patch in place; the other nine re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
+- [ ] **Deeper treemap nesting** — one hierarchy level ships (groups squarify, children squarify under a naming band). Arbitrary depth needs a recursive layout and a header budget that does not eat the leaves.
 
 ## @jarenjs/calc
 

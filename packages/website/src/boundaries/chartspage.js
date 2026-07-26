@@ -164,19 +164,33 @@ const DEMOS = [
   },
   {
     key: 'treemap',
-    blurb: 'Part-of-whole by area, squarified so tiles stay near-square — labels render inside every tile they fit, with ink picked by fill luminance.',
+    blurb: 'Part-of-whole by area, squarified so tiles stay near-square. One hierarchy level: groups squarify against each other, their children squarify under a naming band, and a group is one hue with hairlines between its members.',
     config: {
       type: 'treemap',
-      title: 'Suite time by package',
+      title: 'Suite time by package and module',
       items: [
-        { label: 'validate', value: 42 },
-        { label: 'json', value: 25 },
-        { label: 'view', value: 18 },
+        {
+          label: 'validate',
+          children: [
+            { label: 'keywords', value: 24 },
+            { label: 'compile', value: 12 },
+            { label: 'errors', value: 6 },
+          ],
+        },
+        {
+          label: 'json',
+          children: [
+            { label: 'path', value: 14 },
+            { label: 'pointer', value: 7 },
+            { label: 'patch', value: 4 },
+          ],
+        },
+        {
+          label: 'view',
+          children: [{ label: 'patch', value: 11 }, { label: 'render', value: 7 }],
+        },
         { label: 'md', value: 15 },
         { label: 'mermaid', value: 11 },
-        { label: 'charts', value: 8 },
-        { label: 'josl', value: 5 },
-        { label: 'ai', value: 3 },
       ],
     },
   },
@@ -197,7 +211,7 @@ const DEMOS = [
   },
   {
     key: 'sankey',
-    blurb: 'Value-proportional flows between layered nodes — nodes appear from the links alone, cycles are dropped, every ribbon names its flow on hover.',
+    blurb: 'Value-proportional flows between layered nodes — nodes appear from the links alone, cycles are dropped, and barycenter sweeps reorder each layer to uncross the ribbons.',
     config: {
       type: 'sankey',
       title: 'Where visits go',

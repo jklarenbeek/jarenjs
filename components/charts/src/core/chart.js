@@ -70,7 +70,7 @@ export function chartTypes() {
  *
  * @param {{type: string, title?: string, [k: string]: any}} config
  * @param {any} [data]
- * @param {{theme?: any}} [options]
+ * @param {{theme?: any, tooltip?: import('./marks.js').ChartTooltipSpec}} [options]
  * @returns {CompiledChart}
  * @throws {TypeError} On an unknown chart type
  */
@@ -81,12 +81,15 @@ export function compileChart(config, data = config, options = {}) {
   const ast = def.build(data, config);
   const theme = createTheme(options.theme);
   const hash = hashContent(stableStringify(config) ?? '');
+  // Only the render half takes options; passing the object through
+  // whole would let a `theme` member reach a type's palette options.
+  const renderOptions = options.tooltip === undefined ? undefined : { tooltip: options.tooltip };
   let vnode;
   let svg;
   return {
     ast,
     toVnode() {
-      if (vnode === undefined) vnode = def.render(ast, theme, hash);
+      if (vnode === undefined) vnode = def.render(ast, theme, hash, renderOptions);
       return vnode;
     },
     toSvgString() {

@@ -33,6 +33,9 @@ export function renderPie(ast, theme, hash) {
     palette: CATEGORICAL,
     textColor: theme.tokens.nodeText,
     sliceStroke: '#fff',
+    // A mermaid diagram's SVG is a byte-stable contract; the per-slice
+    // hover text charts adds for its own pies would break it.
+    titles: false,
   });
 }
 

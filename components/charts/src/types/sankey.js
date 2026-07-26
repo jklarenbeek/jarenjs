@@ -19,6 +19,7 @@
 import { svgRoot, textAt, coord } from '@jarenjs/view/helpers';
 import { FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
+import { normalizeTooltip, valueMark } from '../core/marks.js';
 
 /**
  * @typedef {object} SankeyNodeAST
@@ -134,6 +135,11 @@ export function buildSankeyAST(data, config = {}) {
     if (list === undefined) byLayer.set(layer[i], list = []);
     list.push(i);
   }
+  reduceCrossings(byLayer, links);
+  /** @type {Map<number, number>} node → its position within its layer */
+  const rank = new Map();
+  for (const list of byLayer.values())
+    list.forEach((node, at) => rank.set(node, at));
   let scale = Infinity;
   for (const list of byLayer.values()) {
     const total = list.reduce((s, i) => s + size[i], 0);
@@ -163,23 +169,29 @@ export function buildSankeyAST(data, config = {}) {
     }
   }
 
-  // Ribbon slots: links stack down each node face in link order.
+  // Ribbon slots: links stack down each node face ordered by where
+  // their far end sits, not by input order — the local half of crossing
+  // reduction. Two ribbons leaving one node cross each other whenever
+  // their slots and their targets disagree, and that is decided here.
   const outAt = names.map((_, i) => nodeAt[i] === -1 ? 0 : nodes[nodeAt[i]].y0);
   const inAt = names.map((_, i) => nodeAt[i] === -1 ? 0 : nodes[nodeAt[i]].y0);
-  const linkAsts = links.map((link) => {
-    const h = link.value * scale;
-    const sy0 = outAt[link.source];
-    const ty0 = inAt[link.target];
-    outAt[link.source] += h;
-    inAt[link.target] += h;
-    return {
-      source: nodeAt[link.source],
-      target: nodeAt[link.target],
-      value: link.value,
-      sy0, sy1: sy0 + h,
-      ty0, ty1: ty0 + h,
-    };
-  });
+  const sy = new Array(links.length);
+  const ty = new Array(links.length);
+  for (const at of orderedFaces(links, (l) => l.source, (l) => rank.get(l.target) ?? 0)) {
+    sy[at] = outAt[links[at].source];
+    outAt[links[at].source] += links[at].value * scale;
+  }
+  for (const at of orderedFaces(links, (l) => l.target, (l) => rank.get(l.source) ?? 0)) {
+    ty[at] = inAt[links[at].target];
+    inAt[links[at].target] += links[at].value * scale;
+  }
+  const linkAsts = links.map((link, at) => ({
+    source: nodeAt[link.source],
+    target: nodeAt[link.target],
+    value: link.value,
+    sy0: sy[at], sy1: sy[at] + link.value * scale,
+    ty0: ty[at], ty1: ty[at] + link.value * scale,
+  }));
 
   return {
     type: 'sankey',
@@ -190,18 +202,144 @@ export function buildSankeyAST(data, config = {}) {
 }
 
 /**
+ * Link indexes grouped by one endpoint and ordered by where the other
+ * endpoint sits, groups in first-appearance order. The result is a flat
+ * index list: walking it assigns every face's slots top-down.
+ * @param {{source:number,target:number,value:number}[]} links
+ * @param {(l: any) => number} faceOf the node whose face the slot is on
+ * @param {(l: any) => number} keyOf the far end's position
+ * @returns {number[]} link indexes
+ */
+function orderedFaces(links, faceOf, keyOf) {
+  /** @type {Map<number, number[]>} */
+  const faces = new Map();
+  for (let at = 0; at < links.length; at++) {
+    const face = faceOf(links[at]);
+    let list = faces.get(face);
+    if (list === undefined) faces.set(face, list = []);
+    list.push(at);
+  }
+  const out = [];
+  for (const list of faces.values()) {
+    // stable: equal far ends keep input order
+    list.sort((a, b) => keyOf(links[a]) - keyOf(links[b]));
+    out.push(...list);
+  }
+  return out;
+}
+
+/**
+ * Order the nodes inside each layer to reduce ribbon crossings, in
+ * place. The heuristic is the classic barycenter sweep: repeatedly
+ * place each node at the average position of its neighbors — value-
+ * weighted, because a thick ribbon crossing reads worse than a thin one
+ * — alternating down the layers and back up, and keeping whichever
+ * arrangement counted the fewest crossings. Input order is the starting
+ * arrangement and wins every tie, so a graph the sweeps cannot improve
+ * (and every graph with one node per layer) lays out exactly as it did
+ * before crossing reduction existed.
+ *
+ * Positions are compared as fractions of a layer's height, so a link
+ * that skips a layer is measured against the same scale as its
+ * neighbors.
+ * @param {Map<number, number[]>} byLayer layer number → node indexes
+ * @param {{source:number,target:number,value:number}[]} links
+ * @returns {void}
+ */
+function reduceCrossings(byLayer, links) {
+  const layers = [...byLayer.keys()].sort((a, b) => a - b);
+  if (layers.length < 2 || links.length < 2) return;
+
+  /** @type {Map<number, {other:number, value:number}[]>} */
+  const inbound = new Map();
+  /** @type {Map<number, {other:number, value:number}[]>} */
+  const outbound = new Map();
+  for (const link of links) {
+    (inbound.get(link.target) ?? setDefault(inbound, link.target)).push({ other: link.source, value: link.value });
+    (outbound.get(link.source) ?? setDefault(outbound, link.source)).push({ other: link.target, value: link.value });
+  }
+
+  /** Normalized position of every node in the current arrangement. */
+  const positions = () => {
+    const pos = new Map();
+    for (const l of layers) {
+      const list = byLayer.get(l);
+      for (let i = 0; i < list.length; i++)
+        pos.set(list[i], list.length === 1 ? 0.5 : i / (list.length - 1));
+    }
+    return pos;
+  };
+
+  const crossings = () => {
+    const pos = positions();
+    let count = 0;
+    for (let a = 0; a < links.length; a++) {
+      for (let b = a + 1; b < links.length; b++) {
+        const ds = pos.get(links[a].source) - pos.get(links[b].source);
+        const dt = pos.get(links[a].target) - pos.get(links[b].target);
+        if (ds * dt < 0) count++;
+      }
+    }
+    return count;
+  };
+
+  const sweep = (side) => {
+    const pos = positions();
+    for (const l of layers) {
+      const list = byLayer.get(l);
+      const key = new Map();
+      for (let i = 0; i < list.length; i++) {
+        const edges = side.get(list[i]) ?? [];
+        let weight = 0;
+        let sum = 0;
+        for (const e of edges) {
+          weight += e.value;
+          sum += e.value * pos.get(e.other);
+        }
+        // no neighbors on this side: stay where you are
+        key.set(list[i], weight === 0 ? pos.get(list[i]) : sum / weight);
+      }
+      list.sort((a, b) => key.get(a) - key.get(b));
+    }
+  };
+
+  let best = layers.map((l) => byLayer.get(l).slice());
+  let bestCount = crossings();
+  for (let pass = 0; pass < 4 && bestCount !== 0; pass++) {
+    for (const side of [inbound, outbound]) {
+      sweep(side);
+      const count = crossings();
+      if (count < bestCount) {
+        bestCount = count;
+        best = layers.map((l) => byLayer.get(l).slice());
+      }
+    }
+  }
+  layers.forEach((l, i) => byLayer.set(l, best[i]));
+}
+
+/** Seed and return an empty adjacency list. */
+function setDefault(map, key) {
+  const list = [];
+  map.set(key, list);
+  return list;
+}
+
+/**
  * Render a sankey AST to a pure-vnode SVG: categorical node bars,
  * translucent muted ribbons with flow `<title>`s, node labels beside
  * the bar on its open side.
  * @param {SankeyAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderSankeyAST(ast, theme, hash, options = {}) {
   const t = theme.tokens;
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   const width = options.width ?? 560;
   const top = ast.title ? 34 : 8;
   const pad = 8;
@@ -222,21 +360,22 @@ export function renderSankeyAST(ast, theme, hash, options = {}) {
     const x0 = X(s.x1);
     const x1 = X(target.x0);
     const mx = coord((x0 + x1) / 2);
-    children.push(['path', {
+    children.push(valueMark('path', {
       d: `M${x0},${Y(link.sy0)} C${mx},${Y(link.sy0)} ${mx},${Y(link.ty0)} ${x1},${Y(link.ty0)} `
         + `L${x1},${Y(link.ty1)} C${mx},${Y(link.ty1)} ${mx},${Y(link.sy1)} ${x0},${Y(link.sy1)} Z`,
       fill: t.muted, 'fill-opacity': 0.3, class: 'chart-sankey-link',
-    }, ['title', {}, `${s.name} → ${target.name}: ${link.value}`]]);
+    }, tooltip, `${s.name} → ${target.name}: ${link.value}`,
+    { type: 'sankey', source: s.name, target: target.name, value: link.value }));
   }
 
   for (let i = 0; i < ast.nodes.length; i++) {
     const node = ast.nodes[i];
-    children.push(['rect', {
+    children.push(valueMark('rect', {
       x: X(node.x0), y: Y(node.y0),
       width: coord((node.x1 - node.x0) * plotW),
       height: coord(Math.max(1, (node.y1 - node.y0) * plotH)),
       fill: seriesColor(i, palette), class: 'chart-sankey-node',
-    }, ['title', {}, node.name]]);
+    }, tooltip, node.name, { type: 'sankey', node: node.name }));
     const onLeftHalf = (node.x0 + node.x1) / 2 < 0.5;
     children.push(textAt(
       onLeftHalf ? X(node.x1) + 5 : X(node.x0) - 5,

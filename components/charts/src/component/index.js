@@ -21,6 +21,10 @@ import { createChartSession } from '../core/session.js';
 /**
  * @typedef {object} ChartComponentOptions
  * @property {any} [theme] theme name or override object
+ * @property {import('../core/marks.js').ChartTooltipSpec} [tooltip] pointer
+ *  bindings emitted from every value mark, for a floating-tooltip host
+ *  (see {@link tooltipView}); absent leaves charts on their native
+ *  `<title>` hover only
  */
 /**
  * @typedef {object} ChartComponent
@@ -45,7 +49,7 @@ import { createChartSession } from '../core/session.js';
  * @returns {ChartComponent}
  */
 export function createChartComponent(options = {}) {
-  const compileOptions = { theme: options.theme };
+  const compileOptions = { theme: options.theme, tooltip: options.tooltip };
 
   /** Data-identity memo; inner maps key on the config hash. */
   /** @type {WeakMap<object, Map<string, any>>} */
@@ -83,4 +87,37 @@ export function createChartComponent(options = {}) {
     // wiring (timers, sockets) belongs to the host boundary, not here.
     effects: {},
   };
+}
+
+/**
+ * The floating-tooltip host: the vnode for the box a `tooltip` binding
+ * asks for. The mark dispatches `{ text, … }` plus the pointer's
+ * `clientX`/`clientY`; an action stores that slice in the state and the
+ * viewModel projects it through here.
+ *
+ * Positioned `fixed` at the viewport coordinates the event carried, so
+ * it needs no measurement and no layout read — the stylesheet's
+ * `translate` lifts it clear of the pointer. `null` (the leave action's
+ * state) renders nothing.
+ *
+ * @example
+ * // viewModel: (state) => ({ ...state, tip: tooltipView(state.tip) })
+ * // action:    { "tip": { "text": "$payload.text",
+ * //                       "x": "$event.clientX", "y": "$event.clientY" } }
+ *
+ * @param {{text?: string, x?: number, y?: number}|null|undefined} tip
+ * @returns {any} a `<div class="chart-tooltip">` vnode, or null
+ */
+export function tooltipView(tip) {
+  if (tip === null || typeof tip !== 'object') return null;
+  const text = tip.text;
+  if (typeof text !== 'string' || text === '') return null;
+  return ['div', {
+    class: 'chart-tooltip',
+    role: 'status',
+    style: {
+      left: `${Number.isFinite(tip.x) ? tip.x : 0}px`,
+      top: `${Number.isFinite(tip.y) ? tip.y : 0}px`,
+    },
+  }, text];
 }

@@ -20,6 +20,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { FS_TICK, toneColor, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL } from '../core/palette.js';
+import { normalizeTooltip, markProps } from '../core/marks.js';
 
 /**
  * @typedef {object} GaugeAST
@@ -70,12 +71,15 @@ export function buildGaugeAST(data, config = {}) {
  * @param {GaugeAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[]}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[],
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderGaugeAST(ast, theme, hash, options = {}) {
   const t = theme.tokens;
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
+  const valueText = formatTickValue(ast.value) + (ast.unit ? ` ${ast.unit}` : '');
   const R = 110;
   const stroke = 18;
   const pad = 46;
@@ -103,8 +107,15 @@ export function renderGaugeAST(ast, theme, hash, options = {}) {
   children.push(svgPath(arcPath(0, 1),
     { fill: 'none', stroke: t.grid, 'stroke-width': stroke, class: 'chart-gauge-track' }));
   if (ast.frac > 0) {
-    children.push(svgPath(arcPath(0, ast.frac),
-      { fill: 'none', stroke: toneColor(theme, ast.tone, 0, palette), 'stroke-width': stroke, class: 'chart-gauge-fill' }));
+    // The fill arc takes the tooltip bindings but no `<title>`: this
+    // chart already spells its value out in 30px type below, and with
+    // no chart title the root's aria-label is that same value.
+    children.push(['path', markProps({
+      d: arcPath(0, ast.frac),
+      fill: 'none', stroke: toneColor(theme, ast.tone, 0, palette),
+      'stroke-width': stroke, class: 'chart-gauge-fill',
+    }, tooltip, valueText,
+    { type: 'gauge', value: ast.value, min: ast.min, max: ast.max, unit: ast.unit })]);
   }
 
   for (const tick of ast.ticks) {
@@ -118,7 +129,6 @@ export function renderGaugeAST(ast, theme, hash, options = {}) {
   }
 
   // The headline figure inside the dial's mouth.
-  const valueText = formatTickValue(ast.value) + (ast.unit ? ` ${ast.unit}` : '');
   children.push(textAt(cx, cy - 8, valueText, 30,
     { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.text, class: 'chart-gauge-value' }));
 

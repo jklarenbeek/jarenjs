@@ -21,13 +21,15 @@ import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, niceStep, formatTickValue } from '../core/axis.js';
 import { FS_TICK, FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
+import { normalizeTooltip, valueMark } from '../core/marks.js';
 
 /**
  * @typedef {object} RadarAST
  * @property {'radar'} type
  * @property {string|null} title
  * @property {number} top value at the outer ring
- * @property {{label: string, angle: number}[]} axes
+ * @property {{label: string, angle: number, labeled: boolean}[]} axes
+ * @property {number} labelEvery spoke-label stride (1 = label every axis)
  * @property {{r: number, label: string}[]} rings tick fractions (0..1]
  * @property {{name: string, points: ({angle: number, r: number}|null)[]}[]} series
  * @property {{name: string, swatch: number}[]|null} legend
@@ -35,6 +37,8 @@ import { CATEGORICAL, seriesColor } from '../core/palette.js';
 
 /**
  * Build the geometry-free radar AST.
+ * `config.labelEvery` overrides the spoke-label stride; by default it
+ * is derived from the axis count (see {@link radarLabelEvery}).
  * @param {any} data
  * @param {any} [config]
  * @returns {RadarAST}
@@ -75,16 +79,38 @@ export function buildRadarAST(data, config = {}) {
     }),
   }));
 
+  const labelEvery = Number.isInteger(config.labelEvery) && config.labelEvery > 0
+    ? config.labelEvery
+    : radarLabelEvery(n);
+
   return {
     type: 'radar',
     title: config.title ?? null,
     top,
-    axes: axes.map((label, i) => ({ label, angle: angleOf(i) })),
+    axes: axes.map((label, i) => ({ label, angle: angleOf(i), labeled: i % labelEvery === 0 })),
+    labelEvery,
     rings,
     series,
     legend: series.length > 1 ? series.map((s, i) => ({ name: s.name, swatch: i })) : null,
   };
 }
+
+/**
+ * How many axes apart the spoke labels stand. A radar's labels sit on
+ * a circle, so their room shrinks as the axis count grows while the
+ * radius stays fixed — past a dozen axes the text collides. The stride
+ * keeps at most {@link LABEL_BUDGET} labels drawn, whatever the axis
+ * count; every spoke is still drawn, and every axis is still named by
+ * the `<title>` on its spoke, so thinning costs no information.
+ * @param {number} axisCount
+ * @returns {number} a stride ≥ 1
+ */
+function radarLabelEvery(axisCount) {
+  return axisCount <= LABEL_BUDGET ? 1 : Math.ceil(axisCount / LABEL_BUDGET);
+}
+
+/** The most spoke labels a fixed-radius radar reads cleanly with. */
+const LABEL_BUDGET = 12;
 
 /**
  * Render a radar AST to a pure-vnode SVG: ring polygons and spokes for
@@ -93,14 +119,19 @@ export function buildRadarAST(data, config = {}) {
  * @param {RadarAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[]}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[],
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderRadarAST(ast, theme, hash, options = {}) {
   const t = theme.tokens;
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   const R = 120;
-  const labelPad = Math.ceil(Math.max(40, ...ast.axes.map((a) => textWidth(a.label, FS_LABEL) + 12)));
+  // Only drawn labels claim margin; a thinned radar is not padded for
+  // text it does not render.
+  const labelPad = Math.ceil(Math.max(40,
+    ...ast.axes.filter((a) => a.labeled).map((a) => textWidth(a.label, FS_LABEL) + 12)));
   const cx = labelPad + R;
   const top = (ast.title ? 40 : 20) + FS_LABEL;
   const cy = top + R;
@@ -132,8 +163,12 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
       { fill: t.muted, class: 'chart-tick' }));
   }
   for (const axis of ast.axes) {
-    children.push(svgLine(cx, cy, px(axis.angle, 1), py(axis.angle, 1),
-      { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' }));
+    const spoke = svgLine(cx, cy, px(axis.angle, 1), py(axis.angle, 1),
+      { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' });
+    // A spoke whose label was thinned away carries the name as hover
+    // text instead, so the thinning hides text, never information.
+    children.push(axis.labeled ? spoke : [...spoke, ['title', {}, axis.label]]);
+    if (!axis.labeled) continue;
     const anchor = anchorForAngle(axis.angle);
     const c = Math.cos(axis.angle);
     const s = Math.sin(axis.angle);
@@ -153,11 +188,11 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
       if (p !== null) pts.push(`${px(p.angle, p.r)},${py(p.angle, p.r)}`);
     }
     if (pts.length === 0) continue;
-    children.push(['polygon', {
+    children.push(valueMark('polygon', {
       points: pts.join(' '),
       fill: color, 'fill-opacity': 0.15,
       stroke: color, 'stroke-width': 2, class: 'chart-radar-series',
-    }, ['title', {}, s.name]]);
+    }, tooltip, s.name, { type: 'radar', series: s.name }));
     for (const p of s.points) {
       if (p !== null) {
         children.push(['circle', {

@@ -37,6 +37,7 @@ import {
   normalizeDomainPolicy, resolveWindowX, resolveStepY, resolveStepYLog, resolvePinnedY,
 } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
+import { normalizeTooltip, markProps } from '../core/marks.js';
 
 /**
  * @typedef {object} LineAST
@@ -231,20 +232,42 @@ export function buildLineAST(data, config = {}) {
  *  next appended token is an `L`, not an `M`)
  * @property {any[]} dots marker circle vnodes (empty when markers off)
  * @property {string} color the series color
+ * @property {string} name the series name (its hover text)
  */
 
 /**
- * Render one series as its `<g>` group: the polyline path (when it has
- * one) followed by its marker dots.
- * @param {{points: ({u:number,v:number}|null)[]}} s
+ * The children of one series `<g>`: the hover `<title>`, the polyline
+ * path (when it has one), then the marker dots. The series — not the
+ * individual sample — is the value mark here: a live line carries tens
+ * of thousands of vertices, and a `<title>` per vertex would put a
+ * label allocation on the streaming path for text no reader can aim at.
+ * Shared with the incremental session, which rebuilds these children in
+ * place, so the two cannot drift.
+ * @param {string} name @param {string} d @param {any[]} dots @param {string} color
+ * @returns {any[]}
+ */
+export function lineSeriesChildren(name, d, dots, color) {
+  const children = [];
+  if (name !== '') children.push(['title', {}, name]);
+  if (d !== '')
+    children.push(svgPath(d, { stroke: color, 'stroke-width': 2, fill: 'none', class: 'chart-line' }));
+  children.push(...dots);
+  return children;
+}
+
+/**
+ * Render one series as its `<g>` group.
+ * @param {{name?: string, points: ({u:number,v:number}|null)[]}} s
  * @param {number} si series index
  * @param {{x:number,y:number,w:number,h:number}} plot
  * @param {readonly string[]} palette
  * @param {boolean} markers
+ * @param {import('../core/marks.js').ChartTooltip|null} [tooltip]
  * @returns {LineSeriesRender}
  */
-export function lineSeriesRender(s, si, plot, palette, markers) {
+export function lineSeriesRender(s, si, plot, palette, markers, tooltip = null) {
   const color = seriesColor(si, palette);
+  const name = String(s.name ?? '');
   const pixels = s.points.map((p) => p === null ? null : {
     x: coord(plot.x + p.u * plot.w),
     y: coord(plot.y + (1 - p.v) * plot.h),
@@ -256,15 +279,15 @@ export function lineSeriesRender(s, si, plot, palette, markers) {
       if (p !== null) dots.push(circle(p.x, p.y, 2.5, { fill: color, class: 'chart-dot' }));
     }
   }
-  const children = d !== ''
-    ? [svgPath(d, { stroke: color, 'stroke-width': 2, fill: 'none', class: 'chart-line' }), ...dots]
-    : [...dots];
+  const props = markProps({ key: `ls${si}`, class: 'chart-series' },
+    tooltip, name, { type: 'line', series: name });
   return {
-    group: ['g', { key: `ls${si}`, class: 'chart-series' }, ...children],
+    group: ['g', props, ...lineSeriesChildren(name, d, dots, color)],
     d,
     pen: s.points.length !== 0 && s.points[s.points.length - 1] !== null,
     dots,
     color,
+    name,
   };
 }
 
@@ -275,12 +298,14 @@ export function lineSeriesRender(s, si, plot, palette, markers) {
  * @param {LineAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {{svg: any, plot: {x:number,y:number,w:number,h:number},
  *   chromeLen: number, series: LineSeriesRender[]}}
  */
 export function buildLineRender(ast, theme, hash, options = {}) {
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   const frame = cartesianFrame({
     title: ast.title,
     legend: ast.legend,
@@ -296,7 +321,7 @@ export function buildLineRender(ast, theme, hash, options = {}) {
   const children = frame.children;
   const series = [];
   for (let si = 0; si < ast.series.length; si++) {
-    const parts = lineSeriesRender(ast.series[si], si, plot, palette, ast.markers);
+    const parts = lineSeriesRender(ast.series[si], si, plot, palette, ast.markers, tooltip);
     series.push(parts);
     children.push(parts.group);
   }

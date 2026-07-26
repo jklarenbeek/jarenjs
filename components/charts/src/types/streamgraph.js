@@ -22,6 +22,7 @@ import { scaleLinear } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
+import { normalizeTooltip, valueMark } from '../core/marks.js';
 
 /**
  * @typedef {object} StreamgraphAST
@@ -111,11 +112,13 @@ export function buildStreamgraphAST(data, config = {}) {
  * @param {StreamgraphAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderStreamgraphAST(ast, theme, hash, options = {}) {
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   const frame = cartesianFrame({
     title: ast.title,
     legend: ast.legend,
@@ -142,12 +145,12 @@ export function renderStreamgraphAST(ast, theme, hash, options = {}) {
       const p = layer.points[k];
       d += `L${px(p)},${py(p.lo)} `;
     }
-    children.push(['path', {
+    children.push(valueMark('path', {
       d: d.trimEnd() + ' Z',
       fill: seriesColor(si, palette),
       stroke: theme.tokens.sliceStroke, 'stroke-width': 1,
       class: 'chart-stream-band',
-    }, ['title', {}, layer.name]]);
+    }, tooltip, layer.name, { type: 'streamgraph', series: layer.name }));
   }
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-streamgraph-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'stream-') + hash);

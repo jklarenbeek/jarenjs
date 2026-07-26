@@ -8,8 +8,9 @@
  * — charts never imports mermaid (the dependency arrow is one-way).
  */
 
-import { svgRoot, rect, path, group, textAt, num, textWidth } from '@jarenjs/view/helpers';
+import { svgRoot, rect, group, textAt, num, textWidth } from '@jarenjs/view/helpers';
 import { CATEGORICAL } from '../core/palette.js';
+import { normalizeTooltip, markProps } from '../core/marks.js';
 
 /**
  * @typedef {object} PieSliceAST
@@ -76,6 +77,13 @@ export function buildPieAST(data, config = {}) {
  * @property {readonly string[]} [palette] slice colors
  * @property {string} [textColor] title/legend text fill
  * @property {string} [sliceStroke] slice separator stroke
+ * @property {boolean} [titles] per-slice hover `<title>` (default true).
+ *  `@jarenjs/mermaid` turns it off: a mermaid pie is a *diagram*, and
+ *  its emitted SVG is a byte-stable contract that hover text would
+ *  break — the delegation exists to share geometry, not to change what
+ *  mermaid renders.
+ * @property {import('../core/marks.js').ChartTooltipSpec} [tooltip]
+ *  pointer bindings for a floating-tooltip host
  */
 
 /**
@@ -85,7 +93,8 @@ export function buildPieAST(data, config = {}) {
  * emitted by the same wedge template as before the donut variant
  * existed — solid-pie output is byte-stable, which is what keeps the
  * mermaid delegation byte-identical; the annular geometry lives
- * entirely in the other branch.
+ * entirely in the other branch. Every slice carries a label/value
+ * `<title>` unless `options.titles` is false (mermaid's opt-out).
  * @param {PieAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash content hash for the vnode key
@@ -100,6 +109,8 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   const palette = options.palette ?? CATEGORICAL;
   const textColor = options.textColor ?? theme.tokens.text;
   const sliceStroke = options.sliceStroke ?? theme.tokens.sliceStroke;
+  const titles = options.titles !== false;
+  const tooltip = normalizeTooltip(options.tooltip);
   const fs = 14;
   const R = 130;
   const cx = R + 20;
@@ -121,8 +132,11 @@ export function renderPieAST(ast, theme, hash, options = {}) {
         + `L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} `
         + `L${num(cx + r * Math.cos(s.end))},${num(cy + r * Math.sin(s.end))} `
         + `A${num(r)},${num(r)} 0 ${large} 0 ${num(cx + r * Math.cos(s.start))},${num(cy + r * Math.sin(s.start))} Z`;
-    slices.push(path(d,
-      { fill: color, stroke: sliceStroke, 'stroke-width': 1, class: sliceClass }));
+    const text = `${s.label}: ${s.value} (${(s.frac * 100).toFixed(1)}%)`;
+    const props = markProps(
+      { d, fill: color, stroke: sliceStroke, 'stroke-width': 1, class: sliceClass },
+      tooltip, text, { type: 'pie', label: s.label, value: s.value });
+    slices.push(titles ? ['path', props, ['title', {}, text]] : ['path', props]);
   }
 
   // Legend.

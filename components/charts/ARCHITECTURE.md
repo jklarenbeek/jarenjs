@@ -41,11 +41,37 @@ variant included — `bar`, `line`, `scatter`, `candlestick`) plus
 `radar`, `gauge`, `boxplot`, `heatmap`, `treemap`, `streamgraph` and
 `sankey`. Cartesian types share `cartesianFrame`; `radar`/`gauge` are
 polar around their own centers; `treemap`/`sankey` lay out in the unit
-square with `y` growing downward (no axes — reading order wins). Types
-added after the first five give every value-carrying mark a `<title>`
-child (native SSR-safe hover text); the first five keep their
-byte-stable output, so per-mark titles there would be a deliberate
-golden-fixture regeneration.
+square with `y` growing downward (no axes — reading order wins).
+
+## Value marks (`src/core/marks.js`)
+
+Every value-carrying mark emits a `<title>` child holding its hover
+text — native, SSR-safe, and working in a static `toSvgString()`
+document with nothing else present, which is why it is unconditional.
+The text names the datum, never the axis's rounded ticks: on a log axis
+a pixel cannot be read back to a value at all.
+
+Reporting the datum is why the ASTs of the original five carry `label`,
+`name` and `value` on a bar, the raw `(x, y)` on a scatter point and
+the raw OHLC prices on a candle. A unit-space position is clamped and
+scaled — enough to draw the mark, not enough to name it.
+
+Two marks deliberately differ. A **line series** takes one `<title>` on
+its `<g>` rather than one per vertex: a live line carries tens of
+thousands of vertices, and no reader can aim at one. A **gauge** takes
+none at all — it already prints its value in 30px type, and with no
+chart title the root's `aria-label` is that same value.
+
+`options.tooltip` layers pointer **bindings** (VIEW-FORMAT §4) onto the
+same marks for a host that wants a positioned box instead: an action
+name, the mark descriptor as the payload, `clientX`/`clientY` as
+requested `$event` fields. The engine names an action and never calls
+one, and `renderToString` drops `on`, so the SSR bytes are identical
+either way. `tooltipView` in the component layer is the floating host.
+
+`@jarenjs/mermaid` renders its pie with `titles: false`. A mermaid
+diagram's SVG is a byte-stable contract; the delegation exists to share
+the geometry, not to change what mermaid draws.
 
 ## Scales and axes (`src/core/`)
 
@@ -87,28 +113,31 @@ palette constant or a theme token.
 ## Incremental sessions (`src/core/session.js`)
 
 `createChartSession` is the O(change) counterpart to `compileChart`'s
-wholesale pipeline, for `line` and `candlestick`. Three properties make
-it sound rather than merely fast:
+wholesale pipeline, for `line`, `bar` and `candlestick`. Three
+properties make it sound rather than merely fast:
 
 1. **Stillness is tested exactly, never guessed.** The session
    re-resolves the scale domains from the updated extremes using the
    *same exported helpers the wholesale build uses*
-   (`scanLineExtremes`/`resolveLineDomains`, `scanCandleExtremes`/
-   `resolveCandleDomains`) and compares against the AST's recorded
-   `domain`. One implementation of the bounds decision, so the two
-   paths cannot drift.
-2. **Anything unclassifiable rebuilds.** Only in-place point traffic
-   (line appends/evictions, candle upserts) is incremental. A moved
-   domain, a new series, a candle count change (band widths shift), a
-   reset, or an op shape the session does not recognize all fall back
-   to a wholesale rebuild — reported as `mode: 'rebuilt'`.
+   (`scanLineExtremes`/`resolveLineDomains`, `scanBarExtremes`/
+   `resolveBarDomains`, `scanCandleExtremes`/`resolveCandleDomains`)
+   and compares against the AST's recorded `domain`. One implementation
+   of the bounds decision, so the two paths cannot drift.
+2. **Anything unclassifiable rebuilds.** Only in-place mark traffic
+   (line appends/evictions, bar value updates, candle upserts) is
+   incremental. A moved domain, a new series or category, a candle
+   count change (band widths shift), a value crossing zero (a rect
+   appears or disappears, so every later child's index moves), a
+   stacked bar chart (one value moves every bar above it), a reset, or
+   an op shape the session does not recognize all fall back to a
+   wholesale rebuild — reported as `mode: 'rebuilt'`.
 3. **Untouched output keeps its references.** Each series renders as
-   one `<g class="chart-series">` and each candle as one keyed
-   `<g class="chart-candle">`, so a still frame replaces exactly the
-   touched groups in a shallow-copied root; every sibling is the same
-   array reference, which the view patcher skips in O(1) (VIEW-FORMAT
-   §5.1). A line append also extends the path `d` string by one token
-   instead of re-joining every point.
+   one `<g class="chart-series">`, each candle as one keyed
+   `<g class="chart-candle">`, each bar as one `<rect>`, so a still
+   frame replaces exactly the touched marks in a shallow-copied root;
+   every sibling is the same array reference, which the view patcher
+   skips in O(1) (VIEW-FORMAT §5.1). A line append also extends the
+   path `d` string by one token instead of re-joining every point.
 
 Domain-stability policies (`src/core/domain.js`) are what make ticks
 still often enough to matter: quantized sliding windows and pinned or
@@ -145,6 +174,16 @@ matching (`recordPath`); the two `recordBoundary` modes map onto the
 two streaming shapes (incremental document vs. message feed). Snapshot
 objects from `getData()` are fresh per call on purpose: the component's
 identity-keyed memo then re-renders exactly once per snapshot.
+
+The five accumulators are one shape apart from each other: `bar` counts
+or sums under one grouping key, `heatmap` under two (`xField` is the
+column, `seriesField` the row), `line` keeps a ring buffer per series,
+`candlestick` keys on open time, and `gauge` keeps only the newest
+reading. Absence is `null` wherever it can happen — an unmeasured
+heatmap cell, a gauge with no reading yet — because zero is a claim and
+neither is making it. The heatmap's matrix stays rectangular as it
+grows, so a new column widens every existing row; its change ops report
+exactly that, which is what keeps replay equivalence exact.
 
 The benchmark transforms (`src/transforms/benchmark-adapter.js`) are
 the static counterpart: pure functions from the website's published

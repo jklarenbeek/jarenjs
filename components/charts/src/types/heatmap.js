@@ -22,6 +22,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { SEQUENTIAL, sequentialColor } from '../core/palette.js';
+import { normalizeTooltip, valueMark } from '../core/marks.js';
 
 /**
  * @typedef {object} HeatCellAST
@@ -125,11 +126,13 @@ export function buildHeatmapAST(data, config = {}) {
  * @param {HeatmapAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, ramp?: readonly string[], width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, ramp?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderHeatmapAST(ast, theme, hash, options = {}) {
   const ramp = options.ramp ?? SEQUENTIAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   // The ramp key rides the frame's legend mechanism: five sequential
   // stops as swatches, the extent values as the end labels.
   const rampStops = [0, 0.25, 0.5, 0.75, 1].map((t) => sequentialColor(t, ramp));
@@ -157,12 +160,15 @@ export function renderHeatmapAST(ast, theme, hash, options = {}) {
     const y = plot.y + (1 - cell.v1) * plot.h + inset;
     const w = (cell.u1 - cell.u0) * plot.w - 2 * inset;
     const h = (cell.v1 - cell.v0) * plot.h - 2 * inset;
-    children.push(['rect', {
+    children.push(valueMark('rect', {
       x: coord(x), y: coord(y),
       width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
       fill: sequentialColor(cell.t, ramp), class: 'chart-heat-cell',
-    }, ['title', {},
-      `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${formatTickValue(cell.value)}`]]);
+    }, tooltip,
+    `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${formatTickValue(cell.value)}`,
+    {
+      type: 'heatmap', x: ast.xLabels[cell.xi], y: ast.yLabels[cell.yi], value: cell.value,
+    }));
   }
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-heatmap-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'heat-') + hash);

@@ -9,12 +9,13 @@
  *              xLabel?, yLabel? }
  */
 
-import { svgRoot, line as svgLine, circle, textAt, coord } from '@jarenjs/view/helpers';
+import { svgRoot, line as svgLine, textAt, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog } from '../core/scale.js';
 import { axisTicksLinear, axisTicksLog, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart, FS_TICK } from '../core/cartesian.js';
 import { CATEGORICAL } from '../core/palette.js';
+import { normalizeTooltip, valueMark } from '../core/marks.js';
 
 /**
  * @typedef {object} ScatterAST
@@ -22,7 +23,8 @@ import { CATEGORICAL } from '../core/palette.js';
  * @property {string|null} title
  * @property {{ticks: {pos:number,label:string}[], label: string|null}} x
  * @property {{ticks: {pos:number,label:string}[], label: string|null}} y
- * @property {{u:number,v:number,tone:'win'|'loss'|null}[]} points
+ * @property {{u:number,v:number,tone:'win'|'loss'|null,x:number,y:number}[]} points
+ *  unit position plus the raw sample the hover text reports
  * @property {{v: number, label: string|null}|null} ref
  */
 
@@ -59,7 +61,7 @@ export function buildScatterAST(data, config = {}) {
     const u = xScale(p.x);
     const v = yScale(p.y);
     if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
-    points.push({ u: clamp01(u), v: clamp01(v), tone: p.tone ?? null });
+    points.push({ u: clamp01(u), v: clamp01(v), tone: p.tone ?? null, x: p.x, y: p.y });
   }
 
   const ref = typeof config.refY === 'number' && Number.isFinite(yScale(config.refY))
@@ -97,15 +99,20 @@ function axisFor(values, log) {
 }
 
 /**
- * Render a scatter AST to a pure-vnode SVG.
+ * Render a scatter AST to a pure-vnode SVG. Each dot carries its raw
+ * `(x, y)` as a `<title>`: on a log axis a pixel position is not
+ * readable back to a value, so the hover text is the only honest way to
+ * name the sample.
  * @param {ScatterAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderScatterAST(ast, theme, hash, options = {}) {
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   const frame = cartesianFrame({
     title: ast.title,
     legend: null,
@@ -128,11 +135,12 @@ export function renderScatterAST(ast, theme, hash, options = {}) {
     }
   }
   for (const p of ast.points) {
-    children.push(circle(
-      coord(plot.x + p.u * plot.w),
-      coord(plot.y + (1 - p.v) * plot.h),
-      3,
-      { fill: toneColor(theme, p.tone, 0, palette), 'fill-opacity': 0.75, class: 'chart-dot' }));
+    children.push(valueMark('circle', {
+      cx: coord(plot.x + p.u * plot.w),
+      cy: coord(plot.y + (1 - p.v) * plot.h),
+      r: 3,
+      fill: toneColor(theme, p.tone, 0, palette), 'fill-opacity': 0.75, class: 'chart-dot',
+    }, tooltip, `(${p.x}, ${p.y})`, { type: 'scatter', x: p.x, y: p.y, tone: p.tone }));
   }
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-scatter-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'scatter-') + hash);

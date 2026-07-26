@@ -115,6 +115,7 @@ describe('mermaid delegation', function () {
       palette: CATEGORICAL,
       textColor: mermaidTheme().tokens.nodeText,
       sliceStroke: '#fff',
+      titles: false,
     });
     assert.equal(renderToString(chartsVnode), mermaidSvg);
   });

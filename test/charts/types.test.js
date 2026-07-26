@@ -72,6 +72,38 @@ describe('radar AST', function () {
     }).toSvgString();
     assert.match(svg, /<circle[^>]*class="chart-grid"/);
   });
+
+  it('labels every axis up to a dozen, then thins to a stride', function () {
+    const axesOf = (n) => Array.from({ length: n }, (_, i) => `axis${i}`);
+    assert.equal(buildRadarAST({ axes: axesOf(12) }, {}).labelEvery, 1);
+    assert.equal(buildRadarAST({ axes: axesOf(13) }, {}).labelEvery, 2);
+    assert.equal(buildRadarAST({ axes: axesOf(24) }, {}).labelEvery, 2);
+    assert.equal(buildRadarAST({ axes: axesOf(30) }, {}).labelEvery, 3);
+    const many = buildRadarAST({ axes: axesOf(30) }, {});
+    assert.equal(many.axes.filter((a) => a.labeled).length, 10);
+    assert.equal(many.axes[0].labeled, true);
+    assert.equal(many.axes[1].labeled, false);
+  });
+
+  it('config.labelEvery overrides the derived stride', function () {
+    const ast = buildRadarAST({ axes: ['a', 'b', 'c', 'd'] }, { labelEvery: 2 });
+    assert.deepEqual(ast.axes.map((a) => a.labeled), [true, false, true, false]);
+    // hostile strides fall back to the derived one
+    for (const labelEvery of [0, -1, 1.5, 'two', null])
+      assert.equal(buildRadarAST({ axes: ['a', 'b'] }, { labelEvery }).labelEvery, 1);
+  });
+
+  it('a thinned axis keeps its name as spoke hover text', function () {
+    const axes = Array.from({ length: 20 }, (_, i) => `axis${i}`);
+    const svg = compileChart({
+      type: 'radar', axes, series: [{ name: 's', values: axes.map(() => 1) }],
+    }).toSvgString();
+    assert.match(svg, /class="chart-axis"><title>axis1<\/title>/); // thinned away, still named
+    assert.match(svg, /class="chart-axis-label">axis0</); // drawn as a label
+    assert.doesNotMatch(svg, /class="chart-axis-label">axis1</);
+    assert.equal((svg.match(/class="chart-axis-label"/g) ?? []).length, 10);
+    assert.ok(!svg.includes('NaN'));
+  });
 });
 
 describe('gauge AST', function () {
@@ -271,6 +303,61 @@ describe('treemap AST', function () {
     assert.ok(!svg.includes('NaN'));
   });
 
+  it('one hierarchy level: groups squarify, children squarify inside them', function () {
+    const ast = buildTreemapAST({
+      items: [
+        { label: 'validate', children: [{ label: 'keywords', value: 30 }, { label: 'compile', value: 20 }] },
+        { label: 'json', children: [{ label: 'path', value: 25 }, { label: 'pointer', value: 5 }] },
+      ],
+    }, { type: 'treemap' });
+    assert.equal(ast.total, 80);
+    assert.deepEqual(ast.groups.map((g) => [g.label, g.value]), [['validate', 50], ['json', 30]]);
+    let groupArea = 0;
+    for (const group of ast.groups) groupArea += (group.x1 - group.x0) * (group.y1 - group.y0);
+    assert.ok(Math.abs(groupArea - 1) < 1e-9);
+    for (const tile of ast.tiles) {
+      const group = ast.groups.find((g) => g.label === tile.group);
+      assert.ok(tile.x0 >= group.x0 - 1e-9 && tile.x1 <= group.x1 + 1e-9);
+      // children start below the group's naming band
+      assert.ok(tile.y0 >= group.y0 + group.header - 1e-9 && tile.y1 <= group.y1 + 1e-9);
+    }
+    // tiles are proportional WITHIN their group (the header is the group's)
+    const group = ast.groups[0];
+    const inner = (group.x1 - group.x0) * (group.y1 - group.y0 - group.header);
+    const kids = ast.tiles.filter((t) => t.group === 'validate');
+    assert.ok(Math.abs((kids[0].x1 - kids[0].x0) * (kids[0].y1 - kids[0].y0) / inner - 30 / 50) < 1e-9);
+  });
+
+  it('a group takes one hue; a childless item becomes a group of one', function () {
+    const ast = buildTreemapAST({
+      items: [
+        { label: 'pkg', children: [{ label: 'a', value: 2 }, { label: 'b', value: 1 }] },
+        { label: 'loose', value: 4 },
+      ],
+    }, { type: 'treemap' });
+    assert.deepEqual(ast.tiles.map((t) => [t.group, t.label, t.swatch]),
+      [['loose', 'loose', 0], ['pkg', 'a', 1], ['pkg', 'b', 1]]);
+  });
+
+  it('renders group names and titles that spell out the path', function () {
+    const svg = compileChart({
+      type: 'treemap', title: 'Nested',
+      items: [{ label: 'validate', children: [{ label: 'keywords', value: 30 }, { label: 'compile', value: 20 }] }],
+    }).toSvgString();
+    assert.match(svg, /chart-treemap-group/);
+    assert.match(svg, />validate \(100\.0%\)</);
+    assert.match(svg, /<title>validate \/ keywords: 30 \(60\.0%\)<\/title>/);
+    assert.ok(!svg.includes('NaN'));
+  });
+
+  it('a flat treemap keeps its old shape: no groups, no seams', function () {
+    const ast = buildTreemapAST({ items: [{ label: 'a', value: 1 }] }, { type: 'treemap' });
+    assert.deepEqual(ast.groups, []);
+    assert.equal(ast.tiles[0].group, null);
+    assert.doesNotMatch(compileChart({ type: 'treemap', items: [{ label: 'a', value: 1 }] }).toSvgString(),
+      /chart-treemap-tile[^>]*stroke=/);
+  });
+
   it('inkFor flips between dark and light ink at the luminance threshold', function () {
     assert.equal(inkFor('#f59e0b'), '#1f2020'); // amber is light
     assert.equal(inkFor('#1e40af'), '#ffffff'); // deep blue is dark
@@ -382,6 +469,33 @@ describe('sankey AST', function () {
     }, { type: 'sankey' });
     assert.equal(ast.links.length, 1);
     assert.equal(ast.nodes[ast.links[0].target].name, 'y');
+  });
+
+  it('reorders a layer to uncross its ribbons', function () {
+    // as declared, a→y and b→x cross; barycenter ordering swaps x and y
+    const ast = buildSankeyAST({
+      nodes: ['a', 'b', 'x', 'y'],
+      links: [{ source: 'a', target: 'y', value: 5 }, { source: 'b', target: 'x', value: 5 }],
+    }, { type: 'sankey' });
+    assert.deepEqual(ast.nodes.map((n) => n.name), ['a', 'b', 'y', 'x']);
+    for (const link of ast.links)
+      assert.ok(Math.abs(link.sy0 - link.ty0) < 1e-9, 'each ribbon runs straight across');
+  });
+
+  it('an already-uncrossed graph keeps its input order', function () {
+    const ast = buildSankeyAST({ links: LINKS }, { type: 'sankey' });
+    assert.deepEqual(ast.nodes.map((n) => n.name), ['in1', 'in2', 'mid', 'out']);
+  });
+
+  it('ribbons stack down a face by where they land, not by input order', function () {
+    // the link to the LOWER target is declared first; it must sit lower
+    const ast = buildSankeyAST({
+      nodes: ['h', 'up', 'down'],
+      links: [{ source: 'h', target: 'down', value: 1 }, { source: 'h', target: 'up', value: 1 }],
+    }, { type: 'sankey' });
+    const [toDown, toUp] = ast.links;
+    assert.equal(ast.nodes[toUp.target].name, 'up');
+    assert.ok(toUp.sy0 < toDown.sy0);
   });
 
   it('survives empty input and renders nodes, ribbons and flow titles', function () {

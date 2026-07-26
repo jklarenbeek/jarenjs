@@ -68,15 +68,50 @@ separate `data` argument). The type-specific fields, briefly:
 | `line` | `series: [{name, points: [{x, y}]}]`; `x: 'time'`, `log`, `markers` |
 | `scatter` | `points: [{x, y, tone?}]`; `xLog`/`yLog`, `refY`/`refLabel` |
 | `candlestick` | `candles: [{t, open, high, low, close}]` |
-| `radar` | `axes: string[]`, `series: [{name, values}]`; `max` pins the domain |
+| `radar` | `axes: string[]`, `series: [{name, values}]`; `max` pins the domain, `labelEvery` the spoke-label stride |
 | `gauge` | `value`; `min`/`max` (0..100 default), `unit`, `tone` |
 | `boxplot` | `boxes: [{label, values}]` raw, or `{label, min, q1, med, q3, max, outliers?}` |
 | `heatmap` | `xLabels`, `yLabels`, `values[yi][xi]` (row-major from the top); `log` |
-| `treemap` | `items: [{label, value}]`; `aspect` (default 1.6) |
+| `treemap` | `items: [{label, value}]` or `[{label, children: [{label, value}]}]`; `aspect` (default 1.6) |
 | `streamgraph` | `series: [{name, values}]`, optional numeric `xs` |
 | `sankey` | `links: [{source, target, value}]` by name or index; `nodes` optional |
 
 The full contract is `schemas/chart-definition.schema.json`.
+
+## Hover text and tooltips
+
+Every value-carrying mark — slice, bar, dot, candle, cell, tile,
+ribbon, band, series — renders a `<title>` child naming it and its
+exact value. That is native hover text: it works in a static
+`toSvgString()` document with no script, no CSS and no app, so it is
+always on. Marks report the datum, not the axis's rounded tick scale,
+which is the only way to read a value back off a log axis.
+
+For a positioned, styled tooltip instead, ask for **bindings**:
+
+```js
+const compiled = compileChart(config, data, {
+  tooltip: { action: 'chartHover', leaveAction: 'chartLeave' },
+});
+```
+
+Each mark then carries an `on` binding (VIEW-FORMAT §4) naming that
+action, with the mark's descriptor as the payload and the pointer's
+`clientX`/`clientY` requested as `$event` fields. Bindings are plain
+JSON built at render time — the engine names an action, it never calls
+one — and `renderToString` drops `on`, so the SSR bytes do not change.
+The `@jarenjs/app` half is three lines and a projection:
+
+```js
+const charts = createChartComponent({ theme: 'host', tooltip: { action: 'chartHover', leaveAction: 'chartLeave' } });
+// action chartHover: { "tip": { "text": "$payload.text", "x": "$event.clientX", "y": "$event.clientY" } }
+// action chartLeave: { "tip": null }
+// viewModel:         (state) => ({ ...state, tip: tooltipView(state.tip) })
+```
+
+`tooltipView` (from `@jarenjs/charts/component`) returns the floating
+box positioned at those viewport coordinates; `styles/charts.css`
+carries its `.chart-tooltip` rules.
 
 ## Scales, axes, palette
 
@@ -132,9 +167,19 @@ Two record boundaries cover the two streaming shapes: `'path'` (one
 large document arriving in chunks — records close when the event path
 leaves them) and `'document'` (many small complete documents, e.g. one
 WebSocket message each — `endDocument()` closes the record;
-`abortDocument()` discards a malformed one). Accumulators: `line`,
-`bar` (live counts/sums) and `candlestick` (keyed by open time;
-re-delivered keys replace their candle — exchange kline semantics).
+`abortDocument()` discards a malformed one). Five accumulators:
+
+| type | what a record contributes | fields |
+|---|---|---|
+| `line` | a point on a series, ring-buffer evicted | `xField`, `yField`, `seriesField` |
+| `bar` | +1 (or `+yField`) on a category | `xField`, `yField?` |
+| `heatmap` | the same, under two grouping keys | `xField` (column), `seriesField` (row), `yField?` |
+| `gauge` | the latest reading; nothing is kept | `yField` |
+| `candlestick` | a candle keyed by open time; a re-delivered key replaces it (exchange kline semantics) | `xField`, `openField`… |
+
+A heatmap cell nobody measured stays `null` rather than `0` — the
+surface shows through, which is the honest rendering of "no
+measurement" — and a gauge with no reading yet is `null`, not zero.
 
 ## Incremental sessions (O(1) ticks)
 
@@ -184,8 +229,28 @@ Measured (`npm run benchmark:charts`, one appended point):
 
 The session tick is *flat* in n (10 000 points cost no more than 100)
 while the wholesale tick grows 35×. Supported types: `line` (appends
-and ring-buffer evictions) and `candlestick` (keyed kline upserts —
-one candle group re-renders). The website's Binance demo runs on it.
+and ring-buffer evictions), `bar` (live counts and sums) and
+`candlestick` (keyed kline upserts — one candle group re-renders). The
+website's Binance demo runs on it.
+
+A bar chart's stillness test is the nice-number top rather than a
+declared policy: a count below it repaints one rect, a count that
+pushes the axis higher rebuilds. A new category rebuilds too — every
+band width and position moves with it — and so does a stacked chart,
+where one value shifts every bar above it in its category.
+
+| categories | session tick | wholesale tick |
+|---|---|---|
+| 20 | ~5.7 µs | ~33 µs |
+| 200 | ~11 µs | ~137 µs |
+
+Only the *vnode* work is O(1) there — one rect re-emitted instead of
+all of them. The stillness test still rescans every category (a count
+that drops can retire the tallest bar, so extremes cannot be extended)
+and the adapter rebuilds its snapshot arrays, so the bar session's tick
+does grow with the category count. It grows about 2× where the
+wholesale render grows about 4×; the line session's flatness is the
+stronger claim, and this is deliberately the weaker one.
 
 ## Mermaid interop
 

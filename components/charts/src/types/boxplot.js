@@ -21,6 +21,7 @@ import { scaleLinear, scaleBand } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
+import { normalizeTooltip, valueMark } from '../core/marks.js';
 
 /**
  * @typedef {object} BoxAST
@@ -158,12 +159,14 @@ export function buildBoxplotAST(data, config = {}) {
  * @param {BoxplotAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {any}
  */
 export function renderBoxplotAST(ast, theme, hash, options = {}) {
   const t = theme.tokens;
   const palette = options.palette ?? CATEGORICAL;
+  const tooltip = normalizeTooltip(options.tooltip);
   const color = seriesColor(0, palette);
   const frame = cartesianFrame({
     title: ast.title,
@@ -189,14 +192,15 @@ export function renderBoxplotAST(ast, theme, hash, options = {}) {
     children.push(svgLine(coord(cx - capW / 2), coord(y(box.loV)), coord(cx + capW / 2), coord(y(box.loV)), whisker));
     children.push(svgLine(coord(cx - capW / 2), coord(y(box.hiV)), coord(cx + capW / 2), coord(y(box.hiV)), whisker));
     const s = box.stats;
-    children.push(['rect', {
+    children.push(valueMark('rect', {
       x: coord(x0), y: coord(y(box.q3V)),
       width: coord(x1 - x0), height: coord(Math.max(1, y(box.q1V) - y(box.q3V))),
       fill: color, 'fill-opacity': 0.35, stroke: color, 'stroke-width': 1.5,
       class: 'chart-box',
-    }, ['title', {},
-      `${box.label} — min ${formatTickValue(s.min)}, q1 ${formatTickValue(s.q1)}, `
-      + `median ${formatTickValue(s.med)}, q3 ${formatTickValue(s.q3)}, max ${formatTickValue(s.max)}`]]);
+    }, tooltip,
+    `${box.label} — min ${formatTickValue(s.min)}, q1 ${formatTickValue(s.q1)}, `
+    + `median ${formatTickValue(s.med)}, q3 ${formatTickValue(s.q3)}, max ${formatTickValue(s.max)}`,
+    { type: 'boxplot', label: box.label, ...s }));
     children.push(svgLine(coord(x0), coord(y(box.medV)), coord(x1), coord(y(box.medV)),
       { stroke: color, 'stroke-width': 2, class: 'chart-box-median' }));
     for (const v of box.outliersV) {

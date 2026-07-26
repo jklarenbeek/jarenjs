@@ -208,6 +208,59 @@ describe('stream adapter — bar counts', function () {
   });
 });
 
+describe('stream adapter — heatmap matrix', function () {
+  const SPEC = { recordPath: ['run'], xField: 'size', seriesField: 'scenario' };
+
+  it('counts records under two grouping keys, rows and columns in arrival order', function () {
+    const doc = JSON.stringify({ run: [
+      { size: '4', scenario: 'singular' },
+      { size: '100', scenario: 'singular' },
+      { size: '4', scenario: 'join' },
+      { size: '4', scenario: 'singular' },
+    ] });
+    assert.deepEqual(throughJson(doc, SPEC, 'heatmap').getData(), {
+      xLabels: ['4', '100'],
+      yLabels: ['singular', 'join'],
+      values: [[2, 1], [1, null]], // the join×100 cell was never measured
+    });
+  });
+
+  it('sums a value field when yField is set', function () {
+    const doc = JSON.stringify({ run: [
+      { size: 'a', scenario: 'r', ms: 2 },
+      { size: 'a', scenario: 'r', ms: 3 },
+    ] });
+    assert.deepEqual(throughJson(doc, { ...SPEC, yField: 'ms' }, 'heatmap').getData().values, [[5]]);
+  });
+
+  it('an unmeasured cell renders as the surface, not as a zero', function () {
+    const doc = JSON.stringify({ run: [{ size: 'a', scenario: 'r' }, { size: 'b', scenario: 's' }] });
+    const svg = compileChart({ type: 'heatmap' }, throughJson(doc, SPEC, 'heatmap').getData()).toSvgString();
+    assert.equal((svg.match(/chart-heat-cell/g) ?? []).length, 2);
+    assert.ok(!svg.includes('NaN'));
+  });
+});
+
+describe('stream adapter — gauge reading', function () {
+  const SPEC = { recordPath: ['run'], yField: 'temp' };
+
+  it('keeps the latest reading and nothing else', function () {
+    const doc = JSON.stringify({ run: [{ temp: 20 }, { temp: 21.5 }, { temp: '22.5' }] });
+    assert.deepEqual(throughJson(doc, SPEC, 'gauge').getData(), { value: 22.5 });
+  });
+
+  it('a missing or unparsable reading leaves the last one standing', function () {
+    const doc = JSON.stringify({ run: [{ temp: 20 }, { other: 1 }, { temp: 'warm' }] });
+    assert.deepEqual(throughJson(doc, SPEC, 'gauge').getData(), { value: 20 });
+  });
+
+  it('no reading yet is null, not zero', function () {
+    const adapter = createStreamAdapter('gauge', SPEC);
+    assert.deepEqual(adapter.getData(), { value: null });
+    assert.equal(compileChart({ type: 'gauge' }, adapter.getData()).ast.frac, 0);
+  });
+});
+
 describe('stream adapter — change reporting (takeChanges)', function () {
   /** Feed one JSON document per message (document boundary). */
   function feedDoc(adapter, message) {
@@ -255,6 +308,32 @@ describe('stream adapter — change reporting (takeChanges)', function () {
       () => feedDoc(adapter, { bucket: 'win' }),
     ]);
     assert.deepEqual(adapter.getData().series[0].values, [2, 1]);
+  });
+
+  it('heatmap: new rows, new columns and cell updates replay to the snapshot', function () {
+    const adapter = createStreamAdapter('heatmap', {
+      recordBoundary: 'document', xField: 'size', seriesField: 'scenario', changes: true,
+    });
+    assertReplay(adapter, [
+      () => feedDoc(adapter, { size: '4', scenario: 'singular' }),
+      () => feedDoc(adapter, { size: '100', scenario: 'singular' }), // widens the row
+      () => feedDoc(adapter, { size: '4', scenario: 'join' }), // a whole new row
+      () => feedDoc(adapter, { size: '4', scenario: 'singular' }), // one cell
+    ]);
+    assert.deepEqual(adapter.getData().values, [[2, 1], [1, null]]);
+  });
+
+  it('gauge: every reading replays as one replace', function () {
+    const adapter = createStreamAdapter('gauge', {
+      recordBoundary: 'document', yField: 'temp', changes: true,
+    });
+    assertReplay(adapter, [
+      () => feedDoc(adapter, { temp: 20 }),
+      () => feedDoc(adapter, { temp: 21 }),
+      () => feedDoc(adapter, { other: 9 }), // no reading, no op
+    ]);
+    assert.deepEqual(adapter.takeChanges(), []);
+    assert.deepEqual(adapter.getData(), { value: 21 });
   });
 
   it('candlestick: add, keyed upsert and eviction replay to the snapshot', function () {

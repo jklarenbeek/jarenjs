@@ -32,6 +32,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleTime } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue, formatTimeTick } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
+import { normalizeTooltip, markProps } from '../core/marks.js';
 import { numOf } from '../core/stream-adapter.js';
 import {
   normalizeDomainPolicy, resolveWindowX, resolveStepY, resolvePinnedY,
@@ -44,6 +45,9 @@ import {
  * @property {number} w body width (0..1)
  * @property {number} openV @property {number} closeV
  * @property {number} highV @property {number} lowV
+ * @property {number} open @property {number} high
+ * @property {number} low @property {number} close raw prices, which the
+ *  hover text reports (a clamped unit value cannot be read back to one)
  * @property {boolean} up close >= open
  */
 /**
@@ -146,6 +150,10 @@ export function candleUnit(c, xScale, yScale, w) {
     closeV: clamp01(yScale(c.close)),
     highV: clamp01(yScale(c.high)),
     lowV: clamp01(yScale(c.low)),
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
     up: c.close >= c.open,
   };
 }
@@ -183,14 +191,16 @@ export function buildCandlestickAST(data, config = {}) {
 }
 
 /**
- * Render one candle as its keyed `<g>` group: the wick line under the
- * body rect, up/down tones from the theme's win/loss pair.
+ * Render one candle as its keyed `<g>` group: an OHLC hover `<title>`,
+ * then the wick line under the body rect, up/down tones from the
+ * theme's win/loss pair.
  * @param {CandleAST} c
  * @param {{x:number,y:number,w:number,h:number}} plot
  * @param {{tokens: Record<string,string>}} theme
+ * @param {import('../core/marks.js').ChartTooltip|null} [tooltip]
  * @returns {any}
  */
-export function candleRender(c, plot, theme) {
+export function candleRender(c, plot, theme, tooltip = null) {
   const color = c.up ? theme.tokens.win : theme.tokens.loss;
   const x = plot.x + c.u * plot.w;
   const halfW = Math.max(1, (c.w * plot.w) / 2);
@@ -200,7 +210,10 @@ export function candleRender(c, plot, theme) {
   const yClose = plot.y + (1 - c.closeV) * plot.h;
   const bodyTop = Math.min(yOpen, yClose);
   const bodyH = Math.max(1, Math.abs(yOpen - yClose));
-  return ['g', { key: `c${c.t}`, class: 'chart-candle' },
+  const text = `${formatTimeTick(c.t)} O ${c.open} H ${c.high} L ${c.low} C ${c.close}`;
+  return ['g', markProps({ key: `c${c.t}`, class: 'chart-candle' }, tooltip, text,
+    { type: 'candlestick', t: c.t, open: c.open, high: c.high, low: c.low, close: c.close }),
+    ['title', {}, text],
     svgLine(coord(x), coord(yHigh), coord(x), coord(yLow),
       { stroke: color, 'stroke-width': 1, class: c.up ? 'chart-candle-up' : 'chart-candle-down' }),
     ['rect', {
@@ -217,10 +230,12 @@ export function candleRender(c, plot, theme) {
  * @param {CandlestickAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
- * @param {{rootClass?: string, keyPrefix?: string, width?: number}} [options]
+ * @param {{rootClass?: string, keyPrefix?: string, width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
  * @returns {{svg: any, plot: {x:number,y:number,w:number,h:number}, chromeLen: number}}
  */
 export function buildCandlestickRender(ast, theme, hash, options = {}) {
+  const tooltip = normalizeTooltip(options.tooltip);
   const frame = cartesianFrame({
     title: ast.title,
     legend: null,
@@ -234,7 +249,7 @@ export function buildCandlestickRender(ast, theme, hash, options = {}) {
   const chromeLen = frame.children.length;
   const children = frame.children;
   for (const c of ast.candles)
-    children.push(candleRender(c, plot, theme));
+    children.push(candleRender(c, plot, theme, tooltip));
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-candlestick-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'candle-') + hash);
   annotateChart(svg, ast.title);

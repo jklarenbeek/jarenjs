@@ -478,7 +478,8 @@ function generateView(tmp, options) {
 
 /**
  * The charts suite: per-type compile costs plus the session-vs-wholesale
- * scaling rows (the O(change) evidence).
+ * scaling rows (the O(change) evidence) for both session types — line
+ * appends by point count, bar counts by category count.
  */
 function generateCharts(tmp, options) {
   const file = path.join(tmp, 'charts.json');
@@ -498,6 +499,11 @@ function generateCharts(tmp, options) {
     ...raw,
     types: raw.types.map((r) => ({ label: r.label, ns: sig4(r.ns) })),
     scaling: raw.scaling.map((r) => ({
+      ...r,
+      sessionNs: sig4(r.sessionNs),
+      wholesaleNs: sig4(r.wholesaleNs),
+    })),
+    barScaling: (raw.barScaling ?? []).map((r) => ({
       ...r,
       sessionNs: sig4(r.sessionNs),
       wholesaleNs: sig4(r.wholesaleNs),

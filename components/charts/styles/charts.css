@@ -54,3 +54,30 @@
 rect.chart-candle-up { fill: var(--chart-win); stroke: none; }
 .chart-candle-down { stroke: var(--chart-loss); }
 rect.chart-candle-down { fill: var(--chart-loss); stroke: none; }
+
+/* The floating-tooltip host (`tooltipView`). Positioned at the pointer's
+ * viewport coordinates by the inline `left`/`top` the binding carried,
+ * then lifted clear of the cursor here — so the host never measures the
+ * box. It links the site tokens directly (DESIGN.md §7) rather than the
+ * `--chart-*` table: this is page chrome around the SVG, not a mark
+ * inside it. `pointer-events: none` keeps it from stealing the
+ * pointerleave that dismisses it. */
+.chart-tooltip {
+  position: fixed;
+  z-index: 30;
+  transform: translate(-50%, calc(-100% - 12px));
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface, #ffffff);
+  color: var(--fg, #1f2020);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.dark .chart-tooltip {
+  border-color: var(--border, #334155);
+  background: var(--surface, #11141c);
+  color: var(--fg, #f4f4f4);
+}

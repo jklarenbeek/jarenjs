@@ -695,6 +695,13 @@ const chartsSuiteCharts = memo1((data) => ({
     })),
     ['incremental session', 'wholesale re-render'],
     { title: 'One appended point — session vs wholesale (log)', log: true, valLabel: 'ns/tick (log)' })),
+  barScaling: chartNode(profileBars(
+    (data.barScaling ?? []).map((s) => ({
+      name: `${s.categories} categories`,
+      results: { 'incremental session': s.sessionNs, 'wholesale re-render': s.wholesaleNs },
+    })),
+    ['incremental session', 'wholesale re-render'],
+    { title: 'One live count — session vs wholesale (log)', log: true, valLabel: 'ns/tick (log)' })),
 }));
 
 /** The charts suite: per-type cost, and the O(change) scaling evidence. */
@@ -741,6 +748,25 @@ function chartsSuite(data) {
       strong: true,
     })),
     'The session column is flat in the point count; the wholesale column is linear in it.'));
+  const barScaling = data.barScaling ?? [];
+  if (barScaling.length !== 0) {
+    out.push(c.barScaling);
+    out.push(table('One live count — bar session vs wholesale re-render',
+      ['Categories', 'Session tick', 'Wholesale tick', 'Ratio', 'Frames incremental'],
+      barScaling.map((s) => ({
+        cells: [
+          String(s.categories),
+          formatNs(s.sessionNs),
+          formatNs(s.wholesaleNs),
+          formatRatio(s.sessionNs > 0 ? s.wholesaleNs / s.sessionNs : null),
+          `${s.incremental} of ${s.incremental + s.rebuilt}`,
+        ],
+        strong: true,
+      })),
+      'Only the vnode work is O(1) here — one rect re-emitted. The stillness test rescans '
+      + 'every category (a count that drops can retire the tallest bar), so the session column '
+      + 'grows with the category count too, just far more slowly than the wholesale one.'));
+  }
   out.push(c.types);
   out.push(table('Compile + project, per chart type',
     ['Scenario', 'ns per chart'],

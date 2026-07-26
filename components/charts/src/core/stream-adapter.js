@@ -23,9 +23,12 @@
  *   `abortDocument()`, leaving the accumulated snapshot untouched.
  *
  * Accumulators: `line` (records → per-series points, ring-buffer
- * eviction), `bar` (live category counts or sums), and `candlestick`
- * (records keyed by open time; a re-delivered key REPLACES its candle,
- * which is exactly how exchange kline updates behave).
+ * eviction), `bar` (live category counts or sums), `heatmap` (the same
+ * counts or sums under TWO grouping keys — the column is `xField`, the
+ * row `seriesField`), `gauge` (the latest reading, nothing kept), and
+ * `candlestick` (records keyed by open time; a re-delivered key
+ * REPLACES its candle, which is exactly how exchange kline updates
+ * behave).
  *
  * A record is emitted into the snapshot only when its required fields
  * are present; `getData()` returns a FRESH object shaped for
@@ -49,10 +52,11 @@
  *  (e.g. `['data', 'k']` for a combined-stream kline payload)
  * @property {'path'|'document'} [recordBoundary] default 'path'
  * @property {string} [xField] record field for x (line/candlestick) or
- *  the category (bar)
- * @property {string} [yField] record field for y (line) or the summed
- *  value (bar; omitted = count records)
- * @property {string} [seriesField] record field naming the series (line)
+ *  the category (bar) / column (heatmap)
+ * @property {string} [yField] record field for y (line), the summed
+ *  value (bar/heatmap; omitted = count records), or the reading (gauge)
+ * @property {string} [seriesField] record field naming the series
+ *  (line) or the row (heatmap)
  * @property {string} [openField] candlestick fields (defaults
  *  'open'/'high'/'low'/'close')
  * @property {string} [highField]
@@ -79,14 +83,17 @@
  * @property {() => void} reset drop all accumulated state
  */
 
+/** The chart types with a streaming accumulator. */
+const STREAM_TYPES = new Set(['line', 'bar', 'heatmap', 'gauge', 'candlestick']);
+
 /**
  * Create a streaming accumulator for a chart type.
- * @param {'line'|'bar'|'candlestick'} chartType
+ * @param {'line'|'bar'|'heatmap'|'gauge'|'candlestick'} chartType
  * @param {StreamAdapterConfig} [config]
  * @returns {StreamAdapter}
  */
 export function createStreamAdapter(chartType, config = {}) {
-  if (chartType !== 'line' && chartType !== 'bar' && chartType !== 'candlestick')
+  if (!STREAM_TYPES.has(chartType))
     throw new TypeError(`unknown stream chart type '${chartType}'`);
   const recordPath = config.recordPath ?? [];
   const documentMode = config.recordBoundary === 'document';
@@ -104,6 +111,11 @@ export function createStreamAdapter(chartType, config = {}) {
   let series = new Map();
   /** @type {Map<string, number>} bar counts */
   let counts = new Map();
+  /** @type {{xLabels: string[], yLabels: string[], rows: (number|null)[][],
+   *   xAt: Map<string, number>, yAt: Map<string, number>}} heatmap matrix */
+  let matrix = emptyMatrix();
+  /** @type {number|null} gauge reading */
+  let reading = null;
   /** @type {Map<number|string, any>} candles keyed by open time */
   let candles = new Map();
   /** @type {Record<string, any>|null} the record being assembled */
@@ -128,8 +140,53 @@ export function createStreamAdapter(chartType, config = {}) {
     const done = record;
     record = null;
     index = null;
+    if (chartType === 'gauge') {
+      // A gauge keeps no history: the newest reading IS the state, so
+      // there is nothing to key a record by and no x to require.
+      if (yField === undefined) return;
+      const v = numish(done[yField]);
+      if (typeof v !== 'number' || !Number.isFinite(v)) return;
+      reading = v;
+      if (track) ops.push({ op: 'replace', path: '/value', value: v });
+      return;
+    }
     const x = done[xField];
     if (x === undefined) return;
+    if (chartType === 'heatmap') {
+      const column = String(x);
+      const row = String(done[seriesField] ?? '');
+      const add = yField === undefined ? 1 : Number(done[yField]);
+      if (yField !== undefined && !Number.isFinite(add)) return;
+      // The matrix stays rectangular: a new column widens every row,
+      // a new row arrives at the current width. Unmeasured cells are
+      // null, which the heatmap build reads as "no measurement" and
+      // leaves the surface showing through.
+      if (!matrix.xAt.has(column)) {
+        matrix.xAt.set(column, matrix.xLabels.length);
+        matrix.xLabels.push(column);
+        if (track) {
+          ops.push({ op: 'add', path: '/xLabels/-', value: column });
+          for (let r = 0; r < matrix.rows.length; r++)
+            ops.push({ op: 'add', path: `/values/${r}/-`, value: null });
+        }
+        for (const cells of matrix.rows) cells.push(null);
+      }
+      if (!matrix.yAt.has(row)) {
+        matrix.yAt.set(row, matrix.rows.length);
+        matrix.yLabels.push(row);
+        matrix.rows.push(new Array(matrix.xLabels.length).fill(null));
+        if (track) {
+          ops.push({ op: 'add', path: '/yLabels/-', value: row });
+          ops.push({ op: 'add', path: '/values/-', value: matrix.rows[matrix.rows.length - 1].slice() });
+        }
+      }
+      const ri = matrix.yAt.get(row);
+      const ci = matrix.xAt.get(column);
+      const cells = matrix.rows[ri];
+      cells[ci] = (cells[ci] ?? 0) + add;
+      if (track) ops.push({ op: 'replace', path: `/values/${ri}/${ci}`, value: cells[ci] });
+      return;
+    }
     if (chartType === 'bar') {
       const key = String(x);
       const add = yField === undefined ? 1 : Number(done[yField]);
@@ -219,6 +276,16 @@ export function createStreamAdapter(chartType, config = {}) {
   }
 
   function getData() {
+    if (chartType === 'gauge') {
+      return { value: reading };
+    }
+    if (chartType === 'heatmap') {
+      return {
+        xLabels: matrix.xLabels.slice(),
+        yLabels: matrix.yLabels.slice(),
+        values: matrix.rows.map((cells) => cells.slice()),
+      };
+    }
     if (chartType === 'bar') {
       const categories = [...counts.keys()];
       return {
@@ -241,6 +308,10 @@ export function createStreamAdapter(chartType, config = {}) {
   function emptyData() {
     if (chartType === 'bar')
       return { categories: [], series: [{ name: yField ?? 'count', values: [] }] };
+    if (chartType === 'heatmap') return { xLabels: [], yLabels: [], values: [] };
+    // null, not 0: no reading yet is not a reading of zero (both draw
+    // an empty dial, but only one of them is a claim)
+    if (chartType === 'gauge') return { value: null };
     if (chartType === 'candlestick') return { candles: [] };
     return { series: [] };
   }
@@ -263,6 +334,8 @@ export function createStreamAdapter(chartType, config = {}) {
     reset() {
       series = new Map();
       counts = new Map();
+      matrix = emptyMatrix();
+      reading = null;
       candles = new Map();
       record = null;
       index = null;
@@ -270,6 +343,11 @@ export function createStreamAdapter(chartType, config = {}) {
       if (track) ops = [{ op: 'replace', path: '', value: emptyData() }];
     },
   };
+}
+
+/** A heatmap matrix with no rows, columns or cells yet. */
+function emptyMatrix() {
+  return { xLabels: [], yLabels: [], rows: [], xAt: new Map(), yAt: new Map() };
 }
 
 function startsWith(path, prefix) {
