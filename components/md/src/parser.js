@@ -36,6 +36,7 @@ import {
   normalizeLabel,
   isSpaceCode,
 } from './scanner.js';
+import { scanEntity } from './entities.js';
 import {
   MD_VERSION,
   thematicBreak, blockquote, list, listItem,
@@ -527,7 +528,7 @@ class BlockParser {
       case 'paragraph': {
         let raw = leaf.lines.join('\n');
         raw = this.extractDefinitions(raw);
-        raw = raw.replace(/\s+$/, '');
+        raw = trimEnd(raw);
         if (raw !== '') this.add({ type: 'paragraph', children: [], raw });
         break;
       }
@@ -653,18 +654,6 @@ function hasOpenItem(stack, listIndex) {
 // Inline parser
 // ------------------------------------------------------------------
 
-/** Named character references (the pragmatic set; numeric forms cover the rest). */
-const ENTITIES = new Map(Object.entries({
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
-  copy: '©', reg: '®', trade: '™', deg: '°',
-  plusmn: '±', times: '×', divide: '÷', hellip: '…',
-  mdash: '—', ndash: '–', laquo: '«', raquo: '»',
-  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
-  bull: '•', middot: '·', sect: '§', para: '¶',
-  euro: '€', pound: '£', yen: '¥', cent: '¢',
-}));
-
-const RE_ENTITY = /^&(?:#[xX][0-9a-fA-F]{1,6};|#[0-9]{1,7};|[a-zA-Z][a-zA-Z0-9]{1,31};)/;
 // eslint-disable-next-line no-control-regex -- the spec excludes all control characters
 const RE_AUTOLINK_URI = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/;
 const RE_AUTOLINK_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+)>/;
@@ -678,29 +667,6 @@ for (const ch of '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') PUNCT[ch.charCodeAt(0)] =
 const INLINE_SPECIAL = new Uint8Array(128);
 for (const ch of '\\`*_~[!]<&\n') INLINE_SPECIAL[ch.charCodeAt(0)] = 1;
 
-/**
- * Decode one character reference at `pos` (`&...;`). Returns null when
- * it is not a valid reference.
- * @param {string} src
- * @param {number} pos
- * @returns {{ value: string, end: number } | null}
- */
-function scanEntity(src, pos) {
-  const m = RE_ENTITY.exec(pos === 0 ? src : src.slice(pos));
-  if (m === null) return null;
-  const body = m[0].slice(1, -1);
-  if (body.charCodeAt(0) === 0x23 /* # */) {
-    const cp = body.charCodeAt(1) === 0x78 || body.charCodeAt(1) === 0x58
-      ? parseInt(body.slice(2), 16)
-      : parseInt(body.slice(1), 10);
-    if (!Number.isFinite(cp) || cp === 0 || cp > 0x10FFFF) {
-      return { value: '�', end: pos + m[0].length };
-    }
-    return { value: String.fromCodePoint(cp), end: pos + m[0].length };
-  }
-  const named = ENTITIES.get(body);
-  return named === undefined ? null : { value: named, end: pos + m[0].length };
-}
 
 /**
  * The inline parsing context threaded through one document.
@@ -1008,6 +974,9 @@ function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
     }
     const def = ictx.defs.get(normalizeLabel(label));
     if (def === undefined) {
+      // A definition may still arrive: the incremental parser notes the
+      // miss so it can re-resolve this block once the stream ends.
+      ictx.unresolved = true;
       brackets.pop();
       return -1;
     }
@@ -1168,8 +1137,12 @@ export function finishBlocks(blocks, ictx) {
       case 'paragraph':
       case 'heading':
         if (node.raw !== undefined) {
-          node.children = parseInlines(node.raw, ictx);
+          const raw = node.raw;
+          ictx.unresolved = false;
+          node.children = parseInlines(raw, ictx);
           delete node.raw;
+          if (ictx.unresolved === true && ictx.deferred !== undefined)
+            ictx.deferred.push({ node, raw });
         }
         break;
       case 'table':
@@ -1305,6 +1278,25 @@ function feedLines(parser, textChunk, final) {
 }
 
 /**
+ * Drop trailing whitespace. A hand-rolled scan rather than
+ * `replace(/\s+$/, '')`: that pattern re-scans the string from every
+ * position it can start at, and closing a paragraph is one of the
+ * hottest points in the parse.
+ * @param {string} text
+ * @returns {string}
+ */
+function trimEnd(text) {
+  let end = text.length;
+  while (end > 0) {
+    const code = text.charCodeAt(end - 1);
+    if (code !== 0x20 && code !== 0x09 && code !== 0x0A && code !== 0x0D
+      && code !== 0x0B && code !== 0x0C) break;
+    end--;
+  }
+  return end === text.length ? text : text.slice(0, end);
+}
+
+/**
  * The incremental parsing core behind `streamMarkdown` (docs/LOADER.md
  * §4): feed chunks, collect completed top-level blocks per feed, and
  * flush the tail with `end()`.
@@ -1324,11 +1316,24 @@ export function createIncrementalParser(options = {}) {
   const tables = buildPluginTables(options.plugins);
   const parser = new BlockParser(options, tables);
   const detect = options.frontmatter !== false;
+  /**
+   * Blocks emitted with a reference link whose definition had not
+   * arrived YET, kept with the source text they came from. A streamed
+   * document may define `[ref]` after the paragraph that uses it, and a
+   * parser that hands blocks out as they close has already emitted that
+   * paragraph — so those blocks are re-resolved at `end()`, when the
+   * whole document is known, and land exactly where batch parsing puts
+   * them.
+   * @type {{node: any, raw: string}[]}
+   */
+  const deferred = [];
   const ictx = {
     defs: parser.defs,
     inlines: tables.inlines,
     gfm: parser.gfm,
     ctx: parser.ctx,
+    unresolved: false,
+    deferred,
   };
   let buffer = '';
   let hash = FNV1A_OFFSET_BASIS;
@@ -1372,6 +1377,22 @@ export function createIncrementalParser(options = {}) {
     return true;
   };
 
+  /**
+   * Re-parse the blocks that referenced a definition they had not seen.
+   * The nodes are patched IN PLACE: a consumer of `feed()` already holds
+   * them, and handing back a copy would leave that consumer with the
+   * unresolved version forever. Blocks whose reference is still unknown
+   * at this point simply keep their literal text, which is what the
+   * batch parser produces for them too.
+   */
+  const resolveDeferred = () => {
+    if (deferred.length === 0) return;
+    const pending = deferred.splice(0);
+    for (const { node, raw } of pending) {
+      node.children = parseInlines(raw, ictx);
+    }
+  };
+
   /** @returns {MdNode[]} */
   const drain = () => {
     const fresh = parser.blocks.slice(emitted);
@@ -1406,6 +1427,7 @@ export function createIncrementalParser(options = {}) {
       buffer = '';
       parser.finish();
       drain();
+      resolveDeferred();
       return {
         $md: MD_VERSION,
         frontmatter,

@@ -197,8 +197,18 @@ Two filters run when an AST becomes vnodes, on the same principle: the
 vnode format has no unescaped output, so nothing authored reaches the page
 as markup or as a live URL.
 
-- **Raw HTML** is dropped (`options.html: 'text'` shows it as literal text
-  instead — never as elements).
+- **Raw HTML** is dropped. `options.html: 'text'` shows it as literal
+  text instead; `'vnode'` PARSES it through an allow-list
+  (`@jarenjs/md/html`), keeping the elements a document legitimately
+  uses — `<details>`, `<span class>`, `<img>`, tables — and dropping
+  everything else. What makes that offerable is structural rather than a
+  promise about filtering: the output is a vnode tree, so an
+  unrecognised element contributes only its children's text, `on*`
+  handlers and `style` never exist to begin with, `href`/`src` go
+  through the same URL policy as Markdown's own links, and a
+  `<script>`'s content is discarded rather than shown. It is not an
+  HTML5 parser — unbalanced input closes at the end of its run — and a
+  host with its own rules injects them through `options.parseHtml`.
 - **Link and image URLs** whose scheme can execute (`javascript:`,
   `vbscript:`) or stand in for a document (`file:`, `data:` other than a
   raster image) lose their `href`/`src`; the element and its text stay, so
@@ -217,8 +227,14 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 Measured, not claimed — `npm run benchmark:markdown`, 2026-07-19, Node
 v22.22.2 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: ~72 µs for a typical ~2 kB document, ~0.3 ms for
-  ~10 kB, ~3.1 ms for ~100 kB — linear in input.
+- **Parse to AST**: ~75 µs for a typical ~2 kB document, ~0.30 ms for
+  ~10 kB, ~3.0 ms for ~100 kB — linear in input. A CPU profile puts the
+  inline phase at ~36% of that and the source hash for `meta.hash` at
+  ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
+  `/\s+$/` regex at paragraph close with a scan was worth 4–17%
+  depending on how paragraph-dense the document is — measured as an A/B
+  on this corpus, because the same change looked like noise on a
+  differently shaped one.)
 - **Parse + render to HTML** (the cross-engine row): within 1.1–1.5x of
   `marked` and `markdown-it`, 6–15x faster than `micromark`, on the
   same GFM documents.
@@ -229,11 +245,17 @@ v22.22.2 (run it yourself; micro-timings vary ±15%):
   identity transform returns the document by reference; a partial
   transform keeps every unmatched subtree `===`. That pipeline — not
   the one-shot HTML render — is what this package is optimized for.
-- **CommonMark scorecard**: 526 of 655 spec examples (80.3%) under the
+- **CommonMark scorecard**: 571 of 655 spec examples (87.2%) under the
   spec's normalization, reported honestly as coverage of the pragmatic
-  dialect (raw-HTML pass-through examples cannot pass by design: the
-  vnode format has no unescaped output). The scorecard runs against
-  the official spec as a git submodule, QT3-style.
+  dialect. 47 of the 84 remaining **cannot pass by construction**: the
+  spec renders raw HTML verbatim, including a lone `</div>` or a
+  never-closed tag, and a vnode tree cannot hold half an element. The
+  rest are real dialect gaps (loose-list paragraph wrapping, emphasis
+  flanking, link-label edge cases) tracked in the
+  [ROADMAP](../../ROADMAP.md). The scorecard runs against the official
+  spec as a git submodule, QT3-style, and compares rendered meaning:
+  whitespace that only lays markup out is normalized away on every
+  engine's output, not just this one's.
 
 ## Development
 

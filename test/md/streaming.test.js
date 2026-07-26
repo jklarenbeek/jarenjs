@@ -33,6 +33,26 @@ describe('createIncrementalParser', function () {
     }
   });
 
+  it('binds a reference defined AFTER the block that uses it', function () {
+    // the streaming gap: the paragraph closes before the definition
+    // arrives, so it is emitted with literal text and re-resolved at end()
+    const source = 'See [ref] and [gone] here.\n\nmore\n\n[ref]: /target "T"\n';
+    for (const size of [1, 5, 17, 4096]) {
+      const inc = createIncrementalParser({ frontmatter: false });
+      const streamed = [];
+      for (const chunk of chunked(source, size)) streamed.push(...inc.feed(chunk));
+      const doc = inc.end();
+      assert.deepEqual(doc.ast, parseMarkdown(source, { frontmatter: false }).ast,
+        `chunk size ${size}`);
+      // patched IN PLACE: what feed() handed out is what end() fixed
+      for (let i = 0; i < streamed.length; i++) assert.equal(streamed[i], doc.ast[i]);
+      const kinds = doc.ast[0].children.map((c) => c.type);
+      assert.deepEqual(kinds, ['text', 'link', 'text'], `chunk size ${size}`);
+      assert.equal(doc.ast[0].children[2].value, ' and [gone] here.',
+        'a reference nothing ever defines stays literal, as in batch mode');
+    }
+  });
+
   it('yields blocks as soon as their end is certain', function () {
     const inc = createIncrementalParser({});
     assert.deepEqual(inc.feed('# A\n\nstart'), [

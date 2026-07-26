@@ -96,3 +96,59 @@ export function sanitizeUrl(url) {
   if (!UNSAFE_SCHEMES.has(schemeOf(trimmed))) return trimmed;
   return RE_SAFE_DATA_IMAGE.test(trimmed) ? trimmed : null;
 }
+
+/**
+ * Characters a URL attribute may carry literally: the RFC 3986 reserved
+ * and unreserved sets. Everything else is percent-encoded, byte by byte,
+ * from its UTF-8 encoding.
+ */
+const URL_LITERAL = new Uint8Array(128);
+for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789;/?:@&=+$,-_.!~*'()#")
+  URL_LITERAL[ch.charCodeAt(0)] = 1;
+
+/** An already-encoded octet: `%` followed by two hex digits. */
+const RE_PCT_OCTET = /^%[0-9A-Fa-f]{2}/;
+
+/**
+ * Percent-encode a URL for a `href`/`src` attribute.
+ *
+ * Authored text is not a URL: a Markdown destination may hold spaces,
+ * backslashes, backticks or any non-ASCII character, and writing those
+ * into an attribute produces a link a browser resolves differently than
+ * the author wrote — or not at all. This maps them to their UTF-8
+ * percent-encoding while leaving the reserved characters that carry URL
+ * *structure* (`/?:@&=+$,#`) alone.
+ *
+ * An existing `%XX` is passed through rather than re-encoded to `%25XX`,
+ * so a destination an author already encoded survives a round trip; a
+ * lone `%` that does not begin an octet is encoded. Sanitizing and
+ * encoding are separate steps on purpose — encode what
+ * {@link sanitizeUrl} returned, never the other way around, or an
+ * unsafe scheme could hide behind an escape.
+ *
+ * @param {string} url a URL that has already passed a sanitizer
+ * @returns {string} the attribute-ready URL
+ */
+export function encodeUrlAttribute(url) {
+  let out = '';
+  for (let i = 0; i < url.length; i++) {
+    const code = url.charCodeAt(i);
+    if (code < 128 && URL_LITERAL[code] === 1) {
+      out += url[i];
+      continue;
+    }
+    if (code === 0x25 /* % */ && RE_PCT_OCTET.test(url.slice(i, i + 3))) {
+      out += url.slice(i, i + 3);
+      i += 2;
+      continue;
+    }
+    // one code POINT: a surrogate pair is one UTF-8 sequence, and
+    // encoding its halves separately would emit two invalid ones
+    const point = url.codePointAt(i);
+    const char = String.fromCodePoint(/** @type {number} */ (point));
+    i += char.length - 1;
+    for (const byte of new TextEncoder().encode(char))
+      out += '%' + byte.toString(16).toUpperCase().padStart(2, '0');
+  }
+  return out;
+}

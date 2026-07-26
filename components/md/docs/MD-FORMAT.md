@@ -193,6 +193,14 @@ The scheme MUST be read the way a browser reads it, not as a literal
 prefix: ASCII whitespace and control characters inside it are ignored, so
 a tab spliced into `javascript:` does not get a URL through.
 
+A `url` that survives the filter MUST be **percent-encoded** for the
+attribute: an authored destination may hold spaces, backslashes,
+backticks or any non-ASCII character, and a browser resolves those
+differently than the author wrote them. Characters carrying URL
+structure (`/?:@&=+$,#`) stay literal, and an existing `%XX` is not
+re-encoded. The AST still holds the destination verbatim — only the
+attribute is encoded.
+
 `mdToVnode` implements this with `sanitizeUrl` from
 `@jarenjs/view/helpers`. `options.sanitizeUrl` replaces the policy
 wholesale — `(url) => string | null` — which is how a host widens it for a

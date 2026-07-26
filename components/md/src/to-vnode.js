@@ -13,9 +13,11 @@
  *  - content-hash keys: block vnodes are keyed by a hash of their
  *    content, so moved blocks reorder instead of rebuilding.
  *
- * Raw HTML nodes are dropped by default (`options.html: 'text'` shows
- * them literally) — the vnode format has no unescaped output, which is
- * the safe default for untrusted Markdown. Link and image URLs are
+ * Raw HTML nodes are dropped by default; `options.html: 'text'` shows
+ * them literally, and `'vnode'` PARSES them through an allow-list
+ * (`parseHtmlFragment`, or an injected `parseHtml`). The vnode format
+ * has no unescaped output in any of the three, which is what makes
+ * dropping the safe default for untrusted Markdown. Link and image URLs are
  * filtered on the same principle: a destination whose scheme can execute
  * (`javascript:`, `vbscript:`) or stand in for a document
  * (`data:text/html`, `file:`) loses its attribute rather than reaching
@@ -24,8 +26,9 @@
  */
 
 import { h, createDomRenderer } from '@jarenjs/view';
-import { sanitizeUrl as defaultSanitizeUrl } from '@jarenjs/view/helpers';
+import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
 import { hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
+import { parseHtmlFragment, parseHtmlTag } from './html.js';
 import { walkAst } from './ast.js';
 import { buildPluginTables } from './parser.js';
 
@@ -36,7 +39,14 @@ import { buildPluginTables } from './parser.js';
 /**
  * @typedef {object} MdVnodeOptions
  * @property {any[]} [plugins] plugin set (must match the parse set for claimed nodes)
- * @property {'skip'|'text'} [html] raw HTML handling (default 'skip')
+ * @property {'skip'|'text'|'vnode'} [html] raw HTML handling (default
+ *   'skip'): drop it, show it as literal text, or parse it to vnodes
+ * @property {(html: string) => any} [parseHtml] the parser `html: 'vnode'`
+ *   uses (default `parseHtmlFragment` from `@jarenjs/md/html`) — the
+ *   injection point for a host's own sanitizer. It returns a LIST of
+ *   vnodes (empty or null when nothing survived); an array is always
+ *   read as a list, because a vnode is an array too and the two would
+ *   otherwise be indistinguishable.
  * @property {(url: string) => (string|null)} [sanitizeUrl] link/image URL
  *   filter, replacing the default deny-list; return the URL to emit, or
  *   `null` to drop the attribute. Supply one only to widen the policy for
@@ -44,8 +54,38 @@ import { buildPluginTables } from './parser.js';
  */
 
 /**
+ * One raw-HTML node, under whichever policy is in force.
+ *
+ * `'vnode'` parses; what the parser returns may be several nodes, so a
+ * BLOCK wraps them in a `<div>` (a block-level html node stands where a
+ * block does) while an INLINE one returns the array for the caller to
+ * splice. Nothing surviving the parse renders nothing at all, which is
+ * the same outcome as `'skip'` — an allow-list that rejected everything
+ * must not leave an empty wrapper behind.
+ * @param {any} node @param {any} rctx
+ * @param {string|null} blockClass class for the block form, null = inline
+ * @returns {any}
+ */
+function htmlNodeVnode(node, rctx, blockClass) {
+  if (rctx.html === 'skip') return null;
+  if (rctx.html === 'text') {
+    return blockClass === null ? node.value : ['pre', { class: blockClass }, node.value];
+  }
+  const parsed = rctx.parseHtml(node.value);
+  const children = parsed === null || parsed === undefined
+    ? []
+    : Array.isArray(parsed) ? parsed : [parsed];
+  if (children.length === 0) return null;
+  if (blockClass === null) return children;
+  return children.length === 1 && Array.isArray(children[0])
+    ? children[0]
+    : ['div', { class: blockClass }, ...children];
+}
+
+/**
  * The render context threaded through one emission.
- * @typedef {{ tables: any, html: 'skip'|'text', options: MdVnodeOptions,
+ * @typedef {{ tables: any, html: 'skip'|'text'|'vnode', options: MdVnodeOptions,
+ *   parseHtml: (html: string) => any,
  *   sanitizeUrl: (url: string) => (string|null),
  *   hash: (str: string) => string, counts: Map<string, number> }} RenderCtx
  */
@@ -77,10 +117,90 @@ function inlineChildren(nodes, rctx) {
  * @returns {any[]}
  */
 function intoVnode(vnode, nodes, rctx) {
+  if (rctx.html === 'vnode' && hasInlineHtml(nodes)) {
+    vnode.push(...pairInlineHtml(nodes, rctx));
+    return vnode;
+  }
   for (let i = 0; i < nodes.length; i++) {
     vnode.push(inlineVnode(nodes[i], rctx));
   }
   return vnode;
+}
+
+/** Does this inline run contain a raw-HTML node at all? */
+function hasInlineHtml(nodes) {
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].type === 'html') return true;
+  }
+  return false;
+}
+
+/**
+ * Assemble an inline run whose raw HTML comes one TAG at a time.
+ *
+ * CommonMark's inline phase emits `<b>bold</b>` as three siblings — an
+ * html node, a text node, an html node — because at that level a tag is
+ * not an element. Parsing each html node on its own would produce an
+ * empty `<b></b>` followed by loose text, so the run is re-paired here:
+ * an opening tag opens a frame, the matching closing tag closes it, and
+ * everything between becomes its children. A tag left open at the end of
+ * the run closes there, as it does inside a fragment.
+ *
+ * Only the default parser can be asked to classify a lone tag; an
+ * injected `parseHtml` keeps the simple path (parse each node on its
+ * own), because a host's parser answers a different question.
+ * @param {MdNode[]} nodes @param {RenderCtx} rctx
+ * @returns {any[]}
+ */
+function pairInlineHtml(nodes, rctx) {
+  const stack = [{ tag: null, props: null, children: /** @type {any[]} */ ([]) }];
+  const top = () => stack[stack.length - 1].children;
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node.type !== 'html') {
+      top().push(inlineVnode(node, rctx));
+      continue;
+    }
+    const tag = rctx.parseHtml === parseHtmlFragment ? parseHtmlTag(node.value) : null;
+    if (tag === null) {
+      // not one plain tag (a comment, a whole element, an injected
+      // parser): whatever the parser makes of it stands on its own
+      const parsed = rctx.parseHtml(node.value);
+      if (Array.isArray(parsed)) top().push(...parsed);
+      else if (parsed !== null && parsed !== undefined) top().push(parsed);
+      continue;
+    }
+    if (tag.closing) {
+      // close the nearest frame this end tag matches; an unmatched one
+      // is dropped, like a stray `</div>` in a fragment
+      for (let depth = stack.length - 1; depth > 0; depth--) {
+        if (stack[depth].tag !== tag.name) continue;
+        while (stack.length > depth) closeInlineFrame(stack);
+        break;
+      }
+      continue;
+    }
+    if (tag.complete) {
+      if (tag.props !== null) top().push([tag.name, tag.props]);
+      continue;
+    }
+    stack.push({ tag: tag.name, props: tag.props, drop: tag.drop, children: [] });
+  }
+  while (stack.length > 1) closeInlineFrame(stack);
+  return stack[0].children;
+}
+
+/**
+ * Pop one inline frame into its parent: a known element keeps its props
+ * and children, an unknown one keeps only its children, and one whose
+ * content is not prose (`<script>`) keeps neither.
+ */
+function closeInlineFrame(stack) {
+  const frame = stack.pop();
+  const parent = stack[stack.length - 1].children;
+  if (frame.drop === true) return;
+  if (frame.props !== null) parent.push([frame.tag, frame.props, ...frame.children]);
+  else parent.push(...frame.children);
 }
 
 /** @type {Record<string, (node: MdNode, rctx: RenderCtx) => any>} */
@@ -92,21 +212,26 @@ const INLINE_RENDERERS = {
   inlineCode: (node) => ['code', {}, node.value],
   link: (node, rctx) => {
     // A rejected destination drops the attribute and keeps the element:
-    // the link text stays readable, it just is not clickable.
+    // the link text stays readable, it just is not clickable. What
+    // survives is percent-encoded: the AST holds the destination the
+    // author wrote, an attribute needs a URL a browser resolves the same
+    // way (CommonMark's rendering rule).
     const href = rctx.sanitizeUrl(node.url);
-    const props = href === null ? {} : { href };
+    const props = href === null ? {} : { href: encodeUrlAttribute(href) };
     if (node.title != null) props.title = node.title;
     return intoVnode(['a', props], node.children, rctx);
   },
   image: (node, rctx) => {
     const src = rctx.sanitizeUrl(node.url);
-    const props = src === null ? { alt: node.alt } : { src, alt: node.alt };
+    const props = src === null
+      ? { alt: node.alt }
+      : { src: encodeUrlAttribute(src), alt: node.alt };
     if (node.title != null) props.title = node.title;
     return ['img', props];
   },
   break: () => ['br', {}],
   softBreak: () => '\n',
-  html: (node, rctx) => (rctx.html === 'text' ? node.value : null),
+  html: (node, rctx) => htmlNodeVnode(node, rctx, null),
 };
 
 /**
@@ -155,7 +280,7 @@ const BLOCK_RENDERERS = {
     return ['pre', {}, ['code', props, node.value]];
   },
 
-  html: (node, rctx) => (rctx.html === 'text' ? ['pre', { class: 'md-html' }, node.value] : null),
+  html: (node, rctx) => htmlNodeVnode(node, rctx, 'md-html'),
 
   table: (node, rctx) => {
     const rows = node.children;
@@ -372,7 +497,8 @@ export function mdToVnode(docOrCompiled, options = {}) {
   /** @type {RenderCtx} */
   const rctx = {
     tables,
-    html: options.html === 'text' ? 'text' : 'skip',
+    html: options.html === 'text' || options.html === 'vnode' ? options.html : 'skip',
+    parseHtml: typeof options.parseHtml === 'function' ? options.parseHtml : parseHtmlFragment,
     sanitizeUrl: typeof options.sanitizeUrl === 'function'
       ? options.sanitizeUrl
       : defaultSanitizeUrl,

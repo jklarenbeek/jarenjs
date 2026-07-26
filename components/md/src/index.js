@@ -44,6 +44,8 @@ export {
 
 export { definePlugin } from './plugins/index.js';
 
+export { parseHtmlFragment, parseHtmlTag } from './html.js';
+
 export {
   MD_VERSION,
   walkAst,

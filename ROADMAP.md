@@ -196,10 +196,23 @@ delete it or fix it.
 
 ## @jarenjs/md
 
-- [ ] **CommonMark conformance push** — 526/655 spec examples pass today (`npm run benchmark:markdown --score-only --verbose` lists the failures); the largest deliberate class is raw-HTML pass-through (the vnode format has no unescaped output), the rest are honest dialect gaps (link-label edge cases, exotic emphasis nestings, HTML block subtleties) worth picking off.
-- [ ] **Parse-speed workstream** — ~0.3 ms per 10 kB to AST; the block scan re-slices lines per container level and the inline phase re-buffers leaf text; a column-offset scanner (no intermediate slices) is the next lever toward the sub-200 µs target.
-- [ ] **Sanitizer-backed raw HTML** — an opt-in `html` mode that parses raw HTML nodes into vnodes through an injected sanitizer, replacing today's skip/text-only choice.
-- [ ] **Streaming reference definitions** — the incremental parser binds `[ref]` links against definitions seen so far; a deferred-resolution pass at `end()` would close the gap with batch mode.
+- [ ] **CommonMark conformance push** — 571/655 spec examples pass
+  (`npm run benchmark:markdown --score-only --verbose` lists the failures).
+  **47 of the remaining 84 cannot be reached at all**: CommonMark renders raw
+  HTML verbatim, including a lone `</div>`, an unknown `<bab>` and a
+  never-closed tag, and a vnode tree has no way to hold half an element. The
+  `html: 'vnode'` mode already takes the balanced cases. What is left that is
+  *fixable* is ~37 examples of real dialect gaps, in four groups worth doing
+  one at a time: loose-list `<p>` wrapping (List items, Lists), emphasis
+  flanking rules, link-label edge cases, and empty/`<>` destinations.
+- [ ] **Parse-speed workstream** — ~0.32 ms per 10 kB to AST. A CPU profile
+  says the block scan is **not** where the time is (~14%): the inline phase is
+  ~36% (`parseInlines`, `resolveEmphasis`, `mergeText`, `closeBracket`) and
+  hashing the source for `meta.hash` is ~10% on its own. The leads in order of
+  measured weight are avoiding the adjacent-text-node merge, then deciding
+  whether `meta.hash` can be computed lazily without breaking the document
+  contract. A column-offset block scanner was the previous guess and the
+  profile does not support it.
 
 ## @jarenjs/mermaid
 

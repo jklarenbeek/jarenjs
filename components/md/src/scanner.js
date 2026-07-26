@@ -10,6 +10,7 @@
  */
 
 import { countIndent } from './utils.js';
+import { decodeReferences } from './entities.js';
 
 const CC_SPACE = 0x20;
 const CC_HASH = 0x23;
@@ -119,7 +120,7 @@ export function scanFenceClose(line, marker, length) {
 
 /**
  * Split a fence info string into `lang` (first word) and `meta` (the
- * rest), decoding backslash escapes in the lang.
+ * rest), resolving backslash escapes and character references in both.
  * @param {string} info
  * @returns {{ lang: string|null, meta: string|null }}
  */
@@ -127,8 +128,9 @@ export function splitFenceInfo(info) {
   if (info === '') return { lang: null, meta: null };
   let i = 0;
   while (i < info.length && !isSpaceCode(info.charCodeAt(i))) i++;
-  const lang = info.slice(0, i);
-  const meta = info.slice(i).trim();
+  // an info string carries escapes and references like a destination does
+  const lang = decodeReferences(info.slice(0, i));
+  const meta = decodeReferences(info.slice(i).trim());
   return { lang, meta: meta === '' ? null : meta };
 }
 
@@ -415,31 +417,25 @@ export function scanLinkDefinition(text, pos) {
  * @returns {{ url: string, end: number } | null}
  */
 export function scanLinkDestination(text, pos) {
+  // The raw range is decoded in ONE pass at the end (escapes and
+  // character references together): unescaping while scanning would let
+  // a backslash-escaped `&` start an entity in the next pass.
   if (text.charCodeAt(pos) === CC_LT) {
     let i = pos + 1;
-    let url = '';
     while (i < text.length) {
       const c = text.charCodeAt(i);
-      if (c === CC_GT) return { url, end: i + 1 };
+      if (c === CC_GT) return { url: decodeReferences(text.slice(pos + 1, i)), end: i + 1 };
       if (c === CC_LT || c === 0x0A) return null;
-      if (c === 0x5C && i + 1 < text.length) {
-        url += text[i + 1];
-        i += 2;
-        continue;
-      }
-      url += text[i];
-      i++;
+      i += c === 0x5C && i + 1 < text.length ? 2 : 1;
     }
     return null;
   }
   let i = pos;
-  let url = '';
   let depth = 0;
   while (i < text.length) {
     const c = text.charCodeAt(i);
     if (c <= 0x20) break;
     if (c === 0x5C && i + 1 < text.length) {
-      url += text[i + 1];
       i += 2;
       continue;
     }
@@ -448,11 +444,10 @@ export function scanLinkDestination(text, pos) {
       if (depth === 0) break;
       depth--;
     }
-    url += text[i];
     i++;
   }
   if (depth !== 0) return null;
-  return i === pos ? null : { url, end: i };
+  return i === pos ? null : { url: decodeReferences(text.slice(pos, i)), end: i };
 }
 
 /**
@@ -466,18 +461,11 @@ export function scanLinkTitle(text, pos) {
   if (open !== 0x22 && open !== 0x27 && open !== 0x28) return null;
   const close = open === 0x28 ? CC_RPAREN : open;
   let i = pos + 1;
-  let title = '';
   while (i < text.length) {
     const c = text.charCodeAt(i);
-    if (c === close) return { title, end: i + 1 };
+    if (c === close) return { title: decodeReferences(text.slice(pos + 1, i)), end: i + 1 };
     if (open === 0x28 && c === 0x28) return null;
-    if (c === 0x5C && i + 1 < text.length) {
-      title += text[i + 1];
-      i += 2;
-      continue;
-    }
-    title += text[i];
-    i++;
+    i += c === 0x5C && i + 1 < text.length ? 2 : 1;
   }
   return null;
 }

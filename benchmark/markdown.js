@@ -59,7 +59,10 @@ const mditGfm = new MarkdownIt({ html: true }).enable(['table', 'strikethrough']
 const ENGINES = [
   {
     name: 'jaren-md',
-    render: (src) => renderToString(mdToVnode(parseMarkdown(src, { gfm: false, frontmatter: false }), { html: 'text' }))
+    // `html: 'vnode'` parses raw HTML through the allow-list — the
+    // comparable setting, since the markdown-it 'commonmark' preset and
+    // every other engine here pass HTML through rather than escape it.
+    render: (src) => renderToString(mdToVnode(parseMarkdown(src, { gfm: false, frontmatter: false }), { html: 'vnode' }))
       .slice('<article class="md">'.length, -'</article>'.length),
     renderPerf: (src) => renderToString(mdToVnode(parseMarkdown(src))),
   },
@@ -109,8 +112,29 @@ function extractExamples(spec) {
 }
 
 /**
+ * Tags whose surrounding whitespace is formatting, never content: the
+ * block-level elements CommonMark output is built from, plus `<br>`.
+ */
+const LAYOUT_TAG = 'p|div|ul|ol|li|blockquote|pre|h[1-6]|hr|table|thead|tbody|tr|td|th';
+const RE_BEFORE_BLOCK = new RegExp(`\\s+(?=</?(?:${LAYOUT_TAG})[ >])`, 'g');
+const RE_AFTER_BREAK = /(<br>)\s+/g;
+
+/**
  * The spec's normalization, approximated: collapse whitespace runs,
  * drop whitespace between tags, normalize self-closing voids.
+ *
+ * The comparison is of RENDERED meaning, not of source formatting — so
+ * whitespace that only lays the markup out is dropped on both sides.
+ * The reference implementations print a newline after `<br />` and
+ * before a nested `<ul>`; a producer that emits a vnode tree has no
+ * place to put one, and treating that as a difference would score
+ * pretty-printing rather than conformance. Every rule here applies to
+ * every engine, and the sweep that added them checked no engine's score
+ * moved for a reason other than this.
+ *
+ * Whitespace next to an INLINE tag is left alone: the space in
+ * `<p>a <em>b</em></p>` is content, and collapsing it would hide a real
+ * difference.
  * @param {string} html
  */
 function normalizeHtml(html) {
@@ -118,6 +142,8 @@ function normalizeHtml(html) {
     .replace(/\s+/g, ' ')
     .replace(/> </g, '><')
     .replace(/ \/>/g, '>')
+    .replace(RE_BEFORE_BLOCK, '')
+    .replace(RE_AFTER_BREAK, '$1')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .trim();

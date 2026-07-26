@@ -101,7 +101,9 @@ describe('parseMarkdown: CommonMark core', function () {
   it('parses inline links with titles', function () {
     assert.equal(html('[t](/u)'), '<p><a href="/u">t</a></p>');
     assert.equal(html('[t](/u "T")'), '<p><a href="/u" title="T">t</a></p>');
-    assert.equal(html('[t](<u v>)'), '<p><a href="u v">t</a></p>');
+    // a space is legal inside an angle-bracketed destination and illegal
+    // in the attribute it lands in, so it percent-encodes on the way out
+    assert.equal(html('[t](<u v>)'), '<p><a href="u%20v">t</a></p>');
     assert.equal(html('[*em* t](/u)'), '<p><a href="/u"><em>em</em> t</a></p>');
   });
 

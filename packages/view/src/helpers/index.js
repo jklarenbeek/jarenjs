@@ -9,7 +9,7 @@
  * `@jarenjs/view/helpers/theme`).
  */
 
-export { sanitizeHref, sanitizeUrl } from './url.js';
+export { sanitizeHref, sanitizeUrl, encodeUrlAttribute } from './url.js';
 
 export {
   num,
