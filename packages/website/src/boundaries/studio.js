@@ -29,7 +29,7 @@
 
 import { JarenValidator } from '@jarenjs/validate';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
-import { createApp, createFormView } from '@jarenjs/app';
+import { createApp, createFormView, formEventFields } from '@jarenjs/app';
 import { createDomRenderer } from '@jarenjs/view';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
@@ -344,6 +344,8 @@ export function loadStudioDocument(doc, env = {}) {
       schedule: env.schedule,
       widgets: STUDIO_WIDGETS,
       compileTypeTest,
+      // the form widget's typed selects and json editor decode here
+      eventFields: { ...formEventFields() },
       onError: env.onError,
       // deliberately absent: effects, subs — the isolation boundary
     });

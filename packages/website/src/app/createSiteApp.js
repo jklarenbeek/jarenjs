@@ -13,7 +13,7 @@
  *  - `/route` changed → run the routed engine once if it has no result.
  */
 
-import { createApp } from '@jarenjs/app';
+import { createApp, formEventFields } from '@jarenjs/app';
 
 import { ACTIONS, SUBS } from './actions.js';
 import { createInitialState } from './state.js';
@@ -294,6 +294,9 @@ export function createSiteApp(env) {
     node: env.node,
     document: env.document,
     schedule: env.schedule,
+    // the standard form controls that carry JSON text (typed selects,
+    // the structured-value editor) decode it here
+    eventFields: { ...formEventFields() },
     viewModel,
     // per committed frame: keep the active tab/section of the mobile
     // scroll strips in view (a no-op capability on headless hosts)

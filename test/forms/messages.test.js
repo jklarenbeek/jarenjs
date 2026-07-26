@@ -20,6 +20,7 @@ import {
   evaluateFormRules,
   formRulesToQueryAssertions,
   formsMessagesEn,
+  formChromeLabels,
   compileMessageCatalog,
   compileMessageTemplate,
 } from '@jarenjs/forms';
@@ -367,7 +368,21 @@ describe('forms message utilities', () => {
       'form/minimum', 'form/maximum', 'form/exclusiveMinimum', 'form/exclusiveMaximum',
       'form/multipleOf', 'form/minItems', 'form/maxItems', 'form/uniqueItems',
       'form/minProperties', 'form/maxProperties', 'x-form/assert',
+      // chrome, not validation: the array buttons' accessible names
+      'form/addItem', 'form/removeItem',
     ];
     assert.deepStrictEqual(Object.keys(formsMessagesEn).sort(), expected.sort());
+  });
+
+  it('formChromeLabels resolves the array buttons through a catalog', () => {
+    assert.deepStrictEqual(formChromeLabels(),
+      { addItem: 'Add item', removeItem: 'Remove item' });
+    // the same keyspace every locale pack has to cover
+    const dutch = formChromeLabels(compileMessageCatalog(nl));
+    assert.strictEqual(dutch.addItem, 'Item toevoegen');
+    assert.strictEqual(dutch.removeItem, 'Item verwijderen');
+    // a catalog missing the keys still yields the English chrome
+    assert.deepStrictEqual(formChromeLabels(compileMessageCatalog({})),
+      { addItem: 'Add item', removeItem: 'Remove item' });
   });
 });

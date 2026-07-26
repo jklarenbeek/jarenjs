@@ -13,9 +13,11 @@
  * cached by pointer string and reads are allocation-free.
  */
 
+import { equalsJson } from '@jarenjs/core/object';
 import {
   parseJSONPointer,
   compileJSONPointer,
+  encodeJSONPointerSegment,
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json/pointer';
 import {
@@ -154,6 +156,93 @@ export function appendItem(data, pointer, value) {
   const arr = getValueAtPointer(data, pointer);
   const next = Array.isArray(arr) ? [...arr, value] : [value];
   return setValueAtPointer(data, pointer, next);
+}
+
+/**
+ * Every pointer whose value differs between two documents, in
+ * document order.
+ *
+ * Membership is significant: an added or removed member (or array tail
+ * slot) contributes its pointer even when both sides read back as
+ * `null` through a pointer lookup. Reference-equal subtrees are skipped
+ * whole, so over copy-on-write edits — which is how every writer in
+ * this package produces its next document — the walk costs O(change),
+ * not O(document).
+ *
+ * Two callers rely on it: the session's navigation-guard evidence
+ * (`dirtyPaths`) and the rule memo's invalidation set.
+ * @param {any} previous
+ * @param {any} current
+ * @returns {string[]}
+ */
+export function changedPointers(previous, current) {
+  /** @type {string[]} */
+  const out = [];
+  collectChanged(previous, current, '', out);
+  return out;
+}
+
+function collectChanged(previous, current, pointer, out) {
+  // Reference equality first, at every level and before any pointer
+  // string is built: over a copy-on-write edit almost every member of
+  // the touched container is the identical value, and formatting a
+  // pointer for each of them would put the document's WIDTH back into a
+  // walk whose whole point is to cost only its depth.
+  if (previous === current) return;
+  if (Array.isArray(previous) && Array.isArray(current)) {
+    const shared = Math.min(previous.length, current.length);
+    for (let i = 0; i < shared; i++) {
+      if (previous[i] !== current[i])
+        collectChanged(previous[i], current[i], `${pointer}/${i}`, out);
+    }
+    const longest = Math.max(previous.length, current.length);
+    for (let i = shared; i < longest; i++)
+      out.push(`${pointer}/${i}`); // added or removed tail slot
+    return;
+  }
+  if (previous !== null && typeof previous === 'object' && !Array.isArray(previous)
+    && current !== null && typeof current === 'object' && !Array.isArray(current)) {
+    const before = Object.keys(previous);
+    const after = Object.keys(current);
+    // Same members in the same order — which is what a copy-on-write
+    // edit of one member produces — needs no membership probing at all,
+    // just a value compare per key. The general path below is for real
+    // shape changes.
+    if (before.length === after.length && sameOrder(before, after)) {
+      for (let i = 0; i < before.length; i++) {
+        const key = before[i];
+        if (previous[key] !== current[key]) {
+          collectChanged(previous[key], current[key],
+            `${pointer}/${encodeJSONPointerSegment(key)}`, out);
+        }
+      }
+      return;
+    }
+    // own keys only, membership by Object.hasOwn — JSON member names
+    // like 'constructor', 'toString' or a parsed own '__proto__' are
+    // legal data and must diff as data, never through the prototype
+    // chain (null-prototype records diff identically)
+    for (const key of before) {
+      if (!Object.hasOwn(current, key))
+        out.push(`${pointer}/${encodeJSONPointerSegment(key)}`); // removed member
+      else if (previous[key] !== current[key])
+        collectChanged(previous[key], current[key], `${pointer}/${encodeJSONPointerSegment(key)}`, out);
+    }
+    for (const key of after) {
+      if (!Object.hasOwn(previous, key))
+        out.push(`${pointer}/${encodeJSONPointerSegment(key)}`); // added member
+    }
+    return;
+  }
+  if (!equalsJson(previous, current)) out.push(pointer);
+}
+
+/** Whether two key lists hold the same names in the same positions. */
+function sameOrder(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 //#endregion

@@ -124,5 +124,7 @@ export const nl = {
   'form/minProperties': (p) => `Moet ten minste ${num(p.limit)} ${plural(p.limit, 'eigenschap', 'eigenschappen')} bevatten`,
   'form/maxProperties': (p) => `Mag ten hoogste ${num(p.limit)} ${plural(p.limit, 'eigenschap', 'eigenschappen')} bevatten`,
   'x-form/assert': 'Ongeldige waarde',
+  'form/addItem': 'Item toevoegen',
+  'form/removeItem': 'Item verwijderen',
   //#endregion
 };

@@ -74,6 +74,9 @@ const SAMPLE_PARAMS = {
   'form/minProperties': { limit: 2 },
   'form/maxProperties': { limit: 2 },
   'x-form/assert': { pointer: '/vatId' },
+  // form chrome takes no params: the accessible names of the array buttons
+  'form/addItem': {},
+  'form/removeItem': {},
 };
 
 /**

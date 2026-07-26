@@ -65,9 +65,23 @@ describe('buildFormViewModel', function () {
     const plan = child(tree({ plan: 'pro' }), 'plan');
     assert.strictEqual(plan.control, 'select');
     assert.deepStrictEqual(plan.options, [
-      { value: 'free', label: 'free', selected: false },
-      { value: 'pro', label: 'pro', selected: true },
+      { value: 'free', key: '"free"', label: 'free', selected: false },
+      { value: 'pro', key: '"pro"', label: 'pro', selected: true },
     ]);
+  });
+
+  it('gives every option a reversible key for string-valued controls', function () {
+    const typed = buildFormViewModel(
+      buildFormModel({
+        type: 'object',
+        properties: { size: { enum: [1, 2.5, true, null, 'x'] } },
+      }),
+      { size: 2.5 });
+    assert.deepStrictEqual(child(typed, 'size').options.map((o) => o.key),
+      ['1', '2.5', 'true', 'null', '"x"']);
+    // the key round-trips to the typed value, which String(v) would not
+    for (const option of child(typed, 'size').options)
+      assert.deepStrictEqual(JSON.parse(option.key), option.value);
   });
 
   it('excludes rule-hidden fields and carries computed values', function () {

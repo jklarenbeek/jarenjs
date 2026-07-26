@@ -672,9 +672,13 @@ feedback shape a repair loop needs.
   artifacts alongside it. A constrained decoder held to it cannot emit
   a structurally invalid application — and the test suite validates
   the production website's own app document against it.
-- **The standard forms stylesheet** — render any `@jarenjs/forms`
-  model through one shipped rule set; generalize `x-form`'s derivation
-  vocabulary (`computed`/`visible`) to app-level derived state.
+- ~~The standard forms stylesheet~~ — **shipped**: `createFormView` /
+  `createFormActions` render any `@jarenjs/forms` model through one
+  rule set. What remains of the idea is the other half — generalizing
+  `x-form`'s derivation vocabulary (`computed`/`visible`) to app-level
+  derived state, and letting a stylesheet replace the view-model
+  composition itself, which needs a language primitive this format does
+  not have (see ROADMAP, `@jarenjs/forms`).
 - ~~Dirty-path-pruned re-rendering~~ — largely **shipped** through the
   other side: the JSLT `memo` option makes unchanged subtrees return
   reference-equal vnodes the renderer skips in O(1); prepass-level

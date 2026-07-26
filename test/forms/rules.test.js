@@ -12,6 +12,8 @@ import {
   compileFormRules,
   evaluateFormRules,
   formRulesToQueryAssertions,
+  pruneHiddenValues,
+  createRuleMemo,
   setValueAtPointer,
 } from '@jarenjs/forms';
 
@@ -289,14 +291,274 @@ describe('Form Rules (x-form)', function () {
     });
   });
 
+  describe('#createRuleMemo() dependency memoization', function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        kind: { type: 'string' },
+        company: {
+          type: 'string',
+          'x-form': {
+            visible: { $eq: ['$.kind', 'biz'] },
+            assert: { $ne: ['$value', ''] },
+          },
+        },
+        note: { type: 'string', 'x-form': { assert: { $ne: ['$value', 'bad'] } } },
+        lines: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              amount: { type: 'number', 'x-form': { assert: { $gt: ['$value', 0] } } },
+            },
+          },
+        },
+      },
+    };
+
+    it('should record the pointer prefixes each rule reads', function () {
+      const compiled = compiledFor(schema);
+      const deps = Object.fromEntries(compiled.rules.map((r) => [r.pointer, r.deps]));
+      assert.deepEqual(deps['/company'].slice().sort(), ['/company', '/kind']);
+      assert.deepEqual(deps['/note'], ['/note']);
+      // a template rule depends on the whole array: adding or removing an
+      // element changes which pointers it even produces
+      assert.deepEqual(deps['/lines/-/amount'], ['/lines']);
+    });
+
+    it('should see the paths a filter names, not just the top-level ones', function () {
+      // `$.selected` is inside the filter, and a rule that reads it must
+      // re-run when it changes — an under-approximation here is a stale
+      // form, which is the one failure mode this analysis may not have
+      const compiled = compiledFor({
+        type: 'object',
+        properties: {
+          selected: { type: 'string' },
+          lines: { type: 'array' },
+          hit: {
+            'x-form': {
+              computed: { $count: "$.lines[?@.id == $.selected].name" },
+            },
+          },
+        },
+      });
+      const deps = compiled.rules[0].deps.slice().sort();
+      assert.deepEqual(deps, ['/hit', '/lines', '/selected']);
+
+      const memo = createRuleMemo();
+      const state = evaluateFormRules(compiled,
+        { selected: 'a', lines: [{ id: 'a', name: 'x' }, { id: 'b', name: 'y' }] },
+        undefined, memo);
+      assert.isTrue(state['/hit'].computed === 1);
+      evaluateFormRules(compiled,
+        { selected: 'b', lines: [{ id: 'a', name: 'x' }, { id: 'b', name: 'y' }] },
+        undefined, memo);
+      assert.isTrue(state['/hit'].computed === 1, 'still one match, but it was recomputed');
+      evaluateFormRules(compiled,
+        { selected: 'zz', lines: [{ id: 'a', name: 'x' }, { id: 'b', name: 'y' }] },
+        undefined, memo);
+      assert.isTrue(state['/hit'].computed === 0, 'the filter dependency reached the rule');
+    });
+
+    it('should produce exactly what an unmemoized evaluation produces', function () {
+      const compiled = compiledFor(schema);
+      const memo = createRuleMemo();
+      const documents = [
+        { kind: 'person' },
+        { kind: 'biz' },
+        { kind: 'biz', company: '' },
+        { kind: 'biz', company: 'ACME' },
+        { kind: 'biz', company: 'ACME', note: 'bad' },
+        { kind: 'biz', company: 'ACME', note: 'ok', lines: [{ amount: 1 }] },
+        { kind: 'biz', company: 'ACME', note: 'ok', lines: [{ amount: 1 }, { amount: 0 }] },
+        { kind: 'biz', company: 'ACME', note: 'ok', lines: [{ amount: 1 }] },
+        { kind: 'person', company: 'ACME', note: 'ok', lines: [] },
+      ];
+      for (const data of documents) {
+        assert.deepEqual(evaluateFormRules(compiled, data, undefined, memo),
+          evaluateFormRules(compiled, data),
+          `memoized result diverged for ${JSON.stringify(data)}`);
+      }
+    });
+
+    it('should skip the rules a change cannot reach', function () {
+      const compiled = compiledFor(schema);
+      // a re-evaluated rule writes a fresh result object; a skipped one
+      // leaves the entry it wrote last time in place (the memo patches
+      // its map rather than rebuilding it, so identity is the evidence)
+      const memo = createRuleMemo();
+      const state = evaluateFormRules(compiled, { kind: 'biz', company: 'ACME', note: 'ok' },
+        undefined, memo);
+      const companyBefore = state['/company'];
+      const noteBefore = state['/note'];
+      evaluateFormRules(compiled, { kind: 'biz', company: 'ACME', note: 'x' }, undefined, memo);
+      assert.isTrue(state['/company'] === companyBefore, '/company untouched, not re-evaluated');
+      assert.isTrue(state['/note'] !== noteBefore, '/note changed, re-evaluated');
+    });
+
+    it('should trust a declared write instead of diffing', function () {
+      const compiled = compiledFor(schema);
+      const memo = createRuleMemo();
+      const state = evaluateFormRules(compiled, { kind: 'biz', company: 'ACME', note: 'ok' },
+        undefined, memo);
+      const companyBefore = state['/company'];
+      evaluateFormRules(compiled, { kind: 'biz', company: 'ACME', note: 'x' },
+        undefined, memo.touch('/note'));
+      assert.isTrue(state['/company'] === companyBefore, 'the declared write reached only /note');
+      assert.isTrue(state['/note'].errors === undefined);
+      // and the declaration is consumed: the next call diffs again
+      const noteBefore = state['/note'];
+      evaluateFormRules(compiled, { kind: 'biz', company: 'ACME', note: 'bad' }, undefined, memo);
+      assert.isTrue(state['/note'] !== noteBefore);
+      assert.isTrue(state['/note'].errors.length === 1);
+    });
+
+    it('should drop the entries a shrunken array no longer has', function () {
+      const compiled = compiledFor(schema);
+      const memo = createRuleMemo();
+      const grown = evaluateFormRules(compiled,
+        { lines: [{ amount: 1 }, { amount: 2 }, { amount: 3 }] }, undefined, memo);
+      assert.isTrue(grown['/lines/2/amount'] !== undefined);
+      const shrunk = evaluateFormRules(compiled, { lines: [{ amount: 1 }] }, undefined, memo);
+      assert.isTrue(shrunk['/lines/1/amount'] === undefined, 'stale element entry removed');
+      assert.isTrue(shrunk['/lines/2/amount'] === undefined);
+      assert.deepEqual(shrunk, evaluateFormRules(compiled, { lines: [{ amount: 1 }] }));
+    });
+
+    it('should re-evaluate a cross-field rule when the field it reads changes', function () {
+      const compiled = compiledFor(schema);
+      const memo = createRuleMemo();
+      const first = evaluateFormRules(compiled, { kind: 'biz', company: 'ACME' }, undefined, memo);
+      assert.isTrue(first['/company'].visible === true);
+      const second = evaluateFormRules(compiled, { kind: 'person', company: 'ACME' },
+        undefined, memo);
+      assert.isTrue(second['/company'].visible === false, 'the sibling change reached it');
+    });
+
+    it('should return the previous map by reference when nothing changed', function () {
+      const compiled = compiledFor(schema);
+      const memo = createRuleMemo();
+      const data = { kind: 'biz', company: 'ACME' };
+      const first = evaluateFormRules(compiled, data, undefined, memo);
+      assert.isTrue(evaluateFormRules(compiled, data, undefined, memo) === first);
+      // an equal-but-fresh document is a no-op too: the diff is by value
+      assert.isTrue(evaluateFormRules(compiled, { ...data }, undefined, memo) === first);
+    });
+
+    it('should re-render every message when the catalog changes', function () {
+      const localized = {
+        type: 'object',
+        properties: {
+          a: {
+            'x-form': {
+              assert: { $ne: ['$value', 1] },
+              message: { $msgid: 'demo/nope', message: 'nope' },
+            },
+          },
+        },
+      };
+      const compiled = compiledFor(localized);
+      const memo = createRuleMemo();
+      const data = { a: 1 };
+      const english = evaluateFormRules(compiled, data, undefined, memo);
+      assert.isTrue(english['/a'].errors[0].message === 'nope');
+      const dutch = evaluateFormRules(compiled, data,
+        { 'demo/nope': () => 'nee' }, memo);
+      assert.isTrue(dutch['/a'].errors[0].message === 'nee', 'the locale switch was not cached over');
+    });
+  });
+
+  describe('#pruneHiddenValues()', function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        kind: { type: 'string' },
+        company: { type: 'string', 'x-form': { visible: { $eq: ['$.kind', 'biz'] } } },
+        lines: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              note: { type: 'string', 'x-form': { visible: { $ne: ['$value', 'skip'] } } },
+            },
+          },
+        },
+      },
+    };
+
+    it('should drop the values of currently hidden fields', function () {
+      const compiled = compiledFor(schema);
+      assert.deepEqual(
+        pruneHiddenValues(compiled, { kind: 'person', company: 'ACME', lines: [] }),
+        { kind: 'person', lines: [] });
+    });
+
+    it('should keep values the rules currently show', function () {
+      const compiled = compiledFor(schema);
+      const data = { kind: 'biz', company: 'ACME', lines: [] };
+      assert.isTrue(pruneHiddenValues(compiled, data) === data, 'nothing hidden, same reference');
+    });
+
+    it('should prune per array element without disturbing its siblings', function () {
+      const compiled = compiledFor(schema);
+      assert.deepEqual(
+        pruneHiddenValues(compiled, {
+          kind: 'biz',
+          lines: [{ note: 'keep' }, { note: 'skip' }, { note: 'also keep' }],
+        }),
+        { kind: 'biz', lines: [{ note: 'keep' }, {}, { note: 'also keep' }] });
+    });
+
+    it('should evaluate visibility once, against the incoming document', function () {
+      // `visible` reads the very value it hides: pruning must not make a
+      // second pass see the field reappear
+      const selfHiding = {
+        type: 'object',
+        properties: {
+          secret: { type: 'string', 'x-form': { visible: { $ne: ['$value', 'hide me'] } } },
+        },
+      };
+      const compiled = compiledFor(selfHiding);
+      assert.deepEqual(pruneHiddenValues(compiled, { secret: 'hide me' }), {});
+    });
+
+    it('should remove a hidden element highest-index-first so pointers stay valid', function () {
+      const elementSchema = {
+        type: 'object',
+        properties: {
+          lines: {
+            type: 'array',
+            items: { type: 'string', 'x-form': { visible: { $ne: ['$value', 'drop'] } } },
+          },
+        },
+      };
+      const compiled = compiledFor(elementSchema);
+      assert.deepEqual(
+        pruneHiddenValues(compiled, { lines: ['a', 'drop', 'b', 'drop', 'c'] }),
+        { lines: ['a', 'b', 'c'] });
+    });
+  });
+
   describe('#formRulesToQueryAssertions()', function () {
     it('should copy a single assert into its own allOf branch with rebound value/pointer and message', function () {
       const out = formRulesToQueryAssertions(signupSchema);
       assert.isTrue(out.allOf.length === 1);
       assert.deepEqual(out.allOf[0], {
         $query: {
-          $let: { value: "$['vatId']", pointer: { $const: '/vatId' } },
-          $return: signupSchema.properties.vatId['x-form'].assert,
+          // $default: an absent field binds null on submit exactly as it
+          // does per keystroke, so $eq/$ne cannot mean opposite things
+          $let: {
+            value: { $default: ["$['vatId']", { $const: null }] },
+            pointer: { $const: '/vatId' },
+          },
+          // guarded by the field's own `visible`: a hidden field's
+          // assert holds vacuously, as it effectively does per keystroke
+          $return: {
+            $or: [
+              { $not: signupSchema.properties.vatId['x-form'].visible },
+              signupSchema.properties.vatId['x-form'].assert,
+            ],
+          },
         },
         errorMessage: {
           $query: {
@@ -325,7 +587,7 @@ describe('Form Rules (x-form)', function () {
         { $query: { $msgid: 'x-form/assert', params: { pointer: '/a' } } });
     });
 
-    it('should quantify item-template asserts with $every', function () {
+    it('should quantify item-template asserts over the elements', function () {
       const out = formRulesToQueryAssertions({
         type: 'object',
         properties: {
@@ -340,10 +602,16 @@ describe('Form Rules (x-form)', function () {
           },
         },
       });
+      // over the ELEMENTS, not over the selected leaves: quantifying
+      // over leaves would skip an element that lacks `amount`, where
+      // the keystroke path evaluates that element with value null
       assert.deepEqual(out.allOf[0].$query, {
-        $every: { value: "$['lines'][*]['amount']" },
+        $every: { _item0: "$['lines'][*]" },
         $satisfies: {
-          $let: { pointer: { $const: '/lines/-/amount' } },
+          $let: {
+            value: { $default: ["$_item0['amount']", { $const: null }] },
+            pointer: { $const: '/lines/-/amount' },
+          },
           $return: { $gt: ['$value', 0] },
         },
       });
@@ -367,6 +635,14 @@ describe('Form Rules (x-form)', function () {
       assert.isTrue(formRulesToQueryAssertions(true) === true);
     });
 
+    it('should leave an assert unguarded when the field has no visible rule', function () {
+      const out = formRulesToQueryAssertions({
+        type: 'object',
+        properties: { a: { 'x-form': { assert: { $ne: ['$value', 1] } } } },
+      });
+      assert.deepEqual(out.allOf[0].$query.$return, { $ne: ['$value', 1] });
+    });
+
     it('should escape pointer and path metacharacters in property names', function () {
       const out = formRulesToQueryAssertions({
         type: 'object',
@@ -374,7 +650,7 @@ describe('Form Rules (x-form)', function () {
           "a/b's": { 'x-form': { assert: { $ne: ['$value', ''] } } },
         },
       });
-      assert.isTrue(out.allOf[0].$query.$let.value === "$['a/b\\'s']");
+      assert.isTrue(out.allOf[0].$query.$let.value.$default[0] === "$['a/b\\'s']");
       assert.deepEqual(out.allOf[0].$query.$let.pointer, { $const: '/a~1b\'s' });
     });
   });

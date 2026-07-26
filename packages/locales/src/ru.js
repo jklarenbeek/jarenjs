@@ -135,5 +135,7 @@ export const ru = {
   'form/minProperties': (p) => `Должно содержать не менее ${num(p.limit)} ${plural(p.limit, 'свойства', 'свойств')}`,
   'form/maxProperties': (p) => `Должно содержать не более ${num(p.limit)} ${plural(p.limit, 'свойства', 'свойств')}`,
   'x-form/assert': 'Недопустимое значение',
+  'form/addItem': 'Добавить элемент',
+  'form/removeItem': 'Удалить элемент',
   //#endregion
 };

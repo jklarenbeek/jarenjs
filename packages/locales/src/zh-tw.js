@@ -123,5 +123,7 @@ export const zhTW = {
   'form/minProperties': (p) => `至少需要 ${num(p.limit)} 個屬性`,
   'form/maxProperties': (p) => `最多 ${num(p.limit)} 個屬性`,
   'x-form/assert': '無效的值',
+  'form/addItem': '新增項目',
+  'form/removeItem': '移除項目',
   //#endregion
 };

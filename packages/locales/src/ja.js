@@ -120,5 +120,7 @@ export const ja = {
   'form/minProperties': (p) => `プロパティは ${num(p.limit)} 個以上必要です`,
   'form/maxProperties': (p) => `プロパティは ${num(p.limit)} 個以下にしてください`,
   'x-form/assert': '無効な値です',
+  'form/addItem': '項目を追加',
+  'form/removeItem': '項目を削除',
   //#endregion
 };

@@ -144,7 +144,7 @@ createApp(doc, {
 The marquee integration: render any [`@jarenjs/forms`](../forms) model with **zero hand-written render code**. `createFormView()` returns a plain-JSON JSLT rule set that dispatches over a `buildFormViewModel` tree by *shape* (JSONPath filter selectors on each node's `control`), and `createFormActions()` returns the matching action documents that write keystrokes back into the state — choosing the correct RFC 6902 op per node (`replace` for array elements, where `add` would insert; `add` for object members, where it means set-or-replace).
 
 ```javascript
-import { createApp, createFormView, createFormActions } from '@jarenjs/app';
+import { createApp, createFormView, createFormActions, formEventFields } from '@jarenjs/app';
 import { buildFormModel, compileFormRules, createInitialData, buildFormViewModel } from '@jarenjs/forms';
 
 const model = buildFormModel(schema);
@@ -159,13 +159,14 @@ const app = createApp({
   actions: createFormActions({ dataPointer: '/data' }),
 }, {
   node: document.getElementById('app'),
+  eventFields: { ...formEventFields() },                  // decode the JSON-carrying controls
   viewModel: (state) => ({                                // the derivation boundary
     form: buildFormViewModel(model, state.data, { rules, validateFields: true }),
   }),
 });
 ```
 
-Schema in, live form out: text/email/number/date/color inputs, textareas, checkboxes, selects with precomputed options, nested object fieldsets, arrays with add/remove buttons, inline errors, and `x-form` visibility/enablement/computed reacting per keystroke. The `viewModel` option is the general **derivation boundary**: it maps state to the view stylesheet's input before every render, so JS-computed derivations enter the render path without ever entering the state. Known 0.1 limits (documented in `src/forms.js`): selects write string values, a cleared number input writes `null`, arrays need to exist in the data (give them `default: []` in the schema), and the `json` fallback control renders a placeholder.
+Schema in, live form out: text/email/number/date/color inputs, textareas, checkboxes, selects with precomputed options, nested object fieldsets, arrays with add/remove buttons, inline errors, and `x-form` visibility/enablement/computed reacting per keystroke. The `viewModel` option is the general **derivation boundary**: it maps state to the view stylesheet's input before every render, so JS-computed derivations enter the render path without ever entering the state. A DOM control's value is a string, and two controls carry something else: a select over a non-string enum, and the `json` editor over a structured value. Both round-trip through JSON text and decode it in `formEventFields()`, the format's one sanctioned place for host JavaScript at the DOM boundary (APP-FORMAT §5.4) — **register it or those two controls write nothing**. Remaining 0.1 limits (documented in `src/forms.js`): a cleared number input writes `null`, and arrays need to exist in the data (give them `default: []` in the schema).
 
 ## Headless and server-side
 
@@ -184,4 +185,4 @@ Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` fi
 
 ## Development
 
-Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../ROADMAP.md) for what's next: the standard forms stylesheet (render any `@jarenjs/forms` model through one shipped rule set), dirty-path-pruned re-rendering, time-travel tooling over the action log, and the app-document meta-schema.
+Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../ROADMAP.md) for what's next: dirty-path-pruned re-rendering, time-travel tooling over the action log, and the app-document meta-schema.

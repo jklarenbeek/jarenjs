@@ -25,6 +25,8 @@ export {
   compileFormRules,
   evaluateFormRules,
   formRulesToQueryAssertions,
+  pruneHiddenValues,
+  createRuleMemo,
 } from './rules.js';
 
 export {
@@ -34,6 +36,7 @@ export {
 
 export {
   formsMessagesEn,
+  formChromeLabels,
   compileMessageTemplate,
   compileMessageCatalog,
 } from './messages.js';

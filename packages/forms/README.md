@@ -186,7 +186,40 @@ or `$msgid` form) with `params` merged over `{ pointer: <field pointer> }`
 `params.pointer`, letting the UI place root-level `$query` errors onto
 fields, and renders the **same text** as the keystroke path (see below).
 
-Item-template asserts quantify with `$every` over the actual elements. Two divergences from the keystroke path are inherent to the copy: on submit an absent field binds `$value` to the empty sequence (not `null`), and `$pointer` for template elements stays the template pointer (element indexes are a render-time notion).
+**One rule, one meaning.** Whatever the keystroke evaluation says about a
+document, submit says too — the copy is not allowed to change what an author
+wrote. Three things enforce that, and each is a place the naive copy went
+wrong:
+
+- an **absent field binds `null`**, not the empty sequence, so `$ne`/`$eq`
+  cannot mean opposite things on the two sides (the binding is wrapped in
+  `$default`);
+- an **item-template assert quantifies over the ELEMENTS**, not over the
+  selected leaf values — quantifying over leaves silently skips an element
+  that lacks the member, where the keystroke path evaluates it with `null`;
+- an assert on a field with a `visible` rule is **guarded by it**, holding
+  vacuously while the field is hidden — which is what the keystroke path
+  already does, since `buildFormViewModel` drops hidden nodes and their
+  errors never render or count.
+
+One divergence remains, and is inherent: `$pointer` for template elements
+stays the template pointer, because element indexes are a render-time notion.
+
+A hidden field's *value* is a separate question, and the answer is explicit:
+values are kept while editing — a field that reappears must not have
+forgotten what the operator typed — and dropped only at the submit boundary,
+by a caller who asks:
+
+```javascript
+import { pruneHiddenValues } from '@jarenjs/forms';
+
+const submitted = pruneHiddenValues(compiledRules, session.data);
+```
+
+Visibility is evaluated once, against the incoming document. Hidden array
+elements are removed and their siblings renumber, which is right for a
+document being sent — and means the returned pointers no longer line up with
+the ones the view model rendered.
 
 ## Messages & i18n
 
@@ -282,6 +315,52 @@ const tree = buildFormViewModel(model, data, { rules, validateFields: true, cata
 ```
 
 Render it with anything — a React component walking the tree, or **no framework at all**: the standard form rules of [`@jarenjs/app`](../app) are a shipped JSLT rule set that dispatches over exactly this shape and produces [`@jarenjs/view`](../view) vnodes, closing the loop from JSON Schema to live DOM without a single hand-written render function.
+
+Two node members exist because a **DOM control's value is a string** and not
+every field's value is: each select option carries `key`, its value as JSON
+text, and a `json`-control node carries `json`, its value as indented JSON
+text. A renderer puts those in the control and hands them back verbatim;
+`@jarenjs/app`'s `formEventFields()` decodes them. That keeps a `enum: [1, 2]`
+selection a number instead of `"2"`.
+
+### Re-evaluating only what changed
+
+Rules compile once and run per keystroke. On a wide form most of that work is
+wasted — a keystroke in one field cannot change what a rule reading two other
+fields concludes — so pass a **memo** and only the reachable rules re-run:
+
+```javascript
+import { createRuleMemo } from '@jarenjs/forms';
+
+const memo = createRuleMemo();                       // one per form session
+const tree = buildFormViewModel(model, data, { rules, memo, catalog });
+```
+
+Each rule's dependencies are derived at compile time from the root-anchored
+paths in its query documents (plus its own location). That over-approximates
+every read, and soundly: the only way into the document is such a path, and a
+`$let`/`$for` variable can only hold what one of them produced.
+
+The memo diffs the previous document against the new one — reference-equal
+subtrees are skipped whole, so an immutable edit costs O(change). A host that
+already knows what it wrote can skip even that with `memo.touch(pointer)`,
+which is a promise as much as an optimization: touch one pointer while
+changing another and the rules you did not name keep stale results.
+
+Measured on a 200-rule form (one `visible` + one `assert` each):
+
+| tick | cost |
+|---|---|
+| full evaluation | ~54 µs |
+| memo, one field changed (diffed) | ~13 µs |
+| memo, one field changed (declared) | ~4.7 µs |
+| memo, a field every rule reads | ~58 µs |
+
+The last row is the honest one: when a change reaches every rule there is
+nothing to skip, and the memo's bookkeeping makes it slightly *slower* than
+evaluating straight through. It pays when a form is wide and its rules are
+mostly local — which is what a large form usually is, and exactly when the
+full evaluation starts to hurt.
 
 ### The form session — submit/draft lifecycle around one document
 

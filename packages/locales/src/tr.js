@@ -122,5 +122,7 @@ export const tr = {
   'form/minProperties': (p) => `En az ${num(p.limit)} özellik içermelidir`,
   'form/maxProperties': (p) => `En fazla ${num(p.limit)} özellik içermelidir`,
   'x-form/assert': 'Geçersiz değer',
+  'form/addItem': 'Öğe ekle',
+  'form/removeItem': 'Öğeyi kaldır',
   //#endregion
 };

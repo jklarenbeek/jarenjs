@@ -123,5 +123,7 @@ export const ko = {
   'form/minProperties': (p) => `속성이 ${num(p.limit)}개 이상 필요합니다`,
   'form/maxProperties': (p) => `속성은 ${num(p.limit)}개 이하여야 합니다`,
   'x-form/assert': '유효하지 않은 값입니다',
+  'form/addItem': '항목 추가',
+  'form/removeItem': '항목 삭제',
   //#endregion
 };

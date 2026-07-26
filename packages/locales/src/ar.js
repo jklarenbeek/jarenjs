@@ -153,5 +153,7 @@ export const ar = {
   'form/minProperties': (p) => `يجب ألا يقل عدد الخصائص عن ${num(p.limit)}`,
   'form/maxProperties': (p) => `يجب ألا يزيد عدد الخصائص عن ${num(p.limit)}`,
   'x-form/assert': 'قيمة غير صالحة',
+  'form/addItem': 'إضافة عنصر',
+  'form/removeItem': 'إزالة عنصر',
   //#endregion
 };

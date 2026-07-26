@@ -22,7 +22,7 @@
 import { equalsJson } from '@jarenjs/core/object';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
-import { getValueAtPointer, createItemValue } from './data.js';
+import { getValueAtPointer, createItemValue, changedPointers } from './data.js';
 import { evaluateFormRules } from './rules.js';
 import { validateAllFields } from './validate.js';
 
@@ -45,8 +45,13 @@ const EMPTY_STATE = Object.freeze({});
  * @property {string|null} placeholder
  * @property {any} value - The current value (`x-form.computed` wins);
  *   `null` when the field is absent from the data.
- * @property {Array<{value: any, label: string, selected: boolean}>|null} options
+ * @property {Array<{value: any, key: string, label: string, selected: boolean}>|null} options
  *   Select options, `selected` precomputed against the current value.
+ *   `key` is the option's value as JSON text — what a string-valued
+ *   control (a DOM `<option>`) can carry and hand back losslessly.
+ * @property {string} [json] - The value as indented JSON text, on
+ *   `json`-control nodes only: the editable text for a structured
+ *   value, precomputed like `options`.
  * @property {string[]} errors - Localized messages: field validation
  *   first, then rule asserts.
  * @property {boolean} element - True when this node is an array element
@@ -139,6 +144,10 @@ const EMPTY_STATE = Object.freeze({});
  *   no errors until the app opts in).
  * @property {object} [catalog] - Compiled message catalog for error
  *   texts (compileMessageCatalog), default English.
+ * @property {import('./rules.js').RuleMemo} [memo] - A memo from
+ *   `createRuleMemo`, reused across calls so only the rules a change
+ *   can reach are re-evaluated. Keep one per form session; the tree it
+ *   produces is the same either way.
  * @property {FormSessionOptions} [session] - Fold a form session
  *   (initial/touched/submitted/serverErrors/submit identity) into the
  *   tree: every node gains `id`/`describedBy`/`dirty`/`touched`/
@@ -164,7 +173,7 @@ const EMPTY_STATE = Object.freeze({});
  */
 export function buildFormViewModel(model, data, options = {}) {
   const ruleState = options.rules !== undefined
-    ? evaluateFormRules(options.rules, data, options.catalog)
+    ? evaluateFormRules(options.rules, data, options.catalog, options.memo)
     : EMPTY_STATE;
   const fieldErrors = options.validateFields === true
     ? validateAllFields(model, data, options.catalog)
@@ -220,13 +229,11 @@ function compileSession(session, data) {
       serverErrors.set(pointer, Array.isArray(value) ? value.map(String) : [String(value)]);
     }
   }
-  /** @type {string[]} */
-  const dirtyPaths = [];
   const hasInitial = 'initial' in session;
   // the navigation-guard evidence is a FULL diff of the two documents,
   // never a walk of the rendered tree: removed members, hidden retained
   // values and null-membership changes must all surface
-  if (hasInitial) collectDirtyPaths(session.initial, data, '', dirtyPaths);
+  const dirtyPaths = hasInitial ? changedPointers(session.initial, data) : [];
   return {
     hasInitial,
     initial: session.initial,
@@ -243,49 +250,6 @@ function compileSession(session, data) {
   };
 }
 
-/**
- * Collect every changed pointer between the initial and the current
- * document. Membership is significant: an added or removed member (or
- * array tail slot) contributes its pointer even when both sides read
- * back as `null` through a pointer lookup.
- * @param {any} initial
- * @param {any} current
- * @param {string} pointer
- * @param {string[]} out
- */
-function collectDirtyPaths(initial, current, pointer, out) {
-  if (initial === current) return;
-  if (Array.isArray(initial) && Array.isArray(current)) {
-    const shared = Math.min(initial.length, current.length);
-    for (let i = 0; i < shared; i++) {
-      collectDirtyPaths(initial[i], current[i], `${pointer}/${i}`, out);
-    }
-    const longest = Math.max(initial.length, current.length);
-    for (let i = shared; i < longest; i++) {
-      out.push(`${pointer}/${i}`); // added or removed tail slot
-    }
-    return;
-  }
-  if (initial !== null && typeof initial === 'object' && !Array.isArray(initial)
-    && current !== null && typeof current === 'object' && !Array.isArray(current)) {
-    // own keys only, membership by Object.hasOwn — JSON member names
-    // like 'constructor', 'toString' or a parsed own '__proto__' are
-    // legal data and must diff as data, never through the prototype
-    // chain (null-prototype records diff identically)
-    for (const key of Object.keys(initial)) {
-      const child = `${pointer}/${encodeJSONPointerSegment(key)}`;
-      if (!Object.hasOwn(current, key)) out.push(child); // removed member
-      else collectDirtyPaths(initial[key], current[key], child, out);
-    }
-    for (const key of Object.keys(current)) {
-      if (!Object.hasOwn(initial, key)) {
-        out.push(`${pointer}/${encodeJSONPointerSegment(key)}`); // added member
-      }
-    }
-    return;
-  }
-  if (!equalsJson(initial, current)) out.push(pointer);
-}
 
 /**
  * A stable accessible element id for a pointer: the encoded segments
@@ -367,9 +331,22 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
     addValue: undefined,
   };
 
+  if (field.control === 'json') {
+    // the editable text for a structured value: precomputed here so the
+    // renderer needs no encoder, mirroring how `options` are precomputed
+    node.json = node.value === null || node.value === undefined
+      ? ''
+      : JSON.stringify(node.value, null, 2);
+  }
+
   if (field.enumValues !== null && field.enumValues !== undefined) {
     node.options = field.enumValues.map((v, i) => ({
       value: v,
+      // `key` is the JSON text of `value`: a DOM select carries strings,
+      // so a renderer needs something reversible to put in the control
+      // and hand back. Encoding here keeps the round trip lossless for
+      // number, boolean and null enums, which `String(v)` is not.
+      key: JSON.stringify(v) ?? 'null',
       label: field.enumLabels?.[i] ?? String(v),
       selected: v === node.value,
     }));
@@ -417,13 +394,24 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
         : field.item;
       if (template === null || template === undefined) break;
       const isTupleSlot = field.tuple !== null && field.tuple !== undefined && i < field.tuple.length;
+      // A tuple slot is removable only as the array's LAST element:
+      // dropping one from the middle would slide every later value into
+      // a slot with a different schema. Whether the shortened tuple is
+      // still valid is `minItems`' answer to give, not this layer's.
+      const removable = !isTupleSlot || i === array.length - 1;
       const built = buildNode(
-        template, `${pointer}/${i}`, data, ruleState, fieldErrors, true, !isTupleSlot, session);
+        template, `${pointer}/${i}`, data, ruleState, fieldErrors, true, removable, session);
       if (built !== null) items.push(built);
     }
     node.items = items;
     if (field.item !== null && field.item !== undefined) {
       node.addValue = createItemValue(field.item) ?? null;
+    }
+    else if (field.tuple !== null && field.tuple !== undefined && array.length < field.tuple.length) {
+      // a tuple shorter than its schema grows one slot at a time, each
+      // starting from ITS OWN template — that is what makes a tuple
+      // loaded short (or absent) fillable at all
+      node.addValue = createItemValue(field.tuple[array.length]) ?? null;
     }
   }
 

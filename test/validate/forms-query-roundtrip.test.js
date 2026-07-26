@@ -2,7 +2,9 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { JarenValidator } from '@jarenjs/validate';
-import { formRulesToQueryAssertions } from '@jarenjs/forms';
+import {
+  formRulesToQueryAssertions, buildFormModel, compileFormRules, evaluateFormRules,
+} from '@jarenjs/forms';
 
 // The validate-side round trip of the forms rules synergy: a rule
 // authored once as `x-form.assert` (per-keystroke feedback) is copied by
@@ -44,10 +46,10 @@ describe("forms x-form.assert -> '$query' round trip", () => {
     const validate = new JarenValidator().compile(formRulesToQueryAssertions(schema));
     assert.strictEqual(validate({ nick: 'joe' }), true);
     assert.strictEqual(validate({ nick: 'root' }), false);
-    // absent field: the $let binds the empty sequence; $ne over it is
-    // false, so absence fails this assert on submit (keystroke evaluation
-    // binds null instead - require the field when that matters).
-    assert.strictEqual(validate({}), false);
+    // absent field: bound null, exactly as the keystroke path binds it,
+    // so the rule means the same thing on both sides. Absence itself is
+    // `required`'s job, not an assert's.
+    assert.strictEqual(validate({}), true);
   });
 
   it('should quantify a copied item-template assert over the actual elements', () => {
@@ -71,6 +73,45 @@ describe("forms x-form.assert -> '$query' round trip", () => {
     assert.strictEqual(validate({ lines: [{ amount: 5 }, { amount: 0 }] }), false);
     assert.strictEqual(validate({ lines: [] }), true, '$every is vacuously true');
     assert.strictEqual(validate({}), true, 'no array, nothing to assert');
+  });
+
+  it('should agree with the keystroke path on absent fields and absent members', () => {
+    // The contract of the copy: one authored rule, one meaning. Whatever
+    // the per-keystroke evaluation says about a document, submit says too.
+    const schema = {
+      type: 'object',
+      properties: {
+        nick: { type: 'string', 'x-form': { assert: { $ne: ['$value', 'root'] } } },
+        lines: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              amount: { type: 'number', 'x-form': { assert: { $gt: ['$value', 0] } } },
+            },
+          },
+        },
+      },
+    };
+    const validate = new JarenValidator().compile(formRulesToQueryAssertions(schema));
+    const rules = compileFormRules(buildFormModel(schema));
+    const keystrokeOk = (data) => Object.values(evaluateFormRules(rules, data))
+      .every((r) => r.errors === undefined);
+
+    const documents = [
+      {},
+      { nick: 'joe' },
+      { nick: 'root' },
+      { lines: [] },
+      { lines: [{ amount: 5 }] },
+      { lines: [{ amount: 0 }] },
+      { lines: [{ amount: 5 }, {}] }, // an element with no `amount` at all
+      { nick: 'joe', lines: [{}] },
+    ];
+    for (const data of documents) {
+      assert.strictEqual(validate(data), keystrokeOk(data),
+        `submit and keystroke disagreed on ${JSON.stringify(data)}`);
+    }
   });
 
   it('should compose with an existing root $query through allOf', () => {

@@ -14,10 +14,18 @@
  *   actions: { ...createFormActions({ dataPointer: '/data' }) }
  *   options: { viewModel: (state) => ({ form: buildFormViewModel(model, state.data, { rules }) }) }
  *
- * Known 0.1 limitations, documented rather than hidden: select controls
- * write the DOM's string value (string enums recommended); a cleared
- * number input writes `null` (surfaces as a validation error, not a
- * dispatch error); tuple fields render but expose no add/remove.
+ * A DOM control's value is a STRING, and two of these controls carry
+ * something else: a select over a non-string enum, and the `json`
+ * editor over an arbitrary value. Both round-trip through the JSON text
+ * the view model precomputes (`option.key`) or the operator types, and
+ * both decode it in a registered event-field extractor —
+ * {@link formEventFields}, the format's one sanctioned place for host
+ * JavaScript at the DOM boundary (APP-FORMAT §5.4). A host that renders
+ * these controls MUST register them.
+ *
+ * Remaining limitation, documented rather than hidden: a cleared number
+ * input writes `null` (which surfaces as a validation error, not a
+ * dispatch error).
  */
 
 /** The default action names shared by both factories. */
@@ -25,9 +33,48 @@ const DEFAULT_ACTIONS = Object.freeze({
   input: 'form/input',
   check: 'form/check',
   number: 'form/number',
+  json: 'form/json',
   add: 'form/add',
   remove: 'form/remove',
 });
+
+/**
+ * The `$event` field name both JSON-carrying controls request.
+ * @see formEventFields
+ */
+const JSON_FIELD = 'formJsonValue';
+
+/**
+ * The event-field extractors the standard form controls need, for
+ * `createApp`'s `eventFields` (APP-FORMAT §5.4).
+ *
+ * One extractor, `formJsonValue`: the control's value parsed as JSON.
+ * A select carries `option.key` (the view model's JSON text for the
+ * typed enum value) and the `json` editor carries whatever the operator
+ * typed. Unparsable text yields `null` rather than throwing, so a
+ * half-typed JSON document is a validation problem — visible, fixable —
+ * instead of a dispatch error; `json` fields therefore want a schema
+ * that rejects `null` if absence is not acceptable.
+ *
+ * @example
+ * createApp(doc, { node, eventFields: { ...formEventFields() } });
+ *
+ * @returns {Record<string, (event: any) => any>}
+ */
+export function formEventFields() {
+  return {
+    [JSON_FIELD]: (event) => {
+      const raw = event?.target?.value;
+      if (typeof raw !== 'string' || raw.trim() === '') return null;
+      try {
+        return JSON.parse(raw);
+      }
+      catch {
+        return null;
+      }
+    },
+  };
+}
 
 /**
  * Options shared by `createFormView` / `createFormActions`.
@@ -39,6 +86,10 @@ const DEFAULT_ACTIONS = Object.freeze({
  *   standard action names (`input`/`check`/`number`/`add`/`remove`).
  * @property {string} [addLabel] - Add-item button text (default `'+'`).
  * @property {string} [removeLabel] - Remove-item button text (default `'×'`).
+ * @property {{addItem?: string, removeItem?: string}} [labels] - Accessible
+ *   names for the two symbol buttons. `@jarenjs/forms`'
+ *   `formChromeLabels(catalog)` resolves them from a message catalog;
+ *   the English defaults apply when absent.
  * @property {string} [dataPointer] - (actions) JSON Pointer to the form
  *   data inside the app state (default `'/data'`).
  */
@@ -55,6 +106,7 @@ export function createFormView(options = {}) {
   const root = options.root ?? '$.form';
   const cls = options.classPrefix ?? 'jaren-form';
   const act = { ...DEFAULT_ACTIONS, ...options.actions };
+  const labels = { addItem: 'Add item', removeItem: 'Remove item', ...options.labels };
   /** Match any view-model node under `root` with the given control. */
   const ctl = (control) => `${root}..[?@.control == '${control}']`;
 
@@ -73,6 +125,9 @@ export function createFormView(options = {}) {
       ['button', {
         type: 'button',
         class: `${cls}-remove`,
+        // the glyph is decoration; the accessible name is the label
+        'aria-label': labels.removeItem,
+        title: labels.removeItem,
         on: { click: { action: act.remove, with: { pointer: '$.pointer' } } },
       }, options.removeLabel ?? '×']] },
   ];
@@ -121,6 +176,8 @@ export function createFormView(options = {}) {
           ['button', {
             type: 'button',
             class: `${cls}-add`,
+            'aria-label': labels.addItem,
+            title: labels.addItem,
             on: { click: { action: act.add, with: { pointer: '$.pointer', value: '$.addValue' } } },
           }, options.addLabel ?? '+']] },
         [{ $apply: '$.errors[*]' }],
@@ -131,16 +188,19 @@ export function createFormView(options = {}) {
       match: `${root}..errors[*]`,
       body: ['p', { class: `${cls}-error`, role: 'alert' }, '$'],
     },
-    // select: options are precomputed by the view model
+    // select: options are precomputed by the view model, and carry the
+    // JSON text of their typed value so the round trip survives the DOM
     {
       match: `${root}..options[*]`,
-      body: ['option', { value: '$.value', selected: '$.selected' }, '$.label'],
+      body: ['option', { value: '$.key', selected: '$.selected' }, '$.label'],
     },
     {
       match: ctl('select'),
       body: field(['select', {
         disabled,
-        on: { change: { action: act.input, with: writeWith } },
+        on: {
+          change: { action: act.json, with: writeWith, event: [JSON_FIELD] },
+        },
       }, [{ $apply: '$.options[*]' }]]),
     },
     // boolean: checkbox with the checked binding
@@ -167,8 +227,19 @@ export function createFormView(options = {}) {
     { match: ctl('number'), body: field(textInput('number', act.number)) },
     // fixed values render as text
     { match: ctl('const'), body: field(['span', { class: `${cls}-const` }, '$.value']) },
-    // the structured-JSON fallback control is out of scope for 0.1
-    { match: ctl('json'), body: field(['em', { class: `${cls}-unsupported` }, 'unsupported field']) },
+    // structured values: a JSON text editor. The view model precomputes
+    // the text (`json`), so the control needs no encoder of its own.
+    {
+      match: ctl('json'),
+      body: field(['textarea', {
+        class: `${cls}-json`,
+        rows: 4,
+        spellcheck: 'false',
+        readonly: '$.readOnly',
+        disabled,
+        on: { change: { action: act.json, with: writeWith, event: [JSON_FIELD] } },
+      }, '$.json']),
+    },
   ];
 
   // the text-input family: one rule per control, all through act.input
@@ -211,6 +282,11 @@ export function createFormActions(options = {}) {
         // a dispatch error
         value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] },
       }],
+    },
+    // the two JSON-carrying controls (typed select, json editor) share
+    // one action: the extractor already produced a JSON value
+    [act.json]: {
+      patch: [{ op: writeOp, path: target, value: `$event.${JSON_FIELD}` }],
     },
     [act.add]: {
       patch: [{

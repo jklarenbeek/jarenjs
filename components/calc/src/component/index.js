@@ -21,7 +21,9 @@
  * reverse.
  */
 
-import { createApp as appCreateApp, createFormView, createFormActions } from '@jarenjs/app';
+import {
+  createApp as appCreateApp, createFormView, createFormActions, formEventFields,
+} from '@jarenjs/app';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 
 import {
@@ -339,6 +341,8 @@ export function createCalcComponent(options = {}) {
       };
       return appCreateApp(appDoc, {
         ...appOptions,
+        // the financial panel's selects carry their values as JSON text
+        eventFields: { ...formEventFields(), ...(appOptions.eventFields ?? {}) },
         effects: { ...calcEditEffects, ...rates.effects, ...(appOptions.effects ?? {}) },
         subs: { ...rates.subs, ...(appOptions.subs ?? {}) },
         viewModel: (state) => ({ ...state, ui: { calculator: contributeCalcViewModel(state) } }),

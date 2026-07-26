@@ -125,5 +125,7 @@ export const de = {
   'form/minProperties': (p) => `Muss mindestens ${num(p.limit)} ${plural(p.limit, 'Eigenschaft', 'Eigenschaften')} enthalten`,
   'form/maxProperties': (p) => `Darf höchstens ${num(p.limit)} ${plural(p.limit, 'Eigenschaft', 'Eigenschaften')} enthalten`,
   'x-form/assert': 'Ungültiger Wert',
+  'form/addItem': 'Element hinzufügen',
+  'form/removeItem': 'Element entfernen',
   //#endregion
 };

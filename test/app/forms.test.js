@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { createApp, createFormView, createFormActions } from '@jarenjs/app';
+import { createApp, createFormView, createFormActions, formEventFields } from '@jarenjs/app';
 import { renderToString } from '@jarenjs/view';
 import {
   buildFormModel,
@@ -20,6 +20,8 @@ const schema = {
     age: { type: 'integer', minimum: 13 },
     newsletter: { type: 'boolean' },
     plan: { enum: ['free', 'pro'] },
+    level: { enum: [1, 2, null] },
+    meta: {},  // no determinable type -> the structured `json` control
     company: { type: 'string' },
     vatId: {
       type: 'string',
@@ -52,7 +54,7 @@ function mountForm(options = {}) {
   const appDoc = {
     state: { data: createInitialData(model) },
     view: [
-      ...createFormView(),
+      ...createFormView({ labels: options.labels }),
       { match: '$', body: ['main', {}, { $apply: '$.form' }] },
     ],
     actions: createFormActions({ dataPointer: '/data' }),
@@ -62,6 +64,8 @@ function mountForm(options = {}) {
     node: container,
     document,
     schedule: (f) => f(),
+    // the select and json controls decode their JSON text here
+    eventFields: { ...formEventFields() },
     viewModel: (state) => ({
       form: buildFormViewModel(model, state.data, {
         rules,
@@ -107,8 +111,47 @@ describe('the standard forms stylesheet', function () {
 
   it('selects write the chosen value', function () {
     const { app, container } = mountForm();
-    fire(fieldControl(container, '/plan', 'select'), 'change', { target: { value: 'pro' } });
+    // the DOM carries the option's `key` — the value as JSON text
+    fire(fieldControl(container, '/plan', 'select'), 'change', { target: { value: '"pro"' } });
     assert.strictEqual(app.getState().data.plan, 'pro');
+  });
+
+  it('selects keep non-string enum values typed', function () {
+    const { app, container } = mountForm();
+    const select = fieldControl(container, '/level', 'select');
+    assert.strictEqual(select.childNodes[1].attributes.get('value'), '2',
+      'the option carries JSON text, not a display string');
+    fire(select, 'change', { target: { value: '2' } });
+    assert.strictEqual(app.getState().data.level, 2, 'a number enum stays a number');
+    fire(select, 'change', { target: { value: 'null' } });
+    assert.strictEqual(app.getState().data.level, null);
+  });
+
+  it('the json control edits a structured value as text', function () {
+    const { app, container } = mountForm();
+    const editor = fieldControl(container, '/meta', 'textarea');
+    assert.notStrictEqual(editor, undefined, 'json fields render an editor, not a placeholder');
+    fire(editor, 'change', { target: { value: '{"a":[1,2]}' } });
+    assert.deepStrictEqual(app.getState().data.meta, { a: [1, 2] });
+    // the rendered text is the value, indented
+    assert.strictEqual(fieldControl(container, '/meta', 'textarea').childNodes[0].nodeValue,
+      '{\n  "a": [\n    1,\n    2\n  ]\n}');
+  });
+
+  it('unparsable json text writes null rather than failing the dispatch', function () {
+    const { app, container } = mountForm();
+    fire(fieldControl(container, '/meta', 'textarea'), 'change', { target: { value: '{oops' } });
+    assert.strictEqual(app.getState().data.meta, null);
+  });
+
+  it('the array buttons carry accessible names', function () {
+    const { container } = mountForm();
+    const addButton = find(container, (n) => n.attributes?.get('class') === 'jaren-form-add');
+    assert.strictEqual(addButton.attributes.get('aria-label'), 'Add item');
+    const localized = mountForm({ labels: { addItem: 'Regel toevoegen' } });
+    const dutchButton = find(localized.container,
+      (n) => n.attributes?.get('class') === 'jaren-form-add');
+    assert.strictEqual(dutchButton.attributes.get('aria-label'), 'Regel toevoegen');
   });
 
   it('x-form visibility reacts per keystroke', function () {

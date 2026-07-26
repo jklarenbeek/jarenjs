@@ -165,11 +165,21 @@ delete it or fix it.
 
 ## @jarenjs/forms
 
-- [ ] **Rule dependency memoization** — every `evaluateFormRules` call re-evaluates every rule; the compiler already sees each rule's paths, so a dirty-pointer index (changed pointer → affected rules) is the obvious next step once forms get large.
-- [ ] **Pruning hidden fields before submit** — `visible: false` fields keep their values in the data; whether submit should drop them (and whether `formRulesToQueryAssertions` should guard asserts on their own `visible`) is an open product decision.
-- [ ] **Absent-field semantics: keystroke `null` vs submit empty-sequence** — form rules bind an absent field to `null` during editing, but the submit-side `$query` copy of the same rule binds it as the empty sequence, so `$eq`/`$ne` diverge between the two paths. Documented today with a `$exists`-guard workaround; unifying the two bindings is the real fix.
-- [ ] **Stylesheets replacing the JS composition step** — `buildFormViewModel` composes the render tree in JS today; letting stylesheets *replace* that composition entirely needs dynamic-pointer reads in rule bodies.
-- [ ] **Standard forms stylesheet follow-ups** — typed select values (non-string enums), tuple add/remove affordances, a `json` control editor, and i18n for the chrome strings (add/remove button labels).
+- [ ] **Stylesheets replacing the JS composition step** — `buildFormViewModel`
+  composes the render tree in JS. A stylesheet cannot replace it because
+  rendering a form is a **two-cursor walk**: the schema-derived model says what
+  a field is, the data says what it holds, and a JSLT rule descends only the
+  one input document it matched. Either primitive would unblock it, and neither
+  exists: **a fold** (`$get` is a real dynamic lookup, so walking a runtime
+  pointer needs only a reduce over its segments — see *Higher-order operators*),
+  or **a parameterized `$apply`** that carries a second cursor down with the
+  matched node. Deciding which is the language question to answer first.
+- [ ] **Form chrome beyond the two array buttons** — `form/addItem` and
+  `form/removeItem` are catalog messages resolved by `formChromeLabels`; the
+  `+`/`×` glyphs, the `*` required marker and the `json` editor's affordances
+  are still literal. They want a decision about how much of a stylesheet's
+  static text belongs in the message keyspace before more keys land in eleven
+  packs.
 
 ## @jarenjs/view & @jarenjs/app
 
