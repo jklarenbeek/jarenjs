@@ -1103,3 +1103,130 @@ describe('hash-joined equijoins are invisible', () => {
     }), ['one', 'two'], 'a stale table would answer the second group wrong');
   });
 });
+
+describe('spatial joins are screened by an index, invisibly', () => {
+  // Same oracle discipline as the hash-join suite: a `$let` makes the
+  // planner refuse the rewrite, so the nested scan is the reference.
+  const withLet = (doc) => ({ ...doc, $let: { _z: 1 } });
+  const bothWays = (doc, data) => {
+    const indexed = queryJson(doc, data);
+    const scanned = queryJson(withLet(doc), data);
+    assert.deepStrictEqual(indexed, scanned,
+      'the indexed probe must agree with the scan it replaces');
+    return indexed;
+  };
+
+  const region = (id, x, y, w = 2) => ({
+    id,
+    geom: { type: 'Polygon', coordinates: [[[x, y], [x + w, y], [x + w, y + w], [x, y + w], [x, y]]] },
+  });
+  const data = {
+    regions: [region('a', 0, 0), region('b', 10, 10), region('c', 20, 20)],
+    points: [
+      { id: 'p1', at: [1, 1] },
+      { id: 'p2', at: [11, 11] },
+      { id: 'p3', at: [99, 80] },
+    ],
+  };
+  const joinDoc = {
+    $for: { p: '$.points[*]', r: '$.regions[*]' },
+    $where: { $within: ['$p.at', '$r.geom'] },
+    $return: { p: '$p.id', r: '$r.id' },
+  };
+
+  it('should find exactly the pairs the scan finds', () => {
+    assert.deepStrictEqual(bothWays(joinDoc, data), [
+      { p: 'p1', r: 'a' },
+      { p: 'p2', r: 'b' },
+    ]);
+  });
+
+  it('should screen $bbox-intersects too', () => {
+    const doc = {
+      $for: { p: '$.points[*]', r: '$.regions[*]' },
+      $where: { '$bbox-intersects': ['$p.at', '$r.geom'] },
+      $return: '$r.id',
+    };
+    assert.deepStrictEqual(bothWays(doc, data), ['a', 'b']);
+  });
+
+  it('should keep a point on a region boundary', () => {
+    // the boundary counts as inside, and the index must not clip it off
+    const edge = { regions: [region('a', 0, 0)], points: [{ id: 'e', at: [0, 1] }] };
+    assert.deepStrictEqual(bothWays(joinDoc, edge), { p: 'e', r: 'a' });
+  });
+
+  it('should still raise what a scan would raise on a bad operand', () => {
+    // an item with no computable box cannot be screened, so it has to
+    // reach the predicate anyway — otherwise the index would swallow
+    // the error the scan reports
+    const bad = {
+      regions: [{ id: 'x', geom: 'not a geometry' }],
+      points: [{ id: 'p', at: [1, 1] }],
+    };
+    assert.throws(() => queryJson(joinDoc, bad), (e) => e.code === 'JQ2001');
+    assert.throws(() => queryJson(withLet(joinDoc), bad), (e) => e.code === 'JQ2001');
+  });
+
+  it('should fall back to a scan when the probe side has no box', () => {
+    const noBox = {
+      regions: [region('a', 0, 0)],
+      points: [{ id: 'p', at: { type: 'Feature', geometry: null } }],
+    };
+    assert.deepStrictEqual(bothWays(joinDoc, noBox), undefined);
+  });
+
+  it('should decline a correlated probe side', () => {
+    const doc = {
+      $for: {
+        p: '$.points[*]',
+        r: { $in: { $for: { x: '$.regions[*]' }, $where: { $eq: ['$x.id', '$p.id'] }, $return: '$x' } },
+      },
+      $where: { $within: ['$p.at', '$r.geom'] },
+      $return: '$r.id',
+    };
+    assert.strictEqual(queryJson(doc, data), undefined, 'no point id matches a region id');
+  });
+
+  it('should decline when the predicate is not the whole $where', () => {
+    // an $and could throw in a conjunct the index would skip
+    const doc = {
+      $for: { p: '$.points[*]', r: '$.regions[*]' },
+      $where: { $and: [{ $within: ['$p.at', '$r.geom'] }, { $ne: ['$r.id', 'b'] }] },
+      $return: { p: '$p.id', r: '$r.id' },
+    };
+    assert.deepStrictEqual(bothWays(doc, data), { p: 'p1', r: 'a' });
+  });
+
+  it('should rebuild its index per phrase evaluation when nested', () => {
+    const doc = {
+      $for: { g: '$.groups[*]' },
+      $return: {
+        $for: { p: '$g.points[*]', r: '$g.regions[*]' },
+        $where: { $within: ['$p.at', '$r.geom'] },
+        $return: '$r.id',
+      },
+    };
+    assert.deepStrictEqual(queryJson(doc, {
+      groups: [
+        { regions: [region('one', 0, 0)], points: [{ at: [1, 1] }] },
+        { regions: [region('two', 50, 50)], points: [{ at: [51, 51] }] },
+      ],
+    }), ['one', 'two'], 'a stale index would answer the second group wrong');
+  });
+
+  it('should scale sub-linearly where a scan does not', () => {
+    // the point of the whole exercise: the same answer, less work
+    const regions = [];
+    for (let i = 0; i < 30; i++)
+      for (let j = 0; j < 20; j++) regions.push(region(`${i}-${j}`, i * 9 - 180, j * 8 - 85, 8));
+    const points = [];
+    for (let k = 0; k < 60; k++)
+      points.push({ id: k, at: [(k % 30) * 9 - 176, ((k * 7) % 20) * 8 - 81] });
+    const big = { regions, points };
+    const indexed = queryJson(joinDoc, big);
+    assert.deepStrictEqual(indexed, queryJson(withLet(joinDoc), big));
+    assert.ok(Array.isArray(indexed) && indexed.length === 60,
+      `every point should land in one region, got ${indexed?.length}`);
+  });
+});

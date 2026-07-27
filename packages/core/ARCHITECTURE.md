@@ -535,6 +535,8 @@ passed straight in without the `type` discriminator being involved.
 | `ring.js` | ring closure, winding, area and containment |
 | `bbox.js` | bounding boxes, the cheap half of every spatial test |
 | `geohash.js` | the base-32 cell encoding |
+| `geojson.js` | the one layer that knows the `type` discriminator |
+| `index-tree.js` | a static packed-Hilbert box index for spatial joins |
 
 Two decisions carry the module. **Orientation is computed exactly**, through
 Shewchuk's adaptive precision arithmetic: a naive floating-point determinant

@@ -19,6 +19,7 @@
 //   bbox.js        bounding boxes: the cheap half of every spatial test
 //   geohash.js     the string encoding that needs no new vocabulary
 //   geojson.js     the one layer that knows the `type` discriminator
+//   index-tree.js  a static packed-Hilbert box index for spatial joins
 //
 // RFC 7946 removed coordinate-reference-system support and mandates WGS
 // 84 in decimal degrees, so there is deliberately no SRID table and no
@@ -32,5 +33,6 @@ export * from './ring.js';
 export * from './bbox.js';
 export * from './geohash.js';
 export * from './geojson.js';
+export * from './index-tree.js';
 
 //#endregion

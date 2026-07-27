@@ -24,6 +24,7 @@ import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normal
 // table entry (compileOp). Only referenced inside functions, so the
 // import cycle compile.js <-> operators.js is initialization-safe.
 import { OPERATORS, checkRangeBound } from './operators.js';
+import { bboxOf, createBboxIndex } from '@jarenjs/core/geo';
 
 /**
  * Sentinel stored in the frame slot of an external parameter the caller
@@ -410,6 +411,17 @@ function isEqOp(node) {
   return node.kind === 'op' && node.name === '$eq' && node.args.length === 2;
 }
 
+// The spatial predicates a bounding box can screen. Box overlap is a
+// NECESSARY condition for both - a position inside a surface lies inside
+// that surface's box, and box intersection is what the second one tests
+// outright - so an index over boxes can only ever remove candidates that
+// would have failed anyway.
+const SPATIAL_JOIN_OPS = new Set(['$within', '$bbox-intersects']);
+
+function isSpatialOp(node) {
+  return node.kind === 'op' && SPATIAL_JOIN_OPS.has(node.name) && node.args.length === 2;
+}
+
 function isKeyExpr(node) {
   return (node.kind === 'path' || node.kind === 'var') && node.card !== CARD_MANY;
 }
@@ -477,6 +489,153 @@ function planHashJoin(node) {
     return null;
 
   return { inner, outerKey, innerKey, residual: rest };
+}
+
+/**
+ * Decide whether the innermost `$for` can be probed through a spatial
+ * index. Returns `{ inner, innerGeo, outerGeo }` or null.
+ *
+ * Unlike the hash join this does NOT consume the predicate: the index
+ * only narrows the candidate set, and `$where` still runs unchanged on
+ * every candidate. That makes the rewrite correct by construction — the
+ * surviving tuples are decided by the same closure either way — and
+ * leaves only one thing to be careful about, which is that a tuple the
+ * index rejects never reaches the predicate at all. `compileSpatialProbe`
+ * handles that by keeping any item whose box cannot be computed in an
+ * always-check list, so a malformed operand still raises the error a
+ * scan would have raised.
+ */
+function planSpatialJoin(node) {
+  const fors = node.forBindings;
+  if (fors.length < 2 || node.where === null)
+    return null;
+  if (node.asChecks !== null || node.letBindings.length !== 0)
+    return null; // they run per tuple before $where and would see fewer
+  const where = node.where;
+  if (!isSpatialOp(where))
+    return null; // only a bare spatial predicate; an $and could throw first
+  const inner = fors[fors.length - 1];
+  if (inner.atSlot >= 0 || inner.allowingEmpty === true
+    || (inner.window !== null && inner.window !== undefined))
+    return null;
+
+  const outerSlots = [];
+  for (let i = 0; i < fors.length - 1; i++) {
+    outerSlots.push(fors[i].slot);
+    if (fors[i].atSlot >= 0)
+      outerSlots.push(fors[i].atSlot);
+  }
+  if (intersects(readsOf(inner.expr), outerSlots))
+    return null; // correlated: the index would differ per outer tuple
+
+  // one operand must be the probe's geometry, the other must not mention it
+  const [a, b] = where.args;
+  if (!isKeyExpr(a) || !isKeyExpr(b))
+    return null; // paths and variables only, so evaluation cannot throw
+  const usesA = readsOf(a).has(inner.slot);
+  const usesB = readsOf(b).has(inner.slot);
+  if (usesA === usesB)
+    return null;
+  const innerGeo = usesA ? a : b;
+  const outerGeo = usesA ? b : a;
+  if (readsOf(outerGeo).has(inner.slot) || intersects(readsOf(innerGeo), outerSlots))
+    return null;
+  return { inner, innerGeo, outerGeo };
+}
+
+/**
+ * The spatial probe clause plus the prologue that indexes the inner
+ * side. Same closure-state discipline as the hash join: the index is
+ * rebuilt per phrase evaluation and saved/restored around the tuple
+ * stream, because a registered `$call` function can re-enter the query.
+ */
+function compileSpatialProbe(plan, next, where, wherePath) {
+  const slot = plan.inner.slot;
+  const srcGet = compileNode(plan.inner.expr);
+  const innerGeoGet = compileNode(plan.innerGeo);
+  const outerGeoGet = compileNode(plan.outerGeo);
+  const cond = compileNode(where);
+  let items = [];
+  let always = [];
+  let index = null;
+
+  const collect = (f, item) => {
+    if (Array.isArray(item)) { // D4, exactly as a $for would unpack it
+      for (let j = 0; j < item.length; j++)
+        items.push(item[j]);
+      return;
+    }
+    items.push(item);
+  };
+
+  const build = (f) => {
+    items = [];
+    always = [];
+    const v = srcGet(f);
+    if (v === EMPTY) {
+      index = null;
+      return;
+    }
+    if (v instanceof Seq) {
+      const list = v.items;
+      for (let i = 0; i < list.length; i++)
+        collect(f, list[i]);
+    }
+    else {
+      collect(f, v);
+    }
+    const boxes = new Array(items.length);
+    for (let i = 0; i < items.length; i++) {
+      f[slot] = items[i];
+      const box = bboxOf(innerGeoGet(f));
+      boxes[i] = box;
+      // no box means the index cannot speak for it - a malformed operand
+      // must still reach the predicate and raise what a scan would raise
+      if (box === null)
+        always.push(i);
+    }
+    index = createBboxIndex(boxes);
+  };
+
+  const emit = (f, out, i) => {
+    f[slot] = items[i];
+    if (ebv(cond(f), wherePath))
+      next(f, out);
+  };
+
+  const probe = (f, out) => {
+    if (index === null)
+      return;
+    const box = bboxOf(outerGeoGet(f));
+    if (box === null) {
+      // nothing to screen with: fall back to the full scan, which is
+      // what this phrase would have done without an index at all
+      for (let i = 0; i < items.length; i++)
+        emit(f, out, i);
+      return;
+    }
+    const hits = index.search(box[0], box[1], box[2], box[3]);
+    for (let i = 0; i < hits.length; i++)
+      emit(f, out, hits[i]);
+    for (let i = 0; i < always.length; i++)
+      emit(f, out, always[i]);
+  };
+
+  const drive = (f, out, chain) => {
+    const savedItems = items;
+    const savedAlways = always;
+    const savedIndex = index;
+    build(f);
+    try {
+      chain(f, out);
+    }
+    finally {
+      items = savedItems;
+      always = savedAlways;
+      index = savedIndex;
+    }
+  };
+  return { drive, probe };
 }
 
 // The key a bucket is filed under, or null when the value cannot take
@@ -1045,7 +1204,13 @@ function compileFlwor(node) {
   // an equijoin the planner can serve from a hash table is answered by
   // the probe clause below, so its conjunct never reaches $where
   const join = planHashJoin(node);
-  if (join !== null && join.residual !== null) {
+  // a spatial predicate is screened by an index instead: the probe keeps
+  // $where intact and runs it on every candidate, so it installs no
+  // where-stage of its own
+  // ... and when there is one, no where-stage is installed at all: the
+  // probe evaluates the predicate itself, on the candidates
+  const spatial = join === null ? planSpatialJoin(node) : null;
+  if (spatial === null && join !== null && join.residual !== null) {
     const conds = join.residual.map(compileNode);
     const paths = join.residual.map((a) => a.docPath);
     const clen = conds.length;
@@ -1058,7 +1223,7 @@ function compileFlwor(node) {
       next(f, out);
     };
   }
-  else if (join === null && node.where !== null) {
+  else if (spatial === null && join === null && node.where !== null) {
     const cond = compileNode(node.where);
     const condPath = node.where.docPath;
     const next = emit;
@@ -1084,8 +1249,10 @@ function compileFlwor(node) {
   const fors = node.forBindings;
   let driveJoin = null;
   for (let i = fors.length - 1; i >= 0; i--) {
-    if (join !== null && i === fors.length - 1) {
-      const probe = compileJoinProbe(join, emit);
+    if (i === fors.length - 1 && (join !== null || spatial !== null)) {
+      const probe = join !== null
+        ? compileJoinProbe(join, emit)
+        : compileSpatialProbe(spatial, emit, node.where, node.where.docPath);
       driveJoin = probe.drive;
       emit = probe.probe;
       continue;
