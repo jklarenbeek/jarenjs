@@ -126,6 +126,30 @@ describe('README examples: the Jaren JSON Query language', () => {
       cheaper(data, { maxPrice: 9 }),
       ['Sayings of the Century', 'Moby Dick']);
   });
+
+  it('reduces a tuple stream with $fold', () => {
+    assert.strictEqual(queryJson({
+      $fold: { total: 0 },
+      $for: { b: '$.store.book[*]' },
+      $where: { $lt: ['$b.price', 10] },
+      $return: { $add: ['$total', '$b.price'] },
+    }, data), 17.939999999999998);
+  });
+
+  it('walks a runtime path by folding $get over its segments', () => {
+    assert.strictEqual(queryJson({
+      $fold: { cur: '$.doc' },
+      $for: { seg: '$.path[*]' },
+      $return: { $get: ['$cur', '$seg'] },
+    }, { doc: { a: { b: [10, 20] } }, path: ['a', 'b', 1] }), 20);
+  });
+
+  it('averages a sliding window', () => {
+    assert.deepStrictEqual(queryJson({
+      $for: { w: { $in: '$[*]', $window: 'sliding', $size: 3 } },
+      $return: { $avg: '$w' },
+    }, [1, 2, 3, 4, 5]), [2, 3, 4]);
+  });
 });
 
 describe('README examples: generating queries with LLMs', () => {

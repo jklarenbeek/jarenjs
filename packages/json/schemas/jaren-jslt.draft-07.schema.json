@@ -332,9 +332,12 @@
       "maxItems": 2
     },
     "flworPhrase": {
-      "description": "FLWOR phrase. Clauses apply in the fixed semantic order $for, $let, $as, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $for/$let.",
+      "description": "FLWOR phrase. Clauses apply in the fixed semantic order $fold, $for, $let, $as, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $fold/$for/$let. With $fold the phrase evaluates to the final accumulator instead of the collected $return sequence.",
       "type": "object",
       "properties": {
+        "$fold": {
+          "$ref": "#/definitions/foldBinding"
+        },
         "$for": {
           "$ref": "#/definitions/forBindings"
         },
@@ -373,6 +376,11 @@
           "required": [
             "$let"
           ]
+        },
+        {
+          "required": [
+            "$fold"
+          ]
         }
       ],
       "additionalProperties": false
@@ -382,7 +390,7 @@
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
     },
     "forBindings": {
-      "description": "Iteration bindings: variable name to source expression or extended {$in, $at} binding. Bindings nest left-to-right in document key order and may be correlated; key-order-hostile producers should nest phrases instead.",
+      "description": "Iteration bindings: variable name to source expression or extended $in binding. Bindings nest left-to-right in document key order and may be correlated; key-order-hostile producers should nest phrases instead.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
@@ -403,7 +411,7 @@
       ]
     },
     "extendedForBinding": {
-      "description": "Extended $for binding: iterates $in and binds $at to the 0-based (D6) position variable.",
+      "description": "Extended $for binding. $in is the source; $at binds the 0-based (D6) position variable; $allowing-empty emits one tuple with the variable bound to the empty sequence (position -1) when the source yields no tuple; $window with $size, and optionally $step, iterates tumbling or sliding windows instead of items. Only $in is structurally required: the compiler rejects $size/$step without $window, and $window without $size (JQ0003).",
       "type": "object",
       "properties": {
         "$in": {
@@ -411,11 +419,27 @@
         },
         "$at": {
           "$ref": "#/definitions/variableName"
+        },
+        "$allowing-empty": {
+          "type": "boolean"
+        },
+        "$window": {
+          "enum": [
+            "tumbling",
+            "sliding"
+          ]
+        },
+        "$size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "$step": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
-        "$in",
-        "$at"
+        "$in"
       ],
       "additionalProperties": false
     },
@@ -568,7 +592,20 @@
           "$is-boolean",
           "$is-null",
           "$is-array",
-          "$is-object"
+          "$is-object",
+          "$is-date",
+          "$is-time",
+          "$is-datetime",
+          "$is-duration",
+          "$year",
+          "$month",
+          "$day",
+          "$hours",
+          "$minutes",
+          "$seconds",
+          "$offset",
+          "$epoch",
+          "$datetime"
         ]
       },
       "additionalProperties": {
@@ -802,6 +839,18 @@
         "$call"
       ],
       "additionalProperties": false
+    },
+    "foldBinding": {
+      "description": "The $fold accumulator: exactly one variable name mapped to the accumulator's initial value, evaluated once in the enclosing scope before the tuple stream starts. $return then names the accumulator's next value per surviving tuple.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/expression"
+      }
     }
   }
 }

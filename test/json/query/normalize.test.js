@@ -109,12 +109,19 @@ describe('Jaren JSON Query normalizer', () => {
       failsWith({ $for: { '9x': 1 }, $return: 1 }, 'JQ0003', '/$for/9x');
     });
 
-    it('should validate the extended $in/$at binding form', () => {
-      failsWith({ $for: { b: { $in: '$.a[*]' } }, $return: '$b' }, 'JQ0003', '/$for/b');
+    it('should validate the extended binding form', () => {
+      // '$in' is the only required key; '$at', '$allowing-empty' and the
+      // window keys are each optional, so a bare '$in' is simply the
+      // long spelling of the plain source form
+      assert.deepStrictEqual(
+        compileJsonQuery({ $for: { b: { $in: '$.a[*]' } }, $return: '$b' })({ a: [1, 2] }),
+        [1, 2]);
       failsWith({ $for: { b: { $at: 'i' } }, $return: '$b' }, 'JQ0003', '/$for/b');
       failsWith({ $for: { b: { $in: 1, $at: 'i', $seq: [] } }, $return: '$b' }, 'JQ0003', '/$for/b');
       failsWith({ $for: { b: { $in: 1, $at: 9 } }, $return: '$b' }, 'JQ0003', '/$for/b/$at');
       failsWith({ $for: { b: { $in: 1, $at: '9x' } }, $return: '$b' }, 'JQ0003', '/$for/b/$at');
+      failsWith({ $for: { b: { $in: 1, '$allowing-empty': 'yes' } }, $return: '$b' },
+        'JQ0003', '/$for/b/$allowing-empty');
     });
 
     it('should reject the extended binding form in $let and quantifiers', () => {

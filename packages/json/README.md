@@ -343,17 +343,43 @@ One phrase carries the whole pipeline. Clauses apply in **fixed semantic order r
 
 | Key | Value | Presence |
 |---|---|---|
-| `$for` | iteration bindings `{ name: source, ... }`, positional form `{ "$in": expr, "$at": "i" }` | at least one of `$for`/`$let` |
-| `$let` | sequence bindings (no iteration) | at least one of `$for`/`$let` |
+| `$fold` | one accumulator binding `{ name: initExpr }` | at least one of `$fold`/`$for`/`$let` |
+| `$for` | iteration bindings `{ name: source, ... }`, extended form `{ "$in": expr, "$at": "i" }` | at least one of `$fold`/`$for`/`$let` |
+| `$let` | sequence bindings (no iteration) | at least one of `$fold`/`$for`/`$let` |
+| `$as` | schema assertions on this phrase's bindings | optional |
 | `$where` | tuple filter (effective boolean value) | optional |
 | `$groupby` | grouping-key bindings | optional |
 | `$orderby` | key spec or list: `{ "$key": e, "$dir": "desc", "$empty": "greatest" }` | optional |
 | `$count` | variable name for the 0-based tuple index | optional |
 | `$return` | the result expression per surviving tuple | required |
 
-Semantic order: `$for → $let → $where → $groupby → $orderby → $count → $return`. Quantifiers are their own two-key phrases: `{"$some": bindings, "$satisfies": expr}` / `{"$every": ...}`, with short-circuit evaluation.
+Semantic order: `$fold → $for → $let → $as → $where → $groupby → $orderby → $count → $return`. Quantifiers are their own two-key phrases: `{"$some": bindings, "$satisfies": expr}` / `{"$every": ...}`, with short-circuit evaluation.
 
-The operator library (58 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+**`$fold` turns the phrase into a reduction.** The accumulator's initial value is evaluated once, `$return` names its next value per surviving tuple, and the phrase evaluates to the final accumulator instead of the collected sequence. This is how the language gets a general fold without the JSON encoding needing to spell a *function value* — the accumulator is a binding, not a lambda parameter. It composes with the rest, so `$orderby` folds over sorted tuples and `$groupby` updates once per group:
+
+```js
+queryJson({
+  $fold: { total: 0 },
+  $for: { b: '$.store.book[*]' },
+  $where: { $lt: ['$b.price', 10] },
+  $return: { $add: ['$total', '$b.price'] },
+}, bookstore); // 17.939999999999998 — every number is an IEEE double (D1)
+```
+
+Because `$get` is a real dynamic lookup, a fold over a runtime path is a pointer walk: `{"$fold": {"cur": "$.doc"}, "$for": {"seg": "$.path[*]"}, "$return": {"$get": ["$cur", "$seg"]}}`.
+
+**Extended `$for` bindings** cover the two remaining XQuery iteration shapes. `{"$in": e, "$allowing-empty": true}` is outer-join iteration: when the source yields no tuple, one tuple is emitted with the variable bound to the empty sequence (position `-1` if `$at` is present), so the enclosing row survives. `{"$in": e, "$window": "tumbling"|"sliding", "$size": n, "$step": m}` iterates runs instead of items — a tumbling window *partitions* the stream, so its short final window is kept; a sliding window is a fixed-width moving view, so only full windows are emitted.
+
+```js
+queryJson({
+  $for: { w: { $in: '$[*]', $window: 'sliding', $size: 3 } },
+  $return: { $avg: '$w' },
+}, [1, 2, 3, 4, 5]); // [2, 3, 4] — a 3-point moving average
+```
+
+The operator library (73 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, and the RFC 3339 date operators) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+
+**Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
 
 ### External parameters
 
@@ -432,30 +458,31 @@ q(null, { doc: data }); // [ 'Sayings of the Century', 'Moby Dick' ]
 
 `npm run benchmark:jsonquery` runs the scenario matrix against [fontoxpath](https://www.npmjs.com/package/fontoxpath) (a real XQuery 3.1 engine in JavaScript — the closest honest comparison) and [jsonata](https://www.npmjs.com/package/jsonata) (the popular practical alternative), asserting result equivalence on every document before timing anything. Each engine runs the same scenario written idiomatically in its own language (`benchmark/adaptors/jsonquery/`).
 
-Measured with `npm run benchmark:jsonquery:profile` (2026-07-17, Node v24.14.0; ratios are that engine's time over Jaren's):
+Measured with `npm run benchmark:jsonquery:profile` (2026-07-27, Node v22.22.2; ratios are that engine's time over Jaren's):
 
 | Scenario | Jaren | fontoxpath 3.34 | jsonata 2.2 |
 |---|---|---|---|
 | **4-book bookstore** | | | |
-| singular access `$b.title` | 382 ns (2.6M/s) | 7.3 µs (19x) | 5.7 µs (15x) |
-| filter + project (spec A.2) | 1.9 µs (527k/s) | 36.1 µs (19x) | 27.0 µs (14x) |
-| join (spec A.3) | 5.6 µs (178k/s) | 77.5 µs (14x) | 111.7 µs (20x) |
-| group + aggregate (spec A.4) | 4.3 µs (234k/s) | n/a | 47.7 µs (11x) |
-| deep reshape | 2.6 µs (393k/s) | 190.5 µs (75x) | 82.9 µs (33x) |
+| singular access `$b.title` | 451 ns (2.2M/s) | 12.0 µs (27x) | 7.3 µs (16x) |
+| filter + project (spec A.2) | 3.6 µs (281k/s) | 60.6 µs (17x) | 26.2 µs (7.4x) |
+| join (spec A.3) | 3.4 µs (291k/s) | 102.0 µs (30x) | 96.6 µs (28x) |
+| group + aggregate (spec A.4) | 4.4 µs (229k/s) | n/a | 52.6 µs (12x) |
+| deep reshape | 2.4 µs (426k/s) | 173.1 µs (74x) | 55.8 µs (24x) |
 | **10,000-book bookstore** | | | |
-| singular access | 299 ns (3.3M/s) | 16.6 µs (56x) | 4.2 µs (14x) |
-| filter + project | 1.5 ms | 328.3 ms (215x) | 68.0 ms (45x) |
-| join (measured at 1,000 books) | 27.8 ms | 1.57 s (57x) | 1.75 s (63x) |
-| group + aggregate | 2.5 ms | n/a | 39.9 ms (16x) |
-| deep reshape | 3.6 ms | 422.0 ms (118x) | 119.0 ms (33x) |
-| **compile, µs per query** | 24.3 µs | 460.7 µs (19x) | 66.1 µs (2.7x) |
+| singular access | 324 ns (3.1M/s) | 9.0 µs (28x) | 4.6 µs (14x) |
+| filter + project | 1.33 ms | 343.2 ms (259x) | 70.4 ms (53x) |
+| join (measured at 1,000 books) | 331 µs | 1.64 s (4952x) | 1.71 s (5175x) |
+| group + aggregate | 2.47 ms | n/a | 37.9 ms (15x) |
+| deep reshape | 3.51 ms | 452.0 ms (129x) | 117.0 ms (33x) |
+| **compile, µs per query** | 37.4 µs | 562.5 µs (15x) | 118.3 µs (3.2x) |
 
 Honest caveats — what each competitor is optimized for:
 
 - **fontoxpath** is an XML-first XPath/XQuery engine; JSON rides on XDM maps and arrays. The benchmark pre-converts each document to XDM *once, outside the timed loop* (per-call conversion would cost ~12 ms alone at 10k books), and fontoxpath has no public compile-only API, so its compile number is fresh-source evaluation minus cached re-evaluation. It does not implement `group by`. Its engineering effort goes into DOM navigation, buckets and XQuery Update — not JSON throughput.
 - **jsonata** is a tree-walking interpreter whose `evaluate()` is async since 2.x; its numbers include that promise overhead because its API imposes it. It is optimized for expressiveness and embeddability, not raw speed.
 - **Jaren**'s compile number includes `JSON.parse` of the query text, since the competitors parse text too.
-- The join is a naive O(books × ratings) nested loop in **all three** engines (Jaren's hash-join optimizer is roadmap); it is measured at 1,000 books.
+- The join row is the one place these engines are not doing the same work, and the four-digit ratio says so rather than hiding it. fontoxpath and jsonata run it as a naive O(books × ratings) nested loop; Jaren's planner recognizes the uncorrelated equijoin and answers it from a hash table, which is O(books + ratings). At four books that is worth nothing (3.4 µs against 96–102 µs, the same 28–30x as every other small-document row); at 1,000 books it is the whole difference. Read the 4,952x as "different algorithm", not "faster engine" — and note the rewrite is declined whenever it would be observable (a `$as`, a `$let`, a correlated probe side), in which case Jaren runs the same nested loop they do. The row stays capped at 1,000 books because raising it would grow their cost quadratically and Jaren's linearly, measuring the cap instead of the engines.
+- The 4-book `singular` cell reads slower than the 1,000-book one (451 ns vs 335 ns) run to run. That is JIT/IC noise across the cell sequence, not a real cost curve; pinning it down is a `--cell-order` shuffle on the roadmap.
 
 ## JSLT — declarative JSON transformation
 
@@ -600,7 +627,7 @@ Unmatched nodes follow the XSLT built-in template rules, restated for JSON: cont
 
 ## Roadmap
 
-This package's roadmap lives in the repository-wide [ROADMAP](../../ROADMAP.md), under its `@jarenjs/json` sections: the query filter optimizer and hash joins, lazy sequences, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: custom JSONPath function extensions, early-exit iteration (`query.iterate`), the `json-path-segments` format, canonical JSON (RFC 8785), and the minimal array-diff mode for `createJSONPatch`.
+This package's roadmap lives in the repository-wide [ROADMAP](../../ROADMAP.md), under its `@jarenjs/json` sections: hoisting `$`-absolute comparables out of filter loops, first-class function values, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: hash-joined equijoins and counting-loop `$range` iteration, the `$fold` accumulator clause, `$allowing-empty` and window bindings, the RFC 3339 date operators, closed-world compilation and the `steps`/`depth` execution limits.
 
 ## Development
 

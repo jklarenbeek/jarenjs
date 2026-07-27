@@ -464,3 +464,33 @@ describe('Jaren JSON Query expressions', () => {
     });
   });
 });
+
+describe('constructed __proto__ members are data, not the prototype', () => {
+  // written through JSON.parse: a JS object literal's `__proto__:` key
+  // would set the document's own prototype instead of adding a member
+  const parse = (s) => JSON.parse(s);
+
+  it('should build an own member from an object constructor', () => {
+    const q = compileJsonQuery(parse('{"__proto__": "$.payload", "ok": 1}'));
+    const out = q({ payload: { polluted: true } });
+    assert.strictEqual(Object.getPrototypeOf(out), Object.prototype);
+    assert.strictEqual(Object.hasOwn(out, '__proto__'), true);
+    assert.deepStrictEqual(out['__proto__'], { polluted: true });
+    assert.strictEqual(out.ok, 1);
+    assert.strictEqual(/** @type {any} */ ({}).polluted, undefined);
+  });
+
+  it('should build an own member from a $map dynamic key', () => {
+    const q = compileJsonQuery(parse('{"$map": [["$.k", "$.v"]]}'));
+    const out = q({ k: '__proto__', v: { polluted: true } });
+    assert.strictEqual(Object.getPrototypeOf(out), Object.prototype);
+    assert.strictEqual(Object.hasOwn(out, '__proto__'), true);
+    assert.deepStrictEqual(out['__proto__'], { polluted: true });
+    assert.strictEqual(/** @type {any} */ ({}).polluted, undefined);
+  });
+
+  it('should keep an ordinary member on the plain assignment path', () => {
+    const q = compileJsonQuery(parse('{"title": "$.t"}'));
+    assert.deepStrictEqual(q({ t: 'x' }), { title: 'x' });
+  });
+});

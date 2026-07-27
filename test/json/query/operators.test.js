@@ -750,3 +750,96 @@ describe('Jaren JSON Query operator library', () => {
 
   //#endregion
 });
+
+describe('section 8.13 — dates and times', () => {
+  const doc = {
+    at: '2026-07-27T14:30:05.5+02:00',
+    day: '2026-07-27',
+    clock: '14:30:05Z',
+    span: 'P1Y2M3DT4H5M6S',
+  };
+  const run = (q, data = doc) => queryJson(q, data);
+
+  it('should test the RFC 3339 lexical forms', () => {
+    assert.strictEqual(run({ '$is-datetime': '$.at' }), true);
+    assert.strictEqual(run({ '$is-date': '$.day' }), true);
+    assert.strictEqual(run({ '$is-time': '$.clock' }), true);
+    assert.strictEqual(run({ '$is-duration': '$.span' }), true);
+    // the forms are distinct: a date-time is not a date
+    assert.strictEqual(run({ '$is-date': '$.at' }), false);
+    assert.strictEqual(run({ '$is-datetime': '$.day' }), false);
+    // like the $is-* family, a non-string is false, never an error
+    assert.strictEqual(run({ '$is-date': 42 }), false);
+    assert.strictEqual(run({ '$is-date': '$.missing' }), false);
+  });
+
+  it('should read components lexically, in the value\'s own offset', () => {
+    assert.strictEqual(run({ '$year': '$.at' }), 2026);
+    assert.strictEqual(run({ '$month': '$.at' }), 7);
+    assert.strictEqual(run({ '$day': '$.at' }), 27);
+    // 14, not the 12 it would be shifted to UTC
+    assert.strictEqual(run({ '$hours': '$.at' }), 14);
+    assert.strictEqual(run({ '$minutes': '$.at' }), 30);
+    assert.strictEqual(run({ '$seconds': '$.at' }), 5.5);
+    assert.strictEqual(run({ '$offset': '$.at' }), 120);
+  });
+
+  it('should propagate the empty sequence through every component', () => {
+    for (const op of ['$year', '$month', '$day', '$hours', '$minutes', '$seconds', '$offset', '$epoch']) {
+      assert.strictEqual(run({ [op]: '$.missing' }), undefined, op);
+    }
+  });
+
+  it('should reject a value whose half is missing', () => {
+    assert.throws(() => run({ '$hours': '$.day' }),
+      (e) => e.code === 'JQ2001' && /no time component/.test(e.message));
+    assert.throws(() => run({ '$year': '$.clock' }),
+      (e) => e.code === 'JQ2001' && /no date component/.test(e.message));
+    assert.throws(() => run({ '$epoch': '$.clock' }),
+      (e) => e.code === 'JQ2001' && /no date component/.test(e.message));
+    // a bare full-date has no offset at all — empty, not an error
+    assert.strictEqual(run({ '$offset': '$.day' }), undefined);
+  });
+
+  it('should report a malformed string by value', () => {
+    assert.throws(() => run({ '$year': { $const: '2026-13-99' } }),
+      (e) => e.code === 'JQ2001' && /"2026-13-99"/.test(e.message));
+    assert.throws(() => run({ '$year': 42 }),
+      (e) => e.code === 'JQ2001' && /a number/.test(e.message));
+  });
+
+  it('should place instants on the epoch and back again', () => {
+    assert.strictEqual(run({ '$epoch': '$.at' }), Date.parse(doc.at));
+    assert.strictEqual(run({ '$epoch': '$.day' }), Date.UTC(2026, 6, 27));
+    assert.strictEqual(run({ '$datetime': { '$epoch': '$.at' } }), '2026-07-27T12:30:05.500Z');
+    // whole seconds drop the fraction, so the form stays canonical
+    assert.strictEqual(run({ '$datetime': 0 }), '1970-01-01T00:00:00Z');
+    assert.throws(() => run({ '$datetime': 1e18 }), (e) => e.code === 'JQ2001');
+    assert.throws(() => run({ '$datetime': '$.at' }), (e) => e.code === 'JQ2001');
+  });
+
+  it('should compare across offsets through $epoch', () => {
+    // the same instant, spelled in two offsets: string order disagrees,
+    // epoch order does not
+    const data = { a: '2026-07-27T14:00:00+02:00', b: '2026-07-27T12:00:00Z' };
+    assert.strictEqual(queryJson({ '$lt': ['$.a', '$.b'] }, data), false,
+      'as strings, "14:00" sorts after "12:00"');
+    assert.strictEqual(
+      queryJson({ '$eq': [{ '$epoch': '$.a' }, { '$epoch': '$.b' }] }, data), true);
+  });
+
+  it('should group by a date component in a phrase', () => {
+    const events = [
+      { on: '2026-01-15', what: 'a' },
+      { on: '2026-01-20', what: 'b' },
+      { on: '2027-03-02', what: 'c' },
+    ];
+    const out = queryJson({
+      $for: { e: '$[*]' },
+      $groupby: { y: { '$year': '$e.on' } },
+      $orderby: ['$y'],
+      $return: { year: '$y', count: { $count: '$e.what' } },
+    }, events);
+    assert.deepStrictEqual(out, [{ year: 2026, count: 2 }, { year: 2027, count: 1 }]);
+  });
+});

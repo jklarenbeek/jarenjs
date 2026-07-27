@@ -95,9 +95,12 @@ export const DOCS_SECTIONS = [
   {
     id: 'json-query', title: 'Jaren JSON Query',
     blocks: [
-      p('XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 58-operator library — as JSON documents with JSONPath leaves. The grammar is published as JSON Schema, so a constrained decoder cannot emit an invalid query.'),
+      p('XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 73-operator library — as JSON documents with JSONPath leaves. The grammar is published as JSON Schema, so a constrained decoder cannot emit an invalid query.'),
       code(null, '{ "$for": { "b": "$.store.book[*]" },\n  "$where": { "$lt": ["$b.price", 10] },\n  "$orderby": ["$b.price"],\n  "$return": { "title": "$b.title", "price": "$b.price" } }'),
+      p('A $fold clause turns the same phrase into a reduction: the accumulator is a binding, not a lambda, so the language gets folds, running totals and runtime pointer walks without the JSON encoding ever needing to spell a function value. Extended $for bindings cover the rest of XQuery iteration — $allowing-empty for outer joins, and tumbling or sliding windows for moving aggregates.'),
+      code(null, '{ "$fold": { "total": 0 },\n  "$for": { "b": "$.store.book[*]" },\n  "$where": { "$lt": ["$b.price", 10] },\n  "$return": { "$add": ["$total", "$b.price"] } }'),
       callout('Schema operators', 'With the compileTypeTest hook from @jarenjs/validate/query, queries can type-check their own data: $valid, $assert and $as take JSON Schema literals.'),
+      callout('Uncorrelated equijoins are hash joins', 'The planner recognizes a $where equality whose probe side does not depend on the outer binding and answers it from a hash table — O(n+m) instead of O(n·m). It declines whenever the rewrite would be observable (a $as or $let in the phrase, a correlated source, an equality that is not the first $and conjunct), so the optimization can never change an answer.'),
     ],
   },
   {

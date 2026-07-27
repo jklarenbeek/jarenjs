@@ -14,7 +14,7 @@
 // longer sequence -> array of items).
 
 import { normalizeQuery, deepFreezeCopy } from './normalize.js';
-import { compileNode, UNBOUND } from './compile.js';
+import { compileQueryRoot, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
 import { JsonQueryRuntimeError } from './errors.js';
 
@@ -37,6 +37,17 @@ const hasOwn = Object.hasOwn;
  * @property {number} [resultItems] - Caps the final result at the
  *   query boundary (`JQ2009`); checked after evaluation, and
  *   deliberately bypassed by `first`/`exists`/`ebv`.
+ * @property {number} [steps] - Caps expression-node evaluations
+ *   (`JQ2009`). This is the one limit that bounds *work* rather than
+ *   output, so it is also the one that costs: setting it compiles a
+ *   counter check into every node, roughly halving throughput. A step
+ *   is one node evaluation, not one primitive operation - a single
+ *   node that loops internally (`$range` materialization, a general
+ *   comparison's cross product) counts once.
+ * @property {number} [depth] - Caps expression nesting, enforced at
+ *   compile time (`JQ0011`). The language has no recursion, so the
+ *   compiled closure tree's evaluation depth IS the document's static
+ *   nesting: checking it once is exact and costs nothing to evaluate.
  */
 
 /**
@@ -70,8 +81,13 @@ const hasOwn = Object.hasOwn;
  *   document contains. Deliberately separate from `functions`: that
  *   registry extends the query vocabulary through `$call`, this one
  *   extends the RFC 9535 grammar the path strings are written in.
- * @property {JsonQueryLimits} [limits] - Enforced output caps; the
- *   unenforced `steps`/`depth` are rejected with a TypeError.
+ * @property {JsonQueryLimits} [limits] - Enforced execution limits.
+ * @property {readonly string[]} [externals] - Closed-world compilation:
+ *   the variable names (no `$` sigil) the document may leave free.
+ *   Every other free variable is compile error `JQ0005` at its own
+ *   reference site, so a query cannot silently acquire a parameter the
+ *   host never meant to expose. `[]` declares none. Omitted, the open
+ *   world of QUERY-FORMAT.md section 9 applies: use is the declaration.
  */
 
 /**
@@ -93,7 +109,7 @@ const hasOwn = Object.hasOwn;
  * @property {string[]} operators
  * @property {string[]} functions
  * @property {string[]} collations
- * @property {{ sequenceItems: number | null, resultItems: number | null } | null} limits
+ * @property {{ sequenceItems: number | null, resultItems: number | null, steps: number | null, depth: number | null } | null} limits
  */
 
 /**
@@ -116,6 +132,14 @@ const hasOwn = Object.hasOwn;
  * The returned function applies the query to a JSON value and returns the
  * result as plain JSON: `undefined` for the empty sequence, the item
  * itself for a singleton result, an array of items for a longer sequence.
+ *
+ * The `data` argument MUST be a JSON value (section 2.1). The engine does
+ * not deep-validate it - that would cost a full walk per call - so a
+ * non-JSON value inside the document simply flows through as an opaque
+ * item. The single exception is `undefined`, rejected with `JQ2011`
+ * because this API already spends `undefined` on the empty sequence.
+ * An external bound to `undefined` reads as unbound (`JQ2006` on use).
+ *
  * It also carries helper methods and metadata:
  *
  * - `query(data, externals?)` - the query result as described above
@@ -152,18 +176,33 @@ const hasOwn = Object.hasOwn;
  * q(data, { max: 10 }); // { title: 'Sayings of the Century', cheap: true }
  */
 export function compileJsonQuery(doc, options = {}) {
-  const { root, frameSize, externals, limits, usedOps, usedFunctions, usedCollations } =
+  const { root, frameSize, externals, limits, stepSlot, usedOps, usedFunctions, usedCollations } =
     normalizeQuery(doc, options);
-  const get = compileNode(root);
+  const get = compileQueryRoot(root,
+    stepSlot < 0 ? null : { slot: stepSlot, limit: limits.steps });
   const extCount = externals.length;
   const resultCap = limits !== null && limits.resultItems !== null ? limits.resultItems : 0;
 
   function evaluate(data, ext) {
+    // The data model is JSON (section 2.1), and the engine does not
+    // deep-validate its input - that would be an O(size) walk on every
+    // call. The one violation that must not pass silently is `undefined`,
+    // because this API already spends `undefined` on the empty sequence:
+    // `query(undefined)` would answer "empty" while `query.exists(...)`
+    // answered true. Every other non-JSON value flows through as an
+    // opaque item, which is the caller's contract to keep.
+    if (data === undefined)
+      throw new JsonQueryRuntimeError('JQ2011', 'the input document is undefined, which is not a JSON value', '');
     const frame = new Array(frameSize);
     frame[0] = data;
+    if (stepSlot >= 0)
+      frame[stepSlot] = 0;
     for (let i = 0; i < extCount; i++) {
       const e = externals[i];
-      frame[e.slot] = ext != null && hasOwn(ext, e.name) ? ext[e.name] : UNBOUND;
+      // an external explicitly bound to `undefined` reads as unbound, so
+      // the reference raises JQ2006 instead of yielding a non-JSON item
+      const v = ext != null && hasOwn(ext, e.name) ? ext[e.name] : undefined;
+      frame[e.slot] = v === undefined ? UNBOUND : v;
     }
     return get(frame);
   }
@@ -204,14 +243,19 @@ export function compileJsonQuery(doc, options = {}) {
   /**
    * A plain-JSON explanation of the compiled query: its dependencies
    * plus the enforced limits. A fresh value each call.
-   * @returns {{ externals: string[], operators: string[], functions: string[], collations: string[], limits: { sequenceItems: number | null, resultItems: number | null } | null }}
+   * @returns {JsonQueryExplanation}
    */
   query.explain = () => ({
     externals: [...query.externals],
     operators: [...query.dependencies.operators],
     functions: [...query.dependencies.functions],
     collations: [...query.dependencies.collations],
-    limits: limits === null ? null : { sequenceItems: limits.sequenceItems, resultItems: limits.resultItems },
+    limits: limits === null ? null : {
+      sequenceItems: limits.sequenceItems,
+      resultItems: limits.resultItems,
+      steps: limits.steps,
+      depth: limits.depth,
+    },
   });
   return query;
 }

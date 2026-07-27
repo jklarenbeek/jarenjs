@@ -83,12 +83,31 @@ const VAR_HEAD_RE = RE_JSONPATH_VARIABLE_HEAD;
 // FLWOR clause keys (QUERY-FORMAT.md section 6.1) and quantifier keys
 // (section 7). Clauses apply in the fixed semantic order of section 6.1
 // regardless of JSON key order (D7).
-const FLWOR_KEYS = new Set(['$for', '$let', '$as', '$where', '$groupby', '$orderby', '$count', '$return']);
+const FLWOR_KEYS = new Set(['$fold', '$for', '$let', '$as', '$where', '$groupby', '$orderby', '$count', '$return']);
 const QUANTIFIER_KEYS = new Set(['$some', '$every', '$satisfies']);
 
 // Keys of the explicit $orderby key-spec form (section 6.6). Contextual:
 // they are not operators and stay outside the KNOWN_KEYS vocabulary.
 const ORDERBY_SPEC_KEYS = new Set(['$key', '$dir', '$empty', '$collation']);
+
+// Keys of the extended $for binding form (sections 6.2, 6.10): the
+// source, a positional variable, the outer-join switch, and the window
+// specification. Also contextual - not operators.
+const FOR_BINDING_KEYS = new Set(['$in', '$at', '$allowing-empty', '$window', '$size', '$step']);
+
+// Whether a binding source uses the extended object form rather than
+// being an ordinary expression. Any of its keys marks it, so a malformed
+// combination is diagnosed as a bad binding instead of silently
+// normalizing as a map constructor.
+function isExtendedBinding(source) {
+  if (!isJsonObject(source))
+    return false;
+  for (const key of FOR_BINDING_KEYS) {
+    if (hasOwn(source, key))
+      return true;
+  }
+  return false;
+}
 
 // Escape hatches (QUERY-FORMAT.md section 3.5): structural forms with
 // dedicated normalizer cases; every other operator lives in the registry.
@@ -194,14 +213,23 @@ function makePathNode(name, rootSlot, external, rootCard, segments, docPath) {
 
 // resolve a variable reference: walk the lexical scope chain; a free name
 // is an external parameter, allocated a slot on first appearance (spec
-// section 9: use is the declaration)
-function resolveVariable(name, scope, ctx) {
+// section 9: use is the declaration). Under a closed-world compilation
+// (options.externals), only declared names may stay free - every other
+// free name is JQ0005 at its own reference site.
+function resolveVariable(name, scope, ctx, docPath) {
   for (let sc = scope; sc !== null; sc = sc.parent) {
     if (sc.name === name)
       return { slot: sc.slot, card: sc.card, external: false };
   }
   let slot = ctx.externals.get(name);
   if (slot === undefined) {
+    if (ctx.declaredExternals !== null && !ctx.declaredExternals.has(name)) {
+      const declared = [...ctx.declaredExternals];
+      fail('JQ0005', `'$${name}' is neither bound by an enclosing phrase nor a declared external`
+        + (declared.length === 0
+          ? ' (this query was compiled closed-world, declaring no externals)'
+          : ` (declared externals: ${declared.map((n) => "'" + n + "'").join(', ')})`), docPath);
+    }
     slot = ctx.nextSlot++;
     ctx.externals.set(name, slot);
   }
@@ -226,7 +254,7 @@ function normalizeString(s, docPath, scope, ctx) {
     return fail('JQ0004', `'${s}' is not a valid path or escape`, docPath);
   const name = m[1];
   const rest = s.slice(m[0].length);
-  const ref = resolveVariable(name, scope, ctx);
+  const ref = resolveVariable(name, scope, ctx, docPath);
   if (rest === '') // bare '$name': whole-variable reference
     return Object.freeze({ kind: 'var', card: ref.card, docPath, slot: ref.slot, external: ref.external, name });
   // variable-rooted path: the grammar is RFC 9535 with the root identifier
@@ -273,7 +301,8 @@ function normalizePhrase(obj, keys, docPath, scope, ctx) {
       break;
     }
   }
-  if (allFlwor && keys.length >= 2 && hasOwn(obj, '$return') && (hasOwn(obj, '$for') || hasOwn(obj, '$let'))) {
+  if (allFlwor && keys.length >= 2 && hasOwn(obj, '$return')
+    && (hasOwn(obj, '$for') || hasOwn(obj, '$let') || hasOwn(obj, '$fold'))) {
     if (keys.length === 2 && hasOwn(obj, '$let'))
       return normalizeLetPhrase(obj, docPath, scope, ctx);
     return normalizeFlworPhrase(obj, docPath, scope, ctx);
@@ -593,8 +622,8 @@ function normalizeLetBindings(letObj, letPath, scope, ctx, phraseNames, bindings
     const bindPath = letPath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     const source = letObj[name];
-    if (isJsonObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
-      return fail('JQ0003', "the extended '$in'/'$at' binding form is not available in '$let'", bindPath);
+    if (isExtendedBinding(source))
+      return fail('JQ0003', "the extended binding form is not available in '$let'", bindPath);
     const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
     sc = { name, slot, card: expr.card, parent: sc };
@@ -615,6 +644,34 @@ function normalizeLetPhrase(obj, docPath, scope, ctx) {
   });
 }
 
+// The window specification of an extended $for binding (section 6.10).
+// `$size`/`$step` are integer literals, not expressions: a window width
+// that varied per tuple could not be compiled into a specialized loop,
+// and no use has asked for one.
+//
+// A **tumbling** window partitions the item stream - every item lands in
+// exactly one window - so its final window is kept even when short,
+// because dropping it would silently lose data. A **sliding** window is
+// a moving view of fixed width, so a short window is not one of them and
+// the tail is not emitted. That is the whole rule.
+function normalizeWindowSpec(source, bindPath) {
+  const kind = source.$window;
+  if (kind !== 'tumbling' && kind !== 'sliding')
+    return fail('JQ0003', "'$window' must be 'tumbling' or 'sliding'", bindPath + '/$window');
+  if (!hasOwn(source, '$size'))
+    return fail('JQ0003', "a '$window' binding requires '$size'", bindPath);
+  const size = source.$size;
+  if (!Number.isInteger(size) || size < 1)
+    return fail('JQ0003', "'$size' must be a positive integer", bindPath + '/$size');
+  let step = kind === 'tumbling' ? size : 1;
+  if (hasOwn(source, '$step')) {
+    step = source.$step;
+    if (!Number.isInteger(step) || step < 1)
+      return fail('JQ0003', "'$step' must be a positive integer", bindPath + '/$step');
+  }
+  return Object.freeze({ sliding: kind === 'sliding', size, step });
+}
+
 // $for bindings (section 6.2): each name iterates its source, one item
 // per tuple (card ONE), with D4 array unpacking at runtime. The extended
 // {"$in": expr, "$at": name} form additionally binds a 0-based position
@@ -630,18 +687,40 @@ function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings
     let source = forObj[name];
     let sourcePath = bindPath;
     let atName = null;
-    if (isJsonObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at'))) {
-      if (Object.keys(source).length !== 2 || !hasOwn(source, '$in') || !hasOwn(source, '$at'))
-        return fail('JQ0003', "the extended binding form takes exactly the keys '$in' and '$at'", bindPath);
-      atName = source.$at;
-      if (typeof atName !== 'string' || !VAR_NAME_RE.test(atName))
-        return fail('JQ0003', "'$at' takes a variable name string", bindPath + '/$at');
+    let allowingEmpty = false;
+    let window = null;
+    if (isExtendedBinding(source)) {
+      const bindKeys = Object.keys(source);
+      for (let k = 0; k < bindKeys.length; k++) {
+        if (!FOR_BINDING_KEYS.has(bindKeys[k]))
+          return fail('JQ0003', `'${bindKeys[k]}' is not a valid key of an extended '$for' binding`, bindPath);
+      }
+      if (!hasOwn(source, '$in'))
+        return fail('JQ0003', "an extended '$for' binding requires '$in'", bindPath);
+      if (hasOwn(source, '$at')) {
+        atName = source.$at;
+        if (typeof atName !== 'string' || !VAR_NAME_RE.test(atName))
+          return fail('JQ0003', "'$at' takes a variable name string", bindPath + '/$at');
+      }
+      if (hasOwn(source, '$allowing-empty')) {
+        if (typeof source['$allowing-empty'] !== 'boolean')
+          return fail('JQ0003', "'$allowing-empty' takes a boolean", bindPath + '/$allowing-empty');
+        allowingEmpty = source['$allowing-empty'];
+      }
+      if (hasOwn(source, '$window'))
+        window = normalizeWindowSpec(source, bindPath);
+      else if (hasOwn(source, '$size') || hasOwn(source, '$step'))
+        return fail('JQ0003', "'$size'/'$step' require '$window'", bindPath);
       source = source.$in;
       sourcePath = bindPath + '/$in';
     }
     const expr = normalizeExpr(source, sourcePath, sc, ctx);
     const slot = ctx.nextSlot++;
-    sc = { name, slot, card: CARD_ONE, parent: sc };
+    // a window variable holds the window's items, and an $allowing-empty
+    // binding may hold the empty sequence: neither is the plain
+    // exactly-one-item binding the compiler specializes for
+    const bindCard = window !== null ? CARD_MANY : (allowingEmpty ? CARD_OPT : CARD_ONE);
+    sc = { name, slot, card: bindCard, parent: sc };
     tupleSlots.push({ name, slot });
     let atSlot = -1;
     if (atName !== null) {
@@ -650,7 +729,7 @@ function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings
       sc = { name: atName, slot: atSlot, card: CARD_ONE, parent: sc };
       tupleSlots.push({ name: atName, slot: atSlot });
     }
-    bindings.push(Object.freeze({ name, slot, expr, atSlot }));
+    bindings.push(Object.freeze({ name, slot, expr, atSlot, allowingEmpty, window }));
   }
   return sc;
 }
@@ -706,12 +785,17 @@ function normalizeOrderbySpec(spec, specPath, scope, ctx) {
   });
 }
 
-// Collect the frame slots an expression subtree reads (variable
-// references and path roots). Barrier liveness: $groupby/$orderby
-// materialize only the phrase binding slots that later clauses read.
-// Over-approximation is safe; slots written by nested phrases before
-// being read merely widen a snapshot harmlessly.
-function collectReadSlots(node, out) {
+// Barrier liveness: $groupby/$orderby materialize only the phrase
+// binding slots that later clauses read. Slots written by nested phrases
+// before being read merely widen a snapshot harmlessly. The hash-join
+// planner (compile.js) reuses this to prove a probe side uncorrelated.
+/**
+ * Collect the frame slots an expression subtree reads (variable
+ * references and path roots) into `out`. Over-approximation is safe.
+ * @param {object} node - a frozen AST node
+ * @param {Set<number>} out - accumulator of slot indexes
+ */
+export function collectReadSlots(node, out) {
   switch (node.kind) {
     case 'literal':
       return;
@@ -753,6 +837,8 @@ function collectReadSlots(node, out) {
       collectReadSlots(node.satisfies, out);
       return;
     default: { // 'flwor'
+      if (node.fold !== null)
+        collectReadSlots(node.fold.expr, out);
       for (let i = 0; i < node.forBindings.length; i++)
         collectReadSlots(node.forBindings[i].expr, out);
       for (let i = 0; i < node.letBindings.length; i++)
@@ -791,8 +877,34 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
   const letBindings = [];
   let sc = scope;
 
+  // $fold (section 6.9): the accumulator clause. Its initial value is
+  // evaluated ONCE, in the enclosing scope, before the tuple stream
+  // starts; $return then yields the accumulator's next value per
+  // surviving tuple, and the phrase's value is the final accumulator
+  // instead of the collected $return sequence. This is what gives the
+  // language its fold without giving JSON a way to spell a function
+  // value: the accumulator is a binding, not a lambda parameter.
+  let fold = null;
+  if (hasOwn(obj, '$fold')) {
+    const foldPath = docPath + '/$fold';
+    const names = requireBindingObject('$fold', obj.$fold, foldPath);
+    if (names.length !== 1)
+      return fail('JQ0003', "'$fold' takes exactly one accumulator binding", foldPath);
+    const name = names[0];
+    const bindPath = foldPath + '/' + encodeJSONPointerSegment(name);
+    bindPhraseName(name, phraseNames, bindPath);
+    // the initial value cannot see this phrase's own bindings
+    const expr = normalizeExpr(obj.$fold[name], bindPath, scope, ctx);
+    fold = { name, slot: ctx.nextSlot++, expr, docPath: bindPath };
+  }
+
   if (hasOwn(obj, '$for'))
     sc = normalizeForBindings(obj.$for, docPath + '/$for', sc, ctx, phraseNames, forBindings, tupleSlots);
+  // the accumulator binds after $for - a $for source is iterated once and
+  // must not depend on a value that changes per tuple - and before $let,
+  // so every later clause sees the accumulation so far
+  if (fold !== null)
+    sc = { name: fold.name, slot: fold.slot, card: CARD_MANY, parent: sc };
   if (hasOwn(obj, '$let')) {
     const before = letBindings.length;
     sc = normalizeLetBindings(obj.$let, docPath + '/$let', sc, ctx, phraseNames, letBindings);
@@ -859,6 +971,10 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     }
     // post-group scope: same slots, rebound cards
     sc = scope;
+    // the accumulator is not a tuple variable - $groupby does not rebind
+    // it, it keeps accumulating, now once per group
+    if (fold !== null)
+      sc = { name: fold.name, slot: fold.slot, card: CARD_MANY, parent: sc };
     for (let i = 0; i < tupleSlots.length; i++)
       sc = { name: tupleSlots[i].name, slot: tupleSlots[i].slot, card: CARD_MANY, parent: sc };
     for (let i = 0; i < keys.length; i++)
@@ -940,13 +1056,18 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
   // phrase cardinality: MANY unless provably otherwise - a $let-only
   // phrase yields exactly one tuple ($where may still drop it)
   let card;
-  if (forBindings.length !== 0 || groupby !== null)
+  if (fold !== null)
+    // the phrase IS the accumulator: either it never updated (the initial
+    // value) or it holds some $return result
+    card = joinCard(fold.expr.card, ret.card);
+  else if (forBindings.length !== 0 || groupby !== null)
     card = CARD_MANY;
   else
     card = where !== null ? joinCard(ret.card, CARD_ZERO) : ret.card;
 
   return Object.freeze({
     kind: 'flwor', card, docPath,
+    fold: fold === null ? null : Object.freeze(fold),
     forBindings: Object.freeze(forBindings),
     letBindings: Object.freeze(letBindings),
     asChecks, where,
@@ -974,8 +1095,8 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
     const bindPath = clausePath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
     const source = bindObj[name];
-    if (isJsonObject(source) && (hasOwn(source, '$in') || hasOwn(source, '$at')))
-      return fail('JQ0003', "the extended '$in'/'$at' binding form is not available in quantifiers", bindPath);
+    if (isExtendedBinding(source))
+      return fail('JQ0003', 'the extended binding form is not available in quantifiers', bindPath);
     const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
     sc = { name, slot, card: CARD_ONE, parent: sc };
@@ -1032,17 +1153,16 @@ function validateNamedFunctions(value, what) {
   return value;
 }
 
-// Validate `options.limits`. Only the limits the engine actually
+// The known limits (section 8.12). Only limits the engine actually
 // enforces are accepted - an accepted-but-unenforced limit would be a
-// silent false guarantee. `steps`/`depth` need an instrumented
-// evaluation core and are rejected until that exists.
+// silent false guarantee.
+const LIMIT_NAMES = new Set(['sequenceItems', 'resultItems', 'steps', 'depth']);
+
 function validateLimits(value) {
   if (!isJsonObject(value))
     throw new TypeError('options.limits must be a plain object');
   for (const name in value) {
-    if (name === 'steps' || name === 'depth')
-      throw new TypeError(`options.limits.${name} is not enforced by this engine yet; refusing to accept a limit that would not be honored`);
-    if (name !== 'sequenceItems' && name !== 'resultItems')
+    if (!LIMIT_NAMES.has(name))
       throw new TypeError(`options.limits.${name} is not a known limit`);
     const v = value[name];
     if (!Number.isInteger(v) || v < 1)
@@ -1051,7 +1171,96 @@ function validateLimits(value) {
   return Object.freeze({
     sequenceItems: value.sequenceItems ?? null,
     resultItems: value.resultItems ?? null,
+    steps: value.steps ?? null,
+    depth: value.depth ?? null,
   });
+}
+
+// Validate `options.externals`: the closed-world declaration list. An
+// array of variable names (without the '$' sigil); `[]` declares none,
+// so every free variable is JQ0005. Absent means the open world, where
+// use is the declaration (section 9).
+function validateDeclaredExternals(value) {
+  if (!Array.isArray(value))
+    throw new TypeError('options.externals must be an array of variable names');
+  const set = new Set();
+  for (let i = 0; i < value.length; i++) {
+    const name = value[i];
+    if (typeof name !== 'string' || !VAR_NAME_RE.test(name))
+      throw new TypeError(`options.externals[${i}] must be a variable name string (no '$' sigil)`);
+    set.add(name);
+  }
+  return set;
+}
+
+// Maximum expression nesting of a normalized AST. The language has no
+// recursion - no user-defined functions, no self-reference - so the
+// compiled closure tree's evaluation depth is exactly this static depth,
+// which is why `limits.depth` is a compile-time check (JQ0011) rather
+// than a runtime counter: exact, and free at evaluation time. Returns
+// the deepest node found alongside its depth, for the error position.
+function measureDepth(node, depth, worst) {
+  if (depth > worst.depth) {
+    worst.depth = depth;
+    worst.docPath = node.docPath;
+  }
+  const next = depth + 1;
+  switch (node.kind) {
+    case 'literal':
+    case 'var':
+    case 'path':
+    case 'raw':
+      return;
+    case 'object':
+      for (let i = 0; i < node.entries.length; i++)
+        measureDepth(node.entries[i].expr, next, worst);
+      return;
+    case 'map':
+      for (let i = 0; i < node.pairs.length; i++) {
+        measureDepth(node.pairs[i].key, next, worst);
+        measureDepth(node.pairs[i].value, next, worst);
+      }
+      return;
+    case 'array':
+      for (let i = 0; i < node.elements.length; i++)
+        measureDepth(node.elements[i], next, worst);
+      return;
+    case 'op':
+    case 'call':
+      for (let i = 0; i < node.args.length; i++)
+        measureDepth(node.args[i], next, worst);
+      return;
+    case 'let':
+      for (let i = 0; i < node.bindings.length; i++)
+        measureDepth(node.bindings[i].expr, next, worst);
+      measureDepth(node.ret, next, worst);
+      return;
+    case 'quant':
+      for (let i = 0; i < node.bindings.length; i++)
+        measureDepth(node.bindings[i].expr, next, worst);
+      measureDepth(node.satisfies, next, worst);
+      return;
+    default: { // 'flwor'
+      for (let i = 0; i < node.forBindings.length; i++)
+        measureDepth(node.forBindings[i].expr, next, worst);
+      for (let i = 0; i < node.letBindings.length; i++)
+        measureDepth(node.letBindings[i].expr, next, worst);
+      if (node.fold !== null)
+        measureDepth(node.fold.expr, next, worst);
+      if (node.where !== null)
+        measureDepth(node.where, next, worst);
+      if (node.groupby !== null) {
+        for (let i = 0; i < node.groupby.keys.length; i++)
+          measureDepth(node.groupby.keys[i].expr, next, worst);
+      }
+      if (node.orderby !== null) {
+        for (let i = 0; i < node.orderby.specs.length; i++)
+          measureDepth(node.orderby.specs[i].key, next, worst);
+      }
+      measureDepth(node.ret, next, worst);
+      return;
+    }
+  }
 }
 
 function normalizeExpr(value, docPath, scope, ctx) {
@@ -1110,6 +1319,9 @@ export function normalizeQuery(doc, options = {}) {
   const functions = options.functions == null ? null : validateNamedFunctions(options.functions, 'functions');
   const collations = options.collations == null ? null : validateNamedFunctions(options.collations, 'collations');
   const limits = options.limits == null ? null : validateLimits(options.limits);
+  const declaredExternals = options.externals == null
+    ? null
+    : validateDeclaredExternals(options.externals);
   // JSONPath function extensions are a separate registry from
   // options.functions ($call's host functions): they extend the RFC 9535
   // grammar inside path strings, not the query vocabulary. Built once
@@ -1119,7 +1331,7 @@ export function normalizeQuery(doc, options = {}) {
     : { pathFunctions: options.pathFunctions };
   const ctx = {
     nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
-    functions, collations, limits, pathOptions,
+    functions, collations, limits, pathOptions, declaredExternals,
     usedOps: new Set(), usedFunctions: new Set(), usedCollations: new Set(),
   };
   let expr = doc;
@@ -1142,13 +1354,22 @@ export function normalizeQuery(doc, options = {}) {
     }
   }
   const root = normalizeExpr(expr, rootPath, null, ctx);
+  if (limits !== null && limits.depth !== null) {
+    const worst = { depth: 0, docPath: rootPath };
+    measureDepth(root, 1, worst);
+    if (worst.depth > limits.depth)
+      fail('JQ0011', `the query nests ${worst.depth} expressions deep, more than limits.depth (${limits.depth})`, worst.docPath);
+  }
+  // limits.steps instruments every node evaluation; the counter lives in
+  // its own frame slot, so nothing is threaded through the closures
+  const stepSlot = limits !== null && limits.steps !== null ? ctx.nextSlot++ : -1;
   const externals = new Array(ctx.externals.size);
   let i = 0;
   for (const [name, slot] of ctx.externals)
     externals[i++] = Object.freeze({ name, slot });
   return {
     root, frameSize: ctx.nextSlot, externals: Object.freeze(externals),
-    limits,
+    limits, stepSlot,
     usedOps: ctx.usedOps,
     usedFunctions: ctx.usedFunctions,
     usedCollations: ctx.usedCollations,

@@ -111,11 +111,11 @@ Scoping is entirely compile-time: a linked chain of `{name, slot, card, parent}`
 
 ### FLWOR: streaming clauses, blocking clauses, liveness
 
-A FLWOR phrase compiles to a chain of nested `(frame, out) → void` closures. **There are no tuple objects**: a tuple *is* the current state of the frame slots. Clauses apply in the spec's fixed semantic order (`$for → $let → $where → $groupby → $orderby → $count → $return`) regardless of JSON key order.
+A FLWOR phrase compiles to a chain of nested `(frame, out) → void` closures. **There are no tuple objects**: a tuple *is* the current state of the frame slots. Clauses apply in the spec's fixed semantic order (`$fold → $for → $let → $as → $where → $groupby → $orderby → $count → $return`) regardless of JSON key order.
 
 Streaming clauses never materialize the tuple stream:
 
-- `$for` iterates its source sequence (with the spec's D4 one-level array unpacking), rebinding its slot per tuple; multiple bindings nest left-to-right and may be correlated. The `$at` positional form keeps a per-activation 0-based counter.
+- `$for` iterates its source sequence (with the spec's D4 one-level array unpacking), rebinding its slot per tuple; multiple bindings nest left-to-right and may be correlated. The `$at` positional form keeps a per-activation 0-based counter. `$allowing-empty` tests up front whether the source yields any tuple *after* unpacking and, if not, emits one with the slot bound to `EMPTY` (position `-1`); a `$window` binding materializes the unpacked item stream once and slices runs out of it.
 - `$let` writes its slot once per surrounding tuple.
 - `$where` gates the chain on the effective boolean value.
 - `$count` numbers surviving tuples through its own frame slot (reset per phrase evaluation — safe because a phrase cannot re-enter within one frame).
@@ -124,6 +124,20 @@ Streaming clauses never materialize the tuple stream:
 
 - `$orderby` runs a Schwartzian sort: each surviving tuple appends a `[key₁, ..., keyₙ, snapshot]` row, `Array.prototype.sort` (stable) compares precomputed keys, then the snapshots replay into the frame. Key type errors (`JQ2005`) are raised eagerly at key evaluation; empty keys order per `$empty` (least/greatest as ±∞ before direction).
 - `$groupby` accumulates a `Map` from a composite `stableKeyString` key to the group, in first-appearance order; grouping-key variables rebind to the key values, every other live variable rebinds to the *sequence* of its values across the group's tuples.
+
+`$fold` needs no fifth driver pair. It replaces the collecting sink with one that assigns the accumulator slot, then wraps whichever of the four drivers was built: seed the slot, run the tuple stream unchanged, read the slot back. Both barriers, `$count` and `$where` therefore compose with it for free — a fold under `$orderby` reduces over sorted tuples because the replay loop calls the same sink.
+
+### FLWOR: the two compile-time rewrites
+
+Both are pure specializations — they change the closures emitted, never the answer — and both are declined whenever the rewrite would be observable.
+
+**Range iteration.** A `$for` or quantifier binding whose source is *statically* a `$range` compiles to a counting loop instead of materializing the sequence to walk it once. Memory drops from O(n) to O(1), so the `JQ2007` guard stops being the only thing between a query and the heap (a 50-million-item `$for` allocates nothing); a quantifier additionally stops at its witness. The loop is written out at each use site rather than shared through a callback, because an indirect call per iterated number costs more than the duplication saves. A `$range` that is genuinely materialized — bound by `$let`, handed to an aggregate — keeps the guard.
+
+**Hash joins.** `$for a, $for b` with an equality `$where` is O(|a|·|b|) as nested loops. When the inner binding is *uncorrelated* (`collectReadSlots` proves its source reads no outer binding slot), the equality is answered from a `Map` built once over the inner side, making it O(|a| + |b|) — measured at 227 ms → 1.0 ms for 2000×2000, with identical rows.
+
+The planner declines unless the rewrite is provably invisible: no `$as` and no `$let` in the phrase (both run per tuple *between* `$for` and `$where`, so forming fewer tuples would retract an assertion or skip a failure); no `$at`/`$allowing-empty`/`$window` on the probe binding; the equality is the whole `$where` or its **first** `$and` conjunct (so nothing that used to be evaluated first is skipped); both key expressions are paths or variable references, whose only failure is `JQ2006`, so moving *when* they are evaluated cannot move an error; and neither key is statically `MANY`, since `$eq` is existential over sequences. Buckets key on `stableKeyString`, which agrees with the `$eq` relation (`equalsJson`) on every JSON value except `NaN` — dropped on both sides, which is what `$eq` already does. The table is closure state refreshed once per phrase evaluation, which is sound because the language has no recursion: a compiled phrase can never be re-entered while it runs.
+
+`limits.steps` is the third compile-time switch. Instrumentation is opt-in at the `compileNode` dispatch point: with no step limit the compiler emits exactly the closures it always did, and with one it wraps every node in a counter check whose counter lives in its own frame slot. `limits.depth` needs no runtime support at all — with no recursion in the language, evaluation depth *is* the AST's static depth, so it is measured once at normalize time (`JQ0011`).
 
 Quantifier phrases (`$some`/`$every`) compile to early-exit loop nests over the same binding machinery — the first witnessing (or failing) tuple ends evaluation, and later runtime errors are never raised.
 

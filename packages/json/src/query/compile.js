@@ -10,6 +10,7 @@
 // check - the main reason compiled queries are fast.
 
 import { compareCodePoints } from '@jarenjs/core/string';
+import { setObjectMember } from '@jarenjs/core/object';
 import {
   NOTHING,
   compileSingularGetter,
@@ -18,11 +19,11 @@ import {
 } from '../segments.js';
 import { JsonQueryRuntimeError } from './errors.js';
 import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, describeItem } from './runtime.js';
-import { CARD_ONE, hostFailureText } from './normalize.js';
+import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normalize.js';
 // The operator registry: every section-8 operator compiles through its
 // table entry (compileOp). Only referenced inside functions, so the
 // import cycle compile.js <-> operators.js is initialization-safe.
-import { OPERATORS } from './operators.js';
+import { OPERATORS, checkRangeBound } from './operators.js';
 
 /**
  * Sentinel stored in the frame slot of an external parameter the caller
@@ -183,18 +184,30 @@ function compileObject(node) {
   for (let i = 0; i < entries.length; i++) {
     const { name, expr } = entries[i];
     const get = compileNode(expr);
+    // a constructed '__proto__' member is data, not the prototype; the
+    // name is static here, so the slow defineProperty path is chosen once
+    // at compile time and the ordinary member keeps a bare assignment
+    const proto = name === '__proto__';
     if (expr.card === CARD_ONE) {
-      appliers[i] = (f, out) => {
-        out[name] = get(f);
-      };
+      appliers[i] = proto
+        ? (f, out) => setObjectMember(out, name, get(f))
+        : (f, out) => {
+          out[name] = get(f);
+        };
     }
     else {
       const docPath = expr.docPath;
-      appliers[i] = (f, out) => {
-        const v = get(f);
-        if (v !== EMPTY)
-          out[name] = memberValue(v, name, docPath);
-      };
+      appliers[i] = proto
+        ? (f, out) => {
+          const v = get(f);
+          if (v !== EMPTY)
+            setObjectMember(out, name, memberValue(v, name, docPath));
+        }
+        : (f, out) => {
+          const v = get(f);
+          if (v !== EMPTY)
+            out[name] = memberValue(v, name, docPath);
+        };
     }
   }
   const alen = appliers.length;
@@ -223,13 +236,14 @@ function compileMap(node) {
       if (typeof k !== 'string')
         throw new JsonQueryRuntimeError('JQ2004',
           `a $map key must evaluate to a single string, got ${describeItem(k)}`, keyPath);
+      // the key is dynamic, so the '__proto__' test is a runtime one
       if (valOne) {
-        out[k] = valGet(f);
+        setObjectMember(out, k, valGet(f));
         return;
       }
       const v = valGet(f);
       if (v !== EMPTY)
-        out[k] = memberValue(v, k, valPath);
+        setObjectMember(out, k, memberValue(v, k, valPath));
     };
   }
   const alen = appliers.length;
@@ -363,12 +377,192 @@ function compileLet(node) {
 // live binding slots per group, $orderby snapshots only the live slots
 // per tuple next to its pre-evaluated key row (Schwartzian transform).
 //
-//#region roadmap: FLWOR optimizer
-// The compiled form is the straightforward nested-loop pipeline: a join
-// ($for x $for + $where equality) runs O(n*m). Hash joins (build a table
-// on one side of an equijoin), filter hoisting into the deepest binding
-// that covers the predicate's variables, and orderby/groupby fusion are
-// not implemented.
+//#region hash joins
+// The default pipeline is nested loops, so `$for a, $for b` with an
+// equality `$where` costs O(|a| x |b|). When the inner binding is
+// *uncorrelated* - its source does not read any outer binding - that
+// equality can be answered by a hash table built once over the inner
+// side, which makes the join O(|a| + |b|).
+//
+// The rewrite is only applied where it is provably invisible:
+//
+//   - the phrase has no `$as` and no `$let`. Both run per tuple BETWEEN
+//     `$for` and `$where`, so they can observe - or fail on - a tuple the
+//     equality would later have dropped. A hash join never forms that
+//     tuple, which would silently retract a `$as` assertion;
+//   - the probe side is the innermost $for, with no `$at` (a position
+//     would have to survive bucketing), no `$allowing-empty`, no window;
+//   - its source reads no slot bound by an outer binding;
+//   - the equality is the whole `$where`, or its FIRST `$and` conjunct,
+//     so nothing that used to be evaluated before it is skipped;
+//   - both key expressions are paths or variable references, whose only
+//     failure is JQ2006 - so moving when they are evaluated cannot move
+//     an error;
+//   - neither key is statically MANY, because `$eq` is an existential
+//     comparison over sequences and a bucket holds one key per item.
+//
+// Equality itself stays exact: buckets key on `stableKeyString`, which
+// agrees with the `$eq` relation (`equalsJson`) on every JSON value
+// except NaN - and a NaN key is dropped on both sides, which is what
+// `$eq` already does, since NaN equals nothing.
+
+function isEqOp(node) {
+  return node.kind === 'op' && node.name === '$eq' && node.args.length === 2;
+}
+
+function isKeyExpr(node) {
+  return (node.kind === 'path' || node.kind === 'var') && node.card !== CARD_MANY;
+}
+
+function readsOf(node) {
+  const set = new Set();
+  collectReadSlots(node, set);
+  return set;
+}
+
+function intersects(set, slots) {
+  for (let i = 0; i < slots.length; i++) {
+    if (set.has(slots[i]))
+      return true;
+  }
+  return false;
+}
+
+// Decide whether `node`'s innermost $for can become a hash-join probe.
+// Returns { inner, outerKey, innerKey, residual } or null.
+function planHashJoin(node) {
+  const fors = node.forBindings;
+  if (fors.length < 2 || node.where === null)
+    return null;
+  if (node.asChecks !== null || node.letBindings.length !== 0)
+    return null; // they run per tuple before $where and would see fewer
+  const inner = fors[fors.length - 1];
+  if (inner.atSlot >= 0 || inner.allowingEmpty === true
+    || (inner.window !== null && inner.window !== undefined))
+    return null;
+
+  const outerSlots = [];
+  for (let i = 0; i < fors.length - 1; i++) {
+    outerSlots.push(fors[i].slot);
+    if (fors[i].atSlot >= 0)
+      outerSlots.push(fors[i].atSlot);
+  }
+  if (intersects(readsOf(inner.expr), outerSlots))
+    return null; // correlated: the table would differ per outer tuple
+
+  const where = node.where;
+  let eq = null;
+  let rest = null;
+  if (isEqOp(where)) {
+    eq = where;
+  }
+  else if (where.kind === 'op' && where.name === '$and' && isEqOp(where.args[0])) {
+    eq = where.args[0];
+    // a one-conjunct $and is just the equality; leave no empty filter behind
+    rest = where.args.length > 1 ? where.args.slice(1) : null;
+  }
+  if (eq === null || !isKeyExpr(eq.args[0]) || !isKeyExpr(eq.args[1]))
+    return null;
+
+  // one side must be the probe's key, the other must not mention it
+  const reads0 = readsOf(eq.args[0]);
+  const reads1 = readsOf(eq.args[1]);
+  const uses0 = reads0.has(inner.slot);
+  const uses1 = reads1.has(inner.slot);
+  if (uses0 === uses1)
+    return null;
+  const innerKey = uses0 ? eq.args[0] : eq.args[1];
+  const outerKey = uses0 ? eq.args[1] : eq.args[0];
+  if (readsOf(outerKey).has(inner.slot) || intersects(readsOf(innerKey), outerSlots))
+    return null;
+
+  return { inner, outerKey, innerKey, residual: rest };
+}
+
+// The key a bucket is filed under, or null when the value cannot take
+// part in an equality at all (empty, a multi-item sequence, or NaN).
+function joinKey(v) {
+  if (v === EMPTY || v instanceof Seq)
+    return null;
+  if (typeof v === 'number' && v !== v)
+    return null;
+  return stableKeyString(v);
+}
+
+// The probe clause plus the `drive` wrapper that fills its table. The
+// table is closure state, refreshed once per phrase evaluation. The
+// language has no recursion, so a phrase cannot appear inside its own
+// subtree - but a registered `$call` function is host code, and host code
+// CAN re-enter the same compiled query from inside `$return`. `drive`
+// therefore saves and restores the table around the tuple stream, so a
+// nested evaluation cannot leave its own table behind for the outer
+// probe to read.
+function compileJoinProbe(plan, next) {
+  const slot = plan.inner.slot;
+  const srcGet = compileNode(plan.inner.expr);
+  const innerKeyGet = compileNode(plan.innerKey);
+  const outerKeyGet = compileNode(plan.outerKey);
+  let table = new Map();
+
+  const file = (f, item) => {
+    f[slot] = item;
+    const key = joinKey(innerKeyGet(f));
+    if (key === null)
+      return;
+    const bucket = table.get(key);
+    if (bucket === undefined)
+      table.set(key, [item]);
+    else
+      bucket.push(item);
+  };
+  const fileItem = (f, item) => {
+    if (Array.isArray(item)) { // D4, exactly as a $for would unpack it
+      for (let j = 0; j < item.length; j++)
+        file(f, item[j]);
+      return;
+    }
+    file(f, item);
+  };
+
+  const build = (f) => {
+    table = new Map();
+    const v = srcGet(f);
+    if (v === EMPTY)
+      return;
+    if (v instanceof Seq) {
+      const items = v.items;
+      for (let i = 0; i < items.length; i++)
+        fileItem(f, items[i]);
+      return;
+    }
+    fileItem(f, v);
+  };
+
+  const probe = (f, out) => {
+    const key = joinKey(outerKeyGet(f));
+    if (key === null)
+      return;
+    const bucket = table.get(key);
+    if (bucket === undefined)
+      return;
+    for (let i = 0; i < bucket.length; i++) {
+      f[slot] = bucket[i];
+      next(f, out);
+    }
+  };
+  const drive = (f, out, chain) => {
+    const saved = table;
+    build(f);
+    try {
+      chain(f, out);
+    }
+    finally {
+      table = saved;
+    }
+  };
+  return { drive, probe };
+}
+
 //#endregion
 
 // D4 iteration step: an item that is an array contributes its members
@@ -403,10 +597,188 @@ function emitForItemAt(item, f, slot, atSlot, pos, next, out) {
   return pos + 1;
 }
 
-function compileForClause(binding, next) {
+// Iterating a `$range` never needs the range to exist. A `$for` (or a
+// quantifier) whose source is *statically* a `$range` compiles to a
+// counting loop instead of materializing 2^32 numbers to walk them once:
+// the memory goes from O(n) to O(1) and the JQ2007 resource guard stops
+// being the thing standing between a query and the heap. What bounds
+// such a loop is time, which is what `limits.steps` is for.
+//
+// This is a compile-time specialization of the one shape that matters,
+// not general lazy-sequence evaluation: a `$range` bound by `$let`, or
+// handed to an aggregate, still materializes.
+// The bound getters of a statically-recognized `$range` source, or null
+// when the source is anything else. The loop itself is written out at
+// each use site rather than shared through a callback: an indirect call
+// per iterated number would cost more than the duplication saves.
+function rangeSource(expr) {
+  if (expr.kind !== 'op' || expr.name !== '$range' || expr.args.length !== 2)
+    return null;
+  return {
+    fromGet: compileNode(expr.args[0]),
+    fromPath: expr.args[0].docPath,
+    toGet: compileNode(expr.args[1]),
+    toPath: expr.args[1].docPath,
+  };
+}
+
+// Whether a source sequence yields at least one tuple, accounting for
+// the D4 unpacking step (an empty array item contributes nothing). This
+// is what `$allowing-empty` asks about: "did this binding produce a
+// tuple", not "was the sequence empty".
+function yieldsTuple(v) {
+  if (v === EMPTY)
+    return false;
+  if (v instanceof Seq) {
+    const items = v.items;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!Array.isArray(item) || item.length !== 0)
+        return true;
+    }
+    return false;
+  }
+  return !Array.isArray(v) || v.length !== 0;
+}
+
+// The item stream a $for would iterate, flattened once (D4), which is
+// what a window partitions.
+function unpackedItems(v) {
+  const out = [];
+  if (v === EMPTY)
+    return out;
+  if (v instanceof Seq) {
+    const items = v.items;
+    for (let i = 0; i < items.length; i++)
+      appendItem(out, Array.isArray(items[i]) ? seqOf(items[i].slice()) : items[i]);
+    return out;
+  }
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++)
+      out.push(v[i]);
+    return out;
+  }
+  out.push(v);
+  return out;
+}
+
+// A window binding (section 6.10): the source materializes once, then a
+// window starts every `step` items. A tumbling window keeps its short
+// final window (it partitions the stream); a sliding one emits only
+// full-width windows.
+function compileWindowClause(binding, next) {
   const get = compileNode(binding.expr);
   const slot = binding.slot;
   const atSlot = binding.atSlot;
+  const { sliding, size, step } = binding.window;
+  const allowingEmpty = binding.allowingEmpty;
+  return (f, out) => {
+    const items = unpackedItems(get(f));
+    const n = items.length;
+    let w = 0;
+    for (let start = 0; start < n; start += step) {
+      let end = start + size;
+      if (end > n) {
+        if (sliding)
+          break;
+        end = n;
+      }
+      f[slot] = seqOf(items.slice(start, end));
+      if (atSlot >= 0)
+        f[atSlot] = w;
+      w++;
+      next(f, out);
+    }
+    if (w === 0 && allowingEmpty) {
+      f[slot] = EMPTY;
+      if (atSlot >= 0)
+        f[atSlot] = -1;
+      next(f, out);
+    }
+  };
+}
+
+function compileForClause(binding, next) {
+  if (binding.window !== null && binding.window !== undefined)
+    return compileWindowClause(binding, next);
+  const slot = binding.slot;
+  const atSlot = binding.atSlot;
+  // a range source counts instead of materializing; a range is never
+  // empty-yielding in a way $allowing-empty could not also see, so the
+  // two compose
+  const range = binding.allowingEmpty ? null : rangeSource(binding.expr);
+  if (range !== null) {
+    const { fromGet, fromPath, toGet, toPath } = range;
+    if (atSlot < 0) {
+      return (f, out) => {
+        const a = fromGet(f);
+        const b = toGet(f);
+        if (a === EMPTY || b === EMPTY)
+          return;
+        checkRangeBound(a, fromPath);
+        checkRangeBound(b, toPath);
+        for (let i = a; i <= b; i++) {
+          f[slot] = i;
+          next(f, out);
+        }
+      };
+    }
+    return (f, out) => {
+      const a = fromGet(f);
+      const b = toGet(f);
+      if (a === EMPTY || b === EMPTY)
+        return;
+      checkRangeBound(a, fromPath);
+      checkRangeBound(b, toPath);
+      let pos = 0;
+      for (let i = a; i <= b; i++) {
+        f[slot] = i;
+        f[atSlot] = pos++;
+        next(f, out);
+      }
+    };
+  }
+  const get = compileNode(binding.expr);
+  if (binding.allowingEmpty) {
+    // outer-join iteration: when the binding would produce no tuple at
+    // all, produce exactly one with the variable bound to the empty
+    // sequence. The position of that tuple is -1: every real position is
+    // a 0-based one (D6), so there is no non-negative "no position".
+    if (atSlot < 0) {
+      return (f, out) => {
+        const v = get(f);
+        if (!yieldsTuple(v)) {
+          f[slot] = EMPTY;
+          next(f, out);
+          return;
+        }
+        if (v instanceof Seq) {
+          const items = v.items;
+          for (let i = 0; i < items.length; i++)
+            emitForItem(items[i], f, slot, next, out);
+          return;
+        }
+        emitForItem(v, f, slot, next, out);
+      };
+    }
+    return (f, out) => {
+      const v = get(f);
+      if (!yieldsTuple(v)) {
+        f[slot] = EMPTY;
+        f[atSlot] = -1;
+        next(f, out);
+        return;
+      }
+      if (v instanceof Seq) {
+        const items = v.items;
+        let pos = 0;
+        for (let i = 0; i < items.length; i++)
+          pos = emitForItemAt(items[i], f, slot, atSlot, pos, next, out);
+        return;
+      }
+      emitForItemAt(v, f, slot, atSlot, 0, next, out);
+    };
+  }
   if (atSlot < 0) {
     return (f, out) => {
       const v = get(f);
@@ -557,8 +929,17 @@ function compileFlwor(node) {
   // numbers surviving tuples through its own frame slot (0-based, D6),
   // reset once per phrase evaluation by the drivers below
   const retGet = compileNode(node.ret);
+  // $fold (section 6.9) replaces the collecting sink with an assigning
+  // one: $return names the accumulator's next value instead of an item
+  // of the result, and nothing is materialized.
+  const foldSlot = node.fold === null ? -1 : node.fold.slot;
   let sink;
-  if (node.ret.card === CARD_ONE)
+  if (foldSlot >= 0) {
+    sink = (f) => {
+      f[foldSlot] = retGet(f);
+    };
+  }
+  else if (node.ret.card === CARD_ONE)
     sink = (f, out) => out.push(retGet(f));
   else
     sink = (f, out) => appendItem(out, retGet(f));
@@ -578,7 +959,9 @@ function compileFlwor(node) {
     && node.limits.sequenceItems !== null
     ? node.limits.sequenceItems
     : 0;
-  if (seqLimit > 0) {
+  // a $fold materializes nothing, so the phrase-output cap has nothing
+  // to bound and is not installed
+  if (seqLimit > 0 && foldSlot < 0) {
     const inner = sink;
     const limitPath = node.docPath;
     sink = (f, out) => {
@@ -659,7 +1042,23 @@ function compileFlwor(node) {
   // the streaming prefix $for -> $let -> $as -> $where, feeding the first
   // barrier's collector (or the final sink when there is none)
   let emit = groupby !== null ? groupSink : (orderby !== null ? rowSink : sink);
-  if (node.where !== null) {
+  // an equijoin the planner can serve from a hash table is answered by
+  // the probe clause below, so its conjunct never reaches $where
+  const join = planHashJoin(node);
+  if (join !== null && join.residual !== null) {
+    const conds = join.residual.map(compileNode);
+    const paths = join.residual.map((a) => a.docPath);
+    const clen = conds.length;
+    const next = emit;
+    emit = (f, out) => {
+      for (let i = 0; i < clen; i++) {
+        if (!ebv(conds[i](f), paths[i]))
+          return;
+      }
+      next(f, out);
+    };
+  }
+  else if (join === null && node.where !== null) {
     const cond = compileNode(node.where);
     const condPath = node.where.docPath;
     const next = emit;
@@ -683,31 +1082,94 @@ function compileFlwor(node) {
     };
   }
   const fors = node.forBindings;
-  for (let i = fors.length - 1; i >= 0; i--)
+  let driveJoin = null;
+  for (let i = fors.length - 1; i >= 0; i--) {
+    if (join !== null && i === fors.length - 1) {
+      const probe = compileJoinProbe(join, emit);
+      driveJoin = probe.drive;
+      emit = probe.probe;
+      continue;
+    }
     emit = compileForClause(fors[i], emit);
-  const head = emit;
+  }
+  // the table is filled once per phrase evaluation, before the outer
+  // loops start
+  const head = driveJoin === null
+    ? emit
+    : ((chain) => (f, out) => driveJoin(f, out, chain))(emit);
 
-  // drivers, one per barrier combination
-  if (groupby === null && orderby === null) {
-    if (countSlot < 0) {
+  // drivers, one per barrier combination. A $fold wraps whichever driver
+  // this builds rather than adding a fifth pair: the tuple stream, both
+  // barriers and $count all behave identically, only the phrase's value
+  // is read from the accumulator instead of the collector.
+  const drive = buildDriver();
+  if (foldSlot < 0)
+    return drive;
+  const initGet = compileNode(node.fold.expr);
+  return (f) => {
+    f[foldSlot] = initGet(f);
+    drive(f);
+    return f[foldSlot];
+  };
+
+  function buildDriver() {
+    if (groupby === null && orderby === null) {
+      if (countSlot < 0) {
+        return (f) => {
+          const out = [];
+          head(f, out);
+          return seqOf(out);
+        };
+      }
       return (f) => {
         const out = [];
+        f[countSlot] = 0;
         head(f, out);
         return seqOf(out);
       };
     }
+    if (groupby === null) { // $orderby only
+      return (f) => {
+        const rows = [];
+        head(f, rows);
+        rows.sort(comparator); // stable
+        const out = [];
+        if (countSlot >= 0)
+          f[countSlot] = 0;
+        const liveCount = liveSlots.length;
+        for (let i = 0; i < rows.length; i++) {
+          const snap = rows[i][keyCount];
+          for (let j = 0; j < liveCount; j++)
+            f[liveSlots[j]] = snap[j];
+          sink(f, out);
+        }
+        return seqOf(out);
+      };
+    }
+    if (orderby === null) { // $groupby only
+      return (f) => {
+        const map = new Map();
+        head(f, map);
+        const out = [];
+        if (countSlot >= 0)
+          f[countSlot] = 0;
+        for (const group of map.values()) { // first-appearance order
+          writeGroup(f, group);
+          sink(f, out);
+        }
+        return seqOf(out);
+      };
+    }
+    // $groupby then $orderby: sort the per-group tuples
     return (f) => {
-      const out = [];
-      f[countSlot] = 0;
-      head(f, out);
-      return seqOf(out);
-    };
-  }
-  if (groupby === null) { // $orderby only
-    return (f) => {
+      const map = new Map();
+      head(f, map);
       const rows = [];
-      head(f, rows);
-      rows.sort(comparator); // stable
+      for (const group of map.values()) {
+        writeGroup(f, group);
+        rowSink(f, rows);
+      }
+      rows.sort(comparator);
       const out = [];
       if (countSlot >= 0)
         f[countSlot] = 0;
@@ -721,42 +1183,6 @@ function compileFlwor(node) {
       return seqOf(out);
     };
   }
-  if (orderby === null) { // $groupby only
-    return (f) => {
-      const map = new Map();
-      head(f, map);
-      const out = [];
-      if (countSlot >= 0)
-        f[countSlot] = 0;
-      for (const group of map.values()) { // first-appearance order
-        writeGroup(f, group);
-        sink(f, out);
-      }
-      return seqOf(out);
-    };
-  }
-  // $groupby then $orderby: sort the per-group tuples
-  return (f) => {
-    const map = new Map();
-    head(f, map);
-    const rows = [];
-    for (const group of map.values()) {
-      writeGroup(f, group);
-      rowSink(f, rows);
-    }
-    rows.sort(comparator);
-    const out = [];
-    if (countSlot >= 0)
-      f[countSlot] = 0;
-    const liveCount = liveSlots.length;
-    for (let i = 0; i < rows.length; i++) {
-      const snap = rows[i][keyCount];
-      for (let j = 0; j < liveCount; j++)
-        f[liveSlots[j]] = snap[j];
-      sink(f, out);
-    }
-    return seqOf(out);
-  };
 }
 
 //#endregion
@@ -793,8 +1219,28 @@ function quantVisitEvery(item, f, slot, next) {
 }
 
 function compileQuantLevel(binding, next, some) {
-  const get = compileNode(binding.expr);
   const slot = binding.slot;
+  // a quantified range counts too, and stops at its witness: `$some` over
+  // a billion numbers should cost the numbers it actually examines
+  const range = rangeSource(binding.expr);
+  if (range !== null) {
+    const { fromGet, fromPath, toGet, toPath } = range;
+    return (f) => {
+      const a = fromGet(f);
+      const b = toGet(f);
+      if (a === EMPTY || b === EMPTY)
+        return !some; // empty source: no witness / vacuously true
+      checkRangeBound(a, fromPath);
+      checkRangeBound(b, toPath);
+      for (let i = a; i <= b; i++) {
+        f[slot] = i;
+        if (next(f) === some)
+          return some;
+      }
+      return !some;
+    };
+  }
+  const get = compileNode(binding.expr);
   if (some) {
     return (f) => {
       const v = get(f);
@@ -839,12 +1285,55 @@ function compileQuant(node) {
 
 //#endregion
 
+// Step instrumentation (`limits.steps`). Null unless the compilation in
+// flight set a step limit, so an ordinary compile emits exactly the
+// closures it always did and pays nothing. Compilation is synchronous,
+// and compileQueryRoot saves/restores around the whole tree, so a nested
+// compile - a `compileTypeTest` hook that compiles another query - keeps
+// its own setting.
+let STEPS = null;
+
+/**
+ * Compile a query's AST root, optionally instrumenting every node
+ * evaluation against a step limit.
+ * @param {object} root - the AST root from normalizeQuery
+ * @param {{ slot: number, limit: number } | null} steps - the step
+ *   counter's frame slot and its limit, or null for no instrumentation
+ * @returns {(frame: any[]) => any} the root getter
+ */
+export function compileQueryRoot(root, steps) {
+  const prev = STEPS;
+  STEPS = steps;
+  try {
+    return compileNode(root);
+  }
+  finally {
+    STEPS = prev;
+  }
+}
+
 /**
  * Compile a normalized AST node into its getter closure.
  * @param {object} node - a frozen AST node from normalize.js
  * @returns {(frame: any[]) => any} getter returning an item, EMPTY, or a Seq
  */
 export function compileNode(node) {
+  const get = compileNodeKind(node);
+  if (STEPS === null)
+    return get;
+  // one step = one expression-node evaluation (section 8.12)
+  const slot = STEPS.slot;
+  const limit = STEPS.limit;
+  const docPath = node.docPath;
+  return (f) => {
+    if (++f[slot] > limit)
+      throw new JsonQueryRuntimeError('JQ2009',
+        `the query exceeded limits.steps (${limit} expression evaluations)`, docPath);
+    return get(f);
+  };
+}
+
+function compileNodeKind(node) {
   switch (node.kind) {
     case 'literal': {
       const value = node.value;

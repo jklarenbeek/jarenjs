@@ -247,6 +247,68 @@ export const queryExamples = [
     document: BOOKSTORE,
   },
   {
+    name: '$fold: reduce to a running total',
+    query: {
+      $fold: { total: 0 },
+      $for: { b: '$.store.book[*]' },
+      $where: { $lt: ['$b.price', 10] },
+      $return: { $add: ['$total', '$b.price'] },
+    },
+    document: BOOKSTORE,
+  },
+  {
+    name: '$fold: walk a runtime pointer',
+    query: {
+      $fold: { cur: '$.doc' },
+      $for: { seg: '$.path[*]' },
+      $return: { $get: ['$cur', '$seg'] },
+    },
+    document: { doc: { store: { book: [{ title: 'Moby Dick' }] } }, path: ['store', 'book', 0, 'title'] },
+  },
+  {
+    name: 'Sliding window: moving average',
+    query: {
+      $for: { w: { $in: '$.readings[*]', $window: 'sliding', $size: 3 } },
+      $return: { $avg: '$w' },
+    },
+    document: { readings: [10, 12, 14, 20, 8, 6, 30] },
+  },
+  {
+    name: '$allowing-empty: keep unrated books',
+    query: {
+      $for: {
+        b: '$.store.book[*]',
+        r: {
+          $in: {
+            $for: { x: '$.ratings[*]' },
+            $where: { $eq: ['$x.isbn', '$b.isbn'] },
+            $return: '$x',
+          },
+          '$allowing-empty': true,
+        },
+      },
+      $return: { title: '$b.title', stars: '$r.stars' },
+    },
+    document: BOOKSTORE,
+  },
+  {
+    name: 'Dates: group events by year',
+    query: {
+      $for: { e: '$.events[*]' },
+      $where: { '$is-date': '$e.on' },
+      $groupby: { y: { $year: '$e.on' } },
+      $orderby: ['$y'],
+      $return: { year: '$y', count: { $count: '$e.what' } },
+    },
+    document: {
+      events: [
+        { on: '2026-01-15', what: 'launch' },
+        { on: '2026-11-02', what: 'review' },
+        { on: '2027-03-30', what: 'renewal' },
+      ],
+    },
+  },
+  {
     name: 'External parameter',
     query: {
       $for: { b: '$.store.book[*]' },

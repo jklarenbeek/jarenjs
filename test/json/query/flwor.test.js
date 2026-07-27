@@ -729,3 +729,377 @@ describe('Jaren JSON Query FLWOR phrases', () => {
     });
   });
 });
+
+describe('section 6.9 — the $fold accumulator clause', () => {
+  const sum = {
+    $fold: { a: 0 },
+    $for: { n: '$[*]' },
+    $return: { $add: ['$a', '$n'] },
+  };
+
+  it('should reduce the tuple stream to the final accumulator', () => {
+    assert.strictEqual(queryJson(sum, [1, 2, 3, 4]), 10);
+  });
+
+  it('should yield the initial value when no tuple survives', () => {
+    assert.strictEqual(queryJson(sum, []), 0);
+    assert.strictEqual(queryJson({
+      $fold: { a: 99 },
+      $for: { n: '$[*]' },
+      $where: false,
+      $return: { $add: ['$a', '$n'] },
+    }, [1, 2, 3]), 99, '$where drops every tuple, so nothing updates');
+  });
+
+  it('should evaluate the initial value once, in the enclosing scope', () => {
+    // referencing a $for binding from the init makes it a free name, not
+    // a reference to the binding: the accumulation cannot be circular
+    const q = compileJsonQuery({ $fold: { a: '$n' }, $for: { n: '$[*]' }, $return: '$a' });
+    assert.deepStrictEqual([...q.externals], ['n']);
+  });
+
+  it('should give the language its fold without a function value', () => {
+    // walking a runtime JSON Pointer: a reduce over its segments with
+    // $get, the primitive a stylesheet needs for a second cursor
+    const walk = {
+      $fold: { cur: '$.doc' },
+      $for: { seg: '$.path[*]' },
+      $return: { $get: ['$cur', '$seg'] },
+    };
+    const data = { doc: { a: { b: [10, 20] } }, path: ['a', 'b', 1] };
+    assert.strictEqual(queryJson(walk, data), 20);
+    assert.deepStrictEqual(queryJson(walk, { doc: { a: 1 }, path: [] }), { a: 1 },
+      'an empty path never updates, so it folds to the document itself');
+    assert.strictEqual(queryJson(walk, { doc: { a: 1 }, path: ['nope'] }), undefined,
+      'a segment that misses yields the empty sequence');
+  });
+
+  it('should compose with $orderby — folding over sorted tuples', () => {
+    assert.strictEqual(queryJson({
+      $fold: { s: '' },
+      $for: { w: '$[*]' },
+      $orderby: ['$w'],
+      $return: { $concat: ['$s', '$w'] },
+    }, ['c', 'a', 'b']), 'abc');
+  });
+
+  it('should compose with $groupby — one update per group', () => {
+    assert.strictEqual(queryJson({
+      $fold: { n: 0 },
+      $for: { x: '$[*]' },
+      $groupby: { k: '$x.k' },
+      $return: { $add: ['$n', 1] },
+    }, [{ k: 'a' }, { k: 'b' }, { k: 'a' }]), 2, 'two groups, two updates');
+  });
+
+  it('should compose with $where and $count', () => {
+    assert.strictEqual(queryJson({
+      $fold: { a: 0 },
+      $for: { n: '$[*]' },
+      $where: { $gt: ['$n', 2] },
+      $return: { $add: ['$a', '$n'] },
+    }, [1, 2, 3, 4]), 7);
+    assert.strictEqual(queryJson({
+      $fold: { a: 0 }, $for: { n: '$[*]' }, $count: 'i', $return: '$i',
+    }, [5, 5, 5]), 2, '$count is 0-based (D6), so the last tuple sees 2');
+  });
+
+  it('should accumulate a composite value', () => {
+    assert.deepStrictEqual(queryJson({
+      $fold: { acc: { $const: { sum: 0, n: 0 } } },
+      $for: { x: '$[*]' },
+      $return: { sum: { $add: ['$acc.sum', '$x'] }, n: { $add: ['$acc.n', 1] } },
+    }, [2, 4, 6]), { sum: 12, n: 3 });
+  });
+
+  it('should reject more than one accumulator', () => {
+    assert.throws(() => compileJsonQuery({
+      $fold: { a: 0, b: 1 }, $for: { n: '$[*]' }, $return: '$a',
+    }), (e) => e.code === 'JQ0003' && /exactly one accumulator/.test(e.message));
+    assert.throws(() => compileJsonQuery({
+      $fold: {}, $for: { n: '$[*]' }, $return: '$a',
+    }), (e) => e.code === 'JQ0003');
+  });
+
+  it('should count as a phrase binding for the duplicate rule', () => {
+    assert.throws(() => compileJsonQuery({
+      $fold: { n: 0 }, $for: { n: '$[*]' }, $return: '$n',
+    }), (e) => e.code === 'JQ0007');
+  });
+
+  it('should nest — the accumulator restarts per phrase evaluation', () => {
+    // the rows are objects: a raw array item would be unpacked by the D4
+    // iteration rule and never reach the inner phrase as an array
+    assert.deepStrictEqual(queryJson({
+      $for: { row: '$[*]' },
+      $return: { $fold: { a: 0 }, $for: { c: '$row.v[*]' }, $return: { $add: ['$a', '$c'] } },
+    }, [{ v: [1, 2] }, { v: [3, 4] }, { v: [] }]), [3, 7, 0]);
+  });
+});
+
+describe('section 6.10 — $allowing-empty and window clauses', () => {
+  const data = {
+    customers: [{ id: 1, n: 'a' }, { id: 2, n: 'b' }],
+    orders: [{ cid: 1, x: 'p' }, { cid: 1, x: 'q' }],
+  };
+  // a path filter's '$' is the input document, so a correlated source is
+  // a nested phrase rather than a filter mentioning the outer variable
+  const matching = {
+    $for: { o: '$.orders[*]' },
+    $where: { $eq: ['$o.cid', '$c.id'] },
+    $return: '$o',
+  };
+
+  it('should drop an unmatched left row without $allowing-empty', () => {
+    assert.deepStrictEqual(queryJson({
+      $for: { c: '$.customers[*]', o: { $in: matching } },
+      $return: { n: '$c.n', x: '$o.x' },
+    }, data), [{ n: 'a', x: 'p' }, { n: 'a', x: 'q' }]);
+  });
+
+  it('should keep it with $allowing-empty — the outer join', () => {
+    assert.deepStrictEqual(queryJson({
+      $for: { c: '$.customers[*]', o: { $in: matching, '$allowing-empty': true } },
+      $return: { n: '$c.n', x: '$o.x' },
+    }, data), [{ n: 'a', x: 'p' }, { n: 'a', x: 'q' }, { n: 'b' }]);
+  });
+
+  it('should bind the empty tuple to position -1', () => {
+    assert.strictEqual(queryJson({
+      $for: { o: { $in: '$.missing[*]', $at: 'i', '$allowing-empty': true } },
+      $return: '$i',
+    }, data), -1, 'every real position is 0-based, so -1 is the only free marker');
+    assert.deepStrictEqual(queryJson({
+      $for: { o: { $in: '$.orders[*]', $at: 'i', '$allowing-empty': true } },
+      $return: '$i',
+    }, data), [0, 1], 'a non-empty source is unaffected');
+  });
+
+  it('should fire on "no tuple", not merely "empty sequence"', () => {
+    // one item that is an empty array: D4 unpacking yields no tuple, so
+    // $allowing-empty is what keeps the row
+    assert.strictEqual(queryJson({
+      $for: { x: { $in: '$.a', '$allowing-empty': true } },
+      $return: { $count: '$x' },
+    }, { a: [] }), 0);
+  });
+
+  const nums = [1, 2, 3, 4, 5, 6, 7];
+  const win = (spec) => queryJson({
+    $for: { w: { $in: '$[*]', ...spec } }, $return: ['$w'],
+  }, nums);
+
+  it('should partition the stream with a tumbling window', () => {
+    assert.deepStrictEqual(win({ $window: 'tumbling', $size: 3 }),
+      [[1, 2, 3], [4, 5, 6], [7]]);
+    assert.deepStrictEqual(win({ $window: 'tumbling', $size: 7 }), nums,
+      'one window over the whole stream is a single array item — singleton ≡ item (2.1)');
+    // every item appears exactly once — that is why the short tail stays
+    assert.deepStrictEqual(win({ $window: 'tumbling', $size: 3 }).flat(), nums);
+  });
+
+  it('should emit only full-width sliding windows', () => {
+    assert.deepStrictEqual(win({ $window: 'sliding', $size: 3 }),
+      [[1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 6], [5, 6, 7]]);
+    assert.deepStrictEqual(win({ $window: 'sliding', $size: 3, $step: 2 }),
+      [[1, 2, 3], [3, 4, 5], [5, 6, 7]]);
+    assert.deepStrictEqual(win({ $window: 'sliding', $size: 8 }), undefined,
+      'a window wider than the stream is never full');
+  });
+
+  it('should number windows with $at and aggregate over them', () => {
+    assert.deepStrictEqual(queryJson({
+      $for: { w: { $in: '$[*]', $window: 'tumbling', $size: 3, $at: 'i' } },
+      $return: { i: '$i', avg: { $avg: '$w' } },
+    }, nums), [{ i: 0, avg: 2 }, { i: 1, avg: 5 }, { i: 2, avg: 7 }]);
+  });
+
+  it('should yield nothing for an empty stream, unless $allowing-empty', () => {
+    assert.strictEqual(queryJson({
+      $for: { w: { $in: '$[*]', $window: 'tumbling', $size: 3 } }, $return: { $sum: '$w' },
+    }, []), undefined);
+    assert.strictEqual(queryJson({
+      $for: { w: { $in: '$[*]', $window: 'tumbling', $size: 3, '$allowing-empty': true } },
+      $return: { $sum: '$w' },
+    }, []), 0, '$sum of the empty sequence is 0');
+  });
+
+  it('should reject malformed window specifications', () => {
+    const bad = (spec, at) => assert.throws(
+      () => compileJsonQuery({ $for: { w: { $in: '$[*]', ...spec } }, $return: '$w' }),
+      (e) => e.code === 'JQ0003' && e.docPath === at, JSON.stringify(spec));
+    bad({ $window: 'rolling', $size: 3 }, '/$for/w/$window');
+    bad({ $window: 'sliding' }, '/$for/w');
+    bad({ $size: 3 }, '/$for/w');
+    bad({ $step: 2 }, '/$for/w');
+    bad({ $window: 'sliding', $size: 0 }, '/$for/w/$size');
+    bad({ $window: 'sliding', $size: 2, $step: -1 }, '/$for/w/$step');
+    bad({ $window: 'sliding', $size: 1.5 }, '/$for/w/$size');
+  });
+});
+
+describe('hash-joined equijoins are invisible', () => {
+  // Every case below asserts the optimized phrase against the SAME query
+  // written so the planner refuses it, so the oracle is the nested loop
+  // itself rather than a hand-written expectation.
+  const withLet = (doc) => ({ ...doc, $let: { _z: 1 } });
+  const bothWays = (doc, data) => {
+    const fast = queryJson(doc, data);
+    const slow = queryJson(withLet(doc), data);
+    assert.deepStrictEqual(fast, slow,
+      'the hash join must agree with the nested loop it replaces');
+    return fast;
+  };
+
+  const joinDoc = {
+    $for: { b: '$.store.book[*]', r: '$.ratings[*]' },
+    $where: { $eq: ['$b.isbn', '$r.isbn'] },
+    $return: { title: '$b.title', stars: '$r.stars' },
+  };
+
+  it('should produce the same rows, in the same order', () => {
+    assert.deepStrictEqual(bothWays(joinDoc, bookstoreWithRatings), [
+      { title: 'Moby Dick', stars: 4 },
+      { title: 'The Lord of the Rings', stars: 5 },
+    ]);
+  });
+
+  it('should emit duplicates on both sides in nested-loop order', () => {
+    const data = {
+      store: { book: [{ title: 'A', isbn: 'x' }, { title: 'B', isbn: 'x' }] },
+      ratings: [{ isbn: 'x', stars: 1 }, { isbn: 'x', stars: 2 }],
+    };
+    assert.deepStrictEqual(bothWays(joinDoc, data), [
+      { title: 'A', stars: 1 }, { title: 'A', stars: 2 },
+      { title: 'B', stars: 1 }, { title: 'B', stars: 2 },
+    ]);
+  });
+
+  it('should never match on an absent or NaN key', () => {
+    // books without isbn: the empty sequence witnesses nothing
+    assert.deepStrictEqual(bothWays(joinDoc, bookstore), undefined);
+    const nan = {
+      $for: { a: '$.xs[*]', b: '$.ys[*]' },
+      $where: { $eq: ['$a.k', '$b.k'] },
+      $return: ['$a.n', '$b.n'],
+    };
+    const data = { xs: [{ k: { $const: 0 }, n: 1 }], ys: [{ k: 0, n: 2 }] };
+    data.xs[0].k = 0 / 0; // NaN, which equals nothing under $eq
+    data.ys[0].k = 0 / 0;
+    assert.deepStrictEqual(bothWays(nan, data), undefined);
+    // -0 and 0 do compare equal, and must still join
+    assert.deepStrictEqual(bothWays(nan, { xs: [{ k: -0, n: 1 }], ys: [{ k: 0, n: 2 }] }),
+      [1, 2]);
+  });
+
+  it('should join on object and array keys by deep equality', () => {
+    const doc = {
+      $for: { a: '$.xs[*]', b: '$.ys[*]' },
+      $where: { $eq: ['$a.k', '$b.k'] },
+      $return: ['$a.n', '$b.n'],
+    };
+    // key order inside the object must not matter (D2)
+    assert.deepStrictEqual(
+      bothWays(doc, { xs: [{ k: { p: 1, q: 2 }, n: 'a' }], ys: [{ k: { q: 2, p: 1 }, n: 'b' }] }),
+      ['a', 'b']);
+    assert.deepStrictEqual(
+      bothWays(doc, { xs: [{ k: [1, 2], n: 'a' }], ys: [{ k: [1, 2], n: 'b' }] }),
+      ['a', 'b']);
+    assert.deepStrictEqual(
+      bothWays(doc, { xs: [{ k: 1, n: 'a' }], ys: [{ k: '1', n: 'b' }] }), undefined,
+      'a number never equals the string that spells it');
+  });
+
+  it('should keep the remaining $and conjuncts as a filter', () => {
+    const doc = {
+      $for: { b: '$.store.book[*]', r: '$.ratings[*]' },
+      $where: { $and: [{ $eq: ['$b.isbn', '$r.isbn'] }, { $gt: ['$r.stars', 4] }] },
+      $return: { title: '$b.title', stars: '$r.stars' },
+    };
+    assert.deepStrictEqual(bothWays(doc, bookstoreWithRatings),
+      { title: 'The Lord of the Rings', stars: 5 }, 'one row is one item (2.1)');
+  });
+
+  it('should decline when the equality is not the first conjunct', () => {
+    // moving it first would skip an evaluation that used to happen, so
+    // the phrase stays a nested loop — and stays correct
+    const doc = {
+      $for: { b: '$.store.book[*]', r: '$.ratings[*]' },
+      $where: { $and: [{ $gt: ['$r.stars', 3] }, { $eq: ['$b.isbn', '$r.isbn'] }] },
+      $return: { title: '$b.title', stars: '$r.stars' },
+    };
+    assert.deepStrictEqual(bothWays(doc, bookstoreWithRatings), [
+      { title: 'Moby Dick', stars: 4 },
+      { title: 'The Lord of the Rings', stars: 5 },
+    ]);
+  });
+
+  it('should decline a correlated probe side', () => {
+    // the inner source reads the outer binding, so no single table exists
+    const doc = {
+      $for: {
+        b: '$.store.book[*]',
+        r: { $in: { $for: { x: '$.ratings[*]' }, $where: { $eq: ['$x.isbn', '$b.isbn'] }, $return: '$x' } },
+      },
+      $where: { $eq: ['$b.isbn', '$r.isbn'] },
+      $return: { title: '$b.title', stars: '$r.stars' },
+    };
+    assert.deepStrictEqual(queryJson(doc, bookstoreWithRatings), [
+      { title: 'Moby Dick', stars: 4 },
+      { title: 'The Lord of the Rings', stars: 5 },
+    ]);
+  });
+
+  it('should still run $as over every tuple the loop would form', () => {
+    // the join must not retract an assertion by never forming the tuple
+    const doc = {
+      $for: { a: '$.xs[*]', b: '$.ys[*]' },
+      $as: { b: { type: 'object', required: ['k'] } },
+      $where: { $eq: ['$a.k', '$b.k'] },
+      $return: '$a.k',
+    };
+    const data = { xs: [{ k: 1 }], ys: [{ k: 1 }, { other: true }] };
+    assert.throws(() => queryJson(doc, data, undefined),
+      (e) => e.code === 'JQ0008' || e.code === 'JQ2008',
+      'without a type-test hook this is JQ0008; with one it must be JQ2008');
+  });
+
+  it('should decline when a key can be a multi-item sequence', () => {
+    // $eq is existential over sequences; a bucket holds one key per item
+    const doc = {
+      $for: { a: '$.xs[*]', b: '$.ys[*]' },
+      $where: { $eq: ['$a.ks[*]', '$b.k'] },
+      $return: ['$a.n', '$b.n'],
+    };
+    assert.deepStrictEqual(
+      bothWays(doc, { xs: [{ ks: [1, 2], n: 'a' }], ys: [{ k: 2, n: 'b' }] }), ['a', 'b']);
+  });
+
+  it('should unpack array items into the table exactly as $for does', () => {
+    const doc = {
+      $for: { a: '$.xs[*]', b: '$.ys' },
+      $where: { $eq: ['$a.k', '$b.k'] },
+      $return: '$b.n',
+    };
+    // '$.ys' is one array item, which D4 unpacks into its members
+    assert.strictEqual(
+      bothWays(doc, { xs: [{ k: 7 }], ys: [{ k: 7, n: 'hit' }, { k: 8, n: 'miss' }] }), 'hit');
+  });
+
+  it('should rebuild its table per phrase evaluation when nested', () => {
+    const doc = {
+      $for: { g: '$.groups[*]' },
+      $return: {
+        $for: { a: '$g.xs[*]', b: '$g.ys[*]' },
+        $where: { $eq: ['$a.k', '$b.k'] },
+        $return: '$b.n',
+      },
+    };
+    assert.deepStrictEqual(queryJson(doc, {
+      groups: [
+        { xs: [{ k: 1 }], ys: [{ k: 1, n: 'one' }] },
+        { xs: [{ k: 2 }], ys: [{ k: 2, n: 'two' }] },
+      ],
+    }), ['one', 'two'], 'a stale table would answer the second group wrong');
+  });
+});

@@ -43,8 +43,11 @@ const SCALE_SIZES = [1000, 10000];
 
 // Scenario keys must exist in every adaptor's `scenarios` map (value null
 // marks an engine-side n/a). `maxBooks` caps the document size a scenario
-// runs at: the join is a naive O(books x ratings) nested loop in all three
-// engines and is measured at 1000 books, not 10000 (the cap is printed).
+// runs at. The join is capped at 1000 books, not 10000, because the
+// *competitors* run it as a naive O(books x ratings) nested loop; Jaren
+// hash-joins this shape, so raising the cap would grow their cost
+// quadratically and Jaren's linearly, which measures the cap rather than
+// the engines. The cap is printed alongside the row.
 const SCENARIOS = [
   { key: 'singular', title: 'singular access' },
   { key: 'filter', title: 'filter + project (A.2)' },
@@ -334,7 +337,7 @@ function printProfile(engines, rows, compile, options) {
       console.log('-'.repeat(nameWidth + jarenWidth + rivalWidth * (engines.length - 1)));
     }
     if (row.capped !== undefined) {
-      console.log(pad(row.scenario, nameWidth) + `  skipped: naive O(n·m) join in all engines; measured at ${row.capped} books`);
+      console.log(pad(row.scenario, nameWidth) + `  skipped: naive O(n·m) join in the competitors; measured at ${row.capped} books`);
       continue;
     }
     const jarenNs = row.engines.jaren;

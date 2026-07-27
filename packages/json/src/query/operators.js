@@ -33,6 +33,14 @@
 import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
 import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
+import {
+  parseRFC3339Parts,
+  epochOfRFC3339Parts,
+  isDateOnlyRFC3339,
+  isTimeOnlyRFC3339,
+  isDateTimeRFC3339,
+  isValidDuration,
+} from '@jarenjs/core/dates';
 import { JsonQueryRuntimeError } from './errors.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, itemCount, firstItem,
@@ -535,8 +543,84 @@ function rangeBoundError(v, docPath) {
   return runtimeError('JQ2001', `'$range' bounds must be integral numbers, got ${describeItem(v)}`, docPath);
 }
 
+/**
+ * Check one evaluated `$range` bound. Shared with the compiler's
+ * iteration fast path (compile.js), so a range that is iterated rather
+ * than materialized still rejects exactly the same bounds.
+ * @param {any} v - an evaluated bound
+ * @param {string} docPath - the bound's document pointer
+ * @returns {number} the bound
+ * @throws {JsonQueryRuntimeError} JQ2001 when it is not an integer
+ */
+export function checkRangeBound(v, docPath) {
+  if (typeof v !== 'number' || !Number.isInteger(v))
+    throw rangeBoundError(v, docPath);
+  return v;
+}
+
 // the resource guard of $range (section 10.3, JQ2007)
 const RANGE_LIMIT = 4294967296; // 2^32
+
+//#endregion
+
+//#region date and time operators (section 8.13)
+// Dates are RFC 3339 strings - JSON has no date type - and every operator
+// here is a pure function of its operand: there is deliberately no
+// `current-dateTime`, because a query must give the same answer for the
+// same input document forever (it is cached by document identity, saved
+// as a rule, and used as a validation keyword).
+//
+// Components are read LEXICALLY, in the value's own offset, which is
+// what `fn:year-from-dateTime` returns and what grouping by year or
+// month means. Cross-offset comparison and arithmetic go through
+// `$epoch`, which is the one place a value is shifted to UTC.
+
+// a single RFC 3339 operand, decomposed (JQ2001 on anything else)
+function dateParts(v, docPath) {
+  const parts = parseRFC3339Parts(v);
+  if (parts === null) {
+    // a malformed string is the common case here, so show it rather than
+    // reporting the useless fact that it was a string
+    throw runtimeError('JQ2001', 'expected an RFC 3339 date, time, or date-time string, got '
+      + (typeof v === 'string' ? JSON.stringify(v) : describeItem(v)), docPath);
+  }
+  return parts;
+}
+
+// a lexical component operator: empty propagates, a value whose half is
+// missing (asking a full-date for its hours) is JQ2001
+function dateComponentEntry(pick, half) {
+  return {
+    params: UNARY,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        const n = pick(dateParts(v, docPath));
+        if (n < 0)
+          throw runtimeError('JQ2001', `'${v}' carries no ${half} component`, docPath);
+        return n;
+      };
+    },
+  };
+}
+
+// the RFC 3339 type tests, shaped like the section 8.10 $is-* family:
+// one item of the right lexical form, never an error
+function dateTestEntry(test) {
+  return {
+    params: UNARY,
+    result: RESULT_ONE,
+    compile: (gets) => {
+      const get = gets[0];
+      return (f) => test(get(f));
+    },
+  };
+}
 
 //#endregion
 
@@ -1015,10 +1099,8 @@ export const OPERATORS = Object.freeze({
         const b = toGet(f);
         if (a === EMPTY || b === EMPTY) // XQuery `to`: empty operand, empty range
           return EMPTY;
-        if (typeof a !== 'number' || !Number.isInteger(a))
-          throw rangeBoundError(a, fromPath);
-        if (typeof b !== 'number' || !Number.isInteger(b))
-          throw rangeBoundError(b, toPath);
+        checkRangeBound(a, fromPath);
+        checkRangeBound(b, toPath);
         if (a > b)
           return EMPTY;
         const n = b - a + 1;
@@ -1183,6 +1265,81 @@ export const OPERATORS = Object.freeze({
         if (!test(v))
           throw runtimeError('JQ2008', `'$assert' failed: ${describeItem(v)} does not satisfy the schema`, docPath);
         return v;
+      };
+    },
+  },
+
+  //#endregion
+
+  //#region section 8.13 - dates and times
+
+  '$is-date': dateTestEntry(isDateOnlyRFC3339),
+  '$is-time': dateTestEntry(isTimeOnlyRFC3339),
+  '$is-datetime': dateTestEntry(isDateTimeRFC3339),
+  '$is-duration': dateTestEntry(isValidDuration),
+
+  '$year': dateComponentEntry((p) => p.year, 'date'),
+  '$month': dateComponentEntry((p) => p.month, 'date'),
+  '$day': dateComponentEntry((p) => p.day, 'date'),
+  '$hours': dateComponentEntry((p) => p.hours, 'time'),
+  '$minutes': dateComponentEntry((p) => p.minutes, 'time'),
+  '$seconds': dateComponentEntry((p) => p.seconds, 'time'),
+
+  '$offset': { // minutes east of UTC; a bare full-date carries none
+    params: UNARY,
+    result: RESULT_OPT,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        const offset = dateParts(v, docPath).offset;
+        return offset === null ? EMPTY : offset;
+      };
+    },
+  },
+
+  '$epoch': { // the one shift to UTC: milliseconds since 1970-01-01Z
+    params: UNARY,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        const ms = epochOfRFC3339Parts(dateParts(v, docPath));
+        if (ms !== ms) // a full-time has no instant to place
+          throw runtimeError('JQ2001', `'${v}' carries no date component`, docPath);
+        return ms;
+      };
+    },
+  },
+
+  '$datetime': { // the inverse of $epoch, in canonical UTC form
+    params: UNARY,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        if (typeof v !== 'number')
+          throw runtimeError('JQ2001',
+            `'$datetime' takes epoch milliseconds, got ${describeItem(v)}`, docPath);
+        // outside ±8.64e15 ms, and outside years 0000-9999, there is no
+        // RFC 3339 spelling of the instant
+        const iso = Number.isFinite(v) && Math.abs(v) <= 8.64e15
+          ? new Date(v).toISOString().replace('.000Z', 'Z')
+          : '';
+        if (!isDateTimeRFC3339(iso))
+          throw runtimeError('JQ2001', `${v} is outside the range RFC 3339 can spell`, docPath);
+        return iso;
       };
     },
   },

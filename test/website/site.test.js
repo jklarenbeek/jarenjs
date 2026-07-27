@@ -4,6 +4,7 @@ import * as assert from 'node:assert';
 
 import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
+import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
@@ -72,7 +73,12 @@ describe('website — the site as one app document', function () {
     const { container } = mountSite();
     const html = serialize(container);
     assert.match(html, /JSON all the way down/);
-    assert.match(html, /One stack, thirteen engines/);
+    // the heading counts the content document rather than spelling a
+    // number, so this asserts the two agree instead of pinning a literal
+    // that goes stale the next time an engine is added
+    const cards = (html.match(/class="card engine-card"/g) ?? []).length;
+    assert.strictEqual(cards, HOME_CONTENT.engines.length);
+    assert.match(html, new RegExp(`One stack, ${cards} engines`));
     assert.match(html, /nav-link active/);
   });
 

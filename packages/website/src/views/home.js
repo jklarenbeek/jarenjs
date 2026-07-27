@@ -21,7 +21,9 @@ export const HOME_RULES = [
         ],
       ],
       ['section', { class: 'container section' },
-        ['h2', {}, 'One stack, thirteen engines'],
+        // counted from the content document rather than written down, so
+        // the heading cannot drift the next time an engine is added
+        ['h2', {}, { $concat: ['One stack, ', { $count: '$.engines[*]' }, ' engines'] }],
         ['div', { class: 'engine-grid' }, [{ $apply: '$.engines[*]' }]],
       ],
       ['section', { class: 'container section' },

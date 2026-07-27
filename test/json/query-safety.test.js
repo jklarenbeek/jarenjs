@@ -37,12 +37,83 @@ describe('query execution limits', function () {
       'first() takes one item and needs no cap');
   });
 
-  it('refuses limits it cannot enforce — no silent false guarantees', function () {
-    assert.throws(() => compileJsonQuery('$', { limits: { steps: 1000 } }),
-      (err) => err instanceof TypeError && /not enforced/.test(/** @type {Error} */ (err).message));
-    assert.throws(() => compileJsonQuery('$', { limits: { depth: 10 } }), TypeError);
+  it('limits.steps bounds expression evaluations with JQ2009', function () {
+    const doc = { $for: { i: { $range: [1, 1000] } }, $return: { $mul: ['$i', 2] } };
+    const generous = compileJsonQuery(doc, { limits: { steps: 100000 } });
+    assert.strictEqual(/** @type {any[]} */ (generous(null)).length, 1000);
+
+    const tight = compileJsonQuery(doc, { limits: { steps: 50 } });
+    assert.throws(() => tight(null),
+      (err) => /** @type {any} */ (err).code === 'JQ2009'
+        && /steps/.test(/** @type {Error} */ (err).message));
+
+    assert.strictEqual(/** @type {any[]} */ (generous(null)).length, 1000,
+      'the counter resets per evaluation, so a compiled query stays reusable');
+  });
+
+  it('limits.depth is a compile-time check — the language has no recursion', function () {
+    const nested = { $add: [1, { $add: [2, { $add: [3, 4] }] }] };
+    assert.strictEqual(compileJsonQuery(nested, { limits: { depth: 4 } })(null), 10);
+    assert.throws(() => compileJsonQuery(nested, { limits: { depth: 2 } }),
+      (err) => /** @type {any} */ (err).code === 'JQ0011'
+        && /limits\.depth/.test(/** @type {Error} */ (err).message));
+  });
+
+  it('still refuses limits it cannot enforce — no silent false guarantees', function () {
     assert.throws(() => compileJsonQuery('$', { limits: { bogus: 1 } }), TypeError);
     assert.throws(() => compileJsonQuery('$', { limits: { resultItems: 0 } }), TypeError);
+    assert.throws(() => compileJsonQuery('$', { limits: { steps: 1.5 } }), TypeError);
+  });
+});
+
+describe('closed-world compilation (options.externals)', function () {
+  it('declared externals stay free; every other one is JQ0005', function () {
+    const doc = { $lt: ['$.price', '$max'] };
+    const open = compileJsonQuery(doc);
+    assert.deepStrictEqual([...open.externals], ['max'], 'the open world collects on use');
+
+    const closed = compileJsonQuery(doc, { externals: ['max'] });
+    assert.strictEqual(closed({ price: 3 }, { max: 5 }), true);
+
+    assert.throws(() => compileJsonQuery(doc, { externals: ['limit'] }),
+      (err) => /** @type {any} */ (err).code === 'JQ0005'
+        && /'\$max'/.test(/** @type {Error} */ (err).message));
+  });
+
+  it('an empty declaration list closes the world entirely', function () {
+    assert.strictEqual(compileJsonQuery('$.a', { externals: [] })({ a: 1 }), 1,
+      'bound variables and the input document are unaffected');
+    assert.strictEqual(
+      compileJsonQuery({ $for: { b: '$[*]' }, $return: '$b' }, { externals: [] })([1, 2]).length, 2,
+      'phrase bindings are not externals');
+    assert.throws(() => compileJsonQuery('$anything', { externals: [] }),
+      (err) => /** @type {any} */ (err).code === 'JQ0005');
+  });
+
+  it('a malformed declaration list is a host TypeError', function () {
+    assert.throws(() => compileJsonQuery('$', { externals: 'max' }), TypeError);
+    assert.throws(() => compileJsonQuery('$', { externals: ['$max'] }), TypeError);
+  });
+});
+
+describe('the input document contract', function () {
+  it('rejects an undefined input document with JQ2011', function () {
+    const query = compileJsonQuery('$.a');
+    assert.throws(() => query(undefined),
+      (err) => /** @type {any} */ (err).code === 'JQ2011');
+    assert.throws(() => query.exists(undefined),
+      (err) => /** @type {any} */ (err).code === 'JQ2011',
+      'every entry point agrees — this is exactly the case where the '
+      + 'result and exists() would otherwise disagree');
+    assert.strictEqual(query({ a: 1 }), 1);
+    assert.strictEqual(query(null), undefined, 'null is a JSON value, not a violation');
+  });
+
+  it('an external bound to undefined reads as unbound', function () {
+    const query = compileJsonQuery('$max');
+    assert.throws(() => query(null, { max: undefined }),
+      (err) => /** @type {any} */ (err).code === 'JQ2006');
+    assert.strictEqual(query(null, { max: 7 }), 7);
   });
 });
 
@@ -142,7 +213,8 @@ describe('query.dependencies and query.explain()', function () {
     assert.deepStrictEqual([...query.dependencies.collations], ['nl']);
 
     const plan = query.explain();
-    assert.deepStrictEqual(plan.limits, { sequenceItems: null, resultItems: 500 });
+    assert.deepStrictEqual(plan.limits,
+      { sequenceItems: null, resultItems: 500, steps: null, depth: null });
     assert.deepStrictEqual(plan.functions, ['upper']);
     assert.deepStrictEqual(JSON.parse(JSON.stringify(plan)), plan, 'explain is plain JSON');
     assert.notStrictEqual(query.explain(), plan, 'a fresh value each call');
@@ -175,4 +247,37 @@ describe('the schema twins accept $call and $collation', function () {
       }), false, 'a $collation must be a string');
     });
   }
+});
+
+describe('hash-join tables survive host re-entrancy', function () {
+  it('a $call that re-enters the same query cannot corrupt the join table', function () {
+    // A registered function is host code, and host code can call back into
+    // the very query it is running inside. The probe table is per-compilation
+    // closure state, so a nested evaluation must not leave its table behind.
+    const doc = {
+      $for: { a: '$.xs[*]', b: '$.ys[*]' },
+      $where: { $eq: ['$a.k', '$b.k'] },
+      $return: { $call: ['tag', '$b.n'] },
+    };
+    /** @type {any} */
+    let query;
+    let reentered = 0;
+    query = compileJsonQuery(doc, {
+      functions: {
+        tag: (n) => {
+          // re-enter once, on a document with a completely different table
+          if (reentered === 0) {
+            reentered++;
+            query({ xs: [{ k: 'z' }], ys: [{ k: 'z', n: 'inner' }] });
+          }
+          return n;
+        },
+      },
+    });
+
+    const outer = { xs: [{ k: 1 }, { k: 2 }], ys: [{ k: 1, n: 'one' }, { k: 2, n: 'two' }] };
+    assert.deepStrictEqual(query(outer), ['one', 'two'],
+      'the outer probe must still see its own table after the nested call');
+    assert.strictEqual(reentered, 1);
+  });
 });

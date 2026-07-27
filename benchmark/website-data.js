@@ -179,7 +179,7 @@ const QUERY_SCENARIOS = {
   },
   join: {
     title: 'join (spec A.3)',
-    description: 'Correlate books with a ratings array on isbn — a naive O(n·m) nested-loop join in every engine, capped at 1,000 books.',
+    description: 'Correlate books with a ratings array on isbn. Jaren recognizes the uncorrelated equijoin and answers it from a hash table, so it is O(n+m) where the competitors run a naive O(n·m) nested loop — read the ratio here as a different algorithm, not a faster engine. Capped at 1,000 books, because raising it would grow their cost quadratically and Jaren\'s linearly.',
   },
   group: {
     title: 'group + aggregate (spec A.4)',

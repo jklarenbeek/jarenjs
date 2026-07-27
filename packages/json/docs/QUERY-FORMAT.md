@@ -78,6 +78,13 @@ Two conformance roles exist:
 5. A sequence of exactly one item is identified with that item ("singleton ≡
    item"). A literal `42` and a one-item sequence containing `42` are
    indistinguishable.
+6. The **input document** a query is applied to MUST be an item — that is, a
+   JSON value. An implementation is NOT required to verify this (a deep check
+   would cost a full walk per call), so a non-JSON value passed in may simply
+   flow through as an opaque item. It MUST, however, reject a *missing*
+   document (JavaScript `undefined`) with `JQ2011`: a host API that spends
+   the absent value on the empty sequence would otherwise answer "empty" for
+   a query whose existence test says otherwise.
 
 ### 2.2 Effective boolean value (EBV)
 
@@ -358,13 +365,14 @@ choose the dialect deliberately when absent members are possible.
 
 ### 6.1 Shape and clause order
 
-A FLWOR phrase is an operator phrase containing `$for` and/or `$let`, plus
-optional clauses, plus the REQUIRED `$return`:
+A FLWOR phrase is an operator phrase containing `$fold`, `$for` and/or
+`$let`, plus optional clauses, plus the REQUIRED `$return`:
 
 | Key | Value | Presence |
 |---|---|---|
-| `$for` | binding object (§6.2) | at least one of `$for`, `$let` |
-| `$let` | binding object (§6.3) | at least one of `$for`, `$let` |
+| `$fold` | one-member accumulator binding (§6.9) | at least one of `$fold`, `$for`, `$let` |
+| `$for` | binding object (§6.2) | at least one of `$fold`, `$for`, `$let` |
+| `$let` | binding object (§6.3) | at least one of `$fold`, `$for`, `$let` |
 | `$as` | schema assertion object (§6.8) | OPTIONAL |
 | `$where` | expression | OPTIONAL |
 | `$groupby` | binding object (§6.5) | OPTIONAL |
@@ -376,7 +384,7 @@ The clauses apply in **fixed semantic order regardless of their order in the
 JSON document** (**D7**):
 
 ```
-$for → $let → $as → $where → $groupby → $orderby → $count → $return
+$fold → $for → $let → $as → $where → $groupby → $orderby → $count → $return
 ```
 
 JSON key order is not interoperable — several ecosystems (e.g. Go maps)
@@ -395,7 +403,9 @@ which is standard XQuery practice anyway:
 ```
 
 The FLWOR phrase evaluates to the concatenation of the `$return` results over
-the surviving tuple stream, in tuple order.
+the surviving tuple stream, in tuple order — unless the phrase has a `$fold`
+clause (§6.9), in which case it evaluates to the final accumulator and
+`$return` names the accumulator's next value instead of an output item.
 
 ### 6.2 `$for` — iteration bindings
 
@@ -425,16 +435,18 @@ may reference variables bound earlier in the same `$for` object.
 > key-order-hostile stacks SHOULD emit one binding per phrase, nesting
 > phrases, instead of relying on multi-key binding objects.
 
-**Extended binding form** — a source written as
+**Extended binding form** — a source written as an object with an `$in`
+member iterates `$in` like a plain source, with options:
 
 ```json
 { "$in": expr, "$at": "posName" }
 ```
 
-iterates `expr` like a plain source and additionally binds *posName* to the
-**0-based** (D6) position of the current item within the iterated sequence.
-Both keys are REQUIRED in this form (a positionless binding is simply the
-plain form); *posName* MUST be a valid variable name.
+binds *posName* to the **0-based** (D6) position of the current item within
+the iterated sequence. `$in` is the only REQUIRED key (so a bare
+`{"$in": expr}` is just the long spelling of the plain form); *posName* MUST
+be a valid variable name. The two remaining options — `$allowing-empty` and
+the `$window` family — are §6.10.
 
 ```json
 { "$for": { "b": { "$in": "$.store.book[*]", "$at": "i" } },
@@ -610,6 +622,124 @@ instead.
   "$as":  { "b": { "type": "object", "required": ["title", "price"] } },
   "$return": "$b.title" }
 ```
+
+### 6.9 `$fold` — the accumulator clause
+
+```json
+"$fold": { name: initExpr }
+```
+
+`$fold` turns the phrase from a *map* into a **reduction**. It binds exactly
+one accumulator variable (a second member is `JQ0003`):
+
+- *initExpr* is evaluated **once**, in the phrase's **enclosing** scope,
+  before the tuple stream starts. It therefore cannot reference this phrase's
+  own `$for`/`$let` bindings — such a name is free, and resolves as an
+  external (§9) rather than as the binding.
+- *name* is in scope from `$let` onward — in `$let`, `$where`, `$groupby`,
+  `$orderby` and `$return` — but **not** in `$for` sources, which are
+  iterated once and must not depend on a value that changes per tuple.
+- For each surviving tuple, `$return` is evaluated and the accumulator is
+  **rebound to its result**. `$return` names the accumulator's next value,
+  not an item of the output.
+- The phrase evaluates to the **final accumulator**. If no tuple survives,
+  that is the initial value.
+
+*name* counts as a binding of this phrase for the duplicate rule (`JQ0007`).
+Because the accumulator is a binding rather than a lambda parameter, this
+gives the language a general fold without giving the JSON encoding a way to
+spell a **function value** — folds, running totals and pointer walks are
+expressible; passing a function to an operator still is not.
+
+`$fold` composes with every other clause. With `$orderby` the reduction runs
+over the *sorted* tuples; with `$groupby` it updates once per group; `$where`
+selects which tuples update it at all.
+
+```json
+{ "$fold": { "total": 0 },
+  "$for": { "b": "$.store.book[*]" },
+  "$where": { "$lt": ["$b.price", 10] },
+  "$return": { "$add": ["$total", "$b.price"] } }
+```
+
+sums the prices of the cheap books. Because `$get` (§8.9) is a real dynamic
+lookup, a fold over a runtime path is a pointer walk:
+
+```json
+{ "$fold": { "cur": "$.doc" },
+  "$for": { "seg": "$.path[*]" },
+  "$return": { "$get": ["$cur", "$seg"] } }
+```
+
+resolves `$.path` — a sequence of member names and array indexes — against
+`$.doc`, one segment per tuple.
+
+### 6.10 `$allowing-empty` and window clauses
+
+Two further options of the extended `$for` binding form (§6.2).
+
+**`$allowing-empty`** makes a binding **outer-join-style**: when the source
+would yield no tuple at all, the clause emits exactly **one** tuple with the
+variable bound to the **empty sequence**, so the enclosing tuple survives.
+
+```json
+{ "$in": expr, "$allowing-empty": true }
+```
+
+The condition is "yields no tuple", not "the sequence was empty" — an item
+that is an empty array contributes no members under D4 unpacking (§6.2) and
+so also triggers it. When the binding also has `$at`, that tuple's position
+is **-1**: every real position is a non-negative 0-based one (D6), so -1 is
+the only value free to mean "no position".
+
+Note the source is what must be empty. Because a path filter's `$` is the
+input document and never a query variable (§3.2), a *correlated* source is
+written as a nested phrase:
+
+```json
+{ "$for": { "b": "$.store.book[*]",
+            "r": { "$in": { "$for": { "x": "$.ratings[*]" },
+                            "$where": { "$eq": ["$x.isbn", "$b.isbn"] },
+                            "$return": "$x" },
+                   "$allowing-empty": true } },
+  "$return": { "title": "$b.title", "stars": "$r.stars" } }
+```
+
+keeps every book, rated or not; an unrated book's `stars` member is omitted
+because an empty member value omits the member (§3.4).
+
+**Windows** iterate consecutive *runs* of the item stream instead of single
+items:
+
+```json
+{ "$in": expr, "$window": "tumbling" | "sliding", "$size": n, "$step": m, "$at": "w" }
+```
+
+`$size` is REQUIRED with `$window` and MUST be a positive **integer literal**,
+as MUST `$step` when present; they are not expressions, because a width that
+varied per tuple could not be compiled into a specialized loop. `$size`/`$step`
+without `$window`, or `$window` without `$size`, is `JQ0003`. The variable
+binds the window's items **as a sequence** (not an array item); `$at` binds
+the 0-based window number.
+
+A window starts at item 0 and every `$step` items thereafter; `$step`
+defaults to `$size` for `tumbling` and to `1` for `sliding`. The two kinds
+differ only in what happens at the end of the stream:
+
+- **`tumbling`** *partitions* the stream — every item belongs to exactly one
+  window — so a short final window IS emitted; dropping it would silently
+  lose data.
+- **`sliding`** is a moving view of fixed width, so a short window is not one
+  of them: only full-width windows are emitted.
+
+```json
+{ "$for": { "w": { "$in": "$.readings[*]", "$window": "sliding", "$size": 3 } },
+  "$return": { "$avg": "$w" } }
+```
+
+is a 3-point moving average; the same document with `"tumbling"` and no
+`$step` averages disjoint blocks of three, including a final block of one or
+two if the stream does not divide evenly.
 
 ---
 
@@ -989,10 +1119,10 @@ semantics, not an effect hatch.
 **`options.collations`.** A registry of named pure compare functions for
 `$orderby`'s `$collation` member (§6.6).
 
-**`options.limits`.** Deterministic **output caps** enforced *inside*
-the synchronous engine. They bound what a phrase or the query hands
-onward — they are NOT memory, work, fan-out, recursion or preemption
-budgets, and they do not bound intermediate accumulation:
+**`options.limits`.** Deterministic limits enforced *inside* the
+synchronous engine. Two of them are **output caps**: they bound what a
+phrase or the query hands onward, NOT memory, fan-out or intermediate
+accumulation.
 
 - `sequenceItems` — bounds every FLWOR phrase materialization (the
   sequence a phrase *returns*) and tightens `$range`'s resource guard
@@ -1005,24 +1135,96 @@ budgets, and they do not bound intermediate accumulation:
   (`JQ2009`), checked after evaluation; `first()`, `exists()` and
   `ebv()` deliberately bypass it.
 
-The caps make trusted, developer-authored rules diagnosable. They are
-not a sandbox: user- or model-authored arbitrary queries need worker
-isolation (or a future instrumented `steps`/`depth` core) — which is
-exactly why unenforced limit names are rejected rather than accepted
-as a false guarantee.
+The other two bound the **query** rather than its output:
 
-Only enforced limits are accepted: `steps`/`depth` (a fully instrumented
-evaluation core) are **rejected with a `TypeError`** until they exist —
-an accepted-but-unenforced limit would be a silent false guarantee. A
-wall-clock or CPU limit is out of scope by design: a synchronous run on
-the caller's thread cannot be preempted; a host needing hard termination
-owns a worker or isolate.
+- `steps` — bounds **expression-node evaluations** (`JQ2009`). A step is
+  one node evaluation, not one primitive operation: a node that loops
+  internally — materializing a `$range`, a general comparison's cross
+  product, a sort's comparisons — counts once. It is the only limit that
+  bounds work rather than output, and the only one that costs: setting
+  it compiles a counter check into every node. The counter resets per
+  evaluation, so a compiled query stays reusable.
+- `depth` — bounds **expression nesting**, and is checked at **compile
+  time** (`JQ0011`). The language has no recursion — no user-defined
+  functions, no self-reference — so the compiled closure tree's maximum
+  evaluation depth IS the document's static nesting. Checking it once is
+  therefore exact, and costs nothing to evaluate.
+
+An unknown limit name, or a value that is not a positive integer, is a
+host programming error (`TypeError`), because an accepted-but-unenforced
+limit would be a silent false guarantee.
+
+Together these make trusted, developer-authored rules diagnosable, and
+give user- or model-authored queries a deterministic work bound. They
+still are not a sandbox: `steps` bounds evaluations, not memory, and a
+wall-clock or CPU limit is out of scope by design — a synchronous run on
+the caller's thread cannot be preempted, so a host needing hard
+termination owns a worker or isolate.
 
 **Dependencies and explanation.** The compiled query reports what it
 needs: `query.dependencies` is a frozen `{ externals, operators,
 functions, collations }`, and `query.explain()` returns that plus the
 enforced limits as fresh plain JSON — the vetting surface for saved or
 machine-authored rules.
+
+### 8.13 Dates and times
+
+JSON has no date type, so dates are **RFC 3339 strings** and these operators
+are ordinary string operators with a calendar's worth of rules. Every one of
+them is a **pure function of its operand**: there is deliberately no
+`current-dateTime`, because a compiled query must give the same answer for
+the same input document forever — it is cached by document identity, saved as
+a rule, and usable as a validation keyword.
+
+**Type predicates.** Unary `{"$is-date": e}`, `$is-time`, `$is-datetime`,
+`$is-duration` — `true` iff `e` is a **singleton string** in that lexical
+form (`full-date`, `full-time`, `date-time`, and the RFC 3339 Appendix A
+duration grammar). Like the §8.10 `$is-*` family these never raise: the empty
+sequence, a multi-item sequence and a non-string are all `false`. The forms
+are disjoint — a `date-time` is not a `date`.
+
+**Components.** Unary `$year`, `$month`, `$day`, `$hours`, `$minutes`,
+`$seconds`, `$offset`. Each propagates the empty sequence and returns a
+number. Components are read **lexically, in the value's own offset** — the
+`fn:year-from-dateTime` reading, and the one that makes "group by month"
+mean what an author expects. `$seconds` carries the fraction (`5.5`).
+`$offset` is minutes east of UTC, and is the one component that yields the
+**empty sequence** rather than an error when absent, because RFC 3339 leaves
+a bare `full-date` offset-less.
+
+Asking a value for a component of a half it does not have — the `$hours` of a
+`full-date`, the `$year` of a `full-time` — is runtime error `JQ2001`, as is
+an operand that is not an RFC 3339 value at all.
+
+**Instants.** Unary `$epoch` maps a value carrying a date to **milliseconds
+since 1970-01-01T00:00:00Z**, and `$datetime` maps such a number back to a
+canonical UTC `date-time` string. `$epoch` is the one place a value is
+shifted to UTC, which makes it the way to compare or subtract across
+offsets — as *strings*, `"…T14:00:00+02:00"` sorts after `"…T12:00:00Z"`
+though they are the same instant. A `full-time` has no instant to place
+(`JQ2001`); so does a number outside the range RFC 3339 can spell.
+
+| Operator | Definition |
+|---|---|
+| `$is-date` `$is-time` `$is-datetime` `$is-duration` | singleton string in that RFC 3339 form → `true`; anything else → `false` |
+| `$year` `$month` `$day` | lexical date components; a value with no date is `JQ2001` |
+| `$hours` `$minutes` `$seconds` | lexical time components, `$seconds` including its fraction; a value with no time is `JQ2001` |
+| `$offset` | minutes east of UTC; a bare `full-date` → empty |
+| `$epoch` | date or date-time → milliseconds since the epoch (UTC); a `full-time` → `JQ2001` |
+| `$datetime` | epoch milliseconds → canonical UTC `date-time`; out of RFC 3339 range → `JQ2001` |
+
+Duration values are recognized (`$is-duration`) but not decomposed: a
+duration's `P1M` is not a fixed number of milliseconds, so there is no honest
+component or arithmetic answer to give without a calendar anchor. Fixed-width
+arithmetic is `$epoch` plus ordinary `$add`/`$sub`.
+
+```json
+{ "$for": { "e": "$.events[*]" },
+  "$where": { "$is-datetime": "$e.at" },
+  "$groupby": { "y": { "$year": "$e.at" }, "m": { "$month": "$e.at" } },
+  "$orderby": ["$y", "$m"],
+  "$return": { "year": "$y", "month": "$m", "count": { "$count": "$e" } } }
+```
 
 ## 9. Variables, scoping, and external parameters
 
@@ -1049,6 +1251,33 @@ machine-authored rules.
 
 `$minPrice` is free — an external the caller binds at call time.
 
+**Closed-world compilation.** Because use is the declaration, a typo in a
+variable name is not an error: it quietly becomes a new external. A host that
+knows the parameters it intends to expose MAY compile **closed-world**,
+declaring them (`options.externals` in this implementation). Every free
+variable that is not declared is then compile error `JQ0005` at its own
+reference site, and an empty declaration list forbids externals entirely.
+This changes no document semantics — a document that compiles closed-world
+behaves identically compiled open — it only decides which documents compile.
+
+> **Worked example (clause order and `$count`).** Scope follows the
+> **semantic** clause order of §6.1, not document key order, and `$count`
+> binds *after* `$where`. So a `$where` that mentions the phrase's own
+> `$count` name does not see the tuple number — the name is not in scope
+> yet, and rule 3 makes it an **external**:
+>
+> ```json
+> { "$for": { "b": "$[*]" },
+>   "$where": { "$lt": ["$n", 2] },
+>   "$count": "n",
+>   "$return": ["$b", "$n"] }
+> ```
+>
+> `$n` in `$where` is external (the compiled query reports `["n"]`); `$n` in
+> `$return` is the tuple number. This is correct and surprising, which is why
+> it is worth stating: filtering by position is done with `$at` (§6.2), whose
+> variable is in scope from the binding onward, not with `$count`.
+
 ---
 
 ## 10. Errors
@@ -1071,12 +1300,13 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ0002` | Unknown operator / `$`-key outside the vocabulary | XPST0017 |
 | `JQ0003` | Known phrase with bad arity, value shape, or key combination | XPST0003 |
 | `JQ0004` | String starting `$` is not a valid path or escape (§3.2) | XPST0003 |
-| `JQ0005` | Variable reference that is neither bound nor collectible as an external (reserved for closed-world compilation modes; see §9); also an `$as` member naming a variable not bound by its phrase's `$for`/`$let` (§6.8) | XPST0008 |
+| `JQ0005` | Variable reference that is neither bound nor a declared external under a closed-world compilation (§9); also an `$as` member naming a variable not bound by its phrase's `$for`/`$let` (§6.8) | XPST0008 |
 | `JQ0006` | Version envelope with unknown or non-string `$query` (§4.2) | XQST0031 |
 | `JQ0007` | Duplicate variable binding within one phrase (§6.3) | XQST0089 |
 | `JQ0008` | Schema operator (`$valid`/`$assert`/`$as`) in a query compiled without a type-test compiler (§8.11) | XQST0009 |
 | `JQ0009` | Schema literal rejected by the type-test compiler (invalid embedded schema, §8.11) | XQST0059 |
 | `JQ0010` | `$call`/`$collation` naming no registered function/collation (§8.12, §6.6) | XPST0017 |
+| `JQ0011` | Expression nesting deeper than `limits.depth` (§8.12) | XPDY0130 |
 
 ### 10.3 Runtime errors (`JQ2xxx`)
 
@@ -1090,8 +1320,9 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2006` | Reference to an unbound external parameter (§9) | XPDY0002 |
 | `JQ2007` | Resource guard: an operator result exceeding an implementation limit (`$range` over 2³² items, §8.9) | XPDY0130 |
 | `JQ2008` | Schema assertion failure: an item rejected by `$assert`'s schema, or a bound variable rejected by its `$as` schema (§6.8, §8.11) | XPTY0004 |
-| `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, or `limits.resultItems` at the query boundary (§8.12) | XPDY0130 |
+| `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, `limits.resultItems` at the query boundary, or `limits.steps` expression evaluations (§8.12) | XPDY0130 |
 | `JQ2010` | A registered `$call` function threw (§8.12) | FOER0000 |
+| `JQ2011` | The input document is `undefined`, which is not a JSON value (§2.1) | XPDY0002 |
 
 ---
 
@@ -1161,8 +1392,9 @@ The schema cannot express, and therefore leaves to the compiler (stated in
 `description`s in the artifacts): fixed clause ordering (semantic, not
 structural — every key order is valid JSON), variable scoping and duplicate
 detection (`JQ0005`/`JQ0007`), `$as` name binding (`JQ0005`), full grammar
-of variable-rooted path segments (only the head is pattern-checked), and all
-runtime typing rules. Schema-literal positions (§8.11) validate as `true` —
+of variable-rooted path segments (only the head is pattern-checked), the
+co-occurrence rules of the extended `$for` binding (`$size`/`$step` require
+`$window`, `$window` requires `$size`, §6.10), and all runtime typing rules. Schema-literal positions (§8.11) validate as `true` —
 draft-neutral by definition; embedded JSON Schemas are deliberately **not**
 meta-validated by these artifacts (the type-test compiler is authoritative,
 `JQ0009`). Where the schema and this text disagree, this text wins and the

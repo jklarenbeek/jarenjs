@@ -231,6 +231,131 @@ export function getDateTypeOfDateTimeRFC3339(str, def = undefined) {
     ? new Date(Date.parse(str))
     : def;
 }
+
+/**
+ * Reads the full-date at index from as {year, month, day}. The region
+ * must already have passed isDateOnlyRegion.
+ * @param {string} str - The string containing the date
+ * @param {number} from - Index of the first digit
+ * @returns {{ year: number, month: number, day: number }}
+ */
+function readDateParts(str, from) {
+  return {
+    year: getTwoDigits(str, from) * 100 + getTwoDigits(str, from + 2),
+    month: getTwoDigits(str, from + 5),
+    day: getTwoDigits(str, from + 8),
+  };
+}
+
+/**
+ * Reads the full-time at index from as {hours, minutes, seconds, offset}.
+ * `seconds` carries the fraction, `offset` is minutes east of UTC. The
+ * region must already have passed isTimeOnlyRegion.
+ * @param {string} str - The string containing the time
+ * @param {number} from - Index of the first digit
+ * @returns {{ hours: number, minutes: number, seconds: number, offset: number }}
+ */
+function readTimeParts(str, from) {
+  const hours = getTwoDigits(str, from);
+  const minutes = getTwoDigits(str, from + 3);
+  let seconds = getTwoDigits(str, from + 6);
+  let i = from + 8;
+  if (str.charCodeAt(i) === 46) { // '.' fraction
+    const start = ++i;
+    while (i < str.length) {
+      const c = str.charCodeAt(i);
+      if (c < 48 || c > 57) break;
+      i++;
+    }
+    seconds += Number(str.slice(start - 1, i)); // '.ddd' as a fraction
+  }
+  const c = str.charCodeAt(i);
+  let offset = 0;
+  if (c === 43 || c === 45) { // '+' | '-'
+    const magnitude = getTwoDigits(str, i + 1) * 60 + getTwoDigits(str, i + 4);
+    offset = c === 45 ? -magnitude : magnitude;
+  }
+  return { hours, minutes, seconds, offset };
+}
+
+/**
+ * Decompose an RFC 3339 date, time, or date-time string into its lexical
+ * components, without allocating a `Date` and without shifting anything
+ * to UTC — the components are the ones the string spells out, which is
+ * what a query grouping by year or month asks for.
+ *
+ * A missing half reads as -1: a full-date has no `hours`, a full-time no
+ * `year`. `offset` is minutes east of UTC, `null` only for a bare
+ * full-date (which RFC 3339 leaves offset-less).
+ *
+ * @param {any} str - The value to decompose
+ * @returns {{ year: number, month: number, day: number, hours: number,
+ *   minutes: number, seconds: number, offset: number | null } | null}
+ *   the components, or null when str is not an RFC 3339 value
+ * @example
+ * parseRFC3339Parts('2026-07-27T14:30:05.5+02:00');
+ * // { year: 2026, month: 7, day: 27, hours: 14, minutes: 30,
+ * //   seconds: 5.5, offset: 120 }
+ */
+export function parseRFC3339Parts(str) {
+  if (!isStringType(str))
+    return null;
+  if (isDateTimeRFC3339(str)) {
+    let sep = -1;
+    for (let i = 0; i < str.length; ++i) {
+      if (isDateTimeSeparator(str.charCodeAt(i))) {
+        sep = i;
+        break;
+      }
+    }
+    return { ...readDateParts(str, 0), ...readTimeParts(str, sep + 1) };
+  }
+  if (isDateOnlyRFC3339(str)) {
+    const zc = str.charCodeAt(str.length - 1);
+    const zulu = zc === 122 || zc === 90;
+    return {
+      ...readDateParts(str, 0),
+      hours: -1, minutes: -1, seconds: -1,
+      offset: zulu ? 0 : null,
+    };
+  }
+  if (isTimeOnlyRFC3339(str)) {
+    return { year: -1, month: -1, day: -1, ...readTimeParts(str, 0) };
+  }
+  return null;
+}
+
+/**
+ * Milliseconds since 1970-01-01T00:00:00Z for RFC 3339 components that
+ * carry a date. Components without a date (a full-time) return NaN, as
+ * do out-of-range instants.
+ *
+ * A bare full-date has no offset and is read as UTC midnight. Note JS
+ * has no leap seconds: a `:60` second rolls into the following minute.
+ *
+ * @param {{ year: number, month: number, day: number, hours: number,
+ *   minutes: number, seconds: number, offset: number | null }} parts -
+ *   components from {@link parseRFC3339Parts}
+ * @returns {number} milliseconds since the epoch, or NaN
+ */
+export function epochOfRFC3339Parts(parts) {
+  if (parts.year < 0)
+    return NaN;
+  const seconds = parts.seconds < 0 ? 0 : parts.seconds;
+  const whole = Math.floor(seconds);
+  const ms = Date.UTC(
+    parts.year, parts.month - 1, parts.day,
+    parts.hours < 0 ? 0 : parts.hours,
+    parts.minutes < 0 ? 0 : parts.minutes,
+    whole, Math.round((seconds - whole) * 1000));
+  if (ms !== ms)
+    return NaN;
+  // Date.UTC maps years 0-99 into the 1900s; restore the real year
+  const utc = new Date(ms);
+  if (parts.year >= 0 && parts.year < 100)
+    utc.setUTCFullYear(parts.year);
+  return utc.getTime() - (parts.offset === null ? 0 : parts.offset) * 60000;
+}
 //#endregion
 
 //#region Duration Validation (RFC 3339)

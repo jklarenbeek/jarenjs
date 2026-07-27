@@ -40,12 +40,38 @@ import { JarenValidator } from './index.js';
  *   "$return": "$b.title"
  * }, { compileTypeTest: createTypeTestCompiler() });
  */
+/**
+ * Project a diagnostic string from whatever the validator threw, without
+ * reading `.message` off a raw value or coercing it.
+ * @param {unknown} e
+ * @returns {string}
+ */
+function failureText(e) {
+  if (e instanceof Error && typeof e.message === 'string')
+    return e.message;
+  return typeof e === 'string' ? e : 'schema compilation failed';
+}
+
 export function createTypeTestCompiler(validator = undefined) {
   const instance = validator == null
     ? new JarenValidator()
     : (typeof validator === 'function' ? validator() : validator);
-  return function compileTypeTest(schemaJson) {
-    const validate = instance.compile(schemaJson);
+  return function compileTypeTest(schemaJson, docPath) {
+    let validate;
+    try {
+      validate = instance.compile(schemaJson);
+    }
+    catch (err) {
+      // The engine's JQ0009 names the operator that owns the schema; this
+      // names the schema literal itself, which is what distinguishes one
+      // failing schema from the others in the same query document.
+      const where = typeof docPath === 'string' && docPath !== '' ? docPath : '';
+      throw new Error(
+        where === ''
+          ? failureText(err)
+          : `schema literal at '${where}': ${failureText(err)}`,
+        { cause: err });
+    }
     // The default validator options are boolean mode (skipErrors on,
     // collectErrors off): the compiled function IS the predicate. An
     // error-collecting instance returns { valid, errors } objects

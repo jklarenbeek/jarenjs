@@ -190,3 +190,30 @@ describe('Jaren JSON Query x @jarenjs/validate integration', () => {
     });
   });
 });
+
+describe('type-test compiler diagnostics', function () {
+  it('names the failing schema literal by its document pointer', function () {
+    const options = { compileTypeTest: createTypeTestCompiler() };
+    // two schema literals in one document: the message has to say which
+    const doc = {
+      $for: { b: '$[*]' },
+      $as: { b: { type: 'object' } },
+      $return: { $valid: ['$b.price', { type: 'bogus-type' }] },
+    };
+    assert.throws(() => compileJsonQuery(doc, options), (err) => {
+      assert.strictEqual(err instanceof JsonQueryCompileError, true);
+      assert.strictEqual(err.code, 'JQ0009');
+      assert.match(err.message, /\/\$return\/\$valid\/1/,
+        'the hook contributes the schema literal position');
+      assert.strictEqual(err.docPath, '/$return/$valid',
+        "the engine's own docPath still locates the owning operator");
+      return true;
+    });
+  });
+
+  it('retains the validator error as the cause', function () {
+    const options = { compileTypeTest: createTypeTestCompiler() };
+    assert.throws(() => compileJsonQuery({ $valid: ['$', { type: 'nope' }] }, options),
+      (err) => err.cause instanceof Error && err.cause.cause instanceof Error);
+  });
+});

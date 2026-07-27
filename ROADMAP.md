@@ -75,19 +75,33 @@ delete it or fix it.
 
 ## @jarenjs/json — query engine & language
 
-- [ ] **Filter optimizer / hash joins** — hoist `$`-absolute comparables out of filter loops, fuse adjacent singular segments, and turn `$where` equijoins into hash joins instead of nested loops (the benchmark's join row is O(books × ratings) today; a hash join changes the complexity class, not just the constant).
-- [ ] **Lazy sequences / lazy `$range`** — `$range` materializes eagerly; the default `JQ2007` resource guard (2³² items) can never trigger before the heap does (found by the QT3 harness, 6 baselined resource-bomb skips). `options.limits.sequenceItems` lets a host tighten the guard deterministically; true lazy sequence evaluation remains the structural fix.
-- [ ] **`steps`/`depth` execution limits** — `options.limits` deliberately rejects them with a `TypeError` because the closure-compiled engine has no instrumented evaluation core to enforce them; accepting an unenforced limit would be a silent false guarantee. Enforcing them means threading a counters context through the compiled closures (a measured-overhead design question).
-- [ ] **`$allowing-empty` and window clauses** — the two FLWOR constructs v0.1 leaves out (outer-join-style iteration and `tumbling`/`sliding` windows).
-- [ ] **Higher-order operators** — user-supplied functions for map/filter/fold shapes; requires a function-value story the JSON encoding deliberately does not have yet.
-- [ ] **Date/time operators** — `@jarenjs/core/dates` exists as the foundation; the operator registry makes the addition mechanical.
-- [ ] **Closed-world compilation mode (`JQ0005`)** — a mode requiring all variables bound at compile time; today free variables are externals by default and `JQ0005` fires only for unknown `$as` names.
-- [ ] **`compileTypeTest` hook diagnostics** — the hook contract passes `docPath` so future hooks can report schema-compile diagnostics positionally; the reference `createTypeTestCompiler` ignores it today.
-- [ ] **`__proto__` member construction in query constructors** — `compileObject`/`compileMap` assign `out[name] = value`, so a *constructed* member named `__proto__` sets the result's prototype instead of a member. The JSLT dispatcher and `@jarenjs/core/object`'s `setObjectMember` already rebuild `__proto__` as an own property; the query-engine member appliers should adopt the same pattern.
-- [ ] **Non-JSON `queryFn(data)` input** — a compiled query passed `undefined`/non-JSON returns non-JSON without a special-case guard; decide whether to reject or document the pass-through.
-- [ ] **Spec patch batch for QUERY-FORMAT.md §6.5** — the proposed wording for multi-item/empty grouping keys (`JQ2001`/allowed), `NaN` grouping equality and `NaN` order-by placement is implemented and tested but not yet folded into the normative text.
-- [ ] **Spec patch: member-value cardinality (§3.1/§3.5.2) and the `$string` cast table** — the normative wording for object-construction member values (an empty result omits the member; two-or-more items is `JQ2001`) plus the `$string`/`$concat` cast table (`number → String(n)`, booleans, `null → "null"`) is implemented and tested but not yet folded into QUERY-FORMAT.md.
-- [ ] **Spec examples: `$let`-bound sequences vs child filters (§5.1) and `$where` reading its own `$count` (§9)** — two correct-but-surprising behaviors worth a worked example in the spec: a `[?…]` filter on a `$let`-bound item sequence selects the *children* of each item (so an item-level predicate yields empty), and clause scope order lets `$where` observe the phrase's own `$count` name as an external.
+- [ ] **Hoist `$`-absolute comparables out of filter loops** — inside a path
+  filter, a `$`-rooted comparable (`[?@.price < $.max]`) re-walks from the
+  root once per candidate node, though its value is invariant for the whole
+  filter run. The obvious fix — remember the last root and its value, the
+  monomorphic per-callsite cache `compileIRegexp` callers already use — is
+  **wrong**: a caller may mutate the document and re-query the same object
+  identity, and a root-keyed memo cannot see that. A safe version needs the
+  cache reset per filter *application*, which means the predicate tree
+  handing its reset hooks up to the selector that runs it. (The entry's
+  former sibling, fusing adjacent singular segments, is done and was already
+  done: `compileSingularGetter` flattens a whole singular chain into one
+  steps array.)
+- [ ] **Materializing `$range` still meets the heap before the guard** —
+  iterating a range no longer materializes it (`$for` and quantifiers over a
+  static `$range` compile to counting loops), so the shape the QT3
+  resource-bomb skips exercised is fixed. A range that is genuinely
+  materialized — bound by `$let`, handed to an aggregate — still has only the
+  2³² `JQ2007` ceiling, which no heap survives; `options.limits.sequenceItems`
+  tightens it deterministically, and a lower default would be a spec change
+  to §10.3 rather than an implementation choice.
+- [ ] **Function *values*** — `$fold` (§6.9) gave the language its fold, and
+  it turned out not to need function values at all: the accumulator is a
+  binding, so map/filter/fold shapes are all FLWOR. What is still missing is
+  passing a *rule* to an operator — a comparator to `$sort`, a projection to
+  a hypothetical `$map-seq`. `$call` covers host functions over scalars; a
+  first-class function value would need an encoding the JSON surface
+  deliberately does not have.
 
 ## @jarenjs/json — JSLT
 
@@ -131,11 +145,15 @@ delete it or fix it.
   composes the render tree in JS. A stylesheet cannot replace it because
   rendering a form is a **two-cursor walk**: the schema-derived model says what
   a field is, the data says what it holds, and a JSLT rule descends only the
-  one input document it matched. Either primitive would unblock it, and neither
-  exists: **a fold** (`$get` is a real dynamic lookup, so walking a runtime
-  pointer needs only a reduce over its segments — see *Higher-order operators*),
-  or **a parameterized `$apply`** that carries a second cursor down with the
-  matched node. Deciding which is the language question to answer first.
+  one input document it matched. Two primitives would each unblock it, and
+  **one now exists**: the query engine's `$fold` clause (QUERY-FORMAT §6.9)
+  makes walking a runtime pointer a reduce over its segments with `$get`, so
+  a rule can reach the data cursor for the node it matched. The alternative,
+  **a parameterized `$apply`** carrying a second cursor down with the matched
+  node, is still unbuilt. The open work is therefore no longer a language
+  question but a stylesheet one: rewrite `buildFormViewModel`'s composition as
+  rules that fold to their data cursor, and find out where the fold's
+  per-field re-walk costs more than the JS pass it replaces.
 - [ ] **Form chrome beyond the two array buttons** — `form/addItem` and
   `form/removeItem` are catalog messages resolved by `formChromeLabels`; the
   `+`/`×` glyphs, the `*` required marker and the `json` editor's affordances
