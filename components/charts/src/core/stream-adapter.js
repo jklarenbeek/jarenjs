@@ -44,6 +44,8 @@
  * plain data; this module never imports a patch applier.
  */
 
+import { parseRFC3339Parts, epochOfRFC3339Parts } from '@jarenjs/core/dates';
+
 /**
  * @typedef {object} StreamAdapterConfig
  * @property {(string|number)[]} [recordPath] path prefix owning the
@@ -360,14 +362,32 @@ function startsWith(path, prefix) {
 /**
  * Lift a temporal coordinate to its epoch-millisecond number, passing every
  * other value through untouched so a downstream `Number.isFinite` still
- * decides what is plottable. Strictly the Date-only lift: unlike `numish` it
- * does NOT coerce bigints or numeric strings, because a chart axis must not
- * silently accept a string where the config asked for a number.
+ * decides what is plottable.
+ *
+ * A `Date` and an **RFC 3339 string** both lift, because both say
+ * unambiguously that they are an instant — which is what a time axis asked
+ * for, and JSON has no other way to spell one. A *numeric* string still does
+ * not: unlike `numish`, this refuses to accept `"5"` where the config asked
+ * for a number, because that is a type confusion rather than a date.
+ *
+ * A date with no time (`2026-07-27`) reads as UTC midnight, and a value
+ * carrying an offset is shifted to its instant, so points spelled in
+ * different zones land in the right order on one axis.
+ *
  * @param {any} v
  * @returns {any}
  */
 export function numOf(v) {
-  return v instanceof Date ? v.getTime() : v;
+  if (v instanceof Date)
+    return v.getTime();
+  if (typeof v === 'string') {
+    const parts = parseRFC3339Parts(v);
+    if (parts === null)
+      return v;
+    const ms = epochOfRFC3339Parts(parts);
+    return ms === ms ? ms : v; // a full-time has no instant to plot
+  }
+  return v;
 }
 
 function numish(v) {

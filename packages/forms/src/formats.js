@@ -30,13 +30,17 @@ import {
  * @type {Record<string, { control?: string, placeholder?: string }>}
  */
 const FORM_HINTS = {
-  // -- date and time (RFC 3339 requires a timezone offset, which the HTML
-  //    time / datetime-local inputs cannot produce; those stay text inputs)
+  // -- date and time. Which formats get a native control is decided by
+  //    the offset, not by convenience: HTML's `datetime-local` and `time`
+  //    inputs cannot produce one, so binding them to the RFC 3339 formats
+  //    would make the control emit values its own schema rejects. The ISO
+  //    formats leave the offset optional and are exactly what those
+  //    inputs spell, so they map losslessly.
   'date': { control: 'date', placeholder: '2024-01-15' },
   'time': { placeholder: '13:45:30Z' },
   'date-time': { placeholder: '2024-01-15T13:45:30Z' },
-  'iso-date-time': { placeholder: '2024-01-15T13:45:30' },
-  'iso-time': { placeholder: '13:45:30' },
+  'iso-date-time': { control: 'datetime-local', placeholder: '2024-01-15T13:45:30' },
+  'iso-time': { control: 'time', placeholder: '13:45:30' },
   'duration': { placeholder: 'P3DT4H' },
 
   // -- email

@@ -61,7 +61,7 @@ const result = validate(data); // { valid, errors: [{ instancePath, keyword, mes
 | `pointer` | JSON pointer into the data (`/user/name`) |
 | `label` | `title` or a humanized property name (`firstName` → "First Name") |
 | `kind` | `string` `number` `integer` `boolean` `enum` `const` `object` `array` |
-| `control` | Rendering hint: `text` `email` `url` `password` `textarea` `number` `checkbox` `select` `date` `color` `json` |
+| `control` | Rendering hint: `text` `email` `url` `password` `textarea` `number` `checkbox` `select` `date` `datetime-local` `time` `color` `json` |
 | `required` | Whether the parent object requires this property |
 | `constraints` | `minLength`/`maxLength`/`pattern`/`format`/`minimum`/`maximum`/`multipleOf`/`minItems`/... |
 | `rules` | The raw `x-form` rules annotation, if any (see below) |
@@ -70,6 +70,8 @@ const result = validate(data); // { valid, errors: [{ instancePath, keyword, mes
 | `item` / `tuple` | Item template and tuple prefix fields (array kinds) |
 
 Field kinds are inferred from structural keywords when `type` is absent, and `format` maps to input controls and placeholders through the same registry the preemptive validation uses (`getFormatInfo`).
+
+Which date formats get a **native** control is decided by the offset, not by convenience. HTML's `datetime-local` and `time` inputs cannot produce one, and RFC 3339 requires one — binding them to `date-time`/`time` would make the control emit values its own schema rejects, so those stay text inputs. The `iso-date-time`/`iso-time` formats leave the offset optional and are exactly what those inputs spell, so they map losslessly. `formatMinimum`/`formatMaximum` reach the field as constraints and become the control's `min`/`max`, so the picker itself refuses an out-of-range date; HTML has no exclusive date bounds, so `formatExclusive*` stays a submit-time check.
 
 ## Layer 1 — preemptive per-field validation
 

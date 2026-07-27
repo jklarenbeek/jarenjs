@@ -31,7 +31,7 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {string|undefined} description
  * @property {object} schema - The resolved subschema for this field
  * @property {string} kind - 'string'|'number'|'integer'|'boolean'|'enum'|'const'|'object'|'array'|'unknown'
- * @property {string} control - Suggested control: 'text'|'email'|'url'|'password'|'textarea'|'number'|'checkbox'|'select'|'date'|'color'|'json'
+ * @property {string} control - Suggested control: 'text'|'email'|'url'|'password'|'textarea'|'number'|'checkbox'|'select'|'date'|'datetime-local'|'time'|'color'|'json'
  * @property {boolean} required - Whether the parent object requires this property
  * @property {boolean} readOnly
  * @property {Array<any>|null} enumValues - Options for a select control
@@ -234,6 +234,10 @@ function getConstraints(schema) {
   for (const key of [
     'minLength', 'maxLength', 'pattern', 'format',
     'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
+    // the date bounds are constraints like any other; without them a
+    // date control has no min/max to offer and the user only learns the
+    // range by submitting
+    'formatMinimum', 'formatMaximum', 'formatExclusiveMinimum', 'formatExclusiveMaximum',
     'minItems', 'maxItems', 'uniqueItems',
     'minProperties', 'maxProperties',
   ]) {

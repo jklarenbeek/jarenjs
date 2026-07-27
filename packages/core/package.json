@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.21.1",
+  "version": "0.22.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -58,6 +58,14 @@
     "./float": {
       "types": "./dist/types/float.d.ts",
       "default": "./src/float.js"
+    },
+    "./geo": {
+      "types": "./dist/types/geo/index.d.ts",
+      "default": "./src/geo/index.js"
+    },
+    "./geo/*": {
+      "types": "./dist/types/geo/*.d.ts",
+      "default": "./src/geo/*.js"
     },
     "./function": {
       "types": "./dist/types/function.d.ts",

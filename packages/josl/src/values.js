@@ -5,6 +5,8 @@
 // under `JSON.stringify` via `toJSON()`. An offset date-time parses to a
 // native `Date` (the original offset is normalized to the instant).
 
+import { daysInMonth } from '@jarenjs/core/dates';
+
 function pad(n, w) {
   return String(n).padStart(w, '0');
 }
@@ -80,10 +82,11 @@ export class LocalDateTime {
   }
 }
 
-const DAYS_IN_MONTH = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
 /**
- * Whether year/month/day form an existing calendar date.
+ * Whether year/month/day form an existing calendar date. The month
+ * lengths and the leap rule come from the shared calendar kernel, so
+ * TOML's four date flavours and the rest of the suite cannot disagree
+ * about whether a date exists.
  * @param {number} year - Full year
  * @param {number} month - 1-based month
  * @param {number} day - 1-based day
@@ -92,9 +95,7 @@ const DAYS_IN_MONTH = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 export function isValidDateParts(year, month, day) {
   if (month < 1 || month > 12 || day < 1)
     return false;
-  if (month === 2 && ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0))
-    return day <= 29;
-  return day <= DAYS_IN_MONTH[month];
+  return day <= daysInMonth(year, month);
 }
 
 /**

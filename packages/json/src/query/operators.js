@@ -37,6 +37,7 @@ import {
   parseRFC3339Parts,
   epochOfRFC3339Parts,
   formatRFC3339Parts,
+  partsFromEpoch,
   isDateOnlyRFC3339,
   isTimeOnlyRFC3339,
   isDateTimeRFC3339,
@@ -1525,9 +1526,11 @@ export const OPERATORS = Object.freeze({
           throw runtimeError('JQ2001',
             `'$datetime' takes epoch milliseconds, got ${describeItem(v)}`, docPath);
         // outside ±8.64e15 ms, and outside years 0000-9999, there is no
-        // RFC 3339 spelling of the instant
+        // RFC 3339 spelling of the instant. Rendering goes through the
+        // kernel like every other date operator, so one query cannot
+        // emit two spellings of the same fraction.
         const iso = Number.isFinite(v) && Math.abs(v) <= 8.64e15
-          ? new Date(v).toISOString().replace('.000Z', 'Z')
+          ? formatRFC3339Parts(partsFromEpoch(v))
           : '';
         if (!isDateTimeRFC3339(iso))
           throw runtimeError('JQ2001', `${v} is outside the range RFC 3339 can spell`, docPath);

@@ -105,7 +105,20 @@ flowchart TB
         end
 
         subgraph DateModule["Date Processing"]
-            Dates["dates.js<br/>RFC 3339 / ISO 8601"]
+            DatesIndex["dates/index.js"]
+            DatesRfc["rfc3339.js<br/>RFC 3339 / ISO 8601"]
+            DatesCivil["civil.js<br/>Gregorian day-number math"]
+            DatesFormat["format.js<br/>LDML pattern compiler"]
+            DatesDuration["duration.js<br/>ISO 8601 durations"]
+        end
+
+        subgraph GeoModule["Spatial"]
+            GeoIndex["geo/index.js"]
+            GeoPred["predicates.js<br/>Robust orientation"]
+            GeoDist["distance.js<br/>Great-circle measurement"]
+            GeoRing["ring.js<br/>Closure, winding, area, containment"]
+            GeoBbox["bbox.js<br/>Bounding boxes"]
+            GeoHash["geohash.js<br/>Base-32 cells"]
         end
 
         subgraph MathModules["Mathematics"]
@@ -165,11 +178,23 @@ flowchart TB
     MathIndex --> WordMath
     MathIndex --> FormatMath
 
+    DatesIndex --> DatesRfc
+    DatesIndex --> DatesCivil
+    DatesIndex --> DatesFormat
+    DatesIndex --> DatesDuration
+
+    GeoIndex --> GeoPred
+    GeoIndex --> GeoDist
+    GeoIndex --> GeoRing
+    GeoIndex --> GeoBbox
+    GeoIndex --> GeoHash
+
     style CorePackage fill:#e1f5fe
     style CoreModule fill:#bbdefb
     style TextModules fill:#c8e6c9
     style MathModules fill:#ffccbc
     style DateModule fill:#fff9c4
+    style GeoModule fill:#b2dfdb
 ```
 
 ---
@@ -491,6 +516,54 @@ startOfParts(parts, 'week');            // the Monday of that week (ISO 8601)
 
 const fmt = compileDateFormat("yyyy-'W'ww");  // compile once…
 fmt(parts);                             // …call many: '2026-W05'
+```
+
+### 5b. Geo Module (`geo/`)
+
+The spatial kernel. As with dates, **there is no geometry type**: the
+representation is GeoJSON ([RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946)),
+whose positions are `[longitude, latitude]` arrays and whose rings are arrays
+of those. They are already JSON items, so they stay patchable, schema-checkable
+and addressable; a wrapper class would break all three. Every function here
+takes plain numbers and plain arrays, so a `Polygon`'s `coordinates` can be
+passed straight in without the `type` discriminator being involved.
+
+| Module | Owns |
+|---|---|
+| `predicates.js` | robust orientation — the sign every spatial test rests on |
+| `distance.js` | great-circle measurement on the WGS 84 sphere |
+| `ring.js` | ring closure, winding, area and containment |
+| `bbox.js` | bounding boxes, the cheap half of every spatial test |
+| `geohash.js` | the base-32 cell encoding |
+
+Two decisions carry the module. **Orientation is computed exactly**, through
+Shewchuk's adaptive precision arithmetic: a naive floating-point determinant
+returns the *wrong sign* on near-collinear input, which makes a containment
+test contradict itself and a clipper emit self-intersecting output. The test
+suite pins real longitude/latitude fixtures on the San Francisco–Los Angeles
+line where the naive form reports "collinear" and the truth is one side or the
+other. The cheap filter runs first, so the exact path costs nothing until it is
+needed.
+
+**Distance is spherical, and the planar shortcut is refused.** A degree of
+longitude spans ~111 km at the equator and ~68 km at 52°N, so a Euclidean norm
+on raw degrees is 64% wrong over 1 km at Dutch latitudes. `haversineDistance`
+is the answer (<0.5% anywhere, 13.6 ns); `equirectDistance` is the *screening*
+form (0.02% at 430 km, 12.4% intercontinentally, 2.0 ns) for rejecting
+candidates before the real test — the same build-then-probe shape the query
+engine's hash join uses. The ellipsoid is deliberately not modelled.
+
+RFC 7946 removed coordinate-reference-system support and mandates WGS 84, so
+there is no SRID table and no reprojection: conformance removes the need rather
+than an omission hiding it.
+
+```javascript
+import { orient2d, haversineDistance, ringWinding, geohashEncode } from '@jarenjs/core/geo';
+
+orient2d(0, 0, 1, 0, 0, 1);                    // > 0 — counter-clockwise, exactly
+haversineDistance(4.9041, 52.3676, 2.3522, 48.8566);  // 429_862 m
+ringWinding([[0,0],[1,0],[1,1],[0,1],[0,0]]);  // 1 — RFC 7946 exterior ring
+geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string, so $starts-with is proximity
 ```
 
 ### 6. Text Module (`text/`)

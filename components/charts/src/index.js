@@ -20,7 +20,7 @@ export { compileChart, chartTypes } from './core/chart.js';
 export { scaleLinear, scaleLog, scaleOrdinal, scaleBand, scaleTime } from './core/scale.js';
 export {
   niceStep, axisTicksLinear, axisTicksLog, axisTicksOrdinal,
-  formatTickValue, formatTimeTick,
+  formatTickValue, formatTimeTick, axisTicksTime, niceTimeStep,
 } from './core/axis.js';
 export { CATEGORICAL, SEQUENTIAL, seriesColor, sequentialColor, inkFor, createTheme, THEMES, HOST_VARS } from './core/palette.js';
 export { buildPieAST, renderPieAST } from './types/pie.js';

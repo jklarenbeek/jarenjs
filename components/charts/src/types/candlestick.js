@@ -30,7 +30,9 @@
 import { svgRoot, line as svgLine, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleTime } from '../core/scale.js';
-import { axisTicksLinear, formatTickValue, formatTimeTick } from '../core/axis.js';
+import {
+  axisTicksLinear, axisTicksTime, niceTimeStep, formatTickValue, formatTimeTick,
+} from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 import { numOf } from '../core/stream-adapter.js';
@@ -127,7 +129,8 @@ export function resolveCandleDomains(ext, policy) {
   return {
     x: [t0, xHi],
     y: [yLo, yHi],
-    xTickValues: axisTicksLinear(t0, xHi, 4),
+    xTickValues: axisTicksTime(t0, xHi, 4),
+    xTickStep: niceTimeStep(xHi - t0, 4),
     yTickValues,
   };
 }
@@ -178,7 +181,9 @@ export function buildCandlestickAST(data, config = {}) {
     type: 'candlestick',
     title: config.title ?? null,
     x: {
-      ticks: domains.xTickValues.map((v) => ({ pos: clamp01(xScale(v)), label: formatTimeTick(v) })),
+      ticks: domains.xTickValues.map((v) => ({
+        pos: clamp01(xScale(v)), label: formatTimeTick(v, domains.xTickStep),
+      })),
       label: config.xLabel ?? null,
     },
     y: {

@@ -135,6 +135,30 @@ export function isoWeekOfYear(parts) {
   return { year, week: Math.trunc((thursday - jan1) / 7) + 1 };
 }
 
+/**
+ * The parts record of an instant, the inverse of
+ * `epochOfRFC3339Parts` (rfc3339.js).
+ *
+ * `offset` selects the wall clock the fields are read on: 0 (the
+ * default) gives UTC, 120 gives the clock in `+02:00`. The returned
+ * record carries that offset, so rendering it back with
+ * `formatRFC3339Parts` yields the same instant spelled in that zone.
+ *
+ * @param {number} ms - milliseconds since 1970-01-01T00:00:00Z
+ * @param {number} [offset] - minutes east of UTC to read the clock in
+ * @returns {object} a parts record, always with a time half
+ */
+export function partsFromEpoch(ms, offset = 0) {
+  const local = ms + offset * 60000;
+  const z = Math.floor(local / 86400000);
+  let rest = local - z * 86400000;
+  const hours = Math.floor(rest / 3600000);
+  rest -= hours * 3600000;
+  const minutes = Math.floor(rest / 60000);
+  rest -= minutes * 60000;
+  return { ...civilFromDays(z), hours, minutes, seconds: rest / 1000, offset };
+}
+
 //#endregion
 
 //#region units

@@ -68,6 +68,15 @@ separate `data` argument). The type-specific fields, briefly:
 | `line` | `series: [{name, points: [{x, y}]}]`; `x: 'time'`, `log`, `markers` |
 | `scatter` | `points: [{x, y, tone?}]`; `xLog`/`yLog`, `refY`/`refLabel` |
 | `candlestick` | `candles: [{t, open, high, low, close}]` |
+
+**Time axes.** An `x: 'time'` axis (and every `candlestick`) accepts epoch milliseconds, a `Date`, or an **RFC 3339 string** — a date in a JSON document plots without being pre-converted, and a bare `2026-07-27` reads as UTC midnight. A *numeric* string still does not coerce: accepting `"5"` where the config asked for a number is a type confusion, not a date.
+
+Ticks land on calendar boundaries rather than on the 1/2/5 ladder, because a quantity axis and a clock have different nice numbers — the ladder puts ticks 50 seconds or 8.64 days apart, which no reader converts back into a time. Steps come from a clock/calendar ladder (1/5/15/30 seconds and minutes, 1/3/6/12 hours, 1/2 days, 1/2 weeks, 1/3/6 months, years), and the label granularity follows the step, so an axis never repeats one string on every tick:
+
+```javascript
+axisTicksTime(Date.UTC(2024, 0, 1), Date.UTC(2027, 0, 1));  // → 2024, 2025, 2026, 2027
+axisTicksTime(Date.UTC(2026, 6, 27, 0), Date.UTC(2026, 6, 27, 6));  // → 00:00 … 06:00
+```
 | `radar` | `axes: string[]`, `series: [{name, values}]`; `max` pins the domain, `labelEvery` the spoke-label stride |
 | `gauge` | `value`; `min`/`max` (0..100 default), `unit`, `tone` |
 | `boxplot` | `boxes: [{label, values}]` raw, or `{label, min, q1, med, q3, max, outliers?}` |

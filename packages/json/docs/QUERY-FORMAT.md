@@ -1248,6 +1248,11 @@ the presentation layer, not to a query.
 | `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from` |
 | `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern |
 
+Every operator that *produces* a date produces it in the same canonical
+spelling, so one query can never emit two forms of one instant: a fractional
+second appears only when non-zero and without trailing zeros
+(`…:05.5Z`, never `…:05.500Z`).
+
 Durations are recognized and applied, but never *decomposed* into a number:
 `P1M` is not a fixed count of milliseconds, so there is no honest length to
 report without a calendar anchor. Applying one to a date is where the anchor

@@ -811,7 +811,7 @@ describe('section 8.13 — dates and times', () => {
   it('should place instants on the epoch and back again', () => {
     assert.strictEqual(run({ '$epoch': '$.at' }), Date.parse(doc.at));
     assert.strictEqual(run({ '$epoch': '$.day' }), Date.UTC(2026, 6, 27));
-    assert.strictEqual(run({ '$datetime': { '$epoch': '$.at' } }), '2026-07-27T12:30:05.500Z');
+    assert.strictEqual(run({ '$datetime': { '$epoch': '$.at' } }), '2026-07-27T12:30:05.5Z');
     // whole seconds drop the fraction, so the form stays canonical
     assert.strictEqual(run({ '$datetime': 0 }), '1970-01-01T00:00:00Z');
     assert.throws(() => run({ '$datetime': 1e18 }), (e) => e.code === 'JQ2001');

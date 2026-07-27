@@ -30,7 +30,10 @@
 import { svgRoot, path as svgPath, circle, polylinePath, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog, scaleTime } from '../core/scale.js';
-import { axisTicksLinear, axisTicksLog, formatTickValue, formatTimeTick } from '../core/axis.js';
+import {
+  axisTicksLinear, axisTicksLog, axisTicksTime, niceTimeStep,
+  formatTickValue, formatTimeTick,
+} from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { numOf } from '../core/stream-adapter.js';
 import {
@@ -147,7 +150,9 @@ export function resolveLineDomains(ext, policy, time, log) {
     x: [x0, x1],
     y: [yLo, yHi],
     xDrop,
-    xTickValues: axisTicksLinear(x0, x1, time ? 4 : 5),
+    xTickValues: time ? axisTicksTime(x0, x1, 4) : axisTicksLinear(x0, x1, 5),
+    // the step the ticks were chosen on, so the labels can match it
+    xTickStep: time ? niceTimeStep(x1 - x0, 4) : null,
     yTickValues,
   };
 }
@@ -209,7 +214,7 @@ export function buildLineAST(data, config = {}) {
     x: {
       ticks: domains.xTickValues.map((v) => ({
         pos: clamp01(xScale(v)),
-        label: time ? formatTimeTick(v) : formatTickValue(v),
+        label: time ? formatTimeTick(v, domains.xTickStep) : formatTickValue(v),
       })),
       label: config.xLabel ?? null,
     },

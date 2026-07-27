@@ -147,6 +147,25 @@ export function createFormView(options = {}) {
     on: { input: { action, with: writeWith } },
   }];
 
+  /**
+   * A date-family `<input>`: the text-input binding plus the schema's
+   * date bounds as `min`/`max`, so the picker itself refuses an
+   * out-of-range date instead of the user finding out on submit. An
+   * absent bound evaluates to the empty sequence, which omits the
+   * attribute. HTML has no exclusive date bounds, so
+   * `formatExclusive*` stays a submit-time check.
+   */
+  const dateInput = (type, action) => ['input', {
+    type,
+    value: '$.value',
+    placeholder: '$.placeholder',
+    readonly: '$.readOnly',
+    disabled,
+    min: '$.constraints.formatMinimum',
+    max: '$.constraints.formatMaximum',
+    on: { input: { action, with: writeWith } },
+  }];
+
   const rules = [
     // the form root: a section holding the top-level fields
     {
@@ -243,8 +262,12 @@ export function createFormView(options = {}) {
   ];
 
   // the text-input family: one rule per control, all through act.input
-  for (const type of ['text', 'email', 'url', 'password', 'date', 'color']) {
+  for (const type of ['text', 'email', 'url', 'password', 'color']) {
     rules.push({ match: ctl(type), body: field(textInput(type, act.input)) });
+  }
+  // the date family, which additionally carries its bounds
+  for (const type of ['date', 'datetime-local', 'time']) {
+    rules.push({ match: ctl(type), body: field(dateInput(type, act.input)) });
   }
   return rules;
 }

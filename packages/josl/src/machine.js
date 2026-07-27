@@ -60,7 +60,9 @@ import {
   isValidDateParts,
   isValidTimeParts,
 } from './values.js';
-import { setKey, getOwn, countNewlines, columnOf } from './util.js';
+import {
+  setKey, getOwn, countNewlines, columnOf, RE_DATETIME, RE_TIMEONLY,
+} from './util.js';
 
 function isBareKeyCode(c) {
   return (c >= 0x41 && c <= 0x5A) // A-Z
@@ -97,10 +99,8 @@ function skipRun(re, buf, pos) {
   return re.lastIndex;
 }
 
-// Datetime / number token patterns. Sticky (y) so they match in place at
-// the current position without slicing the logical line.
-const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/y;
-const RE_TIMEONLY = /(\d{2}):(\d{2}):(\d{2})(\.\d+)?/y;
+// Number token patterns; the date-time pair is shared with the JSONX
+// scalar reader (util.js). Sticky (y) so they match in place.
 const RE_HEX = /0x[0-9a-fA-F](?:_?[0-9a-fA-F])*(n?)/y;
 const RE_OCT = /0o[0-7](?:_?[0-7])*(n?)/y;
 const RE_BIN = /0b[01](?:_?[01])*(n?)/y;

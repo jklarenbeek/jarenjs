@@ -5,7 +5,11 @@ import * as assert from 'node:assert/strict';
 import {
   scaleLinear, scaleLog, scaleOrdinal, scaleBand, scaleTime,
   niceStep, axisTicksLinear, axisTicksLog, axisTicksOrdinal,
+  axisTicksTime, niceTimeStep, formatTimeTick,
 } from '@jarenjs/charts';
+
+// numOf is adapter-internal; the test reaches it by source path
+import { numOf } from '../../components/charts/src/core/stream-adapter.js';
 
 describe('scales', function () {
   it('scaleLinear maps the domain onto [0,1]', function () {
@@ -100,5 +104,84 @@ describe('axis ticks', function () {
       { label: 'b', pos: 0.75 },
     ]);
     assert.deepEqual(axisTicksOrdinal([]), []);
+  });
+});
+
+describe('time ticks land on calendar boundaries', function () {
+  const labels = (min, max, count = 4) => {
+    const step = niceTimeStep(max - min, count);
+    return axisTicksTime(min, max, count).map((t) => formatTimeTick(t, step));
+  };
+
+  it('should step by clock units, not by the 1/2/5 ladder', function () {
+    // the numeric ladder puts these 50 s apart, which is not a unit
+    // anybody reads a clock in
+    assert.deepEqual(labels(Date.UTC(2024, 6, 21, 10, 0, 0), Date.UTC(2024, 6, 21, 10, 2, 0)),
+      ['10:00:00', '10:00:30', '10:01:00', '10:01:30', '10:02:00']);
+    assert.deepEqual(labels(Date.UTC(2026, 6, 27, 0, 0, 0), Date.UTC(2026, 6, 27, 6, 0, 0)),
+      ['00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00']);
+  });
+
+  it('should step by calendar units over long spans', function () {
+    assert.deepEqual(labels(Date.UTC(2024, 0, 1), Date.UTC(2027, 0, 1)),
+      ['2024', '2025', '2026', '2027']);
+    assert.deepEqual(labels(Date.UTC(2026, 0, 1), Date.UTC(2026, 4, 1)),
+      ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05']);
+  });
+
+  it('should match the label granularity to the step', function () {
+    // one string per tick, never the same label repeated across an axis
+    for (const [lo, hi] of [
+      [Date.UTC(2026, 0, 1), Date.UTC(2027, 0, 1)],
+      [Date.UTC(2026, 0, 1), Date.UTC(2026, 0, 10)],
+      [Date.UTC(2026, 0, 1, 0), Date.UTC(2026, 0, 1, 8)],
+    ]) {
+      const out = labels(lo, hi);
+      assert.equal(new Set(out).size, out.length, out.join(' '));
+    }
+  });
+
+  it('should fall back to the numeric ladder below a second', function () {
+    const ticks = axisTicksTime(0, 100, 4);
+    assert.ok(ticks.length > 1);
+    assert.deepEqual(ticks, [0, 20, 40, 60, 80, 100]);
+  });
+
+  it('should keep the historical label shape with no step', function () {
+    assert.equal(formatTimeTick(Date.UTC(2026, 6, 27, 14, 30, 5)), '14:30:05');
+    assert.equal(formatTimeTick(Date.UTC(2026, 6, 27)), '2026-07-27', 'a day boundary shows the date');
+  });
+
+  it('should handle degenerate and reversed domains', function () {
+    assert.deepEqual(axisTicksTime(5, 5), [5]);
+    assert.deepEqual(axisTicksTime(Number.NaN, 5), []);
+    const lo = Date.UTC(2026, 0, 1), hi = Date.UTC(2026, 0, 5);
+    assert.deepEqual(axisTicksTime(hi, lo), axisTicksTime(lo, hi), 'reversed reads the same');
+  });
+});
+
+describe('date strings are plottable', function () {
+
+  it('should lift an RFC 3339 string to its instant', function () {
+    // the whole point: a date in a JSON document reaches a time axis
+    assert.equal(numOf('2026-07-27T14:30:05Z'), Date.UTC(2026, 6, 27, 14, 30, 5));
+    assert.equal(numOf('2026-07-27'), Date.UTC(2026, 6, 27), 'a bare date is UTC midnight');
+    // two spellings of one instant land on the same point
+    assert.equal(numOf('2026-07-27T14:30:05+02:00'), numOf('2026-07-27T12:30:05Z'));
+  });
+
+  it('should still refuse a numeric string', function () {
+    // accepting "5" where the config asked for a number is a type
+    // confusion, not a date — it passes through unplottable
+    assert.equal(numOf('5'), '5');
+    assert.equal(numOf('nonsense'), 'nonsense');
+    assert.equal(numOf('14:30:05Z'), '14:30:05Z', 'a full-time has no instant');
+  });
+
+  it('should pass numbers, Dates and non-values through as before', function () {
+    assert.equal(numOf(42), 42);
+    assert.equal(numOf(new Date(1000)), 1000);
+    assert.equal(numOf(null), null);
+    assert.equal(numOf(undefined), undefined);
   });
 });

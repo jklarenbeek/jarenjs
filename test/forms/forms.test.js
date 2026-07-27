@@ -432,3 +432,56 @@ describe('Format Registry', function () {
     assert.isTrue(getFormatInfo('textarea').control === 'textarea');
   });
 });
+
+describe('date fields carry their controls and bounds', () => {
+  const model = buildFormModel({
+    type: 'object',
+    properties: {
+      born: {
+        type: 'string', format: 'date',
+        formatMinimum: '1900-01-01', formatMaximum: '2026-12-31',
+      },
+      seen: { type: 'string', format: 'iso-date-time' },
+      at: { type: 'string', format: 'iso-time' },
+      stamp: { type: 'string', format: 'date-time' },
+      clock: { type: 'string', format: 'time' },
+      span: { type: 'string', format: 'duration' },
+    },
+  });
+  const field = (key) => model.children.find((f) => f.key === key);
+
+  it('should give a native control only where the offset allows one', () => {
+    // HTML's datetime-local/time inputs cannot produce an offset, and
+    // RFC 3339 requires one — binding them would make the control emit
+    // values its own schema rejects. The ISO formats leave the offset
+    // optional, so they map losslessly.
+    assert.strictEqual(field('born').control, 'date');
+    assert.strictEqual(field('seen').control, 'datetime-local');
+    assert.strictEqual(field('at').control, 'time');
+    assert.strictEqual(field('stamp').control, 'text', 'date-time needs an offset');
+    assert.strictEqual(field('clock').control, 'text', 'time needs an offset');
+    assert.strictEqual(field('span').control, 'text');
+  });
+
+  it('should expose the format bounds as constraints', () => {
+    assert.strictEqual(field('born').constraints.formatMinimum, '1900-01-01');
+    assert.strictEqual(field('born').constraints.formatMaximum, '2026-12-31');
+    // a field without bounds carries none, so the control omits min/max
+    assert.strictEqual(field('seen').constraints.formatMinimum, undefined);
+  });
+
+  it('should carry the exclusive bounds too', () => {
+    const m = buildFormModel({
+      type: 'object',
+      properties: {
+        d: {
+          type: 'string', format: 'date',
+          formatExclusiveMinimum: '2026-01-01', formatExclusiveMaximum: '2026-12-31',
+        },
+      },
+    });
+    const c = m.children[0].constraints;
+    assert.strictEqual(c.formatExclusiveMinimum, '2026-01-01');
+    assert.strictEqual(c.formatExclusiveMaximum, '2026-12-31');
+  });
+});

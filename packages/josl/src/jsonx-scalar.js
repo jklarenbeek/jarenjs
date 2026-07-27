@@ -35,11 +35,9 @@ import {
   isValidDateParts,
   isValidTimeParts,
 } from './values.js';
+// the date-time token patterns are shared with the JOSL machine
+import { RE_DATETIME, RE_TIMEONLY } from './util.js';
 
-// Sticky (y) so they match in place at the current position without
-// slicing the source text.
-const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/y;
-const RE_TIMEONLY = /(\d{2}):(\d{2}):(\d{2})(\.\d+)?/y;
 const RE_NUM_JSON = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
 const RE_NUM_JSONX = /[+-]?(?:0|[1-9](?:_?\d)*)(?:\.\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?(n?)/y;
 
