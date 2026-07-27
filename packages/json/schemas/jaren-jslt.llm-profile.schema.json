@@ -273,6 +273,9 @@
           "$ref": "#/$defs/stringJoinPhrase"
         },
         {
+          "$ref": "#/$defs/geohashPhrase"
+        },
+        {
           "$ref": "#/$defs/ternaryOperatorPhrase"
         },
         {
@@ -756,6 +759,24 @@
         "minItems": 3,
         "maxItems": 3
       }
+    },
+    "geohashPhrase": {
+      "description": "$geohash [value] or [value, precision]: a GeoJSON value as a base-32 cell string. Precision is an integer from 1 to 12 (default 9); a value that is not a bare position is represented by its centroid.",
+      "type": "object",
+      "properties": {
+        "$geohash": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expression"
+          },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "$geohash"
+      ],
+      "additionalProperties": false
     }
   }
 }

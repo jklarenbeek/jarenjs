@@ -275,6 +275,9 @@
           "$ref": "#/definitions/stringJoinPhrase"
         },
         {
+          "$ref": "#/definitions/geohashPhrase"
+        },
+        {
           "$ref": "#/definitions/ternaryOperatorPhrase"
         },
         {
@@ -612,7 +615,11 @@
           "$week",
           "$week-year",
           "$quarter",
-          "$weekday"
+          "$weekday",
+          "$bbox",
+          "$area",
+          "$length",
+          "$centroid"
         ]
       },
       "additionalProperties": {
@@ -649,6 +656,9 @@
           "$start-of",
           "$end-of",
           "$date-format",
+          "$distance",
+          "$within",
+          "$bbox-intersects",
           "$default"
         ]
       },
@@ -882,6 +892,24 @@
         "minItems": 3,
         "maxItems": 3
       }
+    },
+    "geohashPhrase": {
+      "description": "$geohash [value] or [value, precision]: a GeoJSON value as a base-32 cell string. Precision is an integer from 1 to 12 (default 9); a value that is not a bare position is represented by its centroid.",
+      "type": "object",
+      "properties": {
+        "$geohash": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/expression"
+          },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "$geohash"
+      ],
+      "additionalProperties": false
     }
   }
 }

@@ -956,3 +956,118 @@ describe('section 8.13 — date arithmetic', () => {
     ]);
   });
 });
+
+describe('section 8.14 — spatial', () => {
+  // a 1-degree box over the western Netherlands
+  const box = {
+    type: 'Feature',
+    properties: { name: 'box' },
+    geometry: { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] },
+  };
+  const doc = {
+    ams: [4.9041, 52.3676],
+    par: [2.3522, 48.8566],
+    area: box,
+    cities: [
+      { name: 'Amsterdam', at: [4.9041, 52.3676] },
+      { name: 'Paris', at: [2.3522, 48.8566] },
+      { name: 'Utrecht', at: [5.1214, 52.0907] },
+    ],
+  };
+  const run = (q, data = doc) => queryJson(q, data);
+
+  it('should measure geodesic distance, not a planar one', () => {
+    const d = run({ $distance: ['$.ams', '$.par'] });
+    assert.ok(Math.abs(d - 429862) < 100, `Amsterdam to Paris was ${d}`);
+    assert.strictEqual(run({ $distance: ['$.ams', '$.ams'] }), 0);
+    // a degree of longitude is not a fixed distance, so the planar
+    // answer on raw degrees would be far larger
+    const planar = Math.hypot(4.9041 - 2.3522, 52.3676 - 48.8566) * 111320;
+    assert.ok(planar / d > 1.1, 'the planar shortcut must not be what this returns');
+  });
+
+  it('should measure bbox, area, length and centroid', () => {
+    assert.deepStrictEqual(run({ $bbox: '$.area' }), [4, 52, 5, 53]);
+    assert.deepStrictEqual(run({ $centroid: '$.area' }), [4.4, 52.4]);
+    // a 1-degree box at 52N is much smaller than one at the equator
+    const km2 = run({ $area: '$.area' }) / 1e6;
+    assert.ok(km2 > 7000 && km2 < 8000, `area was ${km2} km2`);
+    const km = run({ $length: '$.area' }) / 1000;
+    assert.ok(km > 300 && km < 400, `perimeter was ${km} km`);
+    // things with no surface measure zero rather than erroring
+    assert.strictEqual(run({ $area: '$.ams' }), 0);
+    assert.strictEqual(run({ $length: '$.ams' }), 0);
+  });
+
+  it('should unwrap a Feature, a geometry or a bare position alike', () => {
+    const geometry = box.geometry;
+    assert.deepStrictEqual(run({ $bbox: { $const: geometry } }), [4, 52, 5, 53]);
+    assert.deepStrictEqual(run({ $bbox: { $const: box } }), [4, 52, 5, 53]);
+    assert.deepStrictEqual(run({ $bbox: '$.ams' }), [4.9041, 52.3676, 4.9041, 52.3676]);
+    const fc = { type: 'FeatureCollection', features: [box] };
+    assert.deepStrictEqual(run({ $bbox: { $const: fc } }), [4, 52, 5, 53]);
+  });
+
+  it('should test containment', () => {
+    assert.strictEqual(run({ $within: ['$.ams', '$.area'] }), true);
+    assert.strictEqual(run({ $within: ['$.par', '$.area'] }), false);
+    // nothing is inside nothing, and this is false rather than an error
+    assert.strictEqual(run({ $within: ['$.missing', '$.area'] }), false);
+    assert.strictEqual(run({ $within: ['$.ams', '$.missing'] }), false);
+    // only a surface has an inside
+    assert.strictEqual(run({ $within: ['$.ams', '$.ams'] }), false);
+  });
+
+  it('should say what it tests: bounding boxes, not geometry', () => {
+    assert.strictEqual(run({ '$bbox-intersects': ['$.area', '$.ams'] }), true);
+    assert.strictEqual(run({ '$bbox-intersects': ['$.area', '$.par'] }), false);
+    // the honest case: two shapes whose boxes overlap and which do not.
+    // The name promises only the box, which is why it is named that way.
+    const ellA = { type: 'Polygon', coordinates: [[[0, 0], [3, 0], [3, 1], [0, 1], [0, 0]]] };
+    const ellB = { type: 'Polygon', coordinates: [[[0, 2], [3, 2], [3, 3], [0, 3], [0, 2]]] };
+    assert.strictEqual(
+      queryJson({ '$bbox-intersects': ['$.a', '$.b'] }, { a: ellA, b: ellB }), false);
+  });
+
+  it('should encode a geohash, defaulting to precision 9', () => {
+    assert.strictEqual(run({ $geohash: ['$.ams', 5] }), 'u173z');
+    assert.strictEqual(run({ $geohash: ['$.ams'] }).length, 9);
+    assert.ok(run({ $geohash: ['$.ams'] }).startsWith('u173z'), 'precision nests');
+    // a non-position value is represented by its centroid
+    assert.strictEqual(run({ $geohash: ['$.area', 3] }), 'u17');
+  });
+
+  it('should propagate the empty sequence and reject non-spatial operands', () => {
+    for (const op of ['$bbox', '$area', '$length', '$centroid'])
+      assert.strictEqual(run({ [op]: '$.missing' }), undefined, op);
+    assert.strictEqual(run({ $distance: ['$.missing', '$.ams'] }), undefined);
+    assert.throws(() => run({ $area: 42 }), (e) => e.code === 'JQ2001');
+    assert.throws(() => run({ $distance: ['$.ams', 'nonsense'] }), (e) => e.code === 'JQ2001');
+    assert.throws(() => run({ $geohash: ['$.ams', 99] }),
+      (e) => e.code === 'JQ2001' && /precision/.test(e.message));
+  });
+
+  it('should filter, sort and bucket — the shapes this exists for', () => {
+    assert.strictEqual(queryJson({
+      $for: { c: '$.cities[*]' },
+      $where: { $within: ['$c.at', '$.area'] },
+      $return: '$c.name',
+    }, doc), 'Amsterdam');
+
+    assert.deepStrictEqual(queryJson({
+      $for: { c: '$.cities[*]' },
+      $orderby: [{ $key: { $distance: ['$c.at', '$.ams'] } }],
+      $return: '$c.name',
+    }, doc), ['Amsterdam', 'Utrecht', 'Paris']);
+
+    assert.deepStrictEqual(queryJson({
+      $for: { c: '$.cities[*]' },
+      $groupby: { cell: { $geohash: ['$c.at', 3] } },
+      $orderby: ['$cell'],
+      $return: { cell: '$cell', names: { '$string-join': ['$c.name', '+'] } },
+    }, doc), [
+      { cell: 'u09', names: 'Paris' },
+      { cell: 'u17', names: 'Amsterdam+Utrecht' },
+    ]);
+  });
+});

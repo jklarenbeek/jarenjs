@@ -294,9 +294,10 @@ thing to avoid.
 ## Geospatial (cross-package)
 
 A PostGIS-shaped capability, ordered so each phase is independently useful.
-The kernel (`@jarenjs/core/geo/*`) and the GeoJSON meta-schema are done; what
-they do is documented in `packages/core/ARCHITECTURE.md` and the `@jarenjs/json`
-README. Six entries are left. The suite had **no** spatial code before this, so
+The kernel (`@jarenjs/core/geo/*`), the GeoJSON meta-schema and the spatial
+query operators are done; what they do is documented in
+`packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.14 and the `@jarenjs/json`
+README. Five entries are left. The suite had **no** spatial code before this, so
 it was a clean slate — but less of one than it looked: `Vec2f64.cross3` already *is* the signed-orientation
 predicate ("which side of the line is point c on"), documented as such and
 used by nothing, and the `convert` registry already ships `length` (with
@@ -321,15 +322,6 @@ exist. And equirectangular distance is 0.02% off at 430 km but 12.4% off
 intercontinentally, at 2.0 ns against haversine's 13.6 ns — so the design is
 screen-then-refine, the same build-then-probe shape as the hash join.
 
-- [ ] **Spatial query operators** — PostGIS's `ST_*` set as query vocabulary:
-  `$distance`, `$within`, `$intersects`, `$bbox`, `$area`, `$length`,
-  `$centroid`, `$geohash`. The ergonomic reason these must be operators rather
-  than hand-written query documents is D4: `$for`/`$every` unpack an array
-  item into its members, so iterating a Polygon's `coordinates` yields
-  positions rather than rings, and expressing ring math by hand needs `$let`
-  plus `$get`-by-index gymnastics. Note what needs *no* operator: a geohash is
-  a string, so proximity is `$starts-with` and spatial bucketing is `$groupby`
-  on a `$substring` prefix — both verified against the shipped engine.
 - [ ] **The spatial index as a compile-time optimization** — a spatial
   predicate over a FeatureCollection is an O(n) scan today. Building an R-tree
   once and probing it is the same complexity-class rewrite as the hash join,

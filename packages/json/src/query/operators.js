@@ -56,6 +56,17 @@ import {
   fixedUnitMs,
   compileDateFormat,
 } from '@jarenjs/core/dates';
+import {
+  isPosition,
+  bboxOf,
+  bboxIntersects,
+  geometryArea,
+  geometryLength,
+  centroidOf,
+  containsPosition,
+  geoDistance,
+  geohashEncode,
+} from '@jarenjs/core/geo';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, itemCount, firstItem,
@@ -699,6 +710,54 @@ function dateTruncEntry(truncate) {
     },
   };
 }
+
+//#region spatial operators (section 8.14)
+// PostGIS's ST_* set, in the vocabulary this language already has. The
+// operand is GeoJSON (RFC 7946) — a bare position, a geometry, a Feature
+// or a FeatureCollection — because that is what a JSON document holds;
+// there is no geometry type to construct first.
+//
+// Coordinates are longitude, latitude, in WGS 84 decimal degrees, and
+// measurements are geodesic. That matters: a degree of longitude is not
+// a fixed distance, so a planar answer is wrong by two thirds at Dutch
+// latitudes. These operators never return a planar number.
+//
+// What is deliberately absent is real geometry-to-geometry intersection.
+// `$bbox-intersects` says exactly what it tests, because an operator
+// named `$intersects` that only compared bounding boxes would be a lie
+// the first time two L-shapes shared a box and nothing else.
+
+// A spatial operand, rejected uniformly: the empty sequence propagates
+// at the call site, so this only ever sees a real item.
+function geoArg(v, docPath) {
+  if (v === EMPTY || v instanceof Seq || v === null || typeof v !== 'object') {
+    throw runtimeError('JQ2001',
+      `expected a GeoJSON value or a [longitude, latitude] position, got ${describeItem(v)}`,
+      docPath);
+  }
+  return v;
+}
+
+// a unary spatial measurement: empty propagates, anything else is JQ2001
+function geoUnaryEntry(measure, resultCard = resultEmptyPropagates) {
+  return {
+    params: UNARY,
+    result: resultCard,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        const out = measure(geoArg(v, docPath));
+        return out === null ? EMPTY : out;
+      };
+    },
+  };
+}
+
+//#endregion
 
 // the RFC 3339 type tests, shaped like the section 8.10 $is-* family:
 // one item of the right lexical form, never an error
@@ -1368,6 +1427,112 @@ export const OPERATORS = Object.freeze({
   '$is-time': dateTestEntry(isTimeOnlyRFC3339),
   '$is-datetime': dateTestEntry(isDateTimeRFC3339),
   '$is-duration': dateTestEntry(isValidDuration),
+
+  //#endregion
+
+  //#region section 8.14 - spatial
+
+  '$bbox': geoUnaryEntry(bboxOf),
+  '$area': geoUnaryEntry(geometryArea, RESULT_ONE),
+  '$length': geoUnaryEntry(geometryLength, RESULT_ONE),
+  '$centroid': geoUnaryEntry(centroidOf),
+
+  '$distance': { // metres between two values' representative positions
+    params: ARGS_2,
+    result: RESULT_OPT,
+    compile: (gets, args) => {
+      const aGet = gets[0];
+      const aPath = args[0].docPath;
+      const bGet = gets[1];
+      const bPath = args[1].docPath;
+      return (f) => {
+        const a = aGet(f);
+        const b = bGet(f);
+        if (a === EMPTY || b === EMPTY)
+          return EMPTY;
+        const out = geoDistance(geoArg(a, aPath), geoArg(b, bPath));
+        return out === null ? EMPTY : out;
+      };
+    },
+  },
+
+  '$within': { // is the first value's position inside the second's surface
+    params: ARGS_2,
+    result: RESULT_ONE,
+    compile: (gets, args) => {
+      const pointGet = gets[0];
+      const pointPath = args[0].docPath;
+      const areaGet = gets[1];
+      const areaPath = args[1].docPath;
+      return (f) => {
+        const point = pointGet(f);
+        const area = areaGet(f);
+        if (point === EMPTY || area === EMPTY)
+          return false; // nothing is inside nothing
+        const p = geoArg(point, pointPath);
+        // a bare position is itself; anything else is represented by its
+        // centroid, the same rule $distance uses
+        const at = isPosition(p) ? p : centroidOf(p);
+        if (at === null)
+          return false;
+        return containsPosition(geoArg(area, areaPath), at[0], at[1]);
+      };
+    },
+  },
+
+  '$bbox-intersects': { // do the two values' bounding boxes overlap
+    params: ARGS_2,
+    result: RESULT_ONE,
+    compile: (gets, args) => {
+      const aGet = gets[0];
+      const aPath = args[0].docPath;
+      const bGet = gets[1];
+      const bPath = args[1].docPath;
+      return (f) => {
+        const a = aGet(f);
+        const b = bGet(f);
+        if (a === EMPTY || b === EMPTY)
+          return false;
+        const boxA = bboxOf(geoArg(a, aPath));
+        const boxB = bboxOf(geoArg(b, bPath));
+        return boxA !== null && boxB !== null && bboxIntersects(boxA, boxB);
+      };
+    },
+  },
+
+  '$geohash': { // a position as a base-32 cell string
+    params: ARGS_1_2,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      const precisionGet = gets.length === 2 ? gets[1] : null;
+      const precisionPath = precisionGet === null ? '' : args[1].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        const value = geoArg(v, docPath);
+        const at = isPosition(value) ? value : centroidOf(value);
+        if (at === null)
+          return EMPTY;
+        let precision = 9;
+        if (precisionGet !== null) {
+          precision = precisionGet(f);
+          if (!Number.isInteger(precision) || precision < 1 || precision > 12) {
+            throw runtimeError('JQ2001',
+              `a geohash precision must be an integer from 1 to 12, got ${describeItem(precision)}`,
+              precisionPath);
+          }
+        }
+        return geohashEncode(at[0], at[1], precision);
+      };
+    },
+  },
+
+  //#endregion
+
+  //#region section 8.13 - dates and times, continued
 
   '$date-add': dateShiftEntry(1),
   '$date-sub': dateShiftEntry(-1),

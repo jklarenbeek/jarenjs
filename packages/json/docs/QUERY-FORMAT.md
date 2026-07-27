@@ -1277,6 +1277,63 @@ because a week boundary is arithmetic, not a field.
   "$return": { "year": "$y", "month": "$m", "count": { "$count": "$e" } } }
 ```
 
+### 8.14 Spatial
+
+Geography enters the language the way dates did: through the format the data
+already has. Operands are **GeoJSON** ([RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946))
+— a bare position `[longitude, latitude]`, a geometry, a `Feature`, or a
+`FeatureCollection` — because that is what a JSON document holds. There is no
+geometry type to construct, and a wrapper is unwrapped for you: passing a
+`Feature` where a geometry is wanted is not an error, it is the common case.
+
+Coordinates are longitude then latitude, in WGS 84 decimal degrees. RFC 7946
+removed alternative coordinate reference systems, so there is nothing to
+configure and no `crs` to honour.
+
+**Measurements are geodesic, never planar.** A degree of longitude spans about
+111 km at the equator and 68 km at 52°N, so a Euclidean answer over raw degrees
+is wrong by two thirds over a kilometre at Dutch latitudes. `$distance`,
+`$area` and `$length` answer in metres and square metres on the WGS 84 sphere,
+accurate to under half a percent. Convert with ordinary arithmetic —
+`{"$idiv": [{"$distance": [a, b]}, 1000]}` for kilometres.
+
+`$distance` and `$within` measure a value by its **representative position**: a
+bare position or `Point` is itself, anything else is its centroid. That is
+stated rather than inferred because the alternative — the minimum distance
+between two shapes — needs point-to-segment geodesics and is a much larger
+piece of work this format does not yet do.
+
+`$bbox-intersects` is named for exactly what it tests. An operator called
+`$intersects` that compared only bounding boxes would be a lie the first time
+two L-shaped regions shared a box and nothing else; real geometry-to-geometry
+intersection is overlay work and is deliberately absent.
+
+| Operator | Definition |
+|---|---|
+| `$bbox` | any value → `[west, south, east, north]`; a value with no positions → empty |
+| `$area` | square metres of the value's polygons, exterior rings less holes; anything without a surface → `0` |
+| `$length` | metres of the value's lines and ring perimeters; a point → `0` |
+| `$centroid` | the mean of the value's positions, as a position. **Not** the area-weighted centre of mass: for a concave shape it can fall outside the polygon |
+| `$distance` | `[a, b]` → metres between the two representative positions |
+| `$within` | `[a, b]` → is `a`'s representative position inside `b`'s surface? Only a polygon has an inside, so a line or point as `b` is `false` |
+| `$bbox-intersects` | `[a, b]` → do the two bounding boxes overlap? Touching edges count |
+| `$geohash` | `[value]` or `[value, precision]` → the base-32 cell string; precision is 1-12, default 9 |
+
+Note what needs **no** operator. A geohash is a string, so proximity is
+`$starts-with` on a prefix and spatial bucketing is `$groupby` over
+`$substring` — the existing vocabulary already indexes, groups and orders them.
+
+```json
+{ "$for": { "c": "$.cities[*]" },
+  "$where": { "$within": ["$c.at", "$.region"] },
+  "$orderby": [{ "$key": { "$distance": ["$c.at", "$.centre"] } }],
+  "$return": { "name": "$c.name",
+               "km": { "$idiv": [{ "$distance": ["$c.at", "$.centre"] }, 1000] } } }
+```
+
+selects the cities inside a region and orders them by how far they are from a
+point — a spatial filter and a spatial sort, in the language's own clauses.
+
 ## 9. Variables, scoping, and external parameters
 
 1. Variables are introduced by `$for`, `$let`, `$at`, `$count`, `$groupby`

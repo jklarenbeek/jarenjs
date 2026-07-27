@@ -292,6 +292,41 @@ export const queryExamples = [
     document: BOOKSTORE,
   },
   {
+    name: 'Spatial: filter and sort by distance',
+    query: {
+      $for: { c: '$.cities[*]' },
+      $where: { $within: ['$c.at', '$.region'] },
+      $orderby: [{ $key: { $distance: ['$c.at', '$.centre'] } }],
+      $return: {
+        name: '$c.name',
+        km: { $idiv: [{ $distance: ['$c.at', '$.centre'] }, 1000] },
+      },
+    },
+    document: {
+      centre: [4.5, 52.5],
+      region: { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] },
+      cities: [
+        { name: 'Amsterdam', at: [4.9041, 52.3676] },
+        { name: 'Haarlem', at: [4.6462, 52.3874] },
+        { name: 'Paris', at: [2.3522, 48.8566] },
+      ],
+    },
+  },
+  {
+    name: 'Spatial: measure a region',
+    query: {
+      area_km2: { $idiv: [{ $area: '$.region' }, 1000000] },
+      perimeter_km: { $idiv: [{ $length: '$.region' }, 1000] },
+      bbox: { $bbox: '$.region' },
+      centroid: { $centroid: '$.region' },
+      cell: { $geohash: [{ $centroid: '$.region' }, 5] },
+    },
+    document: {
+      region: { type: 'Feature', properties: { name: 'box' },
+        geometry: { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] } },
+    },
+  },
+  {
     name: 'Dates: bucket into ISO weeks',
     query: {
       $for: { e: '$.events[*]' },

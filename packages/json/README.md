@@ -377,7 +377,7 @@ queryJson({
 }, [1, 2, 3, 4, 5]); // [2, 3, 4] — a 3-point moving average
 ```
 
-The operator library (83 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, and the RFC 3339 date family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+The operator library (91 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, and the spatial family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
 
 **Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), `$week`/`$week-year`/`$quarter`/`$weekday` add the derived calendar fields, and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
 
@@ -394,6 +394,19 @@ queryJson({
 ```
 
 Bucketing by week is the shape components alone cannot express, because a week boundary is arithmetic rather than a field. Patterns stay locale-independent — `MMMM` and `EEEE` are rejected rather than silently rendered in English — because localized text belongs to the presentation layer, not to a query.
+
+**Geography is GeoJSON** ([§8.14](./docs/QUERY-FORMAT.md#814-spatial)), for the same reason dates are RFC 3339 strings: it is what the document already holds. Operands are a bare `[longitude, latitude]` position, a geometry, a `Feature` or a `FeatureCollection`, and wrappers unwrap for you. `$distance`, `$area` and `$length` answer in metres on the WGS 84 sphere — never planar, because a Euclidean answer over raw degrees is wrong by two thirds over a kilometre at Dutch latitudes. `$within` tests containment, `$bbox`/`$centroid` measure, and `$bbox-intersects` is named for exactly what it tests, since an `$intersects` that compared only boxes would be a lie the first time two L-shapes shared one.
+
+```js
+queryJson({
+  $for: { c: '$.cities[*]' },
+  $where: { $within: ['$c.at', '$.region'] },
+  $orderby: [{ $key: { $distance: ['$c.at', '$.centre'] } }],
+  $return: '$c.name',
+}, data); // a spatial filter and a spatial sort, in the language's own clauses
+```
+
+A geohash needs no operator of its own to be useful: it is a string, so proximity is `$starts-with` on a prefix and spatial bucketing is `$groupby` over `$substring`. `$geohash` only produces it.
 
 ### External parameters
 

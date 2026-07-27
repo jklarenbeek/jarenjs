@@ -90,6 +90,7 @@
         { "$ref": "#/$defs/nonEmptyVariadicOperatorPhrase" },
         { "$ref": "#/$defs/conditionalArityOperatorPhrase" },
         { "$ref": "#/$defs/stringJoinPhrase" },
+        { "$ref": "#/$defs/geohashPhrase" },
         { "$ref": "#/$defs/ternaryOperatorPhrase" },
         { "$ref": "#/$defs/replacePhrase" },
         { "$ref": "#/$defs/schemaOperatorPhrase" }
@@ -287,7 +288,8 @@
           "$is-date", "$is-time", "$is-datetime", "$is-duration",
           "$year", "$month", "$day", "$hours", "$minutes", "$seconds",
           "$offset", "$epoch", "$datetime",
-          "$week", "$week-year", "$quarter", "$weekday"
+          "$week", "$week-year", "$quarter", "$weekday",
+          "$bbox", "$area", "$length", "$centroid"
         ]
       },
       "additionalProperties": { "$ref": "#/$defs/expression" }
@@ -303,7 +305,8 @@
           "$add", "$sub", "$mul", "$div", "$idiv", "$mod",
           "$contains", "$starts-with", "$ends-with", "$match", "$search",
           "$index-of", "$range", "$get",
-          "$start-of", "$end-of", "$date-format", "$default"
+          "$start-of", "$end-of", "$date-format",
+          "$distance", "$within", "$bbox-intersects", "$default"
         ]
       },
       "additionalProperties": {
@@ -354,6 +357,20 @@
         "minItems": 2,
         "maxItems": 3
       }
+    },
+    "geohashPhrase": {
+      "description": "$geohash [value] or [value, precision]: a GeoJSON value as a base-32 cell string. Precision is an integer from 1 to 12 (default 9); a value that is not a bare position is represented by its centroid.",
+      "type": "object",
+      "properties": {
+        "$geohash": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expression" },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": ["$geohash"],
+      "additionalProperties": false
     },
     "stringJoinPhrase": {
       "description": "$string-join [seq, separator?]: one or two operand expressions.",
