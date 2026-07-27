@@ -91,3 +91,47 @@ test('the browser back button restores the previous view', async ({ page }) => {
   await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Home');
   expect(errors).toEqual([]);
 });
+
+test.describe('the README dialog over stubbed documents', () => {
+  // The site's service worker would fetch the README itself, invisibly
+  // to page.route (WebKit routes never see SW-originated requests) —
+  // block it so the stubbed documents are what the dialog receives.
+  test.use({ serviceWorkers: 'block' });
+
+  test('README-relative links navigate the dialog in place, with a working trail', async ({ page }) => {
+    const errors = trackPageErrors(page);
+    // deterministic offline READMEs: the dialog fetches raw.githubusercontent
+    const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+    const DOCS = {
+      [`${RAW}/packages/core/README.md`]: '# core\n\nRead [DATES](./docs/DATES.md).\n',
+      [`${RAW}/packages/core/docs/DATES.md`]: '# the dates kernel\n\nplain text body\n',
+    };
+    await page.route('https://raw.githubusercontent.com/**', (route) => {
+      const body = DOCS[route.request().url()];
+      if (body === undefined) return route.fulfill({ status: 404, body: 'not found' });
+      return route.fulfill({ status: 200, contentType: 'text/plain', body });
+    });
+
+    await page.goto('/#/docs');
+    await page.locator('.readme-btn', { hasText: '@jarenjs/core' }).click();
+    const dialog = page.locator('.md-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('article.md')).toContainText('Read DATES');
+
+    // the rewritten link stays inside the dialog instead of leaving the site
+    const before = page.url();
+    await dialog.locator('article.md a', { hasText: 'DATES' }).click();
+    await expect(dialog.locator('.md-dialog-title')).toHaveText('packages/core/docs/DATES.md');
+    await expect(dialog.locator('article.md')).toContainText('the dates kernel');
+    expect(page.url(), 'the page itself did not navigate').toBe(before);
+
+    // the trail replays both ways
+    await dialog.locator('button[aria-label="Back"]').click();
+    await expect(dialog.locator('.md-dialog-title')).toHaveText('@jarenjs/core');
+    await dialog.locator('button[aria-label="Forward"]').click();
+    await expect(dialog.locator('.md-dialog-title')).toHaveText('packages/core/docs/DATES.md');
+    await expect(dialog.locator('button[aria-label="Forward"]')).toBeDisabled();
+
+    expect(errors).toEqual([]);
+  });
+});

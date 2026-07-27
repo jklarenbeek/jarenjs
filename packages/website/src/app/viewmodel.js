@@ -14,7 +14,7 @@ import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
 import { PACKAGES } from '../content/packages.js';
 import { exampleSchemas } from '../content/schemas.js';
-import { md } from '../boundaries/markdown.js';
+import { md, rewriteReadmeLinks } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
@@ -175,7 +175,12 @@ const readmeOverlay = memo1((readme) => ({
   title: readme.title,
   status: readme.status,
   message: readme.message,
-  article: readme.source !== null ? md.view(readme.source) : null,
+  canBack: readme.at > 0,
+  canForward: readme.at < readme.stack.length - 1,
+  // repo-relative links inside the article navigate the dialog itself
+  article: readme.source !== null
+    ? rewriteReadmeLinks(md.view(readme.source), readme.url)
+    : null,
 }));
 
 const deriveNav = memo1((page) =>

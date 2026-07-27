@@ -246,6 +246,30 @@ export function createSiteApp(env) {
         dispatch('eng/load', { engine: props.engine, inputs: props.inputs });
       }
     },
+    // the README dialog's navigation trail: reset on open, push on an
+    // in-document link, and back/forward replay entries. The stack
+    // arithmetic lives here because a truncate-and-push is JS, not a
+    // patch; the state only ever changes through 'readme/history'.
+    'readme-hist': (props, dispatch) => {
+      const readme = app.getState().readme;
+      if (props.kind === 'reset') {
+        dispatch('readme/history', { stack: [{ title: props.title, url: props.url }], at: 0 });
+      }
+      else if (props.kind === 'push') {
+        // navigating from mid-trail drops the forward entries, exactly
+        // like a browser history
+        const stack = readme.stack.slice(0, readme.at + 1);
+        stack.push({ title: props.title, url: props.url });
+        dispatch('readme/history', { stack, at: stack.length - 1 });
+      }
+      else {
+        const at = props.kind === 'back' ? readme.at - 1 : readme.at + 1;
+        if (at < 0 || at >= readme.stack.length) return;
+        const entry = readme.stack[at];
+        dispatch('readme/history', { stack: readme.stack, at });
+        dispatch('readme/show', { title: entry.title, url: entry.url });
+      }
+    },
     // fetch a package README as raw text (cached per URL); the viewModel
     // parses + renders it through the @jarenjs/md component
     'readme-load': (props, dispatch) => {

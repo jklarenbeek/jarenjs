@@ -7,7 +7,11 @@
  * in the near-fullscreen dialog.
  */
 
-const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+/** The raw-content base every README (and README-relative doc) loads from. */
+export const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+
+/** The human-facing GitHub base for repo paths that are not Markdown. */
+export const REPO = 'https://github.com/jklarenbeek/jarenjs';
 
 /** @type {{ name: string, dir: string, blurb: string }[]} */
 const ENTRIES = [

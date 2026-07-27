@@ -213,7 +213,11 @@ export const ACTIONS = {
   'studio/template': { effects: [{ run: 'studio-template', with: { name: '$payload' } }] },
   'studio/download': { effects: [{ run: 'studio-download' }] },
 
-  // the package-README dialog: open (fetch), receive, fail, close
+  // the package-README dialog: open (fetch), receive, fail, close.
+  // Opening from the docs page starts a fresh navigation trail; a
+  // repo-relative link inside the rendered document navigates in place
+  // ('readme/navigate' pushes onto the trail), and back/forward replay
+  // it ('readme-hist' owns the stack arithmetic).
   'readme/open': {
     patch: [
       { op: 'replace', path: '/readme/open', value: true },
@@ -225,10 +229,51 @@ export const ACTIONS = {
     ],
     effects: [
       { run: 'lock-scroll', with: { on: true } },
+      { run: 'readme-hist', with: { kind: 'reset', title: '$payload.title', url: '$payload.url' } },
       {
         run: 'readme-load',
         with: { url: '$payload.url', done: 'readme/loaded', error: 'readme/failed' },
       },
+    ],
+  },
+  'readme/navigate': {
+    patch: [
+      { op: 'replace', path: '/readme/title', value: '$payload.title' },
+      { op: 'replace', path: '/readme/url', value: '$payload.url' },
+      { op: 'replace', path: '/readme/status', value: 'loading' },
+      { op: 'replace', path: '/readme/source', value: null },
+      { op: 'replace', path: '/readme/message', value: null },
+    ],
+    effects: [
+      { run: 'readme-hist', with: { kind: 'push', title: '$payload.title', url: '$payload.url' } },
+      {
+        run: 'readme-load',
+        with: { url: '$payload.url', done: 'readme/loaded', error: 'readme/failed' },
+      },
+    ],
+  },
+  // show a trail entry without changing the trail (back/forward land here)
+  'readme/show': {
+    patch: [
+      { op: 'replace', path: '/readme/title', value: '$payload.title' },
+      { op: 'replace', path: '/readme/url', value: '$payload.url' },
+      { op: 'replace', path: '/readme/status', value: 'loading' },
+      { op: 'replace', path: '/readme/source', value: null },
+      { op: 'replace', path: '/readme/message', value: null },
+    ],
+    effects: [
+      {
+        run: 'readme-load',
+        with: { url: '$payload.url', done: 'readme/loaded', error: 'readme/failed' },
+      },
+    ],
+  },
+  'readme/back': { effects: [{ run: 'readme-hist', with: { kind: 'back' } }] },
+  'readme/forward': { effects: [{ run: 'readme-hist', with: { kind: 'forward' } }] },
+  'readme/history': {
+    patch: [
+      { op: 'replace', path: '/readme/stack', value: '$payload.stack' },
+      { op: 'replace', path: '/readme/at', value: '$payload.at' },
     ],
   },
   'readme/loaded': {

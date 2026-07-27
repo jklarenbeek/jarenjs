@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/forms",
   "private": false,
-  "version": "0.22.6",
+  "version": "0.22.7",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -47,8 +47,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.22.6",
-    "@jarenjs/formats": "^0.22.6",
-    "@jarenjs/json": "^0.22.6"
+    "@jarenjs/core": "^0.22.7",
+    "@jarenjs/formats": "^0.22.7",
+    "@jarenjs/json": "^0.22.7"
   }
 }

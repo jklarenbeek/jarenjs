@@ -637,7 +637,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   font-family: var(--mono);
   font-size: 1rem;
 }
-.md-dialog-close {
+.md-dialog-close,
+.md-dialog-nav {
   flex: none;
   width: 2rem;
   height: 2rem;
@@ -652,6 +653,18 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .md-dialog-close:hover {
   border-color: var(--fail);
   color: var(--fail);
+}
+.md-dialog-navgroup {
+  display: flex;
+  gap: var(--space-2);
+}
+.md-dialog-nav:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.md-dialog-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .md-dialog-body {
   flex: 1;
@@ -682,7 +695,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
     padding-top: calc(var(--space-4) + env(safe-area-inset-top));
   }
   .md-dialog-body { padding: var(--space-4) var(--space-5); }
-  .md-dialog-close { width: 2.75rem; height: 2.75rem; }
+  .md-dialog-close, .md-dialog-nav { width: 2.75rem; height: 2.75rem; }
 }
 .md-dialog-status {
   color: var(--muted);

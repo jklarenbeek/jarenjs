@@ -99,7 +99,13 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     calc: calcInitialState(),    // the @jarenjs/calc sub-app slice
 
     // the package-README dialog: a fetched Markdown source rendered by
-    // the @jarenjs/md visual component in a near-fullscreen overlay
-    readme: { open: false, title: '', url: null, status: 'idle', source: null, message: null },
+    // the @jarenjs/md visual component in a near-fullscreen overlay.
+    // `stack`/`at` are the dialog's own navigation history — repo-
+    // relative links inside a README load in place, and back/forward
+    // walk the trail without touching the browser history.
+    readme: {
+      open: false, title: '', url: null, status: 'idle', source: null, message: null,
+      stack: [], at: -1,
+    },
   };
 }

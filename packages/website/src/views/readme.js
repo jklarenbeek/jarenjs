@@ -14,6 +14,24 @@ export const README_RULES = [
       ['div', { class: 'md-dialog-backdrop', on: { click: 'readme/close' } }],
       ['div', { class: 'md-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': '$.title' },
         ['div', { class: 'md-dialog-head' },
+          // the dialog's own history: repo-relative links navigate in
+          // place, and these replay the trail
+          ['div', { class: 'md-dialog-navgroup' },
+            ['button', {
+              type: 'button',
+              class: 'md-dialog-nav',
+              'aria-label': 'Back',
+              disabled: { $if: ['$.canBack', false, 'disabled'] },
+              on: { click: 'readme/back' },
+            }, '‹'],
+            ['button', {
+              type: 'button',
+              class: 'md-dialog-nav',
+              'aria-label': 'Forward',
+              disabled: { $if: ['$.canForward', false, 'disabled'] },
+              on: { click: 'readme/forward' },
+            }, '›'],
+          ],
           ['h2', { class: 'md-dialog-title' }, '$.title'],
           ['button', {
             type: 'button',

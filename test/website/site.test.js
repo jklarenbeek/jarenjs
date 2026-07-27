@@ -338,6 +338,95 @@ describe('website — the site as one app document', function () {
     assert.doesNotMatch(serialize(container), /md-dialog/, 'backdrop click closed it');
   });
 
+  const RAW_MAIN = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+  const README_DOCS = {
+    [`${RAW_MAIN}/packages/core/README.md`]:
+      '# core\n\nSee [DATES](./docs/DATES.md), [formats](../formats), [LICENSE](./LICENSE) and [spec](https://example.com/spec).\n',
+    [`${RAW_MAIN}/packages/core/docs/DATES.md`]:
+      '# dates doc\n\nBack to [the README](../README.md).\n',
+    [`${RAW_MAIN}/packages/formats/README.md`]: '# formats readme\n',
+  };
+
+  /** Open the @jarenjs/core README over the fixture documents. */
+  async function openCoreReadme() {
+    const urls = [];
+    const site = mountSite({
+      fetchText: (url) => {
+        urls.push(url);
+        return url in README_DOCS
+          ? Promise.resolve(README_DOCS[url])
+          : Promise.reject(new Error('404'));
+      },
+    });
+    site.go('#/docs');
+    fire(find(site.container, (n) => n.tagName === 'button'
+      && n.childNodes?.[0]?.nodeValue === '@jarenjs/core'), 'click');
+    await tick();
+    return { ...site, urls };
+  }
+
+  it('rewrites the repo-relative links of a rendered README', async function () {
+    const { container } = await openCoreReadme();
+
+    const dates = find(container, (n) => n.tagName === 'a'
+      && n.attributes?.get('href') === `${RAW_MAIN}/packages/core/docs/DATES.md`);
+    assert.notStrictEqual(dates, undefined, 'a relative .md link resolves against the raw base');
+
+    const license = find(container, (n) => n.tagName === 'a'
+      && n.attributes?.get('href') === 'https://github.com/jklarenbeek/jarenjs/blob/main/packages/core/LICENSE');
+    assert.notStrictEqual(license, undefined, 'a non-markdown file points at its GitHub page');
+    assert.strictEqual(license.attributes.get('target'), '_blank');
+
+    const external = find(container, (n) => n.tagName === 'a'
+      && n.attributes?.get('href') === 'https://example.com/spec');
+    assert.notStrictEqual(external, undefined, 'absolute links pass through untouched');
+    assert.strictEqual(external.attributes.get('target'), undefined);
+  });
+
+  it('a relative .md link navigates the dialog; back and forward replay the trail', async function () {
+    const { container, urls } = await openCoreReadme();
+
+    fire(find(container, (n) => n.tagName === 'a'
+      && n.childNodes?.[0]?.nodeValue === 'DATES'), 'click');
+    await tick();
+    let html = serialize(container);
+    assert.match(html, /class="md-dialog-title">packages\/core\/docs\/DATES\.md/,
+      'a navigated document is titled by its repo path');
+    assert.match(html, /dates doc/, 'the linked document rendered in place');
+    assert.strictEqual(urls[urls.length - 1], `${RAW_MAIN}/packages/core/docs/DATES.md`);
+
+    const back = find(container, (n) => n.attributes?.get('aria-label') === 'Back');
+    const forward = find(container, (n) => n.attributes?.get('aria-label') === 'Forward');
+    assert.notStrictEqual(back.attributes.get('disabled'), 'disabled', 'back is live mid-trail');
+
+    const fetches = urls.length;
+    fire(back, 'click');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /class="md-dialog-title">@jarenjs\/core/, 'back shows the README again');
+    assert.match(html, /and <a/, 'the original article is back');
+    assert.strictEqual(urls.length, fetches, 'the trail replays from the cache, not the network');
+
+    fire(forward, 'click');
+    await tick();
+    assert.match(serialize(container), /class="md-dialog-title">packages\/core\/docs\/DATES\.md/,
+      'forward returns to the navigated document');
+  });
+
+  it('a relative directory link opens that package README', async function () {
+    const { container } = await openCoreReadme();
+    const dir = find(container, (n) => n.tagName === 'a'
+      && n.childNodes?.[0]?.nodeValue === 'formats');
+    assert.strictEqual(dir.attributes.get('href'),
+      'https://github.com/jklarenbeek/jarenjs/tree/main/packages/formats',
+      'the href stays a real page for open-in-new-tab');
+    fire(dir, 'click');
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /class="md-dialog-title">packages\/formats\/README\.md/);
+    assert.match(html, /formats readme/);
+  });
+
   it('parseHash covers the route grammar', function () {
     assert.deepStrictEqual(parseHash('#/'), { page: 'home', params: {} });
     assert.deepStrictEqual(parseHash(''), { page: 'home', params: {} });
