@@ -103,7 +103,10 @@ test.describe('the README dialog over stubbed documents', () => {
     // deterministic offline READMEs: the dialog fetches raw.githubusercontent
     const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
     const DOCS = {
-      [`${RAW}/packages/core/README.md`]: '# core\n\nRead [DATES](./docs/DATES.md).\n',
+      // the .md link sits in the FIRST item of a FIRST-block list on
+      // purpose: fragment-shaped vnodes once skipped exactly that spot
+      [`${RAW}/packages/core/README.md`]:
+        '- Read [DATES](./docs/DATES.md)\n\nOr [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n',
       [`${RAW}/packages/core/docs/DATES.md`]: '# the dates kernel\n\nplain text body\n',
     };
     await page.route('https://raw.githubusercontent.com/**', (route) => {
@@ -131,6 +134,13 @@ test.describe('the README dialog over stubbed documents', () => {
     await dialog.locator('button[aria-label="Forward"]').click();
     await expect(dialog.locator('.md-dialog-title')).toHaveText('packages/core/docs/DATES.md');
     await expect(dialog.locator('button[aria-label="Forward"]')).toBeDisabled();
+
+    // a link to the site itself closes the dialog and routes in-app
+    await dialog.locator('button[aria-label="Back"]').click();
+    await dialog.locator('article.md a', { hasText: 'the benchmarks' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(page.url()).toContain('#/benchmarks?suite=geo');
+    await expect(page.locator('main.main')).toBeVisible();
 
     expect(errors).toEqual([]);
   });

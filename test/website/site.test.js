@@ -339,9 +339,16 @@ describe('website — the site as one app document', function () {
   });
 
   const RAW_MAIN = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+  // The list is deliberately the FIRST block and the .md link sits in its
+  // FIRST item: the md engine emits untagged fragment arrays, and a walk
+  // that mistakes a fragment for a tagged vnode skips exactly that
+  // first position (the original shipped bug).
   const README_DOCS = {
     [`${RAW_MAIN}/packages/core/README.md`]:
-      '# core\n\nSee [DATES](./docs/DATES.md), [formats](../formats), [LICENSE](./LICENSE) and [spec](https://example.com/spec).\n',
+      '![logo](../../jaren.png)\n\n'
+      + '- the reference is [DATES](./docs/DATES.md)\n'
+      + '- see [formats](../formats) and [LICENSE](./LICENSE)\n\n'
+      + 'More at [spec](https://example.com/spec) and [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n',
     [`${RAW_MAIN}/packages/core/docs/DATES.md`]:
       '# dates doc\n\nBack to [the README](../README.md).\n',
     [`${RAW_MAIN}/packages/formats/README.md`]: '# formats readme\n',
@@ -365,12 +372,13 @@ describe('website — the site as one app document', function () {
     return { ...site, urls };
   }
 
-  it('rewrites the repo-relative links of a rendered README', async function () {
+  it('rewrites the repo-relative links of a rendered README, lists included', async function () {
     const { container } = await openCoreReadme();
 
     const dates = find(container, (n) => n.tagName === 'a'
       && n.attributes?.get('href') === `${RAW_MAIN}/packages/core/docs/DATES.md`);
-    assert.notStrictEqual(dates, undefined, 'a relative .md link resolves against the raw base');
+    assert.notStrictEqual(dates, undefined,
+      'a relative .md link resolves against the raw base — even in the first item of the first list');
 
     const license = find(container, (n) => n.tagName === 'a'
       && n.attributes?.get('href') === 'https://github.com/jklarenbeek/jarenjs/blob/main/packages/core/LICENSE');
@@ -381,6 +389,21 @@ describe('website — the site as one app document', function () {
       && n.attributes?.get('href') === 'https://example.com/spec');
     assert.notStrictEqual(external, undefined, 'absolute links pass through untouched');
     assert.strictEqual(external.attributes.get('target'), undefined);
+
+    const image = find(container, (n) => n.tagName === 'img'
+      && n.attributes?.get('src') === `${RAW_MAIN}/jaren.png`);
+    assert.notStrictEqual(image, undefined, 'a relative image resolves against the raw base');
+  });
+
+  it('a link to the site itself closes the dialog and routes in-app', async function () {
+    const { container, hashes } = await openCoreReadme();
+    const bench = find(container, (n) => n.tagName === 'a'
+      && n.attributes?.get('href') === '#/benchmarks?suite=geo');
+    assert.notStrictEqual(bench, undefined, 'the site-absolute href becomes the in-app hash');
+    fire(bench, 'click');
+    await tick();
+    assert.doesNotMatch(serialize(container), /md-dialog/, 'the dialog closed');
+    assert.strictEqual(hashes[hashes.length - 1], '#/benchmarks?suite=geo', 'the router navigated');
   });
 
   it('a relative .md link navigates the dialog; back and forward replay the trail', async function () {

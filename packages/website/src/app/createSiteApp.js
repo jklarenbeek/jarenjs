@@ -246,6 +246,11 @@ export function createSiteApp(env) {
         dispatch('eng/load', { engine: props.engine, inputs: props.inputs });
       }
     },
+    // a README link to a published page routes in-app after the dialog
+    // closes (the action's patch already closed it)
+    'readme-goto': (props) => {
+      env.navigate?.(props.hash);
+    },
     // the README dialog's navigation trail: reset on open, push on an
     // in-document link, and back/forward replay entries. The stack
     // arithmetic lives here because a truncate-and-push is JS, not a

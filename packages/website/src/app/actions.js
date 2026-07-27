@@ -270,6 +270,14 @@ export const ACTIONS = {
   },
   'readme/back': { effects: [{ run: 'readme-hist', with: { kind: 'back' } }] },
   'readme/forward': { effects: [{ run: 'readme-hist', with: { kind: 'forward' } }] },
+  // a README link to the site itself: close the dialog and route in-app
+  'readme/goto': {
+    patch: [{ op: 'replace', path: '/readme/open', value: false }],
+    effects: [
+      { run: 'lock-scroll', with: { on: false } },
+      { run: 'readme-goto', with: { hash: '$payload.hash' } },
+    ],
+  },
   'readme/history': {
     patch: [
       { op: 'replace', path: '/readme/stack', value: '$payload.stack' },

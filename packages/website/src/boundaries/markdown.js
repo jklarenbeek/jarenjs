@@ -35,12 +35,21 @@ export const md = createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin
 //                      open-in-new-tab keeps working
 //   a directory     -> that directory's README.md, in the dialog
 //   any other file  -> the human-facing GitHub page, in a new tab
+//   the site itself -> close the dialog and route in-app: an absolute
+//                      link to a published page would otherwise change
+//                      the hash BEHIND the open modal, which reads as a
+//                      dead link
 //
-// Absolute URLs, mailto: and in-page #anchors pass through untouched.
-// The dialog's title for a navigated document is its repo path — the
-// package names belong to the docs page's own buttons.
+// Relative image sources resolve to the raw base the same way, so a
+// README's own images load. Other absolute URLs, mailto: and in-page
+// #anchors pass through untouched. The dialog's title for a navigated
+// document is its repo path — the package names belong to the docs
+// page's own buttons.
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/** The published site root: absolute links here route in-app instead. */
+const SITE = 'https://jklarenbeek.github.io/jarenjs/';
 
 /** A dot in the last path segment means a file, not a directory —
  * except the all-caps extensionless files (LICENSE) which are files. */
@@ -55,7 +64,21 @@ function isDirectoryPath(path) {
 function rewriteAnchor(props, base) {
   const href = props.href;
   if (typeof href !== 'string' || href === '' || href.startsWith('#')
-    || href.startsWith('//') || SCHEME.test(href))
+    || href.startsWith('//'))
+    return null;
+  if (href.startsWith(SITE)) {
+    // a link to the site the reader is already on: routing behind an
+    // open modal is invisible, so close the dialog and navigate
+    const hash = href.slice(SITE.length) || '#/';
+    return {
+      ...props,
+      href: hash,
+      on: {
+        click: { action: 'readme/goto', with: { hash }, preventDefault: true },
+      },
+    };
+  }
+  if (SCHEME.test(href))
     return null;
   let resolved;
   try {
@@ -98,15 +121,44 @@ function rewriteAnchor(props, base) {
   return { ...props, href: `${REPO}/blob/main/${repoPath}`, target: '_blank', rel: 'noopener' };
 }
 
+/** A relative image source, resolved against the raw base, or null. */
+function rewriteImage(props, base) {
+  const src = props.src;
+  if (typeof src !== 'string' || src === '' || src.startsWith('#')
+    || src.startsWith('//') || SCHEME.test(src))
+    return null;
+  try {
+    return { ...props, src: new URL(src, base).href };
+  }
+  catch {
+    return null;
+  }
+}
+
 /** Walk a vnode, rebuilding only the paths that actually change. */
 function rewriteNode(node, base) {
   if (!Array.isArray(node))
     return node;
+  // a FRAGMENT — an array of vnodes with no tag — walks from index 0;
+  // treating it as a tagged vnode would skip its first child, which is
+  // exactly where a document's first list or paragraph lives
+  if (typeof node[0] !== 'string') {
+    let out = node;
+    for (let i = 0; i < node.length; i++) {
+      const child = rewriteNode(node[i], base);
+      if (child !== node[i]) {
+        if (out === node)
+          out = node.slice();
+        out[i] = child;
+      }
+    }
+    return out;
+  }
   const props = node.length > 1 && node[1] !== null && typeof node[1] === 'object'
     && !Array.isArray(node[1]) ? node[1] : null;
   let out = node;
-  if (node[0] === 'a' && props !== null) {
-    const rewritten = rewriteAnchor(props, base);
+  if (props !== null && (node[0] === 'a' || node[0] === 'img')) {
+    const rewritten = node[0] === 'a' ? rewriteAnchor(props, base) : rewriteImage(props, base);
     if (rewritten !== null) {
       out = node.slice();
       out[1] = rewritten;
