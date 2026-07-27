@@ -226,3 +226,108 @@ export function deriveJsltDefs(querySchema) {
   });
   return derived;
 }
+
+/**
+ * The shoelace sum of one linear ring, as a query expression over a
+ * variable `$r` bound to the ring. Positive is counter-clockwise, which
+ * is the winding RFC 7946 requires of an exterior ring.
+ * @returns {object} a Jaren JSON Query expression
+ */
+function shoelaceOfRing() {
+  return {
+    $fold: { s: 0 },
+    $for: { i: { $range: [0, { $sub: [{ $count: '$r[*]' }, 2] }] } },
+    $let: { p: { $get: ['$r', '$i'] }, q: { $get: ['$r', { $add: ['$i', 1] }] } },
+    $return: {
+      $add: ['$s', {
+        $sub: [
+          { $mul: [{ $get: ['$p', 0] }, { $get: ['$q', 1] }] },
+          { $mul: [{ $get: ['$q', 0] }, { $get: ['$p', 1] }] },
+        ],
+      }],
+    },
+  };
+}
+
+/**
+ * The two ring invariants, as a query expression over a variable
+ * `$rings` bound to a polygon's ring array: every ring is closed, the
+ * exterior ring winds counter-clockwise, and every hole winds clockwise.
+ *
+ * Rings are addressed by index rather than iterated, because the D4
+ * rule unpacks an array item into its members — `$for`/`$every` over a
+ * ring would bind positions, not the ring.
+ *
+ * @returns {object} a Jaren JSON Query expression
+ */
+function ringInvariants() {
+  const ringAt = (index) => ({ $get: ['$rings', index] });
+  return {
+    $and: [
+      {
+        $every: { i: { $range: [0, { $sub: [{ $count: '$rings[*]' }, 1] }] } },
+        $satisfies: {
+          $let: { r: ringAt('$i') },
+          $return: { $eq: [{ $get: ['$r', 0] }, { $get: ['$r', -1] }] },
+        },
+      },
+      { $gt: [{ $let: { r: ringAt(0) }, $return: shoelaceOfRing() }, 0] },
+      {
+        $every: { h: { $range: [1, { $sub: [{ $count: '$rings[*]' }, 1] }] } },
+        $satisfies: { $lt: [{ $let: { r: ringAt('$h') }, $return: shoelaceOfRing() }, 0] },
+      },
+    ],
+  };
+}
+
+/**
+ * Derive the Jaren-flavoured GeoJSON artifact from the portable one, by
+ * attaching the `$query` assertions that plain JSON Schema provably
+ * cannot express: linear-ring closure and the right-hand rule.
+ *
+ * The transform is a pure RESTRICTION and touches only the `polygon` and
+ * `multiPolygon` definitions — every other definition is copied
+ * verbatim, so the two artifacts cannot drift structurally.
+ *
+ * @param {object} schema - the portable geojson.schema.json
+ * @returns {object} the derived artifact
+ */
+export function deriveGeoJsonInvariants(schema) {
+  const defs = schema?.$defs;
+  if (defs === null || typeof defs !== 'object' || Array.isArray(defs))
+    throw new TypeError('geojson schema contract changed: missing object $defs');
+  for (const name of ['polygon', 'multiPolygon']) {
+    if (defs[name] === undefined)
+      throw new TypeError(`geojson schema contract changed: missing $defs.${name}`);
+    if (Object.hasOwn(defs[name], '$query'))
+      throw new TypeError(`geojson schema contract changed: $defs.${name}.$query already exists`);
+  }
+
+  const out = structuredClone(schema);
+  out.$id = 'https://jarenjs.dev/schemas/geojson-jaren';
+  out.title = 'GeoJSON (RFC 7946), fully validated';
+  out.description = 'GeoJSON with the two invariants plain JSON Schema cannot '
+    + 'express, added through the Jaren $query keyword: every linear ring is '
+    + 'closed (its first position equals its last), and rings follow the '
+    + 'right-hand rule of RFC 7946 section 3.1.6 (the exterior ring winds '
+    + 'counter-clockwise, holes wind clockwise). Structurally this is '
+    + 'geojson.schema.json unchanged; a validator without $query support sees '
+    + 'the same grammar. Winding is decided by the sign of the shoelace sum, '
+    + 'and rings are addressed by index because the D4 iteration rule would '
+    + 'unpack a ring into its positions.';
+
+  // a polygon's own coordinates ARE the ring array
+  out.$defs.polygon.$query = {
+    $let: { rings: '$.coordinates' },
+    $return: ringInvariants(),
+  };
+  // a multipolygon's coordinates are a list of those
+  out.$defs.multiPolygon.$query = {
+    $every: { p: { $range: [0, { $sub: [{ $count: '$.coordinates[*]' }, 1] }] } },
+    $satisfies: {
+      $let: { rings: { $get: ['$.coordinates', '$p'] } },
+      $return: ringInvariants(),
+    },
+  };
+  return out;
+}

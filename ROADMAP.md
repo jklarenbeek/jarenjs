@@ -294,8 +294,10 @@ thing to avoid.
 ## Geospatial (cross-package)
 
 A PostGIS-shaped capability, ordered so each phase is independently useful.
-The suite has **no** spatial code today, so this is a clean slate — but less
-of one than it looks: `Vec2f64.cross3` already *is* the signed-orientation
+The kernel (`@jarenjs/core/geo/*`) and the GeoJSON meta-schema are done; what
+they do is documented in `packages/core/ARCHITECTURE.md` and the `@jarenjs/json`
+README. Six entries are left. The suite had **no** spatial code before this, so
+it was a clean slate — but less of one than it looked: `Vec2f64.cross3` already *is* the signed-orientation
 predicate ("which side of the line is point c on"), documented as such and
 used by nothing, and the `convert` registry already ships `length` (with
 `nmi`), `area`, `speed` (with `knot`) and `angle` dimensions, so a distance
@@ -319,33 +321,6 @@ exist. And equirectangular distance is 0.02% off at 430 km but 12.4% off
 intercontinentally, at 2.0 ns against haversine's 13.6 ns — so the design is
 screen-then-refine, the same build-then-probe shape as the hash join.
 
-- [ ] **The geo kernel (`@jarenjs/core/geo/*`)** — everything below needs
-  orientation, distance, bounding boxes, ring area and winding,
-  point-in-polygon and geohash, and none of it exists. The constraint that
-  decides the design is **robustness, not speed**: a naive floating-point
-  orientation test returns the wrong sign on near-collinear input, which is
-  how a clipper emits self-intersecting output and a containment test
-  contradicts itself. The failure needs adversarial input — attempts to
-  provoke it with ordinary coordinates in antisymmetry and permutation tests
-  did not trigger it — so it passes a test suite and fails on real OSM data.
-  [Shewchuk's adaptive predicates](https://github.com/mourner/robust-predicates)
-  are the standard answer and are pure arithmetic with no dependencies, so
-  they fit the house rules, but they have to be in from the start rather than
-  retrofitted under a working-looking implementation.
-- [ ] **A GeoJSON meta-schema that actually validates** — the highest-value,
-  lowest-risk piece, and the one nobody else ships. The
-  [official GeoJSON JSON Schema](https://github.com/geojson/schema) states
-  that it *cannot* express that a linear ring is closed or that it follows the
-  right-hand rule, so every validator in the ecosystem bolts on custom code —
-  and unclosed rings and reversed winding (which makes a renderer fill the
-  entire globe) are among the
-  [most common real-world defects](https://github.com/chrieke/geojson-invalid-geometry).
-  Jaren is the one stack that can express both *inside the schema*, through
-  `$query`: ring closure is `$eq` of the first and last position, and winding
-  is the sign of the shoelace sum, both verified working against the shipped
-  engine. The constraint is portability — the structural half must stay plain
-  draft-neutral JSON Schema so the artifact is useful to consumers without
-  Jaren, with the geometric invariants as a `$query` layer they can ignore.
 - [ ] **Spatial query operators** — PostGIS's `ST_*` set as query vocabulary:
   `$distance`, `$within`, `$intersects`, `$bbox`, `$area`, `$length`,
   `$centroid`, `$geohash`. The ergonomic reason these must be operators rather

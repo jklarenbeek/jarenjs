@@ -1,0 +1,863 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/geojson-jaren",
+  "title": "GeoJSON (RFC 7946), fully validated",
+  "description": "GeoJSON with the two invariants plain JSON Schema cannot express, added through the Jaren $query keyword: every linear ring is closed (its first position equals its last), and rings follow the right-hand rule of RFC 7946 section 3.1.6 (the exterior ring winds counter-clockwise, holes wind clockwise). Structurally this is geojson.schema.json unchanged; a validator without $query support sees the same grammar. Winding is decided by the sign of the shoelace sum, and rings are addressed by index because the D4 iteration rule would unpack a ring into its positions.",
+  "allOf": [
+    {
+      "$ref": "#/$defs/geoJsonObject"
+    }
+  ],
+  "$defs": {
+    "geoJsonObject": {
+      "description": "Any GeoJSON object: a geometry, a Feature, or a FeatureCollection.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/geometry"
+        },
+        {
+          "$ref": "#/$defs/feature"
+        },
+        {
+          "$ref": "#/$defs/featureCollection"
+        }
+      ]
+    },
+    "geometry": {
+      "description": "One of the seven geometry types of RFC 7946 section 3.1.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/point"
+        },
+        {
+          "$ref": "#/$defs/multiPoint"
+        },
+        {
+          "$ref": "#/$defs/lineString"
+        },
+        {
+          "$ref": "#/$defs/multiLineString"
+        },
+        {
+          "$ref": "#/$defs/polygon"
+        },
+        {
+          "$ref": "#/$defs/multiPolygon"
+        },
+        {
+          "$ref": "#/$defs/geometryCollection"
+        }
+      ]
+    },
+    "position": {
+      "description": "A position: longitude, latitude, and optionally altitude, in that order (RFC 7946 section 3.1.1). Longitude and latitude are bounded because the coordinate reference system is fixed to WGS 84.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        }
+      ],
+      "items": {
+        "type": "number"
+      }
+    },
+    "linearRing": {
+      "description": "A closed LineString of four or more positions. JSON Schema can require the count but NOT that the first and last positions are equal, which is why this artifact alone cannot fully validate a polygon.",
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "$ref": "#/$defs/position"
+      }
+    },
+    "bbox": {
+      "description": "All axes of the most south-westerly position followed by all axes of the more north-easterly one (RFC 7946 section 5): four numbers in two dimensions, six in three.",
+      "type": "array",
+      "oneOf": [
+        {
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "minItems": 6,
+          "maxItems": 6
+        }
+      ],
+      "items": {
+        "type": "number"
+      }
+    },
+    "point": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Point"
+        },
+        "coordinates": {
+          "$ref": "#/$defs/position"
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false
+    },
+    "multiPoint": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "MultiPoint"
+        },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/position"
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false
+    },
+    "lineString": {
+      "description": "Two or more positions (RFC 7946 section 3.1.4).",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "LineString"
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/position"
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false
+    },
+    "multiLineString": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "MultiLineString"
+        },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "$ref": "#/$defs/position"
+            }
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false
+    },
+    "polygon": {
+      "description": "An array of linear rings: the exterior ring first, then holes (RFC 7946 section 3.1.6). Ring closure and the right-hand rule are NOT checked here - see this schema's description.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Polygon"
+        },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/linearRing"
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false,
+      "$query": {
+        "$let": {
+          "rings": "$.coordinates"
+        },
+        "$return": {
+          "$and": [
+            {
+              "$every": {
+                "i": {
+                  "$range": [
+                    0,
+                    {
+                      "$sub": [
+                        {
+                          "$count": "$rings[*]"
+                        },
+                        1
+                      ]
+                    }
+                  ]
+                }
+              },
+              "$satisfies": {
+                "$let": {
+                  "r": {
+                    "$get": [
+                      "$rings",
+                      "$i"
+                    ]
+                  }
+                },
+                "$return": {
+                  "$eq": [
+                    {
+                      "$get": [
+                        "$r",
+                        0
+                      ]
+                    },
+                    {
+                      "$get": [
+                        "$r",
+                        -1
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "$gt": [
+                {
+                  "$let": {
+                    "r": {
+                      "$get": [
+                        "$rings",
+                        0
+                      ]
+                    }
+                  },
+                  "$return": {
+                    "$fold": {
+                      "s": 0
+                    },
+                    "$for": {
+                      "i": {
+                        "$range": [
+                          0,
+                          {
+                            "$sub": [
+                              {
+                                "$count": "$r[*]"
+                              },
+                              2
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "$let": {
+                      "p": {
+                        "$get": [
+                          "$r",
+                          "$i"
+                        ]
+                      },
+                      "q": {
+                        "$get": [
+                          "$r",
+                          {
+                            "$add": [
+                              "$i",
+                              1
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "$return": {
+                      "$add": [
+                        "$s",
+                        {
+                          "$sub": [
+                            {
+                              "$mul": [
+                                {
+                                  "$get": [
+                                    "$p",
+                                    0
+                                  ]
+                                },
+                                {
+                                  "$get": [
+                                    "$q",
+                                    1
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "$mul": [
+                                {
+                                  "$get": [
+                                    "$q",
+                                    0
+                                  ]
+                                },
+                                {
+                                  "$get": [
+                                    "$p",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                0
+              ]
+            },
+            {
+              "$every": {
+                "h": {
+                  "$range": [
+                    1,
+                    {
+                      "$sub": [
+                        {
+                          "$count": "$rings[*]"
+                        },
+                        1
+                      ]
+                    }
+                  ]
+                }
+              },
+              "$satisfies": {
+                "$lt": [
+                  {
+                    "$let": {
+                      "r": {
+                        "$get": [
+                          "$rings",
+                          "$h"
+                        ]
+                      }
+                    },
+                    "$return": {
+                      "$fold": {
+                        "s": 0
+                      },
+                      "$for": {
+                        "i": {
+                          "$range": [
+                            0,
+                            {
+                              "$sub": [
+                                {
+                                  "$count": "$r[*]"
+                                },
+                                2
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "$let": {
+                        "p": {
+                          "$get": [
+                            "$r",
+                            "$i"
+                          ]
+                        },
+                        "q": {
+                          "$get": [
+                            "$r",
+                            {
+                              "$add": [
+                                "$i",
+                                1
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "$return": {
+                        "$add": [
+                          "$s",
+                          {
+                            "$sub": [
+                              {
+                                "$mul": [
+                                  {
+                                    "$get": [
+                                      "$p",
+                                      0
+                                    ]
+                                  },
+                                  {
+                                    "$get": [
+                                      "$q",
+                                      1
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "$mul": [
+                                  {
+                                    "$get": [
+                                      "$q",
+                                      0
+                                    ]
+                                  },
+                                  {
+                                    "$get": [
+                                      "$p",
+                                      1
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "multiPolygon": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "MultiPolygon"
+        },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/linearRing"
+            }
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false,
+      "$query": {
+        "$every": {
+          "p": {
+            "$range": [
+              0,
+              {
+                "$sub": [
+                  {
+                    "$count": "$.coordinates[*]"
+                  },
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        "$satisfies": {
+          "$let": {
+            "rings": {
+              "$get": [
+                "$.coordinates",
+                "$p"
+              ]
+            }
+          },
+          "$return": {
+            "$and": [
+              {
+                "$every": {
+                  "i": {
+                    "$range": [
+                      0,
+                      {
+                        "$sub": [
+                          {
+                            "$count": "$rings[*]"
+                          },
+                          1
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "$satisfies": {
+                  "$let": {
+                    "r": {
+                      "$get": [
+                        "$rings",
+                        "$i"
+                      ]
+                    }
+                  },
+                  "$return": {
+                    "$eq": [
+                      {
+                        "$get": [
+                          "$r",
+                          0
+                        ]
+                      },
+                      {
+                        "$get": [
+                          "$r",
+                          -1
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "$gt": [
+                  {
+                    "$let": {
+                      "r": {
+                        "$get": [
+                          "$rings",
+                          0
+                        ]
+                      }
+                    },
+                    "$return": {
+                      "$fold": {
+                        "s": 0
+                      },
+                      "$for": {
+                        "i": {
+                          "$range": [
+                            0,
+                            {
+                              "$sub": [
+                                {
+                                  "$count": "$r[*]"
+                                },
+                                2
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "$let": {
+                        "p": {
+                          "$get": [
+                            "$r",
+                            "$i"
+                          ]
+                        },
+                        "q": {
+                          "$get": [
+                            "$r",
+                            {
+                              "$add": [
+                                "$i",
+                                1
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "$return": {
+                        "$add": [
+                          "$s",
+                          {
+                            "$sub": [
+                              {
+                                "$mul": [
+                                  {
+                                    "$get": [
+                                      "$p",
+                                      0
+                                    ]
+                                  },
+                                  {
+                                    "$get": [
+                                      "$q",
+                                      1
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "$mul": [
+                                  {
+                                    "$get": [
+                                      "$q",
+                                      0
+                                    ]
+                                  },
+                                  {
+                                    "$get": [
+                                      "$p",
+                                      1
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              {
+                "$every": {
+                  "h": {
+                    "$range": [
+                      1,
+                      {
+                        "$sub": [
+                          {
+                            "$count": "$rings[*]"
+                          },
+                          1
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "$satisfies": {
+                  "$lt": [
+                    {
+                      "$let": {
+                        "r": {
+                          "$get": [
+                            "$rings",
+                            "$h"
+                          ]
+                        }
+                      },
+                      "$return": {
+                        "$fold": {
+                          "s": 0
+                        },
+                        "$for": {
+                          "i": {
+                            "$range": [
+                              0,
+                              {
+                                "$sub": [
+                                  {
+                                    "$count": "$r[*]"
+                                  },
+                                  2
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "$let": {
+                          "p": {
+                            "$get": [
+                              "$r",
+                              "$i"
+                            ]
+                          },
+                          "q": {
+                            "$get": [
+                              "$r",
+                              {
+                                "$add": [
+                                  "$i",
+                                  1
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "$return": {
+                          "$add": [
+                            "$s",
+                            {
+                              "$sub": [
+                                {
+                                  "$mul": [
+                                    {
+                                      "$get": [
+                                        "$p",
+                                        0
+                                      ]
+                                    },
+                                    {
+                                      "$get": [
+                                        "$q",
+                                        1
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "$mul": [
+                                    {
+                                      "$get": [
+                                        "$q",
+                                        0
+                                      ]
+                                    },
+                                    {
+                                      "$get": [
+                                        "$p",
+                                        1
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    0
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "geometryCollection": {
+      "description": "A heterogeneous collection of geometries. RFC 7946 section 3.1.8 advises against nesting one inside another.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "GeometryCollection"
+        },
+        "geometries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/geometry"
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "geometries"
+      ],
+      "additionalProperties": false
+    },
+    "feature": {
+      "description": "A geometry with properties. Both members are REQUIRED and both are nullable (RFC 7946 section 3.2).",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Feature"
+        },
+        "geometry": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/geometry"
+            }
+          ]
+        },
+        "properties": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "geometry",
+        "properties"
+      ],
+      "additionalProperties": false
+    },
+    "featureCollection": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "FeatureCollection"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feature"
+          }
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      },
+      "required": [
+        "type",
+        "features"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

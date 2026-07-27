@@ -431,6 +431,28 @@ The complete structural grammar of the language is published as JSON Schema, twi
 
 Both exist because the schema is authored in a draft-neutral keyword subset (no `$ref` siblings, no `unevaluated*`, no tuples), so ecosystems pinned to draft-07 — several structured-output stacks among them — get an identical grammar for one `$defs`→`definitions` rename. Every fixture in the test suite validates under both drafts.
 
+### GeoJSON, fully validated
+
+The same machinery answers a problem the geospatial ecosystem has lived with for years. The [official GeoJSON JSON Schema](https://github.com/geojson/schema) states that it **cannot** express that a linear ring is closed, or that rings follow RFC 7946's right-hand rule — neither is a structural property — so every validator bolts on custom code, and unclosed rings and reversed winding (which makes a renderer fill the entire globe) remain among the commonest defects in real data.
+
+Three artifacts ship here:
+
+- [`schemas/geojson.schema.json`](./schemas/geojson.schema.json) — **portable**: plain draft-neutral JSON Schema, no Jaren extension, usable by any validator;
+- [`schemas/geojson.draft-07.schema.json`](./schemas/geojson.draft-07.schema.json) — its mechanically derived draft-07 twin;
+- [`schemas/geojson.jaren.schema.json`](./schemas/geojson.jaren.schema.json) — the same grammar plus the two missing invariants, expressed with [`$query`](../validate).
+
+The Jaren artifact is a mechanical *restriction* of the portable one — structurally identical, with a `$query` on the `polygon` and `multiPolygon` definitions — so the two cannot drift, and a consumer without `$query` support still gets the standard grammar. Ring closure is `$eq` of the first and last position; winding is the sign of the shoelace sum, computed with `$fold`:
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
+const unclosed = { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1]]] };
+new JarenValidator().compile(portableSchema)(unclosed);  // true  — structurally fine
+new JarenValidator().compile(jarenSchema)(unclosed);     // false — the ring never closes
+```
+
+The test suite pins six defect classes that slip past structural validation and are caught here, including one buried inside a `FeatureCollection`.
+
 ## Generating queries with LLMs
 
 A query language whose entire grammar is one JSON Schema is a natural fit for **constrained decoding** — the structured-output mode of every major LLM API. Hand the schema to the provider and the model cannot emit an unknown operator, a three-argument `$eq`, or a mixed `$`/plain-key object; what remains is validated and compiled in two lines, and every failure carries a `docPath` you can feed back to the model for repair:
