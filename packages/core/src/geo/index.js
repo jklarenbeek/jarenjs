@@ -19,6 +19,8 @@
 //   bbox.js        bounding boxes: the cheap half of every spatial test
 //   geohash.js     the string encoding that needs no new vocabulary
 //   geojson.js     the one layer that knows the `type` discriminator
+//   valid.js       the one-call structural judgment (rings must close)
+//   wkt.js         a validity tester for the databases' text encoding
 //   index-tree.js  a static packed-Hilbert box index for spatial joins
 //   mercator.js    the projection out, for anything that draws a map
 //   simplify.js    dropping the vertices that land on the same pixel
@@ -40,6 +42,8 @@ export * from './ring.js';
 export * from './bbox.js';
 export * from './geohash.js';
 export * from './geojson.js';
+export * from './valid.js';
+export * from './wkt.js';
 export * from './index-tree.js';
 export * from './mercator.js';
 export * from './simplify.js';

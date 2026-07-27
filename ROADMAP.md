@@ -295,14 +295,12 @@ thing to avoid.
 
 A PostGIS-shaped capability, ordered so each phase is independently useful.
 The kernel (`@jarenjs/core/geo/*`), the GeoJSON meta-schema, the spatial query
-operators and the spatial-join index are done; what they do is documented in
-`packages/core/ARCHITECTURE.md`, `packages/json/ARCHITECTURE.md`,
-QUERY-FORMAT.md §8.14 and the `@jarenjs/json` README. Four entries are left. The suite had **no** spatial code before this, so
-it was a clean slate — but less of one than it looked: `Vec2f64.cross3` already *is* the signed-orientation
-predicate ("which side of the line is point c on"), documented as such and
-used by nothing, and the `convert` registry already ships `length` (with
-`nmi`), `area`, `speed` (with `knot`) and `angle` dimensions, so a distance
-operator can answer in nautical miles without new unit machinery.
+operators, the spatial-join index, the `geoFormats` group (`geohash`/`wkt`/
+`geojson`), the streaming map accumulator and the published benchmark suite
+are done; what they do is documented in `packages/core/ARCHITECTURE.md`,
+`packages/json/ARCHITECTURE.md`, QUERY-FORMAT.md §8.14 and the
+`@jarenjs/json`, `@jarenjs/formats` and `@jarenjs/charts` READMEs. One entry
+is left.
 
 **The representation is GeoJSON, and there is no geometry type.**
 [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) is a closed JSON
@@ -315,61 +313,13 @@ conformance rather than by omission: no SRID table, no `proj4`, and no
 geometry/geography duality to model. Web Mercator is needed only for
 rendering, and is a projection *out*, not a CRS system.
 
-Two measured facts set the shape of the kernel. Treating lon/lat as planar
-x/y is **64% wrong at 1 km** at 52°N, because a degree of longitude shrinks
-with latitude — so "just use `vec2`" is not an option and a real module has to
-exist. And equirectangular distance is 0.02% off at 430 km but 12.4% off
-intercontinentally, at 2.0 ns against haversine's 13.6 ns — so the design is
-screen-then-refine, the same build-then-probe shape as the hash join.
-
-- [ ] **Close the two remaining spatial benchmark losses** — `npm run
-  benchmark:geo` measures this kernel against Turf, geolib and Flatbush and
-  asserts result equivalence before timing; the table lives in
-  `packages/core/ARCHITECTURE.md`. Two rows are losses with a known cause.
-  **Index build** is ~2.6x slower than Flatbush (31 ms against 12 ms for 100k
-  boxes) because the leaf sort permutes the bounds array on every swap; sorting
-  an index array and permuting once at the end is the fix, and probe — the
-  operation a join actually repeats — is already level. **Centroid** on a
-  2000-vertex ring is 1.4x slower than Turf and is *not* diagnosed: it walks
-  the same `eachPosition` callback that `bboxOf` uses to beat Turf on the same
-  ring, so the difference is unexplained rather than inherent, and guessing
-  before profiling is how the last two optimizations nearly went wrong. The
-  third loss — point-in-polygon at half Turf's speed on a large ring — is
-  deliberate and stays: it is the exact orientation predicate, and giving it up
-  would trade a right answer for a fast one.
-
-- [ ] **Publish the geo suite to the Benchmarks page** — `benchmark/geo.js`
-  already measures against Turf, geolib and Flatbush and writes JSON with
-  `--filepath`, but it was never wired into `benchmark/website-data.js`, so the
-  page shows fourteen suites and not this one. The wiring is small; what makes
-  it more than a patch is that the page's overview row is *derived from every
-  suite*, so adding a fifteenth moves a published number, and a full
-  `benchmark:generate` rewrites every tracked timing with whatever machine ran
-  it. Generate the geo file alone (`--skip` the rest), and re-derive the
-  overview deliberately.
-- [ ] **A `geoFormats` group in `@jarenjs/formats`** — `geohash`, `wkt` and a
-  `geojson` tester alongside the four existing groups. Mechanically this is a
-  new `src/geo.js` exporting `formatValidators`, one `export` line in
-  `index.js` and a tester bundle; the open question is whether `geojson` as a
-  *format* earns its place next to the meta-schema, which validates the same
-  thing more thoroughly.
-- [ ] **A streaming map chart** — now that a FeatureCollection can be read
-  with bounded memory, the remaining gap is drawing one that way. The charts
-  stream adapter accumulates flat scalar fields into records, which a nested
-  Feature is not, and an accumulator that simply kept every feature would give
-  back exactly the memory `detach` just saved. The honest version projects and
-  simplifies each feature on arrival and keeps only the unit-space rings —
-  which needs the projection fitted before the last feature has been seen, so
-  it is a two-pass or a refit-on-growth design. Worth doing only if a real
-  document wants it; aggregating while streaming (count, bin, bound) covers
-  the cases seen so far, and `test/josl/geojson-stream.test.js` is that shape.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and
-  a half-correct clipper is worse than none. Ship the rest first, benchmark
-  honestly against [Turf](https://github.com/Turfjs/turf) (~796k weekly
-  downloads) and JSTS (~577k), and record the loss here rather than pretending
-  the gap is small.
+  a half-correct clipper is worse than none. Everything before it has shipped,
+  so if this is ever built it starts by benchmarking honestly against
+  [Turf](https://github.com/Turfjs/turf) (~796k weekly downloads) and JSTS
+  (~577k), and records the loss here rather than pretending the gap is small.
 
 ## Benchmarks & tooling
 

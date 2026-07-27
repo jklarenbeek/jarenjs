@@ -251,15 +251,16 @@ export function geometryLength(value, radius = EARTH_RADIUS) {
  * @returns {[number, number] | null}
  */
 export function centroidOf(value) {
-  let sumX = 0;
-  let sumY = 0;
-  let count = 0;
+  // typed accumulators, not closure variables: a captured `sum += p[0]`
+  // writes a boxed heap number per vertex, and this is two of those per
+  // vertex on a walk whose other work is four comparisons
+  const acc = new Float64Array(3);
   eachPosition(value, (p) => {
-    sumX += p[0];
-    sumY += p[1];
-    count++;
+    acc[0] += p[0];
+    acc[1] += p[1];
+    acc[2]++;
   });
-  return count === 0 ? null : [sumX / count, sumY / count];
+  return acc[2] === 0 ? null : [acc[0] / acc[2], acc[1] / acc[2]];
 }
 
 /**

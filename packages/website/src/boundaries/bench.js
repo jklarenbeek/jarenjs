@@ -40,6 +40,7 @@ export const SUITES = [
   { key: 'mermaid', label: 'Mermaid' },
   { key: 'view', label: 'View' },
   { key: 'charts', label: 'Charts' },
+  { key: 'geo', label: 'Geo' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -68,6 +69,7 @@ export function deriveSuite(state, suite) {
     case 'mermaid': return mermaid(data);
     case 'view': return view(data);
     case 'charts': return chartsSuite(data);
+    case 'geo': return geoSuite(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -873,6 +875,79 @@ function chartsSuite(data) {
     ['Scenario', 'ns per chart'],
     (data.types ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
     `${data.iterations ?? '?'} iterations; definition plus data to a geometry-free AST to pure vnodes.`));
+  return out;
+}
+
+/** The geo suite chart, rebuilt only when the suite data reloads. */
+const geoCharts = memo1((data) => [chartNode(
+  profileBars(
+    (data.rows ?? []).filter((r) => r.rival !== null).map((r) => ({
+      name: r.name,
+      results: { jaren: r.ours, [r.rivalName]: r.rival },
+    })),
+    ['jaren', 'turf', 'geolib', 'flatbush'],
+    { title: 'Spatial kernel vs the field, ns per op (log)', log: true, valLabel: 'ns/op (log)' }),
+  'Each scenario against the rival that owns it: Turf for GeoJSON measurement, geolib for distance, Flatbush for the static box index.')]);
+
+/**
+ * The geo suite: the spatial kernel against Turf, geolib and Flatbush,
+ * with the result-equivalence checks that gate the timings shown as
+ * their own table — a spatial library that is fast and wrong is worse
+ * than one that is neither, so the agreement is the headline claim and
+ * the speed the second one.
+ */
+function geoSuite(data) {
+  const rows = data.rows ?? [];
+  const checks = data.checks ?? [];
+  const agreed = checks.filter((c) => c.agrees).length;
+  const ratios = rows
+    .filter((r) => r.rival !== null && r.ours > 0)
+    .map((r) => r.rival / r.ours);
+  const geomean = ratios.length === 0 ? null
+    : Math.exp(ratios.reduce((s, v) => s + Math.log(v), 0) / ratios.length);
+  const pip = rows.find((r) => r.name.includes('polygon (2000'));
+
+  const out = [];
+  out.push(cards([
+    {
+      title: 'Result equivalence',
+      value: `${agreed} / ${checks.length}`,
+      note: 'asserted against Turf, geolib and Flatbush before any timing',
+    },
+    {
+      title: 'Speed vs the field',
+      value: geomean === null ? '—' : formatRatio(geomean),
+      note: 'geometric mean over every head-to-head row, losses included',
+    },
+    {
+      title: 'Point in polygon, 2000 vertices',
+      value: pip !== undefined && pip.rival !== null ? formatRatio(pip.rival / pip.ours) : '—',
+      note: 'the deliberate loss: the exact orientation predicate, kept over the fast answer',
+    },
+  ]));
+  out.push(callout('What this suite measures — including where we lose',
+    'The kernel is screen-then-refine: a planar equirectangular distance screens candidates at a fraction of haversine\'s cost (both are rows below) and the spherical answer refines the survivors — the same build-then-probe shape as the query engine\'s hash join. The honest rows are all here: point-in-polygon on a large ring runs at roughly half Turf\'s speed because every crossing uses the exact orientation predicate — an answer that cannot flip on near-collinear edges — and that trade is kept on purpose. geolib\'s distance is Vincenty on the WGS 84 ellipsoid, a genuinely different model; the equivalence check states the tolerance instead of hiding the difference.'));
+  out.push(...geoCharts(data));
+  out.push(table('Head to head, ns per operation',
+    ['Scenario', 'Jaren', 'Rival', 'Who', 'Ratio'],
+    rows.map((r) => ({
+      cells: [
+        r.name,
+        formatNs(r.ours),
+        r.rival === null ? '—' : formatNs(r.rival),
+        r.rivalName || '—',
+        r.rival === null ? '—' : formatRatio(r.ours > 0 ? r.rival / r.ours : null),
+      ],
+      strong: r.rival !== null && r.ours > 0 && r.rival / r.ours >= 1,
+    })),
+    `${(data.iterations ?? 0).toLocaleString()} iterations; lower is better. Rows without a rival are Jaren-only reference points.`));
+  out.push(table('Result equivalence — the gate the timings run behind',
+    ['Scenario', 'Rival', 'Agrees', 'Detail'],
+    checks.map((c) => ({
+      cells: [c.name, c.rival, c.agrees ? 'yes' : 'NO', c.note !== '' ? `${c.detail} (${c.note})` : c.detail],
+      strong: !c.agrees,
+    })),
+    'A disagreement beyond the stated tolerance withholds the timing table at generation time.'));
   return out;
 }
 

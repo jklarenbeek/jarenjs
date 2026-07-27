@@ -28,32 +28,60 @@ const DEFAULT_NODE_SIZE = 16;
  * Interleave the low 16 bits of x and y into a Hilbert distance.
  * Boxes ordered by this stay spatially clustered, which is what makes
  * the packed parents tight.
+ *
+ * Bit-parallel: all sixteen levels of the per-bit quadrant rotation run
+ * at once as mask arithmetic (the public-domain transform from
+ * rawrunprotected/hilbert_curves), which is what makes computing 100k of
+ * these a millisecond instead of the build's dominant cost. The values
+ * are identical to the classical per-bit walk of the curve.
+ *
  * @param {number} x - 0..65535
  * @param {number} y - 0..65535
  * @returns {number}
  */
 export function hilbertDistance(x, y) {
-  let rx;
-  let ry;
-  let d = 0;
-  let a = x;
-  let b = y;
-  for (let s = 32768; s > 0; s = Math.floor(s / 2)) {
-    rx = (a & s) > 0 ? 1 : 0;
-    ry = (b & s) > 0 ? 1 : 0;
-    d += s * s * ((3 * rx) ^ ry);
-    // rotate the quadrant so the curve stays continuous
-    if (ry === 0) {
-      if (rx === 1) {
-        a = s - 1 - a;
-        b = s - 1 - b;
-      }
-      const t = a;
-      a = b;
-      b = t;
-    }
-  }
-  return d;
+  let a = x ^ y;
+  let b = 0xFFFF ^ a;
+  let c = 0xFFFF ^ (x | y);
+  let d = x & (y ^ 0xFFFF);
+  let A = a | (b >> 1);
+  let B = (a >> 1) ^ a;
+  let C = ((c >> 1) ^ (b & (d >> 1))) ^ c;
+  let D = ((a & (c >> 1)) ^ (d >> 1)) ^ d;
+
+  a = A; b = B; c = C; d = D;
+  A = (a & (a >> 2)) ^ (b & (b >> 2));
+  B = (a & (b >> 2)) ^ (b & ((a ^ b) >> 2));
+  C ^= (a & (c >> 2)) ^ (b & (d >> 2));
+  D ^= (b & (c >> 2)) ^ ((a ^ b) & (d >> 2));
+
+  a = A; b = B; c = C; d = D;
+  A = (a & (a >> 4)) ^ (b & (b >> 4));
+  B = (a & (b >> 4)) ^ (b & ((a ^ b) >> 4));
+  C ^= (a & (c >> 4)) ^ (b & (d >> 4));
+  D ^= (b & (c >> 4)) ^ ((a ^ b) & (d >> 4));
+
+  a = A; b = B; c = C; d = D;
+  C ^= (a & (c >> 8)) ^ (b & (d >> 8));
+  D ^= (b & (c >> 8)) ^ ((a ^ b) & (d >> 8));
+
+  a = C ^ (C >> 1);
+  b = D ^ (D >> 1);
+
+  let i0 = x ^ y;
+  let i1 = b | (0xFFFF ^ (i0 | a));
+
+  i0 = (i0 | (i0 << 8)) & 0x00FF00FF;
+  i0 = (i0 | (i0 << 4)) & 0x0F0F0F0F;
+  i0 = (i0 | (i0 << 2)) & 0x33333333;
+  i0 = (i0 | (i0 << 1)) & 0x55555555;
+
+  i1 = (i1 | (i1 << 8)) & 0x00FF00FF;
+  i1 = (i1 | (i1 << 4)) & 0x0F0F0F0F;
+  i1 = (i1 | (i1 << 2)) & 0x33333333;
+  i1 = (i1 | (i1 << 1)) & 0x55555555;
+
+  return ((i1 << 1) | i0) >>> 0;
 }
 
 /**
@@ -109,6 +137,43 @@ export function createBboxIndex(boxes, nodeSize = DEFAULT_NODE_SIZE) {
   let maxY = -Infinity;
   for (let i = 0; i < count; i++) {
     const box = boxes[i];
+    if (box === null || box === undefined)
+      continue;
+    if (box[0] < minX) minX = box[0];
+    if (box[1] < minY) minY = box[1];
+    if (box[2] > maxX) maxX = box[2];
+    if (box[3] > maxY) maxY = box[3];
+  }
+
+  // Sort a permutation along the Hilbert curve of the box centres, then
+  // write the bounds once, already in leaf order. The sort itself moves
+  // only a key and an index per swap — permuting the four-wide bounds
+  // rows through every partition swap is what made the build memory-bound.
+  const order = new Uint32Array(count);
+  for (let i = 0; i < count; i++)
+    order[i] = i;
+  if (count > 1 && Number.isFinite(minX)) {
+    const width = maxX - minX || 1;
+    const height = maxY - minY || 1;
+    const hilbert = new Uint32Array(count);
+    for (let i = 0; i < count; i++) {
+      const box = boxes[i];
+      if (box === null || box === undefined) {
+        // empties sort to the end (a real box may share this key, which
+        // is harmless: an empty's bounds can never match a query)
+        hilbert[i] = 0xFFFFFFFF;
+        continue;
+      }
+      const cx = Math.floor(65535 * ((box[0] + box[2]) / 2 - minX) / width);
+      const cy = Math.floor(65535 * ((box[1] + box[3]) / 2 - minY) / height);
+      hilbert[i] = hilbertDistance(cx, cy);
+    }
+    sortOrder(hilbert, order, 0, count - 1);
+  }
+
+  for (let i = 0; i < count; i++) {
+    const at = order[i];
+    const box = boxes[at];
     const p = i * 4;
     if (box === null || box === undefined) {
       // a box that overlaps nothing: min above max on both axes
@@ -122,30 +187,8 @@ export function createBboxIndex(boxes, nodeSize = DEFAULT_NODE_SIZE) {
       bounds[p + 1] = box[1];
       bounds[p + 2] = box[2];
       bounds[p + 3] = box[3];
-      if (box[0] < minX) minX = box[0];
-      if (box[1] < minY) minY = box[1];
-      if (box[2] > maxX) maxX = box[2];
-      if (box[3] > maxY) maxY = box[3];
     }
-    indices[i] = i;
-  }
-
-  // sort the leaves along the Hilbert curve of their centres
-  if (count > 1 && Number.isFinite(minX)) {
-    const width = maxX - minX || 1;
-    const height = maxY - minY || 1;
-    const hilbert = new Float64Array(count);
-    for (let i = 0; i < count; i++) {
-      const p = i * 4;
-      if (!Number.isFinite(bounds[p])) {
-        hilbert[i] = Number.MAX_SAFE_INTEGER; // empties sort to the end
-        continue;
-      }
-      const cx = Math.floor(65535 * ((bounds[p] + bounds[p + 2]) / 2 - minX) / width);
-      const cy = Math.floor(65535 * ((bounds[p + 1] + bounds[p + 3]) / 2 - minY) / height);
-      hilbert[i] = hilbertDistance(cx, cy);
-    }
-    sortLeaves(hilbert, bounds, indices, 0, count - 1);
+    indices[i] = at;
   }
 
   // pack each level into the next
@@ -210,11 +253,25 @@ export function createBboxIndex(boxes, nodeSize = DEFAULT_NODE_SIZE) {
   };
 }
 
-// In-place quicksort of the leaf arrays by Hilbert distance, moving the
-// bounds and the original indexes with the keys.
-function sortLeaves(hilbert, bounds, indices, left, right) {
-  if (left >= right)
+// In-place quicksort of the permutation by Hilbert distance: each swap
+// moves one key and one index, nothing wider. Small partitions finish
+// by insertion sort, which beats partitioning once a run fits in cache.
+function sortOrder(hilbert, order, left, right) {
+  if (right - left < 20) {
+    for (let i = left + 1; i <= right; i++) {
+      const h = hilbert[i];
+      const n = order[i];
+      let j = i - 1;
+      while (j >= left && hilbert[j] > h) {
+        hilbert[j + 1] = hilbert[j];
+        order[j + 1] = order[j];
+        j--;
+      }
+      hilbert[j + 1] = h;
+      order[j + 1] = n;
+    }
     return;
+  }
   const pivot = hilbert[(left + right) >> 1];
   let i = left - 1;
   let j = right + 1;
@@ -223,26 +280,15 @@ function sortLeaves(hilbert, bounds, indices, left, right) {
     do j--; while (hilbert[j] > pivot);
     if (i >= j)
       break;
-    swapLeaf(hilbert, bounds, indices, i, j);
+    const h = hilbert[i];
+    hilbert[i] = hilbert[j];
+    hilbert[j] = h;
+    const n = order[i];
+    order[i] = order[j];
+    order[j] = n;
   }
-  sortLeaves(hilbert, bounds, indices, left, j);
-  sortLeaves(hilbert, bounds, indices, j + 1, right);
-}
-
-function swapLeaf(hilbert, bounds, indices, i, j) {
-  const h = hilbert[i];
-  hilbert[i] = hilbert[j];
-  hilbert[j] = h;
-  const n = indices[i];
-  indices[i] = indices[j];
-  indices[j] = n;
-  const pi = i * 4;
-  const pj = j * 4;
-  for (let k = 0; k < 4; k++) {
-    const t = bounds[pi + k];
-    bounds[pi + k] = bounds[pj + k];
-    bounds[pj + k] = t;
-  }
+  sortOrder(hilbert, order, left, j);
+  sortOrder(hilbert, order, j + 1, right);
 }
 
 //#endregion

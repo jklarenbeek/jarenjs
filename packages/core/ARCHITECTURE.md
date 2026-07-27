@@ -119,6 +119,10 @@ flowchart TB
             GeoRing["ring.js<br/>Closure, winding, area, containment"]
             GeoBbox["bbox.js<br/>Bounding boxes"]
             GeoHash["geohash.js<br/>Base-32 cells"]
+            GeoJson["geojson.js<br/>Typed-geometry traversal"]
+            GeoValid["valid.js + wkt.js<br/>Validity testers"]
+            GeoTree["index-tree.js<br/>Packed-Hilbert box index"]
+            GeoMerc["mercator.js + simplify.js<br/>Projection out, simplification"]
         end
 
         subgraph MathModules["Mathematics"]
@@ -188,6 +192,10 @@ flowchart TB
     GeoIndex --> GeoRing
     GeoIndex --> GeoBbox
     GeoIndex --> GeoHash
+    GeoIndex --> GeoJson
+    GeoIndex --> GeoValid
+    GeoIndex --> GeoTree
+    GeoIndex --> GeoMerc
 
     style CorePackage fill:#e1f5fe
     style CoreModule fill:#bbdefb
@@ -534,9 +542,16 @@ passed straight in without the `type` discriminator being involved.
 | `distance.js` | great-circle measurement on the WGS 84 sphere |
 | `ring.js` | ring closure, winding, area and containment |
 | `bbox.js` | bounding boxes, the cheap half of every spatial test |
-| `geohash.js` | the base-32 cell encoding |
+| `geohash.js` | the base-32 cell encoding, and its validity tester |
 | `geojson.js` | the one layer that knows the `type` discriminator |
+| `valid.js` | `isValidGeoJson` — the one-call structural judgment (rings must close), the boolean twin of the schema artifacts in `@jarenjs/json` |
+| `wkt.js` | `isValidWkt` — a strict validity tester for Well-Known Text |
 | `index-tree.js` | a static packed-Hilbert box index for spatial joins |
+| `mercator.js` | Web Mercator, the projection *out* for anything that draws |
+| `simplify.js` | Douglas-Peucker — dropping the vertices a drawing cannot show |
+
+The three validity testers back the `geoFormats` group in
+[`@jarenjs/formats`](../formats) (`geohash`, `wkt`, `geojson`).
 
 Two decisions carry the module. **Orientation is computed exactly**, through
 Shewchuk's adaptive precision arithmetic: a naive floating-point determinant
@@ -550,10 +565,11 @@ needed.
 **Distance is spherical, and the planar shortcut is refused.** A degree of
 longitude spans ~111 km at the equator and ~68 km at 52°N, so a Euclidean norm
 on raw degrees is 64% wrong over 1 km at Dutch latitudes. `haversineDistance`
-is the answer (<0.5% anywhere, 13.6 ns); `equirectDistance` is the *screening*
-form (0.02% at 430 km, 12.4% intercontinentally, 2.0 ns) for rejecting
-candidates before the real test — the same build-then-probe shape the query
-engine's hash join uses. The ellipsoid is deliberately not modelled.
+is the answer (<0.5% anywhere); `equirectDistance` is the *screening* form
+(0.02% at 430 km, 12.4% intercontinentally — a few multiply-adds against
+haversine's transcendentals) for rejecting candidates before the real test —
+the same build-then-probe shape the query engine's hash join uses. The
+ellipsoid is deliberately not modelled.
 
 RFC 7946 removed coordinate-reference-system support and mandates WGS 84, so
 there is no SRID table and no reprojection: conformance removes the need rather
@@ -568,33 +584,44 @@ rival's time over this kernel's, so above 1 means Jaren is faster.
 
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| distance, two positions | 14.5 ns | 114.8 ns (turf) | **7.9×** |
-| distance vs an ellipsoidal library | 49.3 ns | 621.5 ns (geolib) | **12.6×** |
-| line length, 500 positions | 21.8 µs | 63.8 µs (turf) | **2.9×** |
-| bounding box, 2000 vertices | 15.1 µs | 18.3 µs (turf) | **1.2×** |
-| polygon area, 2000 vertices | 19.0 µs | 20.2 µs (turf) | **1.1×** |
-| point in polygon, 12 vertices | 182 ns | 208 ns (turf) | **1.1×** |
-| index probe, 100k boxes | 498 ns | 508 ns (flatbush) | 1.0× |
-| centroid, 2000 vertices | 27.7 µs | 19.5 µs (turf) | **0.7×** |
-| point in polygon, 2000 vertices | 8.3 µs | 4.1 µs (turf) | **0.5×** |
-| index build, 100k boxes | 31.0 ms | 12.0 ms (flatbush) | **0.4×** |
+| distance, two positions | 26.2 ns | 128.5 ns (turf) | **4.9×** |
+| distance vs an ellipsoidal library | 52.3 ns | 648.4 ns (geolib) | **12.4×** |
+| line length, 500 positions | 20.5 µs | 63.6 µs (turf) | **3.1×** |
+| point in polygon, 12 vertices | 228 ns | 327 ns (turf) | **1.4×** |
+| bounding box, 2000 vertices | 15.3 µs | 18.1 µs (turf) | **1.2×** |
+| polygon area, 2000 vertices | 18.8 µs | 20.4 µs (turf) | **1.1×** |
+| centroid, 2000 vertices | 18.4 µs | 19.1 µs (turf) | 1.0× |
+| index build, 100k boxes | 12.2 ms | 12.4 ms (flatbush) | 1.0× |
+| index probe, 100k boxes | 529 ns | 529 ns (flatbush) | 1.0× |
+| point in polygon, 2000 vertices | 8.2 µs | 3.7 µs (turf) | **0.5×** |
 
-The last three are losses and are recorded as such. Two of them are understood:
+One row is a loss, and it is kept on purpose. **Point-in-polygon on a large
+ring runs at about half Turf's speed** because every edge that could matter
+goes through the exact orientation predicate, where Turf uses naive
+floating-point arithmetic. That is the trade this module exists to make — it
+is the difference between a containment test that is right on near-collinear
+input and one that is merely fast. Cheap straddle/span tests already skip the
+predicate on edges that cannot affect the answer, which took this from 0.2×
+to 0.5×; the rest is the predicate itself.
 
-- **Point-in-polygon on a large ring is about half Turf's speed, on purpose.**
-  Every edge that could matter goes through the exact orientation predicate,
-  where Turf uses naive floating-point arithmetic. That is the trade this
-  module exists to make — it is the difference between a containment test that
-  is right on near-collinear input and one that is merely fast. Cheap
-  straddle/span tests already skip the predicate on edges that cannot affect
-  the answer, which took this from 0.2× to 0.5×; the rest is the predicate
-  itself.
-- **Index build is ~2.6× slower than Flatbush** because the leaf sort permutes
-  the bounds array on every swap. Sorting an index array and permuting once at
-  the end is the known fix. Probe — the operation a spatial join actually
-  repeats — is level, which is why this has not been urgent.
+Two former losses closed, and both closures carry a lesson about profiling
+before fixing:
 
-Centroid is simply slower and not yet diagnosed.
+- **Index build** was 2.6× behind Flatbush, and the assumed cause — the leaf
+  sort permuting the four-wide bounds rows on every swap — turned out to be
+  wrong: fixing it moved nothing. A phase profile put ~60% of the build in
+  the *Hilbert distance* computation, a 16-step bisection loop with a float
+  division per step. The classical loop is now the bit-parallel transform
+  (identical values, verified exhaustively at the corners and over 200k
+  pseudo-random points), the sort orders a `Uint32Array` permutation with an
+  insertion-sort cutoff, and the bounds are written once, already in leaf
+  order. Build and probe are both level with Flatbush now.
+- **Centroid** walked the same `eachPosition` as `bboxOf` yet lost where
+  `bboxOf` won. The difference was the callback body: accumulating doubles
+  into *closure variables* writes a boxed heap number per `+=` — two per
+  vertex — where `bboxOf`'s comparisons rarely write at all. The accumulators
+  are a small `Float64Array` now (raw double stores, no boxing), and the row
+  is level with Turf.
 
 ```javascript
 import { orient2d, haversineDistance, ringWinding, geohashEncode } from '@jarenjs/core/geo';

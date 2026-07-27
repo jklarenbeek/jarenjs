@@ -4,7 +4,9 @@ Format validators for the JSON Schema `format` keyword, built on the text valida
 
 The JSON addressing formats are grouped separately in `jsonFormats`: `json-pointer`, `json-pointer-uri-fragment` and `relative-json-pointer` (RFC 6901), and `json-path`, which validates query strings against the complete [RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html) grammar using the parser of the JSONPath compiler in `@jarenjs/json`, plus `json-path-segments` for the variable-rooted path strings of the Jaren query format.
 
-The name → predicate bindings live in one canonical table, exported as `formatTesters` (plus the per-group `stringFormatTesters`, `jsonFormatTesters`, `dateTimeFormatTesters`, `numberFormatTesters`): bare synchronous predicates without validator coupling. The format compilers above wrap these testers in the validator contract, and [`@jarenjs/forms`](../forms) merges its rendering hints over the same table for per-keystroke field validation — one registry, so the two layers can never drift apart.
+The geospatial formats are grouped in `geoFormats`: `geohash`, `wkt` and `geojson`, backed by the spatial kernel in `@jarenjs/core/geo`.
+
+The name → predicate bindings live in one canonical table, exported as `formatTesters` (plus the per-group `stringFormatTesters`, `jsonFormatTesters`, `geoFormatTesters`, `dateTimeFormatTesters`, `numberFormatTesters`): bare synchronous predicates without validator coupling. The format compilers above wrap these testers in the validator contract, and [`@jarenjs/forms`](../forms) merges its rendering hints over the same table for per-keystroke field validation — one registry, so the two layers can never drift apart.
 
 ## Usage
 
@@ -16,7 +18,8 @@ const jaren = new JarenValidator()
   .addFormats(formats.stringFormats)
   .addFormats(formats.numberFormats)
   .addFormats(formats.dateTimeFormats)
-  .addFormats(formats.jsonFormats);
+  .addFormats(formats.jsonFormats)
+  .addFormats(formats.geoFormats);
 
 const validate = jaren.compile({ type: 'string', format: 'json-path' });
 validate('$.store.book[?@.price < 10]'); // true
@@ -98,6 +101,16 @@ These are grouped in `jsonFormats`.
 
 - `country2` | country code by alpha-2 according to [ISO3166-1](https://www.iso.org/iso-3166-country-codes.html) — the 249 assigned codes plus `XK`, the user-assigned code for Kosovo; matched case-insensitively
 - `iban` | International Bank Account Number according to [ISO13616](https://www.iso.org/standard/81090.html) — checks the country's registered length, the alphanumeric body and the ISO 7064 MOD 97-10 check digits, so a transposed digit is caught; accepts both the compact electronic format (`NL91ABNA0417164300`) and the print format grouped in fours (`NL91 ABNA 0417 1643 00`)
+
+### ✍ Geospatial formats
+
+These are grouped in `geoFormats`, backed by the spatial kernel in [`@jarenjs/core/geo`](../core).
+
+- `geohash` | a base-32 geohash cell name, any length (`u173z`); the alphabet is lowercase and deliberately omits `a`, `i`, `l` and `o`
+- `wkt` | a Well-Known Text geometry (ISO 19125 / OGC Simple Features): the seven tagged types with optional `Z`/`M`/`ZM` modifiers, `EMPTY`, consistent coordinate counts and closed polygon rings; an unmodified tag accepts 2 or 3 coordinates per point, as the field (PostGIS) does
+- `geojson` | a structurally valid GeoJSON object per [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) — unlike every other format this one applies to **objects**, and it enforces the invariant JSON Schema provably cannot: every linear ring closed
+
+`geojson` exists *next to* the GeoJSON meta-schema artifacts in [`@jarenjs/json`](../json), not instead of them, and the division of labour is deliberate: the format is the one-keyword annotation that answers yes or no in a single call, while the meta-schema locates the failure and (in the `$query`-extended variant) also checks ring winding. Reach for the schema when you want a diagnosis; reach for the format when you only want the gate.
 
 ### ✍ Formats for numbers
 

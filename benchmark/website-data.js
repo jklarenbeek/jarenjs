@@ -18,6 +18,7 @@
  *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
  *   markdown.json     markdown.js       — @jarenjs/md vs marked/markdown-it/micromark (CommonMark spec)
  *   mermaid.json      mermaid.js        — @jarenjs/mermaid coverage + parse-speed vs @mermaid-js/parser
+ *   geo.json          geo.js            — spatial kernel vs turf/geolib/flatbush (equivalence-gated)
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -48,7 +49,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, qt3');
+        console.log('Suites: validate, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, qt3');
         process.exit(0);
         break;
       default:
@@ -581,6 +582,40 @@ function generateMermaid(tmp, options) {
   };
 }
 
+/**
+ * The geo suite: the spatial kernel against Turf, geolib and Flatbush.
+ * The tool asserts result equivalence and exits non-zero on
+ * disagreement, so a generated file always carries timings its checks
+ * gate.
+ */
+function generateGeo(tmp, options) {
+  const file = path.join(tmp, 'geo.json');
+  try {
+    runTool([
+      'benchmark/geo.js',
+      '--iterations', String(options.quick ? 5_000 : 100_000),
+      '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: geo run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the comparison needs the @turf/turf, geolib and flatbush benchmark devDependencies)');
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    node: raw.node,
+    iterations: raw.iterations,
+    checks: raw.checks,
+    rows: raw.rows.map((r) => ({
+      name: r.name,
+      ours: sig4(r.ours),
+      rival: r.rival === null ? null : sig4(r.rival),
+      rivalName: r.rivalName ?? '',
+    })),
+  };
+}
+
 function generateQt3() {
   let stdout;
   try {
@@ -623,7 +658,7 @@ function generateQt3() {
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
   'validate', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
-  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts',
+  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo',
 ];
 
 /** Geometric mean — the honest average of ratios (a 10× and a 0.1×
@@ -806,6 +841,18 @@ function buildHeadlines(generated, meta) {
       note: big !== undefined ? `incremental tick at ${big.points}×${big.series} points` : '',
     });
   }
+  if (generated.geo !== undefined) {
+    const rows = generated.geo.rows ?? [];
+    const checks = generated.geo.checks ?? [];
+    add('geo', 'Geo', {
+      ratio: geoMean(rows
+        .filter((r) => r.rival !== null && r.ours > 0)
+        .map((r) => r.rival / r.ours)),
+      rival: 'turf / geolib / flatbush',
+      conformance: `${checks.filter((c) => c.agrees).length} / ${checks.length}`,
+      note: 'result equivalence asserted before timing; the point-in-polygon loss is deliberate (exact predicate)',
+    });
+  }
   return out;
 }
 
@@ -866,6 +913,11 @@ async function main() {
     const charts = generateCharts(tmp, options);
     if (charts !== null)
       generated.charts = charts;
+  }
+  if (!options.skip.has('geo')) {
+    const geo = generateGeo(tmp, options);
+    if (geo !== null)
+      generated.geo = geo;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

@@ -17,6 +17,10 @@ import {
   numberFormatTesters,
 } from '@jarenjs/formats';
 
+import {
+  isValidGeoJson,
+} from '@jarenjs/core/geo';
+
 /**
  * @typedef {object} FormatInfo
  * @property {(value: string) => boolean} test - Synchronous validity test
@@ -26,8 +30,11 @@ import {
 
 /**
  * Rendering hints per format name. Formats without an entry render as a
- * plain text input (number-group formats as a number input).
- * @type {Record<string, { control?: string, placeholder?: string }>}
+ * plain text input (number-group formats as a number input). A hint may
+ * also override the canonical `test` when what a form field holds is not
+ * what the validator's format judges (a field holds `geojson` as text,
+ * the format applies to the parsed object).
+ * @type {Record<string, { control?: string, placeholder?: string, test?: (value: string) => boolean }>}
  */
 const FORM_HINTS = {
   // -- date and time. Which formats get a native control is decided by
@@ -91,6 +98,23 @@ const FORM_HINTS = {
   'isbn13': { placeholder: '978-3-16-148410-0' },
   'iban': { placeholder: 'NL91ABNA0417164300' },
   'country2': { placeholder: 'NL' },
+
+  // -- geospatial. The geojson tester judges the OBJECT, but a form
+  //    field holds its text, so the field-level test parses first.
+  'geohash': { placeholder: 'u173z' },
+  'wkt': { placeholder: 'POINT (4.9041 52.3676)' },
+  'geojson': {
+    control: 'textarea',
+    placeholder: '{"type":"Point","coordinates":[4.9,52.4]}',
+    test: (text) => {
+      try {
+        return isValidGeoJson(JSON.parse(text));
+      }
+      catch {
+        return false;
+      }
+    },
+  },
 };
 
 function acceptAnything() {

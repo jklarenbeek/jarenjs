@@ -94,6 +94,27 @@ export function geohashEncode(lon, lat, precision = 9) {
 }
 
 /**
+ * Whether a string is a well-formed geohash: non-empty and every
+ * character in the base-32 alphabet (lowercase; `a`, `i`, `l` and `o`
+ * are deliberately absent from it). Any length is valid — each
+ * character only names a finer cell.
+ * @param {string} hash
+ * @returns {boolean}
+ * @example
+ * isValidGeohash('u173z'); // true (Amsterdam)
+ * isValidGeohash('u17a');  // false ('a' is not in the alphabet)
+ */
+export function isValidGeohash(hash) {
+  if (typeof hash !== 'string' || hash.length === 0)
+    return false;
+  for (let i = 0; i < hash.length; i++) {
+    if (!DECODE.has(hash[i]))
+      return false;
+  }
+  return true;
+}
+
+/**
  * The bounding box of a geohash cell, as `[west, south, east, north]`.
  * Returns null for a string containing a character outside the base-32
  * alphabet (`a`, `i`, `l` and `o` are deliberately absent).

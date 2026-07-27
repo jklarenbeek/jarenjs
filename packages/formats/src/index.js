@@ -21,11 +21,13 @@ export { formatValidators as dateTimeFormats } from './datetime.js';
 export { formatValidators as stringFormats } from './string.js';
 export { formatValidators as numberFormats } from './number.js';
 export { formatValidators as jsonFormats } from './json.js';
+export { formatValidators as geoFormats } from './geo.js';
 
 export {
   formatTesters,
   stringFormatTesters,
   jsonFormatTesters,
+  geoFormatTesters,
   dateTimeFormatTesters,
   numberFormatTesters,
 } from './testers.js';

@@ -62,9 +62,10 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  * the simplification is invisible by construction: it can only remove
  * vertices that would have landed on a neighbour's pixel anyway. A
  * caller drawing much larger passes a smaller number, and `false`
- * switches it off.
+ * switches it off. Exported because the streaming map accumulator
+ * simplifies on arrival with the same default.
  */
-const SIMPLIFY = 0.0006;
+export const MAP_SIMPLIFY = 0.0006;
 
 /**
  * Build the geometry-free map AST.
@@ -78,7 +79,7 @@ export function buildMapAST(data, config = {}) {
   const valueKey = typeof config.value === 'string' ? config.value : null;
   const labelKey = typeof config.label === 'string' && config.label !== '' ? config.label : 'name';
   const tolerance = config.simplify === false ? 0
-    : (typeof config.simplify === 'number' && config.simplify >= 0 ? config.simplify : SIMPLIFY);
+    : (typeof config.simplify === 'number' && config.simplify >= 0 ? config.simplify : MAP_SIMPLIFY);
   const log = config.log === true;
 
   const entries = collectEntries(data, valueKey, labelKey);

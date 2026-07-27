@@ -157,6 +157,16 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /new Function/, 'the udsv loss is explained rather than hidden');
   });
 
+  it('derives the geo suite from the generated data', function () {
+    const state = { benchStatus: { geo: 'loaded' }, bench: { geo: loadBench('geo') }, benchUi: {} };
+    const nodes = deriveSuite(state, 'geo');
+    const text = JSON.stringify(nodes);
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    assert.match(text, /Result equivalence/, 'the equivalence gate renders as the headline');
+    assert.match(text, /the deliberate loss/, 'the point-in-polygon loss is published, not hidden');
+    assert.match(text, /flatbush/, 'the index rival is named');
+  });
+
   it('a suite whose data failed to load renders the error callout', function () {
     const nodes = deriveSuite({ benchStatus: { toml: 'error' }, bench: {}, benchUi: {} }, 'toml');
     assert.match(JSON.stringify(nodes), /Data unavailable/);
@@ -181,7 +191,7 @@ describe('website boundaries — benchmark charts', function () {
   const CASES = [
     ['validate', 3], ['jsonpath', 1], ['jsonquery', 1], ['jslt', 1],
     ['jsonpointer', 1], ['jsonpatch', 1], ['toml', 2], ['markdown', 2],
-    ['mermaid', 2], ['view', 4], ['charts', 2], ['csv', 1],
+    ['mermaid', 2], ['view', 4], ['charts', 2], ['csv', 1], ['geo', 1],
   ];
   for (const [suite, minCharts] of CASES) {
     it(`the ${suite} suite renders ${minCharts}+ svg chart(s) from the published data`, function () {

@@ -417,6 +417,18 @@ describe('Format Registry', function () {
     assert.isTrue(getFormatInfo('duration').test('P3DT4H'));
     assert.isTrue(getFormatInfo('json-pointer').test('/a/b'));
     assert.isTrue(!getFormatInfo('json-pointer').test('a/b'));
+    assert.isTrue(getFormatInfo('geohash').test('u173z'));
+    assert.isTrue(getFormatInfo('wkt').test('POINT (4.9041 52.3676)'));
+  });
+
+  it("should parse a field's text before judging it as GeoJSON", function () {
+    // the canonical geojson tester takes the OBJECT; the form hint
+    // overrides it with a parse-first test because a field holds text
+    const geojson = getFormatInfo('geojson');
+    assert.isTrue(geojson.control === 'textarea');
+    assert.isTrue(geojson.test('{"type":"Point","coordinates":[4.9,52.4]}'));
+    assert.isTrue(!geojson.test('{"type":"Point","coordinates":[4.9,52.4]'), 'unparseable text');
+    assert.isTrue(!geojson.test('{"type":"Polygon","coordinates":[[[0,0],[4,0],[4,4],[1,1]]]}'), 'open ring');
   });
 
   it('should test regular expressions for validity', function () {

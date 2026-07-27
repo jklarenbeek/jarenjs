@@ -93,6 +93,12 @@ import {
   isValidJSONPathSegments,
 } from '@jarenjs/json';
 
+import {
+  isValidGeohash,
+  isValidWkt,
+  isValidGeoJson,
+} from '@jarenjs/core/geo';
+
 /** @typedef {(value: string) => boolean} StringFormatTester */
 /** @typedef {(value: number) => boolean} NumberFormatTester */
 
@@ -177,6 +183,19 @@ export const dateTimeFormatTesters = {
 };
 
 /**
+ * Geospatial format testers (the geo.js compiler group). `geohash` and
+ * `wkt` take strings; `geojson` takes the OBJECT value — the quick
+ * yes-or-no twin of the GeoJSON meta-schema artifacts in `@jarenjs/json`,
+ * including the ring-closure invariant JSON Schema cannot express.
+ * @type {Record<string, (value: any) => boolean>}
+ */
+export const geoFormatTesters = {
+  'geohash': isValidGeohash,
+  'wkt': isValidWkt,
+  'geojson': isValidGeoJson,
+};
+
+/**
  * Number format testers (the number.js compiler group). These take the
  * NUMBER value, not a string.
  * @type {Record<string, NumberFormatTester>}
@@ -207,6 +226,7 @@ export const numberFormatTesters = {
 export const formatTesters = {
   ...stringFormatTesters,
   ...jsonFormatTesters,
+  ...geoFormatTesters,
   ...dateTimeFormatTesters,
   ...numberFormatTesters,
 };

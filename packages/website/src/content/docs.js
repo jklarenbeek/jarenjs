@@ -121,8 +121,8 @@ export const DOCS_SECTIONS = [
   {
     id: 'formats', title: 'Format validators',
     blocks: [
-      p('All standard string formats plus many extras (iban, isbn10, mac, color…), numeric formats (int8…uint64, float16…float64) and the JSON addressing formats — one canonical name → predicate registry shared by the validator and forms, so the two can never drift.'),
-      code(null, "import { stringFormats, numberFormats, dateTimeFormats } from '@jarenjs/formats';\njaren.addFormats(stringFormats).addFormats(numberFormats).addFormats(dateTimeFormats);"),
+      p('All standard string formats plus many extras (iban, isbn10, mac, color…), numeric formats (int8…uint64, float16…float64), the JSON addressing formats and the geospatial formats (geohash, wkt, and geojson — which applies to objects and enforces the ring closure a schema alone cannot) — one canonical name → predicate registry shared by the validator and forms, so the two can never drift.'),
+      code(null, "import { stringFormats, numberFormats, dateTimeFormats, geoFormats } from '@jarenjs/formats';\njaren.addFormats(stringFormats).addFormats(numberFormats).addFormats(dateTimeFormats).addFormats(geoFormats);"),
     ],
   },
   {

@@ -177,7 +177,7 @@ Two record boundaries cover the two streaming shapes: `'path'` (one
 large document arriving in chunks — records close when the event path
 leaves them) and `'document'` (many small complete documents, e.g. one
 WebSocket message each — `endDocument()` closes the record;
-`abortDocument()` discards a malformed one). Five accumulators:
+`abortDocument()` discards a malformed one). Six accumulators:
 
 | type | what a record contributes | fields |
 |---|---|---|
@@ -186,10 +186,27 @@ WebSocket message each — `endDocument()` closes the record;
 | `heatmap` | the same, under two grouping keys | `xField` (column), `seriesField` (row), `yField?` |
 | `gauge` | the latest reading; nothing is kept | `yField` |
 | `candlestick` | a candle keyed by open time; a re-delivered key replaces it (exchange kline semantics) | `xField`, `openField`… |
+| `map` | a whole GeoJSON Feature, projected and simplified on arrival | `labelField?`, `valueField?`, `simplify?`, `aspect?` |
 
 A heatmap cell nobody measured stays `null` rather than `0` — the
 surface shows through, which is the honest rendering of "no
 measurement" — and a gauge with no reading yet is `null`, not zero.
+
+The `map` accumulator is the odd one out: its record is not flat pair
+fields but a complete Feature, consumed from the reader's `object-end`
+events at `recordPath + [index]` (default `['features']`) — pair the
+reader with `detach: ['features', '*']` so the document root retains
+nothing and the accumulator's reduced set is the only retention. Each
+feature's geometry is simplified **on arrival** to the vertices a
+drawing of the current extent could distinguish, so memory is bounded
+by the drawn detail rather than the source detail. The projection
+cannot be fitted before the last feature has been seen, so the design
+is refit-on-growth: the running bbox sets the tolerance, and when it
+grows enough to double it, the kept features are coarsened once against
+the new extent (never re-read — early features can only be finer than
+needed, not wrong). `simplify: false` keeps every vertex, which unbounds
+memory again; `test/charts/map-stream.test.js` pins the reduction, the
+refit and the change-feed replay.
 
 ## Incremental sessions (O(1) ticks)
 

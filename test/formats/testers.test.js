@@ -6,11 +6,13 @@ import {
   jsonFormats,
   dateTimeFormats,
   numberFormats,
+  geoFormats,
   formatTesters,
   stringFormatTesters,
   jsonFormatTesters,
   dateTimeFormatTesters,
   numberFormatTesters,
+  geoFormatTesters,
 } from '@jarenjs/formats';
 
 // The registry sync contract: testers.js is the single source of truth
@@ -26,6 +28,7 @@ describe('Format tester registry', function () {
     ['jsonFormats', jsonFormats, jsonFormatTesters],
     ['dateTimeFormats', dateTimeFormats, dateTimeFormatTesters],
     ['numberFormats', numberFormats, numberFormatTesters],
+    ['geoFormats', geoFormats, geoFormatTesters],
   ];
 
   for (const [label, compilers, testers] of groups) {

@@ -25,10 +25,27 @@
  * Accumulators: `line` (records → per-series points, ring-buffer
  * eviction), `bar` (live category counts or sums), `heatmap` (the same
  * counts or sums under TWO grouping keys — the column is `xField`, the
- * row `seriesField`), `gauge` (the latest reading, nothing kept), and
+ * row `seriesField`), `gauge` (the latest reading, nothing kept),
  * `candlestick` (records keyed by open time; a re-delivered key
  * REPLACES its candle, which is exactly how exchange kline updates
- * behave).
+ * behave), and `map` (whole GeoJSON Features, projected and simplified
+ * on arrival — see below).
+ *
+ * The `map` accumulator is the odd one out in two ways. Its record is
+ * not flat pair fields but a complete Feature, so it consumes the
+ * reader's `object-end` events at `recordPath + [index]` (default
+ * `['features']`) — pair the reader with `detach: ['features', '*']` so
+ * the document root keeps nothing and the accumulator is the only
+ * retention. And what it keeps is *reduced*: each feature's geometry is
+ * simplified on arrival to the vertices a drawing of the current extent
+ * could distinguish, so memory is bounded by the drawn detail, not the
+ * source detail. The projection cannot be fitted before the last
+ * feature has been seen, so the design is refit-on-growth: the running
+ * bbox sets the simplification tolerance, and when it grows enough to
+ * double the tolerance, the kept features are re-simplified against the
+ * new extent (a coarsening of already-kept vertices — never a re-read
+ * of dropped ones, which is why early features can only ever be finer
+ * than needed, not wrong).
  *
  * A record is emitted into the snapshot only when its required fields
  * are present; `getData()` returns a FRESH object shaped for
@@ -45,6 +62,10 @@
  */
 
 import { parseRFC3339Parts, epochOfRFC3339Parts } from '@jarenjs/core/dates';
+import {
+  bboxOf, bboxUnion, projectMercator, simplifyLine, simplifyRing,
+} from '@jarenjs/core/geo';
+import { MAP_SIMPLIFY } from '../types/map.js';
 
 /**
  * @typedef {object} StreamAdapterConfig
@@ -68,6 +89,14 @@ import { parseRFC3339Parts, epochOfRFC3339Parts } from '@jarenjs/core/dates';
  *  candlestick: total candles)
  * @property {boolean} [changes] buffer RFC 6902 ops per snapshot
  *  mutation for {@link StreamAdapter#takeChanges}
+ * @property {string} [labelField] map: the feature property naming a
+ *  feature (default 'name')
+ * @property {string} [valueField] map: the feature property to shade by
+ * @property {number|false} [simplify] map: simplification tolerance as a
+ *  fraction of the frame's width (default the map chart's own; `false`
+ *  keeps every vertex, which unbounds memory)
+ * @property {number} [aspect] map: frame width:height ratio the drawing
+ *  will use (default 1.6, the map chart's own)
  */
 
 /**
@@ -86,18 +115,20 @@ import { parseRFC3339Parts, epochOfRFC3339Parts } from '@jarenjs/core/dates';
  */
 
 /** The chart types with a streaming accumulator. */
-const STREAM_TYPES = new Set(['line', 'bar', 'heatmap', 'gauge', 'candlestick']);
+const STREAM_TYPES = new Set(['line', 'bar', 'heatmap', 'gauge', 'candlestick', 'map']);
 
 /**
  * Create a streaming accumulator for a chart type.
- * @param {'line'|'bar'|'heatmap'|'gauge'|'candlestick'} chartType
+ * @param {'line'|'bar'|'heatmap'|'gauge'|'candlestick'|'map'} chartType
  * @param {StreamAdapterConfig} [config]
  * @returns {StreamAdapter}
  */
 export function createStreamAdapter(chartType, config = {}) {
   if (!STREAM_TYPES.has(chartType))
     throw new TypeError(`unknown stream chart type '${chartType}'`);
-  const recordPath = config.recordPath ?? [];
+  if (chartType === 'map' && config.recordBoundary === 'document')
+    throw new TypeError("createStreamAdapter: the map accumulator reads whole features from one stream ('path' mode only)");
+  const recordPath = config.recordPath ?? (chartType === 'map' ? ['features'] : []);
   const documentMode = config.recordBoundary === 'document';
   const xField = config.xField ?? 'x';
   const yField = config.yField;
@@ -108,6 +139,13 @@ export function createStreamAdapter(chartType, config = {}) {
   const closeField = config.closeField ?? 'close';
   const maxPoints = config.maxPoints ?? 500;
   const track = config.changes === true;
+  const labelField = typeof config.labelField === 'string' && config.labelField !== ''
+    ? config.labelField : 'name';
+  const valueField = typeof config.valueField === 'string' ? config.valueField : null;
+  const simplifyFrac = config.simplify === false ? 0
+    : (typeof config.simplify === 'number' && config.simplify >= 0 ? config.simplify : MAP_SIMPLIFY);
+  const aspect = typeof config.aspect === 'number' && Number.isFinite(config.aspect) && config.aspect > 0
+    ? config.aspect : 1.6;
 
   /** @type {Map<string, {buf: any[], head: number, index: number}>} line series */
   let series = new Map();
@@ -126,6 +164,165 @@ export function createStreamAdapter(chartType, config = {}) {
   let index = null;
   /** @type {{op: string, path: string, value?: any}[]} buffered snapshot ops */
   let ops = [];
+  /** @type {any[]} map: kept (reduced) Feature objects */
+  let mapFeatures = [];
+  /** @type {number[]|null} map: running geographic extent */
+  let mapBbox = null;
+  /** @type {number} map: plane tolerance the kept set was simplified at */
+  let mapTolerance = 0;
+
+  /**
+   * The Douglas-Peucker tolerance in Mercator-plane units that equals
+   * `simplifyFrac` of the frame's width once the running bbox is fitted:
+   * frac x max(planeWidth, planeHeight x aspect). Growing the bbox can
+   * only raise it, which is what makes simplify-on-arrival safe — an
+   * early feature was simplified at least as finely as the final fit
+   * would have.
+   */
+  function mapPlaneTolerance() {
+    if (simplifyFrac <= 0 || mapBbox === null)
+      return 0;
+    const [x0, y1] = projectMercator(mapBbox[0], mapBbox[1]);
+    const [x1, y0] = projectMercator(mapBbox[2], mapBbox[3]);
+    return simplifyFrac * Math.max(x1 - x0, (y1 - y0) * aspect);
+  }
+
+  /** Project a run of positions, carrying lon/lat along as p[2]/p[3]. */
+  function projectCarrying(positions) {
+    if (!Array.isArray(positions))
+      return [];
+    const out = [];
+    for (const position of positions) {
+      if (!Array.isArray(position))
+        continue;
+      const lon = position[0];
+      const lat = position[1];
+      if (typeof lon !== 'number' || typeof lat !== 'number'
+        || !Number.isFinite(lon) || !Number.isFinite(lat))
+        continue;
+      const [px, py] = projectMercator(lon, lat);
+      out.push([px, py, lon, lat]);
+    }
+    return out;
+  }
+
+  const unproject = (p) => [p[2], p[3]];
+
+  function reduceLine(positions, tolerance) {
+    const run = projectCarrying(positions);
+    if (run.length < 2)
+      return null;
+    return (tolerance > 0 ? simplifyLine(run, tolerance) : run).map(unproject);
+  }
+
+  function reduceRing(positions, tolerance) {
+    const run = projectCarrying(positions);
+    if (run.length < 4)
+      return null;
+    return (tolerance > 0 ? simplifyRing(run, tolerance) : run).map(unproject);
+  }
+
+  function reduceParts(list, reduceOne, tolerance) {
+    if (!Array.isArray(list))
+      return null;
+    const out = [];
+    for (const part of list) {
+      const reduced = reduceOne(part, tolerance);
+      if (reduced !== null)
+        out.push(reduced);
+    }
+    return out.length === 0 ? null : out;
+  }
+
+  /**
+   * A geometry with the vertices a drawing at the current extent could
+   * not distinguish removed, as plain lon/lat GeoJSON — a subset of the
+   * source vertices, so re-reducing at a coarser tolerance later is
+   * exact. Null when nothing drawable remains.
+   */
+  function reduceGeometry(geometry, tolerance) {
+    if (geometry === null || typeof geometry !== 'object')
+      return null;
+    const { type, coordinates } = geometry;
+    if (type === 'Point') {
+      const run = projectCarrying([coordinates]);
+      return run.length === 0 ? null : { type, coordinates: unproject(run[0]) };
+    }
+    if (type === 'MultiPoint') {
+      const run = projectCarrying(coordinates);
+      return run.length === 0 ? null : { type, coordinates: run.map(unproject) };
+    }
+    if (type === 'LineString') {
+      const line = reduceLine(coordinates, tolerance);
+      return line === null ? null : { type, coordinates: line };
+    }
+    if (type === 'MultiLineString') {
+      const lines = reduceParts(coordinates, reduceLine, tolerance);
+      return lines === null ? null : { type, coordinates: lines };
+    }
+    if (type === 'Polygon') {
+      const rings = reduceParts(coordinates, reduceRing, tolerance);
+      return rings === null ? null : { type, coordinates: rings };
+    }
+    if (type === 'MultiPolygon') {
+      const polys = reduceParts(coordinates,
+        (rings, t) => reduceParts(rings, reduceRing, t), tolerance);
+      return polys === null ? null : { type, coordinates: polys };
+    }
+    if (type === 'GeometryCollection') {
+      const inner = reduceParts(geometry.geometries,
+        (g, t) => reduceGeometry(g, t), tolerance);
+      return inner === null ? null : { type, geometries: inner };
+    }
+    return null;
+  }
+
+  /** One complete Feature (or bare geometry) off the stream. */
+  function acceptMapFeature(item) {
+    if (item === null || typeof item !== 'object')
+      return;
+    const properties = item.type === 'Feature' ? (item.properties ?? {}) : item;
+    const geometry = item.type === 'Feature' ? item.geometry : item;
+    if (geometry === null || typeof geometry !== 'object')
+      return;
+    const box = bboxOf(geometry);
+    if (box !== null)
+      mapBbox = mapBbox === null ? box : bboxUnion(mapBbox, box);
+    const tolerance = mapPlaneTolerance();
+    const reduced = reduceGeometry(geometry, tolerance);
+    if (reduced === null)
+      return;
+    // only what the drawing reads survives: the label, the shading
+    // value, and the reduced geometry — the rest of the feature goes
+    // with the feature
+    const props = {};
+    const named = properties?.[labelField] ?? properties?.label;
+    if (named !== null && named !== undefined)
+      props[labelField] = String(named);
+    if (valueField !== null && typeof properties?.[valueField] === 'number'
+      && Number.isFinite(properties[valueField]))
+      props[valueField] = properties[valueField];
+    mapFeatures.push({ type: 'Feature', properties: props, geometry: reduced });
+    if (track)
+      ops.push({ op: 'add', path: '/features/-', value: mapFeatures[mapFeatures.length - 1] });
+    // refit-on-growth: a bbox that has doubled the tolerance since the
+    // kept set was last simplified means earlier features now carry
+    // detail the drawing cannot show — coarsen them once, amortized
+    if (mapTolerance === 0) {
+      mapTolerance = tolerance;
+    }
+    else if (tolerance > mapTolerance * 2) {
+      for (let i = 0; i < mapFeatures.length - 1; i++) {
+        const again = reduceGeometry(mapFeatures[i].geometry, tolerance);
+        if (again !== null) {
+          mapFeatures[i] = { ...mapFeatures[i], geometry: again };
+          if (track)
+            ops.push({ op: 'replace', path: `/features/${i}`, value: mapFeatures[i] });
+        }
+      }
+      mapTolerance = tolerance;
+    }
+  }
 
   /** Position of a candle key in snapshot order (bounded by maxPoints). */
   function candlePosition(key) {
@@ -253,6 +450,14 @@ export function createStreamAdapter(chartType, config = {}) {
   function onEvent(event) {
     const path = event.path;
     if (path === undefined) return;
+    if (chartType === 'map') {
+      // the record is a complete Feature, delivered whole by the
+      // reader's object-end (pair events carry only its scalar leaves)
+      if (event.type === 'object-end' && path.length === recordPath.length + 1
+        && startsWith(path, recordPath))
+        acceptMapFeature(event.value);
+      return;
+    }
     if (documentMode) {
       if (event.type === 'pair' && path.length === recordPath.length + 1
         && startsWith(path, recordPath)) {
@@ -278,6 +483,9 @@ export function createStreamAdapter(chartType, config = {}) {
   }
 
   function getData() {
+    if (chartType === 'map') {
+      return { features: mapFeatures.slice() };
+    }
     if (chartType === 'gauge') {
       return { value: reading };
     }
@@ -315,6 +523,7 @@ export function createStreamAdapter(chartType, config = {}) {
     // an empty dial, but only one of them is a claim)
     if (chartType === 'gauge') return { value: null };
     if (chartType === 'candlestick') return { candles: [] };
+    if (chartType === 'map') return { features: [] };
     return { series: [] };
   }
 
@@ -341,6 +550,9 @@ export function createStreamAdapter(chartType, config = {}) {
       candles = new Map();
       record = null;
       index = null;
+      mapFeatures = [];
+      mapBbox = null;
+      mapTolerance = 0;
       // one whole-document replace supersedes any uncollected ops
       if (track) ops = [{ op: 'replace', path: '', value: emptyData() }];
     },
