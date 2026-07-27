@@ -559,6 +559,43 @@ RFC 7946 removed coordinate-reference-system support and mandates WGS 84, so
 there is no SRID table and no reprojection: conformance removes the need rather
 than an omission hiding it.
 
+**Measured against the field** (`npm run benchmark:geo`, Node v22.22.2). Every
+scenario asserts result equivalence before any timing, and the harness refuses
+to print a table if the engines disagree: distance, area, length and bounding
+box come out *bit-identical* to Turf, containment agrees on a 400-point sweep,
+and the index returns exactly Flatbush's answer on 200 queries. Ratios are the
+rival's time over this kernel's, so above 1 means Jaren is faster.
+
+| scenario | Jaren | rival | ratio |
+|---|---|---|---|
+| distance, two positions | 14.5 ns | 114.8 ns (turf) | **7.9×** |
+| distance vs an ellipsoidal library | 49.3 ns | 621.5 ns (geolib) | **12.6×** |
+| line length, 500 positions | 21.8 µs | 63.8 µs (turf) | **2.9×** |
+| bounding box, 2000 vertices | 15.1 µs | 18.3 µs (turf) | **1.2×** |
+| polygon area, 2000 vertices | 19.0 µs | 20.2 µs (turf) | **1.1×** |
+| point in polygon, 12 vertices | 182 ns | 208 ns (turf) | **1.1×** |
+| index probe, 100k boxes | 498 ns | 508 ns (flatbush) | 1.0× |
+| centroid, 2000 vertices | 27.7 µs | 19.5 µs (turf) | **0.7×** |
+| point in polygon, 2000 vertices | 8.3 µs | 4.1 µs (turf) | **0.5×** |
+| index build, 100k boxes | 31.0 ms | 12.0 ms (flatbush) | **0.4×** |
+
+The last three are losses and are recorded as such. Two of them are understood:
+
+- **Point-in-polygon on a large ring is about half Turf's speed, on purpose.**
+  Every edge that could matter goes through the exact orientation predicate,
+  where Turf uses naive floating-point arithmetic. That is the trade this
+  module exists to make — it is the difference between a containment test that
+  is right on near-collinear input and one that is merely fast. Cheap
+  straddle/span tests already skip the predicate on edges that cannot affect
+  the answer, which took this from 0.2× to 0.5×; the rest is the predicate
+  itself.
+- **Index build is ~2.6× slower than Flatbush** because the leaf sort permutes
+  the bounds array on every swap. Sorting an index array and permuting once at
+  the end is the known fix. Probe — the operation a spatial join actually
+  repeats — is level, which is why this has not been urgent.
+
+Centroid is simply slower and not yet diagnosed.
+
 ```javascript
 import { orient2d, haversineDistance, ringWinding, geohashEncode } from '@jarenjs/core/geo';
 

@@ -20,14 +20,6 @@
 
 import { haversineDistance, lineLength, EARTH_RADIUS } from './distance.js';
 import { sphericalRingArea, pointInPolygon, isRingClosed } from './ring.js';
-import { bboxUnion } from './bbox.js';
-
-/** The geometry types whose `coordinates` is a single position. */
-const POINT_TYPES = new Set(['Point']);
-/** Types whose `coordinates` is a list of positions. */
-const LINE_TYPES = new Set(['MultiPoint', 'LineString']);
-/** Types whose `coordinates` is a list of position lists. */
-const SURFACE_TYPES = new Set(['MultiLineString', 'Polygon']);
 
 /**
  * Whether a value looks like a bare position: an array of at least two
@@ -76,8 +68,16 @@ export function eachPosition(value, visit) {
   if (value === null || typeof value !== 'object')
     return;
   if (Array.isArray(value)) { // a nest of coordinates
-    for (let i = 0; i < value.length; i++)
-      eachPosition(value[i], visit);
+    // a ring or line is an array OF positions, which is the overwhelming
+    // majority of what this walks; classifying each member here saves a
+    // call frame and a re-entry per vertex
+    for (let i = 0; i < value.length; i++) {
+      const item = value[i];
+      if (isPosition(item))
+        visit(item);
+      else
+        eachPosition(item, visit);
+    }
     return;
   }
   if (value.type === 'FeatureCollection') {
@@ -115,12 +115,24 @@ export function eachPosition(value, visit) {
  * @returns {number[] | null}
  */
 export function bboxOf(value) {
-  let box = null;
+  // four scalars rather than a box per position: the obvious spelling
+  // (union a fresh [x,y,x,y] into an accumulator) allocates twice for
+  // every vertex, which on a 2000-vertex ring is 4000 short-lived arrays
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  let seen = false;
   eachPosition(value, (p) => {
-    const point = [p[0], p[1], p[0], p[1]];
-    box = box === null ? point : bboxUnion(box, point);
+    const x = p[0];
+    const y = p[1];
+    seen = true;
+    if (x < west) west = x;
+    if (x > east) east = x;
+    if (y < south) south = y;
+    if (y > north) north = y;
   });
-  return box;
+  return seen ? [west, south, east, north] : null;
 }
 
 /**
@@ -344,10 +356,5 @@ export function ringsClosed(value) {
     return (geometry.coordinates ?? []).every((rings) => (rings ?? []).every(isRingClosed));
   return true;
 }
-
-/** The geometry-type groups, exported for consumers that dispatch on shape. */
-export const GEO_POINT_TYPES = POINT_TYPES;
-export const GEO_LINE_TYPES = LINE_TYPES;
-export const GEO_SURFACE_TYPES = SURFACE_TYPES;
 
 //#endregion

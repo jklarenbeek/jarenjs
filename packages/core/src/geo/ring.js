@@ -103,11 +103,15 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
   if (n < 4)
     return 0; // fewer than 3 distinct positions bounds no area
   let total = 0;
+  // consecutive edges share a vertex, so its sine is carried forward
+  // rather than recomputed: one transcendental per vertex, not two
+  let sinA = Math.sin(ring[0][1] * DEG);
   for (let i = 0; i < n - 1; i++) {
     const a = ring[i];
     const b = ring[i + 1];
-    total += (b[0] - a[0]) * DEG
-      * (2 + Math.sin(a[1] * DEG) + Math.sin(b[1] * DEG));
+    const sinB = Math.sin(b[1] * DEG);
+    total += (b[0] - a[0]) * DEG * (2 + sinA + sinB);
+    sinA = sinB;
   }
   return Math.abs(total * radius * radius * 0.5);
 }
@@ -138,17 +142,22 @@ export function pointInRing(x, y, ring) {
     const yi = ring[i][1];
     const xj = ring[j][0];
     const yj = ring[j][1];
-    // exactly on this edge? the robust orientation settles it, and the
-    // bounding test keeps it to the segment rather than the whole line
-    if (orient2d(xi, yi, xj, yj, x, y) === 0
-      && (xi < x) === (x <= xj) && (yi < y) === (y <= yj))
+    // Two cheap tests decide whether the exact predicate is needed at
+    // all. An edge that neither straddles the ray nor spans the point
+    // can affect neither answer, and on a large ring that is almost
+    // every edge - so the robust orientation runs a handful of times
+    // instead of twice per vertex.
+    const straddles = (yi > y) !== (yj > y);
+    const spans = (xi < x) === (x <= xj) && (yi < y) === (y <= yj);
+    if (!straddles && !spans)
+      continue;
+    const side = orient2d(xi, yi, xj, yj, x, y);
+    // exactly on this edge, and within its extent rather than its line
+    if (side === 0 && spans)
       return true;
-    if ((yi > y) !== (yj > y)) {
-      // the crossing test itself: is the edge to the right of the point
-      const side = orient2d(xi, yi, xj, yj, x, y);
-      if (side !== 0 && (side > 0) === (yj > yi))
-        inside = !inside;
-    }
+    // the crossing test itself: is the edge to the right of the point
+    if (straddles && side !== 0 && (side > 0) === (yj > yi))
+      inside = !inside;
   }
   return inside;
 }

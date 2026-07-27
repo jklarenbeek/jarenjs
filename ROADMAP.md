@@ -322,6 +322,22 @@ exist. And equirectangular distance is 0.02% off at 430 km but 12.4% off
 intercontinentally, at 2.0 ns against haversine's 13.6 ns — so the design is
 screen-then-refine, the same build-then-probe shape as the hash join.
 
+- [ ] **Close the two remaining spatial benchmark losses** — `npm run
+  benchmark:geo` measures this kernel against Turf, geolib and Flatbush and
+  asserts result equivalence before timing; the table lives in
+  `packages/core/ARCHITECTURE.md`. Two rows are losses with a known cause.
+  **Index build** is ~2.6x slower than Flatbush (31 ms against 12 ms for 100k
+  boxes) because the leaf sort permutes the bounds array on every swap; sorting
+  an index array and permuting once at the end is the fix, and probe — the
+  operation a join actually repeats — is already level. **Centroid** on a
+  2000-vertex ring is 1.4x slower than Turf and is *not* diagnosed: it walks
+  the same `eachPosition` callback that `bboxOf` uses to beat Turf on the same
+  ring, so the difference is unexplained rather than inherent, and guessing
+  before profiling is how the last two optimizations nearly went wrong. The
+  third loss — point-in-polygon at half Turf's speed on a large ring — is
+  deliberate and stays: it is the exact orientation predicate, and giving it up
+  would trade a right answer for a fast one.
+
 - [ ] **A `geoFormats` group in `@jarenjs/formats`** — `geohash`, `wkt` and a
   `geojson` tester alongside the four existing groups. Mechanically this is a
   new `src/geo.js` exporting `formatValidators`, one `export` line in
