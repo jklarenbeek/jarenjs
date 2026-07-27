@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * AST and render tests for the chart types added after the first five
- * (radar, gauge, boxplot, heatmap, treemap, streamgraph, sankey) plus
+ * (radar, gauge, boxplot, heatmap, treemap, streamgraph, sankey, map) plus
  * their shared invariants: geometry-free unit-space ASTs, hostile-input
  * tolerance, per-mark hover titles.
  */
@@ -13,9 +13,10 @@ import {
   buildLineAST, buildCandlestickAST,
   buildRadarAST, buildGaugeAST,
   buildBoxplotAST, quantileSorted, buildHeatmapAST,
-  buildTreemapAST, buildStreamgraphAST, buildSankeyAST,
+  buildTreemapAST, buildStreamgraphAST, buildSankeyAST, buildMapAST,
   SEQUENTIAL, inkFor,
 } from '@jarenjs/charts';
+import { projectMercator } from '@jarenjs/core/geo';
 
 describe('radar AST', function () {
   it('spreads axes over the circle from 12 o\'clock and scales to a nice top', function () {
@@ -640,5 +641,235 @@ describe('candlestick domain policies', function () {
       { type: 'candlestick', domain: { y: 'step' } });
     assert.ok(stepped.domain.y[0] <= 95 && stepped.domain.y[1] >= 114);
     assert.notDeepEqual(stepped.domain.y, [95, 114]);
+  });
+});
+
+describe('map AST', function () {
+  /** Two adjacent squares and a marker, in the North Sea for realism. */
+  const REGIONS = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { name: 'North', pop: 100 },
+        geometry: { type: 'Polygon', coordinates: [[[3, 52], [7, 52], [7, 54], [3, 54], [3, 52]]] },
+      },
+      {
+        type: 'Feature',
+        properties: { name: 'South', pop: 10_000 },
+        geometry: { type: 'Polygon', coordinates: [[[3, 50], [7, 50], [7, 52], [3, 52], [3, 50]]] },
+      },
+    ],
+  };
+
+  const everyPosition = (ast) => ast.shapes.flatMap(
+    (s) => [...s.rings.flat(), ...s.lines.flat(), ...s.dots]);
+
+  it('is geometry-free unit space: no pixels anywhere', function () {
+    const ast = buildMapAST({ features: REGIONS }, { type: 'map' });
+    assert.equal(ast.shapes.length, 2);
+    for (const [u, v] of everyPosition(ast)) {
+      assert.ok(u >= 0 && u <= 1, `u ${u} out of unit range`);
+      assert.ok(v >= 0 && v <= 1, `v ${v} out of unit range`);
+    }
+    assert.deepEqual(ast.bbox, [3, 50, 7, 54]);
+  });
+
+  it('normalizes the shading property across the features that carry one', function () {
+    const ast = buildMapAST({ features: REGIONS }, { type: 'map', value: 'pop' });
+    assert.deepEqual(ast.domain, { min: 100, max: 10_000 });
+    assert.equal(ast.shapes[0].t, 0);
+    assert.equal(ast.shapes[1].t, 1);
+    // log spreads the two decades evenly instead of pinning the small one to zero
+    const log = buildMapAST({ features: REGIONS }, { type: 'map', value: 'pop', log: true });
+    assert.equal(log.shapes[0].t, 0);
+    assert.equal(log.shapes[1].t, 1);
+    const mid = buildMapAST({
+      features: {
+        type: 'FeatureCollection',
+        features: [
+          ...REGIONS.features,
+          {
+            type: 'Feature',
+            properties: { name: 'Mid', pop: 1000 },
+            geometry: { type: 'Point', coordinates: [5, 51] },
+          },
+        ],
+      },
+    }, { type: 'map', value: 'pop', log: true });
+    assert.equal(mid.shapes[2].t, 0.5);
+  });
+
+  it('leaves a feature with no value unshaded rather than dropping it', function () {
+    const ast = buildMapAST({
+      features: [
+        REGIONS.features[0],
+        { type: 'Feature', properties: { name: 'Unknown' }, geometry: REGIONS.features[1].geometry },
+      ],
+    }, { type: 'map', value: 'pop' });
+    assert.equal(ast.shapes.length, 2);
+    assert.equal(ast.shapes[1].t, null);
+    assert.equal(ast.shapes[1].value, null);
+    assert.equal(ast.shapes[1].rings.length, 1, 'it still draws');
+  });
+
+  it('keeps holes as their own rings and walks every geometry type', function () {
+    const ast = buildMapAST({
+      features: [
+        {
+          type: 'Feature',
+          properties: { name: 'holed' },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]],
+              [[1, 1], [2, 1], [2, 2], [1, 2], [1, 1]],
+            ],
+          },
+        },
+        {
+          type: 'Feature',
+          properties: { name: 'mixed' },
+          geometry: {
+            type: 'GeometryCollection',
+            geometries: [
+              { type: 'MultiPoint', coordinates: [[0, 0], [1, 1]] },
+              { type: 'MultiLineString', coordinates: [[[0, 0], [1, 1]]] },
+              { type: 'MultiPolygon', coordinates: [[[[2, 2], [3, 2], [3, 3], [2, 2]]]] },
+            ],
+          },
+        },
+      ],
+    }, { type: 'map', simplify: false });
+    assert.equal(ast.shapes[0].rings.length, 2);
+    assert.deepEqual(ast.shapes[1].dots.length, 2);
+    assert.equal(ast.shapes[1].lines.length, 1);
+    assert.equal(ast.shapes[1].rings.length, 1);
+  });
+
+  it('folds the points convenience list into the same shape list', function () {
+    const ast = buildMapAST(
+      { features: REGIONS, points: [{ at: [4.9, 52.37], label: 'Amsterdam', value: 900 }] },
+      { type: 'map', value: 'pop' });
+    assert.equal(ast.shapes.length, 3);
+    assert.equal(ast.shapes[2].label, 'Amsterdam');
+    assert.equal(ast.shapes[2].dots.length, 1);
+    assert.equal(ast.shapes[2].value, 900);
+  });
+
+  it('simplifies away the vertices that would land on the same pixel', function () {
+    // a 200-vertex "coastline" that is really a straight line
+    const coordinates = Array.from({ length: 200 }, (_, i) => [3 + i * 0.02, 52 + (i % 2) * 1e-6]);
+    const data = { features: [{ type: 'LineString', coordinates }] };
+    const simplified = buildMapAST(data, { type: 'map' });
+    const verbatim = buildMapAST(data, { type: 'map', simplify: false });
+    assert.equal(verbatim.vertices.drawn, 200);
+    assert.equal(simplified.vertices.source, 200);
+    assert.ok(simplified.vertices.drawn < 10,
+      `a straight line should collapse, kept ${simplified.vertices.drawn}`);
+    // and the endpoints are exactly where they were
+    assert.deepEqual(simplified.shapes[0].lines[0][0], verbatim.shapes[0].lines[0][0]);
+  });
+
+  it('survives hostile input without throwing or emitting NaN', function () {
+    const hostile = {
+      features: {
+        type: 'FeatureCollection',
+        features: [
+          null, 42, 'nope',
+          { type: 'Feature', properties: null, geometry: null },
+          { type: 'Feature', properties: {}, geometry: { type: 'Sphere', coordinates: [1, 2] } },
+          { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: 'ring' } },
+          { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: ['a', 'b'] } },
+          { type: 'Feature', properties: { name: 'ok', pop: 'lots' }, geometry: { type: 'Point', coordinates: [5, 52] } },
+        ],
+      },
+      points: [null, { at: 'here' }, { at: [Infinity, 0] }, { at: [4, 52] }],
+    };
+    const ast = buildMapAST(hostile, { type: 'map', value: 'pop' });
+    assert.equal(ast.domain, null, 'no feature carried a numeric value');
+    assert.equal(ast.shapes.length, 2, 'the two real positions survive');
+    for (const [u, v] of everyPosition(ast))
+      assert.ok(Number.isFinite(u) && Number.isFinite(v));
+    assert.ok(!compileChart({ type: 'map' }).toSvgString().includes('NaN'));
+    assert.ok(!compileChart({ type: 'map', ...hostile }).toSvgString().includes('NaN'));
+  });
+
+  it('accepts a bare FeatureCollection as the whole data document', function () {
+    const ast = buildMapAST(REGIONS, { type: 'map' });
+    assert.equal(ast.shapes.length, 2);
+    assert.equal(buildMapAST([REGIONS.features[0].geometry], { type: 'map' }).shapes.length, 1);
+  });
+});
+
+describe('map render', function () {
+  const CONFIG = {
+    type: 'map', title: 'Regions', value: 'pop',
+    features: {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { name: 'North', pop: 100 },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [[3, 52], [7, 52], [7, 54], [3, 54], [3, 52]],
+              [[4, 52.5], [5, 52.5], [5, 53], [4, 53], [4, 52.5]],
+            ],
+          },
+        },
+        { type: 'Feature', properties: { name: 'Nowhere' }, geometry: { type: 'Point', coordinates: [6, 51] } },
+      ],
+    },
+  };
+
+  it('draws areas with evenodd so holes punch through either winding', function () {
+    const svg = compileChart(CONFIG).toSvgString();
+    assert.match(svg, /class="chart-map-area"/);
+    assert.match(svg, /fill-rule="evenodd"/);
+    // both rings are subpaths of one path: two moveto commands, one path
+    const area = svg.match(/<path d="([^"]+)"[^>]*class="chart-map-area"/);
+    assert.notEqual(area, null);
+    assert.equal(area[1].match(/M/g).length, 2);
+    assert.equal(area[1].match(/Z/g).length, 2);
+  });
+
+  it('gives every mark a hover title and the ramp a legend', function () {
+    const svg = compileChart(CONFIG).toSvgString();
+    assert.match(svg, /<title>North: 100<\/title>/);
+    assert.match(svg, /<title>Nowhere<\/title>/, 'an unshaded mark still names itself');
+    assert.match(svg, /class="chart-swatch"/);
+    assert.match(svg, /class="chart-map-dot"/);
+  });
+
+  it('has no legend when nothing is shaded', function () {
+    const svg = compileChart({ ...CONFIG, value: undefined }).toSvgString();
+    assert.doesNotMatch(svg, /class="chart-swatch"/);
+    assert.match(svg, /class="chart-map-area"/);
+  });
+
+  it('draws the projection undistorted', function () {
+    // The North polygon spans 4 degrees of longitude and 2 of latitude.
+    // That is NOT a 2:1 shape once projected — Mercator stretches
+    // latitude — so the check is against the projected extent, which is
+    // the whole point of the exercise.
+    const NORTH = [3, 52, 7, 54];
+    const svg = compileChart(CONFIG).toSvgString();
+    const d = svg.match(/<path d="([^"]+)"[^>]*class="chart-map-area"/)[1];
+    const xs = [];
+    const ys = [];
+    for (const [, x, y] of d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)) {
+      xs.push(Number(x));
+      ys.push(Number(y));
+    }
+    const drawn = (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys));
+    const [px0, py1] = projectMercator(NORTH[0], NORTH[1]);
+    const [px1, py0] = projectMercator(NORTH[2], NORTH[3]);
+    const projected = (px1 - px0) / (py1 - py0);
+    assert.ok(Math.abs(drawn - projected) < 0.001,
+      `drawn ratio ${drawn} does not match the projected ${projected}`);
+    assert.ok(Math.abs(drawn - 2) > 0.5,
+      'a distorted map would have drawn the 4-by-2-degree box as 2:1');
   });
 });

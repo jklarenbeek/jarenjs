@@ -30,6 +30,7 @@ import { buildHeatmapAST, renderHeatmapAST } from '../types/heatmap.js';
 import { buildTreemapAST, renderTreemapAST } from '../types/treemap.js';
 import { buildStreamgraphAST, renderStreamgraphAST } from '../types/streamgraph.js';
 import { buildSankeyAST, renderSankeyAST } from '../types/sankey.js';
+import { buildMapAST, renderMapAST } from '../types/map.js';
 
 /** @type {Record<string, {build: (data: any, config: any) => any, render: (ast: any, theme: any, hash: string, options?: any) => any}>} */
 const TYPES = {
@@ -45,6 +46,7 @@ const TYPES = {
   treemap: { build: buildTreemapAST, render: renderTreemapAST },
   streamgraph: { build: buildStreamgraphAST, render: renderStreamgraphAST },
   sankey: { build: buildSankeyAST, render: renderSankeyAST },
+  map: { build: buildMapAST, render: renderMapAST },
 };
 
 /**

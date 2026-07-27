@@ -63,6 +63,42 @@ export function chartTitle(x, y, text, fontSize, tokens) {
 }
 
 /**
+ * @typedef {{name: string, swatch?: number, tone?: 'win'|'loss'|null}} LegendEntry
+ */
+
+/**
+ * The legend swatch row, laid out right-to-left from `right` so the last
+ * entry ends at the plot's right edge. Returns the vnodes rather than
+ * drawing, so a chart with no cartesian frame at all (the map) can place
+ * the same row itself.
+ * @param {LegendEntry[]} legend
+ * @param {number} right the x the row ends at
+ * @param {number} y the swatches' top edge
+ * @param {{tokens: Record<string,string>}} theme
+ * @param {readonly string[]} [palette]
+ * @returns {any[]}
+ */
+export function legendRow(legend, right, y, theme, palette) {
+  let x = right;
+  const entries = [];
+  for (let i = legend.length - 1; i >= 0; i--) {
+    const entry = legend[i];
+    const label = entry.name;
+    const w = Math.ceil(textWidth(label, FS_TICK));
+    x -= w + 4;
+    entries.push(textAt(x + 14, y + 9, label, FS_TICK, { fill: theme.tokens.muted, class: 'chart-tick' }));
+    x -= 14;
+    entries.push(['rect', {
+      x: num(x), y: num(y), width: 10, height: 10,
+      fill: toneColor(theme, entry.tone, entry.swatch ?? i, palette),
+      class: 'chart-swatch',
+    }]);
+    x -= 14;
+  }
+  return entries;
+}
+
+/**
  * @typedef {{ticks: {pos: number, label: string}[], label?: string|null}} AxisAST
  */
 
@@ -102,24 +138,7 @@ export function cartesianFrame(params) {
   }
 
   if (legend !== null && legend.length !== 0) {
-    let x = plot.x + plot.w;
-    const y = plot.y - 10;
-    const entries = [];
-    for (let i = legend.length - 1; i >= 0; i--) {
-      const entry = legend[i];
-      const label = entry.name;
-      const w = Math.ceil(textWidth(label, FS_TICK));
-      x -= w + 4;
-      entries.push(textAt(x + 14, y + 9, label, FS_TICK, { fill: t.muted, class: 'chart-tick' }));
-      x -= 14;
-      entries.push(['rect', {
-        x: num(x), y: num(y), width: 10, height: 10,
-        fill: toneColor(params.theme, entry.tone, entry.swatch ?? i, params.palette),
-        class: 'chart-swatch',
-      }]);
-      x -= 14;
-    }
-    children.push(...entries);
+    children.push(...legendRow(legend, plot.x + plot.w, plot.y - 10, params.theme, params.palette));
   }
 
   for (const tick of yAxis.ticks) {

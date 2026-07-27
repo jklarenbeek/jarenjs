@@ -13,8 +13,8 @@
 //                                                  fired on completion
 //   {type:'item', path, index, value, line}      - scalar array element,
 //                                                  fired on completion
-//   {type:'object-end', path, line}              - container completed
-//   {type:'array-end',  path, line}
+//   {type:'object-end', path, value, line}       - container completed
+//   {type:'array-end',  path, value, line}
 //
 // Scalars fire once, on completion (a number is complete only at its
 // delimiter; a string at its closing quote). A container value does NOT
@@ -40,6 +40,23 @@
 // completion signal. Deltas never split a surrogate pair or an escape.
 // Object keys emit none: a key has no path until it is complete, and half
 // a key is not something to display.
+//
+// With `detach: [...path pattern...]` a value whose absolute path matches
+// is **never linked into the tree**. Its completion event still fires and
+// still carries the whole value, so a consumer sees every record exactly
+// once; what changes is that letting go of the event lets go of the
+// record. Without it, feeding a document in chunks bounds the *parse*
+// but not the *result* — the reader still ends up holding everything it
+// has read, which is the wrong answer for a continent-sized
+// FeatureCollection or a log with a million lines.
+//
+//   createJsonxStreamReader({ detach: ['features', '*'], onEvent })
+//
+// leaves `root()` holding the document's frame — its header members and
+// an empty `features` array — however many features went past. The
+// pattern matches an exact path, not a prefix, so a feature's own rings
+// are not separately detached: they belong to their feature and are
+// freed with it.
 
 import {
   CC_TAB,
@@ -85,6 +102,42 @@ const ST_DONE = 7; // after the root value: whitespace only
 
 const RE_BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** The one-segment wildcard in a detach pattern. */
+const WILDCARD = '*';
+
+/**
+ * Validate a detach path pattern: a non-empty array of segments, each a
+ * string key, a non-negative integer index, or `'*'` matching any one
+ * segment. `['features', '*']` names every member of the root's
+ * `features` array; `['*']` names every element of an array root.
+ *
+ * A pattern matches a value's own **absolute path**, exactly — it is not
+ * a prefix. That is what makes it safe on nested data: `['features',
+ * '*']` detaches each feature and says nothing about the rings inside
+ * it, which travel with their feature and are freed with it.
+ *
+ * Note the ambiguity `'*'` carries, the same one JSONPath has: a literal
+ * object key spelled `*` cannot be named. Nothing here can fix that
+ * without a second syntax, and the trade is worth it.
+ *
+ * @param {any} spec
+ * @returns {(string|number)[]}
+ * @throws {TypeError} On a malformed pattern
+ */
+function detachPattern(spec) {
+  if (!Array.isArray(spec) || spec.length === 0)
+    throw new TypeError('detach must be a non-empty array of path segments');
+  for (const segment of spec) {
+    const ok = typeof segment === 'string'
+      || (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0);
+    if (!ok) {
+      throw new TypeError(
+        `detach segment ${JSON.stringify(segment)} must be a string key, a non-negative integer index, or '*'`);
+    }
+  }
+  return spec.slice();
+}
+
 export class JsonxMachine {
   /**
    * @param {object} [options] - Reader options
@@ -93,11 +146,14 @@ export class JsonxMachine {
    * @param {(event: JsonxStreamEvent) => void} [options.onEvent] - Event sink
    * @param {boolean} [options.partialText] - Also emit `text-partial`
    *  deltas while a string value is still arriving
+   * @param {(string|number)[]} [options.detach] - Path pattern whose
+   *  matching values are NOT retained in the root (see `detachPattern`)
    */
   constructor(options = {}) {
     this.mode = options.mode === 'json' ? 'json' : 'jsonx';
     this.onEvent = options.onEvent ?? null;
     this.partialText = options.partialText === true;
+    this.detach = options.detach === undefined ? null : detachPattern(options.detach);
     this.partialFrom = -1; // body offset the next text-partial delta starts at
     this.partialHold = ''; // lone high surrogate held back for the next delta
     this.buf = '';
@@ -156,6 +212,10 @@ export class JsonxMachine {
   /**
    * The (possibly still growing) root value. Undefined until the root
    * value has started; container members appear as they complete.
+   *
+   * Under `detach`, matching values were never linked in — the root is
+   * the document's *frame* (its header members, and an empty array where
+   * the detached records would have been), which is the whole point.
    * @returns {*} Current root value
    */
   root() {
@@ -429,7 +489,28 @@ export class JsonxMachine {
     if (stack.length === 0)
       return [];
     const frame = stack[stack.length - 1];
-    return this.path.concat(frame.array ? frame.value.length : frame.key);
+    return this.path.concat(frame.array ? frame.count : frame.key);
+  }
+
+  /**
+   * Whether `this.path` plus one more segment matches the detach
+   * pattern. Spelled out rather than built on `valuePath()` so the
+   * common case — a document read with no `detach` at all — costs one
+   * null check, and the matching case costs no array allocation.
+   */
+  detaches(last) {
+    const pattern = this.detach;
+    if (pattern === null)
+      return false;
+    const path = this.path;
+    if (pattern.length !== path.length + 1)
+      return false;
+    for (let i = 0; i < path.length; i++) {
+      if (pattern[i] !== WILDCARD && pattern[i] !== path[i])
+        return false;
+    }
+    const tail = pattern[path.length];
+    return tail === WILDCARD || tail === last;
   }
 
   completeScalar(value) {
@@ -441,8 +522,12 @@ export class JsonxMachine {
     }
     const frame = stack[stack.length - 1];
     if (frame.array) {
-      const index = frame.value.length;
-      frame.value.push(value);
+      const index = frame.count++;
+      // A detached scalar is not stored: the `item` event below already
+      // carries it, so linking it in would retain exactly what the
+      // caller asked not to retain.
+      if (!this.detaches(index))
+        frame.value[index] = value;
       if (this.onEvent !== null)
         this.onEvent({
           type: 'item',
@@ -454,7 +539,8 @@ export class JsonxMachine {
       this.state = ST_ARR_NEXT;
     }
     else {
-      setKey(frame.value, frame.key, value);
+      if (!this.detaches(frame.key))
+        setKey(frame.value, frame.key, value);
       if (this.onEvent !== null)
         this.onEvent({
           type: 'pair',
@@ -479,17 +565,26 @@ export class JsonxMachine {
     if (parent === null)
       this.rootValue = container;
     else if (parent.array) {
-      this.path.push(parent.value.length);
-      parent.value.push(container);
+      const index = parent.count++;
+      // The decision is made HERE, at open, not at close: a subtree that
+      // is never linked to its parent is never reachable from the root,
+      // so the memory is not freed later — it is not held in the first
+      // place, and a document with a million records never builds a
+      // million-slot array either.
+      if (!this.detaches(index))
+        parent.value[index] = container;
+      this.path.push(index);
     }
     else {
+      if (!this.detaches(parent.key))
+        setKey(parent.value, parent.key, container);
       this.path.push(parent.key);
-      setKey(parent.value, parent.key, container);
     }
     stack.push({
       array: isArray,
       value: container,
       key: undefined,
+      count: 0,
       pathed: parent !== null,
     });
     if (this.onEvent !== null)
@@ -507,6 +602,7 @@ export class JsonxMachine {
       this.onEvent({
         type: frame.array ? 'array-end' : 'object-end',
         path: this.path.slice(),
+        value: frame.value,
         line: this.curLine,
       });
     if (frame.pathed)
@@ -650,8 +746,8 @@ export class JsonxMachine {
 /**
  * Document-order reader event; see the module doc comment for semantics.
  * @typedef {(
- *   {type: 'object-start'|'array-start'|'object-end'|'array-end',
- *    path: JsonxStreamPath, line: number}
+ *   {type: 'object-start'|'array-start', path: JsonxStreamPath, line: number}
+ * | {type: 'object-end'|'array-end', path: JsonxStreamPath, value: *, line: number}
  * | {type: 'pair', path: JsonxStreamPath, key: string, value: *, line: number}
  * | {type: 'item', path: JsonxStreamPath, index: number, value: *, line: number}
  * | {type: 'text-partial', path: JsonxStreamPath, text: string, line: number}
@@ -666,10 +762,16 @@ export class JsonxMachine {
  * @param {(event: JsonxStreamEvent) => void} [options.onEvent] - Event sink
  * @param {boolean} [options.partialText] - Also emit `text-partial` deltas
  *  while a string value is still arriving, for progressive display
+ * @param {(string|number)[]} [options.detach] - Path pattern (segments,
+ *  or `'*'` for any one segment) whose matching values are never linked
+ *  into the tree. Their completion events still carry them, so the
+ *  consumer sees every record and the reader retains none — this is what
+ *  makes a document larger than memory readable.
  * @returns {{feed(chunk: string): void, end(): *, root(): *}} The reader:
  *  `feed` accepts chunks that may split any token, `end` flushes,
  *  validates completeness and returns the root, `root` peeks at the
  *  partial result.
+ * @throws {TypeError} On a malformed `detach` pattern
  */
 export function createJsonxStreamReader(options = undefined) {
   const machine = new JsonxMachine(options ?? {});

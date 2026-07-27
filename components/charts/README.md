@@ -3,14 +3,15 @@
 **Headless charts** for the jaren suite: a chart definition plus its
 data compiled to a **geometry-free AST** and rendered as **pure-vnode
 SVG** through [`@jarenjs/view`](../../packages/view) — no `innerHTML`,
-no browser, no third-party chart library. Twelve types: `pie` (with a
+no browser, no third-party chart library. Thirteen types: `pie` (with a
 donut variant), `bar` (grouped/stacked, vertical/horizontal,
 linear/log), `line` (linear/time/log, the streaming-critical type),
 `scatter` (log axes, win/loss tones, reference line), `candlestick`
 (OHLC on a time axis), `radar`, `gauge`, `boxplot` (raw samples or
 five-number summaries, Tukey whiskers), `heatmap` (sequential blue
 ramp, linear or log), `treemap` (squarified), `streamgraph`
-(silhouette baseline) and `sankey` (layered flows, cycle-safe). Like
+(silhouette baseline), `sankey` (layered flows, cycle-safe) and `map`
+(GeoJSON in Web Mercator, shaded by a feature property). Like
 [`@jarenjs/mermaid`](../mermaid), it ships in **two layers**: a pure
 engine (definition + data ⇄ AST ⇄ vnode) that knows only the vnode
 shape, and a visual component that packages it for an `@jarenjs/app`

@@ -20,12 +20,19 @@
 //   geohash.js     the string encoding that needs no new vocabulary
 //   geojson.js     the one layer that knows the `type` discriminator
 //   index-tree.js  a static packed-Hilbert box index for spatial joins
+//   mercator.js    the projection out, for anything that draws a map
+//   simplify.js    dropping the vertices that land on the same pixel
 //
 // RFC 7946 removed coordinate-reference-system support and mandates WGS
 // 84 in decimal degrees, so there is deliberately no SRID table and no
-// reprojection here: conformance removes the need rather than an
-// omission hiding it. A projection *out* (Web Mercator, for drawing) is
-// a rendering concern and belongs with the renderer.
+// reprojection *in*: conformance removes the need rather than an
+// omission hiding it. The one projection that does exist goes the other
+// way — a sphere has to become a rectangle before anyone can look at it
+// — and it comes with the rule that keeps the two apart: **never
+// measure on a projected coordinate.** `geometryArea` and
+// `haversineDistance` work on the sphere; `projectMercator` is for
+// drawing, and a Mercator "area" is off by a factor of fourteen at
+// Greenland.
 
 export * from './predicates.js';
 export * from './distance.js';
@@ -34,5 +41,7 @@ export * from './bbox.js';
 export * from './geohash.js';
 export * from './geojson.js';
 export * from './index-tree.js';
+export * from './mercator.js';
+export * from './simplify.js';
 
 //#endregion

@@ -35,5 +35,6 @@ export { buildHeatmapAST, renderHeatmapAST } from './types/heatmap.js';
 export { buildTreemapAST, renderTreemapAST } from './types/treemap.js';
 export { buildStreamgraphAST, renderStreamgraphAST } from './types/streamgraph.js';
 export { buildSankeyAST, renderSankeyAST } from './types/sankey.js';
+export { buildMapAST, renderMapAST } from './types/map.js';
 export { createStreamAdapter } from './core/stream-adapter.js';
 export { createChartSession } from './core/session.js';

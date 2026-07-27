@@ -14,6 +14,12 @@
  *  - incremental document: ONE large document fed in small chunks (the
  *    LLM token-output shape), compared with parsing the same text in
  *    one call.
+ *  - retained memory: a record-per-line document consumed record by
+ *    record, with and without `detach`. This one measures bytes rather
+ *    than nanoseconds, because for a document larger than memory the
+ *    question is not how fast it parses but whether it parses at all.
+ *    Needs `--expose-gc`; without it the section says so rather than
+ *    printing a number taken from a heap nobody collected.
  *
  * JSON.parse is the baseline — a native full-text parser without
  * incremental input or document-order events; the delta is the price of
@@ -22,6 +28,7 @@
  * Usage:
  *   node benchmark/jsonx-stream.js
  *   node benchmark/jsonx-stream.js --iterations 2000 --chunk 16
+ *   node --expose-gc benchmark/jsonx-stream.js --features 20000
  */
 
 import { writeFileSync } from 'node:fs';
@@ -38,6 +45,7 @@ const opt = (name, fallback) => {
 };
 const ITERATIONS = opt('iterations', 1000);
 const CHUNK = opt('chunk', 16);
+const FEATURES = opt('features', 20_000);
 const OUTPUT = args.includes('--output') ? args[args.indexOf('--output') + 1] : null;
 const FILEPATH = args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null;
 const WARMUP = Math.max(10, Math.floor(ITERATIONS / 10));
@@ -163,5 +171,129 @@ if (OUTPUT === 'json') {
 console.log('\nMethodology: strict-JSON mode throughout so JSON.parse is an apples-to-apples');
 console.log('baseline; a fresh reader per document is the intended usage for message feeds');
 console.log('(reader construction is a flat object allocation - no reset() API needed).');
+
+//#endregion
+
+//#region retained memory
+
+/**
+ * A synthetic FeatureCollection: one 40-vertex polygon per feature, the
+ * shape of an OpenStreetMap administrative extract. Built as text
+ * because that is what a reader is given — a file, a socket, a fetch
+ * body — and the point of the exercise is never to hold the parse of it.
+ */
+function featureCollection(count) {
+  const parts = ['{"type":"FeatureCollection","name":"synthetic","features":['];
+  for (let i = 0; i < count; i++) {
+    const lon = -180 + (i % 3600) * 0.1;
+    const lat = -80 + (i % 1600) * 0.1;
+    const ring = [];
+    for (let v = 0; v <= 40; v++) {
+      const a = ((v % 40) / 40) * Math.PI * 2;
+      ring.push(`[${(lon + Math.cos(a) * 0.05).toFixed(5)},${(lat + Math.sin(a) * 0.05).toFixed(5)}]`);
+    }
+    parts.push(`${i === 0 ? '' : ','}{"type":"Feature","properties":{"id":${i},`
+      + `"name":"region-${i}","pop":${1000 + i}},"geometry":{"type":"Polygon",`
+      + `"coordinates":[[${ring.join(',')}]]}}`);
+  }
+  parts.push(']}');
+  return parts.join('');
+}
+
+/**
+ * Read `doc` in 64 kB chunks, consuming every feature as it completes
+ * and then dropping it — a real sink, not a counter that lets the
+ * engine optimize the work away.
+ *
+ * The peak reported is the **live set**: the heap after a forced
+ * collection, sampled a handful of times across the read. Sampling
+ * `heapUsed` without collecting first would measure how lazily V8 gets
+ * around to sweeping, which grows with the heap and says nothing about
+ * whether the document fits — under that measure a detached read looks
+ * like it grows too, because the records it drops are still garbage
+ * that has not been swept yet.
+ *
+ * @param {string} doc @param {number} count features in `doc`
+ * @param {(string|number)[]} [detach]
+ */
+function readFeatures(doc, count, detach) {
+  global.gc();
+  global.gc();
+  const before = process.memoryUsage().heapUsed;
+  const every = Math.max(1, Math.floor(count / 8));
+  let peak = 0;
+  let seen = 0;
+  let vertices = 0;
+  const reader = createJsonxStreamReader({
+    mode: 'json',
+    detach,
+    onEvent: (e) => {
+      if (e.type !== 'object-end' || e.path.length !== 2) return;
+      seen++;
+      vertices += e.value.geometry.coordinates[0].length;
+      if (seen % every === 0) {
+        global.gc();
+        const live = process.memoryUsage().heapUsed - before;
+        if (live > peak) peak = live;
+      }
+    },
+  });
+  const size = 64 * 1024;
+  for (let i = 0; i < doc.length; i += size)
+    reader.feed(doc.slice(i, i + size));
+  const root = reader.end();
+  global.gc();
+  const retained = process.memoryUsage().heapUsed - before;
+  return { peak, retained, seen, vertices, held: root.features.length };
+}
+
+/**
+ * Heap deltas, with an explicit floor. A forced-collection delta can
+ * land a little either side of zero, and printing "-0.5 MB retained" as
+ * though it meant something is worse than saying it is unmeasurable.
+ */
+const FLOOR = 104857.6; // 0.1 MB
+const mb = (n) => (n < FLOOR ? '< 0.1 MB' : `${(n / 1048576).toFixed(1)} MB`);
+
+if (typeof global.gc !== 'function') {
+  console.log('\nretained memory: skipped — re-run with `node --expose-gc` to measure it.');
+}
+else {
+  const doc = featureCollection(FEATURES);
+  const hold = readFeatures(doc, FEATURES, undefined);
+  const detached = readFeatures(doc, FEATURES, ['features', '*']);
+  // four times the records: whether the number moves is the whole claim
+  const bigger = readFeatures(featureCollection(FEATURES * 4), FEATURES * 4, ['features', '*']);
+
+  // Both modes must have SEEN every feature and read every vertex —
+  // otherwise the cheap one is cheap because it did less work.
+  deepStrictEqual(
+    [hold.seen, hold.vertices],
+    [detached.seen, detached.vertices],
+    'detach changed what the consumer saw');
+
+  console.log(`\nretained memory — ${FEATURES} features, ${(doc.length / 1048576).toFixed(1)} MB of text, 64 kB chunks`);
+  console.log('  (peak = live set after a forced collection, sampled 8x across the read)');
+  const row = (label, m, count) =>
+    console.log(`  ${label.padEnd(34)} peak ${mb(m.peak).padStart(9)}   `
+      + `end ${mb(m.retained).padStart(9)}   root holds ${String(m.held).padStart(7)} of ${count}`);
+  row('default (whole tree retained)', hold, FEATURES);
+  row("detach ['features','*']", detached, FEATURES);
+  row(`the same, ${FEATURES * 4} features`, bigger, FEATURES * 4);
+
+  // Below the floor the ratio is noise over noise, so say so instead of
+  // quoting a four-digit multiple that means nothing.
+  const bothTiny = detached.peak < FLOOR && bigger.peak < FLOOR;
+  const growth = bigger.peak / detached.peak;
+  const verdict = bothTiny || growth <= 1.5
+    ? 'flat in document size: the peak is the feed buffer and one feature at a time'
+    : `${growth.toFixed(1)}x for 4x the records, so it is NOT flat — investigate before claiming it is`;
+  console.log(`\n  detached peak: ${mb(detached.peak)} at ${FEATURES} features, `
+    + `${mb(bigger.peak)} at ${FEATURES * 4} — ${verdict}.`);
+  console.log(bothTiny
+    ? `  Holding the tree instead costs ${mb(hold.peak)} and grows with every record read.`
+    : `  Holding the tree instead costs ${(hold.peak / detached.peak).toFixed(0)}x that, `
+      + 'and grows with every record read.');
+}
 
 //#endregion

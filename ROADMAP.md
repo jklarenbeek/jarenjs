@@ -338,26 +338,31 @@ screen-then-refine, the same build-then-probe shape as the hash join.
   deliberate and stays: it is the exact orientation predicate, and giving it up
   would trade a right answer for a fast one.
 
+- [ ] **Publish the geo suite to the Benchmarks page** — `benchmark/geo.js`
+  already measures against Turf, geolib and Flatbush and writes JSON with
+  `--filepath`, but it was never wired into `benchmark/website-data.js`, so the
+  page shows fourteen suites and not this one. The wiring is small; what makes
+  it more than a patch is that the page's overview row is *derived from every
+  suite*, so adding a fifteenth moves a published number, and a full
+  `benchmark:generate` rewrites every tracked timing with whatever machine ran
+  it. Generate the geo file alone (`--skip` the rest), and re-derive the
+  overview deliberately.
 - [ ] **A `geoFormats` group in `@jarenjs/formats`** — `geohash`, `wkt` and a
   `geojson` tester alongside the four existing groups. Mechanically this is a
   new `src/geo.js` exporting `formatValidators`, one `export` line in
   `index.js` and a tester bundle; the open question is whether `geojson` as a
   *format* earns its place next to the meta-schema, which validates the same
   thing more thoroughly.
-- [ ] **A `map` chart type** — choropleth and point overlays from a
-  FeatureCollection, which needs Web Mercator (a projection out to the unit
-  square, not a CRS) and ring simplification to keep the SVG small. The chart
-  type set is closed at build time in a `TYPES` object literal, so this
-  touches the registry, the definition schema's `type` enum, the golden
-  fixtures and the "twelve types" count in four documents.
-- [ ] **Streaming a FeatureCollection** — the OpenStreetMap-scale story, and
-  it is blocked on something concrete rather than on design: `JsonxMachine`
-  accumulates the whole parsed document into `rootValue` with no prune or skip
-  option, so feeding a continent extract in chunks still holds the entire tree
-  in memory, and there is no "this feature is complete, take it and forget it"
-  event. The charts stream adapter already works around this by keying on
-  `pair` paths and building its own bounded snapshot; a subtree-complete event
-  with an opt-in detach is the fix, and it is worth doing for its own sake.
+- [ ] **A streaming map chart** — now that a FeatureCollection can be read
+  with bounded memory, the remaining gap is drawing one that way. The charts
+  stream adapter accumulates flat scalar fields into records, which a nested
+  Feature is not, and an accumulator that simply kept every feature would give
+  back exactly the memory `detach` just saved. The honest version projects and
+  simplifies each feature on arrival and keeps only the unit-space rings —
+  which needs the projection fitted before the last feature has been seen, so
+  it is a two-pass or a refit-on-growth design. Worth doing only if a real
+  document wants it; aggregating while streaming (count, bin, bound) covers
+  the cases seen so far, and `test/josl/geojson-stream.test.js` is that shape.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and

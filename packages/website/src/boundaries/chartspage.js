@@ -8,7 +8,39 @@
  */
 
 import { createChartComponent } from '@jarenjs/charts/component';
+import { geohashBounds, geometryArea } from '@jarenjs/core/geo';
 import { chart, code, details, callout } from '../lib/nodes.js';
+
+/**
+ * The 32 first-level geohash cells as GeoJSON, each carrying its true
+ * area on the sphere — measured by `@jarenjs/core/geo`, not quoted.
+ *
+ * Nothing here is approximated: one base-32 character names one cell,
+ * the 32 of them tile the whole planet exactly, and every cell is a
+ * rectangle in longitude and latitude, so the coarse geometry is the
+ * geometry. It makes two true things visible at once — geohash cells
+ * are not equal-area (2.4x between the equatorial and polar bands), and
+ * Mercator inflates exactly the cells that are smallest.
+ */
+function geohashWorld() {
+  const features = [];
+  for (const character of '0123456789bcdefghjkmnpqrstuvwxyz') {
+    const [west, south, east, north] = geohashBounds(character);
+    const geometry = {
+      type: 'Polygon',
+      coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]],
+    };
+    features.push({
+      type: 'Feature',
+      properties: {
+        name: `${character} (${west}..${east}, ${south}..${north})`,
+        km2: Math.round(geometryArea(geometry) / 1e6),
+      },
+      geometry,
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
 
 /** Host-linked, memoized projections (module-stable configs → stable vnodes). */
 const charts = createChartComponent({ theme: 'host' });
@@ -223,6 +255,23 @@ const DEMOS = [
         { source: 'docs', target: 'playground', value: 12 },
         { source: 'docs', target: 'github', value: 8 },
         { source: 'playground', target: 'github', value: 10 },
+      ],
+    },
+  },
+  {
+    key: 'map',
+    blurb: 'GeoJSON in Web Mercator, shaded by a feature property. These are the 32 first-level geohash cells — one per base-32 character, tiling the planet exactly — shaded by their true area on the sphere, which @jarenjs/core/geo measures. Two things the picture makes obvious: geohash cells are not equal-area (2.4x between the equatorial and polar bands), and Mercator inflates precisely the cells that are smallest. The projection never touches a measurement; area is computed on the sphere, before anything is drawn. The four markers are the cities the geodesic-distance tests are pinned against.',
+    config: {
+      type: 'map',
+      title: 'The 32 geohash cells, by true area (km²)',
+      value: 'km2',
+      aspect: 1,
+      features: geohashWorld(),
+      points: [
+        { at: [4.9041, 52.3676], label: 'Amsterdam' },
+        { at: [2.3522, 48.8566], label: 'Paris' },
+        { at: [-74.006, 40.7128], label: 'New York' },
+        { at: [151.2093, -33.8688], label: 'Sydney' },
       ],
     },
   },

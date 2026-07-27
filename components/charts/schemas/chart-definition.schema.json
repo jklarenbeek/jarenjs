@@ -7,7 +7,7 @@
   "required": ["type"],
   "properties": {
     "type": {
-      "enum": ["pie", "bar", "line", "scatter", "candlestick", "radar", "gauge", "boxplot", "heatmap", "treemap", "streamgraph", "sankey"]
+      "enum": ["pie", "bar", "line", "scatter", "candlestick", "radar", "gauge", "boxplot", "heatmap", "treemap", "streamgraph", "sankey", "map"]
     },
     "title": {
       "type": ["string", "null"]
@@ -224,6 +224,36 @@
           }
         }
       }
+    },
+    {
+      "if": { "properties": { "type": { "const": "map" } } },
+      "then": {
+        "properties": {
+          "value": {
+            "description": "feature property to shade by; absent leaves the map unshaded",
+            "type": "string"
+          },
+          "label": {
+            "description": "feature property to name features by (default 'name')",
+            "type": "string"
+          },
+          "log": { "type": "boolean" },
+          "aspect": { "type": "number", "exclusiveMinimum": 0 },
+          "simplify": {
+            "description": "Douglas-Peucker tolerance as a fraction of the frame's width, or false to keep every vertex",
+            "type": ["number", "boolean"],
+            "minimum": 0
+          },
+          "features": {
+            "description": "GeoJSON: a FeatureCollection, or an array of Features or geometries",
+            "type": ["object", "array"]
+          },
+          "points": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/mapPoint" }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -366,6 +396,26 @@
         "source": { "type": ["string", "integer"] },
         "target": { "type": ["string", "integer"] },
         "value": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "mapPoint": {
+      "description": "a place marker: the convenience path for a caller holding positions rather than GeoJSON",
+      "type": "object",
+      "required": ["at"],
+      "properties": {
+        "at": {
+          "description": "a GeoJSON position: [longitude, latitude]",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": { "type": "number" },
+          "prefixItems": [
+            { "type": "number", "minimum": -180, "maximum": 180 },
+            { "type": "number", "minimum": -90, "maximum": 90 }
+          ]
+        },
+        "label": { "type": "string" },
+        "value": { "type": "number" }
       }
     },
     "domainPolicy": {

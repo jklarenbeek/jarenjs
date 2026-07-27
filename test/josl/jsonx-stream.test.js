@@ -85,10 +85,12 @@ describe('jsonx-stream: event vocabulary', () => {
       { type: 'item', path: ['a', 0], index: 0, value: 1, line: 1 },
       { type: 'object-start', path: ['a', 1], line: 1 },
       { type: 'pair', path: ['a', 1, 'b'], key: 'b', value: 2n, line: 1 },
-      { type: 'object-end', path: ['a', 1], line: 1 },
-      { type: 'array-end', path: ['a'], line: 1 },
+      // an end event carries its completed container, so a consumer
+      // never has to walk back into root() by path to find it
+      { type: 'object-end', path: ['a', 1], value: { b: 2n }, line: 1 },
+      { type: 'array-end', path: ['a'], value: [1, { b: 2n }], line: 1 },
       { type: 'pair', path: ['c'], key: 'c', value: 'x', line: 1 },
-      { type: 'object-end', path: [], line: 1 },
+      { type: 'object-end', path: [], value: { a: [1, { b: 2n }], c: 'x' }, line: 1 },
     ]);
   });
 
@@ -320,6 +322,129 @@ describe('jsonx-stream: text-partial events', () => {
     const { events, root } = partialsOf('"just a string"');
     strictEqual(root, 'just a string');
     strictEqual(joinedText(events, []), 'just a string');
+  });
+});
+
+
+describe('jsonx-stream: detached records', () => {
+  const FC = JSON.stringify({
+    type: 'FeatureCollection',
+    name: 'regions',
+    features: [
+      { type: 'Feature', properties: { name: 'a' }, geometry: { type: 'Point', coordinates: [1, 2] } },
+      { type: 'Feature', properties: { name: 'b' }, geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } },
+      { type: 'Feature', properties: { name: 'c' }, geometry: null },
+    ],
+  });
+
+  /** Feed a document one character at a time, collecting detached records. */
+  function stream(doc, detach) {
+    const records = [];
+    const reader = createJsonxStreamReader({
+      mode: 'json',
+      detach,
+      onEvent: (e) => {
+        if ((e.type === 'object-end' || e.type === 'array-end')
+          && e.path.length === detach.length)
+          records.push(e.value);
+      },
+    });
+    for (const ch of doc)
+      reader.feed(ch);
+    return { root: reader.end(), records };
+  }
+
+  it('hands every record to the consumer and keeps none in the root', () => {
+    const { root, records } = stream(FC, ['features', '*']);
+    strictEqual(records.length, 3);
+    // the frame survives, the records do not
+    deepStrictEqual(root, { type: 'FeatureCollection', name: 'regions', features: [] });
+    strictEqual(root.features.length, 0, 'not even an empty slot per record');
+  });
+
+  it('detached records are byte-for-byte what a full parse would produce', () => {
+    const { records } = stream(FC, ['features', '*']);
+    deepStrictEqual(records, JSON.parse(FC).features);
+  });
+
+  it('a record keeps its own nesting: the pattern is a path, not a prefix', () => {
+    const { records } = stream(FC, ['features', '*']);
+    // the Polygon's rings are inside their feature, not detached from it
+    deepStrictEqual(records[1].geometry.coordinates, [[[0, 0], [1, 0], [1, 1], [0, 0]]]);
+  });
+
+  it('detaches array elements at the root', () => {
+    const doc = '[{"i":0},{"i":1},{"i":2}]';
+    const { root, records } = stream(doc, ['*']);
+    deepStrictEqual(records, [{ i: 0 }, { i: 1 }, { i: 2 }]);
+    deepStrictEqual(root, []);
+  });
+
+  it('keeps indices right when only some siblings detach', () => {
+    // a literal index detaches exactly one element; the others stay put
+    // at the positions they had, so no path ever shifts
+    const events = [];
+    const reader = createJsonxStreamReader({
+      mode: 'json',
+      detach: ['xs', 1],
+      onEvent: (e) => events.push(e),
+    });
+    reader.feed('{"xs":[10,20,30]}');
+    const root = reader.end();
+    deepStrictEqual(events.filter((e) => e.type === 'item').map((e) => e.path),
+      [['xs', 0], ['xs', 1], ['xs', 2]]);
+    strictEqual(root.xs[0], 10);
+    strictEqual(root.xs[2], 30);
+    ok(!(1 in root.xs), 'the detached element left no slot behind');
+  });
+
+  it('detaches scalars too, which the item event already carried', () => {
+    const seen = [];
+    const reader = createJsonxStreamReader({
+      mode: 'json',
+      detach: ['log', '*'],
+      onEvent: (e) => {
+        if (e.type === 'item') seen.push(e.value);
+      },
+    });
+    reader.feed('{"log":["a","b","c"],"n":3}');
+    const root = reader.end();
+    deepStrictEqual(seen, ['a', 'b', 'c']);
+    deepStrictEqual(root, { log: [], n: 3 });
+  });
+
+  it('detaches an object member by key', () => {
+    const reader = createJsonxStreamReader({ mode: 'json', detach: ['big'] });
+    reader.feed('{"keep":1,"big":{"a":[1,2,3]}}');
+    deepStrictEqual(reader.end(), { keep: 1 });
+  });
+
+  it('changes nothing when the pattern matches nothing', () => {
+    const { root } = stream(FC, ['nowhere', '*']);
+    deepStrictEqual(root, JSON.parse(FC));
+  });
+
+  it('reads identically with and without detach, whatever the chunking', () => {
+    // the parse is unaffected: same events, same paths, same values
+    const plain = [];
+    const detached = [];
+    const strip = (e) => (e.type === 'object-end' || e.type === 'array-end'
+      ? { type: e.type, path: e.path, line: e.line }
+      : e);
+    for (const [sink, detach] of [[plain, undefined], [detached, ['features', '*']]]) {
+      const reader = createJsonxStreamReader({
+        mode: 'json', detach, onEvent: (e) => sink.push(strip(e)),
+      });
+      for (let i = 0; i < FC.length; i += 7)
+        reader.feed(FC.slice(i, i + 7));
+      reader.end();
+    }
+    deepStrictEqual(detached, plain);
+  });
+
+  it('rejects a malformed pattern at construction', () => {
+    for (const bad of [[], 'features', 42, null, [{}], [-1], [1.5], [Symbol.iterator]])
+      throws(() => createJsonxStreamReader({ detach: bad }), TypeError);
   });
 });
 

@@ -36,12 +36,30 @@ Every chart type is one file in `src/types/` exporting two stages:
 returns cached projections (`ast`, `toVnode()`, `toSvgString()`), the
 `compileMermaid` bundle shape.
 
-Twelve types follow the contract: the original five (`pie` — donut
+Thirteen types follow the contract: the original five (`pie` — donut
 variant included — `bar`, `line`, `scatter`, `candlestick`) plus
-`radar`, `gauge`, `boxplot`, `heatmap`, `treemap`, `streamgraph` and
-`sankey`. Cartesian types share `cartesianFrame`; `radar`/`gauge` are
-polar around their own centers; `treemap`/`sankey` lay out in the unit
-square with `y` growing downward (no axes — reading order wins).
+`radar`, `gauge`, `boxplot`, `heatmap`, `treemap`, `streamgraph`,
+`sankey` and `map`. Cartesian types share `cartesianFrame`;
+`radar`/`gauge` are polar around their own centers;
+`treemap`/`sankey`/`map` lay out in the unit square with `y` growing
+downward (no axes — reading order wins).
+
+The `map` type is where the build/render split has to be argued rather
+than assumed, because a projection looks like a rendering step. It is
+not: **projecting is geometry of the data**, and it has to happen
+before simplification, which needs to measure "half a pixel" in some
+frame. So `buildMapAST` fits a Web Mercator projection to the data's
+bounding box (`fitMercator` from `@jarenjs/core/geo`), projects into
+the unit square, and simplifies there with a tolerance expressed as a
+fraction of the frame. What is left for the render is what is left
+everywhere else: pixels, colors and chrome.
+
+The fit is **uniform** — one scale for both axes, the shorter one
+centred — because stretching a map to fill its frame is the single most
+common way to make one look wrong. Areas draw as one `<path>` per
+feature with every ring as a subpath and `fill-rule="evenodd"`, so
+holes punch through whichever way the producer wound them; RFC 7946
+mandates a winding, and real data does not always have it.
 
 ## Value marks (`src/core/marks.js`)
 

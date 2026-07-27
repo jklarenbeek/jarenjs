@@ -38,6 +38,19 @@ const FIXTURES = [
     type: 'sankey', nodes: ['a', { name: 'b' }],
     links: [{ source: 'a', target: 1, value: 3 }],
   },
+  {
+    type: 'map', value: 'pop', label: 'name', log: true, simplify: false,
+    features: {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: { name: 'a', pop: 10 },
+        geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+      }],
+    },
+    points: [{ at: [4.9, 52.37, 12], label: 'Amsterdam', value: 900 }],
+  },
+  { type: 'map', features: [], simplify: 0.001, aspect: 2 },
 ];
 
 describe('the chart-definition JSON Schema', function () {
@@ -70,5 +83,11 @@ describe('the chart-definition JSON Schema', function () {
     assert.equal(validate({ type: 'streamgraph', xs: ['monday'] }), false);
     assert.equal(validate({ type: 'sankey', links: [{ source: 'a', target: 'b' }] }), false);
     assert.equal(validate({ type: 'sankey', links: [{ source: 'a', target: 'b', value: 0 }] }), false);
+    // a marker needs a position, and the position has to be on the planet
+    assert.equal(validate({ type: 'map', points: [{ label: 'nowhere' }] }), false);
+    assert.equal(validate({ type: 'map', points: [{ at: [4.9] }] }), false);
+    assert.equal(validate({ type: 'map', points: [{ at: [4.9, 91] }] }), false);
+    assert.equal(validate({ type: 'map', points: [{ at: [181, 52] }] }), false);
+    assert.equal(validate({ type: 'map', simplify: -1 }), false);
   });
 });

@@ -86,8 +86,8 @@ The unified event vocabulary:
 | --- | --- | --- | --- |
 | `pair` | both | `path`, `key`, `value`, `line` | a scalar member completes |
 | `item` | jsonx | `path`, `index`, `value`, `line` | a scalar array element completes |
-| `object-start` / `object-end` | jsonx | `path`, `line` | `{` opened / `}` closed |
-| `array-start` / `array-end` | jsonx | `path`, `line` | `[` opened / `]` closed |
+| `object-start` / `array-start` | jsonx | `path`, `line` | `{` / `[` opened |
+| `object-end` / `array-end` | jsonx | `path`, `value`, `line` | `}` / `]` closed |
 | `table` / `table-array` / `root-item` | josl | `path`, `line` (+`index`) | a header line completes |
 | `text-partial` | jsonx | `path`, `text`, `line` | more of a string arrived (opt-in) |
 
@@ -96,6 +96,53 @@ are directly JSON-Pointer-able. In the JSONX reader a container value
 does NOT additionally fire `pair`/`item` — its start/end events carry
 that; in the line-oriented JOSL reader inline tables arrive as
 completed `pair` values and containers have no end events.
+
+### Documents larger than memory
+
+Feeding a document in chunks bounds the *parse*, not the *result*: the
+reader still ends up holding everything it has read. For a continent-
+sized `FeatureCollection` or a million-line log that is the wrong
+answer, and it is the reason `detach` exists.
+
+A value whose absolute path matches the pattern is **never linked into
+the tree**. Its completion event still carries the whole thing, so the
+consumer sees every record exactly once — but letting go of the event
+lets go of the record.
+
+```js
+const reader = createJsonxStreamReader({
+  mode: 'json',
+  detach: ['features', '*'],          // '*' matches any one segment
+  onEvent(e) {
+    if (e.type === 'object-end' && e.path.length === 2)
+      consume(e.value);               // a whole GeoJSON Feature
+  },
+});
+
+for await (const chunk of fileChunks) reader.feed(chunk);
+reader.end();   // { type: 'FeatureCollection', name: '…', features: [] }
+```
+
+`root()` comes back holding the document's *frame* — its header members,
+and an empty array where the records would have been — however many
+records went past. The pattern matches an exact path, not a prefix, so a
+feature's own rings are not separately detached: they belong to their
+feature and are freed with it.
+
+Measured on a synthetic OpenStreetMap-shaped extract (`node --expose-gc
+benchmark/jsonx-stream.js`), reading 20 000 features of 40 vertices each:
+
+| | peak live set | root holds |
+| --- | --- | --- |
+| default | 185.4 MB | 20 000 features |
+| `detach: ['features','*']` | < 0.1 MB | 0 |
+
+and the detached figure does not move at 80 000 features — the peak is
+the 64 kB feed buffer plus one feature at a time, not the document.
+"Peak live set" means the heap after a forced collection: sampling
+`heapUsed` without collecting first measures how lazily V8 sweeps, which
+grows with the heap and would make even a detached read look like it
+accumulates.
 
 ### Progressive text
 

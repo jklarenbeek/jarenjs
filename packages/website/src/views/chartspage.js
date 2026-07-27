@@ -20,7 +20,7 @@ export const CHARTSPAGE_RULES = [
         [{ $apply: ['$.live[*]', 'ui'] }],
       ],
       ['section', { class: 'charts-demos' },
-        ['h2', {}, 'The twelve chart types'],
+        ['h2', {}, 'Every chart type'],
         [{ $apply: ['$.demos[*]', 'ui'] }],
       ],
     ],

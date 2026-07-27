@@ -105,6 +105,37 @@ const GOLDEN_CONFIGS = {
       { source: 'home', target: 'playground', value: 20 },
     ],
   },
+  'map.golden.svg': {
+    type: 'map', title: 'Map fixture', value: 'pop',
+    features: {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { name: 'North', pop: 1700 },
+          geometry: { type: 'Polygon', coordinates: [[[3, 52], [7, 52], [7, 54], [3, 54], [3, 52]]] },
+        },
+        {
+          type: 'Feature',
+          properties: { name: 'South', pop: 380 },
+          // an exterior ring with a hole, so the golden pins `evenodd`
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [[3, 50], [7, 50], [7, 52], [3, 52], [3, 50]],
+              [[4, 50.5], [5, 50.5], [5, 51], [4, 51], [4, 50.5]],
+            ],
+          },
+        },
+        {
+          type: 'Feature',
+          properties: { name: 'Coast' },
+          geometry: { type: 'LineString', coordinates: [[3, 50], [3, 52], [3.5, 54]] },
+        },
+      ],
+    },
+    points: [{ at: [4.9, 52.37], label: 'Amsterdam' }],
+  },
 };
 
 describe('engine golden SVGs', function () {
@@ -117,7 +148,7 @@ describe('engine golden SVGs', function () {
   it('the dispatcher knows every type', function () {
     assert.deepEqual(chartTypes(), [
       'pie', 'bar', 'line', 'scatter', 'candlestick',
-      'radar', 'gauge', 'boxplot', 'heatmap', 'treemap', 'streamgraph', 'sankey',
+      'radar', 'gauge', 'boxplot', 'heatmap', 'treemap', 'streamgraph', 'sankey', 'map',
     ]);
   });
 });
