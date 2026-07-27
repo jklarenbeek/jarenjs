@@ -377,9 +377,23 @@ queryJson({
 }, [1, 2, 3, 4, 5]); // [2, 3, 4] — a 3-point moving average
 ```
 
-The operator library (73 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, and the RFC 3339 date operators) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+The operator library (83 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, and the RFC 3339 date family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
 
-**Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
+**Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), `$week`/`$week-year`/`$quarter`/`$weekday` add the derived calendar fields, and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
+
+Dates also *move*. `$date-add`/`$date-sub` shift by an ISO 8601 duration or by an amount and a unit, `$start-of`/`$end-of` truncate to a calendar unit, `$date-diff` counts whole units, and `$date-format` renders through a Unicode LDML pattern compiled once with the query. Two rules keep it predictable: the **lexical form is preserved** (a date stays a date, and a date-time keeps its own offset instead of being normalized to UTC), and **month arithmetic clamps**, so 31 January plus a month is 28 February — with `$date-diff` counting to match, so adding its answer back never overshoots.
+
+```js
+queryJson({
+  $for: { e: '$[*]' },
+  $groupby: { w: { '$start-of': ['$e.on', 'week'] } },
+  $orderby: ['$w'],
+  $return: { week: '$w', count: { $count: '$e' } },
+}, [{ on: '2026-01-05' }, { on: '2026-01-08' }, { on: '2026-01-20' }]);
+// [{ week: '2026-01-05', count: 2 }, { week: '2026-01-19', count: 1 }]
+```
+
+Bucketing by week is the shape components alone cannot express, because a week boundary is arithmetic rather than a field. Patterns stay locale-independent — `MMMM` and `EEEE` are rejected rather than silently rendered in English — because localized text belongs to the presentation layer, not to a query.
 
 ### External parameters
 

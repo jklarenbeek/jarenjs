@@ -144,6 +144,16 @@ describe('README examples: the Jaren JSON Query language', () => {
     }, { doc: { a: { b: [10, 20] } }, path: ['a', 'b', 1] }), 20);
   });
 
+  it('buckets dates into ISO weeks', () => {
+    assert.deepStrictEqual(queryJson({
+      $for: { e: '$[*]' },
+      $groupby: { w: { '$start-of': ['$e.on', 'week'] } },
+      $orderby: ['$w'],
+      $return: { week: '$w', count: { $count: '$e' } },
+    }, [{ on: '2026-01-05' }, { on: '2026-01-08' }, { on: '2026-01-20' }]),
+    [{ week: '2026-01-05', count: 2 }, { week: '2026-01-19', count: 1 }]);
+  });
+
   it('averages a sliding window', () => {
     assert.deepStrictEqual(queryJson({
       $for: { w: { $in: '$[*]', $window: 'sliding', $size: 3 } },

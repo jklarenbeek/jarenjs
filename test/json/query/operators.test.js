@@ -843,3 +843,116 @@ describe('section 8.13 — dates and times', () => {
     assert.deepStrictEqual(out, [{ year: 2026, count: 2 }, { year: 2027, count: 1 }]);
   });
 });
+
+describe('section 8.13 — date arithmetic', () => {
+  const doc = {
+    start: '2026-01-31',
+    at: '2026-07-27T14:30:05+02:00',
+    end: '2026-12-25',
+  };
+  const run = (q, data = doc) => queryJson(q, data);
+
+  it('should shift a date by a duration or by an amount and unit', () => {
+    assert.strictEqual(run({ '$date-add': ['$.start', 'P1M'] }), '2026-02-28');
+    assert.strictEqual(run({ '$date-add': ['$.start', 3, 'day'] }), '2026-02-03');
+    assert.strictEqual(run({ '$date-sub': ['$.start', 'P1M'] }), '2025-12-31');
+    assert.strictEqual(run({ '$date-sub': ['$.start', 1, 'year'] }), '2025-01-31');
+    // a negative duration and $date-sub agree
+    assert.strictEqual(run({ '$date-add': ['$.start', '-P1M'] }),
+      run({ '$date-sub': ['$.start', 'P1M'] }));
+  });
+
+  it('should keep the lexical form it was given', () => {
+    // a query that buckets dates must not start emitting date-times
+    assert.strictEqual(run({ '$date-add': ['$.start', 1, 'day'] }), '2026-02-01');
+    assert.strictEqual(run({ '$date-add': ['$.at', 'P1D'] }), '2026-07-28T14:30:05+02:00');
+    assert.strictEqual(run({ '$date-sub': ['$.at', 'PT90M'] }), '2026-07-27T13:00:05+02:00');
+  });
+
+  it('should clamp month arithmetic, matching the kernel rule', () => {
+    assert.strictEqual(run({ '$date-add': ['$.start', 'P1M'] }), '2026-02-28');
+    assert.strictEqual(run({ '$date-add': [{ $const: '2024-01-31' }, 'P1M'] }), '2024-02-29');
+  });
+
+  it('should truncate to a calendar unit with $start-of and $end-of', () => {
+    assert.strictEqual(run({ '$start-of': ['$.at', 'month'] }), '2026-07-01T00:00:00+02:00');
+    assert.strictEqual(run({ '$start-of': ['$.end', 'week'] }), '2026-12-21', 'weeks start Monday');
+    assert.strictEqual(run({ '$start-of': ['$.end', 'quarter'] }), '2026-10-01');
+    // a full-date has nowhere to put a last millisecond, so it ends on a day
+    assert.strictEqual(run({ '$end-of': ['$.start', 'month'] }), '2026-01-31');
+    assert.strictEqual(run({ '$end-of': ['$.at', 'day'] }), '2026-07-27T23:59:59.999+02:00');
+  });
+
+  it('should measure whole units with $date-diff', () => {
+    assert.strictEqual(run({ '$date-diff': ['$.start', '$.end', 'day'] }), 328);
+    assert.strictEqual(run({ '$date-diff': ['$.start', '$.end', 'month'] }), 10);
+    assert.strictEqual(run({ '$date-diff': ['$.start', '$.end', 'quarter'] }), 3);
+    assert.strictEqual(run({ '$date-diff': ['$.start', '$.end', 'year'] }), 0);
+    // reversing the operands negates the answer
+    assert.strictEqual(run({ '$date-diff': ['$.end', '$.start', 'month'] }), -10);
+  });
+
+  it('should format through a compiled LDML pattern', () => {
+    assert.strictEqual(run({ '$date-format': ['$.at', 'yyyy/MM/dd HH:mm'] }), '2026/07/27 14:30');
+    assert.strictEqual(run({ '$date-format': ['$.end', "yyyy-'W'ww"] }), '2026-W52');
+    assert.strictEqual(run({ '$date-format': ['$.end', 'd'] }), '25');
+    // a dynamic pattern goes through the per-callsite cache
+    assert.deepStrictEqual(
+      queryJson({ $for: { p: '$.patterns[*]' }, $return: { '$date-format': ['$.d', '$p'] } },
+        { d: '2026-07-27', patterns: ['yyyy', 'MM', 'dd'] }),
+      ['2026', '07', '27']);
+  });
+
+  it('should reject a locale-dependent pattern, at compile time when literal', () => {
+    // the query engine has no locale, and a silent English fallback
+    // would put English into every localized render
+    assert.throws(() => compileJsonQuery({ '$date-format': ['$.at', 'MMMM'] }),
+      (e) => e.code === 'JQ0003' && /names provider/.test(e.message));
+    assert.throws(() => queryJson({ '$date-format': ['$.at', '$.p'] }, { at: doc.at, p: 'EEEE' }),
+      (e) => e.code === 'JQ2001');
+  });
+
+  it('should read the derived calendar fields', () => {
+    assert.strictEqual(run({ $week: '$.end' }), 52);
+    assert.strictEqual(run({ $quarter: '$.end' }), 4);
+    assert.strictEqual(run({ $weekday: '$.end' }), 5, '2026-12-25 is a Friday');
+    // the ISO week year is not always the calendar year
+    assert.strictEqual(run({ '$week-year': { $const: '2027-01-01' } }), 2026);
+    assert.strictEqual(run({ $week: { $const: '2027-01-01' } }), 53);
+  });
+
+  it('should propagate the empty sequence through every operator', () => {
+    assert.strictEqual(run({ '$date-add': ['$.missing', 'P1D'] }), undefined);
+    assert.strictEqual(run({ '$start-of': ['$.missing', 'day'] }), undefined);
+    assert.strictEqual(run({ '$date-diff': ['$.missing', '$.end', 'day'] }), undefined);
+    assert.strictEqual(run({ '$date-format': ['$.missing', 'yyyy'] }), undefined);
+    assert.strictEqual(run({ $week: '$.missing' }), undefined);
+  });
+
+  it('should reject bad units, durations and operands', () => {
+    assert.throws(() => run({ '$start-of': ['$.start', 'fortnight'] }),
+      (e) => e.code === 'JQ2001' && /calendar unit/.test(e.message));
+    assert.throws(() => run({ '$date-add': ['$.start', 'nope'] }),
+      (e) => e.code === 'JQ2001' && /ISO 8601 duration/.test(e.message));
+    assert.throws(() => run({ '$date-add': ['$.start', 'x', 'day'] }),
+      (e) => e.code === 'JQ2001' && /number of units/.test(e.message));
+    assert.throws(() => run({ '$date-diff': [{ $const: '14:30:00Z' }, '$.end', 'day'] }),
+      (e) => e.code === 'JQ2001' && /no date/.test(e.message));
+  });
+
+  it('should bucket a series by week — the shape that needed all of this', () => {
+    const events = [
+      { on: '2026-01-05' }, { on: '2026-01-08' }, { on: '2026-01-14' }, { on: '2026-01-20' },
+    ];
+    assert.deepStrictEqual(queryJson({
+      $for: { e: '$[*]' },
+      $groupby: { w: { '$start-of': ['$e.on', 'week'] } },
+      $orderby: ['$w'],
+      $return: { week: '$w', count: { $count: '$e' } },
+    }, events), [
+      { week: '2026-01-05', count: 2 },
+      { week: '2026-01-12', count: 1 },
+      { week: '2026-01-19', count: 1 },
+    ]);
+  });
+});

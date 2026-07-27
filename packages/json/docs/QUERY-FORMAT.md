@@ -1204,19 +1204,65 @@ offsets — as *strings*, `"…T14:00:00+02:00"` sorts after `"…T12:00:00Z"`
 though they are the same instant. A `full-time` has no instant to place
 (`JQ2001`); so does a number outside the range RFC 3339 can spell.
 
+**Calendar arithmetic.** `$date-add` and `$date-sub` shift a value, either
+by an ISO 8601 duration (`[date, "P1M"]`) or by an amount and a unit
+(`[date, 3, "day"]`). `$start-of` and `$end-of` truncate to a unit, and
+`$date-diff` counts whole units from one value to another. The unit is
+**data**, not vocabulary — one of `year`, `quarter`, `month`, `week`, `day`,
+`hour`, `minute`, `second`, `millisecond` — so an unknown one is `JQ2001`
+rather than a compile error.
+
+Two rules make these predictable:
+
+- **The lexical form is preserved.** A `full-date` shifted by a day is still
+  a `full-date`, and a `date-time` keeps its own offset rather than being
+  normalized to UTC. A query that buckets dates must not silently start
+  producing date-times. Consequently `$end-of` on a `full-date` yields that
+  unit's last *day*, where on a `date-time` it yields the last millisecond —
+  a `full-date` has nowhere to put one.
+- **Month arithmetic clamps.** `2026-01-31` plus one month is `2026-02-28`,
+  because the alternative — overflowing into March — makes adding a month
+  non-monotonic. `$date-diff` counts months to match, so adding its result
+  back never overshoots: `2026-01-31` to `2026-02-28` is **one** month.
+
+`$date-format` renders a value through a **Unicode LDML** pattern
+(`yyyy-MM-dd`, not moment's `YYYY-MM-DD`); a literal pattern compiles once
+with the query. Patterns are limited to the locale-independent tokens: month
+and weekday *names* would need locale data this format does not carry, so
+`MMMM`, `MMM`, `EEEE`, `EEE` and `a` are rejected — `JQ0003` for a literal
+pattern, `JQ2001` for one computed at runtime. Localized rendering belongs to
+the presentation layer, not to a query.
+
 | Operator | Definition |
 |---|---|
 | `$is-date` `$is-time` `$is-datetime` `$is-duration` | singleton string in that RFC 3339 form → `true`; anything else → `false` |
 | `$year` `$month` `$day` | lexical date components; a value with no date is `JQ2001` |
 | `$hours` `$minutes` `$seconds` | lexical time components, `$seconds` including its fraction; a value with no time is `JQ2001` |
 | `$offset` | minutes east of UTC; a bare `full-date` → empty |
+| `$week` `$week-year` | ISO 8601 week number and its week-numbering year, which is not always the calendar year (2027-01-01 is week 53 of 2026) |
+| `$quarter` `$weekday` | calendar quarter 1-4; ISO weekday 1 (Monday) to 7 (Sunday) |
 | `$epoch` | date or date-time → milliseconds since the epoch (UTC); a `full-time` → `JQ2001` |
 | `$datetime` | epoch milliseconds → canonical UTC `date-time`; out of RFC 3339 range → `JQ2001` |
+| `$date-add` `$date-sub` | `[date, duration]` or `[date, amount, unit]` → a value of the same lexical form |
+| `$start-of` `$end-of` | `[date, unit]` → the unit's first / last instant, in the same lexical form |
+| `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from` |
+| `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern |
 
-Duration values are recognized (`$is-duration`) but not decomposed: a
-duration's `P1M` is not a fixed number of milliseconds, so there is no honest
-component or arithmetic answer to give without a calendar anchor. Fixed-width
-arithmetic is `$epoch` plus ordinary `$add`/`$sub`.
+Durations are recognized and applied, but never *decomposed* into a number:
+`P1M` is not a fixed count of milliseconds, so there is no honest length to
+report without a calendar anchor. Applying one to a date is where the anchor
+exists, which is what `$date-add` is for; fixed-width spans go through
+`$epoch` and ordinary `$sub`.
+
+```json
+{ "$for": { "e": "$.events[*]" },
+  "$groupby": { "w": { "$start-of": ["$e.on", "week"] } },
+  "$orderby": ["$w"],
+  "$return": { "week": "$w", "count": { "$count": "$e" } } }
+```
+
+buckets events into ISO weeks — the shape components alone could not express,
+because a week boundary is arithmetic, not a field.
 
 ```json
 { "$for": { "e": "$.events[*]" },

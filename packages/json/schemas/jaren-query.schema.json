@@ -90,6 +90,7 @@
         { "$ref": "#/$defs/nonEmptyVariadicOperatorPhrase" },
         { "$ref": "#/$defs/conditionalArityOperatorPhrase" },
         { "$ref": "#/$defs/stringJoinPhrase" },
+        { "$ref": "#/$defs/ternaryOperatorPhrase" },
         { "$ref": "#/$defs/replacePhrase" },
         { "$ref": "#/$defs/schemaOperatorPhrase" }
       ]
@@ -285,7 +286,8 @@
           "$is-string", "$is-number", "$is-boolean", "$is-null", "$is-array", "$is-object",
           "$is-date", "$is-time", "$is-datetime", "$is-duration",
           "$year", "$month", "$day", "$hours", "$minutes", "$seconds",
-          "$offset", "$epoch", "$datetime"
+          "$offset", "$epoch", "$datetime",
+          "$week", "$week-year", "$quarter", "$weekday"
         ]
       },
       "additionalProperties": { "$ref": "#/$defs/expression" }
@@ -300,7 +302,8 @@
           "$eq", "$ne", "$lt", "$le", "$gt", "$ge",
           "$add", "$sub", "$mul", "$div", "$idiv", "$mod",
           "$contains", "$starts-with", "$ends-with", "$match", "$search",
-          "$index-of", "$range", "$get", "$default"
+          "$index-of", "$range", "$get",
+          "$start-of", "$end-of", "$date-format", "$default"
         ]
       },
       "additionalProperties": {
@@ -338,12 +341,12 @@
       }
     },
     "conditionalArityOperatorPhrase": {
-      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?].",
+      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit].",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
       "propertyNames": {
-        "enum": ["$if", "$substring", "$subsequence"]
+        "enum": ["$if", "$substring", "$subsequence", "$date-add", "$date-sub"]
       },
       "additionalProperties": {
         "type": "array",
@@ -365,6 +368,19 @@
       },
       "required": ["$string-join"],
       "additionalProperties": false
+    },
+    "ternaryOperatorPhrase": {
+      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit].",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": { "enum": ["$date-diff"] },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/expression" },
+        "minItems": 3,
+        "maxItems": 3
+      }
     },
     "replacePhrase": {
       "description": "$replace [input, pattern, replacement]: exactly three operand expressions (I-Regexp has no flags argument, D5).",

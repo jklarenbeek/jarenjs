@@ -19,7 +19,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/integer` | `int8` ... `uint64` ranges and validators |
 | `@jarenjs/core/float` | `float16` ... `float64` constants, validators, increment/decrement |
 | `@jarenjs/core/bigint` | bigint helpers (`BigInt_min`, `BigInt_MinMax`, ...) |
-| `@jarenjs/core/dates` | RFC 3339 / ISO 8601 date-time parsing and validation |
+| `@jarenjs/core/dates` | RFC 3339 / ISO 8601 validation, plus the calendar kernel: integer date arithmetic, compiled formatting, durations |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the linear `remap` and unit-interval `clamp01` |
 | `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
@@ -61,7 +61,7 @@ Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostn
 
 ## Dates, numbers and math
 
-- `dates` — RFC 3339 date/time/date-time validation and parsing into `Date` (leap years and month lengths included), ISO 8601 durations, and the more lenient ISO date-time forms.
+- `dates` — RFC 3339 date/time/date-time validation and parsing (leap years and month lengths included), the more lenient ISO date-time forms, and the suite's calendar kernel: proleptic Gregorian arithmetic over integer day numbers (`addToParts`, `startOfParts`, `endOfParts` — month math clamps, so 31 Jan plus a month is 28 Feb), ISO 8601 duration decomposition, and `compileDateFormat`, which turns an LDML pattern into a formatter once instead of re-scanning it per call. Dates stay JSON: an RFC 3339 string or epoch milliseconds, never a wrapper object. Locale names live in `@jarenjs/locales`, so a pattern needing `MMMM` takes a names provider.
 - `integer`/`float`/`bigint` — range constants and validators for every fixed-width type from `int8` to `uint64` and `float16` to `float64`, including float increment/decrement in representable steps.
 - `math` — asm.js-style typed math (`Int32`, `Float64`) and vector classes (`Vec2i32`, `Vec2f64`, `Vec3f64`) with a fast integer sine approximation.
 

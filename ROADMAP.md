@@ -234,6 +234,91 @@ delete it or fix it.
   document implies having all of it, so this waits for a consumer that
   genuinely edits a stream.
 
+## Dates & times (cross-package)
+
+One program. The motivating observation is that the suite does not lack a
+date *library* — it lacks date *capability in its engines*: charts silently
+drops date strings, gantt stores its date directives without interpreting
+them, forms renders two of its three date formats as plain text boxes, and
+the locale packs contain no month names at all.
+
+The kernel (`@jarenjs/core/dates/*`) and the query operators it unblocks are
+done; what they do is documented in `packages/core/ARCHITECTURE.md` and
+QUERY-FORMAT.md §8.13. The entries below are what is left, and each is now
+integration work rather than foundation work.
+
+Two constraints shape every entry. **There is no date type**: dates are RFC
+3339 strings (lexical, interchange) and epoch milliseconds (arithmetic), both
+of which are already JSON items — a wrapper object, even an immutable one,
+could not be a query-engine item, a JSON Patch target, a schema-validated
+value or part of app state, which is exactly why `canonicalizeJson` turns a
+`Date` into `{}` and why JOSL's value classes are opaque outside JOSL. And
+**there is no `now`**: a compiled query is cached by document identity and
+saved as a rule, so the current instant enters as data (an external, an app
+effect) rather than as an operator (QUERY-FORMAT §8.13).
+
+Note the deadline this program does *not* have: TC39 Temporal reached Stage 4
+in March 2026 and ships in Chrome 144+, Firefox 139+ and Node 26+, but not
+Safari and not this repo's Node ≥ 22 baseline. The string/number
+representation is what `Temporal.Instant.from()` consumes, so the kernel can
+delegate to Temporal internally once the baseline moves, without changing a
+public surface. Building a general-purpose date *library* is therefore the one
+thing to avoid.
+
+- [ ] **Charts: plottable date strings and real time ticks** — `scaleTime`
+  accepts numbers and `Date` objects only, so an RFC 3339 string on an
+  `x: 'time'` axis is silently dropped as unplottable: you cannot plot dated
+  JSON without pre-converting it. The tick formatter is
+  `new Date(v).toISOString()` sliced to eight characters, so a multi-year
+  series labels every tick with the same `00:00:00`. Needs date-string
+  coercion at the adapter boundary and nice-step selection over calendar units
+  (hour/day/week/month/quarter/year) rather than the linear-scale steps that
+  produce ticks like "every 8.64 days". The existing golden-SVG fixtures are
+  the oracle: changing tick selection changes committed geometry, so the
+  numeric axes must stay byte-identical.
+- [ ] **Locale month/weekday names and relative time** — the 11 packs carry no
+  date content, and `form/format` interpolates the format name untranslated
+  (a Dutch user reads *"Moet een geldige date-time zijn"*). Month, weekday and
+  meridiem names plus relative-time phrasing ("3 dagen geleden") belong on the
+  existing msgid machinery, which already handles the hard plural cases
+  (Russian's genitive second form, Turkish's fixed-noun suffixes, the
+  no-plural languages). The constraint is why this is *not* delegated to
+  `Intl.RelativeTimeFormat` despite it being free: ICU output drifts between
+  Node versions, and the site is server-rendered with byte-comparison tests,
+  so rendered text must come from data the repo owns. An `Intl`-backed
+  provider stays available as an opt-in for hosts that want 100+ locales and
+  do not need byte-stable SSR.
+- [ ] **Forms: offset-aware date-time controls and bounds** — only `date` maps
+  to a real control; `time` and `date-time` fall back to text inputs because
+  RFC 3339 requires an offset that HTML's `time`/`datetime-local` inputs
+  cannot express, and `formatMinimum`/`formatMaximum` never reach the control
+  as `min`/`max` at all. The offset is the whole difficulty: either the
+  control composes a native input with an offset selector, or it declares a
+  host-local-offset convention and documents the lossy round-trip.
+- [ ] **Mermaid gantt: interpret the date directives** — `dateFormat`,
+  `axisFormat`, `tickInterval`, `excludes` and `weekday` are parsed into
+  `meta` as strings and never interpreted, so gantt renders as a structured
+  panel rather than a timeline. This is the one place in the suite that needs
+  *parsing by pattern* (`dateFormat: DD-MM-YYYY`) rather than RFC 3339, which
+  is why the kernel owes a `compileDateParser` as well as a formatter.
+  `excludes: weekends` additionally needs working-day arithmetic.
+- [ ] **JOSL: fold the parallel date model onto the kernel** — TOML 1.0's four
+  flavours are first-class in JOSL, which grew its own `LocalDate`/`LocalTime`/
+  `LocalDateTime` classes, its own days-per-month table and its own leap-year
+  rule, and whose date-time regex pair is duplicated verbatim across
+  `jsonx-scalar.js` and `machine.js` with three further copies in
+  `csv-machine.js`, `jsonx-stream.js` and `gbnf.js`. The value classes are the
+  part to keep — TOML genuinely distinguishes a local date from an instant —
+  but their validation and field arithmetic should be the kernel's. The
+  constraint is that JOSL keeps the fraction as a literal string so precision
+  round-trips, which the parts record must preserve rather than normalize.
+- [ ] **`formatMinimum`/`formatMaximum` without allocating** — the bound
+  comparators parse *both* the bound and the value into `Date` objects on every
+  validation, where the lexical parser plus an epoch comparison would allocate
+  nothing. The catch is that the current path accepts a raw `Date` instance as
+  a value and compares it directly, so the fast path has to keep that door
+  open or the change is not behavior-preserving.
+
 ## Benchmarks & tooling
 
 - [ ] **Shared benchmark harness library** — `jsonquery.js` and `jslt.js` duplicate ~250 lines of harness (option parsing, adaptive iterations, table rendering); extract it, and backport `jslt.js`'s `--filter` alias and stricter option validation either way. Note this rewrites the code that produces the published numbers, so it wants output-diffing against the current tables rather than a blind refactor.

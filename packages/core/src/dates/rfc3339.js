@@ -3,7 +3,11 @@
 import {
   isStringType,
   isObjectOfClass,
-} from './index.js';
+} from '../index.js';
+// the calendar rules live in civil.js, which owns the day tables
+import { isLeapYear, daysInMonth } from './civil.js';
+
+export { isLeapYear };
 
 //#region Dates Constants
 export const CONST_TICKS_SECOND = 1000;
@@ -29,18 +33,11 @@ export function isDateishType(data) {
     || !Number.isNaN(Date.parse(data));
 }
 
-export function isLeapYear(year) {
-  // https://tools.ietf.org/html/rfc3339#appendix-C
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-}
-
 export function isDateOnlyInRange(year = 0, month = 0, day = 0) {
   return month >= 1
     && month <= 12
     && day >= 1
-    && day <= (month === 2 && isLeapYear(year)
-      ? 29
-      : CONST_RFC3339_DAYS[month]);
+    && day <= daysInMonth(year, month);
 }
 
 /**

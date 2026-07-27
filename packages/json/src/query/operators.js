@@ -36,12 +36,26 @@ import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import {
   parseRFC3339Parts,
   epochOfRFC3339Parts,
+  formatRFC3339Parts,
   isDateOnlyRFC3339,
   isTimeOnlyRFC3339,
   isDateTimeRFC3339,
   isValidDuration,
+  isDateUnit,
+  addToParts,
+  startOfParts,
+  endOfParts,
+  parseDuration,
+  addDuration,
+  monthsBetween,
+  daysFromCivil,
+  isoWeekOfYear,
+  isoWeekdayFromDays,
+  quarterOfYear,
+  fixedUnitMs,
+  compileDateFormat,
 } from '@jarenjs/core/dates';
-import { JsonQueryRuntimeError } from './errors.js';
+import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, itemCount, firstItem,
   stableKeyString, describeItem,
@@ -604,6 +618,82 @@ function dateComponentEntry(pick, half) {
         if (n < 0)
           throw runtimeError('JQ2001', `'${v}' carries no ${half} component`, docPath);
         return n;
+      };
+    },
+  };
+}
+
+// A calendar unit argument. Units are data, not vocabulary, so a bad one
+// is a runtime JQ2001 rather than a compile error - the same treatment
+// `$orderby`'s registered collation names get.
+function unitArg(v, docPath) {
+  if (!isDateUnit(v)) {
+    throw runtimeError('JQ2001',
+      `expected a calendar unit ('year', 'month', 'day', ...), got ${describeItem(v)}`, docPath);
+  }
+  return v;
+}
+
+// The shared shape of $date-add / $date-sub: [date, duration] applies an
+// ISO 8601 duration, [date, amount, unit] applies one unit. Both return
+// the same lexical form they were given, so a full-date stays a
+// full-date - a query that buckets dates should not silently start
+// producing date-times.
+function dateShiftEntry(sign) {
+  return {
+    params: ARGS_2_3,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const dateGet = gets[0];
+      const datePath = args[0].docPath;
+      const secondGet = gets[1];
+      const secondPath = args[1].docPath;
+      const unitGet = gets.length === 3 ? gets[2] : null;
+      const unitPath = unitGet === null ? '' : args[2].docPath;
+      return (f) => {
+        const value = dateGet(f);
+        if (value === EMPTY)
+          return EMPTY;
+        const parts = dateParts(value, datePath);
+        const second = secondGet(f);
+        if (second === EMPTY)
+          return EMPTY;
+        if (unitGet === null) {
+          const duration = parseDuration(second);
+          if (duration === null) {
+            throw runtimeError('JQ2001', 'expected an ISO 8601 duration, got '
+              + (typeof second === 'string' ? JSON.stringify(second) : describeItem(second)),
+            secondPath);
+          }
+          return formatRFC3339Parts(addDuration(parts, duration, sign));
+        }
+        if (typeof second !== 'number')
+          throw runtimeError('JQ2001', `expected a number of units, got ${describeItem(second)}`, secondPath);
+        const unit = unitArg(unitGet(f), unitPath);
+        return formatRFC3339Parts(addToParts(parts, sign * second, unit));
+      };
+    },
+  };
+}
+
+// $start-of / $end-of: truncate to a calendar unit, keeping the lexical
+// form. A full-date's end of month is that month's last day, not its
+// last millisecond - there is nowhere in a full-date to put one.
+function dateTruncEntry(truncate) {
+  return {
+    params: ARGS_2,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const dateGet = gets[0];
+      const datePath = args[0].docPath;
+      const unitGet = gets[1];
+      const unitPath = args[1].docPath;
+      return (f) => {
+        const value = dateGet(f);
+        if (value === EMPTY)
+          return EMPTY;
+        const parts = dateParts(value, datePath);
+        return formatRFC3339Parts(truncate(parts, unitArg(unitGet(f), unitPath)));
       };
     },
   };
@@ -1277,6 +1367,108 @@ export const OPERATORS = Object.freeze({
   '$is-time': dateTestEntry(isTimeOnlyRFC3339),
   '$is-datetime': dateTestEntry(isDateTimeRFC3339),
   '$is-duration': dateTestEntry(isValidDuration),
+
+  '$date-add': dateShiftEntry(1),
+  '$date-sub': dateShiftEntry(-1),
+  '$start-of': dateTruncEntry(startOfParts),
+  '$end-of': dateTruncEntry(endOfParts),
+
+  '$date-diff': { // whole units from the first date to the second
+    params: ARGS_3,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const fromGet = gets[0];
+      const fromPath = args[0].docPath;
+      const toGet = gets[1];
+      const toPath = args[1].docPath;
+      const unitGet = gets[2];
+      const unitPath = args[2].docPath;
+      return (f) => {
+        const fromValue = fromGet(f);
+        const toValue = toGet(f);
+        if (fromValue === EMPTY || toValue === EMPTY)
+          return EMPTY;
+        const from = dateParts(fromValue, fromPath);
+        const to = dateParts(toValue, toPath);
+        const unit = unitArg(unitGet(f), unitPath);
+        // months, quarters and years have no fixed width, so they are
+        // counted on the calendar; everything else divides an exact span
+        if (unit === 'month' || unit === 'quarter' || unit === 'year') {
+          const months = monthsBetween(from, to);
+          return unit === 'month' ? months
+            : Math.trunc(months / (unit === 'quarter' ? 3 : 12));
+        }
+        const fromMs = epochOfRFC3339Parts(from);
+        const toMs = epochOfRFC3339Parts(to);
+        if (fromMs !== fromMs || toMs !== toMs)
+          throw runtimeError('JQ2001', 'cannot measure a span from a value with no date', fromPath);
+        return Math.trunc((toMs - fromMs) / fixedUnitMs(unit));
+      };
+    },
+  },
+
+  '$date-format': { // an LDML pattern, compiled once when it is literal
+    params: ARGS_2,
+    result: resultEmptyPropagates,
+    compile: (gets, args, docPath) => {
+      const dateGet = gets[0];
+      const datePath = args[0].docPath;
+      const patternNode = args[1];
+      // the common case is a literal pattern: compile it at query
+      // compile time, so a bad one is a compile error, not a surprise
+      if (patternNode.kind === 'literal' && typeof patternNode.value === 'string') {
+        let format;
+        try {
+          format = compileDateFormat(patternNode.value);
+        }
+        catch (e) {
+          // a literal pattern is authored, not data: reject the document
+          throw new JsonQueryCompileError('JQ0003',
+            `'$date-format' pattern: ${e instanceof Error ? e.message : 'invalid'}`,
+            docPath, { cause: e });
+        }
+        return (f) => {
+          const v = dateGet(f);
+          return v === EMPTY ? EMPTY : format(dateParts(v, datePath));
+        };
+      }
+      // a dynamic pattern gets the monomorphic per-callsite cache the
+      // regex operators use: a filter almost always sees one pattern
+      const patternGet = gets[1];
+      const patternPath = patternNode.docPath;
+      let lastPattern = null;
+      let lastFormat = null;
+      return (f) => {
+        const v = dateGet(f);
+        if (v === EMPTY)
+          return EMPTY;
+        const pattern = patternGet(f);
+        if (typeof pattern !== 'string')
+          throw runtimeError('JQ2001', `expected a date pattern, got ${describeItem(pattern)}`, patternPath);
+        if (pattern !== lastPattern) {
+          lastPattern = pattern;
+          try {
+            lastFormat = compileDateFormat(pattern);
+          }
+          catch (e) {
+            lastFormat = null;
+            throw runtimeError('JQ2001',
+              `'$date-format' pattern: ${e instanceof Error ? e.message : 'invalid'}`, patternPath);
+          }
+        }
+        return lastFormat(dateParts(v, datePath));
+      };
+    },
+  },
+
+  '$week': dateComponentEntry(
+    (p) => (p.year < 0 ? -1 : isoWeekOfYear(p).week), 'date'),
+  '$week-year': dateComponentEntry(
+    (p) => (p.year < 0 ? -1 : isoWeekOfYear(p).year), 'date'),
+  '$quarter': dateComponentEntry(
+    (p) => (p.year < 0 ? -1 : quarterOfYear(p)), 'date'),
+  '$weekday': dateComponentEntry(
+    (p) => (p.year < 0 ? -1 : isoWeekdayFromDays(daysFromCivil(p.year, p.month, p.day))), 'date'),
 
   '$year': dateComponentEntry((p) => p.year, 'date'),
   '$month': dateComponentEntry((p) => p.month, 'date'),

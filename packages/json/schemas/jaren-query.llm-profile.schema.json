@@ -150,6 +150,9 @@
           "$ref": "#/$defs/stringJoinPhrase"
         },
         {
+          "$ref": "#/$defs/ternaryOperatorPhrase"
+        },
+        {
           "$ref": "#/$defs/replacePhrase"
         },
         {
@@ -503,7 +506,7 @@
       }
     },
     "conditionalArityOperatorPhrase": {
-      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
+      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
@@ -533,6 +536,20 @@
         "$string-join"
       ],
       "additionalProperties": false
+    },
+    "ternaryOperatorPhrase": {
+      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/expression"
+        },
+        "minItems": 3,
+        "maxItems": 3
+      }
     },
     "replacePhrase": {
       "description": "$replace [input, pattern, replacement]: exactly three operand expressions (I-Regexp has no flags argument, D5).",

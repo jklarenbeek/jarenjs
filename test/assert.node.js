@@ -14,3 +14,7 @@ export function deepEqual(actual, expected, message) {
 
 export const throws = assert.throws;
 export const doesNotThrow = assert.doesNotThrow;
+export const strictEqual = assert.strictEqual;
+export const deepStrictEqual = assert.deepStrictEqual;
+export const notStrictEqual = assert.notStrictEqual;
+export const ok = assert.ok;

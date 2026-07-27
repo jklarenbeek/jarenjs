@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/ai",
   "private": false,
-  "version": "0.21.0",
+  "version": "0.21.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -77,6 +77,6 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/validate": "^0.21.0"
+    "@jarenjs/validate": "^0.21.1"
   }
 }

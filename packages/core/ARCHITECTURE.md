@@ -405,9 +405,37 @@ getStringLength("👨‍👩‍👧‍👦", false); // 11 (code units)
 getStringLength("👨‍👩‍👧‍👦", true);  // 1 (grapheme cluster)
 ```
 
-### 5. Date Module (`dates.js`)
+### 5. Date Module (`dates/`)
 
-RFC 3339 and ISO 8601 compliant date/time parsing.
+RFC 3339 and ISO 8601 validation, plus the suite's calendar kernel.
+
+**Dates are not a type here.** They are the two forms JSON already has — an
+RFC 3339 **string** (lexical, what documents, schemas, forms and TOML
+contain) and **epoch milliseconds** (arithmetic, what a chart plots). A
+wrapper object, even an immutable one, could not be a query-engine item, a
+JSON Patch target or part of app state; it is why `canonicalizeJson` turns a
+`Date` into `{}`. The parts record from `parseRFC3339Parts` is the working
+intermediate and is plain data, never an opaque handle.
+
+| Module | Owns |
+|---|---|
+| `rfc3339.js` | validation, lexical decomposition, epoch conversion |
+| `civil.js` | proleptic Gregorian arithmetic over integers |
+| `format.js` | LDML pattern → compiled formatter |
+| `duration.js` | ISO 8601 duration decomposition and date arithmetic |
+
+Calendar math goes through day numbers (`daysFromCivil`/`civilFromDays`),
+never through `Date`: the conversions are ~10 integer operations and allocate
+nothing, where an allocate-mutate-read `Date` round trip costs about 165× as
+much for the same answer. Formatting is the two-stage compiler again — a
+pattern is scanned once into a chain of appenders, which measured ~4.5×
+against re-scanning it per call.
+
+Locale-dependent presentation (month and weekday names, meridiem, relative
+phrasing) is deliberately **not** here, so this package stays zero-dependency
+and free of data that drifts per language: `compileDateFormat` takes a names
+provider, and a pattern using `MMMM`/`EEEE`/`a` without one is a compile
+error rather than a silent English fallback.
 
 ```mermaid
 flowchart TB
@@ -447,9 +475,22 @@ import {
   CONST_TICKS_HOUR,      // 3600000
   CONST_TICKS_DAY,       // 86400000
   CONST_RFC3339_DAYS,    // Days per month array
-  CONST_RFC3339_REGEX_ISDATE,  // Date regex
-  CONST_RFC3339_REGEX_ISTIME,  // Time regex
 } from '@jarenjs/core/dates';
+```
+
+**Working with the calendar:**
+
+```javascript
+import {
+  parseRFC3339Parts, addToParts, startOfParts, compileDateFormat,
+} from '@jarenjs/core/dates';
+
+const parts = parseRFC3339Parts('2026-01-31');
+addToParts(parts, 1, 'month');          // 2026-02-28 — month math clamps
+startOfParts(parts, 'week');            // the Monday of that week (ISO 8601)
+
+const fmt = compileDateFormat("yyyy-'W'ww");  // compile once…
+fmt(parts);                             // …call many: '2026-W05'
 ```
 
 ### 6. Text Module (`text/`)

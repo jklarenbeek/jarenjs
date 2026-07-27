@@ -292,6 +292,43 @@ export const queryExamples = [
     document: BOOKSTORE,
   },
   {
+    name: 'Dates: bucket into ISO weeks',
+    query: {
+      $for: { e: '$.events[*]' },
+      $groupby: { w: { '$start-of': ['$e.on', 'week'] } },
+      $orderby: ['$w'],
+      $return: {
+        week: { '$date-format': ['$w', "yyyy-'W'ww"] },
+        starting: '$w',
+        count: { $count: '$e' },
+      },
+    },
+    document: {
+      events: [
+        { on: '2026-01-05', what: 'kickoff' },
+        { on: '2026-01-08', what: 'review' },
+        { on: '2026-01-20', what: 'launch' },
+      ],
+    },
+  },
+  {
+    name: 'Dates: shift a deadline by a duration',
+    query: {
+      $for: { t: '$.tasks[*]' },
+      $return: {
+        task: '$t.name',
+        due: { '$date-add': ['$t.start', '$t.budget'] },
+        days: { '$date-diff': ['$t.start', { '$date-add': ['$t.start', '$t.budget'] }, 'day'] },
+      },
+    },
+    document: {
+      tasks: [
+        { name: 'design', start: '2026-01-31', budget: 'P1M' },
+        { name: 'build', start: '2026-03-02', budget: 'P6W' },
+      ],
+    },
+  },
+  {
     name: 'Dates: group events by year',
     query: {
       $for: { e: '$.events[*]' },
