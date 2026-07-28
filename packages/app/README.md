@@ -181,8 +181,8 @@ renderToString(createApp(doc).getVnode());
 
 `createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), observe(observer), stop(), destroy() }`
 
-Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §8.
+Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
 
 ## Development
 
-Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../ROADMAP.md) for what's next: dirty-path-pruned re-rendering, time-travel tooling over the action log, and the app-document meta-schema.
+Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../ROADMAP.md) for what's next: dirty-path-pruned re-rendering and time-travel tooling over the action log.

@@ -44,9 +44,10 @@ query operators built on this.
 
 ## Durations — `duration.js`
 
-`parseDuration('P3DT4H')` / `isValidDuration` — ISO 8601 duration
-decomposition into `{negative, years, months, weeks, days, hours,
-minutes, seconds}`. The load-bearing distinction is
+`parseDuration('P3DT4H')` — ISO 8601 duration decomposition into
+`{negative, years, months, weeks, days, hours, minutes, seconds}`
+(the boolean twin `isValidDuration` lives in `rfc3339.js` with the
+other format testers). The load-bearing distinction is
 `isFixedDuration(parts)`: days and smaller are a fixed millisecond span
 (`durationToMs`), while years and months are **calendar** units whose
 length depends on where they land — those go through

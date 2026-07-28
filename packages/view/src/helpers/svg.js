@@ -38,6 +38,21 @@ export function coord(v) {
 }
 
 /**
+ * The point at distance `r` from `(cx, cy)` along `angle` (radians,
+ * 0 = east, y growing downward — SVG screen orientation). Raw
+ * coordinates: quantization (`coord`/`num`) stays at the call site so a
+ * caller's emitted bytes are its own choice.
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {number} angle
+ * @returns {{ x: number, y: number }}
+ */
+export function polarPoint(cx, cy, r, angle) {
+  return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+}
+
+/**
  * The `text-anchor` for a label placed radially outward at `angle`
  * (radians, 0 = east, y growing downward). Labels near the left or right
  * of the circle read away from it (`end`/`start`); the deadband around

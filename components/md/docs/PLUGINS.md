@@ -31,7 +31,7 @@ optional.
 
 Plugins are passed as `options.plugins: MdPlugin[]` to `parseMarkdown`,
 `compileMarkdown` and `loadMarkdown`. At compile time they merge into
-four prebuilt tables:
+five prebuilt tables:
 
 | table | indexed by | consulted |
 |---|---|---|
@@ -39,8 +39,9 @@ four prebuilt tables:
 | block starts | first non-space character | once per unclaimed line |
 | inline scans | trigger character | from the inline scanner's dispatch |
 | renders | AST `type` | by the vnode emitter |
+| hydrators | AST `type` | by `createMdRenderer` after mount |
 
-All four are built once per compile; the hot loops do only indexed
+All five are built once per compile; the hot loops do only indexed
 lookups. Two plugins claiming the same fence word, block character
 *and* matching the same line, inline character, or node type: the
 **first plugin in the array wins** (deterministic, documented, no
@@ -124,8 +125,7 @@ plugin composes itself from a trusted constant needs no filtering.
 
 Anything asynchronous or DOM-dependent goes in
 `hydrate(el, node, ctx)`, which `createMdRenderer` invokes **after**
-the patcher mounts the element (§6 of [LOADER.md](LOADER.md) covers
-scheduling). A hydratable render marks its root element with
+the patcher mounts the element. A hydratable render marks its root element with
 `'data-md-hydrate': plugin.name` and `'data-md-hash': contentHash`; the
 renderer finds marked elements, skips those whose hash it already
 hydrated, and calls the plugin. `hydrate` MAY be async; failures are
@@ -147,11 +147,10 @@ no CDN global, no `innerHTML`.
 - `render` claims `mermaid`/`mmd` fences and returns
   `div.md-mermaid.mermaid-block > svg`, keyed by content hash. Because it
   is pure and synchronous, a Markdown document containing a `mermaid`
-  fence renders to a full SVG string through **SSR with no browser** —
-  something the old injection wrapper could not do. Text and attribute
-  values are escaped by the view serializer, and only `http(s)`/relative
-  link `href`s survive, so the SVG-injection surface the old `innerHTML`
-  path carried is gone.
+  fence renders to a full SVG string through **SSR with no browser**.
+  Text and attribute values are escaped by the view serializer, and
+  only `http(s)`/relative link `href`s survive, so there is no
+  raw-`innerHTML` injection surface.
 - There is **no `hydrate`** — the render is already complete.
   Optional client-only enhancements (pan/zoom) are reserved for a future
   interactivity plugin.

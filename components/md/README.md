@@ -91,6 +91,7 @@ import { loadMarkdown, createMdRenderer } from '@jarenjs/md';
 import { highlightPlugin, mermaidPlugin } from '@jarenjs/md/plugins';
 import { renderToString } from '@jarenjs/view';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const plugins = [highlightPlugin(), mermaidPlugin()];   // native engine, no injected instance
 
@@ -104,7 +105,7 @@ const { title } = md.frontmatter;
 const dropH1 = compileJsltStylesheet([
   { match: { path: '$.ast[*]', schema: { properties: { type: { const: 'heading' }, depth: { const: 1 } }, required: ['type', 'depth'] } },
     body: null },
-], { compileTypeTest });   // hook from '@jarenjs/validate/query'
+], { compileTypeTest: createTypeTestCompiler() });   // schema-match hook
 const trimmed = dropH1(md.doc);   // unmatched blocks stay ===
 
 // 4. SSR: pure, deterministic (mermaid renders real inline SVG, no browser).

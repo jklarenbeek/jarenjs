@@ -8,7 +8,7 @@
  * — charts never imports mermaid (the dependency arrow is one-way).
  */
 
-import { svgRoot, rect, group, textAt, num, textWidth } from '@jarenjs/view/helpers';
+import { svgRoot, rect, group, textAt, num, polarPoint, textWidth } from '@jarenjs/view/helpers';
 import { CATEGORICAL } from '../core/palette.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 
@@ -120,18 +120,18 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   const slices = [];
   for (let i = 0; i < ast.slices.length; i++) {
     const s = ast.slices[i];
-    const x1 = cx + R * Math.cos(s.start);
-    const y1 = cy + R * Math.sin(s.start);
-    const x2 = cx + R * Math.cos(s.end);
-    const y2 = cy + R * Math.sin(s.end);
+    const { x: x1, y: y1 } = polarPoint(cx, cy, R, s.start);
+    const { x: x2, y: y2 } = polarPoint(cx, cy, R, s.end);
     const large = s.frac > 0.5 ? 1 : 0;
     const color = palette[i % palette.length];
+    const i1 = polarPoint(cx, cy, r, s.start);
+    const i2 = polarPoint(cx, cy, r, s.end);
     const d = inner === null
       ? `M${num(cx)},${num(cy)} L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} Z`
-      : `M${num(cx + r * Math.cos(s.start))},${num(cy + r * Math.sin(s.start))} `
+      : `M${num(i1.x)},${num(i1.y)} `
         + `L${num(x1)},${num(y1)} A${R},${R} 0 ${large} 1 ${num(x2)},${num(y2)} `
-        + `L${num(cx + r * Math.cos(s.end))},${num(cy + r * Math.sin(s.end))} `
-        + `A${num(r)},${num(r)} 0 ${large} 0 ${num(cx + r * Math.cos(s.start))},${num(cy + r * Math.sin(s.start))} Z`;
+        + `L${num(i2.x)},${num(i2.y)} `
+        + `A${num(r)},${num(r)} 0 ${large} 0 ${num(i1.x)},${num(i1.y)} Z`;
     const text = `${s.label}: ${s.value} (${(s.frac * 100).toFixed(1)}%)`;
     const props = markProps(
       { d, fill: color, stroke: sliceStroke, 'stroke-width': 1, class: sliceClass },

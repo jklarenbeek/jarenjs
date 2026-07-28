@@ -14,7 +14,7 @@
  */
 
 import {
-  svgRoot, path as svgPath, line as svgLine, textAt, coord, anchorForAngle,
+  svgRoot, path as svgPath, line as svgLine, textAt, coord, polarPoint, anchorForAngle,
 } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
@@ -95,8 +95,8 @@ export function renderGaugeAST(ast, theme, hash, options = {}) {
   // Dial angles run π (left) → 2π (right); the fill sweeps clockwise.
   const angleAt = (frac) => Math.PI + frac * Math.PI;
   const pointAt = (frac, r) => {
-    const a = angleAt(frac);
-    return [coord(cx + r * Math.cos(a)), coord(cy + r * Math.sin(a))];
+    const p = polarPoint(cx, cy, r, angleAt(frac));
+    return [coord(p.x), coord(p.y)];
   };
   const arcPath = (f0, f1) => {
     const [x0, y0] = pointAt(f0, R);

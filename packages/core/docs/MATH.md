@@ -16,8 +16,8 @@ Free aliases `mathf64_log`, `mathf64_log2`, `mathf64_log10`, `mathf64_exp`,
 Statics on `Float64`: `factorial(n)` (exact for integers, `gamma(n+1)`
 otherwise), `gamma(x)` (Lanczos, whole real line), `hypot(...args)`,
 `roundTo(value, digits)`, `nthroot(x, n)` (odd roots of negatives),
-`sign(x)`, `logBase(base, x)`. `cosHp(r)` is now implemented (a
-high-precision polynomial cosine; it previously threw).
+`sign(x)`, `logBase(base, x)`, `cosHp(r)` (a high-precision
+polynomial cosine).
 
 ### Range remapping — `remap`
 

@@ -105,7 +105,7 @@ degenerate.
 
 ## Not here
 
-Spatial *query operators* (`$distance`, `$contains`, `$within`,
+Spatial *query operators* (`$distance`, `$within`, `$bbox-intersects`,
 `$centroid`, `$geohash`, index-screened spatial joins) live in the
 query engine of `@jarenjs/json` (QUERY-FORMAT §8.14); the GeoJSON
 meta-schema artifacts live in `@jarenjs/json/schemas`; the map chart

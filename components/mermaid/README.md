@@ -138,7 +138,7 @@ flowchart LR
 Fully laid out: **flowchart**, **sequence**. Structured panels / chart:
 **class**, **ER**, **state**, **gantt**, **pie**. Parse-accepted with an
 honest "not yet laid out" placeholder: mindmap, gitGraph, journey,
-timeline, quadrantChart. The benchmark's coverage scorecard reports this
+timeline, quadrantChart, requirement. The benchmark's coverage scorecard reports this
 without hiding gaps.
 
 Pie rendering delegates to [`@jarenjs/charts`](../charts) (the pie

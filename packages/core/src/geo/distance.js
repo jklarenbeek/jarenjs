@@ -29,11 +29,10 @@
 // A caller needing survey accuracy needs a geodesy library, and this
 // says so rather than pretending.
 
+import { DEG, RAD } from './angle.js';
+
 /** IUGG mean Earth radius in metres — the sphere GeoJSON distances use. */
 export const EARTH_RADIUS = 6371008.8;
-
-const DEG = Math.PI / 180;
-const RAD = 180 / Math.PI;
 
 /**
  * Great-circle distance between two positions, in metres.

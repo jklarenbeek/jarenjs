@@ -709,10 +709,10 @@ export function* runSegmentsG(gens, i, value, root) {
 //#endregion
 
 //#region segment compilation (nodes mode, normalized paths)
-// Moved verbatim from path.js: the selector/segment compilers producing
-// (value, normalized-path) pairs per RFC 9535 section 2.7. path.js
-// imports them back for `query.nodes()`/`query.paths()`; nodes mode
-// stays lazily compiled there, so value-only queries never pay for it.
+// The selector/segment compilers producing (value, normalized-path)
+// pairs per RFC 9535 section 2.7. path.js imports them for
+// `query.nodes()`/`query.paths()`; nodes mode stays lazily compiled
+// there, so value-only queries never pay for it.
 
 // eslint-disable-next-line no-control-regex
 export const RE_NAME_NEEDS_ESCAPE = /['\\\u0000-\u001f]/;

@@ -94,9 +94,8 @@ pure and deterministic, so golden-JSON tests review any geometry drift.
 
 ## SVG vnodes, not innerHTML
 
-The old `@jarenjs/md` mermaid plugin injected a caller-supplied
-`mermaid` instance and swapped in `innerHTML` after mount. This engine
-emits **tagged-array vnodes** rooted at `['svg', …]`; the view patcher
+This engine emits **tagged-array vnodes** rooted at `['svg', …]`;
+the view patcher
 creates the whole subtree in the SVG namespace and escapes text and
 attributes. That inherits, for free: O(change) diffing, keyed
 reconciliation, SSR via `renderToString`, and CSP-safety. `render` is

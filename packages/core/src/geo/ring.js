@@ -16,8 +16,7 @@
 
 import { orient2d } from './predicates.js';
 import { EARTH_RADIUS } from './distance.js';
-
-const DEG = Math.PI / 180;
+import { DEG } from './angle.js';
 
 /**
  * Whether a ring is closed: its last position repeats its first.

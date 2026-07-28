@@ -435,7 +435,7 @@ has two possible shapes, and they serve different providers:
    reads it back and recognizes text with an Earley parser: it accepts
    all 210 documents in the official toml-test valid corpus, rejects 400
    of the 499 invalid ones (the remaining 99 fail on exactly the
-   semantic rules above), and 3000 seeded derivations per mode all parse.
+   semantic rules above), and 3000 seeded derivations across both modes all parse.
    That last direction is the one that matters for sampling — a model
    steered by this grammar cannot be walked into text the parser
    rejects.

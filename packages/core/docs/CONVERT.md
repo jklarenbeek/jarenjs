@@ -40,5 +40,6 @@ table's base currency, so `result = value * rate[from] / rate[to]`.
 ## Not here
 
 Number-base conversion (HEX/DEC/OCT/BIN) is `@jarenjs/core/math/word.js`
-(`toBase`/`fromBase`); the converter's "base" category delegates to it.
+(`toBase`/`fromBase`), standalone — base is a notation, not a dimension,
+so the converter has no "base" category.
 Fuel-economy (mpg ↔ L/100km) is non-affine and outside this model.

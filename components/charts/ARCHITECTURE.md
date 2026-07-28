@@ -193,11 +193,12 @@ two streaming shapes (incremental document vs. message feed). Snapshot
 objects from `getData()` are fresh per call on purpose: the component's
 identity-keyed memo then re-renders exactly once per snapshot.
 
-The five accumulators are one shape apart from each other: `bar` counts
+The six accumulators are one shape apart from each other: `bar` counts
 or sums under one grouping key, `heatmap` under two (`xField` is the
 column, `seriesField` the row), `line` keeps a ring buffer per series,
-`candlestick` keys on open time, and `gauge` keeps only the newest
-reading. Absence is `null` wherever it can happen — an unmeasured
+`candlestick` keys on open time, `gauge` keeps only the newest
+reading, and `map` keeps whole GeoJSON Features, projected and
+simplified on arrival. Absence is `null` wherever it can happen — an unmeasured
 heatmap cell, a gauge with no reading yet — because zero is a claim and
 neither is making it. The heatmap's matrix stays rectangular as it
 grows, so a new column widens every existing row; its change ops report
@@ -213,5 +214,5 @@ benchmark shapes to `{config, data}` pairs.
 mermaid pie AST to `{config, data}`. Mermaid's `renderPie` calls
 `buildPieAST` + `renderPieAST` with options carrying its class names
 (`mm-pie-slice`, …), key prefix (`mmpie-`), palette and theme — making
-the emitted SVG byte-identical to the pre-delegation renderer while the
+the emitted SVG byte-identical to the charts pie renderer's while the
 geometry lives in exactly one place.

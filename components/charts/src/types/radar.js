@@ -15,7 +15,7 @@
  */
 
 import {
-  svgRoot, rect, line as svgLine, textAt, textWidth, num, coord, anchorForAngle,
+  svgRoot, rect, line as svgLine, textAt, textWidth, num, coord, polarPoint, anchorForAngle,
 } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, niceStep, formatTickValue } from '../core/axis.js';
@@ -141,8 +141,8 @@ export function renderRadarAST(ast, theme, hash, options = {}) {
     children.push(chartTitle(cx, 24, ast.title, FS_LABEL + 3, t));
   }
 
-  const px = (angle, r) => coord(cx + R * r * Math.cos(angle));
-  const py = (angle, r) => coord(cy + R * r * Math.sin(angle));
+  const px = (angle, r) => coord(polarPoint(cx, cy, R * r, angle).x);
+  const py = (angle, r) => coord(polarPoint(cx, cy, R * r, angle).y);
   const ringPoints = (r) => ast.axes.map((a) => `${px(a.angle, r)},${py(a.angle, r)}`).join(' ');
 
   // Scale chrome: concentric ring polygons, one spoke per axis.

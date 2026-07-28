@@ -14,6 +14,7 @@ export { sanitizeHref, sanitizeUrl, encodeUrlAttribute } from './url.js';
 export {
   num,
   coord,
+  polarPoint,
   anchorForAngle,
   svgRoot,
   group,

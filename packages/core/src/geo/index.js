@@ -13,6 +13,7 @@
 // a ring takes GeoJSON without needing to know the `type` discriminator;
 // walking a tagged geometry belongs to the layer above.
 //
+//   angle.js       the degree↔radian factors the trigonometry shares
 //   predicates.js  robust orientation — the sign every test rests on
 //   distance.js    great-circle measurement over the WGS 84 sphere
 //   ring.js        ring closure, winding, area and containment

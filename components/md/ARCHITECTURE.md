@@ -191,8 +191,8 @@ return value is the finished document.
 
 ## Known limits (v0.1)
 
-- The dialect is pragmatic, not fully CommonMark-conformant (80.3% of
-  spec examples; the scorecard attributes the rest, raw-HTML
+- The dialect is pragmatic, not fully CommonMark-conformant (87.2% of
+  spec examples, 571 of 655; the scorecard attributes the rest, raw-HTML
   pass-through being the largest deliberate class).
 - Inline HTML and HTML blocks are preserved in the AST but not rendered
   to vnodes by default (`html: 'text'` shows them literally).

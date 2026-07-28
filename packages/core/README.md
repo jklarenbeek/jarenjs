@@ -93,7 +93,7 @@ Three design decisions carry the module:
 - **Measurement is spherical, drawing is projected, and the two never mix.** A Euclidean norm on raw degrees is 64% wrong over 1 km at Dutch latitudes, so `haversineDistance`/`sphericalRingArea` work on the sphere (`equirectDistance` is the cheap screening form for rejecting candidates first), while `projectMercator`/`fitMercator` and `simplifyLine`/`simplifyRing` exist for renderers — never measure on a projected coordinate.
 - **Validity is a separate concern from traversal.** `eachPosition`, `bboxOf`, `centroidOf` and friends measure without judging; `isValidGeoJson` (structure plus the ring closure a JSON Schema provably cannot express), `isValidWkt` and `isValidGeohash` are the one-call judgments that back the `geoFormats` group in [`@jarenjs/formats`](../formats), next to the full GeoJSON meta-schema artifacts in [`@jarenjs/json`](../json).
 
-The spatial query operators (`$distance`, `$contains`, `$geohash`, spatial joins over the box index) live in the query engine in [`@jarenjs/json`](../json); the streaming map chart that draws a FeatureCollection with bounded memory lives in [`@jarenjs/charts`](../../components/charts). The full module reference is [docs/GEO.md](./docs/GEO.md).
+The spatial query operators (`$distance`, `$within`, `$geohash`, spatial joins over the box index) live in the query engine in [`@jarenjs/json`](../json); the streaming map chart that draws a FeatureCollection with bounded memory lives in [`@jarenjs/charts`](../../components/charts). The full module reference is [docs/GEO.md](./docs/GEO.md).
 
 ## Messages
 

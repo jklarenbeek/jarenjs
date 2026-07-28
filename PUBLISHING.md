@@ -1,7 +1,7 @@
 # Publishing the Jaren packages
 
 The repository root and the benchmark/website workspaces are private. A
-release publishes the fourteen public workspaces:
+release publishes the fifteen public workspaces:
 
 - `@jarenjs/core`
 - `@jarenjs/json`
@@ -17,6 +17,7 @@ release publishes the fourteen public workspaces:
 - `@jarenjs/calc`
 - `@jarenjs/charts`
 - `@jarenjs/josl`
+- `@jarenjs/ai`
 
 ## Authenticate locally
 
@@ -100,6 +101,7 @@ npm view @jarenjs/mermaid version
 npm view @jarenjs/calc version
 npm view @jarenjs/charts version
 npm view @jarenjs/josl version
+npm view @jarenjs/ai version
 ```
 
 For automated releases, prefer npm trusted publishing with OIDC over a long-lived write token.

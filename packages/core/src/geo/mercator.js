@@ -22,9 +22,7 @@
 // NaN that would poison a whole path string.
 
 import { clamp01 } from '../math/float64.js';
-
-const DEG = Math.PI / 180;
-const RAD = 180 / Math.PI;
+import { DEG, RAD } from './angle.js';
 
 /**
  * The latitude where Web Mercator's y reaches the edge of its square.

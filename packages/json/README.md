@@ -8,7 +8,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 
 | Import | Contents |
 |---|---|
-| `@jarenjs/json` | everything below |
+| `@jarenjs/json` | the addressing and query modules below (`jslt`/`jtlt`/`xquery` are subpath-only) |
 | `@jarenjs/json/basic` | JSON, JSON Pointer and JSONPath string validation |
 | `@jarenjs/json/pointer` | the JSON Pointer and Relative JSON Pointer compiler |
 | `@jarenjs/json/patch` | JSON Patch and JSON Merge Patch: compiled apply + structural diff |

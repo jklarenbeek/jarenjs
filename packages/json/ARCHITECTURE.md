@@ -153,7 +153,7 @@ Grouping, `$distinct` and the `$orderby` machinery need a total, deterministic e
 
 ### The operator registry
 
-All 58 §8 operators live in one table in `operators.js` — the query-language analogue of `path.js`'s `FUNCTIONS` table:
+All 91 §8 operators live in one table in `operators.js` — the query-language analogue of `path.js`'s `FUNCTIONS` table:
 
 ```javascript
 '$substring': {
