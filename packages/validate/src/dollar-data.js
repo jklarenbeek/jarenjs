@@ -253,32 +253,37 @@ function compileDollarDataFormat(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'format');
   const resolveRef = compileRefResolver(ref);
 
+  // The registry holds format COMPILERS; compile (and cache) a validator
+  // per referenced format name at validation time.
+  const compiled = new Map();
+  const mockSchemaObj = {
+    createErrorHandler: () => () => false,
+    options: { skipErrors: true },
+  };
+
   return function validateDollarDataFormat(data, dataPath, dataRoot) {
     if (typeof data !== 'string') return true;
 
     const formatName = resolveRef(dataRoot, dataPath);
     if (formatName === JSONPOINTER_NOTHING || !isStringType(formatName)) return true;
 
-    const formatCompiler = formats[formatName];
-    if (!formatCompiler) return true;
-
-    // The format compiler needs to be called to create the validator
-    // We pass a mock schemaObj that only has createErrorHandler
-    const mockSchemaObj = {
-      createErrorHandler: () => () => false,
-      options: { skipErrors: true }
-    };
-
-    try {
-      // Get the validator function from the compiler
-      const validator = formatCompiler(mockSchemaObj, { format: formatName });
-      if (typeof validator !== 'function') return true;
-
-      return validator(data, dataPath) || addError(data, dataPath, formatName);
-    } catch (_e) {
-      // If compilation fails, skip validation
-      return true;
+    let validator = compiled.get(formatName);
+    if (validator === undefined) {
+      const formatCompiler = formats[formatName];
+      validator = null;
+      if (formatCompiler) {
+        try {
+          const candidate = formatCompiler(mockSchemaObj, { format: formatName });
+          if (typeof candidate === 'function') validator = candidate;
+        } catch (_e) {
+          // An uncompilable format asserts nothing
+        }
+      }
+      compiled.set(formatName, validator);
     }
+    if (validator === null) return true;
+
+    return validator(data, dataPath) || addError(data, dataPath, formatName);
   };
 }
 
