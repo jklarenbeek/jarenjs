@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/view",
   "private": false,
-  "version": "0.22.12",
+  "version": "0.22.13",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -53,7 +53,7 @@
     "ssr"
   ],
   "dependencies": {
-    "@jarenjs/core": "^0.22.12"
+    "@jarenjs/core": "^0.22.13"
   },
   "scripts": {
     "build": "npm run build:types",

@@ -36,15 +36,10 @@ import {
   isValidTimeParts,
 } from './values.js';
 // the date-time token patterns are shared with the JOSL machine
-import { RE_DATETIME, RE_TIMEONLY } from './util.js';
+import { RE_DATETIME, RE_TIMEONLY, stickyExec } from './util.js';
 
 const RE_NUM_JSON = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
 const RE_NUM_JSONX = /[+-]?(?:0|[1-9](?:_?\d)*)(?:\.\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?(n?)/y;
-
-function stickyExec(re, text, pos) {
-  re.lastIndex = pos;
-  return re.exec(text);
-}
 
 /**
  * @callback JsonxErrCallback

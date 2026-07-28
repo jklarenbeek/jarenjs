@@ -20,6 +20,7 @@
  * ARCHITECTURE.md §"Engine and component".
  */
 
+import { createProjectionMemo } from '@jarenjs/view/helpers';
 import { buildPluginTables } from '../parser.js';
 import { compileMarkdown } from '../compiler.js';
 import { loadMarkdown } from '../loader.js';
@@ -75,12 +76,6 @@ export function createMdComponent(options = {}) {
   const memoLimit = options.memoLimit ?? 32;
   const tables = buildPluginTables(plugins);
 
-  /** Source-string memo (LRU by Map re-insertion). */
-  /** @type {Map<string, CompiledMd>} */
-  const bySource = new Map();
-  /** Parsed-document memo (reference-keyed). */
-  /** @type {WeakMap<object, any>} */
-  const byDoc = new WeakMap();
   /** Content-hash → AST node, for hydratable plugin nodes. */
   /** @type {Map<string, any>} */
   const hydratable = new Map();
@@ -89,27 +84,6 @@ export function createMdComponent(options = {}) {
   const onHydrateError = options.onHydrateError
     // eslint-disable-next-line no-console -- the documented default sink
     ?? ((err) => console.error('md hydrate:', err));
-
-  /**
-   * @param {string} source
-   * @returns {CompiledMd}
-   */
-  const compile = (source) => {
-    let compiled = bySource.get(source);
-    if (compiled !== undefined) {
-      // Refresh recency.
-      bySource.delete(source);
-      bySource.set(source, compiled);
-      return compiled;
-    }
-    compiled = compileMarkdown(source, compileOptions);
-    bySource.set(source, compiled);
-    if (bySource.size > memoLimit) {
-      bySource.delete(bySource.keys().next().value);
-    }
-    indexHydratable(compiled.doc);
-    return compiled;
-  };
 
   /**
    * Remember hydratable nodes of a document by content hash.
@@ -124,26 +98,28 @@ export function createMdComponent(options = {}) {
     });
   };
 
+  const { compile, view } = createProjectionMemo({
+    memoLimit,
+    compile: (source) => {
+      const compiled = compileMarkdown(source, compileOptions);
+      indexHydratable(compiled.doc);
+      return compiled;
+    },
+    toVnode: (compiled) => compiled.toVnode(),
+    docToVnode: (doc) => {
+      const vnode = compileMarkdown(doc, compileOptions).toVnode();
+      indexHydratable(doc);
+      return vnode;
+    },
+  });
+
   /** @type {MdComponent} */
   const component = {
     plugins,
 
     compile,
 
-    view(sourceOrDoc) {
-      if (typeof sourceOrDoc === 'string') {
-        return compile(sourceOrDoc).toVnode();
-      }
-      if (sourceOrDoc === null || sourceOrDoc === undefined) return null;
-      let vnode = byDoc.get(sourceOrDoc);
-      if (vnode === undefined) {
-        const compiled = compileMarkdown(sourceOrDoc, compileOptions);
-        vnode = compiled.toVnode();
-        byDoc.set(sourceOrDoc, vnode);
-        indexHydratable(sourceOrDoc);
-      }
-      return vnode;
-    },
+    view,
 
     effects: {
       /**

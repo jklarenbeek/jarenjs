@@ -58,6 +58,7 @@ import {
   isNameCharCode,
 } from '@jarenjs/core/scan';
 
+import { setObjectMember } from '@jarenjs/core/object';
 import { LabeledSyntaxError } from '../errors.js';
 
 const CC_HASH = 0x23;
@@ -213,16 +214,6 @@ const ARRAY_FN_TABLE = Object.freeze({
 // starts with '$' must be emitted with one extra leading '$'
 function emitString(s) {
   return s.charCodeAt(0) === CC_DOLLAR ? '$' + s : s;
-}
-
-// own-property assignment for emitted objects keyed by user-controlled
-// names: a plain `obj[name] =` would follow the prototype chain for
-// '__proto__' and silently drop the member
-function setMember(obj, name, value) {
-  if (name === '__proto__')
-    Object.defineProperty(obj, name, { value, enumerable: true, writable: true, configurable: true });
-  else
-    obj[name] = value;
 }
 
 // member names foldable into RFC 9535 dot shorthand; everything else
@@ -1001,7 +992,7 @@ export function parseXQuery(source) {
     if (plain) {
       const out = {};
       for (let i = 0; i < keys.length; i++)
-        setMember(out, keys[i], values[i]);
+        setObjectMember(out, keys[i], values[i]);
       return out;
     }
     const pairs = new Array(keys.length);
@@ -1162,7 +1153,7 @@ export function parseXQuery(source) {
         groups.push(group);
         group = {};
       }
-      setMember(group, name, bindings[i][1]);
+      setObjectMember(group, name, bindings[i][1]);
     }
     groups.push(group);
     let out = cond;
@@ -1437,7 +1428,7 @@ export function parseXQuery(source) {
         if (c.kind === 'for') {
           if (forObj === null)
             forObj = {};
-          setMember(forObj, c.name, c.atName === null ? c.expr : { '$in': c.expr, '$at': c.atName });
+          setObjectMember(forObj, c.name, c.atName === null ? c.expr : { '$in': c.expr, '$at': c.atName });
           names.add(c.name);
           if (c.atName !== null)
             names.add(c.atName);
@@ -1446,7 +1437,7 @@ export function parseXQuery(source) {
         else {
           if (letObj === null)
             letObj = {};
-          setMember(letObj, c.name, c.expr);
+          setObjectMember(letObj, c.name, c.expr);
           names.add(c.name);
         }
         lastSlot = slot;
@@ -1470,7 +1461,7 @@ export function parseXQuery(source) {
             fail(`duplicate variable '$${g.name}'`, g.at);
           if (names.has(g.name))
             fail(`unsupported construct 'group by' rebinding variable '$${g.name}'`, g.at);
-          setMember(groupObj, g.name, g.expr);
+          setObjectMember(groupObj, g.name, g.expr);
         }
         for (let k = 0; k < c.keys.length; k++)
           names.add(c.keys[k].name);

@@ -79,7 +79,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { JsonxSyntaxError } from './errors.js';
-import { setKey } from './util.js';
+import { setObjectMember } from '@jarenjs/core/object';
 import {
   isValueEndCode,
   decodeString,
@@ -540,7 +540,7 @@ export class JsonxMachine {
     }
     else {
       if (!this.detaches(frame.key))
-        setKey(frame.value, frame.key, value);
+        setObjectMember(frame.value, frame.key, value);
       if (this.onEvent !== null)
         this.onEvent({
           type: 'pair',
@@ -577,7 +577,7 @@ export class JsonxMachine {
     }
     else {
       if (!this.detaches(parent.key))
-        setKey(parent.value, parent.key, container);
+        setObjectMember(parent.value, parent.key, container);
       this.path.push(parent.key);
     }
     stack.push({

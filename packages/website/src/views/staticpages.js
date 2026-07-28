@@ -5,6 +5,8 @@
  * every engine's example gallery with one-click "Open in playground".
  */
 
+import { tabRule } from './ui.js';
+
 export const STATIC_RULES = [
   // ---- docs ----
   {
@@ -53,13 +55,7 @@ export const STATIC_RULES = [
       ['div', { class: 'example-grid' }, [{ $apply: '$.items[*]' }]],
     ],
   },
-  {
-    match: '$.ui.examples.tabs[*]', mode: 'examples',
-    body: ['a', {
-      href: '$.href',
-      class: { $if: ['$.active', 'tab active', 'tab'] },
-    }, '$.label'],
-  },
+  tabRule('$.ui.examples.tabs[*]', 'examples'),
   {
     match: '$.ui.examples.items[*]', mode: 'examples',
     body: ['article', { class: 'card example-card' },

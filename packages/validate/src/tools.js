@@ -24,6 +24,10 @@ import {
 } from '@jarenjs/core/array';
 
 import {
+  isJsonObject,
+} from '@jarenjs/core/object';
+
+import {
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
 
@@ -151,7 +155,6 @@ export const resolveNothing = () => JSONPOINTER_NOTHING;
 
 const isDefined = (data) => data !== undefined;
 const isJsonString = (data) => typeof data === 'string';
-const isPlainObject = (data) => typeof data === 'object' && data !== null && !Array.isArray(data);
 const isAnyValue = () => true;
 
 /**
@@ -257,9 +260,9 @@ export function createDataRefCompilers(compileRefResolver) {
       (data, min) => data.length >= min),
     maxItems: constraint('maxItems', Array.isArray, isNumberType,
       (data, max) => data.length <= max),
-    minProperties: constraint('minProperties', isPlainObject, isNumberType,
+    minProperties: constraint('minProperties', isJsonObject, isNumberType,
       (data, min) => Object.keys(data).length >= min),
-    maxProperties: constraint('maxProperties', isPlainObject, isNumberType,
+    maxProperties: constraint('maxProperties', isJsonObject, isNumberType,
       (data, max) => Object.keys(data).length <= max),
     enum: constraint('enum', isDefined, Array.isArray,
       (data, values) => values.includes(data)),

@@ -23,6 +23,7 @@
  * aliases, no tags, no multi-document streams, no complex keys.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
 import { countIndent, isBlankLine } from './utils.js';
 
 /** Raised for malformed frontmatter inside a detected fence. */
@@ -258,7 +259,7 @@ function parseYamlMap(state, indent) {
     if (isSeqDash(line.slice(indent))) break;
     const entry = splitYamlKey(line, indent, state.pos);
     state.pos++;
-    setMember(out, entry.key, parseYamlValue(state, entry.rest, indent));
+    setObjectMember(out, entry.key, parseYamlValue(state, entry.rest, indent));
   }
   return out;
 }
@@ -657,25 +658,8 @@ function parseFlowMap(text, pos, lineNo) {
       throw new MdFrontmatterError("expected ':' in flow map", lineNo);
     }
     const value = parseFlowValue(text, i + 1, lineNo);
-    setMember(out, String(key.value), value.value);
+    setObjectMember(out, String(key.value), value.value);
     i = value.end;
-  }
-}
-
-/**
- * Assign a member without falling into the `__proto__` setter trap.
- * @param {Record<string, any>} out
- * @param {string} key
- * @param {any} value
- */
-function setMember(out, key, value) {
-  if (key === '__proto__') {
-    Object.defineProperty(out, key, {
-      value, writable: true, enumerable: true, configurable: true,
-    });
-  }
-  else {
-    out[key] = value;
   }
 }
 
@@ -726,14 +710,14 @@ export function parseTomlSubset(text) {
       const step = path[i];
       if (!(step in target) || typeof target[step] !== 'object') {
         const next = {};
-        setMember(target, step, next);
+        setObjectMember(target, step, next);
         target = next;
       }
       else {
         target = target[step];
       }
     }
-    setMember(target, path[path.length - 1], parseTomlValue(valueText, no));
+    setObjectMember(target, path[path.length - 1], parseTomlValue(valueText, no));
   }
   return root;
 }
@@ -831,7 +815,7 @@ function descendTomlTable(root, path, isArray, no) {
     let next = target[step];
     if (next === undefined) {
       next = {};
-      setMember(target, step, next);
+      setObjectMember(target, step, next);
     }
     else if (Array.isArray(next)) {
       next = next[next.length - 1];
@@ -846,7 +830,7 @@ function descendTomlTable(root, path, isArray, no) {
     let arr = target[leaf];
     if (arr === undefined) {
       arr = [];
-      setMember(target, leaf, arr);
+      setObjectMember(target, leaf, arr);
     }
     if (!Array.isArray(arr)) throw new MdFrontmatterError(`'${leaf}' is not an array of tables`, no);
     const fresh = {};
@@ -856,7 +840,7 @@ function descendTomlTable(root, path, isArray, no) {
   let next = target[leaf];
   if (next === undefined) {
     next = {};
-    setMember(target, leaf, next);
+    setObjectMember(target, leaf, next);
   }
   else if (Array.isArray(next)) {
     next = next[next.length - 1];
@@ -924,10 +908,10 @@ function parseTomlInline(text, no) {
     let target = out;
     for (let p = 0; p < path.length - 1; p++) {
       const next = {};
-      setMember(target, path[p], next);
+      setObjectMember(target, path[p], next);
       target = next;
     }
-    setMember(target, path[path.length - 1], item.value);
+    setObjectMember(target, path[path.length - 1], item.value);
     i = item.end;
   }
 }

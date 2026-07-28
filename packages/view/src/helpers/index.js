@@ -2,10 +2,11 @@
 /**
  * @file `@jarenjs/view/helpers` — the shared, view-layer helper kernel:
  * SVG vnode builders over `h()`, the URL policies that guard what may
- * reach an `href`/`src`, and the prefix-driven theme resolver that
+ * reach an `href`/`src`, the prefix-driven theme resolver that
  * SVG-emitting components (`@jarenjs/calc`, `@jarenjs/mermaid`, …) build
- * on. Import the whole barrel (`@jarenjs/view/helpers`) or a single module
- * (`@jarenjs/view/helpers/svg`, `@jarenjs/view/helpers/url`,
+ * on, and the memoized `view()` projection pair the component layers
+ * share. Import the whole barrel (`@jarenjs/view/helpers`) or a single
+ * module (`@jarenjs/view/helpers/svg`, `@jarenjs/view/helpers/url`,
  * `@jarenjs/view/helpers/theme`).
  */
 
@@ -31,3 +32,4 @@ export {
 
 export { resolveTheme } from './theme.js';
 export { measureText, textWidth } from './metrics.js';
+export { createProjectionMemo } from './memo.js';

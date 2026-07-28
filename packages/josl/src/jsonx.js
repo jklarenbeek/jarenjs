@@ -39,7 +39,8 @@ import {
   isDigitCode,
   isAsciiLetterCode,
 } from '@jarenjs/core/scan';
-import { setKey, columnOf } from './util.js';
+import { columnOf } from './util.js';
+import { setObjectMember } from '@jarenjs/core/object';
 import { countCharCode } from '@jarenjs/core/string';
 import {
   isValueEndCode,
@@ -176,7 +177,7 @@ class JsonxParser {
       this.path.push(key);
       const value = this.parseValue();
       this.path.pop();
-      setKey(obj, key, value);
+      setObjectMember(obj, key, value);
       this.skipWs();
       if (this.pos >= this.text.length)
         this.err('unterminated object', "close the object with '}'");

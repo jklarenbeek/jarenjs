@@ -18,6 +18,7 @@
  * reverse.
  */
 
+import { createProjectionMemo } from '@jarenjs/view/helpers';
 import { compileMermaid, diagramToVnode } from '../index.js';
 
 /**
@@ -50,50 +51,19 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  * @returns {MermaidComponent}
  */
 export function createMermaidComponent(options = {}) {
-  const memoLimit = options.memoLimit ?? 32;
   const compileOptions = { theme: options.theme };
 
-  /** Source-string memo (LRU by Map re-insertion). */
-  /** @type {Map<string, any>} */
-  const bySource = new Map();
-  /** Parsed-document memo (reference-keyed). */
-  /** @type {WeakMap<object, any>} */
-  const byDoc = new WeakMap();
-
-  /**
-   * @param {string} source
-   * @returns {import('../index.js').CompiledMermaid}
-   */
-  const compile = (source) => {
-    let compiled = bySource.get(source);
-    if (compiled !== undefined) {
-      bySource.delete(source);
-      bySource.set(source, compiled);
-      return compiled;
-    }
-    compiled = compileMermaid(source, compileOptions);
-    bySource.set(source, compiled);
-    if (bySource.size > memoLimit) {
-      bySource.delete(bySource.keys().next().value);
-    }
-    return compiled;
-  };
+  const { compile, view } = createProjectionMemo({
+    memoLimit: options.memoLimit ?? 32,
+    compile: (source) => compileMermaid(source, compileOptions),
+    toVnode: (compiled) => compiled.toVnode(),
+    docToVnode: (doc) => diagramToVnode(doc, compileOptions),
+  });
 
   return {
     compile,
 
-    view(sourceOrDoc) {
-      if (typeof sourceOrDoc === 'string') {
-        return compile(sourceOrDoc).toVnode();
-      }
-      if (sourceOrDoc === null || sourceOrDoc === undefined) return null;
-      let vnode = byDoc.get(sourceOrDoc);
-      if (vnode === undefined) {
-        vnode = diagramToVnode(sourceOrDoc, compileOptions);
-        byDoc.set(sourceOrDoc, vnode);
-      }
-      return vnode;
-    },
+    view,
 
     effects: {
       /**

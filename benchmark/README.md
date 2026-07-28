@@ -29,6 +29,11 @@ number in a README performance table names the command that produced it.
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
+The tools share one harness library, [`lib/`](./lib/): option parsing
+(`args.js`), timing and table rendering (`measure.js`, `fmt.js`), tracked
+result files (`results.js`), and the JSON-shape equivalence check
+(`equals.js`) used to verify rival engines agree before timing them.
+
 ## Test suites (git submodules)
 
 Five official suites are vendored as submodules. After cloning, initialize

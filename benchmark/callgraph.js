@@ -92,8 +92,8 @@ function printHelp() {
   console.log('Examples:');
   console.log(`  node benchmark/callgraph.js '/ref.json'`);
   console.log(`  node benchmark/callgraph.js '/ref.json' --iterations 5000`);
-  console.log(`  node benchmark/callgraph.js '/string.json' --top-functions=30`);
-  console.log(`  node benchmark/callgraph.js '/array.json' --max-depth=15`);
+  console.log(`  node benchmark/callgraph.js '/type.json' --top-functions=30`);
+  console.log(`  node benchmark/callgraph.js '/items.json' --max-depth=15`);
   process.exit(0);
 }
 

@@ -1,15 +1,16 @@
 //@ts-check
 /**
  * The playground — mode 'playground', dispatched with `$.ui.pg` as the
- * current node. Nine live engines: the JSON Schema tab (special-cased:
- * generated form + report-time i18n) and eight generic engines driven
- * entirely by the ENGINE_DEFS descriptors — the rules below render ANY
- * engine's fields and results. The IDE bar saves and recalls
- * experiments through the localStorage-backed ide-* effects.
+ * current node. Thirteen live engines: the JSON Schema tab
+ * (special-cased: generated form + report-time i18n) and twelve generic
+ * engines driven entirely by the ENGINE_DEFS descriptors — the rules
+ * below render ANY engine's fields and results. The IDE bar saves and
+ * recalls experiments through the localStorage-backed ide-* effects.
  */
 
 import { LOCALES } from '../boundaries/validator.js';
 import { ideBar, ideNamesRule } from './ide.js';
+import { tabRule } from './ui.js';
 
 /** One segment button of the error-locale switcher. */
 const localeButton = (code) => ['button', {
@@ -103,13 +104,7 @@ export const PLAYGROUND_RULES = [
       { $apply: '$.generic' },
     ],
   },
-  {
-    match: '$.ui.pg.engines[*]', mode: 'playground',
-    body: ['a', {
-      href: '$.href',
-      class: { $if: ['$.active', 'tab active', 'tab'] },
-    }, '$.label'],
-  },
+  tabRule('$.ui.pg.engines[*]', 'playground'),
   ideNamesRule('$.ui.pg.ide.names[*]', 'playground'),
 
   // ---- the validate engine (special-cased: forms + i18n) ----

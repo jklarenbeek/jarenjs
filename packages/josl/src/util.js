@@ -18,6 +18,18 @@ export const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2
 export const RE_TIMEONLY = /(\d{2}):(\d{2}):(\d{2})(\.\d+)?/y;
 
 /**
+ * Run a sticky regex at `pos` and return its match (or null).
+ * @param {RegExp} re - A sticky (`y`) pattern
+ * @param {string} text - The text to match against
+ * @param {number} pos - Position the match must start at
+ * @returns {RegExpExecArray | null} The match, anchored at `pos`
+ */
+export function stickyExec(re, text, pos) {
+  re.lastIndex = pos;
+  return re.exec(text);
+}
+
+/**
  * Shared `feed(chunk)` body for the buffering stream machines (JOSL and
  * CSV): guard against feeding after `end()`, strip a leading BOM on the
  * first non-empty chunk, then buffer and scan. The JSONX stream reader
@@ -57,23 +69,6 @@ export function beginParseAll(machine, text) {
   machine.started = true;
   machine.ended = true;
   return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
-}
-
-/**
- * Assign an own enumerable property without ever touching the prototype
- * chain. LLM-produced documents may legitimately contain a `__proto__`
- * key; plain assignment would silently poison the object.
- * @param {object} obj - Target object
- * @param {string} key - Member name (any string)
- * @param {*} value - Value to assign
- */
-export function setKey(obj, key, value) {
-  if (key === '__proto__')
-    Object.defineProperty(obj, key, {
-      value, writable: true, enumerable: true, configurable: true,
-    });
-  else
-    obj[key] = value;
 }
 
 /**

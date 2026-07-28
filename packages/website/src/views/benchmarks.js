@@ -6,6 +6,8 @@
  * rendered by the generic 'ui' mode.
  */
 
+import { tabRule } from './ui.js';
+
 export const BENCH_RULES = [
   {
     match: '$.ui.bench', mode: 'benchmarks',
@@ -17,11 +19,5 @@ export const BENCH_RULES = [
       ['div', { class: 'bench-body' }, [{ $apply: ['$.nodes[*]', 'ui'] }]],
     ],
   },
-  {
-    match: '$.ui.bench.suites[*]', mode: 'benchmarks',
-    body: ['a', {
-      href: '$.href',
-      class: { $if: ['$.active', 'tab active', 'tab'] },
-    }, '$.label'],
-  },
+  tabRule('$.ui.bench.suites[*]', 'benchmarks'),
 ];

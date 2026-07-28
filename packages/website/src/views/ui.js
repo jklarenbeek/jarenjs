@@ -7,6 +7,21 @@
  * collapsibles, a search box and a show-more button.
  */
 
+/**
+ * The rule for one deep-linkable tab in a `nav.tabs` strip. Each page
+ * holds its tab entries (`{ href, label, active }`) at a different
+ * location, hence the match parameter.
+ * @param {string} match - the JSONPath to the tab entries.
+ * @param {string} mode - the page's dispatch mode.
+ */
+export const tabRule = (match, mode) => ({
+  match, mode,
+  body: ['a', {
+    href: '$.href',
+    class: { $if: ['$.active', 'tab active', 'tab'] },
+  }, '$.label'],
+});
+
 export const UI_RULES = [
   {
     match: "$..[?@.kind == 'p']", mode: 'ui',

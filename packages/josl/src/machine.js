@@ -61,8 +61,9 @@ import {
   isValidTimeParts,
 } from './values.js';
 import {
-  setKey, getOwn, columnOf, feedMachine, beginParseAll, RE_DATETIME, RE_TIMEONLY,
+  getOwn, columnOf, feedMachine, beginParseAll, stickyExec, RE_DATETIME, RE_TIMEONLY,
 } from './util.js';
+import { setObjectMember } from '@jarenjs/core/object';
 import { countCharCode } from '@jarenjs/core/string';
 
 function isBareKeyCode(c) {
@@ -105,11 +106,6 @@ const RE_HEX = /0x[0-9a-fA-F](?:_?[0-9a-fA-F])*(n?)/y;
 const RE_OCT = /0o[0-7](?:_?[0-7])*(n?)/y;
 const RE_BIN = /0b[01](?:_?[01])*(n?)/y;
 const RE_NUM = /[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?(n?)/y;
-
-function stickyExec(re, line, pos) {
-  re.lastIndex = pos;
-  return re.exec(line);
-}
 
 // Whether `pos` is a position a value may legally end at. Separate from
 // the machine's throwing `checkValueEnd` so the number scanner can test a
@@ -564,7 +560,7 @@ export class JoslMachine {
       if (ex === undefined) {
         const nt = {};
         this.meta.set(nt, { implicit: true });
-        setKey(t, k, nt);
+        setObjectMember(t, k, nt);
         t = nt;
         path = path.concat(k);
         continue;
@@ -599,7 +595,7 @@ export class JoslMachine {
     if (ex === undefined) {
       const nt = {};
       this.meta.set(nt, { explicit: true });
-      setKey(t, k, nt);
+      setObjectMember(t, k, nt);
       this.current = nt;
     }
     else if (ex !== null && typeof ex === 'object' && !Array.isArray(ex)) {
@@ -622,7 +618,7 @@ export class JoslMachine {
     if (arr === undefined) {
       arr = [];
       this.meta.set(arr, { aot: true });
-      setKey(t, k, arr);
+      setObjectMember(t, k, arr);
     }
     else if (!Array.isArray(arr) || this.meta.get(arr)?.aot !== true)
       this.err(pos, `key '${keys.join('.')}' is not an array of tables`);
@@ -700,7 +696,7 @@ export class JoslMachine {
       if (ex === undefined) {
         const nt = {};
         this.meta.set(nt, { dotted: true });
-        setKey(t, k, nt);
+        setObjectMember(t, k, nt);
         t = nt;
         continue;
       }
@@ -714,7 +710,7 @@ export class JoslMachine {
     const k = keys[keys.length - 1];
     if (Object.hasOwn(t, k))
       this.err(pos, `duplicate key '${k}'`);
-    setKey(t, k, value);
+    setObjectMember(t, k, value);
   }
 
   parseKeys(line, pos) {
@@ -1076,7 +1072,7 @@ export class JoslMachine {
       if (ex === undefined) {
         const nt = {};
         this.meta.set(nt, { inline: true, dotted: true });
-        setKey(t, k, nt);
+        setObjectMember(t, k, nt);
         t = nt;
         continue;
       }
@@ -1090,7 +1086,7 @@ export class JoslMachine {
     const k = keys[keys.length - 1];
     if (Object.hasOwn(t, k))
       this.err(pos, `duplicate key '${k}'`);
-    setKey(t, k, value);
+    setObjectMember(t, k, value);
   }
 
   //#endregion

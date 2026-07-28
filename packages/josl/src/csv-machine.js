@@ -48,7 +48,8 @@ import {
 } from '@jarenjs/core/scan';
 
 import { CsvSyntaxError } from './errors.js';
-import { columnOf, setKey, feedMachine, beginParseAll } from './util.js';
+import { columnOf, feedMachine, beginParseAll } from './util.js';
+import { setObjectMember } from '@jarenjs/core/object';
 import {
   LocalDate,
   LocalTime,
@@ -691,7 +692,7 @@ export class CsvMachine {
     const limit = n < width ? n : width;
     if (this.protoSafe) {
       for (let i = 0; i < limit; i++)
-        setKey(row, fields[i], values[i]);
+        setObjectMember(row, fields[i], values[i]);
     }
     else {
       for (let i = 0; i < limit; i++)
@@ -706,7 +707,7 @@ export class CsvMachine {
       for (let i = width; i < n; i++) {
         const name = uniqueName(fields, `column_${i + 1}`);
         fields.push(name);
-        setKey(row, name, values[i]);
+        setObjectMember(row, name, values[i]);
       }
       this.protoSafe = this.protoSafe || fields.includes('__proto__');
     }

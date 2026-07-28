@@ -6,8 +6,8 @@
  * Profiles Jaren vs AJV performance on JSON Schema Test Suite tests.
  *
  * Usage:
- *   node benchmark/profiler.js '/string.json' --profile
- *   node benchmark/profiler.js '/string.json' --profile --iterations 5000
+ *   node benchmark/profiler.js '/type.json' --profile
+ *   node benchmark/profiler.js '/type.json' --profile --iterations 5000
  *   node benchmark/profiler.js --profile-all
  *   node benchmark/profiler.js --profile-all --output csv
  *   node benchmark/profiler.js --profile-all --output json
@@ -295,7 +295,7 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
 
 /**
  * Profile all tests in a suite file
- * @param {string} fileKey - The test file key (e.g., '/string.json')
+ * @param {string} fileKey - The test file key (e.g., '/type.json')
  * @param {Object} tests - The tests object from loader
  * @param {number} iterations - Number of iterations
  * @param {string} draft - The draft version to use
@@ -768,8 +768,8 @@ async function main() {
   // Validate options
   if (!options.profile && !options.profileAll) {
     console.log('Usage:');
-    console.log('  node benchmark/profiler.js \'/string.json\' --profile');
-    console.log('  node benchmark/profiler.js \'/string.json\' --profile --iterations 5000');
+    console.log('  node benchmark/profiler.js \'/type.json\' --profile');
+    console.log('  node benchmark/profiler.js \'/type.json\' --profile --iterations 5000');
     console.log('  node benchmark/profiler.js --profile-all');
     console.log('  node benchmark/profiler.js --profile-all --output csv');
     console.log('  node benchmark/profiler.js --profile-all --output json');
