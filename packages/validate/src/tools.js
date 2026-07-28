@@ -149,6 +149,126 @@ export function createIsSchemaTypeHandler(type, isStrict = false) {
  */
 export const resolveNothing = () => JSONPOINTER_NOTHING;
 
+const isDefined = (data) => data !== undefined;
+const isJsonString = (data) => typeof data === 'string';
+const isPlainObject = (data) => typeof data === 'object' && data !== null && !Array.isArray(data);
+const isAnyValue = () => true;
+
+/**
+ * Build the keyword validators the two data-reference keywords share
+ * verbatim. The `data` keyword (json-everything, absolute + relative
+ * pointers via `compileDataRef`) and the Ajv-style `$data` keyword
+ * (relative pointers only) differ ONLY in which pointer compiler
+ * resolves a ref, so each module passes its own `compileRefResolver`
+ * and gets the same fifteen compilers back.
+ *
+ * Every validator follows one lax contract: a data instance outside the
+ * keyword's type, an unresolvable ref, or a resolved constraint of the
+ * wrong type asserts nothing.
+ *
+ * @param {(ref: string) => (dataRoot: any, dataPath: string) => any} compileRefResolver
+ * @returns {Record<string, (schemaObj: object, ref: string) => ((data: any, dataPath: string, dataRoot: any) => boolean) | undefined>}
+ */
+export function createDataRefCompilers(compileRefResolver) {
+  /**
+   * @param {string} keyword
+   * @param {(data: any) => boolean} accepts - Instance types the keyword constrains
+   * @param {(constraint: any) => boolean} expects - Resolved constraint types that assert
+   * @param {(data: any, constraint: any) => boolean} isValid
+   */
+  const constraint = (keyword, accepts, expects, isValid) =>
+    (schemaObj, ref) => {
+      const addError = schemaObj.createErrorHandler(ref, keyword);
+      const resolveRef = compileRefResolver(ref);
+
+      return function validateDataRefConstraint(data, dataPath, dataRoot) {
+        if (!accepts(data)) return true;
+
+        const value = resolveRef(dataRoot, dataPath);
+        if (value === JSONPOINTER_NOTHING || !expects(value)) return true;
+
+        return isValid(data, value) || addError(data, dataPath, value);
+      };
+    };
+
+  const compileFormat = (schemaObj, ref) => {
+    const formats = schemaObj.formats;
+    if (!formats) return undefined;
+
+    const addError = schemaObj.createErrorHandler(ref, 'format');
+    const resolveRef = compileRefResolver(ref);
+
+    // The registry holds format COMPILERS; compile (and cache) a validator
+    // per referenced format name at validation time.
+    const compiled = new Map();
+    const mockSchemaObj = {
+      createErrorHandler: () => () => false,
+      options: { skipErrors: true },
+    };
+
+    return function validateDataRefFormat(data, dataPath, dataRoot) {
+      if (typeof data !== 'string') return true;
+
+      const formatName = resolveRef(dataRoot, dataPath);
+      if (formatName === JSONPOINTER_NOTHING || !isStringType(formatName)) return true;
+
+      let validator = compiled.get(formatName);
+      if (validator === undefined) {
+        const formatCompiler = formats[formatName];
+        validator = null;
+        if (formatCompiler) {
+          try {
+            const candidate = formatCompiler(mockSchemaObj, { format: formatName });
+            if (typeof candidate === 'function') validator = candidate;
+          } catch (_e) {
+            // An uncompilable format asserts nothing
+          }
+        }
+        compiled.set(formatName, validator);
+      }
+      if (validator === null) return true;
+
+      return validator(data, dataPath) || addError(data, dataPath, formatName);
+    };
+  };
+
+  return {
+    __proto__: null,
+    minimum: constraint('minimum', isNumberType, isNumberType,
+      (data, min) => data >= min),
+    maximum: constraint('maximum', isNumberType, isNumberType,
+      (data, max) => data <= max),
+    exclusiveMinimum: constraint('exclusiveMinimum', isNumberType, isNumberType,
+      (data, min) => data > min),
+    exclusiveMaximum: constraint('exclusiveMaximum', isNumberType, isNumberType,
+      (data, max) => data < max),
+    multipleOf: constraint('multipleOf', isNumberType, isNumberType,
+      (data, multipleOf) => {
+        const q = data / multipleOf;
+        return Math.abs(q - Math.round(q)) < 1e-6;
+      }),
+    minLength: constraint('minLength', isJsonString, isNumberType,
+      (data, min) => data.length >= min),
+    maxLength: constraint('maxLength', isJsonString, isNumberType,
+      (data, max) => data.length <= max),
+    pattern: constraint('pattern', isJsonString, isStringType,
+      (data, pattern) => new RegExp(pattern, 'u').test(data)),
+    minItems: constraint('minItems', Array.isArray, isNumberType,
+      (data, min) => data.length >= min),
+    maxItems: constraint('maxItems', Array.isArray, isNumberType,
+      (data, max) => data.length <= max),
+    minProperties: constraint('minProperties', isPlainObject, isNumberType,
+      (data, min) => Object.keys(data).length >= min),
+    maxProperties: constraint('maxProperties', isPlainObject, isNumberType,
+      (data, max) => Object.keys(data).length <= max),
+    enum: constraint('enum', isDefined, Array.isArray,
+      (data, values) => values.includes(data)),
+    const: constraint('const', isDefined, isAnyValue,
+      (data, value) => data === value),
+    format: compileFormat,
+  };
+}
+
 //#endregion
 
 /**
