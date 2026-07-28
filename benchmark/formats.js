@@ -38,8 +38,14 @@ import * as jarenFormats from '@jarenjs/formats';
 import Ajv from 'ajv';
 import ajvFormats from 'ajv-formats';
 
+import { pad, padLeft, formatNs } from './lib/fmt.js';
+import { measureNsPerOp as measureNs } from './lib/measure.js';
+import { writeJsonResults } from './lib/results.js';
+
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP_ITERATIONS = 20_000;
+
+const measureNsPerOp = (fn, iterations) => measureNs(fn, iterations, WARMUP_ITERATIONS);
 
 //#region scenarios
 
@@ -183,30 +189,6 @@ function scoreConformance() {
 
 //#region measurement
 
-function measureNsPerOp(fn, iterations) {
-  for (let i = 0; i < WARMUP_ITERATIONS; i++)
-    fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++)
-    fn();
-  const end = process.hrtime.bigint();
-  return Number(end - start) / iterations;
-}
-
-function formatNs(ns) {
-  if (ns >= 1e6) return `${(ns / 1e6).toFixed(2)} ms`;
-  if (ns >= 1e3) return `${(ns / 1e3).toFixed(2)} µs`;
-  return `${ns.toFixed(1)} ns`;
-}
-
-function pad(str, width) {
-  return String(str).padEnd(width);
-}
-
-function padLeft(str, width) {
-  return String(str).padStart(width);
-}
-
 function printTable(title, columns, rows, iterations) {
   const nameWidth = Math.max(30, ...rows.map((r) => r.name.length + 2));
   const colWidth = 16;
@@ -241,23 +223,6 @@ function measureScenario(scenario, jarenCompile, ajvCompile, iterations) {
         : measureNsPerOp(() => { ajvValidate(valid); ajvValidate(invalid); }, iterations),
     ],
   };
-}
-
-function writeResults(tables, conformance, options) {
-  if (options.output === 'console' || options.filepath === null)
-    return;
-
-  const content = JSON.stringify({
-    mode: 'formats',
-    date: new Date().toISOString(),
-    node: process.version,
-    iterations: options.iterations,
-    conformance,
-    tables,
-  }, null, 2);
-
-  fs.writeFileSync(options.filepath, content);
-  console.log(`Results written to ${options.filepath}`);
 }
 
 function main() {
@@ -321,7 +286,7 @@ function main() {
       + (conformance.unregistered.length === 0 ? ''
         : ` (not registered: ${conformance.unregistered.join(', ')})`));
   }
-  writeResults(tables, conformance, options);
+  writeJsonResults('formats', { conformance, tables }, options);
 }
 
 main();

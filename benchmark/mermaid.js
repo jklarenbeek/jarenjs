@@ -30,6 +30,7 @@ import { writeFileSync } from 'node:fs';
 
 import { parseMermaid, compileMermaid } from '@jarenjs/mermaid';
 import { CORPUS, PIE_CORPUS, buildScaled } from './fixtures/mermaid.js';
+import { timeIt } from './lib/measure.js';
 
 const args = process.argv.slice(2);
 const flags = {
@@ -120,13 +121,6 @@ function computeScorecard() {
  * @param {() => any} fn @param {number} iterations
  * @returns {number} ms/op
  */
-function timeIt(fn, iterations) {
-  fn(); fn();
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; ++i) fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
-}
-
 /**
  * @param {() => Promise<any>} fn @param {number} iterations
  * @returns {Promise<number>} ms/op

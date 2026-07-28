@@ -36,6 +36,8 @@ import { writeFileSync } from 'node:fs';
 import { parseJsonx, createJsonxStreamReader } from '@jarenjs/josl';
 import { deepStrictEqual } from 'node:assert';
 
+import { makeMeasure, printTable as printRows, chunksOf } from './lib/measure.js';
+
 //#region options
 
 const args = process.argv.slice(2);
@@ -70,12 +72,6 @@ const LARGE = JSON.stringify({
   })),
 });
 
-function chunksOf(text, size) {
-  const out = [];
-  for (let i = 0; i < text.length; i += size)
-    out.push(text.slice(i, i + size));
-  return out;
-}
 const LARGE_CHUNKS = chunksOf(LARGE, CHUNK);
 
 function streamParse(chunks, options) {
@@ -89,29 +85,9 @@ function streamParse(chunks, options) {
 
 //#region timing
 
-function measure(label, run) {
-  for (let i = 0; i < WARMUP; i++) run(i);
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < ITERATIONS; i++) run(i);
-  const ns = Number(process.hrtime.bigint() - start) / ITERATIONS;
-  return { label, ns };
-}
+const measure = makeMeasure(WARMUP, ITERATIONS);
 
-function fmt(ns) {
-  if (ns < 1000) return `${ns.toFixed(0)} ns`;
-  if (ns < 1e6) return `${(ns / 1000).toFixed(1)} µs`;
-  return `${(ns / 1e6).toFixed(2)} ms`;
-}
-
-function printTable(title, rows) {
-  console.log(`\n${title}`);
-  const base = rows[0].ns;
-  for (const row of rows) {
-    const ratio = row.ns / base;
-    const suffix = row === rows[0] ? '' : `  (${ratio >= 1 ? ratio.toFixed(1) + 'x slower' : (1 / ratio).toFixed(1) + 'x faster'} than ${rows[0].label})`;
-    console.log(`  ${row.label.padEnd(34)} ${fmt(row.ns).padStart(10)}${suffix}`);
-  }
-}
+const printTable = (title, rows) => printRows(title, rows, { width: 34 });
 
 //#endregion
 

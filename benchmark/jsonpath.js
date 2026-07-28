@@ -33,11 +33,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
+import { deepEquals } from './lib/equals.js';
+import { pad, padLeft, formatNs } from './lib/fmt.js';
+import { measureNsPerOp as measureNs } from './lib/measure.js';
+import { parseSuiteArgs } from './lib/args.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CTS_PATH = path.join(__dirname, 'jsonpath-suite', 'cts.json');
 
 const DEFAULT_ITERATIONS = 1000;
 const WARMUP_ITERATIONS = 100;
+
+const measureNsPerOp = (fn, iterations) => measureNs(fn, iterations, WARMUP_ITERATIONS);
 
 //#region engines
 
@@ -121,47 +128,6 @@ async function loadEngines(keys) {
 //#endregion
 
 //#region helpers
-
-function deepEquals(a, b) {
-  if (a === b)
-    return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
-    return false;
-  const aIsArray = Array.isArray(a);
-  if (aIsArray !== Array.isArray(b))
-    return false;
-  if (aIsArray) {
-    if (a.length !== b.length)
-      return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEquals(a[i], b[i]))
-        return false;
-    }
-    return true;
-  }
-  const aKeys = Object.keys(a);
-  if (aKeys.length !== Object.keys(b).length)
-    return false;
-  for (const key of aKeys) {
-    if (!Object.hasOwn(b, key) || !deepEquals(a[key], b[key]))
-      return false;
-  }
-  return true;
-}
-
-function formatNs(ns) {
-  if (ns >= 1e6) return `${(ns / 1e6).toFixed(2)} ms`;
-  if (ns >= 1e3) return `${(ns / 1e3).toFixed(2)} µs`;
-  return `${ns.toFixed(0)} ns`;
-}
-
-function pad(str, width) {
-  return String(str).padEnd(width);
-}
-
-function padLeft(str, width) {
-  return String(str).padStart(width);
-}
 
 function groupOf(testName) {
   return testName.split(',')[0].trim();
@@ -302,16 +268,6 @@ function printCompliance(engines, tests, groups, failures, options) {
 //#endregion
 
 //#region profile
-
-function measureNsPerOp(fn, iterations) {
-  for (let i = 0; i < WARMUP_ITERATIONS; i++)
-    fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++)
-    fn();
-  const end = process.hrtime.bigint();
-  return Number(end - start) / iterations;
-}
 
 function makeScaleDocument(items) {
   const document = { items: [] };
@@ -557,40 +513,18 @@ function writeResults(mode, engines, data, options) {
 //#region cli
 
 function parseArgs(argv) {
-  const options = {
-    profile: false,
-    verbose: false,
-    scale: false,
-    iterations: DEFAULT_ITERATIONS,
+  return parseSuiteArgs(argv, {
+    defaultIterations: DEFAULT_ITERATIONS,
     engines: Object.keys(ENGINE_LOADERS),
-    output: 'console',
-    filepath: null,
-    top: null,
-    filter: null,
-    help: false,
-  };
-
-  for (let i = 2; i < argv.length; i++) {
-    const arg = argv[i];
-    switch (arg) {
-      case '--profile': options.profile = true; break;
-      case '--verbose': case '-v': options.verbose = true; break;
-      case '--scale': options.scale = true; break;
-      case '--iterations': case '-i': options.iterations = parseInt(argv[++i], 10); break;
-      case '--engines': options.engines = argv[++i].split(',').map((s) => s.trim()); break;
-      case '--output': case '-o': options.output = argv[++i]; break;
-      case '--filepath': case '-f': options.filepath = argv[++i]; break;
-      case '--top': options.top = parseInt(argv[++i], 10); break;
-      case '--help': case '-h': options.help = true; break;
-      default:
-        if (arg.startsWith('--')) {
-          console.error(`Unknown option: ${arg}`);
-          process.exit(2);
-        }
-        options.filter = arg;
-    }
-  }
-  return options;
+    init: { top: null },
+    extra: (arg, next, options) => {
+      if (arg === '--top') {
+        options.top = parseInt(next(), 10);
+        return true;
+      }
+      return false;
+    },
+  });
 }
 
 function printHelp() {

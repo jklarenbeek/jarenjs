@@ -29,6 +29,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, compileMarkdown, mdToVnode } from '@jarenjs/md';
+import { timeIt } from './lib/measure.js';
 import { renderToString } from '@jarenjs/view';
 import { marked } from 'marked';
 import MarkdownIt from 'markdown-it';
@@ -223,14 +224,6 @@ function buildDocument(sections) {
  * @param {() => any} fn
  * @param {number} iterations
  */
-function timeIt(fn, iterations) {
-  fn();
-  fn();
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; ++i) fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
-}
-
 const PERF_DOCS = [
   ['~2 kB', buildDocument(3)],
   ['~10 kB', buildDocument(16)],

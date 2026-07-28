@@ -39,6 +39,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 import { equalsJson } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json';
+
+import { pad, padLeft } from './lib/fmt.js';
 import { parseXQuery, XQuerySyntaxError } from '@jarenjs/json/xquery';
 
 import { classifyCase, resolveEnvironment, loadConvertedSuite } from './qt3-classify.js';
@@ -426,14 +428,6 @@ function loadBaseline() {
     return { summary: {}, tests: {} };
   const baseline = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
   return { summary: baseline.summary ?? {}, tests: baseline.tests ?? {} };
-}
-
-function pad(str, width) {
-  return String(str).padEnd(width);
-}
-
-function padLeft(str, width) {
-  return String(str).padStart(width);
 }
 
 function main() {

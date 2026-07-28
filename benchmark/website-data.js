@@ -34,7 +34,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-import { Float64 } from '@jarenjs/core/math';
+import { Float64, geoMean } from '@jarenjs/core/math';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -662,14 +662,6 @@ const SUITE_ORDER = [
   'validate', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo',
 ];
-
-/** Geometric mean — the honest average of ratios (a 10× and a 0.1×
- * average to parity, where an arithmetic mean would claim 5×). */
-function geoMean(values) {
-  const usable = values.filter((v) => Number.isFinite(v) && v > 0);
-  if (usable.length === 0) return null;
-  return Math.exp(usable.reduce((sum, v) => sum + Math.log(v), 0) / usable.length);
-}
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
 function bestRival(engines, jarenKey) {

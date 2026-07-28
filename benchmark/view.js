@@ -35,6 +35,7 @@ import { h as preactH } from 'preact';
 import preactRender from 'preact-render-to-string';
 
 import { createStubHost } from '../test/view/dom.stub.js';
+import { makeMeasure, printTable as printRows } from './lib/measure.js';
 
 //#region options
 
@@ -114,29 +115,9 @@ function preactView(state) {
 
 //#region timing
 
-function measure(label, run) {
-  for (let i = 0; i < WARMUP; i++) run(i);
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < ITERATIONS; i++) run(i);
-  const ns = Number(process.hrtime.bigint() - start) / ITERATIONS;
-  return { label, ns };
-}
+const measure = makeMeasure(WARMUP, ITERATIONS);
 
-function fmt(ns) {
-  if (ns < 1000) return `${ns.toFixed(0)} ns`;
-  if (ns < 1e6) return `${(ns / 1000).toFixed(1)} µs`;
-  return `${(ns / 1e6).toFixed(2)} ms`;
-}
-
-function printTable(title, rows) {
-  console.log(`\n${title}`);
-  const base = rows[0].ns;
-  for (const row of rows) {
-    const ratio = row.ns / base;
-    const suffix = row === rows[0] ? '' : `  (${ratio >= 1 ? ratio.toFixed(1) + 'x slower' : (1 / ratio).toFixed(1) + 'x faster'} than ${rows[0].label})`;
-    console.log(`  ${row.label.padEnd(28)} ${fmt(row.ns).padStart(10)}${suffix}`);
-  }
-}
+const printTable = (title, rows) => printRows(title, rows, { width: 28 });
 
 //#endregion
 

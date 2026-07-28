@@ -30,8 +30,12 @@
  * contender lacking the construct) are reported, not failed.
  */
 
-import * as fs from 'fs';
 import { makeBookstoreDocuments } from './fixtures/bookstore.js';
+import { deepEquals } from './lib/equals.js';
+import { pad, padLeft, formatNs, formatRate } from './lib/fmt.js';
+import { measureCell as measureCellLib } from './lib/measure.js';
+import { parseSuiteArgs } from './lib/args.js';
+import { writeEngineResults } from './lib/results.js';
 
 const DEFAULT_ITERATIONS = 1000;
 const WARMUP_ITERATIONS = 100;
@@ -86,58 +90,6 @@ async function loadEngines(keys) {
 
 //#endregion
 
-//#region helpers
-
-function deepEquals(a, b) {
-  if (a === b)
-    return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
-    return false;
-  const aIsArray = Array.isArray(a);
-  if (aIsArray !== Array.isArray(b))
-    return false;
-  if (aIsArray) {
-    if (a.length !== b.length)
-      return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEquals(a[i], b[i]))
-        return false;
-    }
-    return true;
-  }
-  const aKeys = Object.keys(a);
-  if (aKeys.length !== Object.keys(b).length)
-    return false;
-  for (const key of aKeys) {
-    if (!Object.hasOwn(b, key) || !deepEquals(a[key], b[key]))
-      return false;
-  }
-  return true;
-}
-
-function formatNs(ns) {
-  if (ns >= 1e9) return `${(ns / 1e9).toFixed(2)} s`;
-  if (ns >= 1e6) return `${(ns / 1e6).toFixed(2)} ms`;
-  if (ns >= 1e3) return `${(ns / 1e3).toFixed(2)} µs`;
-  return `${ns.toFixed(0)} ns`;
-}
-
-function formatRate(ns) {
-  const ops = 1e9 / ns;
-  if (ops >= 1e6) return `${(ops / 1e6).toFixed(1)}M/s`;
-  if (ops >= 1e3) return `${(ops / 1e3).toFixed(1)}k/s`;
-  return `${ops.toFixed(1)}/s`;
-}
-
-function pad(str, width) {
-  return String(str).padEnd(width);
-}
-
-function padLeft(str, width) {
-  return String(str).padStart(width);
-}
-
-//#endregion
 
 //#region equivalence
 
@@ -234,34 +186,9 @@ const hrnow = () => process.hrtime.bigint();
  * cell budget, sub-microsecond cells are scaled up until the measurement
  * window is long enough to be stable.
  */
-async function measureCell(engine, fn, requestedIterations) {
-  let start = hrnow();
-  await Promise.resolve(fn());
-  const pilotNs = Math.max(1, Number(hrnow() - start));
-
-  let iterations = requestedIterations;
-  if (pilotNs * iterations > CELL_TIME_BUDGET_NS)
-    iterations = Math.max(1, Math.floor(CELL_TIME_BUDGET_NS / pilotNs));
-  else if (pilotNs * iterations < CELL_TIME_FLOOR_NS)
-    iterations = Math.ceil(CELL_TIME_FLOOR_NS / pilotNs);
-
-  const warmup = Math.min(WARMUP_ITERATIONS, iterations);
-  if (engine.isAsync) {
-    for (let i = 0; i < warmup; i++)
-      await fn();
-    start = hrnow();
-    for (let i = 0; i < iterations; i++)
-      await fn();
-  }
-  else {
-    for (let i = 0; i < warmup; i++)
-      fn();
-    start = hrnow();
-    for (let i = 0; i < iterations; i++)
-      fn();
-  }
-  return { ns: Number(hrnow() - start) / iterations, iterations };
-}
+const measureCell = (engine, fn, requestedIterations) => measureCellLib(
+  engine, fn, requestedIterations,
+  CELL_TIME_BUDGET_NS, CELL_TIME_FLOOR_NS, WARMUP_ITERATIONS);
 
 async function runProfile(engines, scenarios, documents, options) {
   const rows = [];
@@ -368,70 +295,17 @@ function printProfile(engines, rows, compile, options) {
 
 //#region output files
 
-function writeResults(mode, engines, data, options) {
-  if (options.output === 'console' || options.filepath === null)
-    return;
-
-  let content;
-  if (options.output === 'json') {
-    content = JSON.stringify({
-      mode,
-      date: new Date().toISOString(),
-      node: process.version,
-      engines: engines.map((e) => e.name),
-      ...data,
-    }, null, 2);
-  }
-  else { // csv
-    const lines = [['document', 'scenario', ...engines.map((e) => `${e.name} ns/op`)].join(',')];
-    for (const row of data.rows ?? []) {
-      lines.push([JSON.stringify(row.document), JSON.stringify(row.scenario),
-        ...engines.map((e) => row.engines[e.key] ?? '')].join(','));
-    }
-    content = lines.join('\n') + '\n';
-  }
-
-  fs.writeFileSync(options.filepath, content);
-  console.log(`Results written to ${options.filepath}`);
-}
+const writeResults = writeEngineResults;
 
 //#endregion
 
 //#region cli
 
 function parseArgs(argv) {
-  const options = {
-    profile: false,
-    verbose: false,
-    scale: false,
-    iterations: DEFAULT_ITERATIONS,
+  return parseSuiteArgs(argv, {
+    defaultIterations: DEFAULT_ITERATIONS,
     engines: ENGINE_KEYS,
-    output: 'console',
-    filepath: null,
-    filter: null,
-    help: false,
-  };
-
-  for (let i = 2; i < argv.length; i++) {
-    const arg = argv[i];
-    switch (arg) {
-      case '--profile': options.profile = true; break;
-      case '--verbose': case '-v': options.verbose = true; break;
-      case '--scale': options.scale = true; break;
-      case '--iterations': case '-i': options.iterations = parseInt(argv[++i], 10); break;
-      case '--engines': options.engines = argv[++i].split(',').map((s) => s.trim()); break;
-      case '--output': case '-o': options.output = argv[++i]; break;
-      case '--filepath': case '-f': options.filepath = argv[++i]; break;
-      case '--help': case '-h': options.help = true; break;
-      default:
-        if (arg.startsWith('--')) {
-          console.error(`Unknown option: ${arg}`);
-          process.exit(2);
-        }
-        options.filter = arg;
-    }
-  }
-  return options;
+  });
 }
 
 function printHelp() {

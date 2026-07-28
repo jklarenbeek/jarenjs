@@ -505,6 +505,20 @@ export function clamp01(v) {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+/**
+ * Geometric mean — the honest average of ratios (a 10× and a 0.1×
+ * average to parity, where an arithmetic mean would claim 5×).
+ * Non-finite and non-positive entries are skipped; `null` when nothing
+ * usable remains.
+ * @param {number[]} values
+ * @returns {number|null}
+ */
+export function geoMean(values) {
+  const usable = values.filter((v) => Number.isFinite(v) && v > 0);
+  if (usable.length === 0) return null;
+  return Math.exp(usable.reduce((sum, v) => sum + Math.log(v), 0) / usable.length);
+}
+
 /** Lanczos g=7 coefficients (shared, allocation-free). */
 const _LANCZOS_G7 = [
   0.99999999999980993,

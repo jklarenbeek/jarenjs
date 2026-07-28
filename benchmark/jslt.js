@@ -26,9 +26,12 @@
  * from Jaren. Unsupported cells are printed as n/a, never hidden.
  */
 
-import * as fs from 'node:fs';
-
 import { makeBookstoreDocuments } from './fixtures/bookstore.js';
+import { deepEquals } from './lib/equals.js';
+import { pad, padLeft, formatNs, formatRate } from './lib/fmt.js';
+import { measureCell as measureCellLib } from './lib/measure.js';
+import { parseSuiteArgs } from './lib/args.js';
+import { writeEngineResults } from './lib/results.js';
 
 const DEFAULT_ITERATIONS = 1000;
 const WARMUP_ITERATIONS = 100;
@@ -102,68 +105,12 @@ async function loadEngines(keys) {
 
 //#region helpers
 
-function deepEquals(a, b) {
-  if (a === b)
-    return true;
-  if (typeof a !== 'object' || typeof b !== 'object'
-    || a === null || b === null) {
-    return false;
-  }
-  const aIsArray = Array.isArray(a);
-  if (aIsArray !== Array.isArray(b))
-    return false;
-  if (aIsArray) {
-    if (a.length !== b.length)
-      return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEquals(a[i], b[i]))
-        return false;
-    }
-    return true;
-  }
-  const aKeys = Object.keys(a);
-  if (aKeys.length !== Object.keys(b).length)
-    return false;
-  for (const key of aKeys) {
-    if (!Object.hasOwn(b, key) || !deepEquals(a[key], b[key]))
-      return false;
-  }
-  return true;
-}
-
-function formatNs(ns) {
-  if (ns >= 1e9)
-    return `${(ns / 1e9).toFixed(2)} s`;
-  if (ns >= 1e6)
-    return `${(ns / 1e6).toFixed(2)} ms`;
-  if (ns >= 1e3)
-    return `${(ns / 1e3).toFixed(2)} µs`;
-  return `${ns.toFixed(0)} ns`;
-}
-
-function formatRate(ns) {
-  const ops = 1e9 / ns;
-  if (ops >= 1e6)
-    return `${(ops / 1e6).toFixed(1)}M/s`;
-  if (ops >= 1e3)
-    return `${(ops / 1e3).toFixed(1)}k/s`;
-  return `${ops.toFixed(1)}/s`;
-}
-
 function formatRatio(ratio) {
   if (ratio < 0.1)
     return `${ratio.toFixed(3)}x`;
   if (ratio < 1)
     return `${ratio.toFixed(2)}x`;
   return `${ratio.toFixed(1)}x`;
-}
-
-function pad(value, width) {
-  return String(value).padEnd(width);
-}
-
-function padLeft(value, width) {
-  return String(value).padStart(width);
 }
 
 //#endregion
@@ -293,37 +240,9 @@ function printEquivalence(engines, rows, failures, options) {
 
 const hrnow = () => process.hrtime.bigint();
 
-async function measureCell(engine, fn, requestedIterations) {
-  let start = hrnow();
-  await Promise.resolve(fn());
-  const pilotNs = Math.max(1, Number(hrnow() - start));
-
-  let iterations = requestedIterations;
-  if (pilotNs * iterations > CELL_TIME_BUDGET_NS)
-    iterations = Math.max(1, Math.floor(CELL_TIME_BUDGET_NS / pilotNs));
-  else if (pilotNs * iterations < CELL_TIME_FLOOR_NS)
-    iterations = Math.ceil(CELL_TIME_FLOOR_NS / pilotNs);
-
-  const warmup = Math.min(WARMUP_ITERATIONS, iterations);
-  if (engine.isAsync) {
-    for (let i = 0; i < warmup; i++)
-      await fn();
-    start = hrnow();
-    for (let i = 0; i < iterations; i++)
-      await fn();
-  }
-  else {
-    for (let i = 0; i < warmup; i++)
-      fn();
-    start = hrnow();
-    for (let i = 0; i < iterations; i++)
-      fn();
-  }
-  return {
-    ns: Number(hrnow() - start) / iterations,
-    iterations,
-  };
-}
+const measureCell = (engine, fn, requestedIterations) => measureCellLib(
+  engine, fn, requestedIterations,
+  CELL_TIME_BUDGET_NS, CELL_TIME_FLOOR_NS, WARMUP_ITERATIONS);
 
 async function runProfile(engines, scenarios, documents, options) {
   const rows = [];
@@ -478,99 +397,24 @@ function printProfile(engines, rows, compile, options) {
 
 //#region output
 
-function writeResults(mode, engines, data, options) {
-  if (options.output === 'console' || options.filepath === null)
-    return;
-
-  let content;
-  if (options.output === 'json') {
-    content = JSON.stringify({
-      mode,
-      date: new Date().toISOString(),
-      node: process.version,
-      engines: engines.map((engine) => engine.name),
-      ...data,
-    }, null, 2);
-  }
-  else {
-    const lines = [[
-      'document',
-      'scenario',
-      ...engines.map((engine) => `${engine.name} ns/op`),
-    ].join(',')];
-    for (const row of data.rows ?? []) {
-      lines.push([
-        JSON.stringify(row.document),
-        JSON.stringify(row.scenario),
-        ...engines.map((engine) => row.engines[engine.key] ?? ''),
-      ].join(','));
-    }
-    content = lines.join('\n') + '\n';
-  }
-  fs.writeFileSync(options.filepath, content);
-  console.log(`Results written to ${options.filepath}`);
-}
+const writeResults = writeEngineResults;
 
 //#endregion
 
 //#region cli
 
 function parseArgs(argv) {
-  const options = {
-    profile: false,
-    verbose: false,
-    scale: false,
-    iterations: DEFAULT_ITERATIONS,
+  const options = parseSuiteArgs(argv, {
+    defaultIterations: DEFAULT_ITERATIONS,
     engines: ENGINE_KEYS,
-    output: 'console',
-    filepath: null,
-    filter: null,
-    help: false,
-  };
-
-  for (let i = 2; i < argv.length; i++) {
-    const arg = argv[i];
-    switch (arg) {
-      case '--profile':
-        options.profile = true;
-        break;
-      case '--verbose':
-      case '-v':
-        options.verbose = true;
-        break;
-      case '--scale':
-        options.scale = true;
-        break;
-      case '--iterations':
-      case '-i':
-        options.iterations = Number.parseInt(argv[++i], 10);
-        break;
-      case '--engines':
-        options.engines = argv[++i].split(',').map((value) => value.trim());
-        break;
-      case '--filter':
-        options.filter = argv[++i];
-        break;
-      case '--output':
-      case '-o':
-        options.output = argv[++i];
-        break;
-      case '--filepath':
-      case '-f':
-        options.filepath = argv[++i];
-        break;
-      case '--help':
-      case '-h':
-        options.help = true;
-        break;
-      default:
-        if (arg.startsWith('--')) {
-          console.error(`Unknown option: ${arg}`);
-          process.exit(2);
-        }
-        options.filter = arg;
-    }
-  }
+    extra: (arg, next, opts) => {
+      if (arg === '--filter') {
+        opts.filter = next();
+        return true;
+      }
+      return false;
+    },
+  });
 
   if (!Number.isInteger(options.iterations) || options.iterations < 1) {
     console.error('--iterations must be a positive integer');

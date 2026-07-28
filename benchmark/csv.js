@@ -47,6 +47,8 @@ import {
   createCsvStreamReader,
 } from '@jarenjs/josl';
 
+import { timeIt, chunksOf } from './lib/measure.js';
+
 import Papa from 'papaparse';
 import { parse as csvParseSync } from 'csv-parse/sync';
 import { csvParse, csvParseRows, csvFormat } from 'd3-dsv';
@@ -341,15 +343,6 @@ const corpora = [
 
 //#region profile
 
-function timeIt(fn, iterations) {
-  fn();
-  fn();
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; ++i)
-    fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
-}
-
 // A parser that quietly produced fewer rows would post a great number, so
 // nothing is timed until it agrees with jaren on the shape of the result.
 function agrees(engine, mode, text) {
@@ -390,13 +383,6 @@ function profileMode(mode, title) {
     }
     out.push({ name: corpus.name, results });
   }
-  return out;
-}
-
-function chunksOf(text, size) {
-  const out = [];
-  for (let i = 0; i < text.length; i += size)
-    out.push(text.slice(i, i + size));
   return out;
 }
 

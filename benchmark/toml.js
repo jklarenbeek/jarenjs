@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 import { parseToml, stringifyToml, parseJosl } from '@jarenjs/josl';
+import { timeIt } from './lib/measure.js';
 import * as smol from 'smol-toml';
 import iarna from '@iarna/toml';
 import toml from 'toml';
@@ -177,15 +178,6 @@ const corpora = [
   { name: 'spec-example-1 (small doc)', text: specExample },
   { name: 'valid corpus (each file)', files: validCases },
 ];
-
-function timeIt(fn, iterations) {
-  fn(); // warmup
-  fn();
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; ++i)
-    fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
-}
 
 function runProfile() {
   console.log(`\nparse profile (${flags.iterations} iterations, ms per pass; ratio vs jaren)\n`);

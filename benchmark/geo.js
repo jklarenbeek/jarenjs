@@ -44,6 +44,9 @@ import * as turf from '@turf/turf';
 import { getDistance, getPathLength } from 'geolib';
 import Flatbush from 'flatbush';
 
+import { pad, padLeft, formatNs } from './lib/fmt.js';
+import { measureNsPerOp } from './lib/measure.js';
+
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP = 5_000;
 
@@ -187,21 +190,7 @@ function runEquivalence() {
 
 //#region measurement
 
-function measure(fn, iterations) {
-  for (let i = 0; i < WARMUP; i++) fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++) fn();
-  return Number(process.hrtime.bigint() - start) / iterations;
-}
-
-function formatNs(ns) {
-  if (ns >= 1e6) return `${(ns / 1e6).toFixed(2)} ms`;
-  if (ns >= 1e3) return `${(ns / 1e3).toFixed(2)} µs`;
-  return `${ns.toFixed(1)} ns`;
-}
-
-const pad = (s, w) => String(s).padEnd(w);
-const padLeft = (s, w) => String(s).padStart(w);
+const measure = (fn, iterations) => measureNsPerOp(fn, iterations, WARMUP);
 
 function printTable(rows, iterations) {
   const nameWidth = Math.max(34, ...rows.map((r) => r.name.length + 2));

@@ -22,6 +22,9 @@ import { writeFileSync } from 'node:fs';
 import { compileChart, createChartSession } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
+import { formatNs as fmt } from './lib/fmt.js';
+import { makeMeasure, printTable as printRows } from './lib/measure.js';
+
 //#region options
 
 const args = process.argv.slice(2);
@@ -69,25 +72,9 @@ const pieConfig = {
 
 //#region timing
 
-function measure(label, run) {
-  for (let i = 0; i < WARMUP; i++) run(i);
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < ITERATIONS; i++) run(i);
-  const ns = Number(process.hrtime.bigint() - start) / ITERATIONS;
-  return { label, ns };
-}
+const measure = makeMeasure(WARMUP, ITERATIONS);
 
-function fmt(ns) {
-  if (ns < 1000) return `${ns.toFixed(0)} ns`;
-  if (ns < 1e6) return `${(ns / 1000).toFixed(1)} µs`;
-  return `${(ns / 1e6).toFixed(2)} ms`;
-}
-
-function printTable(title, rows) {
-  console.log(`\n${title}`);
-  for (const row of rows)
-    console.log(`  ${row.label.padEnd(40)} ${fmt(row.ns).padStart(10)}`);
-}
+const printTable = (title, rows) => printRows(title, rows, { width: 40, ratios: false });
 
 //#endregion
 

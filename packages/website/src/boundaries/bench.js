@@ -12,6 +12,7 @@
 
 import { cards, table, callout, chart, search, more, details, code } from '../lib/nodes.js';
 import { formatNs, formatMs, formatRatio, memo1 } from '../lib/format.js';
+import { geoMean } from '@jarenjs/core/math';
 import { createChartComponent } from '@jarenjs/charts/component';
 import {
   ratioDistributionBars, ratioScatter, conformanceBars,
@@ -917,8 +918,7 @@ function geoSuite(data) {
   const ratios = rows
     .filter((r) => r.rival !== null && r.ours > 0)
     .map((r) => r.rival / r.ours);
-  const geomean = ratios.length === 0 ? null
-    : Math.exp(ratios.reduce((s, v) => s + Math.log(v), 0) / ratios.length);
+  const geomean = geoMean(ratios);
   const pip = rows.find((r) => r.name.includes('polygon (2000'));
 
   const out = [];

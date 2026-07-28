@@ -37,8 +37,13 @@ import {
   parseJSONPointer,
 } from '@jarenjs/json';
 
+import { pad, padLeft, formatNs } from './lib/fmt.js';
+import { measureNsPerOp as measureNs } from './lib/measure.js';
+
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP_ITERATIONS = 5_000;
+
+const measureNsPerOp = (fn, iterations) => measureNs(fn, iterations, WARMUP_ITERATIONS);
 
 //#region official test vectors (correctness gate)
 
@@ -241,30 +246,6 @@ function makeDiffPair() {
 //#endregion
 
 //#region measurement
-
-function measureNsPerOp(fn, iterations) {
-  for (let i = 0; i < WARMUP_ITERATIONS; i++)
-    fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++)
-    fn();
-  const end = process.hrtime.bigint();
-  return Number(end - start) / iterations;
-}
-
-function formatNs(ns) {
-  if (ns >= 1e6) return `${(ns / 1e6).toFixed(2)} ms`;
-  if (ns >= 1e3) return `${(ns / 1e3).toFixed(2)} µs`;
-  return `${ns.toFixed(1)} ns`;
-}
-
-function pad(str, width) {
-  return String(str).padEnd(width);
-}
-
-function padLeft(str, width) {
-  return String(str).padStart(width);
-}
 
 function printTable(table, iterations) {
   const nameWidth = Math.max(30, ...table.rows.map((r) => r.name.length + 2));
