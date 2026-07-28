@@ -13,6 +13,18 @@
 import { JarenValidator } from './index.js';
 
 /**
+ * Project a diagnostic string from whatever the validator threw, without
+ * reading `.message` off a raw value or coercing it.
+ * @param {unknown} e
+ * @returns {string}
+ */
+function failureText(e) {
+  if (e instanceof Error && typeof e.message === 'string')
+    return e.message;
+  return typeof e === 'string' ? e : 'schema compilation failed';
+}
+
+/**
  * Create a `compileTypeTest` hook for `compileJsonQuery` (see
  * `@jarenjs/json/query`), backed by a `JarenValidator`.
  *
@@ -40,18 +52,6 @@ import { JarenValidator } from './index.js';
  *   "$return": "$b.title"
  * }, { compileTypeTest: createTypeTestCompiler() });
  */
-/**
- * Project a diagnostic string from whatever the validator threw, without
- * reading `.message` off a raw value or coercing it.
- * @param {unknown} e
- * @returns {string}
- */
-function failureText(e) {
-  if (e instanceof Error && typeof e.message === 'string')
-    return e.message;
-  return typeof e === 'string' ? e : 'schema compilation failed';
-}
-
 export function createTypeTestCompiler(validator = undefined) {
   const instance = validator == null
     ? new JarenValidator()
