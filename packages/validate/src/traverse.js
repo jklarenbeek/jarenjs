@@ -20,9 +20,13 @@ import {
   isValidHtmlIdentifier,
 } from '@jarenjs/core/text';
 
+import {
+  encodeJSONPointerSegment,
+} from '@jarenjs/json/pointer';
+
 
 function encodeJsonPointerKey(key) {
-  return encodeURIComponent(key.replace('~', '~0').replace('/', '~1'));
+  return encodeURIComponent(encodeJSONPointerSegment(key));
 }
 
 export function encodeJsonPointerPath(path, key, index) {
@@ -32,7 +36,10 @@ export function encodeJsonPointerPath(path, key, index) {
 }
 
 function decodeJsonPointerKey(key) {
-  return decodeURIComponent(key.replace('~0', '~').replace('~1', '/'));
+  // Lenient decode: `$ref` fragments arrive here unvalidated, so a stray
+  // `~` must pass through instead of throwing like the strict parser does.
+  // RFC 6901 section 4: `~1` before `~0`, or `~01` collapses to `/`.
+  return decodeURIComponent(key).replace(/~1/g, '/').replace(/~0/g, '~');
 }
 
 export function decodeJsonPointerPath(path) {
