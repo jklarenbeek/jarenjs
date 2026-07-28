@@ -6,6 +6,8 @@
  * Geometry-free: members and relations preserve declaration order.
  */
 
+import { collectBraceBody } from '../utils.js';
+
 /** Relation operator between two class names, optional `: label`. */
 const RE_RELATION = /^(\S+)\s+([<>|*o.]{0,2}(?:--|\.\.)[<>|*o.]{0,2})\s+(\S+)(?:\s*:\s*(.*))?$/;
 /** `ClassName : member` line form. */
@@ -42,13 +44,9 @@ export function parseClass(lines) {
       if (brace === -1) { ensure(rest.replace(/[~<].*$/, '').trim()); continue; }
       const name = rest.slice(0, brace).trim();
       const cls = ensure(name);
-      let body = rest.slice(brace + 1);
       // Consume until closing brace across lines.
-      while (body.indexOf('}') === -1 && li + 1 < lines.length) {
-        li++;
-        body += '\n' + lines[li];
-      }
-      body = body.slice(0, body.indexOf('}'));
+      let body;
+      ({ body, li } = collectBraceBody(lines, li, rest.slice(brace + 1)));
       for (const raw of body.split('\n')) {
         const mem = raw.trim();
         if (mem !== '') cls.members.push(member(mem));

@@ -16,6 +16,7 @@ import {
   flowNode, flowEdge, flowSubgraph, flowClassDef, flowClass, flowStyle, flowchartAst,
 } from '../ast.js';
 import { fail } from '../errors.js';
+import { countCharCode } from '@jarenjs/core/string';
 
 /**
  * Shape opener sequences, longest first, each with the closer sequences
@@ -349,20 +350,11 @@ function classifyLink(tailMark, body, headMark) {
     : headMark === 'x' ? 'cross' : 'none';
   const tail = tailMark === '<' ? 'arrow' : 'none';
   let length;
-  if (stroke === 'thick') length = countChar(body, 0x3d);
-  else if (stroke === 'dotted') length = countChar(body, 0x2e);
-  else length = countChar(body, 0x2d);
+  if (stroke === 'thick') length = countCharCode(body, 0x3d);
+  else if (stroke === 'dotted') length = countCharCode(body, 0x2e);
+  else length = countCharCode(body, 0x2d);
   if (length < 1) length = 1;
   return { stroke, head, tail, length };
-}
-
-/**
- * @param {string} s @param {number} code @returns {number}
- */
-function countChar(s, code) {
-  let n = 0;
-  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === code) n++;
-  return n;
 }
 
 /**

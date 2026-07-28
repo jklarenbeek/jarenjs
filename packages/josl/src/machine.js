@@ -61,8 +61,9 @@ import {
   isValidTimeParts,
 } from './values.js';
 import {
-  setKey, getOwn, countNewlines, columnOf, RE_DATETIME, RE_TIMEONLY,
+  setKey, getOwn, columnOf, feedMachine, beginParseAll, RE_DATETIME, RE_TIMEONLY,
 } from './util.js';
+import { countCharCode } from '@jarenjs/core/string';
 
 function isBareKeyCode(c) {
   return isAsciiLetterCode(c)
@@ -172,18 +173,7 @@ export class JoslMachine {
    * @returns {this} The machine, for chaining
    */
   feed(chunk) {
-    if (this.ended)
-      throw new Error('cannot feed after end()');
-    if (!this.started && chunk.length !== 0) {
-      this.started = true;
-      if (chunk.charCodeAt(0) === 0xFEFF)
-        chunk = chunk.slice(1); // strip a leading BOM
-    }
-    if (chunk.length !== 0) {
-      this.buf += chunk;
-      this.scan();
-    }
-    return this;
+    return feedMachine(this, chunk);
   }
 
   /**
@@ -219,12 +209,7 @@ export class JoslMachine {
    * @returns {*} The completed root value
    */
   parseAll(text) {
-    if (this.started || this.ended)
-      throw new Error('parseAll cannot be mixed with feed()/end()');
-    this.started = true;
-    this.ended = true;
-    if (text.charCodeAt(0) === 0xFEFF)
-      text = text.slice(1);
+    text = beginParseAll(this, text);
     // positions are offsets into the whole source, which starts at line 1
     this.lineOrigin = 1;
     const tracking = this.onEvent !== null;
@@ -435,7 +420,7 @@ export class JoslMachine {
     const line = this.line;
     throw new JoslSyntaxError(
       message,
-      this.lineOrigin + countNewlines(line, Math.min(pos, line.length)),
+      this.lineOrigin + countCharCode(line, 0x0A, 0, Math.min(pos, line.length)),
       columnOf(line, Math.min(pos, line.length)),
       hint);
   }

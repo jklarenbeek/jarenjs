@@ -150,6 +150,30 @@ function passFail(s) {
   return `${s.passed} / ${s.failed} / ${s.errors}`;
 }
 
+/**
+ * The search/filter/limit/more skeleton the searchable suite tables
+ * share: filter `rows` on the search needle, cap at the limit, and emit
+ * the search box, the table and a "show more" node when rows were cut.
+ * @param {{ search: string, limit: number }} benchUi
+ * @param {object[]} rows - All rows, already in display order
+ * @param {(row: object, needle: string) => boolean} matches
+ * @param {string} placeholder - Search box placeholder text
+ * @param {(shown: object[], total: number) => object} makeTable
+ * @returns {object[]} The nodes to push
+ */
+function searchableTable(benchUi, rows, matches, placeholder, makeTable) {
+  const needle = benchUi.search.trim().toLowerCase();
+  const filtered = needle === '' ? rows : rows.filter((r) => matches(r, needle));
+  const shown = filtered.slice(0, benchUi.limit);
+  const out = [
+    search('bench/search', benchUi.search, placeholder),
+    makeTable(shown, filtered.length),
+  ];
+  if (filtered.length > shown.length)
+    out.push(more('bench/more', `Show more (${filtered.length - shown.length} remaining)`));
+  return out;
+}
+
 //#region validate
 
 const RATIO_BUCKETS = [
@@ -194,25 +218,20 @@ function validate(data, benchUi) {
   out.push(...validateCharts(data));
 
   // the searchable per-test table
-  const needle = benchUi.search.trim().toLowerCase();
-  const filtered = needle === ''
-    ? success
-    : success.filter((r) =>
-      r.description.toLowerCase().includes(needle)
+  out.push(...searchableTable(benchUi,
+    [...success].sort((a, b) => b.ratio - a.ratio),
+    (r, needle) => r.description.toLowerCase().includes(needle)
       || r.suite.toLowerCase().includes(needle)
-      || r.draft.toLowerCase().includes(needle));
-  const sorted = [...filtered].sort((a, b) => b.ratio - a.ratio);
-  const shown = sorted.slice(0, benchUi.limit);
-  out.push(search('bench/search', benchUi.search, 'Search tests… (description, suite, draft)'));
-  out.push(table(
-    `Per-test results — ${shown.length} of ${sorted.length} shown, fastest ratios first`,
-    ['Draft', 'Suite', 'Test', 'Ratio', 'Jaren', 'Ajv'],
-    shown.map((r) => ({
-      cells: [r.draft, r.suite, r.description, formatRatio(r.ratio),
-        formatNs(r.jarenTime * 1e6), formatNs(r.ajvTime * 1e6)],
-      strong: r.ratio > 10,
-    }))));
-  if (sorted.length > shown.length) out.push(more('bench/more', `Show more (${sorted.length - shown.length} remaining)`));
+      || r.draft.toLowerCase().includes(needle),
+    'Search tests… (description, suite, draft)',
+    (shown, total) => table(
+      `Per-test results — ${shown.length} of ${total} shown, fastest ratios first`,
+      ['Draft', 'Suite', 'Test', 'Ratio', 'Jaren', 'Ajv'],
+      shown.map((r) => ({
+        cells: [r.draft, r.suite, r.description, formatRatio(r.ratio),
+          formatNs(r.jarenTime * 1e6), formatNs(r.ajvTime * 1e6)],
+        strong: r.ratio > 10,
+      })))));
   return out;
 }
 
@@ -229,6 +248,14 @@ const jsonpathCharts = memo1((data) => {
     'The 12 queries with the largest Jaren-vs-json-p3 spread; every query is in the table below.')];
 });
 
+/** One name/selector/Jaren/json-p3/ratio row; all three jsonpath tables share it. */
+function jsonpathRow(r) {
+  return {
+    cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
+      formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
+  };
+}
+
 function jsonpath(data, benchUi) {
   const out = [];
   const groups = data.compliance?.groups ?? [];
@@ -243,28 +270,18 @@ function jsonpath(data, benchUi) {
   out.push(...jsonpathCharts(data));
 
   const rows = data.profile?.rows ?? [];
-  const needle = benchUi.search.trim().toLowerCase();
-  const filtered = needle === ''
-    ? rows
-    : rows.filter((r) => r.name.toLowerCase().includes(needle) || r.selector.toLowerCase().includes(needle));
-  const shown = filtered.slice(0, benchUi.limit);
-  out.push(search('bench/search', benchUi.search, 'Search queries… (name, selector)'));
-  out.push(table(
-    `Per-query profile — ${shown.length} of ${filtered.length} shown (${data.profile?.iterations} iterations)`,
-    ['Query', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
-    shown.map((r) => ({
-      cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
-        formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
-    }))));
-  if (filtered.length > shown.length) out.push(more('bench/more', `Show more (${filtered.length - shown.length} remaining)`));
+  out.push(...searchableTable(benchUi, rows,
+    (r, needle) => r.name.toLowerCase().includes(needle) || r.selector.toLowerCase().includes(needle),
+    'Search queries… (name, selector)',
+    (shown, total) => table(
+      `Per-query profile — ${shown.length} of ${total} shown (${data.profile?.iterations} iterations)`,
+      ['Query', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
+      shown.map(jsonpathRow))));
 
   const scale = data.profile?.scaleRows ?? [];
   if (scale.length > 0) {
     out.push(table('Synthetic scale scenarios (1000 items)', ['Scenario', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
-      scale.map((r) => ({
-        cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
-          formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
-      }))));
+      scale.map(jsonpathRow)));
   }
 
   // Same document as the scale table, asking only for the first answer.
@@ -274,10 +291,7 @@ function jsonpath(data, benchUi) {
   if (earlyExit.length > 0) {
     out.push(table('Early exit — first match / any match (1000 items)',
       ['Operation', 'Selector', 'Jaren', 'json-p3', 'Ratio'],
-      earlyExit.map((r) => ({
-        cells: [r.name, r.selector, formatNs(r.engines.jaren), formatNs(r.engines['json-p3']),
-          formatRatio(r.engines.jaren > 0 ? r.engines['json-p3'] / r.engines.jaren : null)],
-      }))));
+      earlyExit.map(jsonpathRow)));
   }
   return out;
 }

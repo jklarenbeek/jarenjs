@@ -600,6 +600,31 @@ function parseFlowValue(text, pos, lineNo) {
 }
 
 /**
+ * Parse a bracketed flow array `[a, b, ...]`; shared by the YAML flow
+ * sequence and the TOML flow array, which differ only in start offset,
+ * item parser and error message.
+ * @param {string} text
+ * @param {number} pos index of `[`
+ * @param {number} lineNo
+ * @param {(text: string, pos: number, lineNo: number) => { value: any, end: number }} parseItem
+ * @param {string} unterminated - error message for a missing `]`
+ * @returns {{ value: any[], end: number }}
+ */
+function parseFlowArray(text, pos, lineNo, parseItem, unterminated) {
+  /** @type {any[]} */
+  const out = [];
+  let i = pos + 1;
+  for (;;) {
+    while (i < text.length && (text.charCodeAt(i) === 0x20 || text.charCodeAt(i) === 0x2C)) i++;
+    if (i >= text.length) throw new MdFrontmatterError(unterminated, lineNo);
+    if (text.charCodeAt(i) === 0x5D /* ] */) return { value: out, end: i + 1 };
+    const item = parseItem(text, i, lineNo);
+    out.push(item.value);
+    i = item.end;
+  }
+}
+
+/**
  * Parse a flow sequence `[a, b, ...]`.
  * @param {string} text
  * @param {number} pos index of `[`
@@ -607,17 +632,7 @@ function parseFlowValue(text, pos, lineNo) {
  * @returns {{ value: any[], end: number }}
  */
 function parseFlowSeq(text, pos, lineNo) {
-  /** @type {any[]} */
-  const out = [];
-  let i = pos + 1;
-  for (;;) {
-    while (i < text.length && (text.charCodeAt(i) === 0x20 || text.charCodeAt(i) === 0x2C)) i++;
-    if (i >= text.length) throw new MdFrontmatterError('unterminated flow sequence', lineNo);
-    if (text.charCodeAt(i) === 0x5D /* ] */) return { value: out, end: i + 1 };
-    const item = parseFlowValue(text, i, lineNo);
-    out.push(item.value);
-    i = item.end;
-  }
+  return parseFlowArray(text, pos, lineNo, parseFlowValue, 'unterminated flow sequence');
 }
 
 /**
@@ -884,17 +899,7 @@ function parseTomlValue(text, no) {
  * @returns {{ value: any[], end: number }}
  */
 function parseTomlArray(text, no) {
-  /** @type {any[]} */
-  const out = [];
-  let i = 1;
-  for (;;) {
-    while (i < text.length && (text.charCodeAt(i) === 0x20 || text.charCodeAt(i) === 0x2C)) i++;
-    if (i >= text.length) throw new MdFrontmatterError('unterminated array', no);
-    if (text.charCodeAt(i) === 0x5D /* ] */) return { value: out, end: i + 1 };
-    const item = parseTomlItem(text, i, no);
-    out.push(item.value);
-    i = item.end;
-  }
+  return parseFlowArray(text, 0, no, parseTomlItem, 'unterminated array');
 }
 
 /**

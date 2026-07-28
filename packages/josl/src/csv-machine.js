@@ -48,7 +48,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { CsvSyntaxError } from './errors.js';
-import { columnOf, setKey } from './util.js';
+import { columnOf, setKey, feedMachine, beginParseAll } from './util.js';
 import {
   LocalDate,
   LocalTime,
@@ -276,18 +276,7 @@ export class CsvMachine {
    * @returns {this} The machine, for chaining
    */
   feed(chunk) {
-    if (this.ended)
-      throw new Error('cannot feed after end()');
-    if (!this.started && chunk.length !== 0) {
-      this.started = true;
-      if (chunk.charCodeAt(0) === 0xFEFF)
-        chunk = chunk.slice(1); // strip a leading BOM
-    }
-    if (chunk.length !== 0) {
-      this.buf += chunk;
-      this.scan();
-    }
-    return this;
+    return feedMachine(this, chunk);
   }
 
   /**
@@ -318,12 +307,7 @@ export class CsvMachine {
    * @returns {Array} The completed rows
    */
   parseAll(text) {
-    if (this.started || this.ended)
-      throw new Error('parseAll cannot be mixed with feed()/end()');
-    this.started = true;
-    this.ended = true;
-    if (text.charCodeAt(0) === 0xFEFF)
-      text = text.slice(1);
+    text = beginParseAll(this, text);
     this.readSpan(text, 0, text.length);
     return this.outRows;
   }

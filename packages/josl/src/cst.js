@@ -14,6 +14,7 @@
 
 import { JoslMachine } from './machine.js';
 import { formatValue, formatKeyPath } from './stringify.js';
+import { countCharCode } from '@jarenjs/core/string';
 
 const KIND_TRIVIA = 'trivia';
 const KIND_PAIR = 'pair';
@@ -229,9 +230,7 @@ export function parseJoslCst(text, options = undefined) {
         removed: false,
       });
       pending.length = 0;
-      for (let i = start; i < end; ++i)
-        if (text.charCodeAt(i) === 0x0A)
-          line++;
+      line += countCharCode(text, 0x0A, start, end);
     },
   });
   const data = machine.parseAll(text);

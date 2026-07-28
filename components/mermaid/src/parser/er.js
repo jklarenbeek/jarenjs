@@ -6,6 +6,8 @@
  * verbatim for a faithful, geometry-free model.
  */
 
+import { collectBraceBody } from '../utils.js';
+
 /** `LEFT <cardl>--<cardr> RIGHT : label` (relationship). */
 const RE_REL = /^(\S+)\s+([|}{o]{1,2})(--|\.\.)([|}{o]{1,2})\s+(\S+)\s*:\s*(.*)$/;
 
@@ -57,12 +59,8 @@ export function parseEr(lines) {
     if (brace !== -1) {
       const name = line.slice(0, brace).trim();
       const ent = ensure(name);
-      let body = line.slice(brace + 1);
-      while (body.indexOf('}') === -1 && li + 1 < lines.length) {
-        li++;
-        body += '\n' + lines[li];
-      }
-      body = body.slice(0, body.indexOf('}'));
+      let body;
+      ({ body, li } = collectBraceBody(lines, li, line.slice(brace + 1)));
       for (const raw of body.split('\n')) {
         const attr = raw.trim();
         if (attr === '') continue;

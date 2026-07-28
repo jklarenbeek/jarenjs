@@ -151,6 +151,22 @@ export function getStringLength(str, useGrapheme = false) {
 }
 
 /**
+ * Count occurrences of a UTF-16 code unit in a slice of a string.
+ * @param {string} str - The string to scan
+ * @param {number} code - The char code to count
+ * @param {number} [start] - Inclusive start offset (defaults to 0)
+ * @param {number} [end] - Exclusive end offset (defaults to full length)
+ * @returns {number} Number of occurrences in [start, end)
+ */
+export function countCharCode(str, code, start = 0, end = str.length) {
+  let n = 0;
+  for (let i = start; i < end; ++i)
+    if (str.charCodeAt(i) === code)
+      n++;
+  return n;
+}
+
+/**
  * Count the Unicode code points of a string (surrogate-pair aware;
  * a lone surrogate counts as one code point).
  * @param {string} str

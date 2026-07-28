@@ -39,7 +39,8 @@ import {
   isDigitCode,
   isAsciiLetterCode,
 } from '@jarenjs/core/scan';
-import { setKey, countNewlines, columnOf } from './util.js';
+import { setKey, columnOf } from './util.js';
+import { countCharCode } from '@jarenjs/core/string';
 import {
   isValueEndCode,
   decodeString,
@@ -66,7 +67,7 @@ class JsonxParser {
   err(message, hint, pos = this.pos) {
     throw new JsonxSyntaxError(
       message,
-      countNewlines(this.text, pos) + 1,
+      countCharCode(this.text, 0x0A, 0, pos) + 1,
       columnOf(this.text, pos),
       hint);
   }

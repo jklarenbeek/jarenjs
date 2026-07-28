@@ -18,6 +18,48 @@ export const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2
 export const RE_TIMEONLY = /(\d{2}):(\d{2}):(\d{2})(\.\d+)?/y;
 
 /**
+ * Shared `feed(chunk)` body for the buffering stream machines (JOSL and
+ * CSV): guard against feeding after `end()`, strip a leading BOM on the
+ * first non-empty chunk, then buffer and scan. The JSONX stream reader
+ * has its own `feed` on purpose - it pumps a token loop and models BOM
+ * handling differently.
+ * @template {{ ended: boolean, started: boolean, buf: string, scan: () => void }} T
+ * @param {T} machine - The stream machine (`this` of its `feed`)
+ * @param {string} chunk - Next piece of the document
+ * @returns {T} The machine, for chaining
+ */
+export function feedMachine(machine, chunk) {
+  if (machine.ended)
+    throw new Error('cannot feed after end()');
+  if (!machine.started && chunk.length !== 0) {
+    machine.started = true;
+    if (chunk.charCodeAt(0) === 0xFEFF)
+      chunk = chunk.slice(1); // strip a leading BOM
+  }
+  if (chunk.length !== 0) {
+    machine.buf += chunk;
+    machine.scan();
+  }
+  return machine;
+}
+
+/**
+ * Shared `parseAll(text)` prelude for the buffering stream machines:
+ * reject mixing with `feed()`/`end()`, mark the machine started and
+ * ended, and strip a leading BOM.
+ * @param {{ ended: boolean, started: boolean }} machine - The stream machine
+ * @param {string} text - The entire document
+ * @returns {string} The text with any leading BOM removed
+ */
+export function beginParseAll(machine, text) {
+  if (machine.started || machine.ended)
+    throw new Error('parseAll cannot be mixed with feed()/end()');
+  machine.started = true;
+  machine.ended = true;
+  return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+}
+
+/**
  * Assign an own enumerable property without ever touching the prototype
  * chain. LLM-produced documents may legitimately contain a `__proto__`
  * key; plain assignment would silently poison the object.
@@ -42,20 +84,6 @@ export function setKey(obj, key, value) {
  */
 export function getOwn(obj, key) {
   return Object.hasOwn(obj, key) ? obj[key] : undefined;
-}
-
-/**
- * Count '\n' occurrences in a string.
- * @param {string} str - Input text
- * @param {number} [end] - Exclusive end offset (defaults to full length)
- * @returns {number} Number of newlines before `end`
- */
-export function countNewlines(str, end = str.length) {
-  let n = 0;
-  for (let i = 0; i < end; ++i)
-    if (str.charCodeAt(i) === 0x0A)
-      n++;
-  return n;
 }
 
 /**
