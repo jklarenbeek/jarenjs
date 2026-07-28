@@ -10,6 +10,8 @@
  * validation (see validate.js).
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
+
 import {
   compileJSONPointer,
   encodeJSONPointerSegment,
@@ -306,7 +308,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
     constraints: getConstraints(effective),
     // The raw `x-form` annotation only - compiling its query documents is
     // rules.js territory, so model building stays query-engine-free.
-    rules: isRulesObject(effective['x-form']) ? effective['x-form'] : null,
+    rules: isJsonObject(effective['x-form']) ? effective['x-form'] : null,
     children: null,
     item: null,
     tuple: null,
@@ -344,10 +346,6 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
   }
 
   return field;
-}
-
-function isRulesObject(value) {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

@@ -8,7 +8,7 @@
  * these functions return domain values only.
  */
 
-import { niceStep } from '@jarenjs/core/math';
+import { Float64, niceStep } from '@jarenjs/core/math';
 import {
   partsFromEpoch,
   epochOfRFC3339Parts,
@@ -217,5 +217,5 @@ export function formatTimeTick(v, step = undefined) {
 }
 
 function trim(x) {
-  return String(Number(x.toPrecision(3)));
+  return String(Float64.roundToPrecision(x, 3));
 }

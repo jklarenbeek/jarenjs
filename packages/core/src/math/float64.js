@@ -391,6 +391,20 @@ export class Float64 {
   }
 
   /**
+   * Round `value` to `digits` significant figures (1–100) — the numeric
+   * value of `Number.prototype.toPrecision`, without its exponential
+   * string formatting.
+   * @param {number} value
+   * @param {number} [digits]
+   * @returns {number}
+   */
+  static roundToPrecision(value = 0.0, digits = 1.0) {
+    value = +value; digits = +digits | 0;
+    if (!isFinite(value)) return +value;
+    return +Number(value.toPrecision(digits));
+  }
+
+  /**
    * The Lanczos approximation of the Gamma function, valid for the whole
    * real line (poles at non-positive integers return ±Infinity/NaN).
    * @param {number} x

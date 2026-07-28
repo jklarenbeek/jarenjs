@@ -1,6 +1,8 @@
 //@ts-check
 /** Number formatting for benchmark displays (ported from the website's utils). */
 
+import { Float64 } from '@jarenjs/core/math';
+
 /**
  * The clock the boundaries time with: `performance` where it exists,
  * `Date` in a plain Node process. Returns milliseconds.
@@ -68,6 +70,7 @@ export function formatRatio(ratio) {
   return `${round3(1 / ratio)}× slower`;
 }
 
+/** Benchmark numbers display at 3 significant figures. */
 function round3(value) {
-  return Number(value.toPrecision(3));
+  return Float64.roundToPrecision(value, 3);
 }

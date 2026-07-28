@@ -62,6 +62,16 @@ describe('#Float64 transcendental completeness', function () {
     assert.equal(Float64.roundTo(Infinity, 2), Infinity);
   });
 
+  it('roundToPrecision significant figures', () => {
+    assert.equal(Float64.roundToPrecision(1234.5678, 3), 1230);
+    assert.equal(Float64.roundToPrecision(0.0012345, 3), 0.00123);
+    assert.equal(Float64.roundToPrecision(3.14159, 3), 3.14);
+    assert.equal(Float64.roundToPrecision(-1234.5678, 2), -1200);
+    assert.equal(Float64.roundToPrecision(5), 5);
+    assert.equal(Float64.roundToPrecision(Infinity, 3), Infinity);
+    assert.ok(Number.isNaN(Float64.roundToPrecision(NaN, 3)));
+  });
+
   it('factorial (integer + gamma bridge)', () => {
     assert.equal(Float64.factorial(0), 1);
     assert.equal(Float64.factorial(5), 120);

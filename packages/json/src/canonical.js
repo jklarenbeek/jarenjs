@@ -22,6 +22,8 @@
 // and exactly wrong for a signature, so this module rejects instead:
 // every input that is not JSON data is an error, never a guess.
 
+import { encodeJSONPointerSegment } from './pointer.js';
+
 const hasOwn = Object.hasOwn;
 
 // In a Unicode-mode pattern a well-formed surrogate pair is one code
@@ -52,7 +54,7 @@ function fail(message, dataPath) {
 
 // RFC 6901 escaping for the diagnostic pointer only.
 function appendPath(path, token) {
-  return path + '/' + String(token).replace(/~/g, '~0').replace(/\//g, '~1');
+  return path + '/' + encodeJSONPointerSegment(token);
 }
 
 function serializeString(value, path) {

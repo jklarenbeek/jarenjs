@@ -28,6 +28,8 @@
  * `schemas/jaren-vnode.schema.json` for validating untrusted documents.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
+
 /** Frozen empty props object shared by all prop-less elements. */
 export const EMPTY_PROPS = Object.freeze({});
 
@@ -87,24 +89,13 @@ export function isWidgetNode(vnode) {
 }
 
 /**
- * Is this value an element's props object (plain object, not an array)?
- * @param {any} value
- * @returns {boolean}
- */
-function isPropsObject(value) {
-  return value !== null
-    && typeof value === 'object'
-    && !Array.isArray(value);
-}
-
-/**
  * The props of an element vnode; `EMPTY_PROPS` when it has none.
  * @param {VNodeElement} vnode
  * @returns {Record<string, any>}
  */
 export function propsOf(vnode) {
   const second = vnode.length > 1 ? vnode[1] : undefined;
-  return isPropsObject(second) ? second : EMPTY_PROPS;
+  return isJsonObject(second) ? second : EMPTY_PROPS;
 }
 
 /**
@@ -123,7 +114,7 @@ export function keyOf(vnode) {
  * @returns {VNodeJson[]}
  */
 export function childrenOf(vnode) {
-  const start = vnode.length > 1 && isPropsObject(vnode[1]) ? 2 : 1;
+  const start = vnode.length > 1 && isJsonObject(vnode[1]) ? 2 : 1;
   /** @type {VNodeJson[]} */
   const out = [];
   for (let i = start; i < vnode.length; i++) {
