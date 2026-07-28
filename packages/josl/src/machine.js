@@ -65,8 +65,7 @@ import {
 } from './util.js';
 
 function isBareKeyCode(c) {
-  return (c >= 0x41 && c <= 0x5A) // A-Z
-    || (c >= 0x61 && c <= 0x7A) // a-z
+  return isAsciiLetterCode(c)
     || isDigitCode(c)
     || c === CC_MINUS
     || c === CC_UNDERSCORE;

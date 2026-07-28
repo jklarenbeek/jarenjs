@@ -1,5 +1,4 @@
 //@ts-check
-// eslint-disable no-useless-escape
 
 import {
   isStringType,

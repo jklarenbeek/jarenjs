@@ -34,6 +34,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
+import { Float64 } from '@jarenjs/core/math';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'packages', 'website', 'public', 'benchmarks');
@@ -92,7 +94,7 @@ function writeJson(name, data) {
 function sig4(n) {
   if (typeof n !== 'number' || !Number.isFinite(n) || n === 0)
     return n;
-  return Number(n.toPrecision(4));
+  return Float64.roundToPrecision(n, 4);
 }
 
 //#endregion

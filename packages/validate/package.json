@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/validate",
   "private": false,
-  "version": "0.22.10",
+  "version": "0.22.11",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -20,6 +20,7 @@
   "files": [
     "dist/types/",
     "src/",
+    "docs/",
     "ARCHITECTURE.md"
   ],
   "description": "Jaren is a JavaScript JSON Schema Validator",
@@ -50,7 +51,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.22.10",
-    "@jarenjs/json": "^0.22.10"
+    "@jarenjs/core": "^0.22.11",
+    "@jarenjs/json": "^0.22.11"
   }
 }

@@ -1,4 +1,6 @@
-/* eslint-disable no-useless-escape */
+/* eslint-disable no-useless-escape -- the escapes live inside JSON Schema
+   `pattern` fixtures, where they are the strings under test; rewriting them
+   would change what these cases assert. */
 import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 

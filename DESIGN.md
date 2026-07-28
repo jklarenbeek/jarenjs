@@ -162,8 +162,11 @@ through **host-linked themes**:
   reserved `'host'` name so all three components resolve it identically. Generic form:
   `resolveTheme`'s overrides object takes a reserved `vars` key (`{ theme: 'dark',
   vars: {...} }` composes).
-- The website passes `theme: 'host'` at its three embed points: the md `mermaidPlugin`,
-  `createMermaidComponent`, and the calc viewmodel.
+- The website passes `theme: 'host'` at every embed point: the md `mermaidPlugin`,
+  `createMermaidComponent`, the calc viewmodel, and each charts entry
+  (`createChartComponent`, `compileChart`, `createChartSession`). A new embed that
+  omits it renders the component's own default palette instead of the site's, which
+  is the one way an SVG component can visibly break the brand.
 
 **HTML-level components** (calc chrome, md articles) are themed by stylesheet custom
 properties, so the host *can* override them — but component CSS loads after site CSS, so a
@@ -171,9 +174,10 @@ site override must win ties with the component's own `.dark .x` block: use the d
 selector **`.site .x, .dark .site .x`** (see the `.calc` and `.md` bridges in
 `styles.css`).
 
-Sync invariants: the mermaid `default` theme lives in **two** files that must match —
-`components/mermaid/src/theme.js` and the `--mm-*` fallbacks in `styles/mermaid.css`.
-Same for calc (`theme.js` ↔ `styles/calc.css`).
+Sync invariants: each themed component's `default` theme lives in **two** files that
+must match — mermaid (`components/mermaid/src/theme.js` ↔ the `--mm-*` fallbacks in
+`styles/mermaid.css`), calc (`theme.js` ↔ `styles/calc.css`) and charts
+(`src/core/palette.js` ↔ the `--chart-*` fallbacks in `styles/charts.css`).
 
 ## 8. Chart & diagram palettes
 

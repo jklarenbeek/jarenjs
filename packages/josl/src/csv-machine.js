@@ -48,7 +48,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { CsvSyntaxError } from './errors.js';
-import { setKey } from './util.js';
+import { columnOf, setKey } from './util.js';
 import {
   LocalDate,
   LocalTime,
@@ -555,7 +555,7 @@ export class CsvMachine {
       // A bare CR is an old-Mac terminator. Reading it as data instead
       // would silently glue two records together, so repair mode ends the
       // record here and strict mode says why.
-      this.heal('CSV1006', this.line, this.columnAt(text, pos));
+      this.heal('CSV1006', this.line, columnOf(text, pos));
       this.line++;
       return pos + 1;
     }
@@ -587,7 +587,7 @@ export class CsvMachine {
       if (pos >= end) {
         // Out of input with the field still open. Closing it here is the
         // only reading that keeps the text.
-        this.heal('CSV1001', this.recordOrigin, this.columnAt(text, pos));
+        this.heal('CSV1001', this.recordOrigin, columnOf(text, pos));
         cells.push(this.finishQuoted(joinCell(out, text, start, pos)));
         return pos;
       }
@@ -622,11 +622,11 @@ export class CsvMachine {
       //
       // Column count wins ties, because a consumer indexes by column.
       if (quoteBeforeBreak(text, pos + 1, end, quote, delim)) {
-        this.heal('CSV1003', this.line, this.columnAt(text, pos));
+        this.heal('CSV1003', this.line, columnOf(text, pos));
         pos++;
         continue;
       }
-      this.heal('CSV1002', this.line, this.columnAt(text, pos));
+      this.heal('CSV1002', this.line, columnOf(text, pos));
       const closed = joinCell(out, text, start, pos);
       pos++; // past the closing quote
       const stray = pos;
@@ -748,11 +748,6 @@ export class CsvMachine {
   }
 
   //#endregion
-
-  // 1-based column of `pos` within its physical line.
-  columnAt(text, pos) {
-    return pos - text.lastIndexOf('\n', pos - 1);
-  }
 }
 
 //#endregion

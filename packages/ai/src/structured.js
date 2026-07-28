@@ -15,20 +15,11 @@
  */
 
 import { JarenValidator } from '@jarenjs/validate';
+import { checkOutcome } from './check.js';
 import { PROVIDERS } from './providers.js';
 
 /** Validation errors reported per failed generation: enough to repair. */
 const MAX_ERRORS = 8;
-
-/**
- * @param {any} outcome - a compiled check's return value
- * @returns {{ valid: boolean, errors: any[] }}
- */
-function checkOutcome(outcome) {
-  return typeof outcome === 'object' && outcome !== null
-    ? { valid: outcome.valid === true, errors: outcome.errors ?? [] }
-    : { valid: outcome === true, errors: [] };
-}
 
 /** @param {any[]} raw */
 function normalizeErrors(raw) {

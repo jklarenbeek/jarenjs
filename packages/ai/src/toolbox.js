@@ -19,23 +19,10 @@
 
 import { JarenValidator } from '@jarenjs/validate';
 
+import { checkOutcome } from './check.js';
+
 /** Validation errors reported back to the model per rejected call. */
 const MAX_INPUT_ERRORS = 8;
-
-/**
- * Normalize a compiled check's outcome: the default validator collects
- * errors (`{ valid, errors }`), an injected one may answer a bare
- * boolean.
- * @param {(input: any) => any} check
- * @param {any} input
- * @returns {{ valid: boolean, errors: any[] }}
- */
-function checkOutcome(check, input) {
-  const outcome = check(input);
-  return typeof outcome === 'object' && outcome !== null
-    ? { valid: outcome.valid === true, errors: outcome.errors ?? [] }
-    : { valid: outcome === true, errors: [] };
-}
 
 /** Whether a property schema asks for structure (object or array). */
 function wantsStructure(schema) {
@@ -142,7 +129,7 @@ export function createToolbox(options = {}) {
     const tool = tools.get(name);
     if (tool === undefined) return { error: `unknown tool '${name}'` };
     let input = args ?? {};
-    let outcome = checkOutcome(tool.check, input);
+    let outcome = checkOutcome(tool.check(input));
     if (!outcome.valid) {
       // models routinely JSON-encode nested arguments; when a property
       // wanted structure but arrived as parseable JSON text, validate
@@ -151,7 +138,7 @@ export function createToolbox(options = {}) {
       const coerced = coerceStringArguments(tool.inputSchema, input);
       if (coerced !== null) {
         input = coerced;
-        outcome = checkOutcome(tool.check, coerced);
+        outcome = checkOutcome(tool.check(coerced));
       }
     }
     if (!outcome.valid) {

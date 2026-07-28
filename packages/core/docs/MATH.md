@@ -15,9 +15,11 @@ Free aliases `mathf64_log`, `mathf64_log2`, `mathf64_log10`, `mathf64_exp`,
 
 Statics on `Float64`: `factorial(n)` (exact for integers, `gamma(n+1)`
 otherwise), `gamma(x)` (Lanczos, whole real line), `hypot(...args)`,
-`roundTo(value, digits)`, `nthroot(x, n)` (odd roots of negatives),
-`sign(x)`, `logBase(base, x)`, `cosHp(r)` (a high-precision
-polynomial cosine).
+`roundTo(value, digits)` (decimal places),
+`roundToPrecision(value, digits)` (significant figures — the numeric
+value of `toPrecision`, without its exponential string formatting),
+`nthroot(x, n)` (odd roots of negatives), `sign(x)`,
+`logBase(base, x)`, `cosHp(r)` (a high-precision polynomial cosine).
 
 ### Range remapping — `remap`
 
@@ -66,8 +68,8 @@ notation; returns `NaN` on failure). Radix I/O delegates to `word.js`.
 > **`notation: 'auto'` is not a drop-in for a fixed-unit readout.** The auto
 > branch escapes to exponential once `abs(value) >= 1e21` or
 > `abs(value) < 1e-6`, so `formatNumber(v, { precision: 3 })` is *not*
-> interchangeable with a plain `Number(v.toPrecision(3))`. A caller that
+> interchangeable with `Float64.roundToPrecision(v, 3)`. A caller that
 > appends its own unit — `"0.0509 ms"` — wants the value never to become
-> `5.09e-5`, and must either pass `notation: 'fixed'` or keep its own
-> rounder. The website's timing helpers keep their own for exactly this
-> reason.
+> `5.09e-5`, and must either pass `notation: 'fixed'` or round to
+> significant figures itself. The website's timing helpers and the chart
+> tick labels take the second route, via `roundToPrecision`.

@@ -19,6 +19,12 @@
 // requires. No leading or trailing text is tolerated: a format that
 // trims would accept strings a consumer then fails on.
 
+import {
+  isAsciiLetterCode,
+  isDigitCode,
+  isWhitespaceCode,
+} from '../scan.js';
+
 // character codes
 const LPAREN = 0x28;
 const RPAREN = 0x29;
@@ -27,20 +33,8 @@ const PLUS = 0x2B;
 const MINUS = 0x2D;
 const DOT = 0x2E;
 
-function isWsCode(c) {
-  return c === 0x20 || c === 0x09 || c === 0x0A || c === 0x0D;
-}
-
-function isDigitCode(c) {
-  return c >= 0x30 && c <= 0x39;
-}
-
-function isAlphaCode(c) {
-  return (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A);
-}
-
 function skipWs(text, at) {
-  while (at < text.length && isWsCode(text.charCodeAt(at)))
+  while (at < text.length && isWhitespaceCode(text.charCodeAt(at)))
     at++;
   return at;
 }
@@ -48,7 +42,7 @@ function skipWs(text, at) {
 /** Read a run of letters, uppercased; returns [word, next] or null. */
 function readWord(text, at) {
   let end = at;
-  while (end < text.length && isAlphaCode(text.charCodeAt(end)))
+  while (end < text.length && isAsciiLetterCode(text.charCodeAt(end)))
     end++;
   return end === at ? null : [text.slice(at, end).toUpperCase(), end];
 }
@@ -260,7 +254,7 @@ function scanGeometry(text, at) {
  * isValidWkt('LINESTRING (0 0, 1 1 1)');                 // false (mixed dimension)
  */
 export function isValidWkt(text) {
-  if (typeof text !== 'string' || text.length === 0 || isWsCode(text.charCodeAt(0)))
+  if (typeof text !== 'string' || text.length === 0 || isWhitespaceCode(text.charCodeAt(0)))
     return false;
   return scanGeometry(text, 0) === text.length;
 }
