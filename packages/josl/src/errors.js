@@ -5,10 +5,32 @@
 // the suggestion style of the other jaren error classes.
 
 /**
+ * Shared constructor body for the line/column syntax errors. The `name`
+ * is passed as a string literal because the bundle is minified and a
+ * mangled class name must not leak into `error.name`.
+ */
+class LineColumnSyntaxError extends SyntaxError {
+  /**
+   * @param {string} name - The public class name for `error.name`
+   * @param {string} message - What is wrong
+   * @param {number} line - 1-based physical line number
+   * @param {number} column - 1-based column number
+   * @param {string} [hint] - Repair suggestion for machine-repair loops
+   */
+  constructor(name, message, line, column, hint = undefined) {
+    super(`${message} at line ${line}, column ${column}${hint ? ` (${hint})` : ''}`);
+    this.name = name;
+    this.line = line;
+    this.column = column;
+    this.hint = hint;
+  }
+}
+
+/**
  * Error thrown when JOSL / TOML source text violates the grammar or the
  * table redefinition rules.
  */
-export class JoslSyntaxError extends SyntaxError {
+export class JoslSyntaxError extends LineColumnSyntaxError {
   /**
    * @param {string} message - What is wrong
    * @param {number} line - 1-based physical line number
@@ -16,11 +38,7 @@ export class JoslSyntaxError extends SyntaxError {
    * @param {string} [hint] - Repair suggestion for machine-repair loops
    */
   constructor(message, line, column, hint = undefined) {
-    super(`${message} at line ${line}, column ${column}${hint ? ` (${hint})` : ''}`);
-    this.name = 'JoslSyntaxError';
-    this.line = line;
-    this.column = column;
-    this.hint = hint;
+    super('JoslSyntaxError', message, line, column, hint);
   }
 }
 
@@ -70,7 +88,7 @@ export class CsvSyntaxError extends SyntaxError {
 /**
  * Error thrown when JSONX source text violates the grammar.
  */
-export class JsonxSyntaxError extends SyntaxError {
+export class JsonxSyntaxError extends LineColumnSyntaxError {
   /**
    * @param {string} message - What is wrong
    * @param {number} line - 1-based physical line number
@@ -78,11 +96,7 @@ export class JsonxSyntaxError extends SyntaxError {
    * @param {string} [hint] - Repair suggestion for machine-repair loops
    */
   constructor(message, line, column, hint = undefined) {
-    super(`${message} at line ${line}, column ${column}${hint ? ` (${hint})` : ''}`);
-    this.name = 'JsonxSyntaxError';
-    this.line = line;
-    this.column = column;
-    this.hint = hint;
+    super('JsonxSyntaxError', message, line, column, hint);
   }
 }
 

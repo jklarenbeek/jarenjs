@@ -6,6 +6,7 @@
 // drift apart.
 
 import { JtltCompileError } from './errors.js';
+import { failerFor } from '../errors.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { isJsonObject } from '@jarenjs/core/object';
 
@@ -18,9 +19,7 @@ const OUTPUT_METHODS = new Set(['text', 'xml']);
 // built-in rules, which sit at -1e308 - beneath every user rule.
 export const RESERVED_PRIORITY_FLOOR = -1e307;
 
-function fail(code, message, docPath) {
-  throw new JtltCompileError(code, message, docPath);
-}
+const fail = failerFor(JtltCompileError);
 
 function normalizeRule(value, index, rulesPath) {
   const rulePath = rulesPath + '/' + index;

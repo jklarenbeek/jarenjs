@@ -3,6 +3,8 @@
 // `code` and a `docPath`, an RFC 6901 JSON Pointer into the stylesheet
 // document. Wrapped parser/query/hook errors are exposed through `cause`.
 
+import { CodedDocPathError } from '../errors.js';
+
 /**
  * Error thrown when a JSLT stylesheet is rejected at compile time
  * (`JT0xxx` codes).
@@ -34,13 +36,9 @@ export class JsltCompileError extends Error {
  * Error thrown when evaluating a compiled JSLT stylesheet fails
  * (`JT2xxx` codes).
  */
-export class JsltRuntimeError extends Error {
+export class JsltRuntimeError extends CodedDocPathError {
   constructor(code, message, docPath, cause = undefined) {
-    super(`${code}: ${message} at ${docPath}`,
-      cause === undefined ? undefined : { cause });
-    this.name = 'JsltRuntimeError';
-    this.code = code;
-    this.docPath = docPath;
+    super('JsltRuntimeError', code, message, docPath, cause);
   }
 }
 

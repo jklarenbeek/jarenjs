@@ -44,6 +44,8 @@ import {
 
 import { NOTHING, scanArrayIndex } from './segments.js';
 
+import { CodedDocPathError } from './errors.js';
+
 import {
   isContainer,
   cloneJson,
@@ -63,13 +65,9 @@ const hasOwn = Object.hasOwn;
  * patch document (e.g. `/2/from`). A wrapped pointer syntax error is
  * exposed through `cause`.
  */
-export class JsonPatchCompileError extends Error {
+export class JsonPatchCompileError extends CodedDocPathError {
   constructor(code, message, docPath, cause = undefined) {
-    super(`${code}: ${message} at ${docPath}`,
-      cause === undefined ? undefined : { cause });
-    this.name = 'JsonPatchCompileError';
-    this.code = code;
-    this.docPath = docPath;
+    super('JsonPatchCompileError', code, message, docPath, cause);
   }
 }
 

@@ -20,13 +20,12 @@
 // pair unambiguously.
 
 import { JtltCompileError } from './errors.js';
+import { failerFor } from '../errors.js';
 
 const DOLLAR = 0x24;
 const BUILTIN_PRIORITY = -1e308;
 
-function fail(code, message, docPath) {
-  throw new JtltCompileError(code, message, docPath);
-}
+const fail = failerFor(JtltCompileError);
 
 // Collect every statically declared `$apply` target mode inside a plain
 // JSON expression tree. `$apply` mode arguments are literal strings by

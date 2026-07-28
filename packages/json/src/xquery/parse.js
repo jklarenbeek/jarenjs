@@ -58,6 +58,8 @@ import {
   isNameCharCode,
 } from '@jarenjs/core/scan';
 
+import { LabeledSyntaxError } from '../errors.js';
+
 const CC_HASH = 0x23;
 const CC_PERCENT = 0x25;
 const CC_PLUS = 0x2B;
@@ -74,12 +76,9 @@ const hasOwn = Object.hasOwn;
  * subset (mirrors JSONPathSyntaxError: `source` and `position` locate the
  * offending token).
  */
-export class XQuerySyntaxError extends SyntaxError {
+export class XQuerySyntaxError extends LabeledSyntaxError {
   constructor(message, source, position) {
-    super(`Invalid XQuery: ${message} at position ${position} in '${source}'`);
-    this.name = 'XQuerySyntaxError';
-    this.source = source;
-    this.position = position;
+    super('XQuerySyntaxError', 'XQuery', message, source, position);
   }
 }
 

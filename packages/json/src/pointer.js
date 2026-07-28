@@ -33,6 +33,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { NOTHING, scanArrayIndex } from './segments.js';
+import { LabeledSyntaxError } from './errors.js';
 
 /**
  * Sentinel for the absence of a value, as distinct from the JSON value
@@ -47,12 +48,9 @@ const hasOwn = Object.hasOwn;
  * Error thrown when a (relative) JSON Pointer is not valid RFC 6901 /
  * draft-luff-relative-json-pointer syntax.
  */
-export class JSONPointerSyntaxError extends SyntaxError {
+export class JSONPointerSyntaxError extends LabeledSyntaxError {
   constructor(message, source, position) {
-    super(`Invalid JSON Pointer: ${message} at position ${position} in '${source}'`);
-    this.name = 'JSONPointerSyntaxError';
-    this.source = source;
-    this.position = position;
+    super('JSONPointerSyntaxError', 'JSON Pointer', message, source, position);
   }
 }
 

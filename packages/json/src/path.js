@@ -76,6 +76,7 @@ import {
   isNameCharCode,
 } from '@jarenjs/core/scan';
 import { deepFreeze } from '@jarenjs/core/object';
+import { LabeledSyntaxError } from './errors.js';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
@@ -87,12 +88,9 @@ export const JSONPATH_NOTHING = NOTHING;
  * Error thrown when a JSONPath query is not valid RFC 9535 syntax
  * (including queries that are not well-typed per section 2.4.3).
  */
-export class JSONPathSyntaxError extends SyntaxError {
+export class JSONPathSyntaxError extends LabeledSyntaxError {
   constructor(message, source, position) {
-    super(`Invalid JSONPath: ${message} at position ${position} in '${source}'`);
-    this.name = 'JSONPathSyntaxError';
-    this.source = source;
-    this.position = position;
+    super('JSONPathSyntaxError', 'JSONPath', message, source, position);
   }
 }
 

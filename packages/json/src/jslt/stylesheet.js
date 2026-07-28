@@ -4,6 +4,7 @@
 // schema, and body closures are compiled by dispatch.js.
 
 import { JsltCompileError } from './errors.js';
+import { failerFor } from '../errors.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { isJsonObject } from '@jarenjs/core/object';
 
@@ -13,9 +14,7 @@ const RULE_KEYS = new Set(['match', 'mode', 'priority', 'body']);
 const MATCH_KEYS = new Set(['path', 'schema']);
 const MODE_KEYS = new Set(['unmatched']);
 
-function fail(code, message, docPath) {
-  throw new JsltCompileError(code, message, docPath);
-}
+const fail = failerFor(JsltCompileError);
 
 function isDisposition(value) {
   return value === 'share' || value === 'fresh' || value === 'error';

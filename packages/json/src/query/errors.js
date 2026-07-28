@@ -5,21 +5,21 @@
 // construct.
 
 /**
- * Error thrown when a query document is rejected at compile time
- * (`JQ0xxx` codes, QUERY-FORMAT.md section 10.2).
+ * Shared constructor body for the two query error classes: `cause`
+ * retains what host code threw, BY VALUE — set via an own property
+ * even for `undefined`, so presence is testable.
  */
-export class JsonQueryCompileError extends Error {
+class JsonQueryError extends Error {
   /**
+   * @param {string} name - The public class name for `error.name`
    * @param {string} code
    * @param {string} message
    * @param {string} docPath
-   * @param {{ cause?: unknown }} [options] - `cause` retains what a
-   *   host hook (e.g. `compileTypeTest`) threw, BY VALUE — set via an
-   *   own property even for `undefined`, so presence is testable.
+   * @param {{ cause?: unknown }} [options]
    */
-  constructor(code, message, docPath, options) {
+  constructor(name, code, message, docPath, options) {
     super(`${code}: ${message} at ${docPath}`);
-    this.name = 'JsonQueryCompileError';
+    this.name = name;
     this.code = code;
     this.docPath = docPath;
     if (options !== undefined && Object.hasOwn(options, 'cause')) {
@@ -31,28 +31,36 @@ export class JsonQueryCompileError extends Error {
 }
 
 /**
+ * Error thrown when a query document is rejected at compile time
+ * (`JQ0xxx` codes, QUERY-FORMAT.md section 10.2).
+ */
+export class JsonQueryCompileError extends JsonQueryError {
+  /**
+   * @param {string} code
+   * @param {string} message
+   * @param {string} docPath
+   * @param {{ cause?: unknown }} [options] - `cause` retains what a
+   *   host hook (e.g. `compileTypeTest`) threw
+   */
+  constructor(code, message, docPath, options) {
+    super('JsonQueryCompileError', code, message, docPath, options);
+  }
+}
+
+/**
  * Error thrown when evaluating a compiled query fails
  * (`JQ2xxx` codes, QUERY-FORMAT.md section 10.3).
  */
-export class JsonQueryRuntimeError extends Error {
+export class JsonQueryRuntimeError extends JsonQueryError {
   /**
    * @param {string} code
    * @param {string} message
    * @param {string} docPath
    * @param {{ cause?: unknown }} [options] - `cause` retains what host
-   *   code threw, BY VALUE — set via an own property even for
-   *   `undefined`, so presence is testable.
+   *   code threw
    */
   constructor(code, message, docPath, options) {
-    super(`${code}: ${message} at ${docPath}`);
-    this.name = 'JsonQueryRuntimeError';
-    this.code = code;
-    this.docPath = docPath;
-    if (options !== undefined && Object.hasOwn(options, 'cause')) {
-      Object.defineProperty(this, 'cause', {
-        value: options.cause, writable: true, enumerable: false, configurable: true,
-      });
-    }
+    super('JsonQueryRuntimeError', code, message, docPath, options);
   }
 }
 

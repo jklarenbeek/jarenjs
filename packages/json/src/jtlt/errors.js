@@ -3,17 +3,15 @@
 // stable `code` and a `docPath`, an RFC 6901 JSON Pointer into the template
 // document. Wrapped JSLT/query errors are exposed through `cause`.
 
+import { CodedDocPathError } from '../errors.js';
+
 /**
  * Error thrown when a JTLT template is rejected at compile time
  * (`TL0xxx` codes).
  */
-export class JtltCompileError extends Error {
+export class JtltCompileError extends CodedDocPathError {
   constructor(code, message, docPath, cause = undefined) {
-    super(`${code}: ${message} at ${docPath}`,
-      cause === undefined ? undefined : { cause });
-    this.name = 'JtltCompileError';
-    this.code = code;
-    this.docPath = docPath;
+    super('JtltCompileError', code, message, docPath, cause);
   }
 }
 
@@ -21,13 +19,9 @@ export class JtltCompileError extends Error {
  * Error thrown when rendering with a compiled JTLT template fails
  * (`TL2xxx` codes).
  */
-export class JtltRuntimeError extends Error {
+export class JtltRuntimeError extends CodedDocPathError {
   constructor(code, message, docPath, cause = undefined) {
-    super(`${code}: ${message} at ${docPath}`,
-      cause === undefined ? undefined : { cause });
-    this.name = 'JtltRuntimeError';
-    this.code = code;
-    this.docPath = docPath;
+    super('JtltRuntimeError', code, message, docPath, cause);
   }
 }
 
