@@ -303,3 +303,48 @@ const chainedResult = chainedFactory.compile({ type: 'string' })('x');
 const chainedValid: boolean = chainedResult.valid;
 const chainedIssues: number = chainedResult.errors.length;
 void (chainedValid && chainedIssues >= 0);
+
+// @jarenjs/emit — the type side of the cyclic verification.
+//
+// `emit-generated.ts` is produced by the generator from test/emit/corpus.js;
+// a node test fails if it drifts. These assertions are the independent oracle:
+// TypeScript itself decides whether the generated types correspond to what the
+// validator accepts, and `npm run test:types` is where that verdict lands.
+//
+//   - a schema-VALID instance must be assignable   → the type is never NARROWER
+//     than the schema, so it cannot reject data the service accepts
+//   - a structurally INVALID instance must not be  → the type is never WIDER
+//     than the schema, so it cannot certify data the service rejects
+//   - a constraint-invalid instance IS assignable  → the documented widening;
+//     TypeScript cannot express minLength, and the generated file says so
+import type { Account, Node as EmitNode } from './emit-generated.js';
+
+// valid → must type-check
+const emitValid1: Account = { id: 'abc' };
+const emitValid2: Account = { id: 'abc', age: 3, role: 'admin', tags: ['x'] };
+const emitValid3: EmitNode = { label: 'root' };
+const emitValid4: EmitNode = { label: 'root', children: [{ label: 'kid', children: [] }] };
+void [emitValid1, emitValid2, emitValid3, emitValid4];
+
+// structurally invalid → must NOT type-check. Each @ts-expect-error becomes an
+// error itself if the generated type ever widens enough to accept the value.
+// @ts-expect-error id must be a string
+const emitBad1: Account = { id: 42 };
+// @ts-expect-error id is required
+const emitBad2: Account = { age: 1 };
+// @ts-expect-error 'owner' is outside the enum
+const emitBad3: Account = { id: 'abc', role: 'owner' };
+// @ts-expect-error tags items must be strings
+const emitBad4: Account = { id: 'abc', tags: [1] };
+// @ts-expect-error label must be a string
+const emitBad5: EmitNode = { label: 1 };
+// @ts-expect-error label is required
+const emitBad6: EmitNode = { children: [] };
+// @ts-expect-error a child must itself be a Node
+const emitBad7: EmitNode = { label: 'root', children: [{ notALabel: true }] };
+void [emitBad1, emitBad2, emitBad3, emitBad4, emitBad5, emitBad6, emitBad7];
+
+// constraint-invalid → type-checks, because no type can carry minLength.
+// The generated file documents it; this pins the honest boundary.
+const emitWidened: Account = { id: 'ab' };
+void emitWidened;

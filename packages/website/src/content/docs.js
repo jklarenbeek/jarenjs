@@ -126,6 +126,16 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'emit', title: 'Schemas as TypeScript',
+    blocks: [
+      p('The gap a schema-first codebase has where a Zod codebase has z.infer. The observation is small: a JSON Schema is JSON, TypeScript is text, and JTLT is JSON-to-text — so generating a declaration file is a stylesheet, not a new engine. Point jaren-emit at a directory of schemas and get .d.ts files with doc comments, unions, tuples, index signatures and recursive references; --check fails CI when a schema moved and the types did not.'),
+      code(null, 'npx jaren-emit --schema ./schemas --out ./src/types'),
+      code(null, "import { emitTypeScript } from '@jarenjs/emit';\nemitTypeScript(schema, { name: 'User' });\n// export interface User { id: string; role?: \"admin\" | \"user\"; }"),
+      callout('The cyclic verification', 'What makes generated types trustworthy is that Jaren owns both sides. The same schema becomes a TYPE and a VALIDATOR, and the two must correspond over a corpus of instances: every schema-valid instance must type-check (so the type is never narrower than the schema), every structurally invalid one must not (never wider), and the cases TypeScript genuinely cannot express — minLength, pattern, format — are asserted as widened AND written into the generated file as a comment. Widening silently is the most common way a generated type misleads its reader. A standalone schema-to-TypeScript tool has no validator to disagree with; the suite here is itself checked by breaking the generator on purpose and confirming it fails.'),
+      p('Two stages, because a schema graph is not shaped like a declaration file: an analysis pass flattens refs, cycles, composition and anonymous subschemas into a published type model, and a JTLT stylesheet per target renders it. Markdown reference docs ship as a second target — as unlike TypeScript as a target gets, and it needed no change to the model, which is the evidence the split earned its keep.'),
+    ],
+  },
+  {
     id: 'forms', title: 'Forms',
     blocks: [
       p('JSON Schema to a framework-agnostic field tree, validated in three layers on one stack: per-field on every keystroke, cross-field x-form rules (visibility, enablement, computed values, assertions — written as query documents), and the authoritative compiled schema on submit.'),

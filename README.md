@@ -116,6 +116,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/validate`](packages/validate) | The JSON Schema validating compiler | [README](packages/validate/README.md) · [ARCHITECTURE](packages/validate/ARCHITECTURE.md) |
 | [`@jarenjs/formats`](packages/formats) | Format validators for the `format` keyword | [README](packages/formats/README.md) |
 | [`@jarenjs/refs`](packages/refs) | The official JSON Schema meta-schemas, bundled for offline use | [README](packages/refs/README.md) |
+| [`@jarenjs/emit`](packages/emit) | Build-time artifacts from JSON documents: JSON Schema → TypeScript declarations (and Markdown docs) through JTLT stylesheets, verified against the validator | [README](packages/emit/README.md) · [ARCHITECTURE](packages/emit/ARCHITECTURE.md) · [FORMAT](packages/emit/docs/EMIT-FORMAT.md) |
 | [`@jarenjs/forms`](packages/forms) | Framework-agnostic form generation from JSON Schema | [README](packages/forms/README.md) |
 | [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms error messages | [README](packages/locales/README.md) |
 | [`@jarenjs/view`](packages/view) | The vnode format: UIs as JSON, with a keyed DOM patcher and SSR | [README](packages/view/README.md) · [FORMAT](packages/view/docs/VIEW-FORMAT.md) |
@@ -142,6 +143,12 @@ The heart of the repository: compiles JSON Schemas into optimized validation fun
 ### ✍ @jarenjs/formats — format validators
 
 All standard JSON Schema string formats (`date-time`, `email`, `idn-hostname`, `uri-template`, `uuid`, ...) plus many extras (`isbn10`, `mac`, `iban`, `color`, ...), numeric formats (`int8` ... `uint64`, `float16` ... `float64`), and the JSON addressing formats — including a `json-path` format checked against the complete RFC 9535 grammar by the real JSONPath parser. One canonical name → predicate registry backs both the validator's format compilers and forms' per-keystroke testers, so the two can never drift. See [packages/formats](packages/formats/README.md).
+
+### 🏗 @jarenjs/emit — your schemas, as TypeScript
+
+The gap a schema-first codebase has where a Zod codebase has `z.infer`. The observation it is built on is small: **a JSON Schema is JSON, TypeScript is text, and JTLT is JSON-to-text** — so generating a declaration file is a stylesheet, not a new engine. Point `jaren-emit` at a directory of schemas and get `.d.ts` files with doc comments, unions, tuples, index signatures and recursive references; `--check` fails CI when a schema moved and the types did not.
+
+What makes the output trustworthy is that Jaren owns both sides. The same schema becomes a **type** and a **validator**, and the [cyclic verification](packages/emit/README.md#the-cyclic-verification) requires the two to correspond over a corpus of instances: every schema-valid instance must type-check (the type is never narrower than the schema), every structurally invalid one must not (never wider), and the cases TypeScript genuinely cannot express — `minLength`, `pattern`, `format` — are asserted as widened *and written into the generated file as a comment*, because widening silently is the most common way a generated type misleads its reader. A standalone schema-to-TypeScript tool has no validator to disagree with; this one does, and the suite is itself checked by breaking the generator on purpose. See [packages/emit](packages/emit/README.md).
 
 ### 🔗 @jarenjs/refs — bundled meta-schemas
 
@@ -202,7 +209,7 @@ I will look up what that means, later...
 - [REFACTOR.md](docs/REFACTOR.md) — the reusable codebase-health playbook: find duplication, collapse it into the right parent package, repair drifted documentation, and the gate a pass must end on.
 - [workflow/](workflow/) — the context-free, work-order development workflow this monorepo was built with, committed as a reusable harness. [`CONVENTIONS.md`](workflow/CONVENTIONS.md) binds the rules, [`BOOTSTRAP.md`](workflow/BOOTSTRAP.md) is the fresh-session prompt, and [`examples/`](workflow/examples/) holds a real work order executed from the bootstrap alone together with the session record it produced.
 - [DESIGN.md](docs/DESIGN.md) — the visual design system and UI/UX constraints for the website and the visual components: brand palette, token vocabulary, spacing scale, breakpoints, accessibility rules and the host-linked theming architecture.
-- [PUBLISHING.md](docs/PUBLISHING.md) — npm authentication, synchronized versioning, the compatibility policy, release checks and publishing the fifteen public workspaces.
+- [PUBLISHING.md](docs/PUBLISHING.md) — npm authentication, synchronized versioning, the compatibility policy, release checks and publishing the sixteen public workspaces.
 - [SECURITY.md](docs/SECURITY.md) — how to report a vulnerability privately, what is in scope, and the supply-chain posture.
 - [benchmark/README.md](benchmark/README.md) — the complete measuring and debugging toolbox: conformance suites, profilers, the test-failure debugger, code coverage, call graphs, and the QT3 scorecard.
 - Language specifications: [QUERY-FORMAT.md](packages/json/docs/QUERY-FORMAT.md) (the Jaren JSON Query format), [JSLT-FORMAT.md](packages/json/docs/JSLT-FORMAT.md) (the JSLT stylesheet format), [XQUERY-FRONTEND.md](packages/json/docs/XQUERY-FRONTEND.md) (the XQuery text subset), [VIEW-FORMAT.md](packages/view/docs/VIEW-FORMAT.md) (the vnode format), [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md) (the app document format).

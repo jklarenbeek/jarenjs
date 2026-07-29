@@ -20,6 +20,7 @@ const ENTRIES = [
   { name: '@jarenjs/validate', dir: 'packages/validate', blurb: 'The JSON Schema validating compiler.' },
   { name: '@jarenjs/formats', dir: 'packages/formats', blurb: 'Format validators for the format keyword.' },
   { name: '@jarenjs/refs', dir: 'packages/refs', blurb: 'The official meta-schemas, bundled for offline use.' },
+  { name: '@jarenjs/emit', dir: 'packages/emit', blurb: 'Your schemas as TypeScript: JSON Schema to .d.ts through JTLT stylesheets, verified against the validator itself.' },
   { name: '@jarenjs/forms', dir: 'packages/forms', blurb: 'Framework-agnostic form generation from JSON Schema.' },
   { name: '@jarenjs/locales', dir: 'packages/locales', blurb: 'Locale packs for validate & forms error messages.' },
   { name: '@jarenjs/view', dir: 'packages/view', blurb: 'The vnode format: UIs as JSON, a keyed DOM patcher and SSR.' },

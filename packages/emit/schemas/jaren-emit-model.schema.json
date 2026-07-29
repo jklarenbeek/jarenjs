@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jklarenbeek/jarenjs/schemas/jaren-emit-model.schema.json",
+  "title": "Jaren emit type model",
+  "description": "The intermediate between a JSON Schema graph and a generated artifact. Published so that a third-party emitter targets the same contract the bundled ones do.",
+  "type": "object",
+  "required": ["$emit", "declarations"],
+  "additionalProperties": false,
+  "properties": {
+    "$emit": {
+      "description": "The model format version.",
+      "const": "0.1"
+    },
+    "source": {
+      "description": "Where the model came from, recorded for the generated banner.",
+      "type": ["string", "null"]
+    },
+    "root": {
+      "description": "The declaration name that corresponds to the schema's root.",
+      "type": ["string", "null"]
+    },
+    "declarations": {
+      "description": "Named declarations in emission order. Every reference is by name, so the list is flat even when the source schema was cyclic.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/declaration" }
+    }
+  },
+  "$defs": {
+    "declaration": {
+      "type": "object",
+      "required": ["kind", "name", "type", "constraints", "doc"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "declaration" },
+        "name": {
+          "description": "A unique, identifier-safe name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": { "$ref": "#/$defs/type" },
+        "constraints": { "$ref": "#/$defs/constraints" },
+        "doc": { "$ref": "#/$defs/doc" }
+      }
+    },
+    "member": {
+      "type": "object",
+      "required": ["kind", "name", "type", "required", "constraints", "doc"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "member" },
+        "name": { "type": "string" },
+        "type": { "$ref": "#/$defs/type" },
+        "required": { "type": "boolean" },
+        "default": { "description": "The schema default, when it declares one." },
+        "constraints": { "$ref": "#/$defs/constraints" },
+        "doc": { "$ref": "#/$defs/doc" }
+      }
+    },
+    "doc": {
+      "description": "Documentation lines: the description, then a summary of the constraints the type cannot express. Empty means the node has nothing to say, and an emitter should print no comment at all.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "constraints": {
+      "description": "Keywords the source schema states that a type cannot carry. Recorded rather than dropped: a reader of the generated artifact must be able to learn that the constraint exists and is not enforced by the type.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["keyword"],
+        "additionalProperties": false,
+        "properties": {
+          "keyword": { "type": "string" },
+          "value": {}
+        }
+      }
+    },
+    "type": {
+      "description": "A type reference. Every form carries a `kind`, so an emitter dispatches on shape rather than on position.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["unknown", "never", "primitive", "literal", "ref",
+            "array", "tuple", "record", "union", "intersection", "object"]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "primitive" } }, "required": ["kind"] },
+          "then": {
+            "required": ["primitive"],
+            "properties": { "primitive": { "enum": ["string", "number", "boolean", "null"] } }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "literal" } }, "required": ["kind"] },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "ref" } }, "required": ["kind"] },
+          "then": { "required": ["ref"], "properties": { "ref": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "array" } }, "required": ["kind"] },
+          "then": { "required": ["items"], "properties": { "items": { "$ref": "#/$defs/type" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "record" } }, "required": ["kind"] },
+          "then": { "required": ["value"], "properties": { "value": { "$ref": "#/$defs/type" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "tuple" } }, "required": ["kind"] },
+          "then": {
+            "required": ["items"],
+            "properties": {
+              "items": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+              "rest": { "$ref": "#/$defs/type" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "union" } }, "required": ["kind"] },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "options": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/type" } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "intersection" } }, "required": ["kind"] },
+          "then": {
+            "required": ["parts"],
+            "properties": {
+              "parts": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/type" } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "object" } }, "required": ["kind"] },
+          "then": {
+            "required": ["members"],
+            "properties": {
+              "members": { "type": "array", "items": { "$ref": "#/$defs/member" } },
+              "index": { "$ref": "#/$defs/type" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

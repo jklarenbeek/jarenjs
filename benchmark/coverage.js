@@ -374,7 +374,9 @@ function runDeadCodeAudit(opts) {
   // browser bootstrap (main.js) is excluded too: it wires the live DOM,
   // localStorage, fetch and the service worker, so no headless test can load
   // it — its logic is covered instead by driving createSiteApp over the stub
-  // host (test/website/site.test.js).
+  // host (test/website/site.test.js). The jaren-emit CLI is excluded for the
+  // same reason: it is an argv/filesystem entry point whose logic is the
+  // library it calls, and that library is covered directly.
   // argv-based on purpose: shell-quoted globs are not portable (Windows
   // cmd.exe passes single quotes through literally, silently
   // instrumenting nothing) — the include/exclude patterns must reach c8
@@ -388,6 +390,7 @@ function runDeadCodeAudit(opts) {
     '--exclude', '**/*.test.js',
     '--exclude', '**/dist/**',
     '--exclude', 'packages/website/src/main.js',
+    '--exclude', 'packages/emit/src/cli.js',
     '--temp-directory', opts.tempDir,
     '--clean',
     process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',

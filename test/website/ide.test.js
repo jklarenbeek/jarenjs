@@ -217,6 +217,20 @@ describe('website — docs, examples, menu', function () {
     assert.match(html, /apply-templates/);
   });
 
+  it('the emit docs section explains the cyclic verification, not just the API', function () {
+    // The reason a generated type can be trusted is the loop back to the
+    // validator. A docs section that only showed the CLI would sell the
+    // feature and omit the argument for it.
+    const { container, go } = mountSite();
+    go('#/docs?s=emit');
+    const html = serialize(container);
+    assert.match(html, /Schemas as TypeScript/);
+    assert.match(html, /jaren-emit --schema/);
+    assert.match(html, /cyclic verification/i);
+    assert.match(html, /never narrower than the schema/i);
+    assert.match(html, /never wider/i);
+  });
+
   it('examples open into the playground with one click', function () {
     const { app, container, go, hashes } = mountSite();
     go('#/examples?engine=jslt');

@@ -44,6 +44,7 @@ flowchart BT
     VALIDATE["@jarenjs/validate<br/>the JSON Schema compiler"]
     FORMATS["@jarenjs/formats<br/>format keyword validators"]
     REFS["@jarenjs/refs<br/>bundled meta-schemas"]
+    EMIT["@jarenjs/emit<br/>schemas to TypeScript/docs<br/>(build-time, JTLT stylesheets)"]
     FORMS["@jarenjs/forms<br/>form model + x-form rules"]
     LOCALES["@jarenjs/locales<br/>error-message locale packs<br/>(zero deps, platform Intl only)"]
 
@@ -52,6 +53,9 @@ flowchart BT
     VALIDATE --> JSON
     FORMATS --> CORE
     FORMATS --> JSON
+    EMIT --> CORE
+    EMIT --> JSON
+    EMIT --> VALIDATE
     FORMS --> CORE
     FORMS --> JSON
     FORMS --> FORMATS
@@ -64,6 +68,7 @@ flowchart BT
 | [`@jarenjs/validate`](../packages/validate) | The validating compiler; consumes core primitives and json's compiled pointers/queries | [validate ARCHITECTURE](../packages/validate/ARCHITECTURE.md) |
 | [`@jarenjs/formats`](../packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](../packages/formats/README.md)) |
 | [`@jarenjs/refs`](../packages/refs) | Data-only meta-schema bundle | — |
+| [`@jarenjs/emit`](../packages/emit) | Build-time artifacts: a schema-analysis pass producing a published type model, then a JTLT stylesheet per target language | [ARCHITECTURE](../packages/emit/ARCHITECTURE.md) · [FORMAT](../packages/emit/docs/EMIT-FORMAT.md) |
 | [`@jarenjs/forms`](../packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](../packages/forms/README.md)) |
 | [`@jarenjs/locales`](../packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](../packages/locales/README.md) and [ERROR-MESSAGES](../packages/validate/docs/ERROR-MESSAGES.md)) |
 | [`@jarenjs/view`](../packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](../packages/view/docs/VIEW-FORMAT.md) |
