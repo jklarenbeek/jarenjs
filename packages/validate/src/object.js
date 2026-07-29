@@ -474,8 +474,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       }
       const keys = dataKeys || Object.keys(data);
       const len = keys.length;
-      if (len < min && !addMinError(len, dataPath))
-        return false;
+      // minProperties and required are independent; a short count says
+      // nothing about WHICH members are missing, which is the useful half.
+      let sizeOk = len >= min || addMinError(len, dataPath);
+      if (stopAtFirst && !sizeOk) return false;
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
@@ -484,7 +486,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
           if (stopAtFirst) break;
         }
       }
-      return valid;
+      return sizeOk && valid;
     };
   }
 
@@ -499,8 +501,9 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       }
       const keys = dataKeys || Object.keys(data);
       const len = keys.length;
-      if (len > max && !addMaxError(len, dataPath))
-        return false;
+      // maxProperties and required are independent (see the min case).
+      let sizeOk = len <= max || addMaxError(len, dataPath);
+      if (stopAtFirst && !sizeOk) return false;
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
@@ -509,7 +512,7 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
           if (stopAtFirst) break;
         }
       }
-      return valid;
+      return sizeOk && valid;
     };
   }
 
@@ -521,9 +524,16 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
   return function validateObjectPrimitives(data, dataPath, dataRoot, dataKeys) {
     const keys = dataKeys || Object.keys(data);
     const len = keys.length;
-    return isMinProperties(len, dataPath)
-      && isMaxProperties(len, dataPath)
-      && hasRequiredProperties(data, keys, dataPath);
+    if (stopAtFirst) {
+      return isMinProperties(len, dataPath)
+        && isMaxProperties(len, dataPath)
+        && hasRequiredProperties(data, keys, dataPath);
+    }
+    // min/max/required are three independent assertions about the same
+    // object; each is the only thing that can report its own fault.
+    let valid = isMinProperties(len, dataPath);
+    valid = isMaxProperties(len, dataPath) && valid;
+    return hasRequiredProperties(data, keys, dataPath) && valid;
   };
 }
 

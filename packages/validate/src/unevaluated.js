@@ -157,12 +157,17 @@ export function wrapUnevaluated(schemaObj, jsonSchema, validator) {
   const unevalItems = compileUnevaluatedItems(schemaObj, jsonSchema);
   if (unevalProps == null && unevalItems == null) return validator;
 
+  const stopAtFirst = root.options.skipErrors;
   return function validateUnevaluatedSchema(data, dataPath, dataRoot, dataKey) {
     const log = root.evalLog;
     const mark = log.mark();
+    // The sibling result IS a precondition: unevaluated* reads annotations
+    // that a failed sibling may never have produced. But unevaluatedProperties
+    // and unevaluatedItems are independent of each other.
     if (validator(data, dataPath, dataRoot, dataKey) === false) return false;
-    if (unevalProps != null && unevalProps(data, dataPath, dataRoot, mark) === false) return false;
-    if (unevalItems != null && unevalItems(data, dataPath, dataRoot, mark) === false) return false;
-    return true;
+    let valid = unevalProps == null || unevalProps(data, dataPath, dataRoot, mark) !== false;
+    if (stopAtFirst && !valid) return false;
+    if (unevalItems != null && unevalItems(data, dataPath, dataRoot, mark) === false) valid = false;
+    return valid;
   };
 }

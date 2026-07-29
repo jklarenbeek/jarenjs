@@ -344,11 +344,22 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
   const isMinItems = minItems || trueThat;
   const isMaxItems = maxItems || trueThat;
 
-  return function validateArrayPrimitives(data, dataPath) {
+  if (schemaObj.options.skipErrors) {
+    return function validateArrayPrimitives(data, dataPath) {
+      const len = data.length;
+      return isMinItems(len, dataPath)
+        && isMaxItems(len, dataPath)
+        && uniqueItems(data, dataPath);
+    };
+  }
+
+  // Length and uniqueness are independent: a short array can also contain
+  // duplicates, and a caller fixing one wants to hear about the other.
+  return function validateArrayPrimitivesAll(data, dataPath) {
     const len = data.length;
-    return isMinItems(len, dataPath)
-      && isMaxItems(len, dataPath)
-      && uniqueItems(data, dataPath);
+    let valid = isMinItems(len, dataPath);
+    valid = isMaxItems(len, dataPath) && valid;
+    return uniqueItems(data, dataPath) && valid;
   };
 }
 
@@ -482,6 +493,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   const itemValidator = validateItem;
   const containsValidator = validateContains;
 
+  const stopAtFirstContains = schemaObj.options.skipErrors;
   return function validateArrayChildren(data, dataPath, dataRoot) {
     const len = resolveLength(data.length);
     const arr = data;
@@ -503,8 +515,10 @@ function compileArrayChildren(schemaObj, jsonSchema) {
         if (trackContains) root.evalLog.add(data, i);
       }
     }
-    return invalid === 0
-      && validateMinMax(contains, dataPath);
+    // Failing items and the contains count are independent tallies.
+    const itemsOk = invalid === 0;
+    if (stopAtFirstContains && !itemsOk) return false;
+    return validateMinMax(contains, dataPath) && itemsOk;
   };
 }
 
@@ -545,12 +559,21 @@ export function compileArraySchema(schemaObj, jsonSchema) {
   if (parts.length === 2) {
     const first = parts[0];
     const second = parts[1];
-    return function validateArraySchemaDouble(data, dataPath, dataRoot) {
-      if (isArrayClass(data)) {
-        return first(data, dataPath, dataRoot)
-          && second(data, dataPath, dataRoot);
-      }
-      return true;
+    if (schemaObj.options.skipErrors) {
+      return function validateArraySchemaDouble(data, dataPath, dataRoot) {
+        if (isArrayClass(data)) {
+          return first(data, dataPath, dataRoot)
+            && second(data, dataPath, dataRoot);
+        }
+        return true;
+      };
+    }
+    // The two parts are independent array keyword groups (length/uniqueness
+    // versus the item walk); the array-class guard stays a precondition.
+    return function validateArraySchemaDoubleAll(data, dataPath, dataRoot) {
+      if (!isArrayClass(data)) return true;
+      const firstOk = first(data, dataPath, dataRoot);
+      return second(data, dataPath, dataRoot) && firstOk;
     };
   }
 
@@ -558,13 +581,22 @@ export function compileArraySchema(schemaObj, jsonSchema) {
   const hasBooleanItems = compiledItemsBoolean || trueThat;
   const hasBooleanContains = compiledContainsBoolean || trueThat;
   const validateItems = compiledArrayChildren || trueThat;
+  const stopAtFirstSchema = schemaObj.options.skipErrors;
 
   return function validateArraySchema(data, dataPath, dataRoot) {
     if (isArrayClass(data)) {
-      return validatePrimitives(data, dataPath)
-        && hasBooleanItems(data, dataPath, dataRoot)
-        && hasBooleanContains(data, dataPath, dataRoot)
-        && validateItems(data, dataPath, dataRoot);
+      if (stopAtFirstSchema) {
+        return validatePrimitives(data, dataPath)
+          && hasBooleanItems(data, dataPath, dataRoot)
+          && hasBooleanContains(data, dataPath, dataRoot)
+          && validateItems(data, dataPath, dataRoot);
+      }
+      // Length/uniqueness, the boolean items/contains forms and the item
+      // walk are independent; a length failure must not hide item faults.
+      let valid = validatePrimitives(data, dataPath);
+      valid = hasBooleanItems(data, dataPath, dataRoot) && valid;
+      valid = hasBooleanContains(data, dataPath, dataRoot) && valid;
+      return validateItems(data, dataPath, dataRoot) && valid;
     }
     return true;
   };

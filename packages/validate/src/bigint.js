@@ -86,12 +86,23 @@ export function compileBigIntBasic(schemaObj, jsonSchema) {
   const isMin = minimum || trueThat;
   const isMul = multipleOf || trueThat;
 
-  return function validateBigIntSchema(data, dataPath) {
-    if (isBigIntType(data)) {
-      return isMax(data, dataPath)
-        && isMin(data, dataPath)
-        && isMul(data, dataPath);
-    }
-    return true;
+  if (schemaObj.options.skipErrors) {
+    return function validateBigIntSchema(data, dataPath) {
+      if (isBigIntType(data)) {
+        return isMax(data, dataPath)
+          && isMin(data, dataPath)
+          && isMul(data, dataPath);
+      }
+      return true;
+    };
+  }
+
+  // The type guard stays a precondition; the three assertions inside it are
+  // independent and each must get to report its own fault.
+  return function validateBigIntSchemaAll(data, dataPath) {
+    if (!isBigIntType(data)) return true;
+    let valid = isMax(data, dataPath);
+    valid = isMin(data, dataPath) && valid;
+    return isMul(data, dataPath) && valid;
   };
 }

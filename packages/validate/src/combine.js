@@ -10,6 +10,7 @@ import {
 } from '@jarenjs/core/function';
 
 import {
+  combineIndependent,
   getBoolOrObjectClass,
   getArrayClassMinItems,
 } from './tools.js';
@@ -34,14 +35,20 @@ function compileAllOf(schemaObj, jsonSchema) {
 
   const addError = schemaObj.createErrorHandler(allOf, 'allOf');
 
+  const stopAtFirst = schemaObj.options.skipErrors;
   return function validateAllOf(data, dataPath, dataRoot, dataKey) {
     if (data !== undefined) {
+      // EVERY allOf branch applies, so every branch's faults are real. Only
+      // the boolean answer may stop at the first failing branch.
+      let valid = true;
       for (let i = 0; i < validators.length; ++i) {
         const validator = validators[i];
         if (validator(data, dataPath, dataRoot, dataKey) === false) {
-          return addError(data, dataPath);
+          valid = addError(data, dataPath);
+          if (stopAtFirst) return valid;
         }
       }
+      return valid;
     }
     return true;
   };
@@ -205,6 +212,11 @@ export function compileCombineSchema(schemaObj, jsonSchema) {
     return undefined;
   if (validators.length === 1)
     return validators[0];
+  // allOf/anyOf/oneOf/not are independent applicator groups: a failing
+  // `oneOf` says nothing about whether `not` also failed.
+  if (!schemaObj.options.skipErrors)
+    return combineIndependent(validators);
+
   if (validators.length === 2) {
     const first = validators[0];
     const second = validators[1];

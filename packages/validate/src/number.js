@@ -135,15 +135,25 @@ function compileNumberIntern(schemaObj, jsonSchema) {
   const isMax = maximum || trueThat;
   const isMin = minimum || trueThat;
 
-  /**
-   * @param {number} data
-   * @param {string} dataPath
-   * @returns {boolean}
-   */
-  return function validateNumberIntern(data, dataPath) {
-    return isMax(data, dataPath)
-      && isMin(data, dataPath)
-      && multipleOf(data, dataPath);
+  if (schemaObj.options.skipErrors) {
+    /**
+     * @param {number} data
+     * @param {string} dataPath
+     * @returns {boolean}
+     */
+    return function validateNumberIntern(data, dataPath) {
+      return isMax(data, dataPath)
+        && isMin(data, dataPath)
+        && multipleOf(data, dataPath);
+    };
+  }
+
+  // The bounds and multipleOf are independent assertions about the same
+  // number: being below the minimum says nothing about divisibility.
+  return function validateNumberInternAll(data, dataPath) {
+    let valid = isMax(data, dataPath);
+    valid = isMin(data, dataPath) && valid;
+    return multipleOf(data, dataPath) && valid;
   };
 }
 

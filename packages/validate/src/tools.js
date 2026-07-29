@@ -339,6 +339,33 @@ export class EvalLog {
   }
 }
 
+/**
+ * Combine INDEPENDENT keyword validators without short-circuiting.
+ *
+ * `a(...) && b(...)` is the right composition in boolean mode: the answer is
+ * known at the first failure and nothing is gained by continuing. When errors
+ * are recorded it is wrong, because each validator is the only thing that can
+ * report its own fault, so the first failure hides every sibling's. This runs
+ * all of them and ANDs the results — the boolean answer is identical, the
+ * error list is complete.
+ *
+ * Only use it where the validators genuinely are independent. A precondition
+ * (a type guard before a length check) must keep its short-circuit: running
+ * past it is meaningless at best and throws at worst.
+ * @param {Function[]} validators - Independent validators, in report order
+ * @returns {Function} A validator that runs every one of them
+ */
+export function combineIndependent(validators) {
+  return function validateIndependent(data, dataPath, dataRoot, dataKey) {
+    let valid = true;
+    for (let i = 0; i < validators.length; ++i) {
+      if (validators[i](data, dataPath, dataRoot, dataKey) === false)
+        valid = false;
+    }
+    return valid;
+  };
+}
+
 export class ValidationResult {
   static undefThat() {
     return new ValidationResult();

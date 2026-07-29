@@ -409,14 +409,14 @@ And for `additionalProperties: false`, Jaren points `instancePath` at the
 offending member (`/nested/extra`) where Ajv points at the parent object —
 deliberate, and spec-truer.
 
-**Collected errors are exhaustive across independent keywords.** An object
-missing three `required` properties yields three errors; an array whose items
-fail yields one error per failing index plus an aggregate `items` error at the
-array itself; a missing `required` property does not hide faults in the
-properties that *are* present; and a string that fails both `minLength` and
-`pattern` reports both. Boolean mode still stops at the first failure — that
-is the whole point of it — so the two modes deliberately differ in how much
-work they do:
+**Collected errors are exhaustive across independent keywords.** Every
+keyword that can fail independently reports its own fault, rather than the
+first failure hiding the rest: keyword groups on one node (`enum` beside
+`minLength`), `minProperties` beside `required`, a numeric bound beside
+`multipleOf`, `minItems` beside `uniqueItems` and beside failing items, every
+`allOf` branch, independent applicator groups, and every absent `required`
+property. Boolean mode still stops at the first failure — that is the whole
+point of it — so the two modes deliberately differ in how much work they do:
 
 ```javascript
 const contract = {

@@ -20,6 +20,7 @@ import {
 } from '@jarenjs/core/function';
 
 import {
+  combineIndependent,
   createIsSchemaTypeHandler,
   hasSchemaRef,
   hasSchemaRecursiveRef,
@@ -522,15 +523,29 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
       const addError = schemaObj.createErrorHandler(required, ['required']);
       const rlen = required.length;
 
-      return function validateRequiredOnly(data, dataPath) {
-        // Required only applies to objects, not arrays or primitives
-        if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
-        for (let i = 0; i < rlen; i++) {
-          if (!Object.hasOwn(data, required[i])) {
-            return addError(required[i], data, dataPath);
+      if (schemaObj.options.skipErrors) {
+        return function validateRequiredOnly(data, dataPath) {
+          // Required only applies to objects, not arrays or primitives
+          if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+          for (let i = 0; i < rlen; i++) {
+            if (!Object.hasOwn(data, required[i])) {
+              return addError(required[i], data, dataPath);
+            }
           }
+          return true;
+        };
+      }
+
+      // Every absent property is its own fault to report; the fast path must
+      // not be the reason a caller only learns about the first one.
+      return function validateRequiredOnlyAll(data, dataPath) {
+        if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
+        let valid = true;
+        for (let i = 0; i < rlen; i++) {
+          if (!Object.hasOwn(data, required[i]))
+            valid = addError(required[i], data, dataPath) && valid;
         }
-        return true;
+        return valid;
       };
     }
   }
@@ -625,6 +640,14 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   if (validators.length === 1)
     return finalize(validators[0]);
+
+  // These are the node's KEYWORD GROUPS (type, string, number, object,
+  // array, combine, ...) and they are independent of one another: each
+  // re-guards the data type it applies to, so continuing past a failed group
+  // is safe. Short-circuiting them is a boolean-mode optimization; when
+  // errors are recorded it lets one group's failure hide every other group's.
+  if (!schemaObj.options.skipErrors)
+    return finalize(combineIndependent(validators));
 
   if (validators.length === 2) {
     const first = validators[0];

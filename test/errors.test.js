@@ -1059,3 +1059,61 @@ describe('Collected errors are exhaustive across independent keywords', () => {
     assert.strictEqual(ok.errors.length, 0);
   });
 });
+
+describe('Collected errors are exhaustive across every keyword group', () => {
+  // One case per composition site that used to short-circuit. The boolean
+  // answer is unchanged everywhere; only the completeness of the list moved.
+  const collect = new JarenValidator({ collectErrors: true });
+  const boolean = new JarenValidator();
+  const keywords = (schema, data) =>
+    collect.compile(schema)(data).errors.map(e => e.keyword);
+
+  const CASES = [
+    ['keyword groups on one node', { type: 'string', minLength: 5, enum: ['ok'] }, 'ab', ['enum', 'minLength']],
+    ['minProperties beside required', { type: 'object', minProperties: 3, required: ['a', 'b'] }, { z: 1 }, ['minProperties', 'required']],
+    ['maxProperties beside required', { type: 'object', maxProperties: 1, required: ['a', 'b'] }, { z: 1, y: 2 }, ['maxProperties', 'required']],
+    ['numeric bound beside multipleOf', { type: 'number', minimum: 10, multipleOf: 3 }, 7, ['minimum', 'multipleOf']],
+    ['minItems beside uniqueItems', { type: 'array', minItems: 5, uniqueItems: true }, [1, 1], ['minItems', 'uniqueItems']],
+    ['minItems beside failing items', { type: 'array', minItems: 5, items: { type: 'string' } }, [1, 2], ['minItems', 'items']],
+    ['every allOf branch', { allOf: [{ minLength: 9 }, { pattern: '^z' }] }, 'ab', ['minLength', 'pattern']],
+    ['independent applicator groups', { oneOf: [{ type: 'number' }], not: { type: 'string' } }, 'ab', ['oneOf', 'not']],
+    ['required-only fast path', { required: ['a', 'b', 'c'] }, {}, ['required']],
+  ];
+
+  for (const [label, schema, data, expected] of CASES) {
+    it(`reports every fault: ${label}`, () => {
+      const seen = keywords(schema, data);
+      for (const keyword of expected)
+        assert.ok(seen.includes(keyword), `${label}: expected ${keyword} in ${JSON.stringify(seen)}`);
+      assert.strictEqual(boolean.compile(schema)(data), false, `${label}: boolean answer must be unchanged`);
+    });
+  }
+
+  it('reports every missing property on the required-only fast path', () => {
+    const result = collect.compile({ required: ['a', 'b', 'c'] })({});
+    const missing = result.errors.map(e => e.params.missingProperty);
+    assert.deepStrictEqual(missing, ['a', 'b', 'c']);
+  });
+
+  it('leaves valid data with an empty error list', () => {
+    assert.strictEqual(collect.compile({ type: 'number', minimum: 1, multipleOf: 2 })(4).errors.length, 0);
+    assert.strictEqual(collect.compile({ type: 'array', minItems: 1, uniqueItems: true })([1, 2]).valid, true);
+    assert.strictEqual(collect.compile({ required: ['a'] })({ a: 1 }).valid, true);
+  });
+});
+
+describe('BigInt bounds collect independently', () => {
+  it('reports both a failed bound and a failed multipleOf on a bigint', () => {
+    const result = new JarenValidator({ collectErrors: true })
+      .compile({ minimum: 10n, multipleOf: 3n })(7n);
+    const keywords = result.errors.map(e => e.keyword);
+    assert.ok(keywords.includes('minimum'), `got ${keywords}`);
+    assert.ok(keywords.includes('multipleOf'), `got ${keywords}`);
+  });
+
+  it('leaves a conforming bigint alone and keeps the boolean answer', () => {
+    const collect = new JarenValidator({ collectErrors: true });
+    assert.strictEqual(collect.compile({ minimum: 10n, multipleOf: 3n })(12n).valid, true);
+    assert.strictEqual(new JarenValidator().compile({ minimum: 10n, multipleOf: 3n })(7n), false);
+  });
+});
