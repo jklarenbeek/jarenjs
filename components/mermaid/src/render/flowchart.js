@@ -181,8 +181,11 @@ function renderEdge(e, t, fontSize, i) {
   if (e.tail !== 'none') parts.push(marker(p1, p2, e.tail, stroke));
 
   if (e.label != null && e.labelPos) {
-    const lw = e.label.length * fontSize * 0.55 + 8;
-    parts.push(rect(e.labelPos.x - lw / 2, e.labelPos.y - fontSize * 0.7, lw, fontSize * 1.4, {
+    // The layout measured the label and resolved its position; re-estimating
+    // the width here is what let a long label overflow its own background.
+    const lw = e.labelW ?? (e.label.length * fontSize * 0.55 + 8);
+    const lh = e.labelH ?? fontSize * 1.4;
+    parts.push(rect(e.labelPos.x - lw / 2, e.labelPos.y - lh / 2, lw, lh, {
       class: 'mm-edge-label-bg', fill: t.edgeLabelBg, stroke: 'none',
     }));
     parts.push(textAt(e.labelPos.x, e.labelPos.y, e.label, fontSize, {

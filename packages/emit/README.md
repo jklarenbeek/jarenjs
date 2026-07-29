@@ -62,8 +62,8 @@ flowchart TD
     T["TypeScript type"]
     V["compiled validator"]
     C["the SAME instances —<br/>and the two answers must correspond"]
-    S -->|emit| T
-    S -->|validate| V
+    S -->|"@jarenjs/emit"| T
+    S -->|"@jarenjs/validate"| V
     T --> C
     V --> C
     N["owning both sides is what<br/>makes this testable"]

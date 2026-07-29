@@ -154,11 +154,22 @@ export function layoutFlowchart(ast) {
     const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
     const p1 = clipToBox(bc, ac, a);
     const p2 = clipToBox(ac, bc, b);
-    const labelPos = e.label != null
-      ? { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
-      : null;
-    return { from: e.from, to: e.to, points: [p1, p2], label: e.label, labelPos, stroke: e.stroke, head: e.head, tail: e.tail };
+    const edge = {
+      from: e.from, to: e.to, points: [p1, p2], label: e.label,
+      labelPos: null, stroke: e.stroke, head: e.head, tail: e.tail,
+    };
+    if (e.label != null) {
+      // Measured, not estimated from the character count: the renderer used to
+      // guess the background width and a wide label overflowed its own box.
+      const m = measureText(e.label, FONT_SIZE);
+      edge.labelW = m.width + LABEL_PAD;
+      edge.labelH = m.height + LABEL_PAD / 2;
+      edge.labelPos = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    }
+    return edge;
   });
+
+  placeEdgeLabels(edges, nodes);
 
   // 9. Subgraph bounding boxes around their members.
   const subgraphs = ast.subgraphs.map((sg) => {
@@ -252,6 +263,78 @@ function clipToBox(from, to, box) {
 }
 
 const roundBox = (b) => ({ ...b, x: round(b.x), y: round(b.y), w: round(b.w), h: round(b.h) });
+
+/** Horizontal breathing room around an edge label's background. */
+const LABEL_PAD = 10;
+
+/** How far along an edge a label may sit, nearest the middle first. */
+const LABEL_SLOTS = [0.5, 0.42, 0.58, 0.34, 0.66];
+
+/** Sideways steps, in label-heights, tried when sliding alone cannot free a
+ * label. Perpendicular to a near-vertical edge is horizontal, which is where
+ * the space actually is when two edges leave one node. */
+const LABEL_OFFSETS = [0, 1, -1, 2, -2];
+
+/** Whether two label boxes overlap, with a small gap required between them. */
+function labelsOverlap(a, b) {
+  const gap = 2;
+  return Math.abs(a.x - b.x) * 2 < a.w + b.w + gap * 2
+    && Math.abs(a.y - b.y) * 2 < a.h + b.h + gap * 2;
+}
+
+/**
+ * Place each edge label so it does not cover one already placed.
+ *
+ * Two edges leaving the same node land their midpoints at the same height, so
+ * with any pair of long labels the second one's opaque background covered the
+ * first — the reason the bundled diagrams had to keep edge labels short.
+ *
+ * Candidates are tried in order of how far they stray from the natural
+ * midpoint: first slide ALONG the edge (which keeps the label on its line),
+ * then step sideways. A label with nowhere free keeps the midpoint rather than
+ * drifting somewhere arbitrary — an honest overlap beats a confusing one.
+ *
+ * Deterministic by construction: edges are visited in document order and the
+ * candidate list is fixed, so a diagram always lays out the same way.
+ * Node boxes are seeded as obstacles too: a label that lands on top of a box
+ * it has nothing to do with reads as that box's text.
+ * @param {any[]} edges positioned edges, mutated in place
+ * @param {any[]} nodes positioned nodes, treated as obstacles
+ */
+function placeEdgeLabels(edges, nodes) {
+  const placed = nodes.map((n) => ({
+    x: n.x + n.w / 2, y: n.y + n.h / 2, w: n.w, h: n.h,
+  }));
+  for (const e of edges) {
+    if (e.labelPos === null || e.points.length < 2) continue;
+    const [p1, p2] = e.points;
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    // The unit normal: sideways relative to this edge, whichever way it runs.
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    let chosen = null;
+    for (const off of LABEL_OFFSETS) {
+      for (const t of LABEL_SLOTS) {
+        const step = off * (e.labelH + 4);
+        const candidate = {
+          x: p1.x + dx * t + nx * step,
+          y: p1.y + dy * t + ny * step,
+          w: e.labelW, h: e.labelH,
+        };
+        if (placed.some((other) => labelsOverlap(candidate, other))) continue;
+        chosen = candidate;
+        break;
+      }
+      if (chosen !== null) break;
+    }
+    if (chosen === null) continue;   // keep the midpoint; nothing is free
+    e.labelPos = { x: chosen.x, y: chosen.y };
+    placed.push(chosen);
+  }
+}
 const roundEdge = (e) => ({
   ...e,
   points: e.points.map((p) => ({ x: round(p.x), y: round(p.y) })),
