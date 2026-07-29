@@ -40,8 +40,13 @@ rather than a registry version — a common choice while Jaren is pre-1.0.
 
 ```bash
 git submodule add https://github.com/jklarenbeek/jarenjs.git vendor/jarenjs
-git -C vendor/jarenjs checkout v0.22.16
+git -C vendor/jarenjs checkout <the tag you reviewed>   # e.g. v0.22.27
 ```
+
+Pin the **resolved commit**, not the tag. Release tags here are lightweight,
+so a tag is a pointer its owner can move; the gitlink your submodule records
+is the thing that cannot change under you. `git -C vendor/jarenjs rev-parse
+HEAD` after checkout, and review that SHA rather than the tag name.
 
 **Do not use `--recursive`.** This repository's own submodules are external
 conformance and benchmark corpora — the JSON-Schema-Test-Suite, the JSONPath
@@ -64,6 +69,7 @@ suffice:
 | `@jarenjs/validate` | The validating compiler |
 | `@jarenjs/formats` | Only if you use the `format` keyword |
 | `@jarenjs/refs` | Only if you `$ref` the official meta-schemas offline |
+| `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
 
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `josl`
 and `ai` are independent of that set — leave them out unless you use them.
@@ -84,7 +90,73 @@ packages:
   - 'vendor/jarenjs/packages/validate'
   - 'vendor/jarenjs/packages/formats'
   - 'vendor/jarenjs/packages/refs'
+  - 'vendor/jarenjs/packages/emit'
 ```
+
+**On pnpm 9, workspace globs alone are not enough.** The internal edges in
+this repository are ordinary semver ranges (`@jarenjs/validate` depends on
+`@jarenjs/core@^0.22.27`), not the `workspace:` protocol — npm, which this
+repository uses, does not understand `workspace:`, so it cannot be adopted
+here without breaking publishing. pnpm 9 in turn defaults
+`link-workspace-packages` to **false**. The combination means a transitive
+`@jarenjs/core` can be satisfied from the registry even though you vendored
+it, producing a build that silently mixes vendored and published code. Turn
+linking on and pin the edges explicitly:
+
+```ini
+# .npmrc
+link-workspace-packages=true
+prefer-workspace-packages=true
+```
+
+```jsonc
+// package.json — one entry per Jaren package you vendor
+{ "pnpm": { "overrides": {
+  "@jarenjs/core":     "link:./vendor/jarenjs/packages/core",
+  "@jarenjs/json":     "link:./vendor/jarenjs/packages/json",
+  "@jarenjs/validate": "link:./vendor/jarenjs/packages/validate",
+  "@jarenjs/formats":  "link:./vendor/jarenjs/packages/formats",
+  "@jarenjs/refs":     "link:./vendor/jarenjs/packages/refs",
+  "@jarenjs/emit":     "link:./vendor/jarenjs/packages/emit"
+} } }
+```
+
+### Prove it, do not assume it
+
+Configuration expresses intent; only the resolved path settles where the code
+came from. Whatever route you take, assert it in CI — walk the whole
+`@jarenjs/*` closure and reject anything whose realpath falls outside your
+vendor directory:
+
+```js
+import { createRequire } from 'node:module';
+import { realpathSync } from 'node:fs';
+
+const VENDOR = new URL('./vendor/jarenjs/', import.meta.url).pathname;
+const queue = [['@jarenjs/validate', import.meta.url]];
+const seen = new Set();
+while (queue.length > 0) {
+  const [name, from] = queue.pop();
+  if (seen.has(name)) continue;
+  seen.add(name);
+  // Resolve each edge FROM ITS PARENT: a transitive dependency is not
+  // hoisted to your root under pnpm's isolated layout.
+  const manifest = realpathSync(createRequire(from).resolve(`${name}/package.json`));
+  if (!manifest.startsWith(VENDOR))
+    throw new Error(`${name} resolved outside the vendored source: ${manifest}`);
+  for (const dep of Object.keys(createRequire(manifest)(manifest).dependencies ?? {}))
+    if (dep.startsWith('@jarenjs/')) queue.push([dep, manifest]);
+}
+```
+
+This repository runs exactly that check against a real pnpm 9 consumer on
+every push — `npm run test:source`, in `scripts/check-source-consumer.js`.
+Worth knowing what actually makes it pass: once you run the install **inside**
+the submodule, npm's own workspace symlinks in `vendor/jarenjs/node_modules`
+satisfy the internal edges, and they win before any consumer-side setting
+applies. That is why "generate the declarations first" below is not only
+about types — skip the install in the submodule and the edges have nowhere
+local to resolve to.
 
 ...or build stable local artifacts once and depend on those:
 
@@ -93,7 +165,7 @@ npm --prefix vendor/jarenjs run build
 npm pack --pack-destination ./vendor/tarballs \
   --workspace=@jarenjs/core --workspace=@jarenjs/json \
   --workspace=@jarenjs/validate --workspace=@jarenjs/formats \
-  --workspace=@jarenjs/refs
+  --workspace=@jarenjs/refs --workspace=@jarenjs/emit
 ```
 
 The tarball route costs an extra step per upgrade but gives you exactly what

@@ -51,7 +51,8 @@ together, so a version number describes the suite, not a single package.
 
 - **Patch releases never break a public API.** Bug fixes, performance work,
   documentation and additive internals only. Upgrading a patch should require
-  reading nothing.
+  reading nothing — *except* for the conformance carve-out below, which is
+  the one case where a patch can change what you observe.
 - **Minor releases may break a public API**, and when one does it is called
   out in the documentation of whatever changed, and is visible in the commit
   range between the two tags. Pre-1.0 this is the release that carries
@@ -67,6 +68,29 @@ together, so a version number describes the suite, not a single package.
 - **Behavior changes count as API changes.** A validator that starts
   reporting different errors for the same schema and document is a breaking
   change even though no signature moved, and it is versioned as one.
+- **Conformance fixes are the exception, and they land on patch.** When the
+  validator was simply *wrong* — a diagnostic that should never have been
+  reported, a constraint that silently did not assert, a verdict that
+  contradicted the specification — the fix ships on the next patch. Holding a
+  known-wrong validator back for a minor leaves every consumer wrong in the
+  meantime, which is worse than the upgrade cost. The trade is that such a
+  patch is **named**: the commit subject says what changed, and consumers who
+  assert on exact error sets should read it.
+
+  Being concrete rather than abstract about it, because these are recent and
+  a consumer pinning ranges will have crossed them:
+
+  | Release | What observably changed |
+  |---|---|
+  | `v0.22.17` | Independent keyword failures became exhaustive; more errors for the same document |
+  | `v0.22.24` | Speculative applicators (`anyOf`/`oneOf`/`not`/`if`/`contains`) stopped leaking probe errors; `$ref` began reporting alongside its siblings |
+  | `v0.22.25` | Generated TypeScript changed shape: objects open by default, parenthesized unions, quoted keys |
+  | `v0.22.26` | A lone `if` stopped leaking; `not: true` gained a diagnostic; `$ref` siblings follow the resource's own draft; **absolute `$data` pointers now assert at all**, so documents that wrongly passed now fail, and an uncompilable `$data` reference is a compile error |
+
+  The last of those changed *verdicts*, not just messages. It is the clearest
+  case for the carve-out: `{ "maximum": { "$data": "/limit" } }` had never
+  constrained anything, and a validator that quietly enforces nothing is not
+  something to keep for compatibility's sake.
 - **Security fixes land on the latest minor** — see [SECURITY.md](SECURITY.md).
   There are no support branches for older minors.
 - **What 1.0 means here**: the per-package items in [ROADMAP.md](ROADMAP.md)

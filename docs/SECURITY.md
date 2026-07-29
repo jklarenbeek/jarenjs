@@ -82,7 +82,14 @@ not part of any published tarball.
 
 Release tags are lightweight, so they are a pointer rather than an
 independently verifiable object; a consumer pinning from source should pin the
-resolved commit and review the gitlink diff on each upgrade. npm publishing
-uses provenance where the registry supports it. See
+resolved commit and review the gitlink diff on each upgrade.
+
+**Publishing carries no provenance attestation today.** Releases are published
+manually by the maintainer, not from CI, so there is no OIDC trusted-publishing
+record linking a tarball to the workflow run and commit that produced it, and
+no signed tag to check instead. Treat the git history as the authoritative
+artifact: pin the resolved commit, verify it against this repository, and build
+from source if your threat model needs more than the registry's word. Wiring
+provenance is tracked in [PUBLISHING.md](PUBLISHING.md). See
 [PUBLISHING.md](PUBLISHING.md) for the release procedure and the
 compatibility policy.

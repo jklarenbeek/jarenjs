@@ -6,18 +6,29 @@ name: CI
 # classes of defect). QT3 conformance and the dead-code audit remain
 # separate evidence runs (they need the qt3tests submodule and a long
 # coverage pass) — they are not silently implied by this green.
+#
+# Third-party actions are pinned to commit SHAs rather than moving major
+# tags. A tag is a pointer its owner can repoint, so `@v4` means "whatever
+# that repository decides v4 is at the moment this job runs" — for a
+# workflow with checkout and install rights that is a supply-chain edge
+# nobody reviews. The readable version stays in the trailing comment.
 
 on:
   push:
     branches: [main]
   pull_request:
 
+# Least privilege by default: nothing here writes to the repository, and a
+# job that needs more should ask for it explicitly rather than inherit it.
+permissions:
+  contents: read
+
 jobs:
   browser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -31,12 +42,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: npm ci
       - run: npm run lint
       - run: npm test
@@ -45,3 +56,18 @@ jobs:
       - run: npm run test:tree-shaking
       - run: npm run test:packed:release
       - run: npm run pack:check
+  # Consumption evidence: the dependency closure a consumer inherits, and
+  # the submodule/pnpm topology that the packed-consumer job cannot speak
+  # to. Linux-only — neither check is platform-sensitive, and both cost
+  # real time.
+  consumption:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:deps
+      - run: npm run test:source:release
