@@ -193,7 +193,7 @@ See also:
 
   Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported.
 
-- `$data` | Ajv-style instance references (`{ "minimum": { "$data": "1/limit" } }`) — supports every keyword the `data` list above supports, plus `uniqueItems` and `required`. Refs compile once at schema compile time through the compiled pointer engine of `@jarenjs/json`.
+- `$data` | Ajv-style instance references (`{ "minimum": { "$data": "1/limit" } }`) — supports every keyword the `data` list above supports, plus `uniqueItems` and `required`. Takes the same three reference forms: empty for the whole instance, an absolute JSON Pointer (`/limit`), or a Relative JSON Pointer (`1/limit`). Refs compile once at schema compile time through the compiled pointer engine of `@jarenjs/json`, and a reference that cannot be compiled **fails the compile** rather than quietly resolving to nothing — a constraint that disables itself is worse than a rejected schema.
 
 - `$query` | Jaren's cross-field assertion keyword — see [below](#query--cross-field-assertions)
 

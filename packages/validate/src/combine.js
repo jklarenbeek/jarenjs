@@ -187,12 +187,20 @@ function compileOneOf(schemaObj, jsonSchema) {
 function compileNotOf(schemaObj, jsonSchema) {
   const notOf = getBoolOrObjectClass(jsonSchema.not);
   if (notOf == null) return undefined;
-  if (notOf === true) return falseThat;
   if (notOf === false) return trueThat;
 
-  const validate = schemaObj.createValidator(notOf, 'not');
-
   const addError = schemaObj.createErrorHandler(notOf, 'not');
+
+  // `not: true` rejects every instance. It still has to SAY so: returning a
+  // bare false made the only schema that can fail without explanation, and a
+  // collector that reports "invalid" with an empty error list is unusable by
+  // a caller trying to render why.
+  if (notOf === true)
+    return function validateNotOfTrue(data, dataPath) {
+      return data === undefined ? true : addError(data, dataPath);
+    };
+
+  const validate = schemaObj.createValidator(notOf, 'not');
 
   // Annotations produced inside a 'not' are never kept, whatever the outcome.
   const root = schemaObj.root;

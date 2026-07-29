@@ -1201,3 +1201,97 @@ describe('$ref reports alongside its sibling keywords', () => {
       new JarenValidator({ collectErrors: true }).compile(schema)('zabcdefgh').valid, true);
   });
 });
+
+describe('Conditionals and mixed dialects, in exact terms', () => {
+  const collect = (schema, data) => new JarenValidator({ collectErrors: true })
+    .compile(schema)(data);
+  const keywords = (result) => result.errors.map(e => e.keyword).sort();
+
+  it('discards a lone `if`s errors even with annotation tracking on', () => {
+    // A lone `if` asserts nothing, so it can never explain a failure. With
+    // `unevaluatedProperties` present the annotation log was rolled back but
+    // the error list was not, so a real failure arrived with a speculative
+    // `required` beside it.
+    const result = collect({
+      type: 'object',
+      minProperties: 5,
+      if: { required: ['a'] },
+      unevaluatedProperties: true,
+    }, { b: 1 });
+    assert.deepStrictEqual(keywords(result), ['minProperties']);
+  });
+
+  it('gives `then` and `else` the data root, so `$data` resolves', () => {
+    // The untracked wrapper declared `(data, dataRoot)` while every call site
+    // passes `(data, dataPath, dataRoot, dataKey)`, so `dataRoot` was bound to
+    // the PATH and the branch ran with no root. A `$data` bound inside `then`
+    // then resolved to nothing and the constraint silently passed — a wrong
+    // verdict, not a wrong message.
+    const schema = {
+      type: 'object',
+      properties: { limit: { type: 'number' }, value: { type: 'number' } },
+      if: { required: ['value'] },
+      then: { properties: { value: { maximum: { $data: '/limit' } } } },
+    };
+    assert.strictEqual(new JarenValidator().compile(schema)({ limit: 5, value: 10 }), false);
+    assert.strictEqual(new JarenValidator().compile(schema)({ limit: 50, value: 10 }), true);
+    // ...and the verdict must not depend on the collection mode.
+    assert.strictEqual(collect(schema, { limit: 5, value: 10 }).valid, false);
+    assert.strictEqual(collect(schema, { limit: 50, value: 10 }).valid, true);
+  });
+
+  it('resolves `$data` through absolute as well as relative pointers', () => {
+    for (const ref of ['/limit', '1/limit']) {
+      const schema = {
+        type: 'object',
+        properties: {
+          limit: { type: 'number' },
+          value: { type: 'number', maximum: { $data: ref } },
+        },
+      };
+      assert.strictEqual(new JarenValidator().compile(schema)({ limit: 5, value: 10 }),
+        false, `${ref} must assert`);
+    }
+  });
+
+  it('explains `not: true` instead of failing silently', () => {
+    const result = collect({ not: true }, 1);
+    assert.strictEqual(result.valid, false);
+    assert.deepStrictEqual(keywords(result), ['not']);
+  });
+
+  it('picks $ref-sibling behavior from the resource that holds the $ref', () => {
+    // A 2020-12 resource embedded in a draft-07 document asserts its siblings;
+    // a draft-07 resource embedded in a 2020-12 document does not. Reading the
+    // ROOT document's draft got both of these backwards.
+    const modern = collect({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      $id: 'https://mixed/old-root',
+      definitions: { S: { type: 'string', minLength: 10 } },
+      properties: {
+        a: {
+          $id: 'https://mixed/new-child',
+          $schema: 'https://json-schema.org/draft/2020-12/schema',
+          $ref: 'https://mixed/old-root#/definitions/S',
+          pattern: '^Z',
+        },
+      },
+    }, { a: 'abc' });
+    assert.deepStrictEqual(keywords(modern), ['minLength', 'pattern']);
+
+    const legacy = collect({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      $id: 'https://mixed/new-root',
+      $defs: { S: { type: 'string', minLength: 10 } },
+      properties: {
+        a: {
+          $id: 'https://mixed/old-child',
+          $schema: 'http://json-schema.org/draft-07/schema#',
+          $ref: 'https://mixed/new-root#/$defs/S',
+          pattern: '^Z',
+        },
+      },
+    }, { a: 'abc' });
+    assert.deepStrictEqual(keywords(legacy), ['minLength']);
+  });
+});

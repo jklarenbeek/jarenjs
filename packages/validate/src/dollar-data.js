@@ -44,22 +44,29 @@ import {
 } from '@jarenjs/core/object';
 
 import {
-  compileRelativeJSONPointer,
+  compileDataRef,
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
 
 import {
-  resolveNothing,
   createDataRefCompilers,
 } from './tools.js';
 
+/**
+ * Resolve a `$data` reference.
+ *
+ * Ajv's `$data` takes the same three forms the `data` keyword does — empty for
+ * the root, a Relative JSON Pointer, or an absolute JSON Pointer — and this
+ * used to compile only the relative form. An absolute `$data: '/limit'` threw,
+ * was swallowed by the catch, and became `resolveNothing`: the constraint
+ * silently never asserted, so a document that should have failed passed. A
+ * disabled constraint is worse than a rejected schema, which is why an
+ * uncompilable reference is now a compile-time error.
+ * @param {string} ref
+ * @returns {(dataRoot: any, dataPath: string) => any}
+ */
 function compileRefResolver(ref) {
-  try {
-    return compileRelativeJSONPointer(ref);
-  }
-  catch {
-    return resolveNothing;
-  }
+  return compileDataRef(ref);
 }
 
 /**

@@ -792,7 +792,13 @@ export class ValidationObject {
 
     // In draft 2019-09+, $ref can have sibling keywords that are applied together.
     // In draft 7 and earlier, $ref overrides siblings.
-    const draftVersion = root.options.draftVersion || 7;
+    //
+    // The draft that decides this is the one declared by the schema RESOURCE
+    // holding the `$ref`, not the one the root document happens to use. A
+    // 2020-12 resource embedded in a draft-07 document has to assert its
+    // siblings, and a draft-07 resource inside a 2020-12 document must not —
+    // reading the root's draft got both backwards.
+    const draftVersion = self.declaredDraft ?? root.options.draftVersion ?? 7;
 
     // Base URI for resolving $ref:
     // - Draft 7 and earlier: $ref replaces the schema entirely, so a sibling

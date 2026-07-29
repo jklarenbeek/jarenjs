@@ -439,7 +439,9 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // We need to check the actual behavior based on schema context.
   // If schema has ONLY $ref (and meta keywords), use the ref-only path.
   // If schema has $ref with validation siblings, process them together (2019-09+ only).
-  const draftVersion = schemaObj.options.draftVersion || 7;
+  // The resource's own declared draft decides $ref-sibling behavior; see the
+  // note in ValidationObject.compileValidator.
+  const draftVersion = schemaObj.declaredDraft ?? schemaObj.options.draftVersion ?? 7;
   // When compiling the sibling keywords of a $ref schema, the unevaluated*
   // wrapper is applied by ValidationObject.compileValidator around the
   // combined (ref + siblings) validator instead of here, so that the

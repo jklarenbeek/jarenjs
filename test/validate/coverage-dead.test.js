@@ -128,27 +128,42 @@ describe('The data keyword with an unresolvable reference or numeric format', fu
 });
 
 describe('$data references with an unresolvable pointer or numeric format', function () {
-  it('should assert nothing when the $data pointer cannot be compiled', function () {
-    // dollar-data.js -> resolveNothing (compileRelativeJSONPointer throws)
+  it('should reject an uncompilable $data pointer at compile time', function () {
+    // A `$data` reference that cannot be compiled used to be swallowed and
+    // replaced with "resolve to nothing", which silently DISABLED the
+    // constraint: the schema looked like it bounded `value` and asserted
+    // nothing at all. Failing the compile is the only honest answer — the
+    // author asked for a constraint and cannot be given one.
     const compiler = new JarenValidator();
-    const broken = compiler.compile({
+    assert.throws(() => compiler.compile({
       type: 'object',
       properties: {
         limit: { type: 'number' },
         value: { type: 'number', maximum: { $data: 'abc-invalid-pointer' } },
       },
-    });
-    const working = compiler.compile({
-      type: 'object',
-      properties: {
-        limit: { type: 'number' },
-        value: { type: 'number', maximum: { $data: '1/limit' } },
-      },
-    });
+    }), 'an uncompilable $data pointer is a schema error');
+  });
 
-    assert.isFalse(working({ limit: 1, value: 999 }), 'working ref: 999 > 1 fails maximum');
-    assert.isTrue(working({ limit: 999, value: 1 }), 'working ref: 1 <= 999 passes');
-    assert.isTrue(broken({ limit: 1, value: 999 }), 'broken $data pointer asserts nothing');
+  it('should resolve $data pointers in all three documented forms', function () {
+    // Absolute pointers are documented and were the form that silently did
+    // nothing: `compileRelativeJSONPointer` rejects a leading '/', the throw
+    // was caught, and the constraint evaporated.
+    const compiler = new JarenValidator();
+    const cases = [
+      ['1/limit', 'relative'],
+      ['/limit', 'absolute'],
+    ];
+    for (const [ref, kind] of cases) {
+      const validate = compiler.compile({
+        type: 'object',
+        properties: {
+          limit: { type: 'number' },
+          value: { type: 'number', maximum: { $data: ref } },
+        },
+      });
+      assert.isFalse(validate({ limit: 1, value: 999 }), `${kind}: 999 > 1 fails maximum`);
+      assert.isTrue(validate({ limit: 999, value: 1 }), `${kind}: 1 <= 999 passes`);
+    }
   });
 
   it('should apply a number format resolved through a $data reference', function () {
