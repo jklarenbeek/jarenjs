@@ -273,8 +273,24 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 .stat-note { margin: 0.1rem 0 0; font-size: 0.8rem; color: var(--muted); }
 
 .table-card { margin: var(--space-6) 0; }
-.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.table-scroll { overflow-x: auto; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); }
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+
+/* A cell inside a scrolling table keeps whole words. The page-wide
+   `overflow-wrap: anywhere` above exists so a long token cannot widen the
+   PAGE — but inside an overflow-x container it cannot, and there it does
+   active harm: it lets every column shrink to one character, so the table
+   never outgrows its wrapper, the scroll never engages, and a wide table
+   crams itself into the viewport instead. Reverting it here is what makes
+   the wrapper's `overflow-x: auto` do its job.
+   `.md table` scrolls on the table element itself (components/md), so it
+   is named here through the doubled host selector. */
+.table-scroll th, .table-scroll td,
+.site .md table th, .site .md table td,
+.dark .site .md table th, .dark .site .md table td {
+  overflow-wrap: normal;
+  word-break: normal;
+}
 th, td { text-align: left; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); }
 th { background: var(--surface); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 tbody tr:last-child td { border-bottom: none; }

@@ -409,10 +409,30 @@ And for `additionalProperties: false`, Jaren points `instancePath` at the
 offending member (`/nested/extra`) where Ajv points at the parent object —
 deliberate, and spec-truer.
 
-Every failing item and every missing property gets its own error: an object
-missing three `required` properties yields three errors, and an array whose
-items fail yields one error per failing index plus the aggregate `items`
-error at the array itself.
+**Collected errors are exhaustive across independent keywords.** An object
+missing three `required` properties yields three errors; an array whose items
+fail yields one error per failing index plus an aggregate `items` error at the
+array itself; a missing `required` property does not hide faults in the
+properties that *are* present; and a string that fails both `minLength` and
+`pattern` reports both. Boolean mode still stops at the first failure — that
+is the whole point of it — so the two modes deliberately differ in how much
+work they do:
+
+```javascript
+const contract = {
+  type: 'object',
+  properties: { slug: { type: 'string', minLength: 3, pattern: '^[a-z]+$' } },
+  required: ['name', 'slug'],
+};
+
+collecting.compile(contract)({ slug: '!' }).errors;
+// required at '', minLength at '/slug', pattern at '/slug'  — three issues
+```
+
+A `required` error points at the **owning object**, not at the absent member
+(there is no location for something that is not there); the missing name is in
+`params.missingProperty`, which is what an adapter appends to build a
+Zod-style path.
 
 ### String lengths count graphemes by default
 
@@ -527,6 +547,26 @@ Every option is **off by default** — each one changes what your data means,
 so each is a decision you make rather than one you inherit.
 `compileNormalizer(schema)` with no options is the identity.
 
+### Per-field control, not just a global switch
+
+`useDefaults`, `coerceTypes` and `trimStrings` each accept a **predicate**
+`(schemaNode) => boolean` in place of a boolean. It runs once per node during
+compilation, so it decides per field and costs nothing at runtime:
+
+```javascript
+const normalize = compileNormalizer(schema, {
+  trimStrings: (node) => node['x-trim'] === true,
+});
+```
+
+This matters more than it looks. A contract typically trims a handful of its
+string fields and must leave the rest byte-for-byte as supplied — a timezone
+name, a deliberately padded identifier, a field whose whitespace is data.
+`trimStrings: true` would quietly rewrite all of them. The predicate reads
+whatever you put in the schema (an `x-` annotation, a `format`, a name
+pattern), which keeps the policy next to the field it governs and portable
+with the schema.
+
 ### It never mutates, and it shares what it can
 
 Ajv's `useDefaults`/`coerceTypes` write into the document you hand them.
@@ -552,6 +592,13 @@ Walked: `properties`, `patternProperties`, `additionalProperties`,
 `$ref` including recursive ones, and `allOf` — whose branches compose, with
 stripping disabled inside them because one branch cannot know what a sibling
 declares.
+
+Member schemas **compose the way JSON Schema says they do**: a member covered
+by `properties` *and* by one or more matching `patternProperties` is
+normalized by every one of them, in that order, and `additionalProperties`
+applies only to a member nothing else covered. A materialized `default` runs
+through its own property's normalizer too, so a defaulted `{ port: '8080' }`
+is shaped exactly like a supplied one rather than keeping its string.
 
 Not walked: `anyOf`, `oneOf`, `if`/`then`/`else`, `not`. Which branch applies
 is only known after validating, and normalizing under one branch can change

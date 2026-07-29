@@ -29,6 +29,7 @@ const chartNode = (pair, note) => chart(null, charts.view(pair.config, pair.data
 export const SUITES = [
   { key: 'overview', label: 'Overview' },
   { key: 'validate', label: 'JSON Schema' },
+  { key: 'contracts', label: 'Contracts vs Zod' },
   { key: 'jsonpath', label: 'JSONPath' },
   { key: 'jsonquery', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
@@ -61,6 +62,7 @@ export function deriveSuite(state, suite) {
     case 'jsonpath': return jsonpath(data, state.benchUi);
     case 'jsonquery': return scenarioMatrix(data, 'query documents');
     case 'jslt': return scenarioMatrix(data, 'stylesheets');
+    case 'contracts': return contractsSuite(data);
     case 'formats': return formatsSuite(data);
     case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
@@ -382,6 +384,20 @@ function genericTables(data, note) {
       t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
       note),
   ]);
+}
+
+/**
+ * The Zod head-to-head. The caveat is rendered ABOVE the tables rather than
+ * as a footnote, because the middle table's ratio flatters Jaren and a
+ * reader who takes it at face value draws the wrong conclusion.
+ */
+function contractsSuite(data) {
+  const out = [];
+  if (data.caveat != null)
+    out.push(callout('Read the third table, not the second', data.caveat));
+  out.push(...genericTables(data,
+    'Nanoseconds per operation; lower is better. A dash is an engine dropped for that scenario because it disagreed on the verdict or the normalized value, rather than being timed doing less work.'));
+  return out;
 }
 
 function formatsSuite(data) {

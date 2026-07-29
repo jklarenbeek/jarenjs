@@ -54,11 +54,16 @@ const RE_JSON_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/;
  * default: each one changes the meaning of the caller's data, so each is a
  * decision the caller makes rather than inherits. With no options the
  * compiled normalizer is the identity.
+ * Three of the four also accept a **predicate** `(schemaNode) => boolean`
+ * instead of a boolean, evaluated once per node at compile time. That is how
+ * a consumer turns a whole-schema switch into a per-field decision — "trim
+ * these string fields, leave those alone" — without the option becoming a
+ * blunt instrument and without any runtime cost.
  * @typedef {object} NormalizeOptions
- * @property {boolean} [useDefaults=false] - Materialize `default` for absent object properties, recursively
+ * @property {boolean|((schemaNode: object) => boolean)} [useDefaults=false] - Materialize `default` for absent object properties, recursively
  * @property {boolean|'all'} [removeAdditional=false] - Strip unknown properties: `true` only where `additionalProperties: false`, `'all'` wherever an object shape is declared
- * @property {boolean} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
- * @property {boolean} [trimStrings=false] - Trim leading/trailing whitespace from every string, before coercion
+ * @property {boolean|((schemaNode: object) => boolean)} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
+ * @property {boolean|((schemaNode: object) => boolean)} [trimStrings=false] - Trim leading/trailing whitespace from strings, before coercion
  */
 
 /**
@@ -130,6 +135,22 @@ function resolveLocalRef(ref, root) {
   return node;
 }
 
+/**
+ * Resolve a per-node normalization switch at COMPILE time. `true` turns the
+ * behavior on everywhere, `false` nowhere, and a predicate decides per schema
+ * node — which is how a consumer expresses "trim these 34 string fields, not
+ * the other 185" without the option becoming a whole-schema blunt instrument.
+ * Because it runs during compilation, a predicate costs nothing at runtime.
+ * @param {boolean|((node: object) => boolean)|undefined} option
+ * @param {object} node - The schema node the switch applies to
+ * @returns {boolean}
+ */
+function resolveSwitch(option, node) {
+  if (option === true) return true;
+  if (typeof option === 'function') return option(node) === true;
+  return false;
+}
+
 /** Compile a regular expression, tolerating patterns this engine rejects. */
 function compilePattern(source) {
   try {
@@ -190,8 +211,13 @@ function buildObjectStep(node, ctx) {
       const step = compileNode(sub, ctx);
       propertySteps.set(key, step);
       if (step !== null) hasStep = true;
-      if (options.useDefaults && isJsonObject(sub) && sub.default !== undefined)
-        defaults.push(key, sub.default);
+      // The step is stored with the default so a materialized container is
+      // normalized by the same schema an explicitly supplied one would be;
+      // otherwise a defaulted `{ port: '8080' }` keeps its string where a
+      // provided one is coerced.
+      if (isJsonObject(sub) && sub.default !== undefined
+        && resolveSwitch(options.useDefaults, sub))
+        defaults.push(key, sub.default, step);
     }
   }
 
@@ -232,41 +258,46 @@ function buildObjectStep(node, ctx) {
     const keys = Object.keys(value);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      // undefined = not declared; null = declared with nothing to do.
-      let step = propertySteps.get(key);
-      if (step === undefined) {
-        let matched = false;
-        for (let p = 0; p < patternCount; p += 2) {
-          if (patternSteps[p].test(key)) {
-            matched = true;
-            step = patternSteps[p + 1];
-            break;
-          }
-        }
-        if (!matched) {
-          if (strip) {
-            if (out === value) out = { ...value };
-            delete out[key];
-            continue;
-          }
-          step = additionalStep;
-        }
-      }
-      if (step === null) continue;
       const current = value[key];
-      const next = step(current);
+      let next = current;
+      // JSON Schema applies EVERY applicable subschema to a member, so a
+      // member covered by `properties` and by one or more `patternProperties`
+      // is normalized by all of them in turn. `additionalProperties` applies
+      // only when nothing else did.
+      // undefined = not declared; null = declared with nothing to do.
+      const named = propertySteps.get(key);
+      let covered = named !== undefined;
+      if (named != null) next = named(next);
+      for (let p = 0; p < patternCount; p += 2) {
+        if (!patternSteps[p].test(key)) continue;
+        covered = true;
+        const patternStep = patternSteps[p + 1];
+        if (patternStep !== null) next = patternStep(next);
+      }
+      if (!covered) {
+        if (strip) {
+          if (out === value) out = { ...value };
+          delete out[key];
+          continue;
+        }
+        if (additionalStep !== null) next = additionalStep(next);
+      }
       if (next !== current) {
         if (out === value) out = { ...value };
         setObjectMember(out, key, next);
       }
     }
-    for (let i = 0; i < defaultCount; i += 2) {
+    for (let i = 0; i < defaultCount; i += 3) {
       const key = defaults[i];
       if (hasOwn(value, key)) continue;
       if (out === value) out = { ...value };
       // Each instance gets its own copy: a container default shared across
-      // normalized documents would let a mutation of one leak into all.
-      setObjectMember(out, key, cloneJson(defaults[i + 1]));
+      // normalized documents would let a mutation of one leak into all. The
+      // copy then runs through the property's own step, so a materialized
+      // default is shaped exactly like a supplied value.
+      const step = defaults[i + 2];
+      const materialized = cloneJson(defaults[i + 1]);
+      setObjectMember(out, key, step === null ? materialized : step(materialized));
     }
     return out;
   };
@@ -334,10 +365,10 @@ function buildArrayStep(node, ctx) {
  */
 function buildScalarStep(node, ctx) {
   const options = ctx.options;
-  const trim = options.trimStrings === true;
+  const trim = resolveSwitch(options.trimStrings, node);
   // A union `type` gives no single conversion target, so coercion is skipped
   // rather than guessed.
-  const coerceTo = options.coerceTypes === true && typeof node.type === 'string'
+  const coerceTo = resolveSwitch(options.coerceTypes, node) && typeof node.type === 'string'
     ? node.type
     : null;
   if (!trim && coerceTo === null) return null;
@@ -466,12 +497,12 @@ function compileNode(node, ctx) {
  */
 export function compileNormalizer(schema, options = {}) {
   const resolved = {
-    useDefaults: options.useDefaults === true,
+    useDefaults: options.useDefaults,
     removeAdditional: options.removeAdditional === 'all'
       ? 'all'
       : options.removeAdditional === true,
-    coerceTypes: options.coerceTypes === true,
-    trimStrings: options.trimStrings === true,
+    coerceTypes: options.coerceTypes,
+    trimStrings: options.trimStrings,
   };
 
   const ctx = {
@@ -486,7 +517,8 @@ export function compileNormalizer(schema, options = {}) {
 
   // A root `default` answers the "the whole document was absent" case, which
   // no member walk can reach.
-  const rootDefault = resolved.useDefaults && isJsonObject(schema) && schema.default !== undefined
+  const rootDefault = isJsonObject(schema) && schema.default !== undefined
+    && resolveSwitch(resolved.useDefaults, schema)
     ? schema.default
     : undefined;
 

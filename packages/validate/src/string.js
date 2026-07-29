@@ -68,11 +68,25 @@ function compileStringIntern(schemaObj, jsonSchema) {
   const isMatch = pattern || trueThat;
   const useGrapheme = schemaObj.options.useGrapheme;
 
-  return function validateStringIntern(data, dataPath) {
+  if (schemaObj.options.skipErrors) {
+    return function validateStringIntern(data, dataPath) {
+      const len = getStringLength(data, useGrapheme);
+      return isMinLength(len, dataPath)
+        && isMaxLength(len, dataPath)
+        && isMatch(data, dataPath);
+    };
+  }
+
+  // Length and pattern are independent assertions over the same string:
+  // `len` is computed before any of them and `isMatch` reads the raw data,
+  // so a failed `minLength` says nothing about whether `pattern` holds.
+  // Short-circuiting them is a boolean-mode optimization; when errors are
+  // recorded it would hide half the reasons the value is wrong.
+  return function validateStringInternAll(data, dataPath) {
     const len = getStringLength(data, useGrapheme);
-    return isMinLength(len, dataPath)
-      && isMaxLength(len, dataPath)
-      && isMatch(data, dataPath);
+    let valid = isMinLength(len, dataPath);
+    valid = isMaxLength(len, dataPath) && valid;
+    return isMatch(data, dataPath) && valid;
   };
 }
 

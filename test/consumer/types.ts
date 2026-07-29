@@ -292,3 +292,14 @@ void normalizedPort;
 const normalizeUnknown = compileNormalizer(userSchema);
 const normalizedUnknown: unknown = normalizeUnknown(JSON.parse('{}'));
 void normalizedUnknown;
+
+// The fluent methods must preserve the collectErrors type parameter: this is
+// the exact chained factory the Zod migration guide documents, and a bare
+// `JarenValidator` return would silently reset it to the boolean default.
+const chainedFactory = new JarenValidator({ collectErrors: true })
+  .addFormats(stringFormats)
+  .addSchema({ $id: 'https://example.com/chained', type: 'object' });
+const chainedResult = chainedFactory.compile({ type: 'string' })('x');
+const chainedValid: boolean = chainedResult.valid;
+const chainedIssues: number = chainedResult.errors.length;
+void (chainedValid && chainedIssues >= 0);

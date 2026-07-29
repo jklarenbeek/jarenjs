@@ -326,6 +326,27 @@ function generateFormats(tmp, options) {
   };
 }
 
+function generateContracts(tmp, options) {
+  const file = path.join(tmp, 'contracts.json');
+  runTool([
+    'benchmark/contracts.js',
+    '--iterations', String(options.quick ? 3_000 : 20_000),
+    '--output', 'json', '--filepath', file,
+  ]);
+  const raw = readJson(file);
+  if (raw === null) return null;
+  return {
+    ...raw,
+    tables: raw.tables.map((table) => ({
+      ...table,
+      rows: table.rows.map((row) => ({
+        ...row,
+        results: row.results.map((ns) => (ns === null ? null : sig4(ns))),
+      })),
+    })),
+  };
+}
+
 function generateJsonPointer(tmp, options) {
   const file = path.join(tmp, 'jsonpointer.json');
   runTool([
@@ -659,7 +680,7 @@ function generateQt3() {
 
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
-  'validate', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
+  'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo',
 ];
 
@@ -695,6 +716,33 @@ function buildHeadlines(generated, meta) {
       conformance: `${passed} / ${passed + failed}`,
       note: 'official suite, every draft',
     });
+  }
+  if (generated.contracts !== undefined) {
+    // The adapter table is the comparable measurement (normalize + validate +
+    // map issues); the verdict table flatters Jaren and the compile table is
+    // paid once, so neither belongs in a one-number headline. The rival is
+    // whichever engine is fastest per scenario - which is Ajv on some of
+    // them, so this ratio can legitimately read as a loss.
+    const adapter = generated.contracts.tables?.find((t) => t.title.startsWith('Normalize'));
+    const columns = adapter?.columns ?? [];
+    const jarenCol = columns.indexOf('@jarenjs/validate');
+    const ratios = [];
+    if (adapter !== undefined && jarenCol !== -1) {
+      for (const row of adapter.rows) {
+        const mine = row.results[jarenCol];
+        const rivals = row.results.filter((v, i) => i !== jarenCol && Number.isFinite(v) && v > 0);
+        if (Number.isFinite(mine) && mine > 0 && rivals.length > 0)
+          ratios.push(Math.min(...rivals) / mine);
+      }
+    }
+    if (ratios.length > 0) {
+      add('contracts', 'Contracts vs Zod', {
+        ratio: geoMean(ratios),
+        rival: 'fastest of Zod 4 / Zod 3 / zod-mini / Ajv',
+        conformance: null,
+        note: 'normalize + validate + map issues, the shape a request handler runs',
+      });
+    }
   }
   if (generated.jsonpath !== undefined) {
     const rows = generated.jsonpath.profile?.rows ?? [];
@@ -870,6 +918,8 @@ async function main() {
     generated.jslt = await generateJslt(tmp, options);
   if (!options.skip.has('formats'))
     generated.formats = generateFormats(tmp, options);
+  if (!options.skip.has('contracts'))
+    generated.contracts = generateContracts(tmp, options);
   if (!options.skip.has('jsonpointer'))
     generated.jsonpointer = generateJsonPointer(tmp, options);
   if (!options.skip.has('jsonpatch'))

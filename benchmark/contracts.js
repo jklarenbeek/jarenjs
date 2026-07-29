@@ -453,10 +453,29 @@ function main() {
   }
 
   if (options.output === 'json') {
+    // The site's generic table renderer consumes
+    // `{ tables: [{ title, columns, rows: [{ name, results[] }] }] }`, so the
+    // matrix is transposed here: one table per measurement, one row per
+    // scenario, one column per engine. A dropped engine is `null`, which the
+    // renderer shows as a dash.
+    const engineKeys = options.engines.filter((key) => key in ADAPTERS);
+    const measurements = [
+      ['compile', 'Compile — once per process'],
+      ['verdict', 'Verdict on valid input — see the caveat above'],
+      ['adapter', 'Normalize + validate + map issues, on invalid input'],
+    ];
     writeJsonResults('contracts', {
       node: process.version,
       iterations: options.iterations,
-      scenarios: results,
+      caveat: 'The verdict table is not apples-to-apples and its ratio flatters Jaren: Jaren answers with a predicate that allocates nothing, while Zod has no predicate mode and builds its normalized output on the way. The adapter table is the comparable one.',
+      tables: measurements.map(([key, title]) => ({
+        title,
+        columns: engineKeys.map((k) => ENGINE_LABELS[k]),
+        rows: scenarios.map((s) => ({
+          name: s.title,
+          results: engineKeys.map((k) => results[s.key]?.[key]?.[k] ?? null),
+        })),
+      })),
     }, options);
   }
 }

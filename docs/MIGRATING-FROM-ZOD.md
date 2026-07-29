@@ -54,7 +54,7 @@ the portability argument is worth little to you.
 | `.strict()` (and Zod's default stripping) | `additionalProperties: false` + `removeAdditional` |
 | `.passthrough()` | leave `additionalProperties` open, `removeAdditional: false` |
 | `z.coerce.number()` | `{ "type": "number" }` + `coerceTypes` |
-| `.trim()` | the normalizer's `trimStrings` |
+| `.trim()` | the normalizer's `trimStrings`, as a **predicate** — see below |
 | `.refine()` / `.superRefine()` | conditionals (`if`/`then`), or the [`$query` keyword](../packages/validate/README.md#query--cross-field-assertions) for cross-field rules |
 | `.transform()` | **stays application code** — see below |
 | `z.lazy()` + recursion | `$ref: '#'` or `$ref: '#/$defs/Name'` |
@@ -108,6 +108,41 @@ const issues = result.errors.map(e => ({
 | `result.success` | `result.valid` |
 | `error.issues` (v4) / `error.errors` (v3) | `result.errors` |
 
+### Two mappings your adapter has to write
+
+**A `required` error points at the owning object, Zod points at the member.**
+There is no location for a member that is not there, so Jaren reports the
+object and names the absent key in `params.missingProperty`. Zod synthesizes
+the child path. Append it:
+
+```javascript
+function toPath(error) {
+  const path = parseJSONPointerPath(error.instancePath);
+  return error.keyword === 'required'
+    ? [...path, error.params.missingProperty]
+    : path;
+}
+```
+
+**An array yields per-item errors *plus* an aggregate `items` error** at the
+array itself, carrying the count of failing elements. Zod emits only the
+per-item issues. Decide once, centrally, whether the aggregate is signal
+(useful for "3 of 50 rows are invalid" summaries) or noise, and filter it in
+the adapter rather than at each call site:
+
+```javascript
+const issues = result.errors
+  .filter(e => !(e.keyword === 'items' && dropAggregates))
+  .map(toIssue);
+```
+
+There is one more ambiguity worth knowing about, and it is inherent rather
+than a defect: `parseJSONPointerPath` turns a canonical numeric token into a
+number, so an object key `'0'` and array index `0` both become `0`. RFC 6901
+has no types, so the pointer alone cannot distinguish them. If your contracts
+have objects with numeric-looking keys, resolve the path against the input
+document in the adapter instead of trusting the lexical answer.
+
 Two behavioral differences to characterize rather than assume. Jaren points
 `instancePath` at the offending member for `additionalProperties`, where Ajv
 points at the parent. And `params` deliberately carries the offending values,
@@ -136,8 +171,11 @@ export function contract(schema) {
   const normalize = compileNormalizer(schema, {
     useDefaults: true,
     removeAdditional: true,   // 'all' to match Zod's strip-by-default
-    coerceTypes: true,
-    trimStrings: true,
+    // Zod trims per field, so mirror that with a predicate rather than a
+    // global `true` — otherwise every string in the contract gets trimmed,
+    // including ones whose whitespace is data.
+    coerceTypes: (node) => node['x-coerce'] === true,
+    trimStrings: (node) => node['x-trim'] === true,
   });
   const validate = jaren.compile(schema);
   return (input) => {
@@ -149,6 +187,13 @@ export function contract(schema) {
   };
 }
 ```
+
+**`.trim()` and `z.coerce` are per-field in Zod, so keep them per-field
+here.** `trimStrings: true` trims every string the walk reaches. If your
+contracts trim 34 of 219 string fields — the usual ratio — a global switch
+silently rewrites the other 185. Mark the fields in the schema (`x-trim`, or
+any annotation you like) and pass a predicate; it is evaluated at compile
+time, so it costs nothing per request.
 
 **`useGrapheme: false` is not optional if you want parity.** Jaren counts
 grapheme clusters by default, so a string of emoji that failed `maxLength`
@@ -174,19 +219,22 @@ Times are per operation; lower is better.
 
 | Scenario | Jaren | Zod 4 | Zod 3 | zod/mini | Ajv |
 | --- | --- | --- | --- | --- | --- |
-| command (uuid/enum/date-time) | **7.5 µs** | 22.7 µs | 13.5 µs | 16.9 µs | 4.0 µs |
-| config (defaults + coercion) | **3.5 µs** | 14.8 µs | 7.4 µs | 10.5 µs | 2.6 µs |
-| collection (50 records) | **16.2 µs** | 27.5 µs | 27.2 µs | 28.6 µs | 27.4 µs |
+| command (uuid/enum/date-time) | **5.1 µs** | 20.5 µs | 9.6 µs | 13.5 µs | 2.7 µs |
+| config (defaults + coercion) | **3.8 µs** | 14.5 µs | 7.5 µs | 10.6 µs | 2.6 µs |
+| collection (50 records) | **20.6 µs** | 27.1 µs | 27.6 µs | 30.9 µs | 27.8 µs |
 
-Jaren is 1.7–4.2× faster than every Zod flavor on all three. **Ajv is faster
-than Jaren on two of the three** (1.9× on command, 1.3× on config) and slower
-on the third (1.7×) — that is the honest picture, and it is the expected
+Jaren is 1.3–4.0× faster than every Zod flavor on all three. **Ajv is faster
+than Jaren on two of the three** (1.9× on command, 1.5× on config) and slower
+on the third (1.3×) — that is the honest picture, and it is the expected
 shape: Ajv generates source with `new Function`, Jaren compiles closures
-because the no-`eval` rule is what makes it CSP-safe. The remaining gap on
-small schemas is tracked as an optional codegen backend in the roadmap.
+because the no-`eval` rule is what makes it CSP-safe. Taken as a geometric
+mean across the three scenarios against the *fastest rival per scenario*,
+Jaren comes out **1.3× slower** — which is what the benchmarks page reports
+rather than quoting only the scenarios it wins. The remaining gap on small
+schemas is tracked as an optional codegen backend in the roadmap.
 
 Compilation is paid once per process and is where Jaren is generally slowest
-— Zod 3 builds a schema 2.3–6.4× faster. If you compile thousands of schemas
+— Zod 3 builds a schema 2.2–8.5× faster. If you compile thousands of schemas
 at boot, measure it; if you compile them once at module load, it does not
 matter.
 

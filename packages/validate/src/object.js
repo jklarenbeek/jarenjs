@@ -810,11 +810,27 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
     };
   }
 
-  return function validateObjectSchema(data, dataPath, dataRoot) {
+  if (schemaObj.options.skipErrors) {
+    return function validateObjectSchema(data, dataPath, dataRoot) {
+      if (isObjectType(data)) {
+        const dataKeys = Object.keys(data);
+        return validatePrimitives(data, dataPath, dataRoot, dataKeys)
+          && validateChildren(data, dataPath, dataRoot, dataKeys);
+      }
+      return true;
+    };
+  }
+
+  // `required`/`minProperties` and the per-property schemas are independent:
+  // the child walk re-derives everything it needs from the data and cannot
+  // fault on a missing key. Stopping after a missing `required` would report
+  // the absent property and hide every fault in the properties that ARE
+  // present, which is the difference between one issue and a usable list.
+  return function validateObjectSchemaAll(data, dataPath, dataRoot) {
     if (isObjectType(data)) {
       const dataKeys = Object.keys(data);
-      return validatePrimitives(data, dataPath, dataRoot, dataKeys)
-        && validateChildren(data, dataPath, dataRoot, dataKeys);
+      const primitives = validatePrimitives(data, dataPath, dataRoot, dataKeys);
+      return validateChildren(data, dataPath, dataRoot, dataKeys) && primitives;
     }
     return true;
   };

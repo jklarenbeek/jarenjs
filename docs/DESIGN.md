@@ -64,6 +64,11 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 - Prose containers that can receive arbitrary content (`.card p`, `.page-lead`, `.doc-p`,
   table cells) carry `overflow-wrap: anywhere` — long unbreakable tokens must never widen
   the page. In copy, prefer spaced slash lists (`a / b / c`) over `a/b/c`.
+  **Exception, and it is load-bearing: cells inside a scrolling table revert to
+  `overflow-wrap: normal`.** The rule exists to protect the *page*, and inside an
+  `overflow-x` container the page is already protected — while `anywhere` there lets every
+  column collapse to a single character, so the table never outgrows its wrapper, the
+  scroll never engages, and a wide table crams instead of scrolling. See §9.
 - Radii: exactly two — `--radius` for cards/callouts/dialogs, `--radius-sm` for controls,
   inputs, editors, code blocks. No new literal radii above 6px.
 
@@ -116,6 +121,13 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   dialog carry `max-width: 100%`; README tables scroll internally
   (`display: block; overflow-x: auto`); anchored headings carry
   `scroll-margin-top: 4.5rem` so section links land below the sticky header.
+- **Wide tables scroll, they do not cram.** A table is wrapped in `.table-scroll`
+  (`overflow-x: auto` + `min-width: 0`), and its cells opt out of `overflow-wrap: anywhere`
+  per §3. Both halves are required: the wrapper alone does nothing while the cells can
+  shrink to one character. Note that a page-overflow assertion cannot catch the failure —
+  a crammed table does not widen the page — so the evidence is internal
+  (`wrapper.scrollWidth > wrapper.clientWidth`) plus a per-column floor, which is what
+  `packages/website/e2e/tables.spec.js` asserts.
 - A media-query override of a rule must appear **later in the file** than its base rule —
   media queries add no specificity (the `.docs-readmes` trap).
 

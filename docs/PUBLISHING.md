@@ -52,11 +52,13 @@ together, so a version number describes the suite, not a single package.
   documentation and additive internals only. Upgrading a patch should require
   reading nothing.
 - **Minor releases may break a public API**, and when one does it is called
-  out in the release tag's annotation and in the documentation of whatever
-  changed. Pre-1.0 this is the release that carries breaking change; there is
-  no separate major channel yet. There is no changelog file on purpose — the
-  git history between two tags *is* the changelog, and a second hand-written
-  copy of it only goes stale.
+  out in the documentation of whatever changed, and is visible in the commit
+  range between the two tags. Pre-1.0 this is the release that carries
+  breaking change; there is no separate major channel yet. There is no
+  changelog file on purpose — the git history between two tags *is* the
+  changelog, and a second hand-written copy of it only goes stale. Tags are
+  lightweight, so they carry no annotation to read: `git log v0.22.15..v0.22.16`
+  is the release note.
 - **Deprecations get one minor of overlap.** A symbol slated for removal is
   documented as deprecated in the release that supersedes it, keeps working
   for that whole minor series, and may be removed in the next minor. A

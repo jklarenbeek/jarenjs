@@ -1018,3 +1018,44 @@ describe('Error Message Quality', () => {
     assert.ok(error.message.toUpperCase().includes('NOT'), 'Message should mention NOT');
   });
 });
+
+describe('Collected errors are exhaustive across independent keywords', () => {
+  // Short-circuiting sibling keyword groups is a boolean-mode optimization.
+  // When errors are collected it hides reasons the value is wrong, and the
+  // resulting issue list disagrees with what other validators report.
+  const contract = {
+    type: 'object',
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      slug: { type: 'string', minLength: 3, pattern: '^[a-z0-9-]+$' },
+    },
+    required: ['name', 'slug'],
+  };
+
+  it('reports property faults alongside a missing required property', () => {
+    const result = new JarenValidator({ collectErrors: true })
+      .compile(contract)({ slug: '!' });
+    assert.strictEqual(result.valid, false);
+    const seen = result.errors.map(e => `${e.keyword}@${e.instancePath}`);
+    assert.ok(seen.includes('required@'), `missing required error: ${seen}`);
+    assert.ok(seen.includes('minLength@/slug'), `missing minLength error: ${seen}`);
+    assert.ok(seen.includes('pattern@/slug'), `missing pattern error: ${seen}`);
+  });
+
+  it('reports every failing string keyword on one value', () => {
+    const result = new JarenValidator({ collectErrors: true })
+      .compile({ type: 'string', minLength: 3, pattern: '^[a-z]+$' })('!');
+    const keywords = result.errors.map(e => e.keyword);
+    assert.ok(keywords.includes('minLength'), `got ${keywords}`);
+    assert.ok(keywords.includes('pattern'), `got ${keywords}`);
+  });
+
+  it('keeps the boolean answer and the valid case unchanged', () => {
+    assert.strictEqual(new JarenValidator().compile(contract)({ slug: '!' }), false);
+    assert.strictEqual(new JarenValidator().compile({ type: 'string', minLength: 3, pattern: '^[a-z]+$' })('!'), false);
+    const ok = new JarenValidator({ collectErrors: true })
+      .compile(contract)({ name: 'a', slug: 'abc' });
+    assert.strictEqual(ok.valid, true);
+    assert.strictEqual(ok.errors.length, 0);
+  });
+});

@@ -130,6 +130,17 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(JSON.stringify(nodes), /json-patch-tests/, 'the conformance note renders');
   });
 
+  it('derives the contracts suite and leads with the caveat, not the flattering table', function () {
+    const state = { benchStatus: { contracts: 'loaded' }, bench: { contracts: loadBench('contracts') }, benchUi: {} };
+    const nodes = deriveSuite(state, 'contracts');
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    const text = JSON.stringify(nodes);
+    assert.match(text, /Read the third table, not the second/, 'the caveat renders above the tables');
+    assert.match(text, /Normalize \+ validate \+ map issues/, 'the comparable table is published');
+    assert.match(text, /zod 4/, 'the rivals are named');
+    assert.match(text, /ajv/, 'ajv is included rather than omitted');
+  });
+
   it('derives the formats suite from the generated data', function () {
     const state = { benchStatus: { formats: 'loaded' }, bench: { formats: loadBench('formats') }, benchUi: {} };
     const nodes = deriveSuite(state, 'formats');

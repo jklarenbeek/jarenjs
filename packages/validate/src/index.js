@@ -1299,7 +1299,7 @@ export class JarenValidator {
    * Adds a format validator.
    * @param {string} name - The format name (e.g., 'email', 'uri', 'date-time')
    * @param {FormatCompiler} formatCompiler - A function that compiles format validators
-   * @returns {JarenValidator} This validator instance for chaining
+   * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
    * @example
    * validator.addFormat('custom', (schemaObj, schema) => {
    *   return (data) => data.startsWith('custom:');
@@ -1316,7 +1316,7 @@ export class JarenValidator {
   /**
    * Adds multiple format validators at once.
    * @param {Record<string, FormatCompiler>} formatCompilers - Object mapping format names to compiler functions
-   * @returns {JarenValidator} This validator instance for chaining
+   * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
    */
   addFormats(formatCompilers) {
     registerFormatCompilers(
@@ -1362,7 +1362,7 @@ export class JarenValidator {
    * Dependencies can be added in any order, and circular dependencies are supported.
    * @param {JSONSchema | boolean | (JSONSchema | boolean)[]} schema - The schema(s) to add
    * @param {string} [key] - Optional key/URI to register the schema under
-   * @returns {JarenValidator} This validator instance for chaining
+   * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
    * @example
    * // Add a single schema
    * validator.addSchema({ $id: 'http://example.com/user', type: 'object' });
@@ -1511,7 +1511,7 @@ export class JarenValidator {
    * Meta-schemas are schemas that describe the structure of valid JSON schemas.
    * @param {JSONSchema | boolean | (JSONSchema | boolean)[]} schema - The meta-schema(s) to add
    * @param {string} [key] - Optional key/URI for the meta-schema
-   * @returns {JarenValidator} This validator instance for chaining
+   * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
    * @example
    * validator.addMetaSchema(draft7MetaSchema, 'http://json-schema.org/draft-07/schema');
    */

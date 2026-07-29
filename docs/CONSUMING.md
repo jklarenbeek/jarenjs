@@ -40,7 +40,7 @@ rather than a registry version — a common choice while Jaren is pre-1.0.
 
 ```bash
 git submodule add https://github.com/jklarenbeek/jarenjs.git vendor/jarenjs
-git -C vendor/jarenjs checkout v0.22.13
+git -C vendor/jarenjs checkout v0.22.16
 ```
 
 **Do not use `--recursive`.** This repository's own submodules are external

@@ -311,3 +311,87 @@ describe('validator options — an unset option keeps its per-draft default', ()
       true);
   });
 });
+
+describe('compileNormalizer — per-node control', () => {
+  // A whole-schema switch is the wrong granularity for a real contract: a
+  // service typically trims a handful of fields and must leave the rest
+  // exactly as supplied. A compile-time predicate expresses that without
+  // costing anything at runtime.
+  const tenant = {
+    type: 'object',
+    properties: {
+      name: { type: 'string', 'x-trim': true },
+      slug: { type: 'string', 'x-trim': true },
+      defaultTimeZone: { type: 'string' },
+    },
+  };
+
+  it('trims only the nodes the predicate selects', () => {
+    const normalize = compileNormalizer(tenant,
+      { trimStrings: (node) => node['x-trim'] === true });
+    deepStrictEqual(
+      normalize({ name: '  Acme  ', slug: '  acme  ', defaultTimeZone: ' Europe/Amsterdam ' }),
+      { name: 'Acme', slug: 'acme', defaultTimeZone: ' Europe/Amsterdam ' });
+  });
+
+  it('coerces only the nodes the predicate selects', () => {
+    const normalize = compileNormalizer({
+      type: 'object',
+      properties: { a: { type: 'integer', 'x-coerce': true }, b: { type: 'integer' } },
+    }, { coerceTypes: (node) => node['x-coerce'] === true });
+    deepStrictEqual(normalize({ a: '1', b: '2' }), { a: 1, b: '2' });
+  });
+
+  it('materializes only the defaults the predicate selects', () => {
+    const normalize = compileNormalizer({
+      type: 'object',
+      properties: { a: { default: 1, 'x-default': true }, b: { default: 2 } },
+    }, { useDefaults: (node) => node['x-default'] === true });
+    deepStrictEqual(normalize({}), { a: 1 });
+  });
+
+  it('keeps the boolean forms behaving exactly as before', () => {
+    deepStrictEqual(
+      compileNormalizer(tenant, { trimStrings: true })({ name: ' a ', slug: ' b ', defaultTimeZone: ' c ' }),
+      { name: 'a', slug: 'b', defaultTimeZone: 'c' });
+    deepStrictEqual(
+      compileNormalizer(tenant, { trimStrings: false })({ name: ' a ' }), { name: ' a ' });
+  });
+});
+
+describe('compileNormalizer — member schemas compose', () => {
+  it('applies properties and every matching patternProperties in turn', () => {
+    const both = compileNormalizer({
+      type: 'object', patternProperties: { '^a': { type: 'integer' }, 'b$': { type: 'string' } },
+    }, { coerceTypes: true });
+    // '^a' coerces to a number, then 'b$' coerces back to a string
+    deepStrictEqual(both({ ab: '5' }), { ab: '5' });
+
+    // The named step trims and coerces to a number; the pattern step then
+    // coerces that number back to a string. Both ran, in order.
+    const named = compileNormalizer({
+      type: 'object', properties: { a1: { type: 'integer' } }, patternProperties: { '^a': { type: 'string' } },
+    }, { coerceTypes: true, trimStrings: true });
+    deepStrictEqual(named({ a1: '  7  ' }), { a1: '7' });
+  });
+
+  it('runs a materialized container default through its own schema', () => {
+    const normalize = compileNormalizer({
+      type: 'object',
+      properties: {
+        cfg: { type: 'object', default: { port: '8080' }, properties: { port: { type: 'integer' } } },
+      },
+    }, { useDefaults: true, coerceTypes: true });
+    deepStrictEqual(normalize({}), { cfg: { port: 8080 } });
+  });
+
+  it('materializes nested defaults inside a materialized default', () => {
+    const normalize = compileNormalizer({
+      type: 'object',
+      properties: {
+        cfg: { type: 'object', default: {}, properties: { port: { type: 'integer', default: 80 } } },
+      },
+    }, { useDefaults: true });
+    deepStrictEqual(normalize({}), { cfg: { port: 80 } });
+  });
+});
