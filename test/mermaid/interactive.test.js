@@ -284,3 +284,43 @@ describe('<br/> is a line break, not text', () => {
     assert.deepStrictEqual(parseMermaid(printed).ast.nodes, doc.ast.nodes);
   });
 });
+
+describe('a label stays legible on whatever fill the author chose', () => {
+  it('derives the ink from a concrete fill instead of the theme', async () => {
+    // The failure this prevents: a pale `classDef` fill under a dark theme,
+    // where the theme's light text disappears into the author's light box.
+    const { resolveNodeStyles, textColor } = await import('@jarenjs/mermaid/styles');
+    const darkThemeInk = { nodeText: '#e6e6e6', noteText: '#e6e6e6', noteFill: '#3b3b26' };
+    const styles = (source) => resolveNodeStyles({
+      classDefs: [{ name: 'c', styles: source }],
+      classes: [{ node: 'N', name: 'c' }],
+    }).get('N');
+
+    assert.strictEqual(textColor(styles('fill:#dcfce7'), darkThemeInk), '#1f2020',
+      'a pale fill takes dark ink even under a dark theme');
+    assert.strictEqual(textColor(styles('fill:#14532d'), darkThemeInk), '#ffffff',
+      'a deep fill takes light ink even under a light theme');
+    assert.strictEqual(textColor(styles('fill:#dcfce7,color:#f0f'), darkThemeInk), '#f0f',
+      'an explicit color always wins');
+    assert.strictEqual(textColor(styles('stroke:#f00'), darkThemeInk), null,
+      'a style that sets no fill keeps the theme ink');
+  });
+
+  it('leaves a themed fill following the theme', async () => {
+    // `note` fill and ink are both theme tokens, so they move together and
+    // must NOT be second-guessed by luminance.
+    const { resolveNodeStyles, textColor } = await import('@jarenjs/mermaid/styles');
+    const tokens = { noteText: '#e6e6e6', noteFill: 'var(--warn-soft, #fef3c7)' };
+    const styles = resolveNodeStyles({ classes: [{ node: 'N', name: 'note' }] }).get('N');
+    assert.strictEqual(textColor(styles, tokens), '#e6e6e6');
+  });
+
+  it('ignores a fill it cannot reason about', async () => {
+    const { isHexColor } = await import('@jarenjs/core/color');
+    assert.strictEqual(isHexColor('#abc'), true);
+    assert.strictEqual(isHexColor('#a1b2c3'), true);
+    assert.strictEqual(isHexColor('var(--x, #fff)'), false);
+    assert.strictEqual(isHexColor('rebeccapurple'), false);
+    assert.strictEqual(isHexColor(undefined), false);
+  });
+});

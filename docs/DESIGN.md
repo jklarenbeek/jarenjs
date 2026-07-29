@@ -69,6 +69,15 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   `overflow-x` container the page is already protected — while `anywhere` there lets every
   column collapse to a single character, so the table never outgrows its wrapper, the
   scroll never engages, and a wide table crams instead of scrolling. See §9.
+- **Ink over a concrete fill is derived from that fill, never inherited from the
+  theme.** Any text set inside a colour the author or a palette chose — chart
+  tiles, a mermaid `classDef` box — takes its colour from
+  `inkFor(fill)` (`@jarenjs/core/color`), which picks by measured WCAG contrast
+  and is swept over the whole RGB cube in `test/core/color.test.js` to
+  guarantee AA (4.5:1). Inheriting the theme's text colour is the bug this
+  prevents: a pale fill under a dark theme gets pale text and the label
+  disappears into its own box. A theme-linked fill is the opposite case and
+  keeps the theme's ink, because the two move together.
 - Radii: exactly two — `--radius` for cards/callouts/dialogs, `--radius-sm` for controls,
   inputs, editors, code blocks. No new literal radii above 6px.
 

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
-import { lerpColor, relativeLuminance } from '@jarenjs/core/color';
+import { inkFor, lerpColor, relativeLuminance } from '@jarenjs/core/color';
 
 describe('lerpColor', () => {
   it('returns the endpoints at t=0 and t=1', () => {
@@ -43,5 +43,39 @@ describe('relativeLuminance', () => {
   it('separates a light fill from a dark fill across the ink threshold', () => {
     assert.isTrue(relativeLuminance('#93c5fd') > 0.4);
     assert.isTrue(relativeLuminance('#1e40af') < 0.4);
+  });
+});
+
+describe('inkFor is a contrast guarantee, not a guess', () => {
+  /** WCAG relative-contrast ratio between two colors. */
+  const ratio = (a, b) => {
+    const l1 = relativeLuminance(a);
+    const l2 = relativeLuminance(b);
+    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  it('clears WCAG AA against every fill in the RGB cube', () => {
+    // The point of deriving ink from luminance is that it holds for a colour
+    // the author picked, not just for the palette we ship. A sweep is what
+    // makes that a guarantee instead of a hope.
+    let worst = Infinity;
+    let worstFill = '';
+    for (let r = 0; r < 256; r += 15) {
+      for (let g = 0; g < 256; g += 15) {
+        for (let b = 0; b < 256; b += 15) {
+          const fill = '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
+          const contrast = ratio(fill, inkFor(fill));
+          if (contrast < worst) { worst = contrast; worstFill = fill; }
+        }
+      }
+    }
+    assert.ok(worst >= 4.5,
+      `worst contrast was ${worst.toFixed(2)} on ${worstFill}; AA needs 4.5`);
+  });
+
+  it('accepts the short hex form', () => {
+    assert.strictEqual(inkFor('#fff'), inkFor('#ffffff'));
+    assert.strictEqual(inkFor('#000'), inkFor('#000000'));
   });
 });

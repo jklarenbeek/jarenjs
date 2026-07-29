@@ -18,7 +18,10 @@
  */
 
 import { resolveTheme } from '@jarenjs/view/helpers';
-import { lerpColor, relativeLuminance } from '@jarenjs/core/color';
+import { inkFor, lerpColor } from '@jarenjs/core/color';
+
+// Re-exported: chart modules have always imported it from here.
+export { inkFor };
 import { clamp01 } from '@jarenjs/core/math';
 
 /**
@@ -66,18 +69,6 @@ export function sequentialColor(t, ramp = SEQUENTIAL) {
   const at = t * spans;
   const i = Math.min(spans - 1, Math.floor(at));
   return lerpColor(ramp[i], ramp[i + 1], at - i);
-}
-
-/**
- * A legible ink for text set INSIDE a concrete fill (treemap tiles):
- * near-black on light fills, white on dark ones. Keyed off the fill's
- * luminance, not the theme — the fill is a palette constant, so the
- * right ink is too.
- * @param {string} fillHex - The `#rrggbb` fill under the text
- * @returns {string}
- */
-export function inkFor(fillHex) {
-  return relativeLuminance(fillHex) > 0.4 ? '#1f2020' : '#ffffff';
 }
 
 /** @type {Record<string, Record<string, string>>} */

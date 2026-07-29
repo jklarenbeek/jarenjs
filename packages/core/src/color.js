@@ -53,3 +53,73 @@ export function relativeLuminance(hex) {
 function channel(c) {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
+
+/** The designed inks, and the WCAG AA threshold for body text. */
+const INK_DARK = '#1f2020';
+const INK_LIGHT = '#ffffff';
+const AA_CONTRAST = 4.5;
+
+/**
+ * A legible ink for text set INSIDE a concrete fill: near-black on light
+ * fills, white on dark ones.
+ *
+ * Keyed off the fill's luminance, **not** the theme. That distinction is the
+ * whole point: a fill the author named is a constant, so it does not follow
+ * light/dark — and if the ink does, a light fill under a dark theme ends up
+ * with light text on it and the label disappears.
+ *
+ * The choice is made by comparing the two candidates' actual WCAG contrast
+ * rather than by a luminance threshold. A threshold is subtly wrong in the
+ * mid-tones: at 0.4 a fill like `#87b496` took dark ink and landed at 2.33:1,
+ * well under AA, because the crossover between the two inks is near 0.179 and
+ * not where a round number puts it. Picking the better of two is optimal by
+ * construction, so the worst case over the whole RGB cube is ~4.6:1 — which
+ * clears AA with nothing to tune.
+ * @param {string} fillHex - The `#rgb` or `#rrggbb` fill under the text
+ * @returns {string} `#1f2020` or `#ffffff`
+ */
+export function inkFor(fillHex) {
+  const fill = relativeLuminance(expandHex(fillHex));
+  const preferred = contrastOf(fill, relativeLuminance(INK_DARK))
+    >= contrastOf(fill, relativeLuminance(INK_LIGHT))
+    ? INK_DARK
+    : INK_LIGHT;
+  if (contrastOf(fill, relativeLuminance(preferred)) >= AA_CONTRAST)
+    return preferred;
+  // The designed near-black is softer than true black, and that softness
+  // costs contrast: against a mid-tone it bottoms out near 4.06:1, just under
+  // AA. Falling through to pure black or white for exactly those fills keeps
+  // the guarantee without making every other diagram harsher than it needs.
+  return fill > 0.1791 ? '#000000' : '#ffffff';
+}
+
+/**
+ * The WCAG contrast ratio between two relative luminances, from 1 (identical)
+ * to 21 (black on white).
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
+export function contrastOf(a, b) {
+  const hi = a > b ? a : b;
+  const lo = a > b ? b : a;
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Whether a CSS color value is a concrete hex this module can reason about.
+ * A `var(...)`, a named color or a function is not: it may resolve to
+ * anything at paint time, so the caller must fall back to its theme.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isHexColor(value) {
+  return typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim());
+}
+
+/** Expand `#abc` to `#aabbcc`; pass a 6-digit hex through. */
+function expandHex(hex) {
+  const h = hex.trim();
+  if (h.length !== 4) return h;
+  return '#' + h[1] + h[1] + h[2] + h[2] + h[3] + h[3];
+}

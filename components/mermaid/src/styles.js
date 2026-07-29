@@ -18,6 +18,8 @@
  * valid Mermaid that other tools can still parse.
  */
 
+import { inkFor, isHexColor } from '@jarenjs/core/color';
+
 /** Style properties that mean something to a shape, mapped to SVG attributes. */
 const SHAPE_PROPS = {
   'fill': 'fill',
@@ -155,7 +157,17 @@ export function shapeAttributes(styles, tokens) {
 }
 
 /**
- * The text color a resolved style object asks for, or null to keep the theme's.
+ * The text color for a node, or null to keep the theme's.
+ *
+ * An author-specified `fill` is a CONSTANT — it does not follow light/dark —
+ * so the ink over it must not follow the theme either. A pale `fill:#dcfce7`
+ * under a dark theme would otherwise get the theme's light text and the label
+ * would vanish into its own box. The ink is therefore derived from the fill's
+ * luminance, exactly as chart tiles do it, unless the author named a `color`
+ * themselves.
+ *
+ * The built-in `note` class is the opposite case and keeps the theme's note
+ * ink: its fill is a theme token too, so the pair moves together.
  * @param {Record<string,string>|undefined} styles
  * @param {Record<string,string>} tokens theme tokens
  * @returns {string|null}
@@ -163,6 +175,7 @@ export function shapeAttributes(styles, tokens) {
 export function textColor(styles, tokens) {
   if (styles === undefined) return null;
   if (typeof styles.color === 'string') return styles.color;
-  if (styles['mm-builtin'] === 'note') return tokens.noteText;
+  if (styles['mm-builtin'] === 'note' && !isHexColor(styles.fill)) return tokens.noteText;
+  if (isHexColor(styles.fill)) return inkFor(styles.fill);
   return null;
 }

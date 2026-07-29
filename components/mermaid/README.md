@@ -174,6 +174,13 @@ A dotted link to a note-classed node reads as an annotation, and the document
 stays valid Mermaid that any other tool can still parse — no dialect, no
 compatibility cost.
 
+**The label stays readable on whatever fill you pick.** A `fill` you name is a
+constant — it does not follow light/dark — so the ink over it must not follow
+the theme either, or a pale box under a dark theme gets pale text and the
+label vanishes into it. The ink is derived from the fill's measured contrast
+instead, and is guaranteed to clear WCAG AA for any colour. Name a `color`
+yourself and that always wins.
+
 **Pan, zoom and touch are opt-in.** `mermaidPlugin({ interactive: true })`
 adds a `hydrate` that attaches to the finished SVG; the render is unchanged
 and server output is byte-identical either way, so a page that does not ask
