@@ -477,7 +477,9 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     return function validateArrayContainsOnly(data, dataPath) {
       const len = resolveLength(data.length);
       const arr = data;
-
+      // Each element is a CANDIDATE probe: the array only has to contain a
+      // match, so an element that is not one has done nothing wrong.
+      const errors = root.errorMark();
       let contains = 0;
       for (let i = 0; i < len; ++i) {
         if (validator(arr[i], dataPath) === true) {
@@ -485,6 +487,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
           if (trackContains) root.evalLog.add(data, i);
         }
       }
+      root.rollbackErrors(errors);
       return validateMinMax(contains, dataPath);
     };
   }
@@ -510,10 +513,13 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       else if (track && i < evalLimit) {
         root.evalLog.add(data, i);
       }
+      // A contains candidate is a probe: not matching is not a fault.
+      const containsMark = root.errorMark();
       if (containsValidator(obj, dataPath, dataRoot) === true) {
         contains++;
         if (trackContains) root.evalLog.add(data, i);
       }
+      root.rollbackErrors(containsMark);
     }
     // Failing items and the contains count are independent tallies.
     const itemsOk = invalid === 0;

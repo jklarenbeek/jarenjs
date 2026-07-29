@@ -584,6 +584,30 @@ export class ValidationRoot {
   }
 
   /**
+   * A checkpoint in the collected-error list.
+   *
+   * A SPECULATIVE applicator - an `anyOf` branch, an `if` condition, the
+   * subschema of a `not`, a `contains` candidate - runs a validator whose
+   * failure may be entirely expected. Those failures still call `addError`,
+   * so without a checkpoint they leak into the caller's issue list and blame
+   * a document for not matching a branch it was never required to match.
+   * Marking before the probe and rolling back after is the same discipline
+   * `EvalLog` already uses for annotations.
+   * @returns {number} The mark to pass to {@link rollbackErrors}
+   */
+  errorMark() {
+    return this.#errors.length;
+  }
+
+  /**
+   * Discard every error collected since `mark`.
+   * @param {number} mark - A value from {@link errorMark}
+   */
+  rollbackErrors(mark) {
+    if (this.#errors.length > mark) this.#errors.length = mark;
+  }
+
+  /**
    * Validates data against the root schema.
    * @param {unknown} data - The data to validate
    * @returns {boolean} True if valid, false otherwise
@@ -834,7 +858,8 @@ export class ValidationObject {
               root.pushDynamicAnchorValidator(anchorName, refValidator);
             }
             try {
-              return refValidator(data, dataPath, dataRoot) && siblingValidator(data, dataPath, dataRoot);
+              return combineRefAndSiblings(refValidator, siblingValidator, self.options.skipErrors,
+              data, dataPath, dataRoot);
             } finally {
               // Pop in reverse order
               if (hasRecAnchor || dynAnchorName) {
@@ -878,7 +903,8 @@ export class ValidationObject {
         // unevaluated* keywords must see annotations produced by the $ref
         // target, so the wrapper goes around the combined validator.
         return wrapUnevaluated(self, schema, function validateRefWithSiblings(data, dataPath, dataRoot) {
-          return refValidator(data, dataPath, dataRoot) && siblingValidator(data, dataPath, dataRoot);
+          return combineRefAndSiblings(refValidator, siblingValidator, self.options.skipErrors,
+              data, dataPath, dataRoot);
         });
       }
       
@@ -937,7 +963,8 @@ export class ValidationObject {
           try {
             // If there are sibling validators (draft 2019-09+), combine them with the ref validator
             if (boundSiblingValidator) {
-              return refValidator(data, dataPath, dataRoot) && boundSiblingValidator(data, dataPath, dataRoot);
+              return combineRefAndSiblings(refValidator, boundSiblingValidator,
+                self.options.skipErrors, data, dataPath, dataRoot);
             }
             return refValidator(data, dataPath, dataRoot);
           } finally {
@@ -947,7 +974,8 @@ export class ValidationObject {
 
         // If there are sibling validators (draft 2019-09+), combine them with the ref validator
         if (boundSiblingValidator) {
-          return refValidator(data, dataPath, dataRoot) && boundSiblingValidator(data, dataPath, dataRoot);
+          return combineRefAndSiblings(refValidator, boundSiblingValidator,
+                self.options.skipErrors, data, dataPath, dataRoot);
         }
 
         // Cache the validator directly (skipping this resolver) only when
@@ -1147,6 +1175,26 @@ export class ValidationObject {
 
     return child.#validator;
   }
+}
+
+/**
+ * Run a `$ref` and its sibling keywords, which are INDEPENDENT of each other:
+ * a document can fail the referenced schema and its siblings for unrelated
+ * reasons, and reporting only the first is the same short-circuit that used to
+ * hide half of every issue list. Boolean mode keeps the early exit.
+ * @param {Function} refValidator
+ * @param {Function} siblingValidator
+ * @param {boolean} stopAtFirst
+ * @param {any} data
+ * @param {string} dataPath
+ * @param {any} dataRoot
+ * @returns {boolean}
+ */
+function combineRefAndSiblings(refValidator, siblingValidator, stopAtFirst, data, dataPath, dataRoot) {
+  if (stopAtFirst)
+    return refValidator(data, dataPath, dataRoot) && siblingValidator(data, dataPath, dataRoot);
+  const target = refValidator(data, dataPath, dataRoot);
+  return siblingValidator(data, dataPath, dataRoot) && target;
 }
 
 /**

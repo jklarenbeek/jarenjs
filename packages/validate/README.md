@@ -429,6 +429,22 @@ collecting.compile(contract)({ slug: '!' }).errors;
 // required at '', minLength at '/slug', pattern at '/slug'  — three issues
 ```
 
+**A speculative applicator never reports.** An `anyOf`/`oneOf` branch that was
+not the one that matched, the subschema of a `not`, an `if` condition, and a
+`contains` candidate that is not the match are all probes — the document was
+never required to satisfy them, so their failures are rolled back rather than
+handed to your caller. What survives is what genuinely explains the failure:
+if *no* `anyOf` branch matched, every branch's errors are kept, because then
+they are the reason.
+
+```javascript
+collecting.compile({
+  type: 'string', minLength: 5,
+  anyOf: [{ type: 'number' }, { type: 'string' }],
+})('x').errors;
+// [minLength]  — not a type error from the number branch that was never required
+```
+
 A `required` error points at the **owning object**, not at the absent member
 (there is no location for something that is not there); the missing name is in
 `params.missingProperty`, which is what an adapter appends to build a

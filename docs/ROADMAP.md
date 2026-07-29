@@ -130,6 +130,13 @@ delete it or fix it.
   main remaining validator performance workstream.
 - [ ] **Optional codegen backend for nano-schemas** — closure-compiled validators bottom out around 5× Ajv's generated code on trivial schemas (a two-branch `allOf` runs ~90 ns vs ~15 ns), which is the price of the CSP-safe no-`new Function` rule. Mirroring the query engine's codegen-backend idea — same compile pipeline, a codegen emitter where CSP allows, closures as the default — would close the floor without giving up the guarantee.
 - [ ] **`additionalProperties: false` instancePath divergence from ajv** — Jaren points the error at the offending member (`/nested/extra`) where ajv points at the parent object; deliberate and spec-truer, tracked so consumers diffing against ajv output know it is intentional.
+- [ ] **Collected errors inside `allOf` branches** — `allOf` is not
+  speculative (every branch must hold), so its branch errors are kept, which
+  is right. What is still coarse is that a branch failing deep inside reports
+  both its own fault and the `allOf` wrapper error; a consumer wanting one
+  issue per fault has to filter the wrapper. The applicator-level rollback
+  shape added for `anyOf`/`oneOf`/`not`/`if`/`contains` is the tool if this
+  ever needs finer treatment.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
 - [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.

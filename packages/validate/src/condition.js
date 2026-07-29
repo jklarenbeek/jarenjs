@@ -56,9 +56,13 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
     return function validateConditionTracked(data, dataPath, dataRoot, dataKey) {
       const log = root.evalLog;
       const mark = log.mark();
-      if (validateIf(data, dataPath, dataRoot, dataKey)) {
-        return validateThen(data, dataPath, dataRoot, dataKey);
-      }
+      // `if` decides WHICH branch applies; the document was never required to
+      // satisfy it, so its complaints are discarded either way. Only `then`
+      // and `else` produce errors a caller should see.
+      const errors = root.errorMark();
+      const taken = validateIf(data, dataPath, dataRoot, dataKey);
+      root.rollbackErrors(errors);
+      if (taken) return validateThen(data, dataPath, dataRoot, dataKey);
       log.rollback(mark);
       return validateElse(data, dataPath, dataRoot, dataKey);
     };
@@ -67,10 +71,10 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
   // If neither then nor else has dynamic anchors, use simple validation
   if (!thenHasAnchor && !elseHasAnchor) {
     return function validateCondition(data, dataRoot) {
-      if (validateIf(data))
-        return validateThen(data, dataRoot);
-      else
-        return validateElse(data, dataRoot);
+      const errors = root.errorMark();
+      const taken = validateIf(data);
+      root.rollbackErrors(errors);
+      return taken ? validateThen(data, dataRoot) : validateElse(data, dataRoot);
     };
   }
   
@@ -78,7 +82,10 @@ export function compileConditionSchema(schemaObj, jsonSchema) {
   const track = root.usesUnevaluated;
   return function validateConditionWithDynamicAnchors(data, dataPath, dataRoot) {
     const mark = track ? root.evalLog.mark() : 0;
-    if (validateIf(data)) {
+    const conditionErrors = root.errorMark();
+    const taken = validateIf(data);
+    root.rollbackErrors(conditionErrors);
+    if (taken) {
       // Validate then branch with dynamic anchor registration
       if (thenHasAnchor && tmpThen) {
         const anchorName = thenDynAnchorName || '';

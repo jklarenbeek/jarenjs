@@ -1117,3 +1117,87 @@ describe('BigInt bounds collect independently', () => {
     assert.strictEqual(new JarenValidator().compile({ minimum: 10n, multipleOf: 3n })(7n), false);
   });
 });
+
+describe('Speculative applicators do not leak their probe errors', () => {
+  // An `anyOf` branch, an `if` condition, the subschema of a `not` and a
+  // `contains` candidate are all SPECULATIVE: the document was never required
+  // to satisfy them, so their failures are not the caller's business.
+  //
+  // These assertions are deliberately EXACT. An earlier round of tests here
+  // only checked that the expected keywords were present, which is exactly
+  // the shape of test that lets a leak through — the extra errors were there
+  // all along and nothing was looking for them.
+  const collect = new JarenValidator({ collectErrors: true });
+  const keywords = (schema, data) =>
+    collect.compile(schema)(data).errors.map(e => e.keyword).sort();
+
+  const CASES = [
+    ['a matched anyOf discards the branches tried before it',
+      { type: 'string', minLength: 5, anyOf: [{ type: 'number' }, { type: 'string' }] },
+      'x', ['minLength']],
+    ['a matched oneOf discards the others',
+      { type: 'string', minLength: 5, oneOf: [{ type: 'number' }, { type: 'string' }] },
+      'x', ['minLength']],
+    ['a passing not discards its subschema’s complaints',
+      { type: 'string', minLength: 5, not: { type: 'number' } },
+      'x', ['minLength']],
+    ['an if condition never reports, whichever way it goes',
+      { type: 'string', minLength: 5, if: { type: 'number' }, else: { type: 'string' } },
+      'x', ['minLength']],
+    ['a satisfied contains discards the elements that did not match',
+      { type: 'array', minItems: 3, contains: { type: 'string' } },
+      [1, 'ok'], ['minItems']],
+  ];
+
+  for (const [label, schema, data, expected] of CASES) {
+    it(label, () => {
+      assert.deepStrictEqual(keywords(schema, data), expected,
+        'no error may come from a branch or probe that succeeded');
+    });
+  }
+
+  it('keeps the branch errors when nothing matched — they are the explanation', () => {
+    // The rollback must not throw away the reason an anyOf actually failed.
+    const seen = keywords({ anyOf: [{ type: 'number' }, { type: 'boolean' }] }, 'x');
+    assert.ok(seen.includes('anyOf'), `got ${seen}`);
+    assert.ok(seen.filter(k => k === 'type').length === 2,
+      `both failing branches should explain themselves: ${seen}`);
+  });
+
+  it('keeps then/else errors, which are not speculative', () => {
+    assert.deepStrictEqual(keywords({ if: { type: 'string' }, then: { minLength: 9 } }, 'ab'),
+      ['minLength']);
+    assert.deepStrictEqual(keywords({ if: { type: 'number' }, else: { minLength: 9 } }, 'ab'),
+      ['minLength']);
+  });
+
+  it('keeps the contains error when the count genuinely fails', () => {
+    assert.deepStrictEqual(keywords({ type: 'array', contains: { type: 'string' } }, [1, 2]),
+      ['contains']);
+  });
+
+  it('leaves every boolean answer unchanged', () => {
+    const boolean = new JarenValidator();
+    for (const [, schema, data] of CASES)
+      assert.strictEqual(boolean.compile(schema)(data), false, JSON.stringify(schema));
+  });
+});
+
+describe('$ref reports alongside its sibling keywords', () => {
+  it('collects both the referenced failure and the sibling failure', () => {
+    // draft 2019-09+ applies `$ref` and its siblings together, and they fail
+    // for unrelated reasons; reporting only the first hides half the answer.
+    const schema = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      $defs: { S: { type: 'string', minLength: 9 } },
+      $ref: '#/$defs/S',
+      pattern: '^z',
+    };
+    const result = new JarenValidator({ collectErrors: true }).compile(schema)('ab');
+    const seen = result.errors.map(e => e.keyword).sort();
+    assert.deepStrictEqual(seen, ['minLength', 'pattern']);
+    assert.strictEqual(new JarenValidator().compile(schema)('ab'), false);
+    assert.strictEqual(
+      new JarenValidator({ collectErrors: true }).compile(schema)('zabcdefgh').valid, true);
+  });
+});

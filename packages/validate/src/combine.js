@@ -82,6 +82,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
     return function validateAnyOfTracked(data, dataPath, dataRoot, dataKey) {
       if (data === undefined) return true;
       const log = root.evalLog;
+      const errors = root.errorMark();
       let found = false;
       for (let i = 0; i < validators.length; ++i) {
         const mark = log.mark();
@@ -90,15 +91,24 @@ function compileAnyOf(schemaObj, jsonSchema) {
         else
           log.rollback(mark);
       }
+      // Annotation tracking runs every branch, so a match leaves the failed
+      // branches' errors behind unless they are rolled back here too.
+      if (found) root.rollbackErrors(errors);
       return found || addError(data, dataPath);
     };
   }
 
   return function validateAnyOf(data, dataPath, dataRoot, dataKey) {
     if (data !== undefined) {
+      // Every branch tried before a match is a SPECULATIVE probe: the document
+      // was never required to satisfy it. Its errors are kept only if no
+      // branch matched at all, where they are the explanation.
+      const mark = root.errorMark();
       for (let i = 0; i < validators.length; ++i) {
-        const validator = validators[i]; // TODO: how to silence errors of children?
-        if (validator(data, dataPath, dataRoot, dataKey) === true) return true;
+        if (validators[i](data, dataPath, dataRoot, dataKey) === true) {
+          root.rollbackErrors(mark);
+          return true;
+        }
       }
       return addError(data, dataPath);
     }
@@ -133,32 +143,43 @@ function compileOneOf(schemaObj, jsonSchema) {
   if (root.usesUnevaluated) {
     return function validateOneOfTracked(data, dataPath, dataRoot, dataKey) {
       const log = root.evalLog;
+      const errors = root.errorMark();
       let found = false;
       for (let i = 0; i < validators.length; ++i) {
         const mark = log.mark();
         if (validators[i](data, dataPath, dataRoot, dataKey) === true) {
-          if (found === true)
+          if (found === true) {
+            root.rollbackErrors(errors);
             return addError(data, dataPath);
+          }
           found = true;
         }
         else {
           log.rollback(mark);
         }
       }
+      // Non-matching branches were speculative; their complaints survive only
+      // when nothing matched and they are the explanation.
+      if (found) root.rollbackErrors(errors);
       return found || addError(data, dataPath);
     };
   }
 
   return function validateOneOf(data, dataPath, dataRoot, dataKey) {
+    const errors = root.errorMark();
     let found = false;
     for (let i = 0; i < validators.length; ++i) {
-      const validator = validators[i];
-      if (validator(data, dataPath, dataRoot, dataKey) === true) {
-        if (found === true)
+      if (validators[i](data, dataPath, dataRoot, dataKey) === true) {
+        if (found === true) {
+          // Matching twice is the failure; the branches' own errors explain
+          // nothing about it.
+          root.rollbackErrors(errors);
           return addError(data, dataPath);
+        }
         found = true;
       }
     }
+    if (found) root.rollbackErrors(errors);
     return found || addError(data, dataPath);
   };
 }
@@ -180,8 +201,12 @@ function compileNotOf(schemaObj, jsonSchema) {
       if (data === undefined) return true;
       const log = root.evalLog;
       const mark = log.mark();
+      const errors = root.errorMark();
       const valid = validate(data, dataPath, dataRoot, dataKey);
       log.rollback(mark);
+      // A `not` whose subschema FAILS is a `not` that passed, so the
+      // subschema's complaints are never the caller's business either way.
+      root.rollbackErrors(errors);
       return valid === false
         ? true
         : addError(data, dataPath);
@@ -190,7 +215,12 @@ function compileNotOf(schemaObj, jsonSchema) {
 
   return function validateNotOf(data, dataPath, dataRoot, dataKey) {
     if (data === undefined) return true;
-    return validate(data, dataPath, dataRoot, dataKey) === false
+    // The subschema is a probe: its failure is what makes `not` succeed, so
+    // its errors are discarded whichever way the probe went.
+    const errors = root.errorMark();
+    const valid = validate(data, dataPath, dataRoot, dataKey);
+    root.rollbackErrors(errors);
+    return valid === false
       ? true
       : addError(data, dataPath);
   };
