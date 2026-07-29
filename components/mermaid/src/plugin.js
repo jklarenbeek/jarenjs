@@ -11,8 +11,12 @@
  * `render` is pure, synchronous and error-safe: a `mermaid`
  * fence becomes inline SVG with no injected instance and no `innerHTML`,
  * so a Markdown document renders to a full SVG string through SSR with
- * no browser — a capability the old injection wrapper lacked. There is
- * no `hydrate`: the render is already complete.
+ * no browser — a capability the old injection wrapper lacked.
+ *
+ * `hydrate` exists only when a consumer asks for `interactive: true`. The
+ * render is complete without it: hydration adds pan/zoom/touch to an already
+ * finished SVG, so server output is byte-identical either way and a page that
+ * does not opt in never loads the module.
  */
 
 import { diagramToVnode } from './render/index.js';
@@ -34,8 +38,26 @@ export function mermaidPlugin(options = {}) {
     render: (node) => {
       const hash = hashContent(node.value);
       const svg = diagramToVnode(node.value, options);
-      return ['div', { class: 'md-mermaid mermaid-block', key: hash }, svg];
+      const props = { class: 'md-mermaid mermaid-block', key: hash };
+      // The hydrate marker is what the md component looks for; emitting it
+      // only when interactive keeps non-interactive output unchanged.
+      if (options.interactive === true) {
+        props['data-md-hydrate'] = 'mermaid';
+        props['data-md-hash'] = hash;
+      }
+      return ['div', props, svg];
     },
+    ...(options.interactive === true
+      ? {
+        /**
+         * @param {any} el the rendered block element
+         */
+        hydrate: async (el) => {
+          const { attachInteractiveDiagram } = await import('./interactive.js');
+          attachInteractiveDiagram(el);
+        },
+      }
+      : {}),
   });
 }
 

@@ -19,7 +19,9 @@ import { RAW, REPO } from '../content/packages.js';
 
 // theme 'host': diagram cssVars reference the site tokens, so memoized
 // SVGs follow light/dark live (docs/DESIGN.md §7)
-export const md = createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host' })] });
+export const md = createMdComponent({
+  plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host', interactive: true })],
+});
 
 //#region README-relative links
 // A fetched README is written for the repository, so its links are

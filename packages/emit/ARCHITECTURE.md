@@ -2,9 +2,19 @@
 
 Two stages, one published contract between them.
 
-```
-schema ──▶ model.js ──▶ TYPE MODEL ──▶ typescript.js / markdown.js ──▶ artifact
-             stage 1      (format)              stage 2
+```mermaid
+flowchart LR
+    A["schema"] --> B["model.js"]
+    B --> C["TYPE MODEL"]
+    C --> D["typescript.js<br/>markdown.js"]
+    D --> E["artifact"]
+    N1["stage 1: the flattening<br/>no template can do"]
+    N2["a published format,<br/>not private state"]
+    N3["stage 2: one stylesheet<br/>per target language"]
+    B -.- N1
+    C -.- N2
+    D -.- N3
+    class N1,N2,N3 note
 ```
 
 ## Stage 1 — `model.js`

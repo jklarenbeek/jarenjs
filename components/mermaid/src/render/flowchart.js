@@ -11,6 +11,8 @@ import {
   svgRoot, group, rect, path, circle, polygon, textAt, textLines, num,
 } from '@jarenjs/view/helpers';
 
+import { shapeAttributes, shapeStyle, textColor } from '../styles.js';
+
 /**
  * @param {any} scene PositionedDiagram (flowchart)
  * @param {{ tokens: Record<string,string>, cssVars: Record<string,string> }} theme
@@ -60,7 +62,11 @@ function renderNode(node, t, fontSize) {
   const shapeEl = shapeVnode(node, t);
   const cx = node.x + node.w / 2;
   const cy = node.y + node.h / 2;
-  const label = textLines(cx, cy, node.label.split('\n'), fontSize, { class: 'mm-label', fill: t.nodeText });
+  const color = textColor(node.styles, t);
+  const label = textLines(cx, cy, node.label.split('\n'), fontSize,
+    color === null
+      ? { class: 'mm-label', fill: t.nodeText }
+      : { class: 'mm-label', fill: color, style: `fill:${color}` });
   return group({ class: 'mm-node', key: 'n-' + node.id }, [shapeEl, label]);
 }
 
@@ -72,7 +78,17 @@ function shapeVnode(node, t) {
   const { x, y, w, h } = node;
   const fill = t.nodeFill;
   const stroke = t.nodeStroke;
-  const common = { class: 'mm-node-shape', fill, stroke, 'stroke-width': 1 };
+  // Author styles (classDef / class / style) win over the theme defaults;
+  // spreading them last is what makes `class X note` repaint the box.
+  // Presentation attributes carry the theme (so standalone SSR looks right
+  // with no stylesheet); the author's own styles go inline, which is what
+  // outranks the stylesheet's `.mm-node-shape` rule.
+  const authored = shapeStyle(node.styles, t);
+  const common = {
+    class: 'mm-node-shape', fill, stroke, 'stroke-width': 1,
+    ...shapeAttributes(node.styles, t),
+    ...(authored === null ? {} : { style: authored }),
+  };
   switch (node.shape) {
     case 'round':
       return rect(x, y, w, h, { rx: 8, ...common });

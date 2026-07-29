@@ -141,6 +141,63 @@ honest "not yet laid out" placeholder: mindmap, gitGraph, journey,
 timeline, quadrantChart, requirement. The benchmark's coverage scorecard reports this
 without hiding gaps.
 
+
+## Styling, notes and interaction
+
+**`classDef` / `class` / `style` now paint.** The parser always recorded them;
+nothing consumed them, so a styled node rendered exactly like an unstyled one.
+They resolve per node in Mermaid's own precedence — classDef in application
+order, then a per-node `style` — and reach the shape as SVG attributes:
+
+```mermaid
+flowchart LR
+  A["input"] --> B["result"]
+  classDef good fill:#dcfce7,stroke:#16a34a
+  class B good
+```
+
+**`note` is a built-in class.** Mermaid has no flowchart note, and a diagram
+that cannot annotate a node loses exactly what an ASCII drawing used to carry
+in a margin comment. Rather than invent syntax, apply the standard `class`
+statement and the node is themed from the same `note*` tokens the sequence
+renderer uses — dashed border, note fill, following light/dark:
+
+```mermaid
+flowchart LR
+  K["@jarenjs/core"] --> E["engine"]
+  N["pure kernel: no I/O, deterministic"]
+  K -.- N
+  class N note
+```
+
+A dotted link to a note-classed node reads as an annotation, and the document
+stays valid Mermaid that any other tool can still parse — no dialect, no
+compatibility cost.
+
+**Pan, zoom and touch are opt-in.** `mermaidPlugin({ interactive: true })`
+adds a `hydrate` that attaches to the finished SVG; the render is unchanged
+and server output is byte-identical either way, so a page that does not ask
+for it never loads the module.
+
+```javascript
+createMdComponent({ plugins: [mermaidPlugin({ theme: 'host', interactive: true })] });
+```
+
+The interaction rules are chosen so a figure never fights the page it sits in:
+
+| gesture | behaviour |
+|---|---|
+| plain wheel | **scrolls the page** — hijacking it is how embedded viewers ruin a document |
+| ctrl/⌘ + wheel | zooms toward the pointer |
+| one-finger drag | pans **only once zoomed in**; at rest the swipe is the page's, and `touch-action` is switched to say so |
+| two fingers | always pinch-zooms |
+| double-click / tap | zooms in, or resets when already zoomed |
+| keyboard | `+` `-` `0` and arrows, on a focusable figure with an aria-label |
+
+Everything runs on the SVG's `viewBox` — four numbers changing. Nothing
+re-renders, nothing re-parses, and the view is clamped so it can never be
+panned off its own canvas.
+
 Pie rendering delegates to [`@jarenjs/charts`](../charts) (the pie
 engine's single home) — the emitted SVG is unchanged; mermaid passes
 its class names, palette and theme through the render options.

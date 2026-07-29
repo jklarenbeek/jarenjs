@@ -94,18 +94,75 @@
 /* --- mermaid placeholder / upgrade (PLUGINS.md §6.1) --------------- */
 
 .md-mermaid {
-  margin: 0.8em 0;
+  /* A diagram is a figure, not a run of text: giving it a surface and a
+     frame separates it from the prose around it and stops a wide diagram
+     from reading as part of the paragraph above. */
+  margin: 1.2em 0;
+  padding: 1rem;
   text-align: center;
+  background: var(--md-figure-bg, #fbfcfe);
+  border: 1px solid var(--md-rule, #d0d4dc);
+  border-radius: 10px;
+  /* A diagram wider than the column scrolls rather than shrinking to
+     illegibility — the same rule the site applies to tables. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 .md-mermaid .md-mermaid-src {
   text-align: left;
   color: var(--md-muted, #5b6472);
 }
-.md-mermaid svg { max-width: 100%; }
+.md-mermaid svg { max-width: 100%; height: auto; }
+
+/* --- the optional interactive viewer ------------------------------- */
+/* Only present once `mermaidPlugin({ interactive: true })` has hydrated:
+   the server-rendered figure carries none of this. */
+.md-mermaid.mm-interactive {
+  position: relative;
+  overflow: hidden;          /* the viewBox does the panning now */
+  cursor: grab;
+}
+.md-mermaid.mm-interactive:focus-visible {
+  outline: 2px solid var(--md-link, #2563eb);
+  outline-offset: 2px;
+}
+.md-mermaid.mm-interactive:active { cursor: grabbing; }
+.md-mermaid .mm-controls {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+.md-mermaid:hover .mm-controls,
+.md-mermaid:focus-within .mm-controls { opacity: 1; }
+.md-mermaid .mm-control {
+  /* 32px is below the 44px touch target the site requires elsewhere, so
+     these are a convenience: every action they offer is also on the
+     keyboard and in the pinch gesture. */
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--md-muted, #5b6472);
+  background: var(--md-figure-bg, #fbfcfe);
+  border: 1px solid var(--md-rule, #d0d4dc);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.md-mermaid .mm-control:hover { color: var(--md-link, #2563eb); }
+
+@media (prefers-reduced-motion: reduce) {
+  .md-mermaid .mm-controls { transition: none; }
+}
 
 /* --- dark scheme --------------------------------------------------- */
 
 .dark .md, .md.dark {
+  --md-figure-bg: #171b22;
   --md-rule: #39414e;
   --md-muted: #9aa4b2;
   --md-link: #7aa2ff;

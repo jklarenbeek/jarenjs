@@ -56,18 +56,21 @@ schema-to-TypeScript tool structurally cannot do.
 
 One schema goes two ways, and the two answers have to correspond:
 
-```
-                    ┌─────────────────────┐
-                    │     JSON Schema     │
-                    └────┬───────────┬────┘
-        @jarenjs/emit    │           │    @jarenjs/validate
-                         ▼           ▼
-                 TypeScript type   compiled validator
-                         │           │
-                         └─────┬─────┘
-                               ▼
-                    the SAME instances, and the
-                    two answers must correspond
+```mermaid
+flowchart TD
+    S["JSON Schema"]
+    T["TypeScript type"]
+    V["compiled validator"]
+    C["the SAME instances —<br/>and the two answers must correspond"]
+    S -->|emit| T
+    S -->|validate| V
+    T --> C
+    V --> C
+    N["owning both sides is what<br/>makes this testable"]
+    C -.- N
+    classDef answer fill:#dcfce7,stroke:#16a34a
+    class C answer
+    class N note
 ```
 
 A generator that is merely *plausible* is worthless. It will emit a type that

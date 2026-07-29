@@ -155,12 +155,34 @@ export function parseFlowchart(lines, lineOffset, direction) {
 
 /**
  * Split a line on top-level `;` (rarely used, but valid).
+ *
+ * Only a `;` OUTSIDE a quoted label separates statements. A label is text —
+ * `"fetch is injected; streaming via SSE"` is one node, not two statements —
+ * and splitting inside it produced an unterminated-shape error on a document
+ * that is perfectly good Mermaid.
  * @param {string} line
  * @returns {string[]}
  */
 function splitStatements(line) {
   if (line.indexOf(';') === -1) return [line];
-  return line.split(';').map((s) => s.trim()).filter(Boolean);
+  const out = [];
+  let start = 0;
+  let quote = '';
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote !== '') {
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === '\'') { quote = ch; continue; }
+    if (ch !== ';') continue;
+    const part = line.slice(start, i).trim();
+    if (part !== '') out.push(part);
+    start = i + 1;
+  }
+  const tail = line.slice(start).trim();
+  if (tail !== '') out.push(tail);
+  return out;
 }
 
 /**
@@ -178,7 +200,7 @@ function parseSubgraphHeader(rest) {
     return { id: id || label, label };
   }
   if (rest.startsWith('"') && rest.endsWith('"')) {
-    const label = rest.slice(1, -1);
+    const label = stripQuotes(rest.slice(1, -1));
     return { id: label, label };
   }
   return { id: rest, label: rest };
@@ -374,10 +396,18 @@ function skipSpace(s, pos) {
  * @param {string} s @returns {string}
  */
 export function stripQuotes(s) {
-  if (s.length >= 2) {
-    const a = s.charCodeAt(0);
-    const b = s.charCodeAt(s.length - 1);
-    if ((a === 0x22 && b === 0x22) || (a === 0x27 && b === 0x27)) return s.slice(1, -1);
+  let out = s;
+  if (out.length >= 2) {
+    const a = out.charCodeAt(0);
+    const b = out.charCodeAt(out.length - 1);
+    if ((a === 0x22 && b === 0x22) || (a === 0x27 && b === 0x27)) out = out.slice(1, -1);
   }
-  return s;
+  // `<br/>` is Mermaid's line break inside a label. Normalizing it to a real
+  // newline here — the one place every label passes through — is what lets
+  // both the text measurement and the renderer treat it as one, instead of
+  // printing the tag and sizing the box for a single long line.
+  return RE_BR.test(out) ? out.replace(RE_BR, '\n') : out;
 }
+
+/** `<br>`, `<br/>`, `<br />` — the spellings Mermaid accepts. */
+const RE_BR = /<br\s*\/?>/gi;

@@ -7,16 +7,17 @@ share. Tools are declared with JSON Schema and validated by Jaren itself before 
 the suite guarding its own tools — and a bounded agent loop keeps even weak local models
 on the rails.
 
-```
-┌────────────────────────────────────────────────────────────┐
-│ createAgent  — bounded tool loop, transcript in/out        │
-│   ├── createChatClient — one client: OpenRouter/Ollama/    │
-│   │     LM Studio/any OpenAI-compatible URL (fetch is      │
-│   │     injected, streaming via createSseDecoder)          │
-│   └── createToolbox    — JSON-Schema tools, Jaren-checked  │
-│         └── registerModelContext — the same tools over     │
-│               WebMCP (navigator.modelContext)              │
-└────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Agent["createAgent — bounded tool loop, transcript in/out"]
+        C["createChatClient<br/>OpenRouter / Ollama / LM Studio /<br/>any OpenAI-compatible URL"]
+        T["createToolbox<br/>JSON-Schema tools, Jaren-checked"]
+        M["registerModelContext<br/>the same tools over WebMCP"]
+        T --> M
+    end
+    N["fetch is injected;<br/>streaming via createSseDecoder"]
+    C -.- N
+    class N note
 ```
 
 ## Why browser-side?

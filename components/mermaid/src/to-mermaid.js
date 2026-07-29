@@ -79,7 +79,9 @@ function printFlowchart(ast) {
 
   // 2. Subgraphs: reference members by bare id (membership only).
   for (const sg of ast.subgraphs) {
-    out.push(sg.label && sg.label !== '' ? `subgraph ${sg.id} [${sg.label}]` : `subgraph ${sg.id}`);
+    out.push(sg.label && sg.label !== ''
+      ? `subgraph ${sg.id} [${sg.label.replace(/\n/g, '<br/>')}]`
+      : `subgraph ${sg.id}`);
     if (sg.direction) out.push('  direction ' + sg.direction);
     for (const id of sg.nodes) out.push('  ' + id);
     out.push('end');
@@ -88,7 +90,7 @@ function printFlowchart(ast) {
   // 3. Edges in AST order.
   for (const e of ast.edges) {
     const op = edgeOp(e);
-    const label = e.label != null ? `|${e.label}|` : '';
+    const label = e.label != null ? `|${e.label.replace(/\n/g, '<br/>')}|` : '';
     out.push(`${e.from} ${op}${label} ${e.to}`);
   }
 
@@ -115,7 +117,11 @@ function nodeDecl(node) {
  * @returns {string}
  */
 function wrapShape(shape, label) {
-  const l = RE_NEEDS_QUOTE.test(label) ? '"' + label.replace(/"/g, '') + '"' : label;
+  // The parser turns `<br/>` into a newline; printing that newline raw would
+  // end the statement. Emitting the tag back is what makes a transformed
+  // diagram round-trip to source that still parses.
+  const text = label.replace(/\n/g, '<br/>');
+  const l = RE_NEEDS_QUOTE.test(text) ? '"' + text.replace(/"/g, '') + '"' : text;
   switch (shape) {
     case 'round': return `(${l})`;
     case 'stadium': return `([${l}])`;

@@ -167,17 +167,30 @@ function validate(data) {
 **Entry Point**: `JarenValidator.addSchema(schema, key)`
 
 **Flow**:
-```
-addSchema(schema, key)
-  ├── Store schema under key (and alt key with/without #)
-  └── #traverseAndStoreIds(baseUri, schema)
-        └── storeSchemaIdsInMap(schemasMap, baseUri, schema)
-              ├── Store root schema under baseUri
-              └── BFS traverse schema structure:
-                    ├── On $id: Store subschema, update baseUri
-                    ├── On $anchor: Store anchor
-                    ├── On $ref: Store null placeholder (mark as ref)
-                    └── On schema objects/arrays: Continue traversal
+```mermaid
+flowchart TD
+    A["addSchema(schema, key)"]
+    B["store schema under key<br/>(and the alt key with/without #)"]
+    C["#traverseAndStoreIds(baseUri, schema)"]
+    D["storeSchemaIdsInMap(schemasMap, baseUri, schema)"]
+    E["store the root schema under baseUri"]
+    F{"BFS over the schema structure"}
+    G["$id — store subschema, update baseUri"]
+    H["$anchor — store anchor"]
+    I["$ref — store a null placeholder, marked as a ref"]
+    J["objects / arrays — keep traversing"]
+    A --> B
+    A --> C
+    C --> D
+    D --> E
+    D --> F
+    F --> G
+    F --> H
+    F --> I
+    F --> J
+    N["the placeholder is what lets refs<br/>be added in any order"]
+    I -.- N
+    class N note
 ```
 
 **Key Data Structure**: `#schemas Map<string, schema|null>`

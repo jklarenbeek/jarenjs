@@ -40,8 +40,14 @@ Dependency direction: `basic.js` and `canonical.js` stand alone; `pointer.js` sh
 
 All compilers in this package have the same shape:
 
-```
-source ──[stage 1: parse / normalize]──► frozen AST ──[stage 2: compile]──► closure tree ──► run(data)
+```mermaid
+flowchart LR
+    S["source"] -->|"stage 1<br/>parse / normalize"| A["frozen AST"]
+    A -->|"stage 2<br/>compile"| C["closure tree"]
+    C --> R["run(data)"]
+    N["every decidable decision<br/>is made before run()"]
+    C -.- N
+    class N note
 ```
 
 Stage 1 owns *all* static errors: the JSONPath parser is a single-pass, character-level recursive-descent parser (the `fail(message, position)` idiom, `JSONPathSyntaxError`), and the query normalizer raises every `JQ0xxx` compile error with a `docPath`. Stage 2 never re-checks structure; it specializes: selector kinds, slice bound arithmetic, comparison operators, literal regexes, operator arities and cardinality fast paths are all resolved before the first document is seen. A compiled query closes over nothing mutable and is reusable across documents and calls.

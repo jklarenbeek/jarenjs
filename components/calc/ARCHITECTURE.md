@@ -2,16 +2,20 @@
 
 Two layers, a one-way dependency arrow, and a strict purity boundary.
 
-```
-              @jarenjs/core (math · finance · convert)   ← pure kernel, no I/O
-                        ▲
-                        │ imports
-   engine  src/*  ──────┘  parseExpression ⇄ toExpression, compileExpr,
-     │                     plot2d/plot3d → pure-vnode SVG (via @jarenjs/view)
-     │ imports (one way)
-     ▼
-   component  src/component/* ── @jarenjs/app + @jarenjs/forms glue,
-                                 the JSLT view, the impure rates fetch
+```mermaid
+flowchart BT
+    K["@jarenjs/core<br/>math · finance · convert"]
+    E["engine — src/*<br/>parseExpression ⇄ toExpression, compileExpr,<br/>plot2d / plot3d → pure-vnode SVG"]
+    C["component — src/component/*<br/>@jarenjs/app + @jarenjs/forms glue,<br/>the JSLT view, the impure rates fetch"]
+    E -->|imports| K
+    C -->|"imports (one way)"| E
+    NK["pure kernel: no I/O, no DOM,<br/>deterministic"]
+    NC["the only impure layer"]
+    K -.- NK
+    C -.- NC
+    classDef pure fill:#dcfce7,stroke:#16a34a
+    class K pure
+    class NK,NC note
 ```
 
 ## The purity boundary (the design axis)

@@ -196,9 +196,18 @@ delete it or fix it.
 
 - [ ] **`foreignObject` / `htmlLabels:true`** — labels are SVG `<text>` in v1 because `@jarenjs/view` has no `foreignObject`/`setAttributeNS`; revisit alongside VIEW-FORMAT §6/§8 for HTML labels and pixel-closer parity.
 - [ ] **Full layout for the secondary types** — class/ER/state/gantt render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
-- [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight edges; orthogonal edge routing, subgraph clustering and crossing reduction are the next levers.
+- [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
+  edges; orthogonal edge routing, subgraph clustering and crossing reduction
+  are the next levers. **Edge labels do not avoid each other**: two labels on
+  edges leaving the same node overlap, and the later one's background covers
+  the earlier — visible with any pair of long labels, and the reason the
+  bundled diagrams keep theirs short. A label-collision pass belongs with the
+  routing work, since both need the same edge geometry.
 - [ ] **More domain projections** — the flagship `stateDiagram ⇄ @jarenjs/app` workflow ships; flowchart⇄DAG executor, sequence⇄orchestration/saga, ER⇄JSON-Schema+`@jarenjs/forms` are follow-ups on the same geometry-free-AST-as-model idea.
-- [ ] **Interactive hydration** — pan/zoom/tooltips as an optional client-only plugin (`hydrate` is a no-op today because the render is complete).
+- [ ] **Diagram tooltips** — pan/zoom/touch ship as the opt-in
+  `mermaidPlugin({ interactive: true })` hydrate; per-node tooltips are the
+  remaining half, and they need a hover/focus target the pure render does not
+  currently mark.
 - [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
 
 ## @jarenjs/charts

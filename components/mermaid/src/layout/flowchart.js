@@ -10,6 +10,8 @@
 import { measureText } from '@jarenjs/view/helpers';
 import { coord as round } from '../utils.js';
 
+import { resolveNodeStyles } from '../styles.js';
+
 const FONT_SIZE = 14;
 const PAD_X = 14;
 const PAD_Y = 9;
@@ -26,6 +28,7 @@ const SUBGRAPH_LABEL_H = 22;
  * @returns {any} PositionedDiagram
  */
 export function layoutFlowchart(ast) {
+  const nodeStyles = resolveNodeStyles(ast);
   const dir = ast.direction || 'TB';
   const horizontal = dir === 'LR' || dir === 'RL';
 
@@ -132,7 +135,12 @@ export function layoutFlowchart(ast) {
   // 7. Positioned nodes.
   const nodes = ast.nodes.map((node) => {
     const b = boxes.get(node.id);
-    return { id: node.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: node.shape, label: node.label };
+    const styles = nodeStyles.get(node.id);
+    const box = { id: node.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: node.shape, label: node.label };
+    // Carried on the positioned node so the scene stays self-describing: a
+    // renderer never has to reach back into the AST to know how to paint.
+    if (styles !== undefined) box.styles = styles;
+    return box;
   });
 
   // 8. Edges: straight, clipped to node borders.

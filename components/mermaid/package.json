@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/mermaid",
   "private": false,
-  "version": "0.22.19",
+  "version": "0.22.20",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -14,6 +14,14 @@
     "./component": {
       "types": "./dist/types/component/index.d.ts",
       "default": "./src/component/index.js"
+    },
+    "./styles": {
+      "types": "./dist/types/styles.d.ts",
+      "default": "./src/styles.js"
+    },
+    "./interactive": {
+      "types": "./dist/types/interactive.d.ts",
+      "default": "./src/interactive.js"
     },
     "./plugin": {
       "types": "./dist/types/plugin.d.ts",
@@ -69,8 +77,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/charts": "^0.22.19",
-    "@jarenjs/core": "^0.22.19",
-    "@jarenjs/view": "^0.22.19"
+    "@jarenjs/charts": "^0.22.20",
+    "@jarenjs/core": "^0.22.20",
+    "@jarenjs/view": "^0.22.20"
   }
 }

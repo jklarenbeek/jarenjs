@@ -56,14 +56,15 @@ The package follows the repository's one philosophy — **parse and
 decide everything once at compile time, then run a specialized
 closure** — applied to a text format instead of a JSON one:
 
-```
-source text ──parse──▶ MdDocument (plain JSON AST)
-                         │
-        ┌────────────────┼──────────────────┐
-        ▼                ▼                  ▼
-   toMarkdown()      mdToVnode()        JSLT / query
-   (canonical         (view vnodes,     (the AST is an
-    round-trip)        hash keys)        ordinary document)
+```mermaid
+flowchart TD
+    S["source text"] -->|parse| D["MdDocument<br/>(plain JSON AST)"]
+    D --> M["toMarkdown()<br/>canonical round-trip"]
+    D --> V["mdToVnode()<br/>view vnodes, hash keys"]
+    D --> Q["JSLT / query"]
+    N["everything right of the parse is a<br/>compiled projection, cached per document"]
+    D -.- N
+    class N note
 ```
 
 Everything right of the parse is a compiled projection: dispatch tables

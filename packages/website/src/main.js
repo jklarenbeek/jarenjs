@@ -7,6 +7,7 @@ import '@jarenjs/mermaid/styles/mermaid.css';
 import '@jarenjs/calc/styles/calc.css';
 import '@jarenjs/charts/styles/charts.css';
 import { createSiteApp } from './app/createSiteApp.js';
+import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';
 
 const BASE = import.meta.env.BASE_URL;
@@ -42,8 +43,16 @@ const theme = stored === 'dark' || stored === 'light'
   : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 document.documentElement.classList.toggle('dark', theme === 'dark');
 
+// Diagrams render complete; hydration only ADDS pan/zoom to them, so it runs
+// after the DOM settles rather than as part of any frame. `md.hydrate` is
+// idempotent — it skips an element whose content hash it has already wired —
+// so re-running it on every mutation is cheap and needs no bookkeeping here.
+const appNode = document.getElementById('app');
+const hydrateDiagrams = () => md.hydrate(appNode);
+new MutationObserver(hydrateDiagrams).observe(appNode, { childList: true, subtree: true });
+
 createSiteApp({
-  node: document.getElementById('app'),
+  node: appNode,
   document,
   initialTheme: theme,
   fetchJson: (name) =>
