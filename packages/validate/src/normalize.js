@@ -60,10 +60,10 @@ const RE_JSON_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/;
  * these string fields, leave those alone" — without the option becoming a
  * blunt instrument and without any runtime cost.
  * @typedef {object} NormalizeOptions
- * @property {boolean|((schemaNode: object) => boolean)} [useDefaults=false] - Materialize `default` for absent object properties, recursively
+ * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [useDefaults=false] - Materialize `default` for absent object properties, recursively
  * @property {boolean|'all'} [removeAdditional=false] - Strip unknown properties: `true` only where `additionalProperties: false`, `'all'` wherever an object shape is declared
- * @property {boolean|((schemaNode: object) => boolean)} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
- * @property {boolean|((schemaNode: object) => boolean)} [trimStrings=false] - Trim leading/trailing whitespace from strings, before coercion
+ * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
+ * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [trimStrings=false] - Trim leading/trailing whitespace from strings, before coercion
  */
 
 /**
@@ -109,17 +109,60 @@ function coerceToType(value, type) {
 }
 
 /**
- * Resolve a same-document `$ref` (`#`, or `#/` followed by a JSON Pointer)
- * to the schema it addresses. Refs into other documents are not followed:
- * a normalizer compiles one schema, and reaching a registered sibling would
- * mean owning the whole resolution scope that `compile` owns.
+ * Collect the `$anchor` declarations of one schema document: a map from
+ * anchor name to the schema node that declares it. Exported because
+ * `@jarenjs/emit` resolves the same references when it derives types, and two
+ * walks with different scope rules would make a generated type disagree with
+ * this normalizer — the one defect class that package must not have.
+ *
+ * The scope is the same-document scope the rest of this module uses: a
+ * subtree that declares its own `$id` is an embedded resource with its own
+ * anchor scope, so it is not descended. First declaration wins, which keeps
+ * the map deterministic for a document that (invalidly) repeats a name.
+ * @param {object|boolean} root - The root schema of the document
+ * @returns {Map<string, object>} anchor name -> schema node
+ */
+export function collectSameDocumentAnchors(root) {
+  /** @type {Map<string, object>} */
+  const anchors = new Map();
+  if (!isJsonObject(root)) return anchors;
+  const seen = new Set();
+  /** @param {any} node @param {boolean} isRoot */
+  const walk = (node, isRoot) => {
+    if (!isJsonContainer(node) || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) walk(node[i], false);
+      return;
+    }
+    if (!isRoot && typeof node.$id === 'string') return;
+    if (typeof node.$anchor === 'string' && !anchors.has(node.$anchor))
+      anchors.set(node.$anchor, node);
+    const keys = Object.getOwnPropertyNames(node);
+    for (let i = 0; i < keys.length; i++) walk(node[keys[i]], false);
+  };
+  walk(root, true);
+  return anchors;
+}
+
+/**
+ * Resolve a same-document `$ref` — `#`, `#/` followed by a JSON Pointer, or
+ * `#name` for a plain `$anchor` — to the schema it addresses. Refs into other
+ * documents are not followed: a normalizer compiles one schema, and reaching
+ * a registered sibling would mean owning the whole resolution scope that
+ * `compile` owns. Exported for `@jarenjs/emit`, which must resolve references
+ * with exactly these rules when it derives the accepted/normalized variants.
  * @param {string} ref - The reference
  * @param {object|boolean} root - The root schema being compiled
+ * @param {Map<string, object>} [anchors] - The document's anchor map, from
+ *   {@link collectSameDocumentAnchors}; omit to skip anchor resolution
  * @returns {object|boolean|undefined} The addressed schema, or undefined
  */
-function resolveLocalRef(ref, root) {
+export function resolveSameDocumentRef(ref, root, anchors) {
   if (ref === '#') return root;
-  if (!ref.startsWith('#/')) return undefined;
+  if (!ref.startsWith('#')) return undefined;
+  if (!ref.startsWith('#/'))
+    return anchors === undefined ? undefined : anchors.get(ref.slice(1));
   let node = root;
   let tokens;
   try {
@@ -144,7 +187,7 @@ function resolveLocalRef(ref, root) {
  * node — which is how a consumer expresses "trim these 34 string fields, not
  * the other 185" without the option becoming a whole-schema blunt instrument.
  * Because it runs during compilation, a predicate costs nothing at runtime.
- * @param {boolean|((node: object) => boolean)|undefined} option
+ * @param {boolean|((node: Record<string, unknown>) => boolean)|undefined} option
  * @param {object} node - The schema node the switch applies to
  * @returns {boolean}
  */
@@ -417,7 +460,7 @@ function compileNode(node, ctx) {
   const steps = [];
 
   if (typeof node.$ref === 'string') {
-    const target = resolveLocalRef(node.$ref, ctx.root);
+    const target = resolveSameDocumentRef(node.$ref, ctx.root, ctx.anchors);
     // A ref this module cannot follow is left alone rather than guessed at;
     // validation still resolves it through the full ref machinery.
     if (target !== undefined && target !== node) {
@@ -471,7 +514,8 @@ function compileNode(node, ctx) {
  *
  * **What is normalized.** `properties`, `patternProperties`,
  * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, same-document
- * `$ref`, and `allOf` (composed, with stripping disabled inside it).
+ * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
+ * with stripping disabled inside it).
  *
  * **What is not, and why.** `anyOf`, `oneOf`, `if`/`then`/`else` and `not`
  * are not descended: which branch applies is only known after validating,
@@ -511,6 +555,7 @@ export function compileNormalizer(schema, options = {}) {
   const ctx = {
     options: resolved,
     root: schema,
+    anchors: collectSameDocumentAnchors(schema),
     memoStrip: new Map(),
     memoNoStrip: new Map(),
     allowStrip: true,

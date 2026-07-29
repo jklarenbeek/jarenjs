@@ -91,6 +91,7 @@ match and stay correct under re-dispatch.
 | `ref` | `ref` | the declaration with that `name` |
 | `array` | `items` | a homogeneous list |
 | `tuple` | `items`, `rest?` | positional items, optionally followed by a rest type |
+| `optional` | `item` | a tuple position that may be absent; only valid inside `tuple.items`, after every non-optional position |
 | `record` | `value` | a map from string keys to `value` |
 | `object` | `members`, `index?` | declared members, plus an optional index signature |
 | `union` | `options` (≥ 2) | any one of |
@@ -99,6 +100,16 @@ match and stay correct under re-dispatch.
 A producer MUST collapse the degenerate forms: a union or intersection of one
 is that one type, and a union containing `unknown` is `unknown`. A consumer is
 therefore entitled to assume `options` and `parts` have at least two entries.
+A tuple with no positional items MUST also collapse: with a `rest` type it is
+an `array` of that type, and without one it is the empty tuple — a consumer
+never has to print a rest with nothing in front of it.
+
+**Tuples mirror what the schema enforces, not what it suggests.** JSON Schema
+`prefixItems` constrains the positions that exist; `minItems` says how many
+must; an omitted rest schema leaves the array open. A producer therefore
+marks only the first `minItems` positions non-optional and emits an `unknown`
+rest for an omitted one — a closed, all-required tuple is emitted only when
+the schema actually closes it.
 
 **`index` covers the declared members.** When an object has both members and
 an index signature, the index type is widened to include every member's type,
@@ -166,6 +177,26 @@ the normalizer uses, including predicate options. A variant that disagrees
 with the normalizer is worse than no variant: it is a type that certifies an
 input the normalizer will not accept.
 
+The same rule extends to *where* normalization runs. `compileNormalizer`
+deliberately does not descend `anyOf`/`oneOf` — which branch applies is only
+known after validating — so inside a union branch no default materializes and
+no coercion applies. A producer MUST NOT let variant semantics leak into
+union branches: a branch references the schema's **as-declared** reading.
+When a referenced type differs under normalization, that reading is its own
+`Plain`-suffixed declaration, shared by both sides of the pair; when it does
+not differ, the branch shares the single plain-named declaration.
+
+Three consequences worth stating because each was once wrong:
+
+- a **`required` member with an enabled default** is still optional on the
+  accepted side — the normalizer materializes it before validation runs;
+- a **`const`/`enum` with an enabled coercion** widens its accepted side by
+  the source primitives that can actually reach a member of the literal set
+  (an integer enum admits `string`; a string enum of words admits nothing
+  extra, because no number ever becomes `"admin"`);
+- coercion widens only nodes with a **single string-valued `type`**, because
+  that is the only place `coerceToType` runs.
+
 ## 8. Determinism
 
 Two compilations of the same input MUST produce byte-identical models.
@@ -182,13 +213,29 @@ Concretely, a producer:
 
 - **`if`/`then`/`else` and `not`.** Neither has a sound type-level reading —
   the first is a conditional type in principle and unreadable in practice, the
-  second has no equivalent at all. A producer emits `unknown` and records
-  nothing, rather than inventing a union that would be wrong in one direction
-  or the other.
+  second has no equivalent at all. A producer ignores them for the type and
+  **records them as dropped constraints** (§6), rather than inventing a union
+  that would be wrong in one direction or the other. The same recording
+  applies to the other silently-widening keywords: integer-ness (`type:
+  "integer"` emits as `number`), `dependentSchemas`/`dependencies`,
+  constraining `unevaluated*` values, and the key restrictions of
+  `patternProperties` (the index signature carries their value types, but no
+  type restricts which keys a pattern admits).
+- **Type inference from applicators.** `properties` or `items` on a node with
+  no `type` does not make it an object or an array — the validator accepts a
+  primitive without reading either. A producer emits the described container
+  shape as one union arm and the remaining JSON kinds beside it.
 - **Cross-document `$ref`.** A model compiles the document it was given.
   Following a ref into another document would mean owning a resolution scope,
-  which is `@jarenjs/validate`'s job, not this format's.
+  which is `@jarenjs/validate`'s job, not this format's. Within the document,
+  the resolved forms are exactly the ones `compileNormalizer` resolves — `#`,
+  `#/pointer` and plain `#anchor` (outside embedded `$id` resources) — and a
+  `$ref`'s siblings compose with its target as an intersection, per 2019-09+.
+  That composition is unconditional, like the normalizer's: a draft-07
+  document in which a validator lets `$ref` shadow its siblings should not
+  put constraining siblings there — they are dead keywords to that validator,
+  and this producer takes them at their word.
 - **`removeAdditional` and `trimStrings` as type differences.** Neither
   changes a *declared* type: trimming is string-to-string, and stripping
   removes members the type never declared. Only `useDefaults` and
-  `coerceTypes` earn a variant (§9).
+  `coerceTypes` earn a variant (§7).

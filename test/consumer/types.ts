@@ -384,3 +384,170 @@ void emitNormalized;
 // @ts-expect-error the normalized shape requires the defaulted members
 const emitMissingDefaults: Config = { name: 'a' };
 void emitMissingDefaults;
+
+// A root that IS a $ref aliases its target instead of collapsing to unknown.
+import type { Id as EmitId, Wide, Base } from './emit-generated.js';
+
+const emitRootAlias: EmitId = 'abc';
+void emitRootAlias;
+// @ts-expect-error the root alias really is the target type, not unknown
+const emitRootAliasBad: EmitId = 1;
+void emitRootAliasBad;
+
+// A plain-anchor $ref with siblings: both the target and the siblings apply.
+const emitWide: Wide = { id: 'x', extra: 1 };
+const emitWideOpen: Wide = { id: 'x', extra: 1, more: true };
+const emitBase: Base = { id: 'x' };
+void [emitWide, emitWideOpen, emitBase];
+// @ts-expect-error the referenced Base still requires id
+const emitWideBad1: Wide = { extra: 1 };
+// @ts-expect-error the $ref siblings still require extra
+const emitWideBad2: Wide = { id: 'x' };
+// @ts-expect-error extra must be a number
+const emitWideBad3: Wide = { id: 'x', extra: 'n' };
+void [emitWideBad1, emitWideBad2, emitWideBad3];
+
+// Tuples: prefixItems does not fix the length. minItems makes the first
+// position required, the omitted `items` leaves the array open.
+import type { Pair, Exact } from './emit-generated.js';
+
+const emitPair1: Pair = ['a'];
+const emitPair2: Pair = ['a', 2];
+const emitPair3: Pair = ['a', 2, true, null];
+void [emitPair1, emitPair2, emitPair3];
+// @ts-expect-error minItems makes the first element required
+const emitPairBad1: Pair = [];
+// @ts-expect-error the first element must be a string
+const emitPairBad2: Pair = [1];
+// @ts-expect-error the second element must be a number
+const emitPairBad3: Pair = ['a', 'b'];
+void [emitPairBad1, emitPairBad2, emitPairBad3];
+// maxItems is a dropped constraint: the validator rejects this, the open
+// rest accepts it, and the generated file says why.
+const emitPairWidened: Pair = ['a', 2, true, null, 'five'];
+void emitPairWidened;
+
+// `items: false` with met minItems is the one case that really is exact.
+const emitExact: Exact = ['a', 2];
+void emitExact;
+// @ts-expect-error minItems closes the short end
+const emitExactBad1: Exact = ['a'];
+// @ts-expect-error items: false closes the long end
+const emitExactBad2: Exact = ['a', 2, 3];
+void [emitExactBad1, emitExactBad2];
+
+// No `type` means no inferred container: the validator accepts primitives
+// without reading `properties`, so the type must too.
+import type { Loose } from './emit-generated.js';
+
+const emitLoose1: Loose = { a: 'x' };
+const emitLoose2: Loose = 'hello';
+const emitLoose3: Loose = 42;
+const emitLoose4: Loose = [1, 'x'];
+const emitLoose5: Loose = null;
+void [emitLoose1, emitLoose2, emitLoose3, emitLoose4, emitLoose5];
+// @ts-expect-error an object with a wrong `a` is structurally invalid
+const emitLooseBad1: Loose = { a: 1 };
+// @ts-expect-error an object without the required `a` is structurally invalid
+const emitLooseBad2: Loose = {};
+void [emitLooseBad1, emitLooseBad2];
+
+// A closed empty object must reject primitives — an empty interface would
+// let them through TypeScript's weak-type escape hatch.
+import type { Empty } from './emit-generated.js';
+
+const emitEmpty: Empty = {};
+void emitEmpty;
+// @ts-expect-error a member is forbidden by additionalProperties: false
+const emitEmptyBad1: Empty = { a: 1 };
+// @ts-expect-error a primitive is not an object
+const emitEmptyBad2: Empty = 'x';
+void [emitEmptyBad1, emitEmptyBad2];
+
+// Literals versus accepted-side coercion: the normalizer turns '2' into 2
+// before the enum check runs, so the transport string satisfies the accepted
+// side and only the literal union satisfies the normalized side.
+import type { Level, LevelInput } from './emit-generated.js';
+
+const emitLevel: Level = { level: 2 };
+const emitLevelRaw: LevelInput = { level: '2' };
+void [emitLevel, emitLevelRaw];
+// @ts-expect-error the enum is integers after normalization
+const emitLevelBad1: Level = { level: '2' };
+// @ts-expect-error 4 is outside the enum on both sides
+const emitLevelBad2: Level = { level: 4 };
+void [emitLevelBad1, emitLevelBad2];
+
+// A required member with an enabled default stays optional on the accepted
+// side: the normalizer materializes it before validation ever runs.
+import type { Job, JobInput } from './emit-generated.js';
+
+const emitJobRaw: JobInput = { cmd: 'ls' };
+const emitJobOut: Job = { cmd: 'ls', retries: 0 };
+void [emitJobRaw, emitJobOut];
+// @ts-expect-error cmd has no default, so it stays required on input
+const emitJobRawBad: JobInput = {};
+// @ts-expect-error retries is required after normalization
+const emitJobOutBad: Job = { cmd: 'ls' };
+void [emitJobRawBad, emitJobOutBad];
+// Integer-ness is a documented widening: the validator rejects 1.5 retries,
+// `number` accepts it, and the generated file records type="integer".
+const emitJobWidened: Job = { cmd: 'ls', retries: 1.5 };
+void emitJobWidened;
+
+// Normalization does not reach into anyOf branches, because
+// compileNormalizer does not descend them. The branch default never
+// materializes and the branch integer is never coerced — on either side.
+import type { Choice, ChoiceInput } from './emit-generated.js';
+
+const emitChoiceRaw: ChoiceInput = { opt: {} };
+const emitChoiceRawCoerce: ChoiceInput = { port: '9000', opt: { level: 3 } };
+// mode is NOT required after normalizing: the branch default never runs.
+const emitChoiceOut: Choice = { port: 8080, opt: {} };
+const emitChoiceOutStr: Choice = { port: 1, opt: 'x' };
+void [emitChoiceRaw, emitChoiceRawCoerce, emitChoiceOut, emitChoiceOutStr];
+// @ts-expect-error the normalized shape materializes port
+const emitChoiceRawAsOut: Choice = { opt: {} };
+// @ts-expect-error level sits under anyOf, so its integer is never coerced
+const emitChoiceBadLevel: ChoiceInput = { opt: { level: '3' } };
+void [emitChoiceRawAsOut, emitChoiceBadLevel];
+
+// A boolean root under normalization options emits exactly one declaration.
+import type { Anything } from './emit-generated.js';
+
+const emitAnything: Anything = { whatever: true };
+void emitAnything;
+
+// @jarenjs/emit — the programmatic surface is fully typed. Passing
+// `normalize` and `variantSuffix` here is the selective route the CLI flags
+// wrap; it used to raise an excess-property error because the options type
+// did not declare them.
+import { compileEmitModel, emitTypeScript, emitMarkdown } from '@jarenjs/emit';
+import type {
+  EmitDeclaration,
+  EmitModel,
+  EmitModelOptions,
+  EmitTypeRef,
+} from '@jarenjs/emit/model';
+
+const emitOptions: EmitModelOptions = {
+  name: 'Contract',
+  source: 'contract.json',
+  openObjects: 'open',
+  normalize: { useDefaults: true, coerceTypes: (node) => node['x-coerce'] === true },
+  variantSuffix: 'Raw',
+  reserved: ['TakenElsewhere'],
+};
+const emitModel: EmitModel = compileEmitModel({
+  type: 'object',
+  properties: { port: { type: 'integer', default: 8080, 'x-coerce': true } },
+}, emitOptions);
+const emitDecls: EmitDeclaration[] = emitModel.declarations;
+const emitRootName: string | null = emitModel.root;
+const emitFirstType: EmitTypeRef = emitDecls[0].type;
+void [emitRootName, emitFirstType.kind, emitDecls[0].variant];
+
+const emittedSource: string = emitTypeScript({ type: 'string' },
+  { name: 'Plain', banner: false, normalize: { useDefaults: true } });
+const emittedDocs: string = emitMarkdown({ type: 'string' }, { name: 'Plain' });
+void [emittedSource, emittedDocs];

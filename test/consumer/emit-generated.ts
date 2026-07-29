@@ -7,6 +7,9 @@ export interface Account {
    * Schema constraints this type cannot express: minLength=3
    */
   id: string;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
   age?: number;
   role?: "admin" | "user";
   tags?: Array<string>;
@@ -30,6 +33,9 @@ export interface Node {
 
 export interface Config {
   host: string;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
   port: number;
   name: string;
   [key: string]: unknown;
@@ -41,9 +47,107 @@ export interface Config {
  */
 export interface ConfigInput {
   host?: string | number | boolean;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
   port?: number | string;
   name: string | number | boolean;
   [key: string]: unknown;
 }
 
+
+export type Uuid = string;
+
+export type Id = Uuid;
+
+export interface Base {
+  id: string;
+  [key: string]: unknown;
+}
+
+
+export type Wide = Base & { extra: number; [key: string]: unknown; };
+
+/**
+ * Schema constraints this type cannot express: minItems=1, maxItems=4
+ */
+export type Pair = [string, number?, ...Array<unknown>];
+
+/**
+ * Schema constraints this type cannot express: minItems=2
+ */
+export type Exact = [string, number];
+
+export type Loose = { a: string; [key: string]: unknown; } | Array<unknown> | string | number | boolean | null;
+
+export type Empty = Record<string, never>;
+
+export interface Level {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  level: 1 | 2 | 3;
+  [key: string]: unknown;
+}
+
+
+/**
+ * Accepted input for Level: the shape before normalization, where defaulted members may be absent and coercible values may still be in their transport form.
+ */
+export interface LevelInput {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  level: 1 | 2 | 3 | string;
+  [key: string]: unknown;
+}
+
+
+export interface Job {
+  cmd: string;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  retries: number;
+  [key: string]: unknown;
+}
+
+
+/**
+ * Accepted input for Job: the shape before normalization, where defaulted members may be absent and coercible values may still be in their transport form.
+ */
+export interface JobInput {
+  cmd: string;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  retries?: number;
+  [key: string]: unknown;
+}
+
+
+export interface Choice {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  port: number;
+  opt?: { mode?: string; level?: number; [key: string]: unknown; } | string;
+  [key: string]: unknown;
+}
+
+
+/**
+ * Accepted input for Choice: the shape before normalization, where defaulted members may be absent and coercible values may still be in their transport form.
+ */
+export interface ChoiceInput {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  port?: number | string;
+  opt?: { mode?: string; level?: number; [key: string]: unknown; } | string;
+  [key: string]: unknown;
+}
+
+
+export type Anything = unknown;
 

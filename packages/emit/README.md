@@ -162,6 +162,18 @@ suite checks the pair the same way it checks everything else — a raw input
 must satisfy `ConfigInput` and not `Config`, and normalizing it at runtime
 must produce something the `Config` side describes.
 
+**The variants stop where the normalizer stops.** `compileNormalizer` does
+not descend `anyOf`/`oneOf` — which branch applies is only known after
+validating — so inside a union branch no default materializes and no coercion
+runs, and the generated pair says the same: branch members keep their
+declared optionality and their declared scalar types on *both* sides. When a
+branch references a type that does differ elsewhere, the branch points at a
+`Plain`-suffixed declaration carrying the schema's as-declared reading.
+Literals get the same treatment in the other direction: an integer `enum`
+under `--coerce` accepts its transport string on the input side (`1 | 2 |
+string`), because the normalizer coerces `"2"` to `2` before the enum check
+runs.
+
 ## Two stages, and why
 
 ```
@@ -204,6 +216,11 @@ jaren-emit --schema <file|dir> --out <dir> [options]
 generated types did not, which is the failure mode that makes generated code
 untrustworthy in the first place.
 
+`--bundle` compiles every schema into **one name space**: a `$defs.Id` that
+two schemas both declare comes out as `Id` and `Id2`, deterministically in
+sorted-file order, instead of two colliding declarations. The programmatic
+equivalent is the `reserved` option of `compileEmitModel`.
+
 ## What it maps
 
 | JSON Schema | TypeScript |
@@ -213,14 +230,15 @@ untrustworthy in the first place.
 | `properties` + `required` | interface members, optional when not required |
 | `additionalProperties` / `patternProperties` | an index signature, widened to cover the declared members |
 | *omitted* `additionalProperties` | `[key: string]: unknown` — the object is **open**, see below |
-| `additionalProperties: false` | a closed interface, with no index signature |
+| `additionalProperties: false` | a closed interface, with no index signature; with no members at all, `Record<string, never>` (an empty interface would let a primitive through) |
 | `items` | `Array<T>` |
-| `prefixItems`, array-form `items` | a tuple, with `additionalItems`/`items` as the rest |
-| `$ref` (same document, including cycles) | a reference to the named declaration |
+| `prefixItems`, array-form `items` | a tuple: the first `minItems` positions required, the rest optional, and an **open** rest (`...Array<unknown>`) unless `items: false`/`additionalItems: false` closes it — JSON Schema accepts shorter and longer arrays, so the type does too |
+| `$ref` (same document, including cycles) | a reference to the named declaration — `#/pointer` and plain `#anchor` forms, resolving exactly as `compileNormalizer` resolves them; a root `$ref` aliases its target, and 2019-09+ siblings intersect with it |
 | `allOf` | an intersection |
 | `anyOf`, `oneOf` | a union |
+| `properties`/`items` with **no `type`** | the container shape as one union arm, plus the other JSON kinds — applicators do not imply a container, and the validator accepts a primitive without reading them |
 | `description` | a doc comment |
-| `default` (with `--defaults`) | optional on the accepted side, present on the normalized side |
+| `default` (with `--defaults`) | optional on the accepted side — even when `required` lists it, since the normalizer materializes it before validation — and present on the normalized side |
 
 ### Objects are open unless the schema closes them
 
@@ -245,11 +263,18 @@ member must type-check, and a closed schema's must not.
 `pattern`, `format`, `minimum`, `maximum`, `exclusiveMinimum`,
 `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems`,
 `contains`, `minProperties`, `maxProperties`, `propertyNames`,
-`dependentRequired`, and the Jaren extension keywords.
+`dependentRequired`, `dependentSchemas`/`dependencies`, `not`,
+`if`/`then`/`else`, constraining `unevaluatedProperties`/`unevaluatedItems`,
+integer-ness (`type: "integer"` emits as `number`), the key restrictions of
+`patternProperties`, and the Jaren extension keywords. Nothing on this list
+narrows a type, and nothing on it disappears silently: each is written into
+the generated file's doc comment.
 
-**Not mapped**: `if`/`then`/`else` and `not` have no sound type-level
-equivalent, and cross-document `$ref`s are not followed — a model compiles the
-document it was handed. Each of these leaves `unknown` rather than a guess.
+**Not mapped**: `if`/`then`/`else` and `not` contribute nothing to the type —
+they have no sound type-level equivalent, so they are recorded (see above)
+rather than guessed at. Cross-document `$ref`s are not followed — a model
+compiles the document it was handed — and an unresolvable reference
+contributes nothing, leaving the node honestly wider.
 
 ## Honest comparison
 

@@ -135,6 +135,15 @@ export const TYPESCRIPT_STYLESHEET = {
       body: ['(', [{ $apply: ['$', 'type'] }], ')'],
     },
     { mode: 'term', body: [[{ $apply: ['$', 'type'] }]] },
+    // An OPTIONAL tuple element: the postfix `?` binds to a whole element,
+    // so a union or intersection inside one is parenthesized first.
+    {
+      match: isKind('optional'), mode: 'type',
+      body: [[{ $apply: ['$.item', 'opt'] }], '?'],
+    },
+    { match: isKind('union'), mode: 'opt', body: ['(', [{ $apply: ['$', 'type'] }], ')'] },
+    { match: isKind('intersection'), mode: 'opt', body: ['(', [{ $apply: ['$', 'type'] }], ')'] },
+    { mode: 'opt', body: [[{ $apply: ['$', 'type'] }]] },
     { mode: 'pipe', body: [' | ', [{ $apply: ['$', 'type'] }]] },
     { mode: 'amp', body: [' & ', [{ $apply: ['$', 'term'] }]] },
     { mode: 'comma', body: [', ', [{ $apply: ['$', 'type'] }]] },
@@ -178,13 +187,15 @@ export const TYPESCRIPT_STYLESHEET = {
 const compiled = compileJtltStylesheet(TYPESCRIPT_STYLESHEET,
   { compileTypeTest: createTypeTestCompiler() });
 
+/** @typedef {import('./model.js').EmitModel} EmitModel */
+/** @typedef {import('./model.js').EmitModelOptions} EmitModelOptions */
+
 /**
- * Render a type model as TypeScript declarations.
- * @param {object} model - A type model from {@link compileEmitModel}
- * @param {object} [options]
- * @param {boolean} [options.banner=true] - Emit the do-not-edit header
- * @returns {string} TypeScript source
+ * Rendering options, shared by both entry points.
+ * @typedef {object} RenderTypeScriptOptions
+ * @property {boolean} [banner=true] - Emit the do-not-edit header
  */
+
 /** A property name TypeScript accepts without quotes. */
 const BARE_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -226,6 +237,12 @@ function printable(node) {
   return out;
 }
 
+/**
+ * Render a type model as TypeScript declarations.
+ * @param {EmitModel} model - A type model from `compileEmitModel`
+ * @param {RenderTypeScriptOptions} [options]
+ * @returns {string} TypeScript source
+ */
 export function renderTypeScript(model, options = {}) {
   const banner = options.banner === false
     ? ''
@@ -243,7 +260,9 @@ export function renderTypeScript(model, options = {}) {
  * Compile a JSON Schema straight to TypeScript declarations — the one-call
  * form of {@link compileEmitModel} followed by {@link renderTypeScript}.
  * @param {object|boolean} schema - The schema to emit
- * @param {object} [options] - Model options (see `compileEmitModel`)
+ * @param {EmitModelOptions & RenderTypeScriptOptions} [options] - Model and
+ *   rendering options — `normalize` and `variantSuffix` included, so the
+ *   programmatic route can do everything the CLI flags can
  * @returns {string} TypeScript source
  * @example
  * emitTypeScript({ type: 'object', properties: { id: { type: 'string' } } },

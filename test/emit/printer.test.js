@@ -69,6 +69,40 @@ describe('the TypeScript printer spells the model correctly', () => {
       'export type X = {"name":"x-y"} | {"name":"ok"};');
   });
 
+  it('spells optional tuple elements, parenthesized when they need it', () => {
+    assert.strictEqual(
+      emit({ type: 'array', prefixItems: [{ type: 'string' }], items: false }),
+      'export type X = [string?];');
+    // The postfix `?` binds to the whole element, so a union inside one is
+    // parenthesized first — `[string | number?]` is not that type.
+    assert.strictEqual(
+      emit({
+        type: 'array',
+        prefixItems: [{ anyOf: [{ type: 'string' }, { type: 'number' }] }],
+        items: false,
+      }),
+      'export type X = [(string | number)?];');
+    // minItems is also a recorded constraint, so the declaration carries a
+    // doc comment; the type line is what this case pins.
+    assert.match(
+      emit({ type: 'array', prefixItems: [{ type: 'string' }], minItems: 1 }),
+      /export type X = \[string, \.\.\.Array<unknown>\];/);
+  });
+
+  it('never prints a rest with nothing in front of it', () => {
+    // The producer collapses the degenerate tuple (EMIT-FORMAT §5), so the
+    // spelling `[, ...Array<T>]` cannot occur.
+    assert.strictEqual(
+      emit({ type: 'array', prefixItems: [], items: { type: 'number' } }),
+      'export type X = Array<number>;');
+  });
+
+  it('spells a closed empty object as a record of never', () => {
+    assert.strictEqual(
+      emit({ type: 'object', additionalProperties: false }),
+      'export type X = Record<string, never>;');
+  });
+
   it('cannot be made to write code through the source banner', () => {
     // `source` names the input file. A newline in it used to end the line
     // comment and put the remainder into code position.

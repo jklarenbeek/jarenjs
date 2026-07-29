@@ -216,6 +216,30 @@ describe('compileNormalizer — schema shapes', () => {
     deepStrictEqual(compileNormalizer(defs, ALL)({ v: '  q  ' }), { v: 'q' });
   });
 
+  it('follows a plain-anchor $ref, exactly as the validator resolves it', () => {
+    const schema = {
+      $defs: { Port: { $anchor: 'port', type: 'integer', default: 8080 } },
+      type: 'object',
+      properties: { port: { $ref: '#port' } },
+    };
+    deepStrictEqual(compileNormalizer(schema, ALL)({ port: ' 9000 ' }), { port: 9000 });
+    // A default reachable only behind the ref still does not materialize —
+    // the documented normalizer edge is unchanged by anchor resolution.
+    deepStrictEqual(compileNormalizer(schema, ALL)({}), {});
+  });
+
+  it('does not resolve an anchor declared inside an embedded resource', () => {
+    // A subtree with its own $id is a different resource, so its anchors are
+    // not in this document's scope. The value is left for validation to judge
+    // through the full ref machinery.
+    const normalize = compileNormalizer({
+      $defs: { Other: { $id: 'https://example.com/other', $anchor: 'port', type: 'integer' } },
+      type: 'object',
+      properties: { port: { $ref: '#port' } },
+    }, ALL);
+    deepStrictEqual(normalize({ port: '9000' }), { port: '9000' });
+  });
+
   it('does not apply structure from a $ref it cannot follow', () => {
     // Refs into other documents are not resolved here, so the target's
     // shape contributes nothing. Node-level trimming still applies, since

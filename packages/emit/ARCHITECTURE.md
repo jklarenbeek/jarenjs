@@ -30,11 +30,36 @@ The decisions that live here, and nowhere else:
   an acyclic list; the frame already building it finishes the declaration.
 - **Composition.** `allOf` → intersection, `anyOf`/`oneOf` → union, `const`/
   `enum` → literals. Degenerate unions collapse, `never` drops out, and a
-  union containing `unknown` becomes `unknown`.
+  union containing `unknown` becomes `unknown`. A `$ref`'s 2019-09+ siblings
+  intersect with the target; the reference itself resolves through the
+  helpers `@jarenjs/validate/normalize` exports (`#`, `#/pointer`, plain
+  `#anchor`, embedded-`$id` scope boundary), so a ref means here exactly what
+  it means to the runtime normalizer.
 - **Honest widening.** Every keyword in `DROPPED_CONSTRAINTS` is recorded on
-  the node it came from and flattened into `doc` lines. Nothing is discarded.
+  the node it came from and flattened into `doc` lines — including
+  integer-ness, `not`, active conditionals, dependent/unevaluated keywords
+  and `patternProperties` key restrictions. Nothing is discarded. The
+  directional half of the rule: the type may be wider than the schema (and
+  says where), never narrower. That is why applicators imply no container
+  (`properties` without `type` unions the object arm with every other JSON
+  kind), why tuples take their required count from `minItems` and stay open
+  unless the schema closes them, and why a closed empty object emits
+  `Record<string, never>` rather than TypeScript's primitive-swallowing
+  empty interface.
+- **The plain universe.** When variants are derived, `anyOf`/`oneOf`
+  branches compile in a context with normalization inert, because
+  `compileNormalizer` does not descend union branches. A referenced type
+  that differs under normalization gets a `Plain`-suffixed declaration for
+  its as-declared reading, shared by both passes; everything else shares the
+  main declaration. `normalizationChangesType` walks exactly the keywords
+  `compileNormalizer` walks — the twin analysis answering differently from
+  the runtime is the defect class this package exists to rule out.
 - **Determinism.** Declaration order is discovery order, member order is
-  schema order, and names never depend on a traversal counter.
+  schema order, and names never depend on a traversal counter. Boolean
+  schemas memoize by value — every `true` is the same schema — except that
+  the `$defs` loop forces one declaration per def name, so every importable
+  name exists. The `reserved` option seeds the taken-name list, which is how
+  the CLI's `--bundle` keeps independently compiled models in one name space.
 
 Absent information is **omitted**, not set to `null` — a missing `rest`,
 `index` or `default` is simply not there. Stage 2 relies on that: a path that

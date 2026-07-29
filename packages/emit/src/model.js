@@ -15,7 +15,10 @@
 //      dropped constraint so the emitter can carry it into a doc comment. A
 //      reader of the generated file learns that `pattern` exists and is not
 //      enforced by the type; silently emitting `string` would be a lie of
-//      omission.
+//      omission. The same rule has a directional half: the generated type may
+//      be WIDER than the schema (and says where), but never narrower — a type
+//      that rejects a document the validator accepts is the one defect class
+//      this package must not have.
 //   2. **Deterministic output.** Same input, byte-identical model. Members
 //      keep schema declaration order, declarations keep discovery order, and
 //      nothing iterates a Set or a Map whose order depends on insertion
@@ -27,10 +30,94 @@
 
 import { isJsonObject } from '@jarenjs/core/object';
 import { parseJSONPointer } from '@jarenjs/json';
-import { resolveNormalizeSwitch } from '@jarenjs/validate/normalize';
+import {
+  collectSameDocumentAnchors,
+  resolveNormalizeSwitch,
+  resolveSameDocumentRef,
+} from '@jarenjs/validate/normalize';
 
 /** The model format version this module produces and consumes. */
 export const EMIT_MODEL_VERSION = '0.1';
+
+/** @typedef {import('@jarenjs/validate/normalize').NormalizeOptions} NormalizeOptions */
+
+/**
+ * A constraint the source schema states that the emitted type cannot carry.
+ * @typedef {object} EmitConstraint
+ * @property {string} keyword - The schema keyword
+ * @property {any} [value] - The keyword's value in the source schema
+ */
+
+/**
+ * A type reference in the model. `kind` is always present and is what an
+ * emitter dispatches on; the other members depend on it (EMIT-FORMAT.md §5).
+ * @typedef {object} EmitTypeRef
+ * @property {'unknown'|'never'|'primitive'|'literal'|'ref'|'array'|'tuple'|'optional'|'record'|'union'|'intersection'|'object'} kind
+ * @property {'string'|'number'|'boolean'|'null'} [primitive] - For `primitive`
+ * @property {any} [value] - The JSON value of a `literal`, or the value type of a `record`
+ * @property {string} [ref] - For `ref`: the referenced declaration name
+ * @property {EmitTypeRef|EmitTypeRef[]} [items] - `array` item type, or `tuple` positional items
+ * @property {EmitTypeRef} [rest] - For `tuple`: the rest type, when the tuple is open
+ * @property {EmitTypeRef} [item] - For `optional`: the wrapped tuple element
+ * @property {EmitTypeRef[]} [options] - For `union` (at least two)
+ * @property {EmitTypeRef[]} [parts] - For `intersection` (at least two)
+ * @property {EmitMember[]} [members] - For `object`
+ * @property {EmitTypeRef} [index] - For `object`: the index-signature value type
+ */
+
+/**
+ * A declared member of an object type.
+ * @typedef {object} EmitMember
+ * @property {'member'} kind
+ * @property {string} name - The property name, verbatim
+ * @property {EmitTypeRef} type
+ * @property {boolean} required
+ * @property {any} [default] - The schema default, when it declares one
+ * @property {EmitConstraint[]} constraints
+ * @property {string[]} doc
+ */
+
+/**
+ * A named declaration.
+ * @typedef {object} EmitDeclaration
+ * @property {'declaration'} kind
+ * @property {string} name - Unique, identifier-safe
+ * @property {EmitTypeRef} type
+ * @property {EmitConstraint[]} constraints
+ * @property {string[]} doc
+ * @property {'accepted'|'normalized'} [variant] - Which side of normalization this declaration describes
+ * @property {string} [variantOf] - For an accepted variant, its normalized counterpart
+ */
+
+/**
+ * The type model document — the published contract every emitter reads.
+ * @typedef {object} EmitModel
+ * @property {string} $emit - The model format version
+ * @property {string|null} source - Where the model came from
+ * @property {string|null} root - The declaration name of the schema's root
+ * @property {true} [variants] - Present when accepted/normalized pairs were derived
+ * @property {EmitDeclaration[]} declarations
+ */
+
+/**
+ * Options for {@link compileEmitModel}.
+ * @typedef {object} EmitModelOptions
+ * @property {string} [name='Root'] - The name for the root declaration
+ * @property {string} [source] - A source identifier recorded in the model
+ * @property {'open'|'closed'} [openObjects='open'] - How to treat an object
+ *   whose `additionalProperties` is omitted. JSON Schema says such an object
+ *   is open, so the default emits an index signature; `'closed'` opts into the
+ *   tighter type, which regains excess-property checking at the cost of
+ *   rejecting documents the schema accepts.
+ * @property {NormalizeOptions|null} [normalize] - When set, derive
+ *   accepted/normalized variant pairs with exactly these `compileNormalizer`
+ *   options
+ * @property {string} [variantSuffix='Input'] - The suffix for accepted-variant
+ *   declaration names
+ * @property {string[]} [reserved] - Declaration names already taken outside
+ *   this model. Bundling concatenates models into one file, so each model
+ *   must be able to avoid the names its predecessors used.
+ */
 
 /** Keywords that constrain a value without narrowing its TYPE. */
 const DROPPED_CONSTRAINTS = [
@@ -38,6 +125,7 @@ const DROPPED_CONSTRAINTS = [
   'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
   'minItems', 'maxItems', 'uniqueItems', 'contains', 'minContains', 'maxContains',
   'minProperties', 'maxProperties', 'propertyNames', 'dependentRequired',
+  'dependentSchemas', 'dependencies', 'not',
   '$query', 'data', '$data',
 ];
 
@@ -75,6 +163,8 @@ const T = {
   literal: (value) => ({ kind: 'literal', value }),
   ref: (name) => ({ kind: 'ref', ref: name }),
   array: (items) => ({ kind: 'array', items }),
+  record: (value) => ({ kind: 'record', value }),
+  optional: (item) => ({ kind: 'optional', item }),
   tuple: (items, rest) => (rest == null
     ? { kind: 'tuple', items }
     : { kind: 'tuple', items, rest }),
@@ -129,35 +219,60 @@ function docLinesFor(node, constraints) {
 /** Collect the constraints this schema states that a type cannot carry. */
 function droppedConstraints(node) {
   const out = [];
+  // `integer` emits as `number`: integer-ness has no TypeScript equivalent,
+  // so it is a dropped constraint like any other.
+  const types = Array.isArray(node.type) ? node.type : [node.type];
+  if (types.indexOf('integer') !== -1)
+    out.push({ keyword: 'type', value: 'integer' });
   for (let i = 0; i < DROPPED_CONSTRAINTS.length; i++) {
     const keyword = DROPPED_CONSTRAINTS[i];
     if (node[keyword] !== undefined)
       out.push({ keyword, value: node[keyword] });
   }
+  // A conditional constrains only when `if` is present — a lone `then` or
+  // `else` asserts nothing, and recording it would claim a constraint that
+  // does not exist.
+  if (node.if !== undefined) {
+    for (const keyword of ['if', 'then', 'else']) {
+      if (node[keyword] !== undefined)
+        out.push({ keyword, value: node[keyword] });
+    }
+  }
+  // `unevaluated*: true` asserts nothing either.
+  for (const keyword of ['unevaluatedProperties', 'unevaluatedItems']) {
+    if (node[keyword] !== undefined && node[keyword] !== true)
+      out.push({ keyword, value: node[keyword] });
+  }
+  // The index signature carries the VALUE types of patternProperties, but no
+  // emitted type restricts which keys a pattern admits.
+  if (isJsonObject(node.patternProperties)) {
+    const patterns = Object.getOwnPropertyNames(node.patternProperties);
+    if (patterns.length > 0)
+      out.push({ keyword: 'patternProperties', value: patterns });
+  }
   return out;
 }
 
 /**
- * Resolve a same-document `$ref` to `{ node, pointer }`, or null when it
- * addresses nothing this compiler can reach. Cross-document refs are not
- * followed: a model compiles the documents it was handed.
+ * Resolve a same-document `$ref` to `{ node, name }`, or null when it
+ * addresses nothing this compiler can reach. The resolution itself is
+ * imported from `@jarenjs/validate/normalize` so a reference resolves here
+ * with exactly the rules the runtime normalizer uses — including plain
+ * `#anchor` refs and the embedded-`$id` scope boundary. `name` is what a
+ * reader of the schema calls the target: the pointer's last token, the
+ * anchor name, or `Root`.
  */
-function resolveRef(ref, root) {
-  if (ref === '#') return { node: root, pointer: '#' };
-  if (!ref.startsWith('#/')) return null;
-  let node = root;
-  let tokens;
-  try {
-    tokens = parseJSONPointer(ref.slice(1));
+function resolveRef(ref, ctx) {
+  const node = resolveSameDocumentRef(ref, ctx.root, ctx.anchors);
+  if (node === undefined) return null;
+  let name = null;
+  if (ref === '#') name = 'Root';
+  else if (ref.startsWith('#/')) {
+    const tokens = parseJSONPointer(ref.slice(1));
+    name = tokens.length > 0 ? tokens[tokens.length - 1] : 'Root';
   }
-  catch (_e) {
-    return null;
-  }
-  for (let i = 0; i < tokens.length; i++) {
-    if (!isJsonObject(node) && !Array.isArray(node)) return null;
-    node = node[tokens[i]];
-  }
-  return node === undefined ? null : { node, pointer: ref };
+  else name = ref.slice(1);
+  return { node, name };
 }
 
 /** Deduplicate structurally identical type refs, preserving first-seen order. */
@@ -202,6 +317,14 @@ function unionOf(types) {
  * removes members the type never declared — neither changes a declared type,
  * so neither justifies a second declaration.
  *
+ * The walk descends exactly what `compileNormalizer` descends — `$ref`,
+ * `allOf`, the object keywords, and the tuple spelling the normalizer would
+ * read — and deliberately NOT `anyOf`/`oneOf`, because the normalizer does
+ * not descend union branches. A default that exists only under a union branch
+ * is never materialized at runtime, so it must not earn a twin here: this
+ * analysis answering differently from the runtime is precisely the defect the
+ * variants exist to rule out.
+ *
  * Computed bottom-up and memoized, because a type differs if anything it
  * contains differs. A node reached while it is still being analyzed is a
  * cycle, and a cycle alone introduces no difference, so it answers `false`.
@@ -222,8 +345,9 @@ function normalizationChangesType(node, ctx) {
   let differs = false;
 
   if (typeof node.$ref === 'string') {
-    const target = resolveRef(node.$ref, ctx.root);
-    if (target !== null) differs = normalizationChangesType(target.node, ctx);
+    const target = resolveSameDocumentRef(node.$ref, ctx.root, ctx.anchors);
+    if (target !== undefined && target !== node)
+      differs = normalizationChangesType(target, ctx);
   }
 
   if (!differs && typeof node.type === 'string'
@@ -246,22 +370,28 @@ function normalizationChangesType(node, ctx) {
     }
   }
 
-  const nested = ['items', 'additionalItems', 'additionalProperties'];
-  for (let i = 0; i < nested.length && !differs; i++) {
-    const sub = node[nested[i]];
-    if (Array.isArray(sub)) {
-      for (let j = 0; j < sub.length && !differs; j++)
-        differs = normalizationChangesType(sub[j], ctx);
+  // The array walk mirrors buildArrayStep: the tuple spelling decides which
+  // keywords the normalizer reads, so it decides which ones this reads.
+  if (!differs) {
+    const itemsIsTuple = Array.isArray(node.items);
+    const prefixSource = itemsIsTuple ? node.items : node.prefixItems;
+    const restSource = itemsIsTuple ? node.additionalItems : node.items;
+    if (Array.isArray(prefixSource)) {
+      for (let i = 0; i < prefixSource.length && !differs; i++)
+        differs = normalizationChangesType(prefixSource[i], ctx);
     }
-    else differs = normalizationChangesType(sub, ctx);
+    if (!differs && !Array.isArray(restSource))
+      differs = normalizationChangesType(restSource, ctx);
   }
-  const lists = ['prefixItems', 'allOf', 'anyOf', 'oneOf'];
-  for (let i = 0; i < lists.length && !differs; i++) {
-    const sub = node[lists[i]];
-    if (!Array.isArray(sub)) continue;
-    for (let j = 0; j < sub.length && !differs; j++)
-      differs = normalizationChangesType(sub[j], ctx);
+
+  if (!differs)
+    differs = normalizationChangesType(node.additionalProperties, ctx);
+
+  if (!differs && Array.isArray(node.allOf)) {
+    for (let i = 0; i < node.allOf.length && !differs; i++)
+      differs = normalizationChangesType(node.allOf[i], ctx);
   }
+
   if (!differs && isJsonObject(node.patternProperties)) {
     const keys = Object.getOwnPropertyNames(node.patternProperties);
     for (let i = 0; i < keys.length && !differs; i++)
@@ -273,8 +403,8 @@ function normalizationChangesType(node, ctx) {
   return differs;
 }
 
-/** The compile context: one per `compileEmitModel` call. */
-function createContext(root, options) {
+/** The compile context: one per pass of `compileEmitModel`. */
+function createContext(root, options, shared) {
   return {
     root,
     options,
@@ -284,18 +414,67 @@ function createContext(root, options) {
     variant: null,
     /** The suffix for accepted-variant declaration names. */
     suffix: options.variantSuffix ?? 'Input',
+    /** @type {Map<string, object>} the document's $anchor declarations */
+    anchors: shared.anchors,
     /** @type {Map<object, boolean>} node -> normalization changes its type */
-    differs: new Map(),
+    differs: shared.differs,
     /** @type {Set<object>} nodes being analyzed, for cycle detection */
-    analyzing: new Set(),
+    analyzing: shared.analyzing,
     /** @type {object[]} declarations in discovery order */
     declarations: [],
-    /** @type {Map<object, string>} schema node -> declaration name */
+    /** @type {Map<object|boolean, string>} schema node -> declaration name */
     named: new Map(),
     /** @type {Set<object>} nodes currently being built, for cycle detection */
     building: new Set(),
     /** @type {string[]} names already taken */
     taken: [],
+    /** The plain universe's name state, shared across passes (see below). */
+    plainNamed: shared.plainNamed,
+    plainBuilding: shared.plainBuilding,
+    /** @type {object|null} this pass's plain universe, created on demand */
+    plain: null,
+    /** @type {object|undefined} set on a PLAIN context: the pass it belongs to */
+    plainOf: undefined,
+  };
+}
+
+/**
+ * The PLAIN universe: compilation with normalization inert.
+ *
+ * `anyOf`/`oneOf` branches compile here when variants are being derived,
+ * because `compileNormalizer` does not descend union branches — a default
+ * under one is never materialized and a coercion never applies there. A
+ * branch that referenced the normalized declaration would require output the
+ * runtime never produces, and one that referenced the accepted twin would
+ * promise coercions that never run; both disagree with the runtime, so the
+ * branch gets the schema's as-declared reading instead. A node whose type
+ * normalization does not change reads identically in every universe and
+ * shares the main declaration; one that differs gains a `Plain`-suffixed
+ * declaration, shared by both passes since it is variant-less by
+ * construction.
+ * @param {object} ctx - The pass context this universe belongs to
+ * @returns {object} The plain compile context
+ */
+function createPlainContext(ctx) {
+  return {
+    root: ctx.root,
+    options: ctx.options,
+    normalize: null,
+    variant: null,
+    suffix: ctx.suffix,
+    anchors: ctx.anchors,
+    differs: ctx.differs,
+    analyzing: ctx.analyzing,
+    // Same array: plain declarations are emitted in discovery order among
+    // the pass's own, and one name space covers both.
+    declarations: ctx.declarations,
+    named: ctx.plainNamed,
+    building: ctx.plainBuilding,
+    taken: ctx.taken,
+    plainNamed: ctx.plainNamed,
+    plainBuilding: ctx.plainBuilding,
+    plain: null,
+    plainOf: ctx,
   };
 }
 
@@ -338,17 +517,6 @@ function typeOf(node, ctx, hint) {
     return T.ref(name);
   }
 
-  if (typeof node.$ref === 'string') {
-    const target = resolveRef(node.$ref, ctx.root);
-    if (target === null) return T.unknown();
-    // Name a $ref target after its pointer's last token, which is what a
-    // reader of the schema calls it.
-    const tokens = target.pointer === '#'
-      ? ['Root']
-      : parseJSONPointer(target.pointer.slice(1));
-    return declare(target.node, ctx, tokens[tokens.length - 1] ?? hint);
-  }
-
   return shapeOf(node, ctx, hint);
 }
 
@@ -356,15 +524,41 @@ function typeOf(node, ctx, hint) {
  * Ensure a node has a NAMED declaration and return a ref to it. Used for
  * `$ref` targets and `$defs` members — the things a reader already thinks of
  * as types.
+ * @param {any} node - The schema node
+ * @param {object} ctx - The compile context
+ * @param {string} hint - The preferred declaration name
+ * @param {boolean} [forceOwn] - Emit a declaration under this hint even when
+ *   an equal boolean schema already has one — the `$defs` loop uses this so
+ *   every name a reader can import exists
+ * @returns {object} A `ref` type ref
  */
-function declare(node, ctx, hint) {
+function declare(node, ctx, hint, forceOwn = false) {
+  // In the plain universe, a node whose type normalization does not change
+  // reads identically everywhere, so it shares the main declaration rather
+  // than gaining a twin.
+  if (ctx.plainOf !== undefined) {
+    if (!isJsonObject(node) || !normalizationChangesType(node, ctx.plainOf))
+      return declare(node, ctx.plainOf, hint, forceOwn);
+    hint = `${hint}Plain`;
+  }
+
   const existing = ctx.named.get(node);
-  if (existing !== undefined) return T.ref(existing);
-  // `true` and `false` are whole schemas, so a boolean ROOT still deserves a
-  // name — emitting nothing left a consumer importing a type that was never
-  // written.
+  if (existing !== undefined && !forceOwn) return T.ref(existing);
+
+  // `true` and `false` are whole schemas, so a boolean ROOT or def still
+  // deserves a name — emitting nothing left a consumer importing a type that
+  // was never written. Booleans memoize by VALUE (every `true` schema is the
+  // same schema), which is also what stops a second reference or a second
+  // pass from emitting a duplicate declaration.
   if (typeof node === 'boolean') {
+    // Normalization cannot change a boolean schema, so the accepted pass
+    // reuses pass one's declaration instead of emitting a twin.
+    if (ctx.variant === 'accepted') {
+      const shared = ctx.shared.get(node);
+      if (shared !== undefined) return T.ref(shared);
+    }
     const boolName = reserveName(ctx, hint);
+    if (existing === undefined) ctx.named.set(node, boolName);
     ctx.declarations.push({
       kind: 'declaration', name: boolName,
       type: node === true ? T.unknown() : T.never(),
@@ -393,6 +587,11 @@ function declare(node, ctx, hint) {
       + 'normalization, where defaulted members may be absent and coercible '
       + 'values may still be in their transport form.');
   }
+  if (ctx.plainOf !== undefined) {
+    doc.push('The declared shape of this schema where normalization does not '
+      + 'reach: inside anyOf/oneOf branches the normalizer neither '
+      + 'materializes defaults nor coerces.');
+  }
   const declaration = {
     kind: 'declaration',
     name,
@@ -410,34 +609,112 @@ function declare(node, ctx, hint) {
   return T.ref(name);
 }
 
-/** The structural shape of a schema node, ignoring its `$ref`. */
-function shapeOf(node, ctx, hint) {
-  // const and enum are the most precise things a schema can say.
-  if (node.const !== undefined) return T.literal(node.const);
-  if (Array.isArray(node.enum))
-    return unionOf(node.enum.map((v) => T.literal(v)));
+/**
+ * Which coercion SOURCE primitives can reach at least one of `values`, for a
+ * literal (`const`/`enum`) node. Mirrors `coerceToType`: a source is admitted
+ * only when some value of it actually converts to a member of the literal
+ * set, so an integer enum widens by `string` (`"2"` normalizes to `2`) while
+ * a string enum of words does not widen by `number` at all.
+ *
+ * Gated exactly as `buildScalarStep` gates coercion: the accepted variant,
+ * a single string-valued `type`, and the same resolved switch.
+ * @param {object} node - The schema node carrying the literal
+ * @param {any[]} values - The literal values
+ * @param {object} ctx - The compile context
+ * @returns {string[]} JSON Schema type names to widen by
+ */
+function coercionSources(node, values, ctx) {
+  if (ctx.variant !== 'accepted' || ctx.normalize === null) return [];
+  if (typeof node.type !== 'string') return [];
+  if (!resolveNormalizeSwitch(ctx.normalize.coerceTypes, node)) return [];
+  const from = COERCIBLE_FROM[node.type];
+  if (from === undefined) return [];
+  const out = [];
+  for (const source of from) {
+    if (values.some((v) => coercionCanProduce(source, node.type, v)))
+      out.push(source);
+  }
+  return out;
+}
 
+/** Whether `coerceToType` can turn SOME value of `source` type into `value`. */
+function coercionCanProduce(source, type, value) {
+  switch (type) {
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'null':
+      return value === null;
+    case 'string': {
+      if (typeof value !== 'string') return false;
+      if (source === 'boolean') return value === 'true' || value === 'false';
+      const num = Number(value);
+      return Number.isFinite(num) && String(num) === value;
+    }
+    default:
+      return false;
+  }
+}
+
+/** The structural shape of a schema node. */
+function shapeOf(node, ctx, hint) {
   const parts = [];
 
-  // allOf is intersection.
-  if (Array.isArray(node.allOf) && node.allOf.length > 0) {
-    const branches = node.allOf.map((b, i) => typeOf(b, ctx, `${hint}Part${i + 1}`));
-    const usable = branches.filter((t) => t.kind !== 'unknown');
-    if (usable.length === 1) parts.push(usable[0]);
-    else if (usable.length > 1) parts.push(T.intersection(usable));
+  // `$ref` composes with its siblings: since 2019-09 the other keywords
+  // apply ALONGSIDE the reference, so the target is one intersection part
+  // rather than a substitute for the node — ignoring the siblings emitted a
+  // type wider than the schema in one place and narrower in another. A bare
+  // `$ref` with nothing else collapses to a plain alias below, and an
+  // unresolvable one contributes nothing, leaving the node honestly wider.
+  if (typeof node.$ref === 'string') {
+    const target = resolveRef(node.$ref, ctx);
+    // A ref that resolves to the node itself asserts nothing — and spelled
+    // out it would be a circular alias, which is not a type.
+    if (target !== null && target.node !== node)
+      parts.push(declare(target.node, ctx, target.name ?? hint));
   }
 
-  // anyOf and oneOf are both unions at the type level. oneOf's exclusivity
-  // is a validation property with no type-level equivalent, so it widens to
-  // the same union rather than being faked.
-  for (const key of ['anyOf', 'oneOf']) {
-    if (Array.isArray(node[key]) && node[key].length > 0) {
-      parts.push(unionOf(node[key].map((b, i) => typeOf(b, ctx, `${hint}${toIdentifier(key)}${i + 1}`))));
+  // const and enum are the most precise things a schema can say. On the
+  // accepted side the literal set still admits what the normalizer coerces
+  // INTO a member — `"2"` for an integer enum — so it widens by the source
+  // primitives that can actually reach one.
+  if (node.const !== undefined || Array.isArray(node.enum)) {
+    const values = node.const !== undefined ? [node.const] : node.enum;
+    const literals = values.map((v) => T.literal(v));
+    for (const source of coercionSources(node, values, ctx))
+      literals.push(T.primitive(PRIMITIVES[source]));
+    parts.push(unionOf(literals));
+  }
+  else {
+    // allOf is intersection.
+    if (Array.isArray(node.allOf) && node.allOf.length > 0) {
+      const branches = node.allOf.map((b, i) => typeOf(b, ctx, `${hint}Part${i + 1}`));
+      const usable = branches.filter((t) => t.kind !== 'unknown');
+      if (usable.length === 1) parts.push(usable[0]);
+      else if (usable.length > 1) parts.push(T.intersection(usable));
     }
-  }
 
-  const own = ownShape(node, ctx, hint);
-  if (own !== null) parts.push(own);
+    // anyOf and oneOf are both unions at the type level. oneOf's exclusivity
+    // is a validation property with no type-level equivalent, so it widens to
+    // the same union rather than being faked. When variants are being
+    // derived, branches compile in the PLAIN universe: the runtime
+    // normalizer does not descend them (see createPlainContext).
+    for (const key of ['anyOf', 'oneOf']) {
+      if (Array.isArray(node[key]) && node[key].length > 0) {
+        const branchCtx = ctx.normalize === null
+          ? ctx
+          : (ctx.plain ??= createPlainContext(ctx));
+        parts.push(unionOf(node[key].map((b, i) =>
+          typeOf(b, branchCtx, `${hint}${toIdentifier(key)}${i + 1}`))));
+      }
+    }
+
+    const own = ownShape(node, ctx, hint);
+    if (own !== null) parts.push(own);
+  }
 
   if (parts.length === 0) return T.unknown();
   if (parts.length === 1) return parts[0];
@@ -456,12 +733,34 @@ function ownShape(node, ctx, hint) {
     || node.additionalProperties !== undefined;
   const hasArrayKeywords = node.items !== undefined || node.prefixItems !== undefined;
 
-  // No `type`: infer from the keywords that are present.
+  // No `type`: the applicator keywords describe the container cases, but
+  // they do not IMPLY them — `properties` applies only when the value
+  // happens to be an object, and the validator accepts a primitive without
+  // reading it. Inferring `object` here emitted a type NARROWER than the
+  // schema, so the described shape is one union arm and every other JSON
+  // kind honestly fills in the rest.
   if (types === null) {
-    if (hasObjectKeywords) return objectShape(node, ctx, hint);
-    if (hasArrayKeywords) return arrayShape(node, ctx, hint);
-    return null;
+    if (!hasObjectKeywords && !hasArrayKeywords) return null;
+    const arms = [];
+    if (hasObjectKeywords) arms.push(objectShape(node, ctx, hint));
+    if (hasArrayKeywords) arms.push(arrayShape(node, ctx, hint));
+    if (!hasObjectKeywords) arms.push(T.record(T.unknown()));
+    if (!hasArrayKeywords) arms.push(T.array(T.unknown()));
+    arms.push(T.primitive('string'), T.primitive('number'),
+      T.primitive('boolean'), T.primitive('null'));
+    return unionOf(arms);
   }
+
+  // The accepted variant also admits whatever the normalizer will convert
+  // FROM, which is what makes `port: '9000'` type-check on input and
+  // `port: number` type-check afterwards. The gate mirrors `buildScalarStep`
+  // exactly: coercion runs only for a single string-valued `type`, so a
+  // union type widens nothing.
+  const coerceFrom = ctx.variant === 'accepted' && ctx.normalize !== null
+    && typeof declared === 'string'
+    && resolveNormalizeSwitch(ctx.normalize.coerceTypes, node)
+    ? COERCIBLE_FROM[declared] ?? []
+    : [];
 
   const alternatives = [];
   for (let i = 0; i < types.length; i++) {
@@ -470,14 +769,8 @@ function ownShape(node, ctx, hint) {
     else if (t === 'array') alternatives.push(arrayShape(node, ctx, hint));
     else if (PRIMITIVES[t] !== undefined) {
       alternatives.push(T.primitive(PRIMITIVES[t]));
-      // The accepted variant also admits whatever the normalizer will convert
-      // FROM, which is what makes `port: '9000'` type-check on input and
-      // `port: number` type-check afterwards.
-      if (ctx.variant === 'accepted' && ctx.normalize !== null
-        && resolveNormalizeSwitch(ctx.normalize.coerceTypes, node)) {
-        for (const from of COERCIBLE_FROM[t] ?? [])
-          alternatives.push(T.primitive(PRIMITIVES[from]));
-      }
+      for (const from of coerceFrom)
+        alternatives.push(T.primitive(PRIMITIVES[from]));
     }
     else alternatives.push(T.unknown());
   }
@@ -499,15 +792,17 @@ function objectShape(node, ctx, hint) {
       const constraints = droppedConstraints(subNode);
       const defaulted = subNode.default !== undefined && ctx.normalize !== null
         && resolveNormalizeSwitch(ctx.normalize.useDefaults, subNode);
-      // A defaulted member is optional for a caller and present afterwards.
-      // That asymmetry is the whole reason the two variants exist.
+      // A defaulted member is optional for a caller — even when `required`
+      // lists it, because the normalizer materializes it before validation
+      // runs — and present afterwards. That asymmetry is the whole reason
+      // the two variants exist.
       const declaredRequired = required.indexOf(key) !== -1;
       const member = {
         kind: 'member',
         name: key,
         type: typeOf(sub, ctx, `${hint}${toIdentifier(key)}`),
-        required: ctx.variant === 'normalized' && defaulted
-          ? true
+        required: defaulted
+          ? ctx.variant !== 'accepted'
           : declaredRequired,
         constraints,
         doc: docLinesFor(subNode, constraints),
@@ -546,21 +841,42 @@ function objectShape(node, ctx, hint) {
   if (index !== null && members.length > 0)
     index = unionOf([index, ...members.map((m) => m.type)]);
 
+  // A closed object with NO members is `Record<string, never>`: an empty
+  // interface is TypeScript's weak-type escape hatch — a primitive satisfies
+  // it — so it would certify data the validator rejects.
+  if (members.length === 0 && index === null) return T.record(T.never());
+
   return T.object(members, index);
 }
 
 /** An array or tuple type. */
 function arrayShape(node, ctx, hint) {
-  const prefix = Array.isArray(node.prefixItems)
-    ? node.prefixItems
-    : (Array.isArray(node.items) ? node.items : null);
+  const itemsIsTuple = Array.isArray(node.items);
+  const prefixSource = itemsIsTuple
+    ? node.items
+    : (Array.isArray(node.prefixItems) ? node.prefixItems : null);
 
-  if (prefix !== null) {
-    const items = prefix.map((s, i) => typeOf(s, ctx, `${hint}Item${i + 1}`));
-    const restSource = Array.isArray(node.items) ? node.additionalItems : node.items;
-    const rest = restSource === undefined || restSource === false
+  if (prefixSource !== null) {
+    // JSON Schema tuples are not fixed-length: `prefixItems` constrains the
+    // positions that exist, `minItems` says how many must exist, and an
+    // omitted rest schema leaves the array OPEN. Emitting every position
+    // required and the tuple closed rejected arrays the validator accepts.
+    const restSource = itemsIsTuple ? node.additionalItems : node.items;
+    const rest = restSource === false
       ? null
-      : typeOf(restSource, ctx, `${hint}Rest`);
+      : restSource === undefined || restSource === true
+        ? T.unknown()
+        : typeOf(restSource, ctx, `${hint}Rest`);
+    const requiredCount = Math.min(
+      typeof node.minItems === 'number' ? node.minItems : 0,
+      prefixSource.length);
+    const items = prefixSource.map((s, i) => {
+      const itemType = typeOf(s, ctx, `${hint}Item${i + 1}`);
+      return i < requiredCount ? itemType : T.optional(itemType);
+    });
+    // The degenerate tuple collapses (EMIT-FORMAT §5): no positional items
+    // with a rest type is just an array — and `[, ...T[]]` is not TypeScript.
+    if (items.length === 0) return rest === null ? T.tuple(items) : T.array(rest);
     return T.tuple(items, rest);
   }
 
@@ -574,15 +890,8 @@ function arrayShape(node, ctx, hint) {
  * The model is a plain JSON document. It is the contract every emitter reads,
  * and it is published as a schema so a third-party emitter can target it too.
  * @param {object|boolean} schema - The root schema
- * @param {object} [options] - Compile options
- * @param {string} [options.name='Root'] - The name for the root declaration
- * @param {string} [options.source] - A source identifier recorded in the model
- * @param {'open'|'closed'} [options.openObjects='open'] - How to treat an
- *   object whose `additionalProperties` is omitted. JSON Schema says such an
- *   object is open, so the default emits an index signature. `'closed'` opts
- *   into the tighter type, which regains excess-property checking at the cost
- *   of rejecting documents the schema accepts.
- * @returns {object} The type model document
+ * @param {EmitModelOptions} [options] - Compile options
+ * @returns {EmitModel} The type model document
  * @example
  * const model = compileEmitModel({
  *   $defs: { Id: { type: 'string' } },
@@ -595,12 +904,24 @@ export function compileEmitModel(schema, options = {}) {
   const name = options.name ?? 'Root';
   const normalize = options.normalize ?? null;
 
+  // State shared across the two passes: the anchor map, the normalization
+  // analysis memos, and the PLAIN universe's names — plain declarations are
+  // variant-less by construction, so one set serves both sides.
+  const shared = {
+    anchors: collectSameDocumentAnchors(schema),
+    differs: new Map(),
+    analyzing: new Set(),
+    plainNamed: new Map(),
+    plainBuilding: new Set(),
+  };
+
   /** One pass over the schema, in one variant. */
-  const run = (variant, shared, taken) => {
-    const ctx = createContext(schema, options);
+  const run = (variant, sharedNames, taken) => {
+    const ctx = createContext(schema, options, shared);
     ctx.variant = variant;
-    ctx.shared = shared;
-    if (taken !== null) ctx.taken = taken;
+    ctx.shared = sharedNames;
+    ctx.taken = taken
+      ?? (Array.isArray(options.reserved) ? options.reserved.slice() : []);
 
     // `$defs`/`definitions` are declared first and in document order: they are
     // the names a reader of the schema already uses, and declaring them up
@@ -610,8 +931,12 @@ export function compileEmitModel(schema, options = {}) {
         const defs = schema[container];
         if (!isJsonObject(defs)) continue;
         const keys = Object.getOwnPropertyNames(defs);
-        for (let i = 0; i < keys.length; i++)
-          declare(defs[keys[i]], ctx, keys[i]);
+        for (let i = 0; i < keys.length; i++) {
+          // forceOwn for a boolean def: two `true` defs are the same schema
+          // VALUE, but each name a reader can import must exist.
+          declare(defs[keys[i]], ctx, keys[i],
+            typeof defs[keys[i]] === 'boolean');
+        }
       }
     }
     declare(schema, ctx, name);

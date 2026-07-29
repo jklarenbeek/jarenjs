@@ -93,7 +93,7 @@
       "properties": {
         "kind": {
           "enum": ["unknown", "never", "primitive", "literal", "ref",
-            "array", "tuple", "record", "union", "intersection", "object"]
+            "array", "tuple", "optional", "record", "union", "intersection", "object"]
         }
       },
       "allOf": [
@@ -128,6 +128,13 @@
               "items": { "type": "array", "items": { "$ref": "#/$defs/type" } },
               "rest": { "$ref": "#/$defs/type" }
             }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "optional" } }, "required": ["kind"] },
+          "then": {
+            "required": ["item"],
+            "properties": { "item": { "$ref": "#/$defs/type" } }
           }
         },
         {

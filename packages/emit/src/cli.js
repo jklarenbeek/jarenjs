@@ -151,6 +151,11 @@ function main() {
 
   let ok = true;
   const bundled = [];
+  // Bundling concatenates declarations into ONE file, so each model must
+  // avoid every name its predecessors used — two schemas that both declare
+  // `$defs.Id` would otherwise collide as duplicate identifiers. The files
+  // are processed in sorted order, so the renames are deterministic.
+  const reserved = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const schema = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -158,9 +163,11 @@ function main() {
     const model = compileEmitModel(schema, {
       name, source: path.basename(file),
       normalize: normalizeOptions, variantSuffix: options.suffix,
+      reserved: options.bundle !== null ? reserved : undefined,
     });
     if (options.bundle !== null) {
       bundled.push(...model.declarations);
+      for (const declaration of model.declarations) reserved.push(declaration.name);
       continue;
     }
     const out = path.join(options.out, nameFromFile(file) + target.extension);
