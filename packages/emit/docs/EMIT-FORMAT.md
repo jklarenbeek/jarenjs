@@ -127,7 +127,46 @@ the empty sequence, without a conditional.
 generated type is trustworthy is that what it cannot say, it says it cannot
 say.
 
-## 7. Determinism
+## 7. Accepted and normalized variants
+
+`@jarenjs/validate/normalize` makes a contract's input and output shapes
+differ: a defaulted member is optional for the caller and present afterwards,
+and a coerced member accepts its transport form on the way in. A model
+compiled with normalization options carries **both**, so a typed contract
+boundary can name them separately.
+
+```json
+{ "$emit": "0.1", "variants": true, "declarations": [
+  { "kind": "declaration", "name": "Config", "variant": "normalized", "…": "…" },
+  { "kind": "declaration", "name": "ConfigInput", "variant": "accepted",
+    "variantOf": "Config", "…": "…" } ] }
+```
+
+- `variants` on the document is `true` exactly when variant pairs were
+  derived. Without normalization options there are no `variant` members at
+  all, and each declaration is simply the schema's shape.
+- The **normalized** declaration keeps the plain name. It is the shape *after*
+  normalizing, which is what the rest of a program handles.
+- The **accepted** declaration takes a suffix (`Input` by default) and names
+  its counterpart in `variantOf`.
+
+**A twin is emitted only when the type actually differs.** A producer computes
+that bottom-up — a type differs if anything it contains differs — so a schema
+with one defaulted field does not double every declaration in the document.
+Everything unaffected is referenced by its single shared name from both sides.
+
+**Two normalizations produce a difference, and only two.** `useDefaults` moves
+a member from optional to required across the boundary. `coerceTypes` widens
+the accepted side to the types the normalizer will convert *from*. `trimStrings`
+is string-to-string and `removeAdditional` removes members no type declared, so
+neither justifies a second declaration.
+
+A producer MUST derive the accepted side from the **same** switch resolution
+the normalizer uses, including predicate options. A variant that disagrees
+with the normalizer is worse than no variant: it is a type that certifies an
+input the normalizer will not accept.
+
+## 8. Determinism
 
 Two compilations of the same input MUST produce byte-identical models.
 Concretely, a producer:
@@ -139,7 +178,7 @@ Concretely, a producer:
 - does not serialize a `Set` or `Map` whose order depends on insertion history
   across merges.
 
-## 8. What the format deliberately does not model
+## 9. What the format deliberately does not model
 
 - **`if`/`then`/`else` and `not`.** Neither has a sound type-level reading —
   the first is a conditional type in principle and unreadable in practice, the
@@ -149,8 +188,7 @@ Concretely, a producer:
 - **Cross-document `$ref`.** A model compiles the document it was given.
   Following a ref into another document would mean owning a resolution scope,
   which is `@jarenjs/validate`'s job, not this format's.
-- **Distinct accepted and normalized variants.** `@jarenjs/validate/normalize`
-  makes the input and output shapes of a contract differ, and a model that
-  carried both would let an emitter produce the `Accepted`/`Normalized` pair a
-  typed contract boundary wants. Format 0.1 does not, and adding it is the
-  next thing this format should grow.
+- **`removeAdditional` and `trimStrings` as type differences.** Neither
+  changes a *declared* type: trimming is string-to-string, and stripping
+  removes members the type never declared. Only `useDefaults` and
+  `coerceTypes` earn a variant (§9).

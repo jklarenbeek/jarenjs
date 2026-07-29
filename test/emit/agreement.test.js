@@ -102,8 +102,11 @@ describe('emit — the generated fixture is current', () => {
     const committed = fs.readFileSync(FIXTURE, 'utf8');
     const header = committed.slice(0, committed.indexOf('\n\n') + 2);
     let fresh = header;
-    for (const entry of CORPUS)
-      fresh += emitTypeScript(entry.schema, { name: entry.name, banner: false });
+    for (const entry of CORPUS) {
+      fresh += emitTypeScript(entry.schema, {
+        name: entry.name, banner: false, normalize: entry.normalize ?? null,
+      });
+    }
     assert.strictEqual(committed, fresh,
       'test/consumer/emit-generated.ts is stale — regenerate it with '
       + '`node scripts/generate-emit-fixture.js`');
@@ -115,15 +118,47 @@ describe('emit — the generated fixture is current', () => {
   });
 });
 
+describe('emit — the variant pair closes the same loop', () => {
+  it('normalizes a raw input into something the normalized side describes', async () => {
+    // The type gate proves a raw input satisfies ConfigInput and not Config.
+    // This proves the other half at runtime: the normalizer really does turn
+    // one into the other, so the pair describes a transition that happens
+    // rather than one the generator merely asserts.
+    const { compileNormalizer } = await import('@jarenjs/validate/normalize');
+    for (const entry of CORPUS) {
+      if (entry.normalize === undefined || entry.rawInput === undefined) continue;
+      const normalize = compileNormalizer(entry.schema, entry.normalize);
+      const validate = new JarenValidator().compile(entry.schema);
+      const model = compileEmitModel(entry.schema,
+        { name: entry.name, normalize: entry.normalize });
+      const normalized = model.declarations.find((d) => d.variant === 'normalized');
+
+      for (const raw of entry.rawInput) {
+        const shaped = normalize(raw);
+        assert.strictEqual(validate(shaped), true,
+          `${entry.name}: normalizing ${JSON.stringify(raw)} must produce a valid document`);
+        // Everything the normalized declaration calls required must be there.
+        for (const member of normalized.type.members) {
+          if (!member.required) continue;
+          assert.ok(Object.hasOwn(shaped, member.name),
+            `${entry.name}.${member.name} is required on the normalized side, `
+            + `but normalizing ${JSON.stringify(raw)} did not produce it`);
+        }
+      }
+    }
+  });
+});
+
 describe('emit — determinism', () => {
   it('produces byte-identical output for the same input', () => {
     for (const entry of CORPUS) {
-      const once = emitTypeScript(entry.schema, { name: entry.name });
-      const twice = emitTypeScript(entry.schema, { name: entry.name });
+      const opts = { name: entry.name, normalize: entry.normalize ?? null };
+      const once = emitTypeScript(entry.schema, opts);
+      const twice = emitTypeScript(entry.schema, opts);
       assert.strictEqual(once, twice, `${entry.name} is not byte-stable`);
       assert.strictEqual(
-        JSON.stringify(compileEmitModel(entry.schema, { name: entry.name })),
-        JSON.stringify(compileEmitModel(entry.schema, { name: entry.name })),
+        JSON.stringify(compileEmitModel(entry.schema, opts)),
+        JSON.stringify(compileEmitModel(entry.schema, opts)),
         `${entry.name} model is not byte-stable`);
     }
   });

@@ -19,6 +19,10 @@
       "description": "The declaration name that corresponds to the schema's root.",
       "type": ["string", "null"]
     },
+    "variants": {
+      "description": "Present and true when the model carries accepted/normalized variant pairs, i.e. it was compiled with normalization options.",
+      "const": true
+    },
     "declarations": {
       "description": "Named declarations in emission order. Every reference is by name, so the list is flat even when the source schema was cyclic.",
       "type": "array",
@@ -32,6 +36,14 @@
       "additionalProperties": false,
       "properties": {
         "kind": { "const": "declaration" },
+        "variant": {
+          "description": "Which side of normalization this declaration describes. Absent when the model was compiled without normalization options, in which case the single declaration is both.",
+          "enum": ["accepted", "normalized"]
+        },
+        "variantOf": {
+          "description": "For an accepted variant, the name of its normalized counterpart.",
+          "type": "string"
+        },
         "name": {
           "description": "A unique, identifier-safe name.",
           "type": "string",

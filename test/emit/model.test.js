@@ -193,6 +193,23 @@ describe('the model format is a real contract', () => {
         `model for ${JSON.stringify(schema)} violates the published format: `
         + JSON.stringify(result.errors.slice(0, 3)));
     }
+
+    // Variant pairs are part of the published format too, so they have to
+    // validate against it — including the document-level `variants` flag and
+    // the `variant`/`variantOf` members the pair adds.
+    const paired = compileEmitModel({
+      type: 'object',
+      properties: {
+        host: { type: 'string', default: 'localhost' },
+        port: { type: 'integer', default: 8080 },
+      },
+    }, { name: 'Probe', normalize: { useDefaults: true, coerceTypes: true } });
+    const pairedResult = validate(paired);
+    assert.strictEqual(pairedResult.valid, true,
+      'a variant model violates the published format: '
+      + JSON.stringify(pairedResult.errors.slice(0, 3)));
+    assert.strictEqual(paired.variants, true);
+    assert.ok(paired.declarations.some((d) => d.variant === 'accepted' && d.variantOf === 'Probe'));
   });
 });
 
@@ -246,5 +263,130 @@ describe('the package barrel and third-party models', () => {
     const md = renderMarkdown(model);
     assert.match(md, /map of number/);
     assert.match(md, /Bag and any/);
+  });
+});
+
+describe('compileEmitModel — accepted and normalized variants', () => {
+  const config = {
+    type: 'object',
+    properties: {
+      host: { type: 'string', default: 'localhost' },
+      port: { type: 'integer', default: 8080 },
+      name: { type: 'string' },
+    },
+    required: ['name'],
+  };
+  const withVariants = (schema, normalize, name = 'Config') =>
+    compileEmitModel(schema, { name, normalize });
+
+  it('emits no variants at all when normalization is not configured', () => {
+    const model = compileEmitModel(config, { name: 'Config' });
+    assert.strictEqual(model.variants, undefined);
+    assert.ok(model.declarations.every((d) => d.variant === undefined));
+  });
+
+  it('marks the pair and links the accepted side to its counterpart', () => {
+    const model = withVariants(config, { useDefaults: true });
+    assert.strictEqual(model.variants, true);
+    const normalized = model.declarations.find((d) => d.variant === 'normalized');
+    const accepted = model.declarations.find((d) => d.variant === 'accepted');
+    assert.strictEqual(normalized.name, 'Config');
+    assert.strictEqual(accepted.name, 'ConfigInput');
+    assert.strictEqual(accepted.variantOf, 'Config');
+  });
+
+  it('moves a defaulted member from optional on input to present on output', () => {
+    // This asymmetry is the entire reason the two variants exist.
+    const model = withVariants(config, { useDefaults: true });
+    const member = (variant, name) => model.declarations
+      .find((d) => d.variant === variant).type.members.find((m) => m.name === name);
+    assert.strictEqual(member('normalized', 'host').required, true);
+    assert.strictEqual(member('accepted', 'host').required, false);
+    // A member without a default is unaffected in either direction.
+    assert.strictEqual(member('normalized', 'name').required, true);
+    assert.strictEqual(member('accepted', 'name').required, true);
+  });
+
+  it('widens the accepted side to what the normalizer converts from', () => {
+    const model = withVariants(config, { coerceTypes: true });
+    const port = (variant) => model.declarations
+      .find((d) => d.variant === variant).type.members.find((m) => m.name === 'port');
+    assert.deepStrictEqual(port('normalized').type, { kind: 'primitive', primitive: 'number' });
+    assert.deepStrictEqual(port('accepted').type.options.map((o) => o.primitive),
+      ['number', 'string']);
+  });
+
+  it('twins only the types that actually differ', () => {
+    // A schema with one defaulted field must not double every declaration.
+    const schema = {
+      $defs: {
+        Address: { type: 'object', properties: { city: { type: 'string' } } },
+        Settings: { type: 'object', properties: { theme: { type: 'string', default: 'dark' } } },
+      },
+      type: 'object',
+      properties: { home: { $ref: '#/$defs/Address' }, settings: { $ref: '#/$defs/Settings' } },
+    };
+    const model = withVariants(schema, { useDefaults: true }, 'User');
+    const twinned = model.declarations
+      .filter((d) => d.variant === 'accepted').map((d) => d.variantOf);
+    assert.ok(!twinned.includes('Address'), 'Address has no difference and must be shared');
+    assert.ok(twinned.includes('Settings'), 'Settings has a default and must be twinned');
+    assert.ok(twinned.includes('User'), 'User contains a differing type, so it differs too');
+  });
+
+  it('honours a per-node predicate exactly as the normalizer does', () => {
+    // The switch resolution is imported from @jarenjs/validate/normalize
+    // rather than reimplemented: two copies of this rule would drift, and a
+    // variant that disagrees with the normalizer is worse than none.
+    const schema = {
+      type: 'object',
+      properties: {
+        a: { type: 'integer', 'x-coerce': true },
+        b: { type: 'integer' },
+      },
+    };
+    const model = withVariants(schema, { coerceTypes: (n) => n['x-coerce'] === true });
+    const accepted = model.declarations.find((d) => d.variant === 'accepted');
+    assert.strictEqual(accepted.type.members.find((m) => m.name === 'a').type.kind, 'union');
+    assert.strictEqual(accepted.type.members.find((m) => m.name === 'b').type.kind, 'primitive');
+  });
+
+  it('agrees with what compileNormalizer actually does', async () => {
+    // The claim the variants make is testable, so it is tested: the value the
+    // normalizer produces must satisfy the normalized side, and the value it
+    // accepts must satisfy the accepted side.
+    const { compileNormalizer } = await import('@jarenjs/validate/normalize');
+    const options = { useDefaults: true, coerceTypes: true };
+    const normalize = compileNormalizer(config, options);
+    const model = withVariants(config, options);
+
+    const raw = { name: 'x', port: '9000' };
+    const shaped = normalize(raw);
+    // defaulted members are absent on the way in and present on the way out
+    assert.strictEqual(Object.hasOwn(raw, 'host'), false);
+    assert.strictEqual(Object.hasOwn(shaped, 'host'), true);
+    assert.strictEqual(shaped.port, 9000);
+
+    const normalized = model.declarations.find((d) => d.variant === 'normalized');
+    for (const m of normalized.type.members) {
+      if (!m.required) continue;
+      assert.ok(Object.hasOwn(shaped, m.name),
+        `${m.name} is required on the normalized side but the normalizer did not produce it`);
+    }
+  });
+
+  it('renders both sides as TypeScript', () => {
+    const ts = emitTypeScript(config, { name: 'Config', normalize: { useDefaults: true, coerceTypes: true } });
+    assert.match(ts, /export interface Config \{/);
+    assert.match(ts, /export interface ConfigInput \{/);
+    assert.match(ts, /\bhost: string;/);        // present after normalizing
+    assert.match(ts, /host\?: string \| number \| boolean;/); // optional and widened before
+    assert.match(ts, /Accepted input for Config/);
+  });
+
+  it('lets the accepted suffix be chosen', () => {
+    const model = compileEmitModel(config,
+      { name: 'Config', normalize: { useDefaults: true }, variantSuffix: 'Raw' });
+    assert.ok(model.declarations.some((d) => d.name === 'ConfigRaw'));
   });
 });

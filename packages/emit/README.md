@@ -109,6 +109,56 @@ The rig is checked against itself, too: deliberately breaking the generator so
 it emits `unknown` everywhere makes the "not wider than the schema" assertion
 fail. A verification suite that passes on a broken generator proves nothing.
 
+## Accepted and normalized types
+
+`@jarenjs/validate/normalize` makes a contract's input and output shapes
+differ — a defaulted member is optional for the caller and present afterwards,
+and a coerced member arrives in its transport form. Pass the same options to
+the generator and it names both sides:
+
+```bash
+jaren-emit --schema ./schemas --out ./types --defaults --coerce
+```
+
+```typescript
+export interface Config {
+  host: string;      // present after normalizing
+  port: number;
+  name: string;
+}
+
+/**
+ * Accepted input for Config: the shape before normalization, where defaulted
+ * members may be absent and coercible values may still be in their transport form.
+ */
+export interface ConfigInput {
+  host?: string | number | boolean;   // optional, and widened to what
+  port?: number | string;             // the normalizer will convert FROM
+  name: string | number | boolean;
+}
+```
+
+That pair is exactly what a `Contract<Input, Output>` boundary wants: the
+handler signature takes `ConfigInput`, the rest of the program handles
+`Config`, and the normalizer is the transition between them.
+
+**A twin appears only where the type actually differs.** The generator works
+that out bottom-up, so a schema with one defaulted field does not double every
+declaration; everything unaffected keeps a single shared name on both sides.
+
+**Only two normalizations produce a difference.** `useDefaults` moves a member
+across the optional boundary and `coerceTypes` widens what the input accepts.
+`trimStrings` is string-to-string, and `removeAdditional` removes members no
+type ever declared — neither earns a second declaration.
+
+The switch resolution, including per-field predicates, is **imported from the
+normalizer rather than reimplemented**. Two copies of that rule would drift,
+and a variant that disagrees with the normalizer is worse than no variant: it
+is a type certifying an input the normalizer will not take. The agreement
+suite checks the pair the same way it checks everything else — a raw input
+must satisfy `ConfigInput` and not `Config`, and normalizing it at runtime
+must produce something the `Config` side describes.
+
 ## Two stages, and why
 
 ```
@@ -165,6 +215,7 @@ untrustworthy in the first place.
 | `allOf` | an intersection |
 | `anyOf`, `oneOf` | a union |
 | `description` | a doc comment |
+| `default` (with `--defaults`) | optional on the accepted side, present on the normalized side |
 
 **Widened, with the constraint recorded**: `minLength`, `maxLength`,
 `pattern`, `format`, `minimum`, `maximum`, `exclusiveMinimum`,

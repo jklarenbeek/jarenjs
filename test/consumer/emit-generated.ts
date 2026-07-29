@@ -21,3 +21,20 @@ export interface Node {
 }
 
 
+export interface Config {
+  host: string;
+  port: number;
+  name: string;
+}
+
+
+/**
+ * Accepted input for Config: the shape before normalization, where defaulted members may be absent and coercible values may still be in their transport form.
+ */
+export interface ConfigInput {
+  host?: string | number | boolean;
+  port?: number | string;
+  name: string | number | boolean;
+}
+
+

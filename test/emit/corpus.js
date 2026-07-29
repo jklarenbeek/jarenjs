@@ -12,6 +12,12 @@
  * - `invalidWidened` — fails validation for a reason no type can carry
  *                      (`minLength`, `pattern`, `format`), so the type
  *                      necessarily accepts it. Asserted rather than hidden.
+ *
+ * An entry may also carry `normalize` options. Then the generated file holds
+ * an accepted/normalized PAIR, and the corpus additionally names:
+ *
+ * - `rawInput`   — what a caller may hand in, which must satisfy the ACCEPTED
+ *                  type and, once normalized, the NORMALIZED one.
  */
 export const CORPUS = [
   {
@@ -49,5 +55,25 @@ export const CORPUS = [
     valid: [{ label: 'root' }, { label: 'root', children: [{ label: 'kid', children: [] }] }],
     invalidShape: [{ label: 1 }, { children: [] }, { label: 'root', children: [{ notALabel: true }] }],
     invalidWidened: [],
+  },
+  {
+    name: 'Config',
+    normalize: { useDefaults: true, coerceTypes: true },
+    schema: {
+      type: 'object',
+      properties: {
+        host: { type: 'string', default: 'localhost' },
+        port: { type: 'integer', default: 8080 },
+        name: { type: 'string' },
+      },
+      required: ['name'],
+    },
+    // Already-normalized documents: valid to the validator as they stand.
+    valid: [{ name: 'a', host: 'h', port: 1 }],
+    invalidShape: [{ name: 1, host: 'h', port: 1 }],
+    invalidWidened: [],
+    // What a caller may actually hand in: defaults absent, port still a
+    // string. The accepted type must take this; the normalized type must not.
+    rawInput: [{ name: 'a', port: '9000' }],
   },
 ];

@@ -28,7 +28,15 @@ Options:
   --name <Name>     Root declaration name for a single schema (default: file name)
   --bundle <file>   Write every schema into one output file instead of one each
   --check           Do not write; exit 1 if any output would differ (for CI)
+  --defaults        Emit accepted/normalized variants for schema defaults
+  --coerce          Emit accepted/normalized variants for type coercion
+  --suffix <s>      Name for the accepted variant (default: Input)
   --help            This text
+
+The --defaults/--coerce flags mirror the compileNormalizer options of the same
+name. With either on, a type whose shape differs before and after normalizing
+gains a second declaration: Config is what you have afterwards, ConfigInput is
+what a caller may hand in.
 
 Examples:
   jaren-emit --schema ./schemas --out ./src/types
@@ -40,6 +48,7 @@ function parseArgs(argv) {
   const options = {
     schema: null, out: null, target: 'typescript',
     name: null, bundle: null, check: false, help: false,
+    defaults: false, coerce: false, suffix: 'Input',
   };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
@@ -49,6 +58,9 @@ function parseArgs(argv) {
       case '--name': options.name = argv[++i]; break;
       case '--bundle': options.bundle = argv[++i]; break;
       case '--check': options.check = true; break;
+      case '--defaults': options.defaults = true; break;
+      case '--coerce': options.coerce = true; break;
+      case '--suffix': options.suffix = argv[++i]; break;
       case '--help': case '-h': options.help = true; break;
       default:
         throw new Error(`unknown option: ${argv[i]}`);
@@ -131,13 +143,22 @@ function main() {
     return;
   }
 
+  // Only pass normalize options when at least one is on: a null here is what
+  // tells the model to emit a single declaration per type rather than a pair.
+  const normalizeOptions = options.defaults || options.coerce
+    ? { useDefaults: options.defaults, coerceTypes: options.coerce }
+    : null;
+
   let ok = true;
   const bundled = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const schema = JSON.parse(fs.readFileSync(file, 'utf8'));
     const name = options.name ?? nameFromFile(file);
-    const model = compileEmitModel(schema, { name, source: path.basename(file) });
+    const model = compileEmitModel(schema, {
+      name, source: path.basename(file),
+      normalize: normalizeOptions, variantSuffix: options.suffix,
+    });
     if (options.bundle !== null) {
       bundled.push(...model.declarations);
       continue;

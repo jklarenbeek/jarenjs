@@ -136,7 +136,10 @@ function resolveLocalRef(ref, root) {
 }
 
 /**
- * Resolve a per-node normalization switch at COMPILE time. `true` turns the
+ * Resolve a per-node normalization switch at COMPILE time. Exported because
+ * `@jarenjs/emit` has to answer the same question when it derives the accepted
+ * and normalized type variants: two implementations of this rule would drift,
+ * and a type that disagrees with the normalizer is worse than no type. `true` turns the
  * behavior on everywhere, `false` nowhere, and a predicate decides per schema
  * node — which is how a consumer expresses "trim these 34 string fields, not
  * the other 185" without the option becoming a whole-schema blunt instrument.
@@ -145,7 +148,7 @@ function resolveLocalRef(ref, root) {
  * @param {object} node - The schema node the switch applies to
  * @returns {boolean}
  */
-function resolveSwitch(option, node) {
+export function resolveNormalizeSwitch(option, node) {
   if (option === true) return true;
   if (typeof option === 'function') return option(node) === true;
   return false;
@@ -216,7 +219,7 @@ function buildObjectStep(node, ctx) {
       // otherwise a defaulted `{ port: '8080' }` keeps its string where a
       // provided one is coerced.
       if (isJsonObject(sub) && sub.default !== undefined
-        && resolveSwitch(options.useDefaults, sub))
+        && resolveNormalizeSwitch(options.useDefaults, sub))
         defaults.push(key, sub.default, step);
     }
   }
@@ -365,10 +368,10 @@ function buildArrayStep(node, ctx) {
  */
 function buildScalarStep(node, ctx) {
   const options = ctx.options;
-  const trim = resolveSwitch(options.trimStrings, node);
+  const trim = resolveNormalizeSwitch(options.trimStrings, node);
   // A union `type` gives no single conversion target, so coercion is skipped
   // rather than guessed.
-  const coerceTo = resolveSwitch(options.coerceTypes, node) && typeof node.type === 'string'
+  const coerceTo = resolveNormalizeSwitch(options.coerceTypes, node) && typeof node.type === 'string'
     ? node.type
     : null;
   if (!trim && coerceTo === null) return null;
@@ -518,7 +521,7 @@ export function compileNormalizer(schema, options = {}) {
   // A root `default` answers the "the whole document was absent" case, which
   // no member walk can reach.
   const rootDefault = isJsonObject(schema) && schema.default !== undefined
-    && resolveSwitch(resolved.useDefaults, schema)
+    && resolveNormalizeSwitch(resolved.useDefaults, schema)
     ? schema.default
     : undefined;
 

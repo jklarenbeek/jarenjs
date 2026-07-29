@@ -348,3 +348,30 @@ void [emitBad1, emitBad2, emitBad3, emitBad4, emitBad5, emitBad6, emitBad7];
 // The generated file documents it; this pins the honest boundary.
 const emitWidened: Account = { id: 'ab' };
 void emitWidened;
+
+// The accepted/normalized variant pair. `compileNormalizer` makes a contract's
+// input and output shapes differ, and these two declarations are that
+// difference made checkable:
+//
+//   - a RAW caller value (defaults absent, port still a transport string)
+//     must satisfy ConfigInput and must NOT satisfy Config
+//   - the NORMALIZED value must satisfy Config
+//
+// This is what a Contract<Input, Output> boundary needs, and it is only
+// trustworthy because the same normalize options drove both the generated
+// types and the runtime normalizer.
+import type { Config, ConfigInput } from './emit-generated.js';
+
+const emitRaw: ConfigInput = { name: 'a', port: '9000' };
+void emitRaw;
+
+// @ts-expect-error a raw input is not the normalized shape: host is absent and port is a string
+const emitRawAsOutput: Config = { name: 'a', port: '9000' };
+void emitRawAsOutput;
+
+const emitNormalized: Config = { name: 'a', host: 'localhost', port: 9000 };
+void emitNormalized;
+
+// @ts-expect-error the normalized shape requires the defaulted members
+const emitMissingDefaults: Config = { name: 'a' };
+void emitMissingDefaults;
