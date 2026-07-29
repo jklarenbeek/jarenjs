@@ -39,9 +39,12 @@ Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSO
 ### Installation
 
 ```bash
-npm install
-npm run build
+npm install @jarenjs/validate @jarenjs/formats @jarenjs/refs
 ```
+
+Node ≥ 22, ESM only, no third-party runtime dependencies. To pin a source
+checkout instead of a registry version — or to work on Jaren itself — see
+[CONSUMING.md](CONSUMING.md).
 
 ### Basic Usage
 
@@ -192,6 +195,7 @@ I will look up what that means, later...
 ```
 
 - [HOWTO.md](HOWTO.md) — practical usage guide: installation profiles, options, formats, `$ref` patterns, performance tips, pitfalls, API reference.
+- [CONSUMING.md](CONSUMING.md) — depending on Jaren from another project: npm packages or a pinned source/submodule checkout, package selection, declaration generation, Docker and bundling, upgrading a pin.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the monorepo fits together and the shared compile-to-closures design; each package links its own deeper ARCHITECTURE document from there.
 - [ROADMAP.md](ROADMAP.md) — release milestones and the open work per package. It lists what is *not* done: shipped capability is documented in the package docs, not there.
 - [REFACTOR.md](REFACTOR.md) — the reusable codebase-health playbook: find duplication, collapse it into the right parent package, repair drifted documentation, and the gate a pass must end on.

@@ -541,27 +541,41 @@ Format validators try a cheap common-case check before a comprehensive one, e.g.
 
 ### Error Collection
 
-When `skipErrors: false`, errors are collected in `ValidationRoot.#errors`:
+Internally, `skipErrors: false` accumulates raw `InternalValidationError`
+records in `ValidationRoot.#errors`. Those records are an implementation
+detail: they carry the offending object, the expected value and a timestamp,
+keyed for cheap allocation on the failure path rather than for reading.
+
+`collectErrors: true` is the public surface. It implies `skipErrors: false`
+and additionally converts the internal records into `ValidationError`
+instances at the end of a validation, which the compiled validator returns:
 
 ```javascript
-const validator = new JarenValidator({ skipErrors: false });
+const validator = new JarenValidator({ collectErrors: true });
 const validate = validator.compile(schema);
 
-const isValid = validate(data);
-const errors = validator.errors;  // Array of ValidationError objects
+const { valid, errors } = validate(data);
 ```
+
+There is no `errors` property on the validator instance — the result is
+returned, which is what keeps a compiled validator reentrant.
 
 ### Error Structure
 
 ```typescript
 interface ValidationError {
   keyword: string;        // 'type', 'minLength', etc.
-  message: string;        // Human-readable message
-  params: object;         // Keyword-specific params
-  dataPath: string;       // Path to error in data
-  schemaPath: string;     // Path to schema keyword
+  instancePath: string;   // RFC 6901 JSON Pointer into the data
+  schemaPath: string;     // Absolute URI into the schema
+  params: object;         // Raw structured values, never prose
+  msgid: string;          // Stable catalog key (defaults to keyword)
+  message: string;        // Rendered text; '' when messages: false
 }
 ```
+
+The `msgid`/`params` pair is what makes report-time i18n possible without
+recompiling; see [ERROR-MESSAGES.md](packages/validate/docs/ERROR-MESSAGES.md)
+for the normative contract.
 
 ### Error Handler Optimization
 

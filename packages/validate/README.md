@@ -343,6 +343,162 @@ Semantics and composition:
   validator's return shape **once per schema literal** — so even a
   `collectErrors` instance is unwrapped into a boolean predicate.
 
+## Compatibility settings
+
+Five options decide answers that differ between validators, between JSON
+Schema drafts, or between Jaren and the library you are migrating from. Each
+one is a deliberate default, and each one is worth setting explicitly in a
+shared factory rather than inheriting.
+
+| Option | Default | What it decides |
+|---|---|---|
+| `collectErrors` | `false` | Whether the compiled validator returns a boolean or `{ valid, errors }` |
+| `skipErrors` | `!collectErrors` | Whether validation stops at the first failure |
+| `useGrapheme` | **`true`** | Whether `minLength`/`maxLength` count grapheme clusters or UTF-16 code units |
+| `formatAssertion` | auto by draft | Whether `format` asserts or only annotates |
+| `contentValidation` | auto by draft | Whether `contentEncoding`/`contentMediaType` assert |
+
+### The return shape is `collectErrors`
+
+`collectErrors` is the *only* switch between the two return shapes, and it is
+off by default:
+
+```javascript
+new JarenValidator().compile(schema)(data);
+// => true | false
+
+new JarenValidator({ collectErrors: true }).compile(schema)(data);
+// => { valid: false, errors: [ /* ValidationError */ ] }
+```
+
+Setting `collectErrors: true` implies `skipErrors: false` (collecting errors
+means recording them), so you do not need to set both. Set `skipErrors`
+yourself only to keep first-failure short-circuiting while still collecting.
+
+There is **no `validator.errors` property**. Errors arrive in the returned
+object and nowhere else, which is what makes a compiled validator reentrant
+and safe to share across concurrent requests.
+
+Each `ValidationError` carries six fields:
+
+```javascript
+{
+  keyword: 'format',                 // the JSON Schema keyword that failed
+  instancePath: '/email',            // RFC 6901 JSON Pointer into the DATA
+  schemaPath: 'https://…#/properties/email',  // absolute URI into the SCHEMA
+  params: { format: 'email' },       // raw structured values, never prose
+  msgid: 'format',                   // stable catalog key for i18n
+  message: 'must match format "email"'
+}
+```
+
+Two notes for anyone diffing this against another validator's output. The
+data location is `instancePath`, a **JSON Pointer string** — not the dotted
+`dataPath` of Ajv v6, and not an array path. `parseJSONPointer` from
+[`@jarenjs/json`](../json/README.md) decodes it into segments. And for
+`additionalProperties: false`, Jaren points `instancePath` at the offending
+member (`/nested/extra`) where Ajv points at the parent object — deliberate,
+and spec-truer.
+
+### String lengths count graphemes by default
+
+`useGrapheme` defaults to **`true`**, so `minLength`/`maxLength` count
+user-perceived characters. Most other validators — and the JSON Schema
+specification itself — count UTF-16 code units:
+
+```javascript
+const family = '👨‍👩‍👧‍👦';   // 1 grapheme cluster, 11 UTF-16 code units
+
+new JarenValidator().compile({ type: 'string', maxLength: 2 })(family);
+// => true   (1 grapheme)
+
+new JarenValidator({ useGrapheme: false })
+  .compile({ type: 'string', maxLength: 2 })(family);
+// => false  (11 code units)
+```
+
+**If you are migrating from a validator that counts code units, set
+`useGrapheme: false`,** or strings containing emoji, combining marks, flags
+or astral-plane characters will silently change validity at the boundaries.
+Grapheme mode is not expensive — ASCII takes a `str.length` fast path and
+most Unicode takes a code-point count; only cluster-forming strings reach
+`Intl.Segmenter` — so the default is about correctness, not speed, and
+switching to it later is a product decision rather than a performance one.
+
+### `format` and content assertion follow the draft
+
+Both are annotation-only in the drafts that say so, and both take an explicit
+override:
+
+- **`format`** asserts through draft 2019-09 and is annotation-only from
+  draft 2020-12 on, per spec. It also turns on automatically when the
+  schema's meta-schema declares the `format-assertion` vocabulary.
+- **`contentEncoding`/`contentMediaType`** assert through draft-07 and are
+  annotation-only from 2019-09 on.
+
+```javascript
+const schema = { $schema: 'https://json-schema.org/draft/2020-12/schema',
+                 type: 'string', format: 'email' };
+
+new JarenValidator().addFormats(formats.stringFormats)
+  .compile(schema)('nope');                       // => true  (annotation only)
+
+new JarenValidator({ formatAssertion: true }).addFormats(formats.stringFormats)
+  .compile(schema)('nope');                       // => false (asserted)
+```
+
+> **Known defect.** Constructing with an options *object* that sets any
+> validation option (`new JarenValidator({ collectErrors: true })`) also
+> pins `contentValidation` to `false`, defeating the auto-by-draft rule
+> above; only `new JarenValidator()` with no options gets the draft default.
+> Set `contentValidation: true` explicitly if you rely on it. Tracked in the
+> [ROADMAP](../../ROADMAP.md).
+
+### Formats are never registered implicitly
+
+`@jarenjs/validate` does not depend on `@jarenjs/formats`. An unregistered
+format name is an unknown annotation and **passes**, per spec — so a
+`format: 'email'` that was never registered validates everything:
+
+```javascript
+import * as formats from '@jarenjs/formats';
+
+const jaren = new JarenValidator()
+  .addFormats(formats.stringFormats)     // email, uri, uuid, hostname, ...
+  .addFormats(formats.dateTimeFormats);  // date-time, date, time, duration
+```
+
+Registration never overwrites an existing name, so register your own
+overrides *before* a bundled group if you want them to win.
+
+### Recipe: migrating from Zod
+
+Zod counts UTF-16 code units, always reports every issue, and always
+asserts formats. This factory reproduces those three answers:
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import * as formats from '@jarenjs/formats';
+
+export const jaren = new JarenValidator({
+  collectErrors: true,     // { valid, errors } instead of a boolean
+  useGrapheme: false,      // UTF-16 code units, like Zod's .min()/.max()
+  formatAssertion: true,   // assert format even under draft 2020-12
+  contentValidation: true, // see the known defect above
+})
+  .addFormats(formats.stringFormats)
+  .addFormats(formats.dateTimeFormats);
+```
+
+What this recipe does **not** give you is Zod's output normalization. Jaren
+validates without modifying its input: `default` values are not materialized,
+types are not coerced, strings are not trimmed, and unknown properties are
+not stripped. That is a deliberate boundary — the compiled validator is a
+pure predicate — so a migration that relies on Zod's parsed *output* needs a
+normalization step of its own between parsing and validation. See
+[Pitfall 3](../../HOWTO.md#pitfall-3-validation-never-modifies-your-data) in
+the HOWTO.
+
 ## Error messages & i18n
 
 Every collected error carries a stable message key (`msgid`) and raw

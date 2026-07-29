@@ -69,9 +69,12 @@ console.log(isValid); // true
 
 ### Getting Validation Errors
 
+Set `collectErrors: true` and the compiled validator returns a result object
+instead of a boolean:
+
 ```javascript
 const jaren = new JarenValidator({
-  skipErrors: false  // Enable error collection
+  collectErrors: true  // return { valid, errors } instead of a boolean
 }).addFormats(formats.stringFormats);
 
 const validate = jaren.compile({
@@ -81,21 +84,33 @@ const validate = jaren.compile({
   }
 });
 
-const isValid = validate({ email: 'invalid-email' });
+const result = validate({ email: 'invalid-email' });
 
-if (!isValid) {
-  console.log(jaren.errors);
+if (!result.valid) {
+  console.log(result.errors);
   // [
   //   {
   //     keyword: 'format',
-  //     message: 'should match format "email"',
+  //     instancePath: '/email',
+  //     schemaPath: 'https://github.com/jklarenbeek/jarenjs#/properties/email',
   //     params: { format: 'email' },
-  //     dataPath: '.email',
-  //     schemaPath: '#/properties/email/format'
+  //     msgid: 'format',
+  //     message: 'must match format "email"'
   //   }
   // ]
 }
 ```
+
+Errors are returned, never stashed on the validator instance — there is no
+`jaren.errors` property. That is what keeps a compiled validator reentrant
+and safe to share across concurrent requests.
+
+`instancePath` is an RFC 6901 JSON Pointer into the *data*; `schemaPath` is an
+absolute URI into the *schema*. The `msgid` + `params` pair is what
+[`@jarenjs/locales`](packages/locales/README.md) re-renders in another
+language. The full error contract, and the options that change these answers,
+are documented under
+[Compatibility settings](packages/validate/README.md#compatibility-settings).
 
 ---
 
@@ -151,8 +166,12 @@ console.log(validate({ count: 42, name: 'test' })); // true
 
 ```javascript
 const jaren = new JarenValidator({
-  // Skip error object creation for better performance (default: true)
-  skipErrors: true,
+  // Return { valid, errors } instead of a boolean (default: false)
+  collectErrors: true,
+
+  // Skip error object creation for better performance
+  // (default: !collectErrors, so setting collectErrors is enough)
+  skipErrors: false,
 
   // Use grapheme counting instead of code units (default: true)
   // Affects minLength/maxLength for strings with emojis
@@ -165,6 +184,11 @@ const jaren = new JarenValidator({
   // Assert the format keyword (default: per draft - asserted through
   // 2019-09, annotation-only from 2020-12 on)
   formatAssertion: true,
+
+  // Render English message text on collected errors (default: true).
+  // false leaves message: '' with msgid and params still set, for
+  // applications that render exclusively through a locale pack.
+  messages: true,
 });
 ```
 
@@ -172,6 +196,11 @@ The JSON Schema draft is detected automatically from the schema's `$schema`
 declaration (`draft-06`, `draft-07`, `2019-09` or `2020-12`), defaulting to
 draft 7 when absent. Referenced documents that declare a different draft are
 processed per their own declaration.
+
+The options that decide answers other validators answer differently — the
+return shape, string-length semantics, format and content assertion, and
+format registration — are documented together, with a migration recipe, under
+[Compatibility settings](packages/validate/README.md#compatibility-settings).
 
 ### ASCII vs Grapheme Mode
 
@@ -197,6 +226,12 @@ console.log(validate2('abc')); // false - 3 code units
 **Recommendation**:
 - Use `useGrapheme: true` (default) if your data may contain emojis or complex Unicode; ASCII and most Unicode strings still take a cheap fast path
 - Use `useGrapheme: false` if you want lengths counted in UTF-16 code units
+
+⚠️ **Migrating from another validator?** The JSON Schema specification counts
+UTF-16 code units, and so do Ajv, Zod and Yup. Jaren's grapheme default is a
+deliberate correctness choice, but it means a string of emoji that failed
+`maxLength` before will now pass. Set `useGrapheme: false` to preserve the old
+answers, and treat the switch to graphemes as its own reviewed change.
 
 ---
 
@@ -469,15 +504,24 @@ for (const item of largeArray) {
 }
 ```
 
-### 2. Use `skipErrors: true` for Production
+### 2. Only Collect Errors Where You Report Them
+
+Error collection costs allocation and defeats first-failure short-circuiting,
+so pay for it only where a human or an API response actually reads the result:
 
 ```javascript
-// Production: Fast, no error details
-const prodValidator = new JarenValidator({ skipErrors: true });
+// Reporting a 400 to a caller: collect
+const requestValidator = new JarenValidator({ collectErrors: true });
 
-// Development: Slower, but get error details
-const devValidator = new JarenValidator({ skipErrors: false });
+// A hot internal guard that only branches on the answer: don't
+const guard = new JarenValidator();  // boolean, stops at the first failure
 ```
+
+Use `collectErrors: true` rather than `skipErrors: false` for this. The two
+are related but not interchangeable: `collectErrors` implies `skipErrors:
+false` *and* converts each failure into the public `ValidationError` shape,
+while `skipErrors: false` on its own leaves the raw internal records on the
+compiled function — an implementation detail, not an API to read.
 
 ### 3. Grapheme Counting Is Cheap by Default
 
@@ -570,7 +614,7 @@ const schema = {
 };
 ```
 
-### Pitfall 3: Expecting Validation to Modify Data
+### Pitfall 3: Validation never modifies your data
 
 ```javascript
 const validate = jaren.compile({
@@ -587,7 +631,16 @@ validate(data);
 console.log(data.count);  // undefined, not 0
 ```
 
-**Note**: Jaren validates but doesn't modify data. For defaults, use a separate library like `ajv` with its defaults option.
+A compiled validator is a pure predicate: it applies no `default` values,
+coerces no types, trims no strings and strips no unknown properties. This is
+deliberate — it is what makes validators reentrant, shareable and free of the
+surprise in-place mutation that data-modifying validators are known for.
+
+The consequence is real, though, and worth planning for: if you are coming
+from a library whose parse step *returns normalized output* (Zod, Yup,
+io-ts), that normalization is yours to own. Do it as an explicit step before
+validation rather than reaching for a second validator to get defaults —
+running two engines over the same schema is how their answers drift apart.
 
 ### Pitfall 4: Format Validation Without Adding Formats
 
@@ -639,9 +692,17 @@ new JarenValidator(options?: ValidationOptions)
 **Options:**
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `skipErrors` | boolean | true | Skip error object creation for better performance |
-| `useGrapheme` | boolean | true | Use grapheme counting for string length |
-| `draft` | string | undefined | JSON Schema draft version |
+| `collectErrors` | boolean | false | Return `{ valid, errors }` instead of a boolean |
+| `skipErrors` | boolean | `!collectErrors` | Stop at the first failure instead of recording every error |
+| `useGrapheme` | boolean | true | Count grapheme clusters (not UTF-16 code units) for `minLength`/`maxLength` |
+| `formatAssertion` | boolean\|null | null (per draft) | Assert `format`; auto-asserts below draft 2020-12 |
+| `contentValidation` | boolean\|null | null (per draft) | Assert `contentEncoding`/`contentMediaType`; auto-asserts below 2019-09 |
+| `messages` | boolean | true | Render English `message` text on collected errors |
+| `formats` | object | `{}` | Format compilers to register at construction |
+| `schemas` | object[] | `[]` | Schemas to register at construction |
+
+The JSON Schema draft is **not** an option — it is detected per document from
+`$schema`, defaulting to draft-07 when absent.
 
 #### Methods
 
@@ -691,15 +752,18 @@ const validate2 = jaren.compile(schema, {
 });
 ```
 
-**Properties**
+**Return value**
 
-**errors**
-Array of validation errors (only populated when `skipErrors: false`).
+A compiled validator returns a boolean, or — when the instance was created
+with `collectErrors: true` — a result object. The validator instance never
+holds errors:
 
 ```javascript
-const jaren = new JarenValidator({ skipErrors: false });
-// ... compile and validate ...
-console.log(jaren.errors);
+const jaren = new JarenValidator({ collectErrors: true });
+const validate = jaren.compile({ type: 'string', minLength: 2 });
+
+const result = validate('x');
+// { valid: false, errors: [ { keyword: 'minLength', instancePath: '', ... } ] }
 ```
 
 ---
@@ -711,9 +775,11 @@ console.log(jaren.errors);
 import { JarenValidator } from '@jarenjs/validate';
 import * as formats from '@jarenjs/formats';
 
-// Create shared validator instance
+// Create shared validator instance. collectErrors gives every handler the
+// full failure list; a compiled validator holds no state, so one instance is
+// safe to share across concurrent requests.
 const jaren = new JarenValidator({
-  skipErrors: process.env.NODE_ENV === 'production',
+  collectErrors: true,
   useGrapheme: true
 }).addFormats(formats.stringFormats);
 
@@ -741,11 +807,11 @@ export const validators = {
 // Middleware helper
 export function validate(schemaName) {
   return (req, res, next) => {
-    const isValid = validators[schemaName](req.body);
-    if (!isValid) {
+    const result = validators[schemaName](req.body);
+    if (!result.valid) {
       return res.status(400).json({
         error: 'Validation failed',
-        details: jaren.errors
+        details: result.errors
       });
     }
     next();
