@@ -59,7 +59,8 @@ export function renderSequence(scene, theme, hash) {
     children.push(renderMessage(scene.messages[i], t, fs, i));
   }
 
-  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children, 'mmseq-' + hash);
+  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children,
+    'mmseq-' + hash, { fit: false });
 }
 
 /**

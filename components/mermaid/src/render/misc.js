@@ -71,7 +71,8 @@ export function renderStructured(title, sections, theme, hash) {
     }
     y += boxH + gap;
   }
-  return svgRoot('mermaid mm-svg', boxW + 32, y, theme, children, 'mmstruct-' + hash);
+  return svgRoot('mermaid mm-svg', boxW + 32, y, theme, children,
+    'mmstruct-' + hash, { fit: false });
 }
 
 /**

@@ -130,6 +130,14 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   dialog carry `max-width: 100%`; README tables scroll internally
   (`display: block; overflow-x: auto`); anchored headings carry
   `scroll-margin-top: 4.5rem` so section links land below the sticky header.
+- **Wide figures scroll, they do not shrink.** The same rule as tables, one
+  step further: an SVG capped at `max-width: 100%` scales to fit, which shrinks
+  its text with it — on a phone a 14px diagram label lands near 11px. A diagram
+  is laid out at a legible size, so it renders at that size and its figure
+  scrolls (`@jarenjs/mermaid`'s `.md-mermaid.mermaid-block`). `svgRoot` writes
+  its `max-width` inline, which outranks any stylesheet, so opting out is the
+  `{ fit: false }` argument rather than a CSS override. Charts keep the fit:
+  scaling a plot is fine, scaling prose is not.
 - **Wide tables scroll, they do not cram.** A table is wrapped in `.table-scroll`
   (`overflow-x: auto` + `min-width: 0`), and its cells opt out of `overflow-wrap: anywhere`
   per §3. Both halves are required: the wrapper alone does nothing while the cells can

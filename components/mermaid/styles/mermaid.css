@@ -23,8 +23,18 @@
 .md-mermaid.mermaid-block {
   margin: 0.9em 0;
   text-align: center;
+  /* A wide diagram scrolls. It must not be scaled to fit: the layout already
+     chose a legible font size, and shrinking the SVG scales that text down
+     with everything else — on a phone a 14px label lands near 11px, which is
+     the whole reason this rule is not `max-width: 100%`. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
-.md-mermaid.mermaid-block svg { max-width: 100%; height: auto; }
+.md-mermaid.mermaid-block svg { max-width: none; height: auto; }
+/* Once zoomed the viewBox owns the view, so the element is constrained to the
+   frame and panning has something to pan within. */
+.md-mermaid.mermaid-block.mm-zoomed { overflow: hidden; }
+.md-mermaid.mermaid-block.mm-zoomed svg { max-width: 100%; }
 
 /* --- self-scoped diagram ------------------------------------------ */
 .mermaid {

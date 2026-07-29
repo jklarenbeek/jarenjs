@@ -51,7 +51,8 @@ export function renderFlowchart(scene, theme, hash) {
     children.push(renderNode(node, t, scene.fontSize));
   }
 
-  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children, 'mmfc-' + hash);
+  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children,
+    'mmfc-' + hash, { fit: false });
 }
 
 /**

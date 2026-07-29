@@ -75,12 +75,20 @@ export function anchorForAngle(angle) {
  * @param {number} width
  * @param {number} height
  * @param {{ cssVars: Record<string,string>, tokens: Record<string,string> }} theme
+ * `max-width: 100%` is written inline so a standalone SVG never overflows its
+ * container. It is inline because the theme variables are, and that means it
+ * outranks any stylesheet — so a caller whose content must NOT be scaled down
+ * (a diagram, where shrinking scales the text below legibility) has to opt out
+ * here rather than in CSS.
  * @param {any[]} children
  * @param {string} [key]
+ * @param {{ fit?: boolean }} [options] `fit: false` omits the inline
+ *   `max-width`, leaving the element at its natural size for a scrolling frame
  * @returns {any}
  */
-export function svgRoot(className, width, height, theme, children, key) {
-  const style = { ...theme.cssVars, 'font-family': theme.tokens.fontFamily, 'max-width': '100%' };
+export function svgRoot(className, width, height, theme, children, key, options = {}) {
+  const style = { ...theme.cssVars, 'font-family': theme.tokens.fontFamily };
+  if (options.fit !== false) style['max-width'] = '100%';
   const props = {
     class: className,
     role: 'img',

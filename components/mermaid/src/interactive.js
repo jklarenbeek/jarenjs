@@ -63,6 +63,10 @@ export function attachInteractiveDiagram(el, env = {}) {
     // the page. Telling the browser directly avoids a preventDefault race.
     el.style.touchAction = scale > 1 ? 'none' : 'pan-y';
     el.setAttribute('data-mm-zoom', scale.toFixed(2));
+    // At rest the figure is an ordinary scrolling frame showing the diagram at
+    // its natural, legible size; zooming switches it to a viewBox viewport.
+    if (typeof el.classList?.toggle === 'function')
+      el.classList.toggle('mm-zoomed', scale > 1);
   };
 
   /** Clamp the view so the diagram can never be panned off its own canvas. */

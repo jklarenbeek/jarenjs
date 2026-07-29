@@ -103,23 +103,19 @@
   background: var(--md-figure-bg, #fbfcfe);
   border: 1px solid var(--md-rule, #d0d4dc);
   border-radius: 10px;
-  /* A diagram wider than the column scrolls rather than shrinking to
-     illegibility — the same rule the site applies to tables. */
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
 }
 .md-mermaid .md-mermaid-src {
   text-align: left;
   color: var(--md-muted, #5b6472);
 }
-.md-mermaid svg { max-width: 100%; height: auto; }
+/* The diagram's own sizing (natural size, scroll rather than shrink) lives in
+   @jarenjs/mermaid's stylesheet, which owns the element the plugin emits. */
 
 /* --- the optional interactive viewer ------------------------------- */
 /* Only present once `mermaidPlugin({ interactive: true })` has hydrated:
    the server-rendered figure carries none of this. */
 .md-mermaid.mm-interactive {
   position: relative;
-  overflow: hidden;          /* the viewBox does the panning now */
   cursor: grab;
 }
 .md-mermaid.mm-interactive:focus-visible {
