@@ -212,6 +212,8 @@ untrustworthy in the first place.
 | `const` / `enum` | a literal / a union of literals |
 | `properties` + `required` | interface members, optional when not required |
 | `additionalProperties` / `patternProperties` | an index signature, widened to cover the declared members |
+| *omitted* `additionalProperties` | `[key: string]: unknown` — the object is **open**, see below |
+| `additionalProperties: false` | a closed interface, with no index signature |
 | `items` | `Array<T>` |
 | `prefixItems`, array-form `items` | a tuple, with `additionalItems`/`items` as the rest |
 | `$ref` (same document, including cycles) | a reference to the named declaration |
@@ -219,6 +221,25 @@ untrustworthy in the first place.
 | `anyOf`, `oneOf` | a union |
 | `description` | a doc comment |
 | `default` (with `--defaults`) | optional on the accepted side, present on the normalized side |
+
+### Objects are open unless the schema closes them
+
+A JSON Schema object accepts members it never declared. That is the default,
+and it is easy to forget when reading a schema that lists four properties and
+looks like a struct. So an interface generated from one carries an index
+signature, and only `additionalProperties: false` removes it.
+
+This costs something real: with an index signature TypeScript stops flagging a
+misspelled property, because the misspelling is a legal member. The trade is
+deliberate. A type that is **narrower** than its schema rejects a document your
+service accepts — the caller is told their payload is wrong by the very
+artifact that promised to describe it, and no amount of local convenience is
+worth a generated type that lies in that direction. If you want the tighter
+type, say so in the schema with `additionalProperties: false` and get it
+honestly, or pass `openObjects: 'closed'` and own the divergence.
+
+Both directions are pinned by the agreement corpus: an open schema's extra
+member must type-check, and a closed schema's must not.
 
 **Widened, with the constraint recorded**: `minLength`, `maxLength`,
 `pattern`, `format`, `minimum`, `maximum`, `exclusiveMinimum`,

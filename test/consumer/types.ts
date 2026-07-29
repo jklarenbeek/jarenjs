@@ -317,14 +317,23 @@ void (chainedValid && chainedIssues >= 0);
 //     than the schema, so it cannot certify data the service rejects
 //   - a constraint-invalid instance IS assignable  → the documented widening;
 //     TypeScript cannot express minLength, and the generated file says so
-import type { Account, Node as EmitNode } from './emit-generated.js';
+import type { Account, Node as EmitNode, Strict } from './emit-generated.js';
 
 // valid → must type-check
 const emitValid1: Account = { id: 'abc' };
 const emitValid2: Account = { id: 'abc', age: 3, role: 'admin', tags: ['x'] };
+// The schema omits `additionalProperties`, so it is open and this document
+// VALIDATES. The type has to accept it, or the generator is narrower than the
+// schema it was generated from.
+const emitOpenExtra: Account = { id: 'abc', extra: true };
+const emitStrictValid: Strict = { kind: 'a' };
+// @ts-expect-error `additionalProperties: false` closes the object, so an
+// extra member really is a structural error here
+const emitStrictBad: Strict = { kind: 'a', extra: 1 };
 const emitValid3: EmitNode = { label: 'root' };
 const emitValid4: EmitNode = { label: 'root', children: [{ label: 'kid', children: [] }] };
-void [emitValid1, emitValid2, emitValid3, emitValid4];
+void [emitValid1, emitValid2, emitValid3, emitValid4,
+  emitOpenExtra, emitStrictValid, emitStrictBad];
 
 // structurally invalid → must NOT type-check. Each @ts-expect-error becomes an
 // error itself if the generated type ever widens enough to accept the value.

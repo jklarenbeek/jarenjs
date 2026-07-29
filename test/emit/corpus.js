@@ -32,7 +32,13 @@ export const CORPUS = [
       },
       required: ['id'],
     },
-    valid: [{ id: 'abc' }, { id: 'abc', age: 3, role: 'admin', tags: ['x'] }],
+    // A JSON Schema object is OPEN unless it says otherwise, so the extra
+    // member here is VALID and the generated type has to accept it. Emitting a
+    // closed interface made the type narrower than the schema — it rejected a
+    // document the service accepts, which is the one direction this generator
+    // promises never to take.
+    valid: [{ id: 'abc' }, { id: 'abc', age: 3, role: 'admin', tags: ['x'] },
+      { id: 'abc', extra: true }],
     invalidShape: [
       { id: 42 },
       { age: 1 },
@@ -40,6 +46,22 @@ export const CORPUS = [
       { id: 'abc', tags: [1] },
     ],
     invalidWidened: [{ id: 'ab' }],
+  },
+  {
+    // The mirror of Account: `additionalProperties: false` closes the object,
+    // so here the extra member IS a structural failure and the type must
+    // reject it. The pair pins the rule in both directions — without this one,
+    // emitting an index signature unconditionally would still pass.
+    name: 'Strict',
+    schema: {
+      type: 'object',
+      properties: { kind: { type: 'string' } },
+      required: ['kind'],
+      additionalProperties: false,
+    },
+    valid: [{ kind: 'a' }],
+    invalidShape: [{ kind: 'a', extra: 1 }, { extra: 1 }],
+    invalidWidened: [],
   },
   {
     name: 'Node',

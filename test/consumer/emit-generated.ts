@@ -10,6 +10,12 @@ export interface Account {
   age?: number;
   role?: "admin" | "user";
   tags?: Array<string>;
+  [key: string]: unknown;
+}
+
+
+export interface Strict {
+  kind: string;
 }
 
 
@@ -18,6 +24,7 @@ export type Label = string;
 export interface Node {
   label: Label;
   children?: Array<Node>;
+  [key: string]: unknown;
 }
 
 
@@ -25,6 +32,7 @@ export interface Config {
   host: string;
   port: number;
   name: string;
+  [key: string]: unknown;
 }
 
 
@@ -35,6 +43,7 @@ export interface ConfigInput {
   host?: string | number | boolean;
   port?: number | string;
   name: string | number | boolean;
+  [key: string]: unknown;
 }
 
 

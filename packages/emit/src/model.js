@@ -360,6 +360,18 @@ function typeOf(node, ctx, hint) {
 function declare(node, ctx, hint) {
   const existing = ctx.named.get(node);
   if (existing !== undefined) return T.ref(existing);
+  // `true` and `false` are whole schemas, so a boolean ROOT still deserves a
+  // name — emitting nothing left a consumer importing a type that was never
+  // written.
+  if (typeof node === 'boolean') {
+    const boolName = reserveName(ctx, hint);
+    ctx.declarations.push({
+      kind: 'declaration', name: boolName,
+      type: node === true ? T.unknown() : T.never(),
+      constraints: [], doc: [],
+    });
+    return T.ref(boolName);
+  }
   if (!isJsonObject(node)) return typeOf(node, ctx, hint);
 
   // In the accepted pass, only a node whose type actually changes earns its
@@ -512,6 +524,14 @@ function objectShape(node, ctx, hint) {
   const additional = node.additionalProperties;
   if (additional !== undefined && additional !== false)
     index = typeOf(additional, ctx, `${hint}Additional`);
+  else if (additional === undefined && ctx.options.openObjects !== 'closed') {
+    // JSON Schema objects are OPEN unless they say otherwise. Emitting a
+    // closed interface makes the type NARROWER than the schema, so it rejects
+    // a document the validator accepts — the one direction this generator
+    // promises never to take. `openObjects: 'closed'` opts into the tighter,
+    // unsound type for a consumer who prefers excess-property checking.
+    index = T.unknown();
+  }
   else if (isJsonObject(node.patternProperties)) {
     const patterns = Object.getOwnPropertyNames(node.patternProperties);
     if (patterns.length > 0) {
@@ -557,6 +577,11 @@ function arrayShape(node, ctx, hint) {
  * @param {object} [options] - Compile options
  * @param {string} [options.name='Root'] - The name for the root declaration
  * @param {string} [options.source] - A source identifier recorded in the model
+ * @param {'open'|'closed'} [options.openObjects='open'] - How to treat an
+ *   object whose `additionalProperties` is omitted. JSON Schema says such an
+ *   object is open, so the default emits an index signature. `'closed'` opts
+ *   into the tighter type, which regains excess-property checking at the cost
+ *   of rejecting documents the schema accepts.
  * @returns {object} The type model document
  * @example
  * const model = compileEmitModel({
