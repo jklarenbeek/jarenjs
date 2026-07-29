@@ -213,6 +213,40 @@ export function formatJSONPointer(segments) {
   return out;
 }
 
+/**
+ * Parse a JSON Pointer into a path array, narrowing every canonical array
+ * index to a number and leaving all other tokens as decoded strings.
+ *
+ * RFC 6901 has no types: `/items/0/id` addresses element 0 of an array and
+ * member `"0"` of an object with the same token. This function resolves that
+ * lexically, not against a document — a token is a number when it is `0` or a
+ * digit sequence without leading zeros within the array-index range, which is
+ * the same rule the pointer compiler uses to pre-parse indexes. `"01"`,
+ * `"1e0"`, `"-"` and `"1abc"` therefore stay strings.
+ *
+ * The result is the `(string|number)[]` shape that error reporters and
+ * diffing tools use for data locations, so it pairs directly with a
+ * validation error's `instancePath`. `formatJSONPointer` is the inverse.
+ * @param {string} pointer - The JSON Pointer (e.g. `/store/book/0`)
+ * @returns {(string|number)[]} Decoded tokens with array indexes as numbers
+ * @throws {JSONPointerSyntaxError} When the pointer violates the grammar
+ * @example
+ * parseJSONPointerPath('/items/0/id');  // ['items', 0, 'id']
+ * parseJSONPointerPath('/items/01');    // ['items', '01']
+ * parseJSONPointerPath('/a~1b');        // ['a/b']
+ */
+export function parseJSONPointerPath(pointer) {
+  const segments = parseJSONPointer(pointer);
+  /** @type {(string|number)[]} */
+  const path = segments;
+  for (let i = 0; i < segments.length; i++) {
+    const token = segments[i];
+    const index = scanArrayIndex(token, 0, token.length);
+    if (index !== -1) path[i] = index;
+  }
+  return path;
+}
+
 //#endregion
 
 //#region compiler

@@ -36,7 +36,7 @@ delete it or fix it.
 *The current focus.* JSON Pointer (RFC 6901), the JSONPath engine
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
-[`packages/json/ARCHITECTURE.md`](packages/json/ARCHITECTURE.md).
+[`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
 
 - [ ] **Opt-in modes for the remaining pointer divergences** — `hashIndex`
   established the pattern (a compile-time option, spec answer available, fast
@@ -129,20 +129,6 @@ delete it or fix it.
   scope (with a small dynamic remainder only where refs make it unknowable) is the
   main remaining validator performance workstream.
 - [ ] **Optional codegen backend for nano-schemas** — closure-compiled validators bottom out around 5× Ajv's generated code on trivial schemas (a two-branch `allOf` runs ~90 ns vs ~15 ns), which is the price of the CSP-safe no-`new Function` rule. Mirroring the query engine's codegen-backend idea — same compile pipeline, a codegen emitter where CSP allows, closures as the default — would close the floor without giving up the guarantee.
-- [ ] **An options object defeats the `contentValidation` auto-by-draft rule** —
-  `compile` picks a per-draft default for `contentEncoding`/`contentMediaType`
-  assertion (asserted below 2019-09), but only when the option arrived as
-  `null`. The `ValidatorOptions` object form coerces it with
-  `opts.contentValidation ?? false`, so constructing with *any* validation
-  option — `new JarenValidator({ collectErrors: true })` — silently pins it to
-  `false` and a draft-07 schema stops asserting `contentEncoding`. Only the
-  no-argument constructor gets the draft default. The fix is to preserve
-  `null` through that path like `formatAssertion` already does; the catch is
-  that `false` is currently indistinguishable from "unset" for every option in
-  that branch, so the same coercion wants auditing rather than a one-line
-  change.
-- [ ] **`required` short-circuit reports only the first missing property** — the historical `&&=` collection short-circuit means each object surfaces only its *first* missing `required` property, even in collect-all-errors mode.
-- [ ] **Type-only `items` fast path aggregates per-item failures** — the type-only `items` fast path reports a single error at the array path instead of one error per failing item; the multi-keyword path already yields per-item errors.
 - [ ] **`additionalProperties: false` instancePath divergence from ajv** — Jaren points the error at the offending member (`/nested/extra`) where ajv points at the parent object; deliberate and spec-truer, tracked so consumers diffing against ajv output know it is intentional.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
@@ -178,7 +164,7 @@ delete it or fix it.
 - [ ] **Real-browser accessibility audit** — the *lifecycle* half of the matrix
   ships (the website's Playwright suite drives the built site through Chromium,
   Firefox and WebKit on every push — see
-  [its browser tests](packages/website/README.md#browser-tests)). The
+  [its browser tests](../packages/website/README.md#browser-tests)). The
   accessibility half is untested and unclaimed: dialog focus traps and focus
   restoration under an actual screen reader, AT semantics, and
   `prefers-reduced-motion`. APP-FORMAT §8.4/§8.5 state the contracts that audit

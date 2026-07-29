@@ -261,7 +261,7 @@ flowchart TB
 | `@jarenjs/refs` | None | Schema reference data |
 | `jarenjs` (root) | All packages | Public API aggregation |
 
-> **Note:** For broader Jaren architecture, see the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md). For development guides, see [`HOWTO.md`](../../HOWTO.md).
+> **Note:** For broader Jaren architecture, see the root [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). For development guides, see [`HOWTO.md`](../../docs/HOWTO.md).
 
 ---
 
@@ -996,4 +996,4 @@ export function isNumberType(data) {
 
 When contributing, remember: this package is used by `@jarenjs/validate` and `@jarenjs/formats`. Changes here have downstream effects. Maintain backward compatibility, optimize for performance, and keep the API predictable.
 
-For questions about the broader architecture, see the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md). For development workflows, see [`HOWTO.md`](../../HOWTO.md).
+For questions about the broader architecture, see the root [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). For development workflows, see [`HOWTO.md`](../../docs/HOWTO.md).

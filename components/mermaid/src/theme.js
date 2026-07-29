@@ -111,7 +111,7 @@ const THEMES = {
 
 /**
  * Host custom-property links for the `'host'` theme: token key → the host
- * token it should follow (the site token vocabulary, DESIGN.md §2). The
+ * token it should follow (the site token vocabulary, docs/DESIGN.md §2). The
  * default theme's concrete colors remain as `var()` fallbacks, so the
  * same SVG is standalone-valid outside any host.
  * @type {Record<string, string>}

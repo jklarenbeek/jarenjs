@@ -137,4 +137,4 @@ These are grouped in `numberFormats`. Formats for numbers validate both numbers 
 
 ## Development
 
-Unit tests live in `test/formats/` at the repository root; `test/formats/testers.test.js` enforces that every compiler registry's key set equals its tester group's, so the validator layer and the bare-predicate layer can never drift. The predicates themselves are implemented and tested in [`@jarenjs/core`](../core). See the repository [README](../../README.md) for the monorepo picture and the [ROADMAP](../../ROADMAP.md) for planned formats.
+Unit tests live in `test/formats/` at the repository root; `test/formats/testers.test.js` enforces that every compiler registry's key set equals its tester group's, so the validator layer and the bare-predicate layer can never drift. The predicates themselves are implemented and tested in [`@jarenjs/core`](../core). See the repository [README](../../README.md) for the monorepo picture and the [ROADMAP](../../docs/ROADMAP.md) for planned formats.

@@ -26,7 +26,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Standard | Functions |
 |---|---|
 | JSON validation | `isValidJSON`, `isValidJSONCheap` (a fast "definitely not JSON" pre-test) |
-| JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)) | `compileJSONPointer`, `parseJSONPointer`, `isValidJSONPointer`, `isValidJSONPointerUriFragment` |
+| JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)) | `compileJSONPointer`, `parseJSONPointer`, `parseJSONPointerPath`, `isValidJSONPointer`, `isValidJSONPointerUriFragment` |
 | Relative JSON Pointer | `compileRelativeJSONPointer`, `parseRelativeJSONPointer`, `compileDataRef`, `isValidRelativeJSONPointer` |
 | JSON Patch ([RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902)) | `compileJSONPatch`, `applyJSONPatch`, `createJSONPatch`, `isValidJSONPatch`, `JsonPatchCompileError`, `JsonPatchRuntimeError` |
 | JSON Merge Patch ([RFC 7396](https://datatracker.ietf.org/doc/html/rfc7396)) | `compileMergePatch`, `applyMergePatch`, `createMergePatch` |
@@ -95,6 +95,15 @@ genuinely name `''`.
 `compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
 
 The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`) and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.
+
+`parseJSONPointerPath(pointer)` is the typed variant: it returns
+`(string|number)[]`, narrowing canonical array indexes to numbers
+(`'/items/0/id'` → `['items', 0, 'id']`) while leaving anything RFC 6901 does
+not make an index — `01`, `1e0`, `-`, `1abc` — a string. RFC 6901 has no
+types, so the classification is lexical rather than resolved against a
+document, using the same index rule the pointer compiler uses. This is the
+path shape error reporters and diffing tools expect, so it pairs directly
+with a validation error's `instancePath`.
 
 ### JSON Patch and JSON Merge Patch
 
@@ -676,8 +685,8 @@ Unmatched nodes follow the XSLT built-in template rules, restated for JSON: cont
 
 ## Roadmap
 
-This package's roadmap lives in the repository-wide [ROADMAP](../../ROADMAP.md), under its `@jarenjs/json` sections: hoisting `$`-absolute comparables out of filter loops, first-class function values, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: hash-joined equijoins and counting-loop `$range` iteration, the `$fold` accumulator clause, `$allowing-empty` and window bindings, the RFC 3339 date operators, closed-world compilation and the `steps`/`depth` execution limits.
+This package's roadmap lives in the repository-wide [ROADMAP](../../docs/ROADMAP.md), under its `@jarenjs/json` sections: hoisting `$`-absolute comparables out of filter loops, first-class function values, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: hash-joined equijoins and counting-loop `$range` iteration, the `$fold` accumulator clause, `$allowing-empty` and window bindings, the RFC 3339 date operators, closed-world compilation and the `steps`/`depth` execution limits.
 
 ## Development
 
-Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks (all documented in the [benchmark workspace README](../../benchmark/README.md)): `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md) for the monorepo picture.
+Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks (all documented in the [benchmark workspace README](../../benchmark/README.md)): `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture.

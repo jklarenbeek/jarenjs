@@ -35,7 +35,14 @@
 //   JP2003 - the root of the document cannot be removed
 //   JP2004 - a `test` operation failed
 
-import { equalsJson, isJsonObject, setObjectMember, stableStringify } from '@jarenjs/core/object';
+import {
+  cloneJson,
+  equalsJson,
+  isJsonContainer,
+  isJsonObject,
+  setObjectMember,
+  stableStringify,
+} from '@jarenjs/core/object';
 
 import {
   parseJSONPointer,
@@ -47,8 +54,6 @@ import { NOTHING, scanArrayIndex } from './segments.js';
 import { CodedDocPathError } from './errors.js';
 
 import {
-  isContainer,
-  cloneJson,
   makeState,
   ownedRoot,
   ownedChild,
@@ -133,7 +138,7 @@ function readTarget(root, t) {
 }
 
 function containsOwned(v, owned) {
-  if (!isContainer(v))
+  if (!isJsonContainer(v))
     return false;
   if (owned.has(v))
     return true;
@@ -156,7 +161,7 @@ function containsOwned(v, owned) {
 // walking the second location would find an owned node and mutate both
 // aliases. In-place mode owns everything, so it always deep-copies.
 function copyForInsert(value, owned) {
-  if (!isContainer(value))
+  if (!isJsonContainer(value))
     return value;
   if (owned === null)
     return cloneJson(value);
@@ -345,7 +350,7 @@ function parseValueGetter(op, index, fresh) {
   if (!hasOwn(op, 'value'))
     throw compileError('JP0004', "the operation requires a 'value' member", '/' + index);
   const value = op.value;
-  if (!isContainer(value))
+  if (!isJsonContainer(value))
     return () => value;
   if (fresh)
     return () => cloneJson(value);
@@ -786,7 +791,7 @@ function diffValue(src, tgt, path, out, lcs) {
     diffArray(src, tgt, path, out, lcs);
     return;
   }
-  if (!sArr && !tArr && isContainer(src) && isContainer(tgt)) {
+  if (!sArr && !tArr && isJsonContainer(src) && isJsonContainer(tgt)) {
     diffObject(src, tgt, path, out, lcs);
     return;
   }

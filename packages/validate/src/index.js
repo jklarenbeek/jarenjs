@@ -1194,7 +1194,10 @@ export class ValidatorOptions {
           opts.skipErrors ?? !collectErrors,
           opts.useGrapheme ?? true,
           collectErrors,
-          opts.contentValidation ?? false,
+          // null, not false: an unset option must stay unset so `compile`
+          // can apply the per-draft default. Coercing it here would make
+          // any options object silently disable content assertion.
+          opts.contentValidation ?? null,
           opts.draftVersion ?? 7,
           true,
           opts.formatAssertion ?? null,
@@ -1216,8 +1219,49 @@ export class ValidatorOptions {
 }
 
 /**
+ * The object a compiled validator returns when `collectErrors` is enabled.
+ * @typedef {{ valid: boolean, errors: import("./messages.js").ValidationError[] }} ValidationResultObject
+ */
+
+/**
+ * A compiled validator in the default boolean mode. It is a type guard, so
+ * `T` is whatever the caller asserts the schema describes; with no `T` it
+ * behaves as an ordinary boolean predicate.
+ * @template T
+ * @typedef {(data: unknown) => data is T} CompiledPredicate
+ */
+
+/**
+ * A compiled validator in collect-errors mode.
+ * @typedef {(data: unknown) => ValidationResultObject} CompiledCollector
+ */
+
+/**
+ * The plain-object form accepted by the JarenValidator constructor, mixing
+ * validator-level settings with the ValidationOptions fields.
+ * @template {boolean} [TCollect=false]
+ * @typedef {object} ValidatorInit
+ * @property {Record<string, FormatCompiler>} [formats] - Format compilers to register
+ * @property {(JSONSchema | boolean)[]} [schemas] - Schemas to register
+ * @property {ValidationOptions} [validation] - Validation behavior options
+ * @property {TraverseOptions} [traverse] - Schema traversal options
+ * @property {TCollect} [collectErrors] - Return `{ valid, errors }` instead of a boolean
+ * @property {boolean} [skipErrors] - Stop at the first failure (defaults to `!collectErrors`)
+ * @property {boolean} [useGrapheme] - Count grapheme clusters for string length
+ * @property {boolean} [contentValidation] - Assert contentEncoding/contentMediaType
+ * @property {number} [draftVersion] - The JSON Schema draft version
+ * @property {boolean} [formatAssertion] - Assert the format keyword
+ * @property {boolean} [messages] - Render English message text on collected errors
+ */
+
+/**
  * JarenValidator is the main entry point for JSON Schema validation.
  * It manages schema registration, format registration, and compilation.
+ *
+ * The `collectErrors` option decides what a compiled validator returns, and
+ * it is carried in the type parameter so the two shapes never have to be
+ * distinguished at runtime.
+ * @template {boolean} [TCollect=false]
  * @class
  * @example
  * const validator = new JarenValidator();
@@ -1237,7 +1281,7 @@ export class JarenValidator {
 
   /**
    * Creates a new JarenValidator instance.
-   * @param {ValidatorOptions} [options] - Validator options including formats, schemas, validation options, and traverse options
+   * @param {ValidatorOptions | ValidatorInit<TCollect>} [options] - Validator options including formats, schemas, validation options, and traverse options
    */
   constructor(options = new ValidatorOptions()) {
     // Accept a plain options object ({ skipErrors, collectErrors, ... })
@@ -1678,9 +1722,16 @@ export class JarenValidator {
    * Compiles a schema into a validation function.
    * This is the main method for creating validators. It resolves all $ref references,
    * compiles the schema structure, and returns a function that validates data.
+   * The return type follows the instance's `collectErrors` setting: a type
+   * guard over `unknown` by default, or a function producing
+   * `{ valid, errors }` when errors are collected. Jaren does not infer `T`
+   * from the schema — the caller asserts what the schema describes, which is
+   * what a checked contract wrapper wants; pair it with a schema-to-type
+   * generator if you need the shape derived mechanically.
+   * @template [T=unknown]
    * @param {JSONSchema | boolean} schema - The schema to compile
    * @param {(JSONSchema | boolean)[]} [schemas] - Additional schemas to reference during compilation
-   * @returns {(data: any) => boolean | {valid: boolean, errors: import("./messages.js").ValidationError[]}} A validation function
+   * @returns {TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function
    * @example
    * const validate = validator.compile({
    *   type: 'object',
@@ -1692,9 +1743,13 @@ export class JarenValidator {
    * const valid = validate({ name: 'John' }); // true
    * const invalid = validate({ name: 123 }); // false
    *
+   * // Narrowing to a caller-asserted type
+   * const isUser = validator.compile<{ name: string }>(userSchema);
+   * if (isUser(input)) input.name; // input is { name: string } here
+   *
    * // With error collection
-   * validator = new JarenValidator({ collectErrors: true });
-   * const result = validate({ name: 123 });
+   * const collecting = new JarenValidator({ collectErrors: true });
+   * const result = collecting.compile(schema)({ name: 123 });
    * // result = { valid: false, errors: [...] }
    */
   compile(schema, schemas = undefined) {

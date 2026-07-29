@@ -107,10 +107,10 @@ and safe to share across concurrent requests.
 
 `instancePath` is an RFC 6901 JSON Pointer into the *data*; `schemaPath` is an
 absolute URI into the *schema*. The `msgid` + `params` pair is what
-[`@jarenjs/locales`](packages/locales/README.md) re-renders in another
+[`@jarenjs/locales`](../packages/locales/README.md) re-renders in another
 language. The full error contract, and the options that change these answers,
 are documented under
-[Compatibility settings](packages/validate/README.md#compatibility-settings).
+[Compatibility settings](../packages/validate/README.md#compatibility-settings).
 
 ---
 
@@ -200,7 +200,7 @@ processed per their own declaration.
 The options that decide answers other validators answer differently — the
 return shape, string-length semantics, format and content assertion, and
 format registration — are documented together, with a migration recipe, under
-[Compatibility settings](packages/validate/README.md#compatibility-settings).
+[Compatibility settings](../packages/validate/README.md#compatibility-settings).
 
 ### ASCII vs Grapheme Mode
 
@@ -636,11 +636,22 @@ coerces no types, trims no strings and strips no unknown properties. This is
 deliberate — it is what makes validators reentrant, shareable and free of the
 surprise in-place mutation that data-modifying validators are known for.
 
-The consequence is real, though, and worth planning for: if you are coming
-from a library whose parse step *returns normalized output* (Zod, Yup,
-io-ts), that normalization is yours to own. Do it as an explicit step before
-validation rather than reaching for a second validator to get defaults —
-running two engines over the same schema is how their answers drift apart.
+When you need normalized *output* — as you will coming from a library whose
+parse step returns it (Zod, Yup, io-ts) — compile a normalizer from the same
+schema and run it first. It is a separate pass, so the validator keeps its
+guarantee:
+
+```javascript
+import { compileNormalizer } from '@jarenjs/validate/normalize';
+
+const normalize = compileNormalizer(schema, { useDefaults: true });
+const shaped = normalize(data);   // a new value; `data` is untouched
+console.log(shaped.count);        // 0
+console.log(data.count);          // still undefined
+```
+
+See [Normalization](../packages/validate/README.md#normalization) for the full
+option list, the coercion table, and what it deliberately does not walk.
 
 ### Pitfall 4: Format Validation Without Adding Formats
 

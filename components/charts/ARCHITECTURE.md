@@ -104,10 +104,10 @@ powers for log axes, band centers for ordinal axes.
 
 ## Colors and theming
 
-Two distinct mechanisms, per DESIGN.md:
+Two distinct mechanisms, per the repo docs/DESIGN.md:
 
 - The **categorical palette** (`CATEGORICAL`) is a concrete constant in
-  the suite anchor order — not theme tokens (DESIGN.md §8). It is the
+  the suite anchor order — not theme tokens (docs/DESIGN.md §8). It is the
   palette the mermaid pie always used, so pies render byte-identically
   through either package. Its magnitude counterpart is **`SEQUENTIAL`**,
   a single-hue blue ramp (light→dark, monotone perceptual lightness,
@@ -121,7 +121,7 @@ Two distinct mechanisms, per DESIGN.md:
   the `chart` prefix. `createTheme('host')` links them to the site
   token vocabulary (`--fg`, `--border`, `--ok`, `--fail`, …) via
   `HOST_VARS`, stamping `var(--host-token, concrete)` inline on the
-  root `<svg>` — the two-layer theming architecture of DESIGN.md §7.
+  root `<svg>` — the two-layer theming architecture of docs/DESIGN.md §7.
   Sync invariant: the token tables in `src/core/palette.js` must match
   the `--chart-*` fallbacks in `styles/charts.css`.
 

@@ -62,6 +62,9 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
   /** @type {function(string, any, string):boolean} */
   // Use array key to get keyed error handler: addKeyedError(dataKey, data, ...meta)
   const addError = schemaObj.createErrorHandler(required, ['required']);
+  // When errors are recorded, every missing property must produce one; only
+  // the boolean-answer path may stop at the first.
+  const stopAtFirst = schemaObj.root.options.skipErrors;
   return function validateRequiredProperties(data = {}, dataKeys = [], dataPath = '') {
     if (!(dataKeys.length > 0))
       return false;
@@ -70,8 +73,10 @@ function compileRequiredProperties(schemaObj, jsonSchema) {
     for (let i = 0; i < rlength; ++i) {
       const key = required[i];
       const idx = dataKeys.indexOf(key);
-      if (idx === -1)
-        valid &&= addError(key, data, dataPath);
+      if (idx === -1) {
+        valid = addError(key, data, dataPath) && valid;
+        if (stopAtFirst) break;
+      }
     }
     return valid;
   };
@@ -386,6 +391,9 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
   const hasMin = min > 0;
   const hasMax = max != null && max >= 0;
   const hasRequired = required != null && required.length > 0;
+  // When errors are recorded, every missing required property must produce
+  // one; only the boolean-answer path may stop at the first.
+  const stopAtFirst = schemaObj.root.options.skipErrors;
 
   // Pre-bind error handlers outside the returned function
   if (hasMin && !hasMax && !hasRequired) {
@@ -429,8 +437,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
         let valid = true;
         for (let i = 0; i < rlength; ++i) {
           const key = required[i];
-          if (!Object.hasOwn(data, key))
-            valid &&= addError(key, data, dataPath);
+          if (!Object.hasOwn(data, key)) {
+            valid = addError(key, data, dataPath) && valid;
+            if (stopAtFirst) break;
+          }
         }
         return valid;
       };
@@ -444,8 +454,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
-        if (keys.indexOf(key) === -1)
-          valid &&= addError(key, data, dataPath);
+        if (keys.indexOf(key) === -1) {
+          valid = addError(key, data, dataPath) && valid;
+          if (stopAtFirst) break;
+        }
       }
       return valid;
     };
@@ -467,8 +479,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
-        if (keys.indexOf(key) === -1)
-          valid &&= addReqError(key, data, dataPath);
+        if (keys.indexOf(key) === -1) {
+          valid = addReqError(key, data, dataPath) && valid;
+          if (stopAtFirst) break;
+        }
       }
       return valid;
     };
@@ -490,8 +504,10 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
-        if (keys.indexOf(key) === -1)
-          valid &&= addReqError(key, data, dataPath);
+        if (keys.indexOf(key) === -1) {
+          valid = addReqError(key, data, dataPath) && valid;
+          if (stopAtFirst) break;
+        }
       }
       return valid;
     };

@@ -1,8 +1,10 @@
 //#region copy-on-write machinery (package-internal)
 // The shared copy-on-write core of the JSON Patch engine (patch.js) and
-// the standalone write operations (write.js). Extracted verbatim from
-// patch.js. Like segments.js, this module is package-internal and is
-// deliberately not listed in the package exports.
+// the standalone write operations (write.js). Like segments.js, this
+// module is package-internal and is deliberately not listed in the
+// package exports. The value-level primitives it builds on
+// (isJsonContainer, shallowCloneJson, cloneJson) are pure JSON helpers
+// and live in @jarenjs/core/object.
 //
 // An application of writes carries a state `{ root, owned }` where
 // `owned` is the set of nodes this application created and may mutate
@@ -22,37 +24,9 @@
 // `readSteps` resolves either form; the callers own their walk loops so
 // each module raises its own error types.
 
-import { setObjectMember } from '@jarenjs/core/object';
+import { isJsonContainer, shallowCloneJson } from '@jarenjs/core/object';
 
 const hasOwn = Object.hasOwn;
-
-export function isContainer(v) {
-  return typeof v === 'object' && v !== null;
-}
-
-// Object spread copies an own '__proto__' data property as an own
-// property (CreateDataProperty semantics), so it is pollution-safe here.
-export function shallowCloneNode(v) {
-  return Array.isArray(v) ? v.slice() : { ...v };
-}
-
-export function cloneJson(value) {
-  if (!isContainer(value))
-    return value;
-  if (Array.isArray(value)) {
-    const len = value.length;
-    const out = new Array(len);
-    for (let i = 0; i < len; i++)
-      out[i] = cloneJson(value[i]);
-    return out;
-  }
-  const out = {};
-  for (const key in value) {
-    if (hasOwn(value, key))
-      setObjectMember(out, key, cloneJson(value[key]));
-  }
-  return out;
-}
 
 /**
  * The mutable state of one write application. `owned` is the set of
@@ -67,9 +41,9 @@ export function makeState(root, owned) {
 export function ownedRoot(state) {
   const root = state.root;
   const owned = state.owned;
-  if (owned === null || !isContainer(root) || owned.has(root))
+  if (owned === null || !isJsonContainer(root) || owned.has(root))
     return root;
-  const clone = shallowCloneNode(root);
+  const clone = shallowCloneJson(root);
   owned.add(clone);
   state.root = clone;
   return clone;
@@ -81,9 +55,9 @@ export function ownedRoot(state) {
  */
 export function ownedChild(state, parent, child, key) {
   const owned = state.owned;
-  if (owned === null || !isContainer(child) || owned.has(child))
+  if (owned === null || !isJsonContainer(child) || owned.has(child))
     return child;
-  const clone = shallowCloneNode(child);
+  const clone = shallowCloneJson(child);
   owned.add(clone);
   // the slot was just read through hasOwn/index, so plain assignment
   // never reaches a prototype '__proto__' setter

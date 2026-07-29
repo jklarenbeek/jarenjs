@@ -4,6 +4,8 @@ import * as assert from '../assert.node.js';
 
 import {
   parseJSONPointer,
+  parseJSONPointerPath,
+  formatJSONPointer,
   parseRelativeJSONPointer,
   compileJSONPointer,
   compileRelativeJSONPointer,
@@ -313,5 +315,45 @@ describe('member values that are undefined', () => {
     const getter = compileJSONPointer('/a');
     strictEqual(getter({ a: undefined }), undefined);
     strictEqual(getter({}), NOTHING);
+  });
+});
+
+describe('parseJSONPointerPath', () => {
+  it('narrows canonical array indexes to numbers', () => {
+    deepStrictEqual(parseJSONPointerPath(''), []);
+    deepStrictEqual(parseJSONPointerPath('/0'), [0]);
+    deepStrictEqual(parseJSONPointerPath('/items/0/id'), ['items', 0, 'id']);
+    deepStrictEqual(parseJSONPointerPath('/4294967294'), [4294967294]);
+  });
+
+  it('leaves non-canonical index-like tokens as strings', () => {
+    // The same rule the pointer compiler uses to pre-parse indexes: no
+    // leading zeros, digits only, within the array-index range.
+    deepStrictEqual(parseJSONPointerPath('/items/01'), ['items', '01']);
+    deepStrictEqual(parseJSONPointerPath('/1e0'), ['1e0']);
+    deepStrictEqual(parseJSONPointerPath('/1abc'), ['1abc']);
+    deepStrictEqual(parseJSONPointerPath('/-'), ['-']);
+    deepStrictEqual(parseJSONPointerPath('/4294967295'), ['4294967295']);
+  });
+
+  it('decodes escapes and preserves empty tokens', () => {
+    deepStrictEqual(parseJSONPointerPath('/a~1b'), ['a/b']);
+    deepStrictEqual(parseJSONPointerPath('/a~0b'), ['a~b']);
+    deepStrictEqual(parseJSONPointerPath('//x'), ['', 'x']);
+  });
+
+  it('round-trips through formatJSONPointer', () => {
+    for (const ptr of ['', '/0', '/items/0/id', '/items/01', '/a~1b', '/a~0b', '//x', '/-']) {
+      strictEqual(formatJSONPointer(parseJSONPointerPath(ptr)), ptr);
+    }
+  });
+
+  it('rejects the same pointers parseJSONPointer rejects', () => {
+    throws(() => parseJSONPointerPath('bad'), JSONPointerSyntaxError);
+    throws(() => parseJSONPointerPath(null), JSONPointerSyntaxError);
+  });
+
+  it('does not change what parseJSONPointer returns', () => {
+    deepStrictEqual(parseJSONPointer('/items/0'), ['items', '0']);
   });
 });

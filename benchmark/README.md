@@ -20,6 +20,7 @@ number in a README performance table names the command that produced it.
 | [`jsonpath.js`](./jsonpath.js) | JSONPath RFC 9535 compliance + performance vs json-p3 | Verifying/benchmarking the JSONPath compiler |
 | [`jsonpointer.js`](./jsonpointer.js) | Compiled JSON Pointer performance | Benchmarking pointer/`$data` resolution |
 | [`formats.js`](./formats.js) | String `format` validation vs ajv-formats | Benchmarking the format testers |
+| [`contracts.js`](./contracts.js) | Contract validation vs Zod 4 / Zod 3 / zod&#47;mini / Ajv | Benchmarking the real adapter shape a service runs |
 | [`jsonquery.js`](./jsonquery.js) | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking FLWOR joins, grouping, reshaping |
 | [`geo.js`](./geo.js) | Spatial kernel performance vs turf / geolib / flatbush | Benchmarking distance, area, containment and the bbox index |
 | [`jslt.js`](./jslt.js) | JSLT performance vs native JS/JSONata | Benchmarking identity sharing, recursive dispatch, modes |
@@ -347,6 +348,46 @@ keeps a format Ajv silently ignores from appearing as an Ajv win.
 ```bash
 npm run benchmark:formats
 node benchmark/formats.js --filter iri
+```
+
+## contracts.js — contract validation vs Zod and Ajv
+
+The rival here is not another JSON Schema engine but the
+validate-and-normalize library a TypeScript service actually uses, so this
+suite runs **Zod 4**, **Zod 3** and **zod/mini** alongside **Ajv** (the
+incumbent JSON Schema engine — excluding it would flatter Jaren).
+
+Three scenarios — a uuid/enum/date-time command, a defaults-and-coercion
+config object, and 50 nested records — each measured three ways:
+
+1. **compile** — paid once per process, and the table where Jaren is
+   generally slowest. It is reported because hiding it would be dishonest.
+2. **verdict** — the cheapest "is this valid?" for input that is valid.
+   **This table is deliberately not apples-to-apples and the ratio flatters
+   Jaren**: Jaren answers with a predicate that allocates nothing, while Zod
+   has no predicate mode and builds its normalized output on the way. That
+   output is not wasted work in a real handler, which is why table 3 exists.
+3. **adapter** — the shape a service actually runs: normalize the input,
+   validate it, and map failures to a library-neutral issue list, timed on
+   invalid input because that is the allocating path. **This is the
+   comparable table and the one to quote.**
+
+Two fairness mechanics are worth knowing about. Ajv normalizes by mutating
+its input, so it is handed a fresh `structuredClone` each iteration and
+charged for it — Jaren and Zod both return a new value and leave the
+caller's alone, and not cloning would measure a different (and, for a shared
+request body, incorrect) program. And Ajv caches compiled validators by
+schema object identity, so the compile table rotates through a pool of
+distinct schema clones; without that, Ajv's compile row measures a cache
+lookup and reads ~1000x too fast.
+
+Every engine must accept the well-formed input, reject the invalid one, and
+produce the same normalized value before it is timed; one that disagrees is
+dropped with the reason printed.
+
+```bash
+npm run benchmark:contracts
+node benchmark/contracts.js collection --iterations 20000
 ```
 
 ## jsonpointer.js — compiled JSON Pointer performance

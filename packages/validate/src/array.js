@@ -232,13 +232,20 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
       }
     }
 
+    // The two fast paths below return bare predicates with no error handler,
+    // so a failing item reports nothing of its own and the caller can only
+    // aggregate one error at the array path. When errors are recorded, fall
+    // through to full compilation so each failing item yields its own error
+    // at its own instancePath, matching the multi-keyword path.
+    const stopAtFirst = schemaObj.root.options.skipErrors;
+
     // Fast path: type-only schema (most common case) - check property directly first
-    if (itemSchema.type !== undefined && Object.keys(itemSchema).length === 1) {
+    if (stopAtFirst && itemSchema.type !== undefined && Object.keys(itemSchema).length === 1) {
       return compileTypeOnlyValidator(itemSchema.type);
     }
 
     // Fast path: required-only schema - check property directly first
-    if (itemSchema.required !== undefined && Object.keys(itemSchema).length === 1) {
+    if (stopAtFirst && itemSchema.required !== undefined && Object.keys(itemSchema).length === 1) {
       const required = itemSchema.required;
       return function validateRequiredOnly(data, _dataPath, _dataRoot) {
         // Required properties only apply to objects, not arrays or other types

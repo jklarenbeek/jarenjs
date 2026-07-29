@@ -59,25 +59,25 @@ flowchart BT
 
 | Package | Role | Internals documented in |
 |---|---|---|
-| [`@jarenjs/core`](packages/core) | Zero-dependency foundation; no JSON Schema knowledge | [core ARCHITECTURE](packages/core/ARCHITECTURE.md) |
-| [`@jarenjs/json`](packages/json) | The addressing/query/stylesheet compilers; no JSON Schema dependency (schema *literals* compile through a host-supplied `compileTypeTest` hook) | [json ARCHITECTURE](packages/json/ARCHITECTURE.md) |
-| [`@jarenjs/validate`](packages/validate) | The validating compiler; consumes core primitives and json's compiled pointers/queries | [validate ARCHITECTURE](packages/validate/ARCHITECTURE.md) |
-| [`@jarenjs/formats`](packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](packages/formats/README.md)) |
-| [`@jarenjs/refs`](packages/refs) | Data-only meta-schema bundle | — |
-| [`@jarenjs/forms`](packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](packages/forms/README.md)) |
-| [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](packages/locales/README.md) and [ERROR-MESSAGES](packages/validate/docs/ERROR-MESSAGES.md)) |
-| [`@jarenjs/view`](packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](packages/view/docs/VIEW-FORMAT.md) |
-| [`@jarenjs/app`](packages/app) | Applications as JSON documents; the compiled dispatch loop composing view (JSLT → vnodes) and json (query actions) | [APP-FORMAT](packages/app/docs/APP-FORMAT.md) |
-| [`@jarenjs/md`](components/md) | Markdown + frontmatter → JSON AST, rendered through view; a format component | [md ARCHITECTURE](components/md/ARCHITECTURE.md) |
-| [`@jarenjs/mermaid`](components/mermaid) | Headless Mermaid clone → geometry-free JSON AST → pure-vnode SVG through view; a format component | [mermaid ARCHITECTURE](components/mermaid/ARCHITECTURE.md) |
-| [`@jarenjs/calc`](components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](components/calc/ARCHITECTURE.md) |
-| [`@jarenjs/charts`](components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG through view, with a stream adapter over the josl readers' unified events; mermaid's pie delegates here | [charts ARCHITECTURE](components/charts/ARCHITECTURE.md) |
-| [`@jarenjs/ai`](packages/ai) | Browser-side AI: one OpenAI-compatible chat client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs `@jarenjs/validate` checks before every call, a bounded agent loop, and WebMCP registration; depends only on validate | [ai README](packages/ai/README.md) |
-| [`@jarenjs/website`](packages/website) | The GitHub Pages site, playground, AI assistant and the Studio — a meta-schema-gated host for AI-authored app documents (not part of the library chain) | [website README](packages/website/README.md) |
+| [`@jarenjs/core`](../packages/core) | Zero-dependency foundation; no JSON Schema knowledge | [core ARCHITECTURE](../packages/core/ARCHITECTURE.md) |
+| [`@jarenjs/json`](../packages/json) | The addressing/query/stylesheet compilers; no JSON Schema dependency (schema *literals* compile through a host-supplied `compileTypeTest` hook) | [json ARCHITECTURE](../packages/json/ARCHITECTURE.md) |
+| [`@jarenjs/validate`](../packages/validate) | The validating compiler; consumes core primitives and json's compiled pointers/queries | [validate ARCHITECTURE](../packages/validate/ARCHITECTURE.md) |
+| [`@jarenjs/formats`](../packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](../packages/formats/README.md)) |
+| [`@jarenjs/refs`](../packages/refs) | Data-only meta-schema bundle | — |
+| [`@jarenjs/forms`](../packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](../packages/forms/README.md)) |
+| [`@jarenjs/locales`](../packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](../packages/locales/README.md) and [ERROR-MESSAGES](../packages/validate/docs/ERROR-MESSAGES.md)) |
+| [`@jarenjs/view`](../packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](../packages/view/docs/VIEW-FORMAT.md) |
+| [`@jarenjs/app`](../packages/app) | Applications as JSON documents; the compiled dispatch loop composing view (JSLT → vnodes) and json (query actions) | [APP-FORMAT](../packages/app/docs/APP-FORMAT.md) |
+| [`@jarenjs/md`](../components/md) | Markdown + frontmatter → JSON AST, rendered through view; a format component | [md ARCHITECTURE](../components/md/ARCHITECTURE.md) |
+| [`@jarenjs/mermaid`](../components/mermaid) | Headless Mermaid clone → geometry-free JSON AST → pure-vnode SVG through view; a format component | [mermaid ARCHITECTURE](../components/mermaid/ARCHITECTURE.md) |
+| [`@jarenjs/calc`](../components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](../components/calc/ARCHITECTURE.md) |
+| [`@jarenjs/charts`](../components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG through view, with a stream adapter over the josl readers' unified events; mermaid's pie delegates here | [charts ARCHITECTURE](../components/charts/ARCHITECTURE.md) |
+| [`@jarenjs/ai`](../packages/ai) | Browser-side AI: one OpenAI-compatible chat client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs `@jarenjs/validate` checks before every call, a bounded agent loop, and WebMCP registration; depends only on validate | [ai README](../packages/ai/README.md) |
+| [`@jarenjs/website`](../packages/website) | The GitHub Pages site, playground, AI assistant and the Studio — a meta-schema-gated host for AI-authored app documents (not part of the library chain) | [website README](../packages/website/README.md) |
 
 Two deliberate inversions keep the graph acyclic while letting the layers cooperate:
 
-- **JSON Schema as the query type system**: `@jarenjs/json`'s `$valid`/`$assert`/`$as` and JSLT schema matches accept schema literals but compile them through an injected `compileTypeTest` hook; [`@jarenjs/validate/query`](packages/validate/src/query.js) supplies the reference hook. Dependency direction stays validate → json.
+- **JSON Schema as the query type system**: `@jarenjs/json`'s `$valid`/`$assert`/`$as` and JSLT schema matches accept schema literals but compile them through an injected `compileTypeTest` hook; [`@jarenjs/validate/query`](../packages/validate/src/query.js) supplies the reference hook. Dependency direction stays validate → json.
 - **Queries inside schemas**: `@jarenjs/validate`'s `$query` keyword compiles a Jaren JSON Query per schema location — validate consumes json, never the other way around.
 
 ### Key Files of the validator
@@ -574,7 +574,7 @@ interface ValidationError {
 ```
 
 The `msgid`/`params` pair is what makes report-time i18n possible without
-recompiling; see [ERROR-MESSAGES.md](packages/validate/docs/ERROR-MESSAGES.md)
+recompiling; see [ERROR-MESSAGES.md](../packages/validate/docs/ERROR-MESSAGES.md)
 for the normative contract.
 
 ### Error Handler Optimization
@@ -600,16 +600,16 @@ createErrorHandler(expected, key) {
 
 ## Testing, Benchmarks and Debugging
 
-Unit tests live in `test/` at the repository root, organized per package (`npm test`, or `npm run test:core` / `test:json` / `test:validate`). The conformance suites, performance profilers and analysis tools all live in the benchmark workspace and are documented in [benchmark/README.md](benchmark/README.md):
+Unit tests live in `test/` at the repository root, organized per package (`npm test`, or `npm run test:core` / `test:json` / `test:validate`). The conformance suites, performance profilers and analysis tools all live in the benchmark workspace and are documented in [benchmark/README.md](../benchmark/README.md):
 
 - `profiler.js` — JSON Schema performance vs Ajv over the official test suite (the source of the README's conformance table);
 - `debug.js` — inspect, run, export and step through individual suite test cases, with Jaren-vs-Ajv comparison;
 - `coverage.js` — merged function-coverage analysis over the suite and/or unit tests (untouched-function and dead-code reports);
 - `callgraph.js` — hot-path call graphs via the Node.js profiler;
 - `jsonpath.js`, `jsonpointer.js`, `jsonquery.js`, `jslt.js` — compliance and performance for the `@jarenjs/json` engines;
-- `qt3-runner.js` — the tiered W3C QT3 scorecard (see [benchmark/qt3-README.md](benchmark/qt3-README.md)).
+- `qt3-runner.js` — the tiered W3C QT3 scorecard (see [benchmark/qt3-README.md](../benchmark/qt3-README.md)).
 
-Validator-specific troubleshooting recipes — "Can not resolve schema for 'X'", first-validation slowness, test interference, ref-resolution logging — are collected in the [validate ARCHITECTURE debugging guide](packages/validate/ARCHITECTURE.md#debugging-guide).
+Validator-specific troubleshooting recipes — "Can not resolve schema for 'X'", first-validation slowness, test interference, ref-resolution logging — are collected in the [validate ARCHITECTURE debugging guide](../packages/validate/ARCHITECTURE.md#debugging-guide).
 
 ---
 

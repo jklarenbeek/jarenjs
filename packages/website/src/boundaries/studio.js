@@ -140,7 +140,7 @@ function formVnode(props) {
 function chartVnode(props) {
   try {
     // inline definitions carry their own data (the charts engine's
-    // static path); theme 'host' keeps light/dark live (DESIGN.md §7)
+    // static path); theme 'host' keeps light/dark live (docs/DESIGN.md §7)
     return ['div', { class: 'studio-chart' },
       compileChart(props.config, props.config, { theme: 'host' }).toVnode()];
   }

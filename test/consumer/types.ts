@@ -216,3 +216,79 @@ if (sessionTree !== null && sessionTree.session !== undefined) {
   void (sessionTree.session.dirty && sessionTree.session.submitted);
   void (sessionTree.session.errorCount + sessionTree.session.serverErrorCount);
 }
+
+// @jarenjs/validate — the compiled-validator type contract.
+// The `collectErrors` option decides the return shape, and it is carried in
+// the class type parameter so consumers never see the undiscriminated union.
+
+// Default instance: a type guard over `unknown`, usable as a plain boolean.
+const booleanMode = new JarenValidator();
+const isString = booleanMode.compile({ type: 'string' });
+const stringVerdict: boolean = isString(JSON.parse('"x"'));
+void stringVerdict;
+
+// The compiled validator takes `unknown`, not `any`: member access on its
+// argument's type must not be allowed. If this ever compiles, `any` has
+// leaked back into the public surface.
+// @ts-expect-error the validator returns boolean, not an indexable value
+void isString('x').anything;
+
+// An explicit `false` behaves exactly like the default.
+const explicitBooleanMode = new JarenValidator({ collectErrors: false });
+const explicitVerdict: boolean = explicitBooleanMode.compile({ type: 'string' })('x');
+void explicitVerdict;
+
+// Collect mode: `{ valid, errors }`, with the full ValidationError shape.
+const collectMode = new JarenValidator({ collectErrors: true });
+const collected = collectMode.compile({ type: 'string' })(1);
+const collectedValid: boolean = collected.valid;
+const collectedCount: number = collected.errors.length;
+void (collectedValid && collectedCount >= 0);
+if (collected.errors.length > 0) {
+  const issue = collected.errors[0];
+  const issueFields: [string, string, string, string, string] = [
+    issue.keyword,
+    issue.instancePath,
+    issue.schemaPath,
+    issue.msgid,
+    issue.message,
+  ];
+  void issueFields;
+  void (issue.params as Record<string, unknown>);
+}
+
+// A caller-asserted type turns the validator into a narrowing type guard.
+type ConsumerUser = { name: string; age: number };
+const isConsumerUser = booleanMode.compile<ConsumerUser>(userSchema);
+const unknownInput: unknown = JSON.parse('{}');
+if (isConsumerUser(unknownInput)) {
+  const narrowedName: string = unknownInput.name;
+  const narrowedAge: number = unknownInput.age;
+  void (narrowedName + String(narrowedAge));
+}
+
+// @jarenjs/validate/normalize — the normalization pass.
+// Input and output types are both caller-assertable, because materializing
+// defaults makes the accepted input and the normalized output differ.
+import { compileNormalizer } from '@jarenjs/validate/normalize';
+import type { NormalizeOptions, Normalizer } from '@jarenjs/validate/normalize';
+
+const normalizeOptions: NormalizeOptions = {
+  useDefaults: true,
+  removeAdditional: 'all',
+  coerceTypes: true,
+  trimStrings: true,
+};
+
+type ContractInput = { name: string; port?: number };
+type ContractOutput = { name: string; port: number };
+
+const normalizeContract: Normalizer<ContractInput, ContractOutput> =
+  compileNormalizer<ContractInput, ContractOutput>(userSchema, normalizeOptions);
+const normalizedPort: number = normalizeContract({ name: 'jaren' }).port;
+void normalizedPort;
+
+// Untyped use stays honest: unknown in, unknown out.
+const normalizeUnknown = compileNormalizer(userSchema);
+const normalizedUnknown: unknown = normalizeUnknown(JSON.parse('{}'));
+void normalizedUnknown;

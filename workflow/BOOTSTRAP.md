@@ -10,7 +10,7 @@ A zero-dependency JSON toolchain monorepo (npm workspaces under
 `packages/*` and `components/*`; tests live at the repo root under
 `test/`, mirroring package names; plain `node:test` + `node:assert`).
 The invariants an executor must preserve are recorded in
-`REFACTOR.md` §"Repo model" and are binding: one-way dependency arrow,
+`docs/REFACTOR.md` §"Repo model" and are binding: one-way dependency arrow,
 zero runtime dependencies outside `@jarenjs/*`, no `eval`/`new
 Function`, ESM everywhere, JSDoc on exports, match surrounding style.
 
@@ -37,7 +37,7 @@ Function`, ESM everywhere, JSDoc on exports, match surrounding style.
 
 - Work lands on `main`, uncommitted, for human review. Never commit,
   tag, push, or branch on your own initiative; the close-out protocol
-  in `REFACTOR.md` §"Close-out & commit protocol" runs only when the
+  in `docs/REFACTOR.md` §"Close-out & commit protocol" runs only when the
   operator explicitly asks.
 - Committed code, comments and docs never reference scratch planning
   files (anything gitignored) — module headers describe the current

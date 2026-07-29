@@ -253,7 +253,7 @@ v22.22.2 (run it yourself; micro-timings vary ±15%):
   never-closed tag, and a vnode tree cannot hold half an element. The
   rest are real dialect gaps (loose-list paragraph wrapping, emphasis
   flanking, link-label edge cases) tracked in the
-  [ROADMAP](../../ROADMAP.md). The scorecard runs against the official
+  [ROADMAP](../../docs/ROADMAP.md). The scorecard runs against the official
   spec as a git submodule, QT3-style, and compares rendered meaning:
   whitespace that only lays markup out is normalized away on every
   engine's output, not just this one's.
@@ -265,6 +265,6 @@ Tests live in the repository root: [`test/md/`](../../test/md)
 plugins, structural sharing, streaming, loader caching, and AST-schema
 validation through `@jarenjs/validate`. The benchmark methodology is
 documented in [benchmark/README.md](../../benchmark/README.md). See the
-repo [README](../../README.md) and [ROADMAP](../../ROADMAP.md) for the
+repo [README](../../README.md) and [ROADMAP](../../docs/ROADMAP.md) for the
 bigger picture, and [ARCHITECTURE.md](ARCHITECTURE.md) for the
 internals.

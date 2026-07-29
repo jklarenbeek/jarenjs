@@ -18,4 +18,4 @@ const jaren = new JarenValidator()
 
 The meta-schemas matter beyond `$ref` resolution: [`@jarenjs/validate`](../validate) uses them for draft detection, `$vocabulary`-aware keyword selection (including `format-assertion`), and cross-draft references — all offline, with no network fetches.
 
-See the repository [README](../../README.md) for full documentation and the [HOWTO](../../HOWTO.md) for multi-draft setups.
+See the repository [README](../../README.md) for full documentation and the [HOWTO](../../docs/HOWTO.md) for multi-draft setups.

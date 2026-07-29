@@ -28,7 +28,7 @@ every executor session; BOOTSTRAP.md is their operational summary.
    router.
 2. **Work lands on `main`, uncommitted, for review.** No executor
    commits, tags, pushes or branches on its own initiative. The commit
-   and release path is `REFACTOR.md` §"Close-out & commit protocol",
+   and release path is `docs/REFACTOR.md` §"Close-out & commit protocol",
    run only on the operator's explicit ask.
 3. **Every work order ends green** before its record is written:
    `npm run lint` at zero errors and zero warnings, `npm test` across
@@ -37,7 +37,7 @@ every executor session; BOOTSTRAP.md is their operational summary.
 4. **Committed artifacts never reference scratch.** Code, comments,
    docs and these workflow files never point at gitignored planning
    files; module headers describe the current role of the code, not
-   how it came to be. (`REFACTOR.md` §"Documentation & reference
+   how it came to be. (`docs/REFACTOR.md` §"Documentation & reference
    rules" is the long form.)
 5. **The source is the source of truth.** When prose and code
    disagree, the code wins and the prose is repaired — never the

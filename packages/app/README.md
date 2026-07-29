@@ -185,4 +185,4 @@ Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` fi
 
 ## Development
 
-Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../ROADMAP.md) for what's next: dirty-path-pruned re-rendering and time-travel tooling over the action log.
+Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../docs/ROADMAP.md) for what's next: dirty-path-pruned re-rendering and time-travel tooling over the action log.

@@ -138,7 +138,7 @@ import {
 
 The categorical palette is a concrete constant in the suite's anchor
 order (blue first, amber second, teal third — no pink, no purple, per
-the repo's DESIGN.md), and `SEQUENTIAL` is its magnitude counterpart:
+the repo's docs/DESIGN.md), and `SEQUENTIAL` is its magnitude counterpart:
 a single-hue blue ramp, light→dark, sampled continuously by
 `sequentialColor(t)` (the heatmap's cell fill). The semantic tokens
 (text/grid/axis, win/loss) resolve through the shared `resolveTheme`

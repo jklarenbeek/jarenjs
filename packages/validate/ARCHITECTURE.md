@@ -1015,8 +1015,8 @@ console.log('Resolving ref:', ref, 'against baseUri:', baseUri);
 
 For broader context on how this package fits into the JarenJS ecosystem:
 
-- **Project-wide Architecture**: See `/ARCHITECTURE.md` at the project root
-- **Developer Guide**: See `/HOWTO.md` at the project root
+- **Project-wide Architecture**: See `docs/ARCHITECTURE.md`
+- **Developer Guide**: See `docs/HOWTO.md`
 - **Core Package**: Depends on `@jarenjs/core` for fundamental utilities and `@jarenjs/json` for the JSON addressing standards
 
 ---

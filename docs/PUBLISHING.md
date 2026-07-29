@@ -43,6 +43,37 @@ npm whoami
 
 Never put the token itself in this repository's `.npmrc`. Revoke and replace it immediately if it is committed or printed in a shared log.
 
+## Compatibility policy
+
+Jaren is pre-1.0. All public workspaces share one version and are released
+together, so a version number describes the suite, not a single package.
+
+- **Patch releases never break a public API.** Bug fixes, performance work,
+  documentation and additive internals only. Upgrading a patch should require
+  reading nothing.
+- **Minor releases may break a public API**, and when one does it is called
+  out in the release tag's annotation and in the documentation of whatever
+  changed. Pre-1.0 this is the release that carries breaking change; there is
+  no separate major channel yet. There is no changelog file on purpose — the
+  git history between two tags *is* the changelog, and a second hand-written
+  copy of it only goes stale.
+- **Deprecations get one minor of overlap.** A symbol slated for removal is
+  documented as deprecated in the release that supersedes it, keeps working
+  for that whole minor series, and may be removed in the next minor. A
+  deprecation is never introduced and removed in the same minor.
+- **Behavior changes count as API changes.** A validator that starts
+  reporting different errors for the same schema and document is a breaking
+  change even though no signature moved, and it is versioned as one.
+- **Security fixes land on the latest minor** — see [SECURITY.md](SECURITY.md).
+  There are no support branches for older minors.
+- **What 1.0 means here**: the per-package items in [ROADMAP.md](ROADMAP.md)
+  are the gate. After 1.0 this policy becomes ordinary semver, with breaking
+  change confined to majors.
+
+Consumers who need a stronger guarantee than pre-1.0 minors provide should
+pin a reviewed tag and upgrade deliberately; the recipe is in
+[CONSUMING.md](CONSUMING.md#upgrading-a-pin).
+
 ## Prepare a release
 
 All public workspaces use one version. Increment them and their internal dependency ranges together:
@@ -84,7 +115,22 @@ The root command reruns the release gate and publishes only the fourteen public 
 npm run publish
 ```
 
-npm may prompt for a one-time password when account/package policy requires 2FA. After publishing, verify the versions:
+npm may prompt for a one-time password when account/package policy requires 2FA.
+
+### Tag the release
+
+```bash
+git tag v<new-version>
+git push && git push --tags
+```
+
+Tags are lightweight and the version lives only in the tag, never in the
+commit message. A consumer pinning a source checkout pins the commit the tag
+resolves to and reviews the gitlink diff on every upgrade — see
+[CONSUMING.md](CONSUMING.md#upgrading-a-pin) — which is the control that
+matters here.
+
+After publishing, verify the versions:
 
 ```bash
 npm view @jarenjs/core version
@@ -104,4 +150,16 @@ npm view @jarenjs/josl version
 npm view @jarenjs/ai version
 ```
 
-For automated releases, prefer npm trusted publishing with OIDC over a long-lived write token.
+## Provenance
+
+npm **trusted publishing with OIDC** is the intended default for automated
+releases, in preference to a long-lived write token: it removes the
+long-lived credential entirely and attaches a provenance attestation linking
+each tarball to the workflow run and commit that produced it. Publish with
+`--provenance` from CI once that is wired.
+
+The SBOM story is short enough to state rather than generate: every published
+`@jarenjs/*` package has **zero third-party runtime dependencies**, so the
+runtime dependency graph of any of them is other `@jarenjs/*` packages and
+nothing else. A consumer can verify that mechanically from the published
+manifests.

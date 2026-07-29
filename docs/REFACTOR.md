@@ -138,12 +138,14 @@ These keep the committed tree honest, and they are part of the refactor's job:
    reader needs to understand or safely change the code. Record the *why* of a non-obvious
    choice; drop the *when/where-it-came-from*.
 4. **Keep documentation in sync with the move.** When a symbol is relocated or renamed, update
-   every place that documents it — package `README.md`, `ARCHITECTURE.md`, `docs/*`, `ROADMAP.md`,
-   `DESIGN.md` — to its new name and home.
+   every place that documents it — a package's `README.md`/`ARCHITECTURE.md`/`docs/*`, and the
+   repo-wide documents in `docs/` (`ARCHITECTURE.md`, `ROADMAP.md`, `DESIGN.md`, `HOWTO.md`) —
+   to its new name and home. The only committed Markdown outside `docs/` and the workspaces is
+   the root `README.md`.
 
 ## Design conformance — DESIGN.md is binding (run every pass)
 
-**`DESIGN.md` (repo root) is the committed visual design system and branding contract** for
+**`docs/DESIGN.md` is the committed visual design system and branding contract** for
 `packages/website` and the visual components (`components/calc`, `components/md`,
 `components/mermaid`). It is not advisory: any code the refactor touches in those areas must
 hold its invariants, and every pass sweeps for drift:

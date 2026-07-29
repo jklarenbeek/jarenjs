@@ -317,6 +317,53 @@ export function setObjectMember(out, name, value) {
 }
 
 /**
+ * Whether a value can hold JSON members: an object or an array, not null.
+ * The complement of a JSON scalar.
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isJsonContainer(value) {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Copy one JSON container one level deep, preserving member order. Object
+ * spread copies an own `__proto__` data property as an own property
+ * (CreateDataProperty semantics), so this is pollution-safe.
+ * @template T
+ * @param {T} value - The container to copy
+ * @returns {T} A shallow copy; scalars are returned unchanged
+ */
+export function shallowCloneJson(value) {
+  return Array.isArray(value) ? value.slice() : { ...value };
+}
+
+/**
+ * Deep-copy a JSON value. Scalars are returned as-is; containers are
+ * rebuilt so no part of the result is shared with the input.
+ * @template T
+ * @param {T} value - The JSON value to copy
+ * @returns {T} A deep copy sharing no container with the input
+ */
+export function cloneJson(value) {
+  if (!isJsonContainer(value))
+    return value;
+  if (Array.isArray(value)) {
+    const len = value.length;
+    const out = new Array(len);
+    for (let i = 0; i < len; i++)
+      out[i] = cloneJson(value[i]);
+    return out;
+  }
+  const out = {};
+  for (const key in value) {
+    if (Object.hasOwn(value, key))
+      setObjectMember(out, key, cloneJson(value[key]));
+  }
+  return out;
+}
+
+/**
  * Recursively `Object.freeze` a value and everything reachable from it,
  * returning the value. Scalars pass through untouched. Assumes an acyclic
  * structure (a JSON value); a cycle would recurse forever.

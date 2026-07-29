@@ -243,7 +243,7 @@ export function resultTableBars(table, options = {}) {
  * categories — engines or scenarios — so their identity comes from the
  * axis label, not from a hue, and the length is the whole message.
  * Semantic win/loss tones are deliberately not used: on a timing chart
- * "ours" is not automatically good, and DESIGN.md reserves those tokens
+ * "ours" is not automatically good, and docs/DESIGN.md reserves those tokens
  * for genuine status.
  * @param {{label: string, ns: number}[]} rows
  * @param {{title?: string, log?: boolean, valLabel?: string}} [options]

@@ -394,11 +394,25 @@ Each `ValidationError` carries six fields:
 
 Two notes for anyone diffing this against another validator's output. The
 data location is `instancePath`, a **JSON Pointer string** — not the dotted
-`dataPath` of Ajv v6, and not an array path. `parseJSONPointer` from
-[`@jarenjs/json`](../json/README.md) decodes it into segments. And for
-`additionalProperties: false`, Jaren points `instancePath` at the offending
-member (`/nested/extra`) where Ajv points at the parent object — deliberate,
-and spec-truer.
+`dataPath` of Ajv v6, and not an array path. `parseJSONPointerPath` from
+[`@jarenjs/json`](../json/README.md) converts it to the `(string|number)[]`
+path shape that Zod's `issue.path` and most diffing tools use, narrowing
+canonical array indexes to numbers:
+
+```javascript
+import { parseJSONPointerPath } from '@jarenjs/json';
+
+parseJSONPointerPath('/items/0/id');   // ['items', 0, 'id']
+```
+
+And for `additionalProperties: false`, Jaren points `instancePath` at the
+offending member (`/nested/extra`) where Ajv points at the parent object —
+deliberate, and spec-truer.
+
+Every failing item and every missing property gets its own error: an object
+missing three `required` properties yields three errors, and an array whose
+items fail yields one error per failing index plus the aggregate `items`
+error at the array itself.
 
 ### String lengths count graphemes by default
 
@@ -447,13 +461,6 @@ new JarenValidator({ formatAssertion: true }).addFormats(formats.stringFormats)
   .compile(schema)('nope');                       // => false (asserted)
 ```
 
-> **Known defect.** Constructing with an options *object* that sets any
-> validation option (`new JarenValidator({ collectErrors: true })`) also
-> pins `contentValidation` to `false`, defeating the auto-by-draft rule
-> above; only `new JarenValidator()` with no options gets the draft default.
-> Set `contentValidation: true` explicitly if you rely on it. Tracked in the
-> [ROADMAP](../../ROADMAP.md).
-
 ### Formats are never registered implicitly
 
 `@jarenjs/validate` does not depend on `@jarenjs/formats`. An unregistered
@@ -484,20 +491,93 @@ export const jaren = new JarenValidator({
   collectErrors: true,     // { valid, errors } instead of a boolean
   useGrapheme: false,      // UTF-16 code units, like Zod's .min()/.max()
   formatAssertion: true,   // assert format even under draft 2020-12
-  contentValidation: true, // see the known defect above
+  contentValidation: true, // assert contentEncoding/contentMediaType
 })
   .addFormats(formats.stringFormats)
   .addFormats(formats.dateTimeFormats);
 ```
 
-What this recipe does **not** give you is Zod's output normalization. Jaren
-validates without modifying its input: `default` values are not materialized,
-types are not coerced, strings are not trimmed, and unknown properties are
-not stripped. That is a deliberate boundary — the compiled validator is a
-pure predicate — so a migration that relies on Zod's parsed *output* needs a
-normalization step of its own between parsing and validation. See
-[Pitfall 3](../../HOWTO.md#pitfall-3-validation-never-modifies-your-data) in
-the HOWTO.
+What this recipe does **not** give you is Zod's output normalization: a
+compiled validator is a pure predicate and never modifies its input. That
+boundary does not move — but the normalization itself ships beside it, as a
+separately compiled pass. See [Normalization](#normalization) below.
+
+## Normalization
+
+Validation answers a question; it does not change your data. When you need
+the *normalized output* that a parse-and-transform library returns —
+materialized defaults, decoded transport values, stripped unknown members —
+compile a normalizer from the same schema and run it first:
+
+```javascript
+import { compileNormalizer } from '@jarenjs/validate/normalize';
+
+const normalize = compileNormalizer(schema, {
+  useDefaults: true,       // fill absent properties from `default`, recursively
+  removeAdditional: true,  // drop members the schema forbids
+  coerceTypes: true,       // '9000' -> 9000 where the schema says integer
+  trimStrings: true,       // '  jaren  ' -> 'jaren'
+});
+
+const shaped = normalize(input);   // a NEW value; `input` is untouched
+const result = validate(shaped);
+```
+
+Every option is **off by default** — each one changes what your data means,
+so each is a decision you make rather than one you inherit.
+`compileNormalizer(schema)` with no options is the identity.
+
+### It never mutates, and it shares what it can
+
+Ajv's `useDefaults`/`coerceTypes` write into the document you hand them.
+This does not: it is a copy-on-write walk, so the input is exactly as it was
+afterwards — you can normalize a frozen document, or keep the original as an
+audit record, without defensive copying.
+
+The other half of that design is identity. A subtree that needs no change is
+returned by reference, and a document that needs no change at all returns the
+input itself:
+
+```javascript
+normalize(alreadyClean) === alreadyClean;   // true
+```
+
+So a no-op costs nothing, and downstream memoization keyed on identity keeps
+working.
+
+### What it walks, and what it deliberately does not
+
+Walked: `properties`, `patternProperties`, `additionalProperties`,
+`items`/`prefixItems`/`additionalItems` (both tuple spellings), same-document
+`$ref` including recursive ones, and `allOf` — whose branches compose, with
+stripping disabled inside them because one branch cannot know what a sibling
+declares.
+
+Not walked: `anyOf`, `oneOf`, `if`/`then`/`else`, `not`. Which branch applies
+is only known after validating, and normalizing under one branch can change
+which branch validates — so guessing would be worse than declining. There is
+also no transform hook: an arbitrary transform is application code, not
+schema semantics, and belongs on your side of the boundary.
+
+### The coercion table
+
+Coercion exists to decode transport encodings — query strings, form fields,
+environment variables, CSV cells — where everything arrives as a string. It
+is conservative on purpose: a value it cannot convert unambiguously is passed
+through unchanged, so validation reports the type error instead of the
+normalizer hiding it.
+
+| Declared `type` | Converted | Left alone |
+|---|---|---|
+| `number` | a string that is exactly a JSON number (`'1e5'`, `'-0.5'`) | `'0x10'`, `'1_000'`, `''`, `'Infinity'` |
+| `integer` | as `number`, when the result is integral | `'4.5'` |
+| `boolean` | `'true'`, `'false'` | `'yes'`, `'1'`, `0` |
+| `string` | finite numbers and booleans | objects, arrays, `null` |
+| `null` | `'null'` | `''`, `0`, `false` |
+
+A union `type` (`['string', 'number']`) gives no single target, so coercion is
+skipped rather than guessed. Trimming runs before coercion, so `'  42  '`
+decodes for an integer field.
 
 ## Error messages & i18n
 
@@ -584,4 +664,4 @@ const validator = new JarenValidator({ collectErrors: true, messages: false });
 
 Unit tests live in `test/validate/` at the repository root (`npm run test:validate`). Performance against Ajv is measured over the official test suite with the [benchmark workspace](../../benchmark/README.md) (`node benchmark/profiler.js --profile-all`), which also houses the test-failure debugger, coverage and call-graph tools.
 
-This package's internals — the four-phase compile pipeline, ref flattening, annotation tracking, dynamic scope — are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. For practical usage recipes (options, lightweight setups, custom formats, pitfalls) see the repository [HOWTO](../../HOWTO.md); for the monorepo picture see the repository [README](../../README.md) and [ARCHITECTURE](../../ARCHITECTURE.md); for what is planned next see the [ROADMAP](../../ROADMAP.md).
+This package's internals — the four-phase compile pipeline, ref flattening, annotation tracking, dynamic scope — are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. For practical usage recipes (options, lightweight setups, custom formats, pitfalls) see the repository [HOWTO](../../docs/HOWTO.md); for the monorepo picture see the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md); for what is planned next see the [ROADMAP](../../docs/ROADMAP.md).
