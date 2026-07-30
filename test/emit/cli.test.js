@@ -11,8 +11,12 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const CLI = new URL('../../packages/emit/src/cli.js', import.meta.url).pathname;
+// A URL pathname (`/C:/repo/...`) is not a native Windows filesystem path:
+// handed to execFileSync it resolves against the drive of the cwd and comes
+// out as `C:\C:\repo\...`. `fileURLToPath` owns the drive-letter rules.
+const CLI = fileURLToPath(new URL('../../packages/emit/src/cli.js', import.meta.url));
 
 /** Run the CLI against a temp workspace holding the given schema files. */
 function runEmit(schemas, args) {

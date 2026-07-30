@@ -131,8 +131,21 @@ vendor directory:
 ```js
 import { createRequire } from 'node:module';
 import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const VENDOR = new URL('./vendor/jarenjs/', import.meta.url).pathname;
+// fileURLToPath, not URL#pathname: a pathname is `/C:/repo/...` on Windows,
+// which is not a native filesystem path.
+const VENDOR = realpathSync(fileURLToPath(new URL('./vendor/jarenjs/', import.meta.url)));
+
+// Containment is path arithmetic, never a string prefix: native Windows
+// realpaths carry drive letters and backslashes, and a prefix check also
+// accepts `/repo-other` as inside `/repo`.
+const isWithin = (root, candidate) => {
+  const rel = relative(root, candidate);
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+};
+
 const queue = [['@jarenjs/validate', import.meta.url]];
 const seen = new Set();
 while (queue.length > 0) {
@@ -142,15 +155,16 @@ while (queue.length > 0) {
   // Resolve each edge FROM ITS PARENT: a transitive dependency is not
   // hoisted to your root under pnpm's isolated layout.
   const manifest = realpathSync(createRequire(from).resolve(`${name}/package.json`));
-  if (!manifest.startsWith(VENDOR))
+  if (!isWithin(VENDOR, manifest))
     throw new Error(`${name} resolved outside the vendored source: ${manifest}`);
   for (const dep of Object.keys(createRequire(manifest)(manifest).dependencies ?? {}))
     if (dep.startsWith('@jarenjs/')) queue.push([dep, manifest]);
 }
 ```
 
-This repository runs exactly that check against a real pnpm 9 consumer on
-every push — `npm run test:source`, in `scripts/check-source-consumer.js`.
+This repository runs exactly that check against a real pnpm consumer — pinned
+to the exact 9.15.4 a vendoring consumer runs, on Linux **and Windows** — on
+every push: `npm run test:source`, in `scripts/check-source-consumer.js`.
 Worth knowing what actually makes it pass: once you run the install **inside**
 the submodule, npm's own workspace symlinks in `vendor/jarenjs/node_modules`
 satisfy the internal edges, and they win before any consumer-side setting

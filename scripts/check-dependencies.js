@@ -28,9 +28,10 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { runNpm } from './lib/portable.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -118,35 +119,52 @@ if (!process.argv.includes('--skip-audit')) {
   try {
     // `npm audit` exits non-zero when it finds anything, so the output is read
     // from the thrown result rather than treated as a failure.
-    report = execFileSync('npm', ['audit', '--json'], { cwd: ROOT, encoding: 'utf8' });
+    report = runNpm(['audit', '--json'], { cwd: ROOT });
   }
   catch (error) {
-    report = error.stdout;
+    // A findings exit carries the report on stdout; a LAUNCH failure carries
+    // nothing. Only the former is evidence. This check fails closed: on a
+    // Windows runner the old bare-name launch never started npm at all, and
+    // "no output, skipping" turned a broken release check into a green one.
+    // An intentional offline run says so explicitly with --skip-audit.
+    const stdout = /** @type {{stdout?: unknown}} */ (error).stdout;
+    report = typeof stdout === 'string' && stdout.length > 0 ? stdout : null;
+    if (report === null)
+      fail(`npm audit did not run: ${/** @type {Error} */ (error).message}`);
   }
 
-  if (typeof report !== 'string' || report.length === 0) {
-    console.log('  ! npm audit produced no output (offline?); skipping the advisory check');
+  if (report !== null && report.length === 0) {
+    fail('npm audit produced no output — refusing to treat silence as evidence');
+    report = null;
   }
-  else {
-    const vulnerabilities = JSON.parse(report).vulnerabilities ?? {};
-    const names = Object.keys(vulnerabilities);
-    const unexpected = names.filter((name) => !(name in KNOWN_TOOLING_ADVISORIES));
-    const publishedNames = new Set(published.map(({ pkg }) => pkg.name));
-    // Nothing advisory-flagged may sit in a published package's own closure.
-    for (const name of names)
-      if (publishedNames.has(name))
-        fail(`advisory reaches a PUBLISHED package: ${name}`);
-
-    for (const name of names) {
-      const reason = KNOWN_TOOLING_ADVISORIES[name];
-      const severity = vulnerabilities[name].severity;
-      if (reason) console.log(`  · ${severity.padEnd(8)} ${name} — ${reason}`);
+  if (report !== null) {
+    let vulnerabilities = null;
+    try {
+      vulnerabilities = JSON.parse(report).vulnerabilities ?? {};
     }
-    for (const name of unexpected)
-      fail(`new advisory not covered by the tooling list: ${name} (${vulnerabilities[name].severity})`);
+    catch (_e) {
+      fail('npm audit produced unparseable JSON — refusing to treat it as evidence');
+    }
+    if (vulnerabilities !== null) {
+      const names = Object.keys(vulnerabilities);
+      const unexpected = names.filter((name) => !(name in KNOWN_TOOLING_ADVISORIES));
+      const publishedNames = new Set(published.map(({ pkg }) => pkg.name));
+      // Nothing advisory-flagged may sit in a published package's own closure.
+      for (const name of names)
+        if (publishedNames.has(name))
+          fail(`advisory reaches a PUBLISHED package: ${name}`);
 
-    if (unexpected.length === 0)
-      console.log(`  ✓ ${names.length} advisories, all in build tooling, none reaching shipped code`);
+      for (const name of names) {
+        const reason = KNOWN_TOOLING_ADVISORIES[name];
+        const severity = vulnerabilities[name].severity;
+        if (reason) console.log(`  · ${severity.padEnd(8)} ${name} — ${reason}`);
+      }
+      for (const name of unexpected)
+        fail(`new advisory not covered by the tooling list: ${name} (${vulnerabilities[name].severity})`);
+
+      if (unexpected.length === 0)
+        console.log(`  ✓ ${names.length} advisories, all in build tooling, none reaching shipped code`);
+    }
   }
 }
 

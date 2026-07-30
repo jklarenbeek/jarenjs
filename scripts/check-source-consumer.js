@@ -28,12 +28,31 @@
 
 import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
+import { isWithin, runNpm } from './lib/portable.js';
+
 const ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '..'));
 const REQUIRE_PNPM = process.argv.includes('--require-pnpm');
+
+/**
+ * The exact pnpm this fixture speaks for. The consumer this recipe exists for
+ * runs 9.15.4, and a floating `pnpm@9` would let the fixture drift onto a
+ * version nobody vendored against; the pin moves only when the consumer's
+ * does. Obtained through npm's own exec so no `.cmd` shim is ever launched —
+ * `npx pnpm` by bare name never started on a Windows runner, and the fixture
+ * misread that launch failure as "pnpm unavailable".
+ */
+const PNPM_VERSION = '9.15.4';
+
+/** Run the pinned pnpm through the portable npm launcher. */
+function pnpm(args, options = {}) {
+  return runNpm(
+    ['exec', '--yes', `--package=pnpm@${PNPM_VERSION}`, '--', 'pnpm', ...args],
+    options);
+}
 
 /** The closure a validating consumer actually needs. */
 const CONSUMED = ['@jarenjs/validate', '@jarenjs/formats', '@jarenjs/refs', '@jarenjs/emit'];
@@ -58,8 +77,12 @@ function sourcePackages() {
 
 function pnpmVersion() {
   try {
-    return execFileSync('npx', ['--yes', 'pnpm@9', '--version'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    // From a NEUTRAL directory, never the repo root: the root package.json
+    // pins `packageManager: npm@…`, and pnpm honors that field by refusing
+    // to run in the project that declares it. The fixture's consumer lives
+    // in a temp directory for the same reason.
+    return pnpm(['--version'],
+      { cwd: tmpdir(), stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   }
   catch {
     return null;
@@ -68,7 +91,7 @@ function pnpmVersion() {
 
 const version = pnpmVersion();
 if (version === null) {
-  const message = 'pnpm 9 is unavailable, so the source-consumer fixture did not run';
+  const message = `pnpm ${PNPM_VERSION} is unavailable, so the source-consumer fixture did not run`;
   if (REQUIRE_PNPM) {
     console.error(`✗ ${message} (--require-pnpm)`);
     process.exit(1);
@@ -139,10 +162,10 @@ console.log(JSON.stringify({
 }));
 `);
 
-  execFileSync('npx', ['--yes', 'pnpm@9', 'install', '--ignore-scripts'],
-    { cwd: consumer, stdio: 'pipe', encoding: 'utf8' });
+  pnpm(['install', '--ignore-scripts'], { cwd: consumer, stdio: 'pipe' });
 
-  const output = execFileSync('node', ['probe.mjs'], { cwd: consumer, encoding: 'utf8' });
+  const output = execFileSync(process.execPath, ['probe.mjs'],
+    { cwd: consumer, encoding: 'utf8' });
   const result = JSON.parse(output.trim().split('\n').pop() ?? '{}');
 
   if (result.ok !== true) fail('the vendored validator did not accept a valid document');
@@ -153,14 +176,19 @@ console.log(JSON.stringify({
   // node_modules (npm workspace symlinks) satisfies the internal edges before
   // any package-manager setting applies, so pointing an override elsewhere
   // does not actually move the resolution. Checking the detector directly is
-  // what keeps this gate from being vacuous.
-  const insideRepo = (path) => typeof path === 'string' && path.startsWith(`${ROOT}/`);
-  if (insideRepo('/somewhere/else/node_modules/@jarenjs/core/package.json'))
+  // what keeps this gate from being vacuous. Containment is path arithmetic
+  // (`isWithin`, via path.relative), never a string prefix: native Windows
+  // realpaths carry drive letters and backslashes, and a `${ROOT}/` prefix
+  // check rejected every one of them.
+  const insideRepo = (path) => typeof path === 'string' && isWithin(ROOT, path);
+  if (insideRepo(join(tmpdir(), 'somewhere-else', 'node_modules', '@jarenjs', 'core', 'package.json')))
     fail('the realpath check accepts a path outside the checkout — the gate is vacuous');
+  if (!insideRepo(join(ROOT, 'packages', 'core', 'package.json')))
+    fail('the realpath check rejects a path inside the checkout — the gate cannot pass honestly');
 
   for (const [name, path] of Object.entries(result.resolved ?? {})) {
     if (insideRepo(path))
-      console.log(`  ✓ ${name} -> ${path.slice(ROOT.length + 1)}`);
+      console.log(`  ✓ ${name} -> ${relative(ROOT, path)}`);
     else
       fail(`${name} resolved OUTSIDE the vendored source: ${path}`);
   }

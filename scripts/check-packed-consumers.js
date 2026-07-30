@@ -52,27 +52,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runNpm } from './lib/portable.js';
+
 const root = fileURLToPath(new URL('..', import.meta.url));
 const requireBun = process.argv.includes('--require-bun');
 
 /**
- * Run the npm CLI portably: through its own JS entrypoint under the
- * current Node when launched from an npm script (`npm_execpath`), else
- * through the platform binary as a deliberate direct-execution
- * fallback (`npm.cmd` needs a shell on Windows).
+ * Run the npm CLI portably — the shared `runNpm` (npm's own JS entrypoint
+ * under the current Node, with the documented shim fallback for direct
+ * invocation), shaped to this script's `(args, cwd)` call sites.
  * @param {string[]} args
  * @param {string} cwd
  * @returns {string}
  */
 function npm(args, cwd) {
-  const npmExecPath = process.env.npm_execpath;
-  if (npmExecPath !== undefined && npmExecPath.endsWith('.js')) {
-    return execFileSync(process.execPath, [npmExecPath, ...args], { cwd, encoding: 'utf8' });
-  }
-  const bin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  return execFileSync(bin, args, {
-    cwd, encoding: 'utf8', shell: process.platform === 'win32',
-  });
+  return runNpm(args, { cwd });
 }
 
 /** Publishable workspaces: every non-private workspace package. */
