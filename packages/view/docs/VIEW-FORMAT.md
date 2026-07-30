@@ -117,6 +117,15 @@ renderer SHOULD compare the live value first and write only on a genuine
 difference, so an already-matching control is not rewritten (which
 preserves the caret).
 
+This reassertion MUST survive the sharing (§5.1) and `memo` (§5.5) fast
+paths: a control inside a subtree those paths skip still holds
+authoritative state, so a conforming renderer reconciles controls from
+something other than the per-frame prop diff. The reference
+implementation keeps a registry of controlled nodes and reconciles it
+once per settled pass — which also lets a `select` resolve its value
+after its options exist and a `multiple` select apply an array of
+values. Composition/IME coordination is not yet specified (§8).
+
 ## 4. Events are data
 
 The value of an `on` member is an opaque JSON **binding**. The view
@@ -497,10 +506,19 @@ as a validation-time gate. It cannot inspect a URL or style **value**, so
 the runtime policy is authoritative; a host validating untrusted input
 SHOULD do both.
 
-Out of scope for this version, and NOT to be assumed: caret/IME fidelity
-under safe rewrites across browser engines, MathML, and a Trusted Types
-integration. Safe mode is a renderer policy, not a substitute for a
-Content-Security-Policy.
+Safe mode reduces an untrusted view to a display; it is **not a complete
+sandbox**. The tag allow-list still admits anchors, forms, controls and media,
+so native navigation, form submission, focus and network loads remain
+possible. It is also a **renderer** policy: a host embedding it in a larger
+runtime MUST NOT assume that runtime inherits it (`@jarenjs/app`, for
+instance, does not forward `safe`, and an app document names host actions and
+effects — so a safe *view* does not make an untrusted *app document* safe).
+
+Out of scope for this version, and NOT to be assumed: caret/IME fidelity under
+safe rewrites across browser engines, MathML, `multiple`-select and
+composition behavior proven in all three engines, and a Trusted Types
+integration. Safe mode is one layer under a Content-Security-Policy, not a
+substitute for one.
 
 ## 9. Open items (roadmap, non-normative)
 

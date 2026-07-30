@@ -54,9 +54,21 @@ export class StubElement extends StubNode {
     // Form controls carry live value/checked properties, exactly the surface
     // the renderer writes and reconciles against. A plain element has neither,
     // so `'value' in node` stays false for a div — matching the real DOM.
-    if (FORM_CONTROLS.has(String(tag).toLowerCase())) {
+    const lower = String(tag).toLowerCase();
+    if (FORM_CONTROLS.has(lower)) {
       this.value = '';
-      if (String(tag).toLowerCase() === 'input') this.checked = false;
+      if (lower === 'input') {
+        this.checked = false;
+        // `files` is a read-only FileList in the browser: assigning to it
+        // throws. Modeling that is how the safe-mode attribute-only write is
+        // shown to avoid a first-render crash that the trusted property write
+        // would hit.
+        Object.defineProperty(this, 'files', {
+          get() { return null; },
+          enumerable: false,
+          configurable: true,
+        });
+      }
     }
   }
 
@@ -64,6 +76,13 @@ export class StubElement extends StubNode {
    * form control apart when reconciling a controlled value. */
   get nodeName() {
     return String(this.tagName).toUpperCase();
+  }
+
+  /** A `<select>`'s option children, as the DOM exposes them — enough for the
+   * multiple-select reconciliation to mark each option `selected`. */
+  get options() {
+    return this.childNodes.filter((c) => c instanceof StubElement
+      && String(c.tagName).toLowerCase() === 'option');
   }
 
   /** @param {StubElement | StubText} node */

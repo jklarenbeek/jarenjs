@@ -121,8 +121,10 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  *   default is trusted rendering — the equivalent of writing the DOM by
  *   hand — so a source-authored view is unaffected. Client and server share
  *   the one policy, so they neutralize an attack identically.
- * @property {(info: { kind: 'tag' | 'prop' | 'event', name: string }) => void}
- *   [onUnsafe] - In safe mode, called for everything the policy strips.
+ * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
+ *   [onUnsafe] - In safe mode, called for everything stripped: a disallowed
+ *   `tag`, a rejected or sanitized-away `prop`, a stripped `on` binding
+ *   (`event`) or a `widget`.
  * @property {(thrown: unknown) => void} [onCleanupError] - Receives
  *   the first VALUE a widget `unmount` threw during TERMINAL teardown
  *   (`destroy()`, direct or deferred) — by identity, whatever host
@@ -170,7 +172,19 @@ export function createDomRenderer(container, options = {}) {
     /** The safe render policy, or null for trusted (default) rendering.
      * Consulted for every tag and prop; the same object the SSR serializer
      * uses, so client and server strip an attack identically. */
-    policy: options.safe ? createSafePolicy(options) : null,
+    policy: options.safe ? createSafePolicy() : null,
+    /** Reports everything safe mode strips — a tag, a property, an `on`
+     * binding or a widget — so a host can observe a hostile document rather
+     * than have it silently vanish. The policy stays a pure decision; the
+     * renderer reports at the point it acts. */
+    onUnsafe: typeof options.onUnsafe === 'function' ? options.onUnsafe : null,
+    /** Controlled form-control nodes (`value`/`checked`), reconciled against
+     * the live DOM at the END of every render pass — so an authoritative
+     * value is reasserted even when the `===`/`memo` fast paths skip the
+     * subtree the control lives in. Trusted mode only: safe mode strips
+     * events, so a safe-mode view has no controlled inputs to fight the user
+     * over. @type {Set<any>} */
+    controlled: new Set(),
     /** Widget host nodes created this patch, awaiting `mount` (§7). */
     mountQueue: [],
     /** True once any widget node exists — gates the destroy walk. */
@@ -253,6 +267,14 @@ export function createDomRenderer(container, options = {}) {
         flushMounts(ctx);
         next = pendingVnode;
       } while (next !== undefined && !ctx.destroyed);
+      // Controlled-input reconciliation, once per settled pass. It runs here,
+      // not inside the prop diff, so it survives every skip: a same-object
+      // re-render, a shared subtree and an equal `memo` marker all return
+      // before `patchProps`, but the control is still in the registry with
+      // its intended value. Also the moment a select's options all exist.
+      if (!ctx.destroyed && ctx.controlled.size > 0) {
+        reconcileControlledSet(ctx, container);
+      }
     }
     finally {
       rendering = false;
@@ -385,21 +407,15 @@ function flushMounts(ctx) {
  * @returns {any}
  */
 function createNode(ctx, vnode, ns) {
+  vnode = resolveForPolicy(ctx, vnode, true);
   if (isTextNode(vnode)) {
     return ctx.doc.createTextNode(String(vnode));
   }
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {
-    // A widget mounts arbitrary imperative JS; safe mode drops it to nothing,
-    // matching the empty string SSR produces for a widget in safe mode.
-    if (ctx.policy !== null) return ctx.doc.createTextNode('');
+    // Only reachable in trusted mode: `resolveForPolicy` already turned a
+    // safe-mode widget into an empty text node above.
     return createWidgetNode(ctx, vnode, ns);
-  }
-  // Safe mode: an element whose tag is not on the inert allow-list (or is not
-  // even a bare identifier — structural injection) is dropped to an empty
-  // text node. SSR drops it to the empty string: the same nothing.
-  if (ctx.policy !== null && ctx.policy.tag(tag) === null) {
-    return ctx.doc.createTextNode('');
   }
   if (tag === 'svg') ns = SVG_NS;
   const node = ns !== null
@@ -413,7 +429,41 @@ function createNode(ctx, vnode, ns) {
   for (let i = 0; i < children.length; i++) {
     node.appendChild(createNode(ctx, children[i], ns));
   }
+  registerControlled(ctx, node, props);
   return node;
+}
+
+/**
+ * Map a vnode the safe policy rejects — a widget (imperative JS) or an
+ * element whose tag is off the allow-list or is injection-shaped — to a
+ * stable empty-text sentinel. Trusted mode returns the vnode untouched.
+ *
+ * This runs at the top of BOTH `createNode` and `patchNode`, which is what
+ * closes the update-path escape: a rejected node has the identity of an empty
+ * text node on every frame, so it can never reach `patchWidgetNode` or the
+ * element patch — a stripped widget cannot mount on a later frame, and a
+ * blocked element cannot be patched as if its placeholder were real.
+ * @param {any} ctx
+ * @param {any} vnode
+ * @param {boolean} report - Whether to notify `onUnsafe` (the new side of a
+ *   patch reports; the old side does not, so a persistently-rejected node is
+ *   not reported twice per frame)
+ * @returns {any} the vnode, or `''` when the policy rejects it
+ */
+function resolveForPolicy(ctx, vnode, report) {
+  if (ctx.policy === null || !isElementNode(vnode)) return vnode;
+  const tag = vnode[0];
+  if (tag === WIDGET_TAG) {
+    if (report && ctx.onUnsafe !== null) {
+      ctx.onUnsafe({ kind: 'widget', name: String(propsOf(vnode).name ?? '') });
+    }
+    return '';
+  }
+  if (ctx.policy.tag(tag) === null) {
+    if (report && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'tag', name: String(tag) });
+    return '';
+  }
+  return vnode;
 }
 
 /**
@@ -431,6 +481,14 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
   // a destroy() requested inside a widget hook stops the active pass:
   // no later sibling may observe another update in this frame
   if (ctx.destroyed) return node;
+  // Normalize BEFORE the identity diff: a safe-rejected node has the identity
+  // of an empty text node on both sides, so it can never enter the widget or
+  // element patch path (the update-path escape). The old side does not report
+  // — its strip was reported when it was first rendered.
+  if (ctx.policy !== null) {
+    oldV = resolveForPolicy(ctx, oldV, false);
+    newV = resolveForPolicy(ctx, newV, true);
+  }
   // the === fast path is sound only while no widget is poisoned: a
   // reference-equal subtree may hide a poisoned widget awaiting its
   // replacement (§7.3), so recovery must not depend on the producer
@@ -490,32 +548,101 @@ function patchProps(ctx, node, oldProps, newProps, ns) {
       }
     }
   }
-  // A controlled form value is authoritative and must survive a same-valued
-  // re-render: the user (or the browser) may have changed the live DOM since
-  // the last frame even when the vnode's value did not change, so the diff
-  // above never touches it. Reassert value/checked against the LIVE property,
-  // not the vnode snapshot. Gated on the props carrying a controlled key, so
-  // ordinary elements pay nothing; guarded on the live value, so an unchanged
-  // control is not rewritten and the caret is left where it is.
-  if ('value' in newProps || 'checked' in newProps) {
-    reconcileControlled(node, newProps);
+  // Record (or refresh) this control's authoritative value; the actual write
+  // happens in the end-of-pass reconciliation so it survives the skip paths.
+  registerControlled(ctx, node, newProps);
+}
+
+/**
+ * Record a form control's authoritative `value`/`checked` so the end-of-pass
+ * reconciliation can reassert it against the live DOM — even for a control
+ * inside a subtree a later frame skips. Trusted mode only: a safe-mode view
+ * strips events and is display-oriented, so there is no controlled state to
+ * fight the user over. Stores the intended value on the DOM node (never the
+ * vnode — §5.1) and keeps the node in `ctx.controlled`.
+ * @param {any} ctx
+ * @param {any} node
+ * @param {Record<string, any>} props
+ */
+function registerControlled(ctx, node, props) {
+  if (ctx.policy !== null) return;
+  const kind = node.nodeName;
+  if (kind !== 'INPUT' && kind !== 'TEXTAREA' && kind !== 'SELECT') return;
+  const hasValue = 'value' in props;
+  const hasChecked = kind === 'INPUT' && 'checked' in props;
+  if (!hasValue && !hasChecked) {
+    if (node.__jarenControlled !== undefined) {
+      node.__jarenControlled = undefined;
+      ctx.controlled.delete(node);
+    }
+    return;
+  }
+  node.__jarenControlled = {
+    hasValue,
+    hasChecked,
+    value: hasValue ? props.value : undefined,
+    checked: hasChecked ? props.checked === true : undefined,
+  };
+  ctx.controlled.add(node);
+}
+
+/** Reconcile every registered controlled node against the live DOM, once per
+ * settled render pass. A node no longer connected to the container is dropped
+ * from the registry here, which is why registration needs no destroy hook. */
+function reconcileControlledSet(ctx, container) {
+  for (const node of ctx.controlled) {
+    if (!isConnectedTo(node, container)) {
+      node.__jarenControlled = undefined;
+      ctx.controlled.delete(node);
+      continue;
+    }
+    reconcileControlled(node);
   }
 }
 
-/** Reassert a form control's authoritative value/checked against the live
- * DOM. React's controlled-input contract: the passed value wins over a user
- * edit. Only writes on a genuine divergence, which preserves the caret. */
-function reconcileControlled(node, props) {
-  const kind = node.nodeName;
-  if (kind === undefined) return;
-  if ('checked' in props && (kind === 'INPUT')) {
-    const want = props.checked === true;
+/**
+ * Reassert one control's authoritative value/checked. React's controlled
+ * contract: the passed value wins over a user edit. Writes only on a genuine
+ * divergence, which preserves the caret on an unchanged control. Runs after
+ * the whole tree is built, so a `select` sees its options, and a `multiple`
+ * select applies an array by marking each option `selected`.
+ * @param {any} node
+ */
+function reconcileControlled(node) {
+  const c = node.__jarenControlled;
+  if (c === undefined) return;
+  if (c.hasChecked) {
+    const want = c.checked === true;
     if (node.checked !== want) node.checked = want;
   }
-  if ('value' in props && (kind === 'INPUT' || kind === 'TEXTAREA' || kind === 'SELECT')) {
-    const want = props.value == null ? '' : String(props.value);
-    if (node.value !== want) node.value = want;
+  if (!c.hasValue) return;
+  const isMultiple = node.multiple === true
+    || (typeof node.getAttribute === 'function' && node.getAttribute('multiple') != null);
+  if (node.nodeName === 'SELECT' && isMultiple && Array.isArray(c.value)) {
+    const want = new Set(c.value.map((v) => String(v)));
+    const options = node.options ?? node.childNodes ?? [];
+    for (let i = 0; i < options.length; i++) {
+      const opt = options[i];
+      const ov = opt.value != null ? opt.value
+        : (typeof opt.getAttribute === 'function' ? opt.getAttribute('value') : null);
+      const sel = ov != null && want.has(String(ov));
+      if (opt.selected !== sel) opt.selected = sel;
+    }
+    return;
   }
+  const want = c.value == null ? '' : String(c.value);
+  if (node.value !== want) node.value = want;
+}
+
+/** Whether `node` is still attached beneath `root` (the render container).
+ * A detached node's ancestor chain stops before the container. */
+function isConnectedTo(node, root) {
+  let n = node;
+  while (n != null) {
+    if (n === root) return true;
+    n = n.parentNode;
+  }
+  return false;
 }
 
 /**
@@ -531,21 +658,39 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   if (name === 'on') {
     // Safe mode strips event bindings: an untrusted document must not bind
     // the host's application actions. Never wires the listener.
-    if (ctx.policy !== null && ctx.policy.dropsEvents) return;
+    if (ctx.policy !== null && ctx.policy.dropsEvents) {
+      if (ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'event', name: 'on' });
+      return;
+    }
     setEvents(ctx, node, oldValue, newValue);
     return;
   }
   if (name in SKIP_PROPS) return;
-  // Safe mode: reject a dangerous name (scripting sink, inline `on*`,
-  // injection-shaped) outright, and sanitize URL/style values. A denied name
-  // was never written in safe mode, so nothing to clear; a cleared value
-  // falls through to the removal path below.
   if (ctx.policy !== null) {
     const decided = ctx.policy.prop(name, newValue);
-    if (decided === null) return;
+    // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
+    // dropped; a sanitized-away URL or dangerous style keeps its (safe) name
+    // and clears the value.
+    if (decided === null) {
+      if (ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
+      return;
+    }
     name = decided.name;
     newValue = decided.value;
+    if (newValue === null && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
+    // SAFE MODE IS ATTRIBUTE-ONLY. Never `node[name] = …`: a live DOM property
+    // write can THROW (`input.files` is read-only) and it diverges from SSR
+    // for a cleared value (an empty reflected attribute vs an omitted one).
+    // Writing/removing the attribute matches exactly what the serializer does.
+    if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
+      newValue = styleToString(newValue);
+    }
+    if (newValue == null || newValue === false) node.removeAttribute(name);
+    else node.setAttribute(name, newValue === true ? '' : String(newValue));
+    return;
   }
+  // Trusted path (unchanged): a property where the node has one, else an
+  // attribute — the equivalent of writing the DOM by hand.
   if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
     newValue = styleToString(newValue);
   }

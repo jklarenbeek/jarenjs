@@ -186,6 +186,22 @@ delete it or fix it.
   would have to prove.
 - [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§8: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
+- [ ] **Safe-mode composition/IME and a real-browser adversarial suite** — the
+  safe render profile (VIEW-FORMAT §8) and the controlled-input registry are
+  verified against the Node DOM stub, which cannot model an IME composition, a
+  live caret, or a browser's URL/style reflection. The open half is a
+  Playwright suite that drives create→update→remove→reinsert of the safe
+  attack corpus and the controlled/`multiple`-select/composition cases through
+  Chromium, Firefox and WebKit, plus composition-aware authoritative writes
+  (defer during a composition, settle without losing the caret). Until then
+  those behaviors are documented as browser-unproven.
+- [ ] **`safe`/`onUnsafe` forwarding through `@jarenjs/app`** — the renderer
+  takes a safe profile, but `createApp` does not thread it, and an app document
+  additionally names host actions, effects and subscriptions. Forwarding the
+  view profile is necessary but not sufficient to run an *untrusted* app
+  document; a real answer needs a capability model for what an app document may
+  name, so today the safe profile is scoped to the *view* renderer and app
+  documents are self-authored only.
 
 ## @jarenjs/md
 

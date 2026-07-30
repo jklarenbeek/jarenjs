@@ -102,15 +102,28 @@ const DANGEROUS_PROPS = new Set([
   'dangerouslysetinnerhtml', 'srcdoc',
 ]);
 
-/** Attributes whose value is a URL, filtered through the deny-list sanitizer.
- * Compared case-insensitively. */
+/** Attributes whose value is a single URL, filtered through the deny-list
+ * sanitizer. Compared case-insensitively. */
 const URL_ATTRS = new Set([
   'href', 'src', 'action', 'formaction', 'poster', 'background',
-  'cite', 'longdesc', 'data', 'ping', 'srcset',
+  'cite', 'longdesc', 'data',
 ]);
+
+/** Attributes whose value is a URL *list*: `srcset` is comma-separated
+ * `url descriptor` candidates, `ping` is a whitespace-separated URL list.
+ * Running the whole string through a single-URL check would miss an unsafe
+ * candidate after the first, so each is parsed and every URL is sanitized. */
+const URL_LIST_ATTRS = new Set(['srcset', 'ping']);
 
 /** Inline-style values that carry a CSS execution vector. */
 const RE_DANGEROUS_STYLE = /expression\s*\(|url\s*\(\s*['"]?\s*(?:javascript|vbscript|data):/i;
+
+/** A CSS property name a safe style object may carry: a plain identifier or a
+ * `--custom-property`. A key with `:`, `;`, `(` or whitespace is not a
+ * property name — it is a declaration smuggled through the key, which is how
+ * `styleToString` concatenation turns `{ 'x:url(javascript:…)': 'y' }` into a
+ * live rule. */
+const RE_SAFE_STYLE_KEY = /^(?:--[A-Za-z0-9-]+|[A-Za-z][A-Za-z0-9-]*)$/;
 
 /**
  * @typedef {Object} SafePolicy
@@ -118,29 +131,24 @@ const RE_DANGEROUS_STYLE = /expression\s*\(|url\s*\(\s*['"]?\s*(?:javascript|vbs
  *   `null` to drop the element and its subtree.
  * @property {(name: string, value: any) => { name: string, value: any } | null}
  *   prop - The name/value to write, `{ name, value: null }` to clear an
- *   existing attribute, or `null` to drop the property entirely.
+ *   existing attribute (a sanitized-away URL, a dangerous style), or `null` to
+ *   drop the property entirely (a rejected name).
  * @property {boolean} dropsEvents - Whether `on` bindings are stripped (always
  *   true for the default policy; the renderers read this to skip the `on`
  *   path in safe mode).
  */
 
 /**
- * @typedef {Object} SafePolicyOptions
- * @property {(info: { kind: 'tag' | 'prop' | 'event', name: string }) => void}
- *   [onUnsafe] - Called for every element, property or event binding the
- *   policy strips, so a host can observe what an untrusted document tried to
- *   do rather than have it silently vanish.
- */
-
-/**
  * Build the default safe policy. Stateless and cheap; a renderer builds one
  * per `safe: true` and hands the *same* object to every element it renders.
- * @param {SafePolicyOptions} [options]
+ *
+ * The policy is a set of **pure decisions** — it neither writes nor reports.
+ * The renderer owns `onUnsafe` and reports at the point it acts on a
+ * rejection, which is what lets it report the strips a policy never sees (an
+ * `on` binding, a widget) with one contract.
  * @returns {SafePolicy}
  */
-export function createSafePolicy(options = {}) {
-  const report = typeof options.onUnsafe === 'function' ? options.onUnsafe : null;
-
+export function createSafePolicy() {
   return {
     dropsEvents: true,
 
@@ -149,7 +157,6 @@ export function createSafePolicy(options = {}) {
         && (SAFE_HTML_TAGS.has(tag) || SAFE_SVG_TAGS.has(tag))) {
         return tag;
       }
-      if (report !== null) report({ kind: 'tag', name: String(tag) });
       return null;
     },
 
@@ -159,40 +166,75 @@ export function createSafePolicy(options = {}) {
       // it spells: reject before it can reach a serializer or a DOM property.
       if (!RE_SAFE_NAME.test(name) || lower.startsWith('on')
         || DANGEROUS_PROPS.has(lower)) {
-        if (report !== null) report({ kind: 'prop', name });
         return null;
       }
       if (URL_ATTRS.has(lower)) {
         const safe = sanitizeUrl(value);
-        if (safe === null) {
-          if (report !== null) report({ kind: 'prop', name });
-          // Keep the name (it is safe) but clear any prior value: a patch
-          // from a good URL to a bad one must remove the old attribute.
-          return { name, value: null };
-        }
+        // Keep the (safe) name but clear the value when the URL is unsafe: a
+        // patch from a good URL to a bad one must remove the old attribute.
         return { name, value: safe };
       }
-      if (lower === 'style' && dangerousStyle(value)) {
-        if (report !== null) report({ kind: 'prop', name });
-        return { name, value: null };
+      if (URL_LIST_ATTRS.has(lower)) {
+        return { name, value: sanitizeUrlList(value, lower === 'srcset') };
+      }
+      if (lower === 'style') {
+        return { name, value: safeStyle(value) };
       }
       return { name, value };
     },
   };
 }
 
-/** Whether an inline-style value (string, or a pre-stringified object) carries
- * a CSS execution vector. Objects that have not been stringified yet are
- * checked value by value. */
-function dangerousStyle(value) {
-  if (typeof value === 'string') return RE_DANGEROUS_STYLE.test(value);
-  if (value !== null && typeof value === 'object') {
-    for (const key in value) {
-      const v = value[key];
-      if (typeof v === 'string' && RE_DANGEROUS_STYLE.test(v)) return true;
-    }
+/**
+ * Sanitize a URL-list attribute. Every candidate's URL is checked; a single
+ * unsafe candidate drops the whole attribute, because a browser would still
+ * act on the safe ones around it and the intent is already hostile.
+ * @param {any} value
+ * @param {boolean} isSrcset - `srcset` (comma-separated `url descriptor`) vs
+ *   `ping` (whitespace-separated URLs)
+ * @returns {string | null}
+ */
+function sanitizeUrlList(value, isSrcset) {
+  if (typeof value !== 'string') return null;
+  const candidates = isSrcset ? value.split(',') : value.split(/\s+/);
+  const out = [];
+  for (const raw of candidates) {
+    const candidate = raw.trim();
+    if (candidate === '') continue;
+    // srcset candidate = URL, then optional whitespace + descriptor.
+    const gap = candidate.search(/\s/);
+    const url = gap === -1 ? candidate : candidate.slice(0, gap);
+    if (sanitizeUrl(url) === null) return null;
+    out.push(candidate);
   }
-  return false;
+  return out.length > 0 ? out.join(isSrcset ? ', ' : ' ') : null;
 }
 
-export { SAFE_HTML_TAGS, SAFE_SVG_TAGS, DANGEROUS_PROPS, URL_ATTRS, RE_SAFE_NAME };
+/**
+ * The safe form of an inline-style value: `null` when it carries a CSS
+ * execution vector or an injection-shaped property name, otherwise the value
+ * unchanged (a string, or an object the renderer will serialize). Both the
+ * KEYS and the values are checked — a payload smuggled through an object key
+ * survives `styleToString`'s concatenation otherwise.
+ * @param {any} value
+ * @returns {any}
+ */
+function safeStyle(value) {
+  if (typeof value === 'string') {
+    return RE_DANGEROUS_STYLE.test(value) ? null : value;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const key in value) {
+      if (!RE_SAFE_STYLE_KEY.test(key) || RE_DANGEROUS_STYLE.test(key)) return null;
+      const v = value[key];
+      if (typeof v === 'string' && RE_DANGEROUS_STYLE.test(v)) return null;
+    }
+    return value;
+  }
+  return value;
+}
+
+export {
+  SAFE_HTML_TAGS, SAFE_SVG_TAGS, DANGEROUS_PROPS,
+  URL_ATTRS, URL_LIST_ATTRS, RE_SAFE_NAME,
+};

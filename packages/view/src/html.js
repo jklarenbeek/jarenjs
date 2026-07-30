@@ -66,7 +66,7 @@ export function escapeAttribute(value) {
  * @param {import('./safe.js').SafePolicy | null} policy
  * @returns {string}
  */
-function serializeProps(props, skip, policy) {
+function serializeProps(props, skip, policy, onUnsafe) {
   let out = '';
   for (const name in props) {
     if (skip.has(name)) continue;
@@ -74,7 +74,13 @@ function serializeProps(props, skip, policy) {
     let value = props[name];
     if (policy !== null) {
       const decided = policy.prop(attr, value);
-      if (decided === null || decided.value === null) continue;
+      // Omit a rejected NAME or a cleared VALUE. Omission — not an empty
+      // attribute — is what the DOM renderer's `removeAttribute` also does in
+      // safe mode, so the two outputs match.
+      if (decided === null || decided.value === null) {
+        if (onUnsafe !== null) onUnsafe({ kind: 'prop', name });
+        continue;
+      }
       attr = decided.name;
       value = decided.value;
     }
@@ -103,8 +109,9 @@ function serializeProps(props, skip, policy) {
  *   and attribute names, and unsafe URLs are stripped, and widget vnodes are
  *   dropped. This is the SAME policy {@link createDomRenderer} applies, so a
  *   document renders to the same safe markup on the server as on the client.
- * @property {(info: { kind: 'tag' | 'prop' | 'event', name: string }) => void}
- *   [onUnsafe] - In safe mode, called for everything the policy strips.
+ * @property {(info: { kind: 'tag' | 'prop' | 'event' | 'widget', name: string }) => void}
+ *   [onUnsafe] - In safe mode, called for everything stripped: a `tag`, a
+ *   `prop`, an `on` binding (`event`) or a `widget`.
  */
 
 /**
@@ -119,19 +126,22 @@ function serializeProps(props, skip, policy) {
  * @returns {string}
  */
 export function renderToString(vnode, options = {}) {
-  const policy = options.safe ? createSafePolicy(options) : null;
-  return renderNode(vnode, options.widgets, policy);
+  const policy = options.safe ? createSafePolicy() : null;
+  const onUnsafe = typeof options.onUnsafe === 'function' ? options.onUnsafe : null;
+  return renderNode(vnode, options.widgets, policy, onUnsafe);
 }
 
 /**
- * The recursive fold. The policy (or null) is carried rather than rebuilt per
- * node, so a `safe: true` document constructs one policy for the whole tree.
+ * The recursive fold. The policy (or null) and the report sink are carried
+ * rather than rebuilt per node, so a `safe: true` document constructs one
+ * policy for the whole tree.
  * @param {any} vnode
  * @param {Record<string, { ssr?: (props: any) => any }> | undefined} widgets
  * @param {import('./safe.js').SafePolicy | null} policy
+ * @param {((info: { kind: string, name: string }) => void) | null} onUnsafe
  * @returns {string}
  */
-function renderNode(vnode, widgets, policy) {
+function renderNode(vnode, widgets, policy, onUnsafe) {
   if (isTextNode(vnode)) {
     return escapeText(String(vnode));
   }
@@ -144,7 +154,10 @@ function renderNode(vnode, widgets, policy) {
     // A widget is arbitrary imperative JS. In safe mode an untrusted document
     // must not mount one, so it drops to nothing — the same nothing the DOM
     // renderer produces for a widget in safe mode.
-    if (policy !== null) return '';
+    if (policy !== null) {
+      if (onUnsafe !== null) onUnsafe({ kind: 'widget', name: String(props.name ?? '') });
+      return '';
+    }
     const hostTag = typeof props.tag === 'string' && props.tag !== '' ? props.tag : 'div';
     const def = widgets !== undefined && typeof props.name === 'string'
       && Object.hasOwn(widgets, props.name) ? widgets[props.name] : undefined;
@@ -154,24 +167,31 @@ function renderNode(vnode, widgets, policy) {
     // `ssr()` (the documented behavior for both)
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
-      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy)
+      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe)
       : '';
-    return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy) + '>'
+    return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe) + '>'
       + inner + '</' + hostTag + '>';
   }
   // Safe mode: a disallowed or injection-shaped tag drops to the empty
   // string, matching the DOM renderer's empty text node.
   if (policy !== null && policy.tag(tag) === null) {
+    if (onUnsafe !== null) onUnsafe({ kind: 'tag', name: String(tag) });
     return '';
   }
-  let out = '<' + tag + serializeProps(props, SKIP_PROPS, policy);
+  // Report a stripped `on` binding for observability parity with the DOM
+  // renderer — SSR never emits `on`, but a host still wants to know an
+  // untrusted document tried to bind an action.
+  if (policy !== null && onUnsafe !== null && props.on !== undefined) {
+    onUnsafe({ kind: 'event', name: 'on' });
+  }
+  let out = '<' + tag + serializeProps(props, SKIP_PROPS, policy, onUnsafe);
   if (VOID_ELEMENTS.has(tag)) {
     return out + '>';
   }
   out += '>';
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
-    out += renderNode(children[i], widgets, policy);
+    out += renderNode(children[i], widgets, policy, onUnsafe);
   }
   return out + '</' + tag + '>';
 }

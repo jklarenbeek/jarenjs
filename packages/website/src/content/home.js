@@ -46,7 +46,7 @@ export const HOME_CONTENT = {
   },
   studio: {
     title: 'The Studio: one prompt → website',
-    lead: 'A second, self-authored app document hosted next to the site\'s own: you — or the AI assistant — author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot structurally, and the real app runtime runs it live. The AI writes JSON; Jaren validates its shape (a structural gate, not a sanitizer — a hostile document renders through the view safe profile). No eval, no server, no scaffolding.',
+    lead: 'A second, self-authored app document hosted next to the site\'s own: you — or the AI assistant — author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot structurally, and the real app runtime runs it live. The AI writes JSON; Jaren validates its shape (a structural gate, not a sanitizer: an app document names host actions and effects, so this is for self-authored apps, not untrusted input). No eval, no server, no scaffolding.',
   },
   meta: {
     title: 'This site is the demo',

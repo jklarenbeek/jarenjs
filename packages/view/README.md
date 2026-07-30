@@ -132,9 +132,21 @@ A companion schema,
 gates the structural half (tag and property *names*) at validation time as
 defense in depth. It cannot read a `javascript:` scheme out of a string, so
 the **runtime policy is authoritative**: validate with the safe schema *and*
-render with `{ safe: true }`. What safe mode does not yet cover — caret/IME
-fidelity across engines, a Trusted Types integration — is tracked in the
-roadmap; do not treat safe mode as a substitute for a Content-Security-Policy.
+render with `{ safe: true }`.
+
+**What safe mode is, and is not.** It reduces the attack surface of an
+untrusted *view* to a display: it strips script, raw-HTML sinks, inline and
+`on` handlers, widgets, and unsafe URLs, and the client and server strip
+identically. It is **not a complete sandbox** — the allow-list still includes
+anchors, forms, controls and media, so native navigation, form submission,
+focus and network loads remain possible; treat safe mode as one layer under a
+Content-Security-Policy, not a replacement for one. It also applies to the
+**renderer only**: [`@jarenjs/app`](../app) does not pass `safe` through, and
+an app document names host actions, effects and subscriptions, so a safe
+*view* does not make an untrusted *app document* safe — run only self-authored
+app documents. Still open, and tracked in the roadmap: caret/IME fidelity
+across engines, `multiple`-select and composition behavior proven in real
+Chromium/Firefox/WebKit, and a Trusted Types integration.
 
 ### Shared view helpers — `@jarenjs/view/helpers`
 
