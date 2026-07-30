@@ -754,7 +754,9 @@ function view(data) {
   const row = (rows, label) => rows.find((r) => r.label.includes(label));
   const build = t.build ?? [];
   const jarenBuild = row(build, 'no memo');
-  const preactBuild = row(build, 'preact');
+  // 'react createElement', never bare 'react': every 'preact' label
+  // contains 'react' too, and the sorted order must not decide the match.
+  const reactBuild = row(build, 'react createElement');
   const frame = t.frame ?? [];
   const memoFrame = row(frame, '(memo)');
   const plainFrame = row(frame, '(no memo)');
@@ -763,12 +765,14 @@ function view(data) {
   out.push(cards([
     {
       // formatRatio names the direction itself, so this reads
-      // "8.7× slower" — the honest label for the build path
-      title: 'Vnode production vs preact',
-      value: jarenBuild !== undefined && preactBuild !== undefined
-        ? formatRatio(preactBuild.ns / jarenBuild.ns)
+      // "11× slower" — the honest label for the build path, stated
+      // against the fastest rival in the table (React's production
+      // build), not the most flattering one
+      title: 'Vnode production vs React',
+      value: jarenBuild !== undefined && reactBuild !== undefined
+        ? formatRatio(reactBuild.ns / jarenBuild.ns)
         : '—',
-      note: 'by design: a generic dispatcher, not a hand-written h()',
+      note: 'by design: a generic dispatcher, not a hand-written element constructor',
     },
     {
       title: 'Frame with memo',
@@ -784,7 +788,7 @@ function view(data) {
     },
   ]));
   out.push(callout('What this suite measures — including where we lose',
-    'Jaren builds views by running a JSLT stylesheet over state, so producing a vnode tree from scratch costs several times a hand-written preact or hyperapp h() call. That is the honest price of views-as-data, and it is on this page. The trade is the re-render path: unchanged state returns the previous output by reference, so the patcher skips it instead of diffing it — the rows below measure both directions on the same 1000-row table, with SSR output asserted byte-identical to preact before timing.'));
+    'Jaren builds views by running a JSLT stylesheet over state, so producing a vnode tree from scratch costs an order of magnitude more than React\'s createElement or a hand-written preact/hyperapp h() call — React\'s production build is in fact the fastest element builder in the table. That is the honest price of views-as-data, and it is on this page. The trade is the re-render path: unchanged state returns the previous output by reference, so the patcher skips it instead of diffing it — the rows below measure both directions on the same 1000-row table, with SSR output asserted byte-identical to React and preact before timing.'));
 
   out.push(c.build);
   out.push(table('View production — full build (fresh state, memo cold)',
@@ -796,7 +800,7 @@ function view(data) {
   out.push(table('View production — one copy-on-write row updated',
     ['Engine', 'ns per view'],
     (t.update ?? []).map((r) => ({ cells: [r.label, formatNs(r.ns)], strong: r.label.startsWith('jaren') })),
-    'hyperapp and preact re-run the whole view function per change (their idiomatic default; both offer opt-in per-call-site memo wrappers). Jaren\'s memo is a compile option that needs no view changes.'));
+    'React, hyperapp and preact re-run the whole view function per change (their idiomatic default; each offers opt-in per-call-site memoization, and React runs its production build here). Jaren\'s memo is a compile option that needs no view changes.'));
 
   out.push(c.ssr);
   out.push(table('SSR — vnodes to an HTML string',
@@ -807,7 +811,7 @@ function view(data) {
   out.push(table('Frame cost — view + DOM patch (Jaren only)',
     ['Path', 'ns per frame'],
     frame.map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
-    'Measured against the repository\'s DOM stub, so no cross-framework claim is made here — hyperapp and preact need a real DOM. The number shows what the reference-equality skip is worth end to end.'));
+    'Measured against the repository\'s DOM stub, so no cross-framework claim is made here — React, hyperapp and preact need a real DOM. The number shows what the reference-equality skip is worth end to end.'));
 
   out.push(c.memo);
   out.push(table('The memo marker (VIEW-FORMAT §5.5)',

@@ -4,21 +4,24 @@
  * JarenJS view/app performance benchmark
  *
  * Measures the cost of the @jarenjs/view + JSLT rendering pipeline
- * against hyperapp's h()/text() and preact's h() over the classic
- * 1000-row-table scenario, honestly scoped to what Node can measure:
+ * against React's createElement, hyperapp's h()/text() and preact's h()
+ * over the classic 1000-row-table scenario, honestly scoped to what
+ * Node can measure:
  *
- *  - view production (state -> vnode tree): all engines, full build and
- *    one-COW-row update. Jaren runs twice — memo off (the generic
- *    dispatcher's raw cost) and memo on (the O(change) path). Hyperapp
- *    and preact re-run their plain view functions, which is their
- *    idiomatic default; both offer opt-in memo wrappers per call site,
- *    where Jaren's memo is a compile option requiring no view changes.
- *  - SSR (vnode -> HTML string): @jarenjs/view renderToString vs
- *    preact-render-to-string (hyperapp has no first-party SSR). String
- *    EQUALITY is asserted before timing.
+ *  - view production (state -> element tree): all engines, full build
+ *    and one-COW-row update. Jaren runs twice — memo off (the generic
+ *    dispatcher's raw cost) and memo on (the O(change) path). React,
+ *    hyperapp and preact re-run their plain view functions, which is
+ *    their idiomatic default; each offers opt-in memoization per call
+ *    site (React.memo/useMemo, preact/compat memo), where Jaren's memo
+ *    is a compile option requiring no view changes.
+ *  - SSR (element tree -> HTML string): @jarenjs/view renderToString vs
+ *    react-dom/server renderToString and preact-render-to-string
+ *    (hyperapp has no first-party SSR). String EQUALITY is asserted
+ *    before timing.
  *  - frame cost (view + DOM patch): Jaren only, against the repository's
- *    test DOM stub — hyperapp/preact require a real DOM, so no
- *    cross-framework claim is made here; the number shows what the
+ *    test DOM stub — React, hyperapp and preact require a real DOM, so
+ *    no cross-framework claim is made here; the number shows what the
  *    reference-equality skip is worth end to end.
  *
  * Usage:
@@ -36,6 +39,16 @@ import preactRender from 'preact-render-to-string';
 
 import { createStubHost } from '../test/view/dom.stub.js';
 import { makeMeasure, printTable as printRows } from './lib/measure.js';
+
+// React is measured in its PRODUCTION build: the development build carries
+// prop validation and warning machinery that inflates every number, and
+// timing a rival's debug mode would rig the table. React's entry points
+// select the build from NODE_ENV at require time, so it is forced before
+// the one import in this file that cannot be static. Nothing else here
+// branches on NODE_ENV.
+process.env.NODE_ENV = 'production';
+const { createElement: reactH } = await import('react');
+const { renderToString: reactRender } = await import('react-dom/server');
 
 //#region options
 
@@ -111,6 +124,19 @@ function preactView(state) {
           preactH('td', { class: 'col' }, row.label))))));
 }
 
+// The same prop shapes as the other views (no keys — keys buy React
+// reconciliation, not element production, and none of the other views
+// carry them), spelled with className because that is what react-dom
+// serializes without complaint.
+function reactView(state) {
+  return reactH('main', null,
+    reactH('h1', null, state.title),
+    reactH('table', null,
+      reactH('tbody', null, state.rows.map((row) =>
+        reactH('tr', { className: row.selected ? 'danger' : null, 'data-id': row.id },
+          reactH('td', { className: 'col' }, row.label))))));
+}
+
 //#endregion
 
 //#region timing
@@ -137,7 +163,14 @@ if (memoHtml !== jarenHtml) {
   console.error('EQUIVALENCE FAILURE: memoized transform output differs');
   process.exit(1);
 }
-console.log(`equivalence: jaren (plain & memo) === preact SSR for ${ROWS} rows, ${jarenHtml.length} chars`);
+const reactHtml = reactRender(reactView(state0));
+if (reactHtml !== jarenHtml) {
+  console.error('EQUIVALENCE FAILURE: jaren and react SSR output differ');
+  console.error('jaren:', jarenHtml.slice(0, 200));
+  console.error('react:', reactHtml.slice(0, 200));
+  process.exit(1);
+}
+console.log(`equivalence: jaren (plain & memo) === preact === react SSR for ${ROWS} rows, ${jarenHtml.length} chars`);
 
 //#endregion
 
@@ -153,6 +186,7 @@ const collected = {};
   const states = [buildState(ROWS), buildState(ROWS)];
   collected.build = [
     measure('preact h()', (i) => preactView(states[i & 1])),
+    measure('react createElement()', (i) => reactView(states[i & 1])),
     measure('hyperapp h()/text()', (i) => hyperappView(states[i & 1])),
     measure('jaren jslt (memo, cold)', (i) => jarenMemo(states[i & 1])),
     measure('jaren jslt (no memo)', (i) => jarenPlain(states[i & 1])),
@@ -167,6 +201,7 @@ const collected = {};
   let plainState = buildState(ROWS);
   let hyperState = buildState(ROWS);
   let preactState = buildState(ROWS);
+  let reactState = buildState(ROWS);
   collected.update = [
     measure('jaren jslt (memo, warm)', (i) => {
       memoState = updateRow(memoState, i % ROWS);
@@ -175,6 +210,10 @@ const collected = {};
     measure('preact h()', (i) => {
       preactState = updateRow(preactState, i % ROWS);
       return preactView(preactState);
+    }),
+    measure('react createElement()', (i) => {
+      reactState = updateRow(reactState, i % ROWS);
+      return reactView(reactState);
     }),
     measure('hyperapp h()/text()', (i) => {
       hyperState = updateRow(hyperState, i % ROWS);
@@ -195,6 +234,7 @@ const collected = {};
     measure('jaren renderToString (memo)', () => renderToString(jarenMemo(memoSsrState))),
     measure('jaren renderToString', () => renderToString(jarenPlain(state0))),
     measure('preact-render-to-string', () => preactRender(preactView(state0))),
+    measure('react-dom/server renderToString', () => reactRender(reactView(state0))),
   ].sort((a, b) => a.ns - b.ns);
   printTable('SSR — vnodes -> HTML string', collected.ssr);
 }
@@ -271,9 +311,10 @@ if (OUTPUT === 'json') {
   }
 }
 
-console.log('\nMethodology: plain idiomatic views on every side; hyperapp and preact re-run the whole');
-console.log('view function per state change (their default; both offer opt-in per-site memo wrappers,');
-console.log("where Jaren's memo is a compile option requiring no view changes). DOM patching is");
-console.log('excluded from cross-framework rows because Node has no DOM; SSR compares equal strings.');
+console.log('\nMethodology: plain idiomatic views on every side; react, hyperapp and preact re-run the');
+console.log('whole view function per state change (their default; each offers opt-in per-site memo,');
+console.log("where Jaren's memo is a compile option requiring no view changes). React runs its");
+console.log('PRODUCTION build. DOM patching is excluded from cross-framework rows because Node has');
+console.log('no DOM; SSR compares byte-equal strings.');
 
 //#endregion

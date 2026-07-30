@@ -57,6 +57,8 @@
     "papaparse": "^5.5.4",
     "preact": "^10.29.7",
     "preact-render-to-string": "^6.7.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "smol-toml": "^1.7.0",
     "toml": "^5.0.0",
     "udsv": "^0.7.3",

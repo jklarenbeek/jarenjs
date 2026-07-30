@@ -508,9 +508,10 @@ function generateMarkdown(tmp, options) {
 }
 
 /**
- * The view suite: the cross-framework comparison (preact, hyperapp,
- * preact-render-to-string) plus Jaren's own memo layers. The rows
- * arrive pre-sorted and pre-labeled; only the timings need slimming.
+ * The view suite: the cross-framework comparison (react, preact,
+ * hyperapp, react-dom/server, preact-render-to-string) plus Jaren's
+ * own memo layers. The rows arrive pre-sorted and pre-labeled; only
+ * the timings need slimming.
  */
 function generateView(tmp, options) {
   const file = path.join(tmp, 'view.json');
@@ -871,7 +872,7 @@ function buildHeadlines(generated, meta) {
       ratio: memo !== undefined && plain !== undefined && memo.ns > 0 ? plain.ns / memo.ns : null,
       rival: 'its own no-memo frame',
       conformance: null,
-      note: 'memo vs no-memo frame; raw vnode production is slower than preact',
+      note: 'memo vs no-memo frame; raw vnode production is slower than react and preact',
     });
   }
   if (generated.charts !== undefined) {
