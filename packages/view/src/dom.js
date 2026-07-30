@@ -49,6 +49,7 @@ import {
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
+import { createSafePolicy } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -112,6 +113,16 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  *   definitions by name (VIEW-FORMAT §7).
  * @property {any} [document] - The document to create nodes with
  *   (defaults to `container.ownerDocument`).
+ * @property {boolean} [safe=false] - Render under the SAFE policy
+ *   ({@link createSafePolicy}): treat the vnode as untrusted. Tags are
+ *   restricted to an inert HTML/SVG allow-list, scripting-sink and inline
+ *   `on*` properties are dropped, injection-shaped names are rejected, URL
+ *   attributes are sanitized, and `on` event bindings are stripped. The
+ *   default is trusted rendering — the equivalent of writing the DOM by
+ *   hand — so a source-authored view is unaffected. Client and server share
+ *   the one policy, so they neutralize an attack identically.
+ * @property {(info: { kind: 'tag' | 'prop' | 'event', name: string }) => void}
+ *   [onUnsafe] - In safe mode, called for everything the policy strips.
  * @property {(thrown: unknown) => void} [onCleanupError] - Receives
  *   the first VALUE a widget `unmount` threw during TERMINAL teardown
  *   (`destroy()`, direct or deferred) — by identity, whatever host
@@ -130,7 +141,7 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
 
 /**
  * The renderer returned by {@link createDomRenderer}: the patch
- * function, carrying the terminal `destroy()` (VIEW-FORMAT §8).
+ * function, carrying the terminal `destroy()` (VIEW-FORMAT §7.3.1).
  * @typedef {((vnode: any) => void) & { destroy: () => void }} DomRenderer
  */
 
@@ -156,6 +167,10 @@ export function createDomRenderer(container, options = {}) {
     doc: options.document ?? container.ownerDocument,
     onEvent: options.onEvent ?? null,
     widgets: options.widgets ?? EMPTY_PROPS,
+    /** The safe render policy, or null for trusted (default) rendering.
+     * Consulted for every tag and prop; the same object the SSR serializer
+     * uses, so client and server strip an attack identically. */
+    policy: options.safe ? createSafePolicy(options) : null,
     /** Widget host nodes created this patch, awaiting `mount` (§7). */
     mountQueue: [],
     /** True once any widget node exists — gates the destroy walk. */
@@ -305,7 +320,7 @@ export function createDomRenderer(container, options = {}) {
   }
 
   /**
-   * Terminal teardown (VIEW-FORMAT §8): every mounted widget in the
+   * Terminal teardown (VIEW-FORMAT §7.3.1): every mounted widget in the
    * rendered tree unmounts exactly once (pending mounts are canceled),
    * the container is left empty, and later `render` calls are exact
    * no-ops. Idempotent. Called from inside a widget hook or a nested
@@ -375,7 +390,16 @@ function createNode(ctx, vnode, ns) {
   }
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {
+    // A widget mounts arbitrary imperative JS; safe mode drops it to nothing,
+    // matching the empty string SSR produces for a widget in safe mode.
+    if (ctx.policy !== null) return ctx.doc.createTextNode('');
     return createWidgetNode(ctx, vnode, ns);
+  }
+  // Safe mode: an element whose tag is not on the inert allow-list (or is not
+  // even a bare identifier — structural injection) is dropped to an empty
+  // text node. SSR drops it to the empty string: the same nothing.
+  if (ctx.policy !== null && ctx.policy.tag(tag) === null) {
+    return ctx.doc.createTextNode('');
   }
   if (tag === 'svg') ns = SVG_NS;
   const node = ns !== null
@@ -454,16 +478,43 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
  * @param {string | null} ns
  */
 function patchProps(ctx, node, oldProps, newProps, ns) {
-  if (oldProps === newProps) return;
-  for (const name in oldProps) {
-    if (!(name in newProps)) {
-      setProp(ctx, node, name, oldProps[name], undefined, ns);
+  if (oldProps !== newProps) {
+    for (const name in oldProps) {
+      if (!(name in newProps)) {
+        setProp(ctx, node, name, oldProps[name], undefined, ns);
+      }
+    }
+    for (const name in newProps) {
+      if (oldProps[name] !== newProps[name]) {
+        setProp(ctx, node, name, oldProps[name], newProps[name], ns);
+      }
     }
   }
-  for (const name in newProps) {
-    if (oldProps[name] !== newProps[name]) {
-      setProp(ctx, node, name, oldProps[name], newProps[name], ns);
-    }
+  // A controlled form value is authoritative and must survive a same-valued
+  // re-render: the user (or the browser) may have changed the live DOM since
+  // the last frame even when the vnode's value did not change, so the diff
+  // above never touches it. Reassert value/checked against the LIVE property,
+  // not the vnode snapshot. Gated on the props carrying a controlled key, so
+  // ordinary elements pay nothing; guarded on the live value, so an unchanged
+  // control is not rewritten and the caret is left where it is.
+  if ('value' in newProps || 'checked' in newProps) {
+    reconcileControlled(node, newProps);
+  }
+}
+
+/** Reassert a form control's authoritative value/checked against the live
+ * DOM. React's controlled-input contract: the passed value wins over a user
+ * edit. Only writes on a genuine divergence, which preserves the caret. */
+function reconcileControlled(node, props) {
+  const kind = node.nodeName;
+  if (kind === undefined) return;
+  if ('checked' in props && (kind === 'INPUT')) {
+    const want = props.checked === true;
+    if (node.checked !== want) node.checked = want;
+  }
+  if ('value' in props && (kind === 'INPUT' || kind === 'TEXTAREA' || kind === 'SELECT')) {
+    const want = props.value == null ? '' : String(props.value);
+    if (node.value !== want) node.value = want;
   }
 }
 
@@ -478,10 +529,23 @@ function patchProps(ctx, node, oldProps, newProps, ns) {
  */
 function setProp(ctx, node, name, oldValue, newValue, ns) {
   if (name === 'on') {
+    // Safe mode strips event bindings: an untrusted document must not bind
+    // the host's application actions. Never wires the listener.
+    if (ctx.policy !== null && ctx.policy.dropsEvents) return;
     setEvents(ctx, node, oldValue, newValue);
     return;
   }
   if (name in SKIP_PROPS) return;
+  // Safe mode: reject a dangerous name (scripting sink, inline `on*`,
+  // injection-shaped) outright, and sanitize URL/style values. A denied name
+  // was never written in safe mode, so nothing to clear; a cleared value
+  // falls through to the removal path below.
+  if (ctx.policy !== null) {
+    const decided = ctx.policy.prop(name, newValue);
+    if (decided === null) return;
+    name = decided.name;
+    newValue = decided.value;
+  }
   if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
     newValue = styleToString(newValue);
   }

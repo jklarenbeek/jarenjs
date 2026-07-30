@@ -31,7 +31,7 @@ export const HOME_CONTENT = {
     { key: 'markdown', title: 'Markdown', blurb: 'The inverse of JTLT: CommonMark + GFM + frontmatter parsed into a JSON AST — transformed by JSLT, rendered by @jarenjs/view with content-hash keys and structural sharing. Ships an app-ready visual component.', perf: 'within 1.1–1.5× of marked, O(1) re-render' },
     { key: 'mermaid', title: 'Mermaid', blurb: 'A native, headless Mermaid clone: diagrams-as-code parsed to a geometry-free JSON AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able with no browser, structurally shared, bidirectional (parseMermaid ⇄ toMermaid).', perf: 'headless SVG, O(1) re-render' },
     { key: 'calc', title: 'Calculator', blurb: 'A multi-mode calculator (standard / scientific / programmer / financial / converter) as an @jarenjs/app document: a two-stage expression compiler (parseExpression ⇄ toExpression), x·y/x·y·z plots as pure-vnode SVG, and a pure numeric kernel pushed down into @jarenjs/core (math/finance/convert).', perf: 'apps as JSON, eval-free, SSR-able' },
-    { key: 'view', title: 'View', blurb: 'UIs as JSON: the tagged-array vnode format, a keyed DOM patcher that skips unchanged subtrees in O(1), an SSR serializer and a registered-widget escape hatch for irreducibly imperative islands. The grammar ships as JSON Schema, so a constrained decoder cannot emit an invalid interface.', perf: 'hand-written vnodes build ~2× faster than React; the data-driven stylesheet pays ~20× for views-as-data — both published' },
+    { key: 'view', title: 'View', blurb: 'UIs as JSON: the tagged-array vnode format, a keyed DOM patcher that skips unchanged subtrees in O(1), an SSR serializer and a registered-widget escape hatch for irreducibly imperative islands. The grammar ships as JSON Schema, so a constrained decoder cannot emit a structurally invalid interface — and an opt-in safe-render profile sanitizes an untrusted one.', perf: 'hand-written vnodes build ~2× faster than React; the data-driven stylesheet pays ~20× for views-as-data — both published' },
     { key: 'app', title: 'App', blurb: 'Whole applications as one JSON document: state, a JSLT stylesheet for the view, query documents for actions, JSON Patch transitions and subscriptions with an EBV liveness query. Everything compiles once at createApp; the running loop only calls specialized closures.', perf: 'this site and the Studio are both app documents' },
     { key: 'ai', title: 'AI', blurb: 'Browser-side AI with bring-your-own-key: one OpenAI-compatible client (OpenRouter / Ollama / LM Studio), an incremental SSE decoder, retry with Retry-After, structured output with local-validation repair, token-budget compaction, a bounded agent loop and WebMCP registration.', perf: 'tool calls validated by Jaren before they run' },
   ],
@@ -40,13 +40,13 @@ export const HOME_CONTENT = {
     lead: 'Tool definitions are JSON Schema. Structured output is JSON Schema. Jaren is the infrastructure on the receiving end:',
     points: [
       'Validate generations locally and strictly — sub-microsecond per document once compiled',
-      'Closed vocabularies published as JSON Schema: a constrained decoder cannot emit an invalid query, stylesheet — or, on this site, an invalid UI',
+      'Closed vocabularies published as JSON Schema: a constrained decoder cannot emit a structurally invalid query, stylesheet — or, on this site, UI (a safe-render profile handles the untrusted case)',
       'Machine-repairable failures: stable codes plus a docPath pointer into the offending document',
     ],
   },
   studio: {
     title: 'The Studio: one prompt → website',
-    lead: 'A second, untrusted app document hosted next to the site\'s own: you — or the AI assistant — author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot, and the real app runtime runs it live. The AI writes JSON; Jaren validates it. No eval, no server, no scaffolding.',
+    lead: 'A second, self-authored app document hosted next to the site\'s own: you — or the AI assistant — author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot structurally, and the real app runtime runs it live. The AI writes JSON; Jaren validates its shape (a structural gate, not a sanitizer — a hostile document renders through the view safe profile). No eval, no server, no scaffolding.',
   },
   meta: {
     title: 'This site is the demo',

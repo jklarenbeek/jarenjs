@@ -27,6 +27,14 @@ export class StubText extends StubNode {
   }
 }
 
+/** Tags the controlled-input reconciliation reasserts against (§3): the stub
+ * gives them live `value`/`checked` properties so a test can simulate a user
+ * edit by writing `node.value`/`node.checked` directly. `option` is
+ * deliberately absent — the renderer writes its value through the attribute
+ * path, exactly as the real DOM leaves the value *attribute* independent of
+ * the value property. */
+const FORM_CONTROLS = new Set(['input', 'textarea', 'select']);
+
 export class StubElement extends StubNode {
   /**
    * @param {StubDocument} doc
@@ -43,6 +51,19 @@ export class StubElement extends StubNode {
     this.attributes = new Map();
     /** @type {Map<string, Set<Function>>} */
     this.listeners = new Map();
+    // Form controls carry live value/checked properties, exactly the surface
+    // the renderer writes and reconciles against. A plain element has neither,
+    // so `'value' in node` stays false for a div — matching the real DOM.
+    if (FORM_CONTROLS.has(String(tag).toLowerCase())) {
+      this.value = '';
+      if (String(tag).toLowerCase() === 'input') this.checked = false;
+    }
+  }
+
+  /** The uppercase tag, as the DOM reports it — how the renderer tells a
+   * form control apart when reconciling a controlled value. */
+  get nodeName() {
+    return String(this.tagName).toUpperCase();
   }
 
   /** @param {StubElement | StubText} node */

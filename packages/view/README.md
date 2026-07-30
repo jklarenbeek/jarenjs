@@ -7,7 +7,7 @@ User interfaces as JSON documents. This package defines the **Jaren vnode format
 
 It is the only package in the Jaren suite that touches the DOM, and it knows nothing about schemas, queries or state — a vnode is plain JSON, wherever it came from. In practice it comes from a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) compiled by [`@jarenjs/json`](../json), and the loop around it lives in [`@jarenjs/app`](../app). Its only runtime dependency is the pure, zero-dependency [`@jarenjs/core`](../core); no `eval`, CSP-safe.
 
-The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.json`](schemas/jaren-vnode.schema.json) — hand it to a constrained decoder and a language model cannot emit an invalid interface. The normative contract is [docs/VIEW-FORMAT.md](docs/VIEW-FORMAT.md).
+The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.json`](schemas/jaren-vnode.schema.json) — hand it to a constrained decoder and a language model cannot emit a document outside the *grammar*. That is a **structural** guarantee, not a safety one: a grammar-valid vnode can still carry `innerHTML`, an inline `on*` handler or a `javascript:` URL, so validation alone does **not** make an untrusted document safe to render. Rendering an untrusted view — from a tenant, a remote service, a model — requires the [safe profile](#untrusted-views-the-safe-profile) below; the default renderers trust their input, exactly like writing the DOM by hand. The normative contract is [docs/VIEW-FORMAT.md](docs/VIEW-FORMAT.md).
 
 ## The format in one glance
 
@@ -92,6 +92,50 @@ const render = createDomRenderer(container, {
 
 `name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. A throwing `mount` or `update` **poisons** the widget instead of corrupting it: siblings and the frame still complete, the first error surfaces after the frame settles, and the next render that revisits the widget replaces it with a fresh lifecycle (`unmount` runs on the old instance only when its `mount` had succeeded). `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
 
+## Untrusted views: the safe profile
+
+The default renderers **trust** their input. A vnode is plain JSON, and the
+default `createDomRenderer`/`renderToString` write whatever it says — including
+`innerHTML`, inline `on*` handlers and `javascript:` URLs. For a
+source-authored view that is exactly right; it is the equivalent of writing the
+DOM by hand, and it is why the grammar's guarantee is *structural*, not a
+sanitizer. Validating a document against the vnode schema proves it is
+well-formed, **not** that it is safe to render.
+
+When a view arrives from somewhere you do not control — a tenant, a remote
+service, a language model — pass `{ safe: true }`:
+
+```js
+renderToString(untrustedVnode, { safe: true });
+createDomRenderer(container, { safe: true, onUnsafe: (i) => log(i) });
+```
+
+Both build the **same** policy ([`createSafePolicy`](src/safe.js)), so the
+client and the server neutralize an attack identically. In safe mode:
+
+- **tags** are restricted to an allow-list of inert HTML and SVG elements —
+  `script`, `iframe`, `object`, `style`, `link`, `foreignObject` and the rest
+  are dropped, and so is any tag whose *name* is not a bare identifier (which
+  closes structural injection through a tag like `div><img …`);
+- **property names** must be bare identifiers too (closing attribute-name
+  injection), may not begin with `on`, and may not be an HTML-parsing sink
+  (`innerHTML`, `outerHTML`, `srcdoc`, …);
+- **URL attributes** (`href`, `src`, …) are filtered through the `sanitizeUrl`
+  deny-list; **inline styles** carrying `expression(` or a script-scheme
+  `url()` are dropped;
+- **`on` event bindings and `jaren-widget` nodes are stripped** — an untrusted
+  document must not bind the host's actions or mount imperative JavaScript, so
+  safe-mode views are display-oriented.
+
+A companion schema,
+[`schemas/jaren-vnode-safe.schema.json`](schemas/jaren-vnode-safe.schema.json),
+gates the structural half (tag and property *names*) at validation time as
+defense in depth. It cannot read a `javascript:` scheme out of a string, so
+the **runtime policy is authoritative**: validate with the safe schema *and*
+render with `{ safe: true }`. What safe mode does not yet cover — caret/IME
+fidelity across engines, a Trusted Types integration — is tracked in the
+roadmap; do not treat safe mode as a substitute for a Content-Security-Policy.
+
 ### Shared view helpers — `@jarenjs/view/helpers`
 
 The `./helpers` subpath is the single home for the small view-layer helper kernel that the suite's visual components (`@jarenjs/calc`, `@jarenjs/md`, `@jarenjs/mermaid`) share, so no component re-implements them:
@@ -112,7 +156,7 @@ The patcher's first check is `oldVnode === newVnode` — a reference-equal subtr
 Measured, not claimed — run `npm run benchmark:view` for your own numbers, and the [benchmarks page](https://jarenjs.github.io/#/benchmarks?suite=view) publishes the latest full run with its date and machine. Two different costs get measured on a 1000-row table (output equality with React and preact asserted before timing), and keeping them apart is what makes the numbers readable:
 
 - **The format.** A vnode is a tagged array — an array literal plus a plain object — and the renderer, patcher and SSR accept it from any producer. A **hand-written view building tagged arrays directly is the fastest element builder in the table: ~1.8× faster than React's production `createElement`**, ~2.5× faster than preact's `h()`. Writing views by hand is fully supported; the stylesheet is opt-in per view.
-- **The engine.** A JSLT stylesheet is a view as *data* — schema-validated, serializable, storable, safe to accept from an LLM's constrained decoder — and running that document through the generic dispatcher costs **~20× the hand-written build**. That is the published price of a capability none of the rivals has a mode for: a JSX view is code by construction, so there is no data-driven React number to compare against.
+- **The engine.** A JSLT stylesheet is a view as *data* — schema-validated, serializable, storable, and renderable from an untrusted source through the [safe profile](#untrusted-views-the-safe-profile) — and running that document through the generic dispatcher costs **~20× the hand-written build**. That is the published price of a capability none of the rivals has a mode for: a JSX view is code by construction, so there is no data-driven React number to compare against.
 - **The re-render path.** An **unchanged document re-renders in O(1)** — the memoized transform returns the previous output by reference and the patcher skips it whole — and the vnode-level `memo` marker gives hand-written producers the same subtree skip (~12× over the child scan). For a one-row copy-on-write update the memo cuts the stylesheet frame ~1.5× against its own no-memo path; at this table size the hand-written view plus a full diff is still the fastest frame outright, and that is on the page too. SSR lands within ~1.6–2.8× of `preact-render-to-string` depending on the route, on byte-identical output.
 
 When a producer cannot preserve the reference — it rebuilds its tree but knows a region did not change — the **`memo` prop** says so declaratively (VIEW-FORMAT §5.5): two same-node vnodes carrying equal `memo` values skip reconciliation exactly like reference-equal ones. It is a producer-owned assertion, `key`'s sibling: equal markers promise identical subtrees, and a violated promise means stale output. Measured on a reallocated parent over 10 000 shared children, the marker removes the whole per-child scan: about **448 µs** to walk the children looking for `===` skips versus about **41 µs** with the marker — **10.9×**, and the gap widens with the child count (`npm run benchmark:view`). `@jarenjs/charts`' streaming sessions are the reference consumer.

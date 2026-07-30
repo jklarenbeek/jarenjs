@@ -18,6 +18,7 @@ import {
   WIDGET_TAG,
 } from './vnode.js';
 import { styleToString } from './dom.js';
+import { createSafePolicy } from './safe.js';
 
 /** Void elements per the HTML standard: no children, no end tag. */
 const VOID_ELEMENTS = new Set([
@@ -53,23 +54,38 @@ export function escapeAttribute(value) {
 
 /**
  * Serialize a props object to an attribute string over a skip set.
+ *
+ * The attribute NAME is trusted here: in the default (trusted) mode it comes
+ * from a source-authored stylesheet, so it is emitted as written. Under a
+ * safe `policy` it is not trusted — the policy rejects an injection-shaped
+ * name and sanitizes a URL value, which is what stops `{ 'x onfocus': … }`
+ * from breaking out of the attribute list. The policy is the same object the
+ * DOM renderer uses, so the two strip an attack identically.
  * @param {Record<string, any>} props
  * @param {Set<string>} skip
+ * @param {import('./safe.js').SafePolicy | null} policy
  * @returns {string}
  */
-function serializeProps(props, skip) {
+function serializeProps(props, skip, policy) {
   let out = '';
   for (const name in props) {
     if (skip.has(name)) continue;
+    let attr = name;
     let value = props[name];
+    if (policy !== null) {
+      const decided = policy.prop(attr, value);
+      if (decided === null || decided.value === null) continue;
+      attr = decided.name;
+      value = decided.value;
+    }
     if (value == null || value === false) continue;
-    if (name === 'style' && typeof value === 'object') {
+    if (attr === 'style' && typeof value === 'object') {
       value = styleToString(value);
       if (value === '') continue;
     }
     out += value === true
-      ? ' ' + name
-      : ' ' + name + '="' + escapeAttribute(String(value)) + '"';
+      ? ' ' + attr
+      : ' ' + attr + '="' + escapeAttribute(String(value)) + '"';
   }
   return out;
 }
@@ -81,6 +97,14 @@ function serializeProps(props, skip) {
  *   serializes its host element around the widget's `ssr(props)` vnode
  *   when the widget is registered and has one, else empty
  *   (VIEW-FORMAT §7).
+ * @property {boolean} [safe=false] - Serialize under the SAFE policy
+ *   ({@link createSafePolicy}): treat the vnode as untrusted. Disallowed
+ *   tags, scripting-sink and inline `on*` properties, injection-shaped tag
+ *   and attribute names, and unsafe URLs are stripped, and widget vnodes are
+ *   dropped. This is the SAME policy {@link createDomRenderer} applies, so a
+ *   document renders to the same safe markup on the server as on the client.
+ * @property {(info: { kind: 'tag' | 'prop' | 'event', name: string }) => void}
+ *   [onUnsafe] - In safe mode, called for everything the policy strips.
  */
 
 /**
@@ -95,6 +119,19 @@ function serializeProps(props, skip) {
  * @returns {string}
  */
 export function renderToString(vnode, options = {}) {
+  const policy = options.safe ? createSafePolicy(options) : null;
+  return renderNode(vnode, options.widgets, policy);
+}
+
+/**
+ * The recursive fold. The policy (or null) is carried rather than rebuilt per
+ * node, so a `safe: true` document constructs one policy for the whole tree.
+ * @param {any} vnode
+ * @param {Record<string, { ssr?: (props: any) => any }> | undefined} widgets
+ * @param {import('./safe.js').SafePolicy | null} policy
+ * @returns {string}
+ */
+function renderNode(vnode, widgets, policy) {
   if (isTextNode(vnode)) {
     return escapeText(String(vnode));
   }
@@ -104,8 +141,11 @@ export function renderToString(vnode, options = {}) {
   const tag = vnode[0];
   const props = propsOf(vnode);
   if (tag === WIDGET_TAG) {
+    // A widget is arbitrary imperative JS. In safe mode an untrusted document
+    // must not mount one, so it drops to nothing — the same nothing the DOM
+    // renderer produces for a widget in safe mode.
+    if (policy !== null) return '';
     const hostTag = typeof props.tag === 'string' && props.tag !== '' ? props.tag : 'div';
-    const widgets = options.widgets;
     const def = widgets !== undefined && typeof props.name === 'string'
       && Object.hasOwn(widgets, props.name) ? widgets[props.name] : undefined;
     // one read: acquisition and invocation are one boundary here too —
@@ -114,19 +154,24 @@ export function renderToString(vnode, options = {}) {
     // `ssr()` (the documented behavior for both)
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
-      ? renderToString(ssr.call(def, props.props ?? null), options)
+      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy)
       : '';
-    return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS) + '>'
+    return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy) + '>'
       + inner + '</' + hostTag + '>';
   }
-  let out = '<' + tag + serializeProps(props, SKIP_PROPS);
+  // Safe mode: a disallowed or injection-shaped tag drops to the empty
+  // string, matching the DOM renderer's empty text node.
+  if (policy !== null && policy.tag(tag) === null) {
+    return '';
+  }
+  let out = '<' + tag + serializeProps(props, SKIP_PROPS, policy);
   if (VOID_ELEMENTS.has(tag)) {
     return out + '>';
   }
   out += '>';
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
-    out += renderToString(children[i], options);
+    out += renderNode(children[i], widgets, policy);
   }
   return out + '</' + tag + '>';
 }

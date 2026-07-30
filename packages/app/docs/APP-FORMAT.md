@@ -498,7 +498,7 @@ accessible patterns are expressible as data.
   native behavior declaratively.
 - **Widgets** own the complete keyboard, focus and announcement
   behavior of their subtree — the renderer guarantees only mount/
-  update/unmount-exactly-once (VIEW-FORMAT §7/§8); everything inside
+  update/unmount-exactly-once (VIEW-FORMAT §7); everything inside
   is the widget contract's responsibility.
 - These contracts are tested headlessly in this repository, and the
   **lifecycle** half is additionally exercised against a real

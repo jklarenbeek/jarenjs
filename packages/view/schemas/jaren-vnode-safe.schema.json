@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-vnode-safe/0.1",
+  "title": "Jaren safe vnode document",
+  "description": "The SAFE vnode profile: the vnode grammar with the structural constraints a schema can express for an UNTRUSTED document. Tag and property names must be bare identifiers (closing tag- and attribute-name injection), property names may not begin with `on` (no inline handlers) and may not be a scripting sink, and a set of document-embedding tags is forbidden. This is a defense-in-depth pre-filter, NOT the authoritative safety boundary: the runtime safe render policy (`createSafePolicy`, applied by `{ safe: true }`) restricts tags to a full allow-list, sanitizes URL attributes and inline styles, and strips event/widget bindings — things a static schema cannot do. Validate with this AND render in safe mode. See safe.js and VIEW-FORMAT.md.",
+  "$ref": "#/$defs/vnode",
+  "$defs": {
+    "vnode": {
+      "anyOf": [
+        { "type": ["string", "number", "boolean", "null"] },
+        { "$ref": "#/$defs/element" },
+        { "$ref": "#/$defs/list" }
+      ],
+      "description": "No widget branch: a widget mounts imperative JavaScript, which an untrusted document must not do, so `jaren-widget` is not a safe-profile node."
+    },
+    "safeName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9-]*$",
+      "description": "A bare identifier: a letter followed by letters, digits or hyphens. No spaces, angle brackets, equals signs, slashes, colons or quotes — the characters every structural-injection payload needs."
+    },
+    "element": {
+      "type": "array",
+      "minItems": 1,
+      "prefixItems": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/safeName" },
+            {
+              "not": {
+                "enum": [
+                  "script", "style", "iframe", "object", "embed", "base",
+                  "link", "meta", "noscript", "template", "frame", "frameset",
+                  "html", "head", "body", "title", "foreignObject", "portal",
+                  "jaren-widget"
+                ]
+              },
+              "description": "Document-structure, script/style carriers and document-embedding elements are forbidden. The runtime policy enforces the positive allow-list; this rejects the highest-risk tags structurally."
+            }
+          ]
+        }
+      ],
+      "items": {
+        "anyOf": [
+          { "$ref": "#/$defs/props" },
+          { "$ref": "#/$defs/vnode" }
+        ]
+      }
+    },
+    "list": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "allOf": [
+            { "not": { "type": "string" } },
+            { "$ref": "#/$defs/vnode" }
+          ]
+        }
+      ],
+      "items": { "$ref": "#/$defs/vnode" }
+    },
+    "props": {
+      "type": "object",
+      "propertyNames": {
+        "allOf": [
+          { "$ref": "#/$defs/safeName" },
+          {
+            "not": { "pattern": "^[Oo][Nn]" },
+            "description": "No property name may begin with `on`: inline event-handler attributes are forbidden, and so is the `on` binding object (an untrusted view must not bind host actions)."
+          },
+          {
+            "not": {
+              "pattern": "^([Ii][Nn][Nn][Ee][Rr]|[Oo][Uu][Tt][Ee][Rr])[Hh][Tt][Mm][Ll]$|^[Ss][Rr][Cc][Dd][Oo][Cc]$|[Dd][Aa][Nn][Gg][Ee][Rr][Oo][Uu][Ss][Ll][Yy]"
+            },
+            "description": "The HTML-parsing sinks (innerHTML, outerHTML, srcdoc, dangerouslySetInnerHTML) are forbidden by name, in any casing."
+          }
+        ]
+      },
+      "properties": {
+        "key": { "type": ["string", "number"] },
+        "style": { "type": ["string", "object"] }
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "null"]
+      },
+      "description": "A safe props object: identifier names only, no on* bindings, no HTML sinks. URL and style VALUES still need the runtime policy — a schema cannot read a `javascript:` scheme out of an href."
+    }
+  }
+}

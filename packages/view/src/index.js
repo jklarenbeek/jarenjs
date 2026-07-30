@@ -28,3 +28,7 @@ export {
   escapeText,
   escapeAttribute,
 } from './html.js';
+
+export {
+  createSafePolicy,
+} from './safe.js';

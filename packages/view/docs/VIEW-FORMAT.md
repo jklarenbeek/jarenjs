@@ -22,6 +22,12 @@ schema-validatable, diffable, and generatable by a constrained decoder.
 The grammar is published as JSON Schema in
 [`schemas/jaren-vnode.schema.json`](../schemas/jaren-vnode.schema.json).
 
+Schema validity is a **structural** property, not a safety one. A
+grammar-valid vnode can still carry an `innerHTML` sink, an inline `on*`
+handler or a `javascript:` URL, so validation alone does not make an
+untrusted document safe to render — the default renderers trust their
+input. Rendering an untrusted document requires the SAFE profile (§8).
+
 ### 1.2 Conformance and normative language
 
 The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**,
@@ -101,6 +107,15 @@ Every other prop **writes through**:
 - `true` renders as a bare attribute, `false` and `null` remove the
   attribute / clear the property.
 - Prop names are used as-is: producers write `class`, not `className`.
+
+A **controlled form value** is authoritative. A patching renderer MUST
+reassert `value`/`checked` on a form control against the control's
+**live** DOM property, not against the previous vnode's value: a user
+edit may have moved the live value since the last frame even when the
+vnode value is unchanged, and the authoritative value MUST win. A
+renderer SHOULD compare the live value first and write only on a genuine
+difference, so an already-matching control is not rewritten (which
+preserves the caret).
 
 ## 4. Events are data
 
@@ -437,7 +452,57 @@ registered and has `ssr`, else empty content. Serialization stays pure
 — no state, no DOM, no widget is mounted; the client-side first render
 mounts widgets as usual (§6).
 
-## 8. Open items (roadmap, non-normative)
+## 8. The safe profile
+
+The default renderers **trust** their input (§1.1): every prop writes
+through, so a producer that owns its stylesheet can reach `innerHTML`, an
+`on*` handler or any DOM property, exactly as it could writing the DOM by
+hand. A vnode from a source you do **not** control — a tenant, a remote
+service, a model — is different, and schema validity does not close the
+gap. A renderer therefore MUST offer a **safe mode** for untrusted
+documents, selected by a `safe` option on both the patching and
+serializing renderers.
+
+Under the safe profile a renderer MUST:
+
+1. **Restrict tags to an allow-list** of inert HTML and SVG elements, and
+   MUST drop any element whose tag is not on it — including any tag whose
+   name is not a bare identifier (`^[A-Za-z][A-Za-z0-9-]*$`), which closes
+   structural injection through the tag. `script`, `iframe`, `object`,
+   `embed`, `style`, `link`, `meta`, `base`, `foreignObject` and other
+   document-embedding or script/style-carrying elements MUST NOT be on the
+   allow-list.
+2. **Reject a property whose name is not a bare identifier** (closing
+   attribute-name injection), **whose name begins with `on`** (no inline
+   handlers), or **which is an HTML-parsing sink** (`innerHTML`,
+   `outerHTML`, `srcdoc`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`).
+3. **Sanitize URL attributes** (`href`, `src`, `action`, ...) through a
+   deny-list that rejects `javascript:`, `vbscript:`, `file:` and
+   document-carrying `data:`, and **drop inline styles** carrying
+   `expression(` or a script-scheme `url()`.
+4. **Strip `on` bindings and `jaren-widget` nodes**: an untrusted document
+   MUST NOT bind host actions or mount imperative code. Safe-mode views are
+   display-oriented.
+
+A dropped element serializes to nothing and patches to an empty node; the
+patching and serializing renderers MUST make the **same** decision for a
+given node, so a document renders to the same safe result on the client
+and the server. The reference implementation is one shared policy
+(`createSafePolicy`) that both renderers call.
+
+The companion schema
+[`schemas/jaren-vnode-safe.schema.json`](../schemas/jaren-vnode-safe.schema.json)
+expresses the structural half — the tag and property-name constraints —
+as a validation-time gate. It cannot inspect a URL or style **value**, so
+the runtime policy is authoritative; a host validating untrusted input
+SHOULD do both.
+
+Out of scope for this version, and NOT to be assumed: caret/IME fidelity
+under safe rewrites across browser engines, MathML, and a Trusted Types
+integration. Safe mode is a renderer policy, not a substitute for a
+Content-Security-Policy.
+
+## 9. Open items (roadmap, non-normative)
 
 - **Fragment / multi-root documents** — a list at the root.
 - **DOM-adopting hydration** (§6).
