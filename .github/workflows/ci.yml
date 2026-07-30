@@ -164,10 +164,16 @@ jobs:
   #    the advisory audit — needs the installed tree, runs where it is cheap.
   #  - source-consumption: the submodule/pnpm topology fixture. It runs on
   #    Windows too — executable shims, drive letters and realpath containment
-  #    are demonstrably platform-sensitive — and deliberately WITHOUT a root
-  #    `npm ci`: npm's workspace symlinks would satisfy the internal edges
-  #    before pnpm's own settings ever apply, and the fixture must prove the
-  #    recipe, not the leftovers.
+  #    are demonstrably platform-sensitive. The root `npm ci` here is NOT a
+  #    confound, it is the documented recipe's own precondition (CONSUMING.md):
+  #    a `link:`ed package's transitive `@jarenjs/*` imports resolve by Node's
+  #    upward walk from the SOURCE directory, and the checkout's own
+  #    node_modules is the only local home that walk can find — skip the
+  #    install and the fixture fails on resolution, proving nothing about
+  #    containment. The corollary is that an end-to-end override teeth test is
+  #    structurally confounded, so the detector's ability to say no is proven
+  #    at the unit level instead (test/scripts/portable.test.js and the
+  #    fixture's own self-checks).
   dependency-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -204,8 +210,13 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
       - name: Pin npm
         run: npm install --global npm@${{ env.NPM_VERSION }}
-      # Deliberately no root npm ci here: the fixture must prove source links
-      # without pre-existing npm workspace symlinks.
+      - run: npm run test:lock
+      # The documented recipe installs inside the vendored checkout — that is
+      # what gives the source tree's internal edges a local home (see the job
+      # comment above).
+      - run: npm ci --include=optional
       - run: npm run test:source:release
