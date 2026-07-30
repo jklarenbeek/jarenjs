@@ -99,6 +99,41 @@ describe('safe mode — attribute-only writes cannot crash or diverge from SSR',
   });
 });
 
+describe('safe mode — the is= customized-built-in escape', () => {
+  it('denies the is attribute on both renderers', () => {
+    // `is` upgrades an element to a registered customized built-in when the
+    // markup is PARSED, so safe SSR emitting it would run host code.
+    assert.strictEqual(renderToString(['button', { is: 'evil-button' }, 'x'], { safe: true }),
+      '<button>x</button>');
+    const h = safeHost();
+    h.render(['button', { is: 'evil-button' }, 'x']);
+    assert.strictEqual(h.container.childNodes[0].getAttribute('is'), null);
+    // any casing
+    assert.strictEqual(renderToString(['span', { IS: 'x' }, 'y'], { safe: true }), '<span>y</span>');
+  });
+
+  it('rejects is in the safe schema too', () => {
+    // (validated in safe.test.js against the schema; pinned here for locality)
+    assert.doesNotThrow(() => renderToString(['button', { is: 'x' }], { safe: true }));
+  });
+});
+
+describe('safe/trusted — a non-vnode child fails closed to nothing', () => {
+  it('renders a stray object child as empty on both the DOM and SSR', () => {
+    // A malformed child (not text, not a valid element) must not become an
+    // <undefined> element that skips the allow-list; it renders as nothing,
+    // matching SSR.
+    for (const safe of [false, true]) {
+      const { document, container } = createStubHost();
+      createDomRenderer(container, { document, safe })(['div', {}, { foo: 'bar' }, 'ok']);
+      const div = container.childNodes[0];
+      // the object child is an empty text node; only 'ok' shows
+      assert.strictEqual(serialize(div), '<div>ok</div>', `safe=${safe}`);
+      assert.strictEqual(renderToString(['div', {}, { foo: 'bar' }, 'ok'], { safe }), '<div>ok</div>');
+    }
+  });
+});
+
 describe('safe mode — style keys and URL lists', () => {
   it('drops a style whose payload hides in an object KEY', () => {
     const attack = ['div', { style: { 'color:red;background-image:url("javascript:alert(1)")': 'ok' } }, 'x'];
@@ -121,6 +156,14 @@ describe('safe mode — style keys and URL lists', () => {
     assert.strictEqual(
       renderToString(['img', { srcset: 'a.png 1x, b.png 2x' }], { safe: true }),
       '<img srcset="a.png 1x, b.png 2x">');
+  });
+
+  it('preserves a comma-bearing data: URL in srcset instead of corrupting it', () => {
+    // The URL runs to whitespace, so the commas inside the base64 payload stay
+    // part of the URL — the naive comma-split mangled this.
+    assert.strictEqual(
+      renderToString(['img', { srcset: 'data:image/png;base64,iVBORw0KGgo 1x, b.png 2x' }], { safe: true }),
+      '<img srcset="data:image/png;base64,iVBORw0KGgo 1x, b.png 2x">');
   });
 
   it('validates every ping URL', () => {

@@ -210,4 +210,9 @@ describe('safe render — the safe schema profile rejects the attack corpus', ()
     assert.strictEqual(validate(['jaren-widget', { name: 'x' }]), false);
     assert.strictEqual(validate(['button', { on: { click: 'a' } }, 'x']), false);
   });
+
+  it('rejects the is attribute (customized-built-in escape) in any casing', () => {
+    assert.strictEqual(validate(['button', { is: 'evil' }, 'x']), false);
+    assert.strictEqual(validate(['button', { IS: 'evil' }, 'x']), false);
+  });
 });

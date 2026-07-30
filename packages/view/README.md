@@ -118,8 +118,9 @@ client and the server neutralize an attack identically. In safe mode:
   are dropped, and so is any tag whose *name* is not a bare identifier (which
   closes structural injection through a tag like `div><img …`);
 - **property names** must be bare identifiers too (closing attribute-name
-  injection), may not begin with `on`, and may not be an HTML-parsing sink
-  (`innerHTML`, `outerHTML`, `srcdoc`, …);
+  injection), may not begin with `on`, may not be an HTML-parsing sink
+  (`innerHTML`, `outerHTML`, `srcdoc`, …), and may not be `is` (which upgrades
+  an element to a registered customized built-in on parse);
 - **URL attributes** (`href`, `src`, …) are filtered through the `sanitizeUrl`
   deny-list; **inline styles** carrying `expression(` or a script-scheme
   `url()` are dropped;

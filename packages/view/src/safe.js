@@ -164,8 +164,12 @@ export function createSafePolicy() {
       const lower = name.toLowerCase();
       // A name that is not a bare identifier is structural injection, whatever
       // it spells: reject before it can reach a serializer or a DOM property.
+      // `is` is a bare identifier but a capability escape: it upgrades an
+      // element to a registered customized built-in when the markup is
+      // PARSED (an untrusted document's safe SSR would run a host-registered
+      // constructor), so it is denied outright.
       if (!RE_SAFE_NAME.test(name) || lower.startsWith('on')
-        || DANGEROUS_PROPS.has(lower)) {
+        || lower === 'is' || DANGEROUS_PROPS.has(lower)) {
         return null;
       }
       if (URL_ATTRS.has(lower)) {
@@ -190,24 +194,58 @@ export function createSafePolicy() {
  * unsafe candidate drops the whole attribute, because a browser would still
  * act on the safe ones around it and the intent is already hostile.
  * @param {any} value
- * @param {boolean} isSrcset - `srcset` (comma-separated `url descriptor`) vs
- *   `ping` (whitespace-separated URLs)
+ * @param {boolean} isSrcset - `srcset` (a candidate list) vs `ping`
+ *   (whitespace-separated URLs)
  * @returns {string | null}
  */
 function sanitizeUrlList(value, isSrcset) {
   if (typeof value !== 'string') return null;
-  const candidates = isSrcset ? value.split(',') : value.split(/\s+/);
-  const out = [];
-  for (const raw of candidates) {
-    const candidate = raw.trim();
-    if (candidate === '') continue;
-    // srcset candidate = URL, then optional whitespace + descriptor.
-    const gap = candidate.search(/\s/);
-    const url = gap === -1 ? candidate : candidate.slice(0, gap);
-    if (sanitizeUrl(url) === null) return null;
-    out.push(candidate);
+  if (!isSrcset) {
+    const urls = value.split(/\s+/).filter((u) => u !== '');
+    for (const url of urls) if (sanitizeUrl(url) === null) return null;
+    return urls.length > 0 ? urls.join(' ') : null;
   }
-  return out.length > 0 ? out.join(isSrcset ? ', ' : ' ') : null;
+  const candidates = parseSrcset(value);
+  if (candidates === null) return null;
+  const out = [];
+  for (const { url, descriptor } of candidates) {
+    if (sanitizeUrl(url) === null) return null;
+    out.push(descriptor === '' ? url : `${url} ${descriptor}`);
+  }
+  return out.length > 0 ? out.join(', ') : null;
+}
+
+/**
+ * Parse an `srcset` into `{ url, descriptor }` candidates. A candidate's URL
+ * runs up to the next ASCII whitespace, so a comma INSIDE a URL — a `data:`
+ * image is full of them — stays part of the URL rather than splitting it,
+ * which the naive comma-split got wrong. Follows the shape of the HTML srcset
+ * algorithm closely enough to validate every URL; the descriptor is opaque to
+ * a safety check.
+ * @param {string} s
+ * @returns {Array<{ url: string, descriptor: string }> | null}
+ */
+function parseSrcset(s) {
+  const isWs = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r';
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    while (i < s.length && (isWs(s[i]) || s[i] === ',')) i++;
+    if (i >= s.length) break;
+    let url = '';
+    while (i < s.length && !isWs(s[i])) { url += s[i]; i++; }
+    // trailing commas on the URL are candidate separators, not part of it.
+    let hadTrailingComma = false;
+    while (url.endsWith(',')) { url = url.slice(0, -1); hadTrailingComma = true; }
+    let descriptor = '';
+    if (!hadTrailingComma) {
+      while (i < s.length && isWs(s[i])) i++;
+      while (i < s.length && s[i] !== ',') { descriptor += s[i]; i++; }
+      if (i < s.length) i++; // consume the separating comma
+    }
+    if (url !== '') out.push({ url, descriptor: descriptor.trim() });
+  }
+  return out.length > 0 ? out : null;
 }
 
 /**

@@ -428,6 +428,8 @@ export function createApp(appDoc, options = {}) {
     let changes = null;
     /** @type {string[]} */
     const scheduledEffects = [];
+    /** Whether this transaction already scheduled a render (state changed). */
+    let renderScheduled = false;
 
     // a typo in one requested event field binds null and reports; the
     // dispatch itself is never dropped (JA2009 contract)
@@ -549,6 +551,7 @@ export function createApp(appDoc, options = {}) {
       }
       refreshSubs();
       scheduleRender();
+      renderScheduled = true;
     }
     finish(changed || scheduledEffects.length > 0 ? 'applied' : 'noop', null);
 
@@ -561,6 +564,18 @@ export function createApp(appDoc, options = {}) {
     function finish(finalStatus, code) {
       status = finalStatus;
       errorCode = code;
+      // Settlement: a DOM event (a `binding` source) may have moved a
+      // controlled input off authoritative state — a user keystroke — and if
+      // this transaction did not itself change state (a no-op, a rejected or
+      // failed action, an effects-only outcome) no render was scheduled, so
+      // the control would keep the user's value. Schedule one render so the
+      // view reasserts controlled values against the live DOM. It is cheap:
+      // unchanged state re-projects to a reference-equal vnode the patcher
+      // skips, leaving only the controlled reconciliation.
+      if (entry.source === 'binding' && !renderScheduled) {
+        renderScheduled = true;
+        scheduleRender();
+      }
       if (observers.size === 0) return;
       /** @type {TransactionRecord} */
       const record = {

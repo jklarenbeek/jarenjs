@@ -319,6 +319,9 @@ export function createDomRenderer(container, options = {}) {
    */
   function teardown() {
     ctx.mountQueue.length = 0;
+    // Release the controlled-node registry: a destroyed renderer must not
+    // retain detached form controls (nor their stored values) past teardown.
+    ctx.controlled.clear();
     if (rootNode !== null) {
       /** @type {unknown[]} */
       const failures = [];
@@ -410,6 +413,15 @@ function createNode(ctx, vnode, ns) {
   vnode = resolveForPolicy(ctx, vnode, true);
   if (isTextNode(vnode)) {
     return ctx.doc.createTextNode(String(vnode));
+  }
+  // Fail closed: a value that is neither text nor a valid element vnode (a
+  // stray object, say `{foo:'bar'}`, that slipped in as a child) renders as
+  // nothing — matching the serializer, and never reaching `createElement`
+  // with an undefined tag, which would build an `<undefined>` element without
+  // consulting the safe allow-list. Lists and skipped values were already
+  // resolved by `childrenOf`, so only a malformed node reaches here.
+  if (!isElementNode(vnode)) {
+    return ctx.doc.createTextNode('');
   }
   const tag = vnode[0];
   if (tag === WIDGET_TAG) {

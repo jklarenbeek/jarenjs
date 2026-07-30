@@ -137,6 +137,16 @@ copy-on-write patch engine and JSLT's structural sharing make reference
 inequality mean real change, end to end — this is the same contract
 VIEW-FORMAT §5.1 builds its fast path on.
 
+One exception keeps controlled inputs correct: a transaction whose
+**source is a DOM event** always schedules a **settlement** render, even
+when it changes nothing (a no-op, a rejected or failed action, an
+effects-only outcome). A user keystroke can move a controlled input off
+authoritative state, and without a render the control would keep the
+user's value; the settlement render lets VIEW-FORMAT §3 reassert it. It
+is cheap — unchanged state re-projects to a reference-equal vnode the
+patcher skips whole, leaving only the controlled reconciliation. A
+programmatic `dispatch` is not a DOM event and does not force it.
+
 A patch-only transition additionally yields its **changed paths**: the
 runtime applies the patch with the engine's `changes` option and hands
 the resulting JSON Pointers (invalidation-sound semantics, see the

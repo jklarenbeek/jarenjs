@@ -483,8 +483,10 @@ Under the safe profile a renderer MUST:
    allow-list.
 2. **Reject a property whose name is not a bare identifier** (closing
    attribute-name injection), **whose name begins with `on`** (no inline
-   handlers), or **which is an HTML-parsing sink** (`innerHTML`,
-   `outerHTML`, `srcdoc`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`).
+   handlers), **which is an HTML-parsing sink** (`innerHTML`, `outerHTML`,
+   `srcdoc`, `insertAdjacentHTML`, `dangerouslySetInnerHTML`), or **which is
+   `is`** (it upgrades an element to a registered customized built-in when the
+   markup is parsed, running host code).
 3. **Sanitize URL attributes** (`href`, `src`, `action`, ...) through a
    deny-list that rejects `javascript:`, `vbscript:`, `file:` and
    document-carrying `data:`, and **drop inline styles** carrying

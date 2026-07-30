@@ -68,6 +68,10 @@
             "description": "No property name may begin with `on`: inline event-handler attributes are forbidden, and so is the `on` binding object (an untrusted view must not bind host actions)."
           },
           {
+            "not": { "pattern": "^[Ii][Ss]$" },
+            "description": "The `is` attribute is forbidden: it upgrades an element to a registered customized built-in when the markup is parsed, running host-registered code."
+          },
+          {
             "not": {
               "pattern": "^([Ii][Nn][Nn][Ee][Rr]|[Oo][Uu][Tt][Ee][Rr])[Hh][Tt][Mm][Ll]$|^[Ss][Rr][Cc][Dd][Oo][Cc]$|[Dd][Aa][Nn][Gg][Ee][Rr][Oo][Uu][Ss][Ll][Yy]"
             },

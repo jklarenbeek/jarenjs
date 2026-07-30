@@ -150,6 +150,17 @@ describe('controlled inputs — survive the ===/memo skip fast paths', () => {
     h.render(['div', {}, ['span', {}, 'still no input']]);
     assert.strictEqual(removed.value, 'edited', 'a detached control is left alone');
   });
+
+  it('releases the registry on destroy without error, and no-ops afterward', () => {
+    // teardown() clears the controlled registry so a destroyed renderer does
+    // not retain detached controls. A post-destroy render is an exact no-op.
+    const { document, container } = createStubHost();
+    const render = createDomRenderer(container, { document, onEvent: () => {} });
+    render(['form', {}, ['input', { value: 'a' }], ['input', { type: 'checkbox', checked: true }]]);
+    assert.doesNotThrow(() => render.destroy());
+    assert.doesNotThrow(() => render(['input', { value: 'b' }]));
+    assert.strictEqual(container.childNodes.length, 0, 'destroyed renderer stays empty');
+  });
 });
 
 describe('controlled selects — value after options, and multiple', () => {
