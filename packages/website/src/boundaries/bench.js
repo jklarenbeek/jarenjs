@@ -754,6 +754,7 @@ function view(data) {
   const row = (rows, label) => rows.find((r) => r.label.includes(label));
   const build = t.build ?? [];
   const jarenBuild = row(build, 'no memo');
+  const handBuild = row(build, 'hand-written');
   // 'react createElement', never bare 'react': every 'preact' label
   // contains 'react' too, and the sorted order must not decide the match.
   const reactBuild = row(build, 'react createElement');
@@ -764,15 +765,26 @@ function view(data) {
 
   out.push(cards([
     {
-      // formatRatio names the direction itself, so this reads
-      // "11× slower" — the honest label for the build path, stated
-      // against the fastest rival in the table (React's production
-      // build), not the most flattering one
-      title: 'Vnode production vs React',
+      // The loss leads, as everywhere on this site. formatRatio names
+      // the direction itself, so this reads "11× slower" — the honest
+      // label for the views-as-DATA path, stated against the fastest
+      // rival build on the page.
+      title: 'Stylesheet vnode production vs React',
       value: jarenBuild !== undefined && reactBuild !== undefined
         ? formatRatio(reactBuild.ns / jarenBuild.ns)
         : '—',
-      note: 'by design: a generic dispatcher, not a hand-written element constructor',
+      note: 'the price of views as data: a generic dispatcher, not code',
+    },
+    {
+      // ...and this reads "1.8× faster" — the tagged-array FORMAT,
+      // hand-written the same way a React view is, is the fastest
+      // element builder on the page. The engine is the price; the
+      // format never was.
+      title: 'Hand-written vnodes vs React',
+      value: handBuild !== undefined && reactBuild !== undefined
+        ? formatRatio(reactBuild.ns / handBuild.ns)
+        : '—',
+      note: 'the format itself: an array literal and a plain object per node',
     },
     {
       title: 'Frame with memo',
@@ -787,8 +799,8 @@ function view(data) {
       note: `${data.memoChildren ?? '?'} shared children under a rebuilt parent`,
     },
   ]));
-  out.push(callout('What this suite measures — including where we lose',
-    'Jaren builds views by running a JSLT stylesheet over state, so producing a vnode tree from scratch costs an order of magnitude more than React\'s createElement or a hand-written preact/hyperapp h() call — React\'s production build is in fact the fastest element builder in the table. That is the honest price of views-as-data, and it is on this page. The trade is the re-render path: unchanged state returns the previous output by reference, so the patcher skips it instead of diffing it — the rows below measure both directions on the same 1000-row table, with SSR output asserted byte-identical to React and preact before timing.'));
+  out.push(callout('What this suite measures — the format, the engine, and where we lose',
+    'Two different things get measured here, and conflating them is how this table gets misread. The FORMAT: a Jaren vnode is a tagged array — an array literal plus a plain object — and a hand-written view producing them directly (the same authoring model as a React or preact view) is the fastest element builder on this page; the renderer, patcher and SSR consume tagged arrays no matter who built them. The ENGINE: a JSLT stylesheet is a view as DATA — schema-validated, serializable, storable, safe to accept from a constrained decoder — and running that document through a generic dispatcher costs roughly 20× the hand-written build. None of the rivals has a data-driven mode to compare that against: a JSX view is code by construction. So the engine rows are the measured price of a capability the others do not offer, the hand-written rows are the like-for-like comparison, and both ship on the same page with SSR output asserted byte-identical to React and preact before timing.'));
 
   out.push(c.build);
   out.push(table('View production — full build (fresh state, memo cold)',
@@ -811,7 +823,7 @@ function view(data) {
   out.push(table('Frame cost — view + DOM patch (Jaren only)',
     ['Path', 'ns per frame'],
     frame.map((r) => ({ cells: [r.label, formatNs(r.ns)] })),
-    'Measured against the repository\'s DOM stub, so no cross-framework claim is made here — React, hyperapp and preact need a real DOM. The number shows what the reference-equality skip is worth end to end.'));
+    'Measured against the repository\'s DOM stub, so no cross-framework claim is made here — React, hyperapp and preact need a real DOM. At this size the hand-written view wins the frame outright: its build is so cheap that a full diff still beats the stylesheet\'s memoized walk, and that is on the page rather than hidden. What the memo buys is the case this table does not exercise: an UNCHANGED document returns the previous tree by reference and the whole frame is O(1), and the memo-marker rows below show the same skip working for hand-written producers too.'));
 
   out.push(c.memo);
   out.push(table('The memo marker (VIEW-FORMAT §5.5)',

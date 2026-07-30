@@ -9,12 +9,19 @@
  * Node can measure:
  *
  *  - view production (state -> element tree): all engines, full build
- *    and one-COW-row update. Jaren runs twice — memo off (the generic
- *    dispatcher's raw cost) and memo on (the O(change) path). React,
- *    hyperapp and preact re-run their plain view functions, which is
- *    their idiomatic default; each offers opt-in memoization per call
- *    site (React.memo/useMemo, preact/compat memo), where Jaren's memo
- *    is a compile option requiring no view changes.
+ *    and one-COW-row update. Jaren runs THREE ways — a hand-written
+ *    function producing tagged arrays directly (the same authoring
+ *    model the rivals use, aimed at our vnode format: no stylesheet,
+ *    no dispatch, no paths), the stylesheet with memo off (the generic
+ *    dispatcher's raw cost) and with memo on (the O(change) path).
+ *    Separating the first two is what keeps the table readable as an
+ *    attribution: the tagged-array FORMAT is the cheapest builder on
+ *    the page, and the engine tax is the measured price of views as
+ *    DATA — a mode none of the rivals has. React, hyperapp and preact
+ *    re-run their plain view functions, which is their idiomatic
+ *    default; each offers opt-in memoization per call site
+ *    (React.memo/useMemo, preact/compat memo), where Jaren's memo is a
+ *    compile option requiring no view changes.
  *  - SSR (element tree -> HTML string): @jarenjs/view renderToString vs
  *    react-dom/server renderToString and preact-render-to-string
  *    (hyperapp has no first-party SSR). String EQUALITY is asserted
@@ -124,6 +131,20 @@ function preactView(state) {
           preactH('td', { class: 'col' }, row.label))))));
 }
 
+// The symmetric cell: the rivals' authoring model (a hand-written JS
+// function) aimed at Jaren's vnode format. A tagged array is an array
+// literal plus a plain object — no constructor, no key/ref extraction —
+// and the renderer, patcher and SSR consume it no matter who built it.
+// This row is what separates the FORMAT's cost from the ENGINE's.
+function jarenHandView(state) {
+  return ['main', {},
+    ['h1', {}, state.title],
+    ['table', {}, ['tbody', {},
+      ...state.rows.map((row) =>
+        ['tr', { class: row.selected ? 'danger' : null, 'data-id': row.id },
+          ['td', { class: 'col' }, row.label]])]]];
+}
+
 // The same prop shapes as the other views (no keys — keys buy React
 // reconciliation, not element production, and none of the other views
 // carry them), spelled with className because that is what react-dom
@@ -170,7 +191,12 @@ if (reactHtml !== jarenHtml) {
   console.error('react:', reactHtml.slice(0, 200));
   process.exit(1);
 }
-console.log(`equivalence: jaren (plain & memo) === preact === react SSR for ${ROWS} rows, ${jarenHtml.length} chars`);
+const handHtml = renderToString(jarenHandView(state0));
+if (handHtml !== jarenHtml) {
+  console.error('EQUIVALENCE FAILURE: hand-written tagged arrays differ from the stylesheet output');
+  process.exit(1);
+}
+console.log(`equivalence: jaren (hand-written, plain & memo) === preact === react SSR for ${ROWS} rows, ${jarenHtml.length} chars`);
 
 //#endregion
 
@@ -185,6 +211,7 @@ const collected = {};
 {
   const states = [buildState(ROWS), buildState(ROWS)];
   collected.build = [
+    measure('jaren hand-written []', (i) => jarenHandView(states[i & 1])),
     measure('preact h()', (i) => preactView(states[i & 1])),
     measure('react createElement()', (i) => reactView(states[i & 1])),
     measure('hyperapp h()/text()', (i) => hyperappView(states[i & 1])),
@@ -202,7 +229,12 @@ const collected = {};
   let hyperState = buildState(ROWS);
   let preactState = buildState(ROWS);
   let reactState = buildState(ROWS);
+  let handState = buildState(ROWS);
   collected.update = [
+    measure('jaren hand-written []', (i) => {
+      handState = updateRow(handState, i % ROWS);
+      return jarenHandView(handState);
+    }),
     measure('jaren jslt (memo, warm)', (i) => {
       memoState = updateRow(memoState, i % ROWS);
       return jarenMemo(memoState);
@@ -231,6 +263,7 @@ const collected = {};
 {
   const memoSsrState = buildState(ROWS);
   collected.ssr = [
+    measure('jaren renderToString (hand-written)', () => renderToString(jarenHandView(state0))),
     measure('jaren renderToString (memo)', () => renderToString(jarenMemo(memoSsrState))),
     measure('jaren renderToString', () => renderToString(jarenPlain(state0))),
     measure('preact-render-to-string', () => preactRender(preactView(state0))),
@@ -254,6 +287,7 @@ const collected = {};
   collected.frame = [
     measure('jaren view+patch (memo)', frame(jarenMemo)),
     measure('jaren view+patch (no memo)', frame(jarenPlain)),
+    measure('jaren view+patch (hand-written)', frame(jarenHandView)),
   ].sort((a, b) => a.ns - b.ns);
   printTable(`frame cost — view + patch, one row updated of ${ROWS} (stub DOM; no cross-framework claim)`, collected.frame);
 }
@@ -314,7 +348,10 @@ if (OUTPUT === 'json') {
 console.log('\nMethodology: plain idiomatic views on every side; react, hyperapp and preact re-run the');
 console.log('whole view function per state change (their default; each offers opt-in per-site memo,');
 console.log("where Jaren's memo is a compile option requiring no view changes). React runs its");
-console.log('PRODUCTION build. DOM patching is excluded from cross-framework rows because Node has');
-console.log('no DOM; SSR compares byte-equal strings.');
+console.log("PRODUCTION build. The 'jaren hand-written []' rows are the rivals' authoring model aimed");
+console.log('at the tagged-array format — they separate what the FORMAT costs from what the stylesheet');
+console.log('ENGINE costs, because views-as-data is the feature none of the rivals has a mode for.');
+console.log('DOM patching is excluded from cross-framework rows because Node has no DOM; SSR compares');
+console.log('byte-equal strings.');
 
 //#endregion

@@ -509,9 +509,10 @@ function generateMarkdown(tmp, options) {
 
 /**
  * The view suite: the cross-framework comparison (react, preact,
- * hyperapp, react-dom/server, preact-render-to-string) plus Jaren's
- * own memo layers. The rows arrive pre-sorted and pre-labeled; only
- * the timings need slimming.
+ * hyperapp, react-dom/server, preact-render-to-string), the
+ * hand-written tagged-array rows that separate the FORMAT's cost from
+ * the stylesheet ENGINE's, and Jaren's own memo layers. The rows
+ * arrive pre-sorted and pre-labeled; only the timings need slimming.
  */
 function generateView(tmp, options) {
   const file = path.join(tmp, 'view.json');
@@ -872,7 +873,7 @@ function buildHeadlines(generated, meta) {
       ratio: memo !== undefined && plain !== undefined && memo.ns > 0 ? plain.ns / memo.ns : null,
       rival: 'its own no-memo frame',
       conformance: null,
-      note: 'memo vs no-memo frame; raw vnode production is slower than react and preact',
+      note: 'memo vs no-memo frame; hand-written vnodes outbuild react, the data-driven stylesheet pays ~20× — see the suite page',
     });
   }
   if (generated.charts !== undefined) {

@@ -368,14 +368,26 @@ describe('website boundaries — the benchmarks overview', function () {
     }
   });
 
-  it('the view suite reports its build path as slower, not faster', function () {
+  it('the view suite leads with the engine loss and separates it from the format win', function () {
     const st = { benchStatus: { view: 'loaded' }, bench: { view: loadBench('view') }, benchUi: { search: '', limit: 40 } };
     const nodes = deriveSuite(st, 'view');
     const cards = nodes.find((n) => n.kind === 'cards');
-    const build = (cards.items ?? cards.cards ?? []).find((c) => /vnode production/i.test(c.title));
-    assert.ok(build !== undefined, 'the suite leads with the build-path card');
-    assert.match(build.value, /slower/,
-      'producing vnodes costs more than a hand-written h() and the page must say so');
+    const items = cards.items ?? cards.cards ?? [];
+    // The LOSS leads: the first card is the stylesheet build path, and it
+    // says "slower" — running a view-as-data through a generic dispatcher
+    // costs more than a hand-written build, and the page must say so first.
+    const engine = items[0];
+    assert.match(engine.title, /vnode production/i,
+      'the suite leads with the build-path card');
+    assert.match(engine.value, /slower/,
+      'the stylesheet engine costs more than a hand-written build and the page must say so');
+    // The decomposition is pinned too: the hand-written tagged-array card
+    // exists, claims the FORMAT (not the engine), and reads "faster" only
+    // because the measured rows do.
+    const hand = items.find((c) => /hand-written/i.test(c.title));
+    assert.ok(hand !== undefined, 'the format card separates the vnode format from the engine');
+    assert.match(hand.value, /faster/,
+      'hand-written tagged arrays outbuild the rivals — the format was never the price');
   });
 
   it('renders the cross-suite chart host-linked, and stays memoized', function () {
