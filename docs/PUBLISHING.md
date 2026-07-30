@@ -119,12 +119,23 @@ npm run release:check
 
 CI runs this same gate on **Linux and Windows both**, because a
 Windows-only failure is a release failure — packed-consumer portability,
-glob quoting and newline normalization are all platform classes of defect
-that a Linux-only green hides. A separate `browser` job runs the website's
-Playwright suite in Chromium, Firefox and WebKit. QT3 conformance and the
-dead-code audit are deliberately *not* part of this gate (they need the
-`qt3tests` submodule and a long coverage pass); they are separate evidence
-runs, so a green CI does not silently imply them.
+glob quoting, newline normalization, `.cmd` shims, drive-letter paths and
+per-platform native packages are all platform classes of defect that a
+Linux-only green hides. A separate `browser` job runs the website's
+Playwright suite in Chromium, Firefox and WebKit, and the source-consumer
+fixture runs on Linux **and Windows**. QT3 conformance and the dead-code
+audit are deliberately *not* part of this gate (they need the `qt3tests`
+submodule and a long coverage pass); they are separate evidence runs, so a
+green CI does not silently imply them.
+
+**The lockfile is written by one npm.** The root `packageManager` field
+names it (npm 11.12.1). An older npm rewrites `package-lock.json` without
+other platforms' native packages (npm/cli#7961, fixed in npm 11.3) — a
+Linux lock rewrite is how the Windows `tsc` once lost its own executable.
+`npm run test:lock` proves the lock's platform completeness structurally
+and runs before every CI install; if it goes red after a local install,
+regenerate the lock with the pinned npm from the last complete baseline
+rather than committing the pruned one.
 
 ## Publish
 

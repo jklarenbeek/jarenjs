@@ -2,6 +2,7 @@
   "name": "jarenjs",
   "private": true,
   "version": "0.22.28",
+  "packageManager": "npm@11.12.1",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
   "license": "MIT",
