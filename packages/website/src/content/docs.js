@@ -174,7 +174,7 @@ export const DOCS_SECTIONS = [
     blocks: [
       p('A native, headless Mermaid clone: @jarenjs/mermaid parses diagrams-as-code (flowchart and sequence fully; class, ER, state, gantt and pie too) into a geometry-free JSON AST, then lays it out and renders pure-vnode SVG through @jarenjs/view — no innerHTML, no browser. render() is synchronous, complete and error-safe, memoized by content hash.'),
       code(null, "import { parseMermaid, toMermaid, renderMermaid } from '@jarenjs/mermaid';\nconst doc = parseMermaid('flowchart TD\\n  A --> B');\ntoMermaid(doc);           // canonical text — a round-trip fixed point\nrenderMermaid('flowchart TD\\n  A --> B'); // an ['svg', …] vnode"),
-      p('Because the AST is geometry-free it is a reusable semantic model: a stateDiagram-v2 projects via a JSLT stylesheet into an @jarenjs/app workflow / FSM (events become actions), and toMermaid turns a workflow back into editable diagram text. Rendering is one consumer of the model, not the only one.'),
+      p('Because the AST is geometry-free it is a reusable semantic model: a stateDiagram-v2 projects via a JSLT stylesheet into an executable @jarenjs/flow machine (jaren-fsm) and a flowchart into a jaren-dag dataflow — both run, both project back to editable diagram text through toMermaid. Rendering is one consumer of the model, not the only one; see the Flow section.'),
       p('The Markdown engine embeds it: a ```mermaid fence renders to inline SVG through the native plugin — SSR-safe, no injected instance. This site dogfoods it; the package READMEs render their own Mermaid diagrams live in the docs dialog. Pie rendering delegates to @jarenjs/charts — same SVG, one pie engine for the whole suite.'),
       {
         kind: 'callout',
@@ -281,9 +281,25 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'flow', title: 'Flow — executable workflows',
+    blocks: [
+      p('@jarenjs/flow makes the suite’s machines executable, in two document formats. A jaren-fsm is a finite state machine as one JSON value — declared states, an initial state and a document-ordered transition table whose guards are Jaren JSON Query documents — compiled once into a pure step function; a jaren-dag is an acyclic dataflow whose nodes are the suite’s own engines (a query filters, a JSLT stylesheet projects, a registered task awaits) wired by edges that carry data. Both are schema-published for constrained decoding, both compile fail-closed with coded, docPath-carrying errors, and neither uses eval.'),
+      p('Effects are data, not callbacks: a fired transition returns resolved { run, with } descriptors — the host’s registry runs them — so the whole machine stays a serializable value. That is the wedge, and the Benchmarks page measures it against XState v5: a jaren-fsm document survives a JSON round trip with its guards intact and still fires them, where XState’s guards are functions JSON drops and the restored machine throws. Published beside that win are the honest losses — a compiled machine holds more memory than an XState actor, and a dag run costs several times a hand-written pipeline: the measured price of dataflow as one serializable, constrained-decodable value.'),
+      code('A machine and a dataflow, both as JSON', '// jaren-fsm: a guard is a query document, effects come back as data\n{ "$fsm": "0.1", "initial": "idle",\n  "states": ["idle", { "id": "done", "final": true }],\n  "transitions": [\n    { "from": "idle", "event": "ok", "guard": "$.payload.fresh", "to": "done" }] }\n\n// jaren-dag: the suite’s engines, wired\n{ "$dag": "0.1",\n  "nodes": { "rows": { "kind": "input" },\n    "adults": { "kind": "query",\n      "query": { "$for": { "r": "$[*]" }, "$where": { "$ge": ["$r.age", 18] }, "$return": "$r" } },\n    "out": { "kind": "output" } },\n  "edges": [{ "from": "rows", "to": "adults" }, { "from": "adults", "to": "out" }] }'),
+      p('One document, three views that cannot disagree: @jarenjs/mermaid projects a stateDiagram to a jaren-fsm and a flowchart to a jaren-dag (and back) as plain JSLT stylesheets, a machine hosts inside an @jarenjs/app through generated standard action documents, and a dag hosts as one app effect. The Flow studio puts all three on one page — click the diagram, edit a generated inspector, or edit the mermaid text; every gesture is an RFC 6902 patch against the same document, which then runs live as a nested app or an aborting dag.'),
+      {
+        kind: 'callout',
+        title: 'Try it',
+        text: 'Open the Flow studio: start from the review-machine or enrich-dataflow seed, edit it three ways, then run it live and watch the diagram highlight the current state or the nodes settle.',
+        href: '#/flow',
+        link: 'Open Flow',
+      },
+    ],
+  },
+  {
     id: 'further-reading', title: 'Further reading',
     blocks: [
-      p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, ERROR-MESSAGES.md and the JOSL FORMAT.md. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),
+      p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, FLOW-FORMAT.md, ERROR-MESSAGES.md and the JOSL FORMAT.md. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),
       callout('The code is the reference', 'Every public function carries JSDoc. When in doubt, open the source — the packages are written to be read.'),
     ],
   },

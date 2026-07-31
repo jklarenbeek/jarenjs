@@ -288,6 +288,9 @@ describe('website — the site as one app document', function () {
     assert.match(html, /Package READMEs/);
     assert.match(html, /class="readme-btn"[^>]*>@jarenjs\/forms/);
     assert.match(html, /@jarenjs\/md/);
+    assert.match(html, /@jarenjs\/flow/, 'every published package is readable here, flow included');
+    // the docs sections cover flow too
+    assert.match(html, /Flow — executable workflows/);
   });
 
   it('opens a README in the dialog, rendered by @jarenjs/md', async function () {
