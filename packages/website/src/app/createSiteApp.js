@@ -26,6 +26,7 @@ import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp,
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget } from '../boundaries/studio.js';
+import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { studioTemplate } from '../content/appTemplates.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
@@ -122,7 +123,12 @@ export function createSiteApp(env) {
   const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
   const aiChat = env.aiChat ?? { read: () => null, write: () => {} };
 
+  // the Flow studio's runtime: nested-machine host widget + effects
+  // (template loading, fail-closed text parsing, dag runs with abort)
+  const flowRuntime = createFlowRuntime({ schedule: env.schedule });
+
   const effects = {
+    ...flowRuntime.effects,
     'fetch-bench': (props, dispatch) => {
       if (requested.has(props.name)) return;
       requested.add(props.name);
@@ -334,7 +340,10 @@ export function createSiteApp(env) {
     effects,
     // the Studio host: a widget whose mount/destroy owns the nested,
     // isolated app a studio document boots into (boundaries/studio.js)
-    widgets: { 'studio-doc': createStudioHostWidget({ schedule: env.schedule }) },
+    widgets: {
+      'studio-doc': createStudioHostWidget({ schedule: env.schedule }),
+      'flow-doc': flowRuntime.widget,
+    },
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),
       ...rates.subs,

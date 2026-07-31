@@ -253,8 +253,17 @@ function printClass(ast) {
  */
 function printState(ast) {
   const out = ['stateDiagram-v2'];
+  // an id-only state no transition mentions must still be DECLARED, or
+  // the canonical round trip silently drops it (`state x` is the
+  // parser's own spelling for exactly that)
+  const mentioned = new Set();
+  for (const t of ast.transitions) {
+    mentioned.add(t.from);
+    mentioned.add(t.to);
+  }
   for (const s of ast.states) {
     if (s.label !== s.id) out.push(`${s.id} : ${s.label}`);
+    else if (!mentioned.has(s.id)) out.push(`state ${s.id}`);
   }
   for (const t of ast.transitions) {
     out.push(`${t.from} --> ${t.to}${t.label ? ' : ' + t.label : ''}`);

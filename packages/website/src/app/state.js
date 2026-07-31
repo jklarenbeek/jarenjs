@@ -74,6 +74,28 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // failure from the nested app's own error sink.
     studio: { doc: null, errors: null, error: null, revision: 0 },
 
+    // the Flow studio (boundaries/flowstudio.js): a jaren-fsm or
+    // jaren-dag document edited three ways that cannot disagree —
+    // clicking the diagram, the forms inspector, the mermaid text —
+    // because every gesture is an RFC 6902 patch against `doc`.
+    // `connect` holds the armed click-to-connect source; `history` is
+    // the COW snapshot ring (undo/redo); `run` is the live run's
+    // observable state; `revision` bumps per run boot so the nested-app
+    // host widget knows when to reboot.
+    flow: {
+      kind: null,        // 'fsm' | 'dag' | null → the template picker
+      doc: null,
+      selection: null,   // { type, id?/index?, path } from a diagram click
+      connect: null,     // armed source id (click-click connect)
+      tab: 'diagram',    // 'diagram' | 'text'
+      parseError: null,  // fail-closed text commits report here
+      history: { past: [], future: [] },
+      run: null,         // fsm: { current, log[] } · dag: { running, nodes, output, error, log[] }
+      runContext: null,  // the machine sandbox's data state (from the template)
+      dagInput: '',      // the dag run pane's JSON input text
+      revision: 0,
+    },
+
     // the browser-side AI assistant (@jarenjs/ai): a bring-your-own-key
     // chat panel that drives the playground through schema-guarded tools
     ai: {

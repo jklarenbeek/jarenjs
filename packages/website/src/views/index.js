@@ -13,6 +13,7 @@ import { BENCH_RULES } from './benchmarks.js';
 import { CHARTSPAGE_RULES } from './chartspage.js';
 import { PLAYGROUND_RULES } from './playground.js';
 import { STUDIO_RULES } from './studio.js';
+import { FLOW_RULES } from './flowstudio.js';
 import { STATIC_RULES } from './staticpages.js';
 import { README_RULES } from './readme.js';
 import { ASSISTANT_RULES } from './assistant.js';
@@ -27,6 +28,7 @@ export const STYLESHEET = {
     home: { unmatched: 'error' },
     playground: { unmatched: 'error' },
     studio: { unmatched: 'error' },
+    flow: { unmatched: 'error' },
     benchmarks: { unmatched: 'error' },
     charts: { unmatched: 'error' },
     docs: { unmatched: 'error' },
@@ -44,11 +46,22 @@ export const STYLESHEET = {
     ...CHARTSPAGE_RULES,
     ...PLAYGROUND_RULES,
     ...STUDIO_RULES,
+    ...FLOW_RULES,
     ...STATIC_RULES,
     ...README_RULES,
     ...ASSISTANT_RULES,
     ...UI_RULES,
     ...calcViewRules,
     ...createFormView({ root: '$.ui.pg.validate.form' }).map((rule) => ({ ...rule, mode: 'form' })),
+    // the Flow inspector: the same generated form stylesheet, scoped to
+    // the selection subtree and writing through the flow/f-* actions
+    // (their target prepends the selection's pointer)
+    ...createFormView({
+      root: '$.ui.flow.live.inspector.form',
+      actions: {
+        input: 'flow/f-input', check: 'flow/f-check', number: 'flow/f-number',
+        json: 'flow/f-json', add: 'flow/f-add', remove: 'flow/f-remove',
+      },
+    }).map((rule) => ({ ...rule, mode: 'flow' })),
   ],
 };

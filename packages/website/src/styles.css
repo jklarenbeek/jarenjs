@@ -797,3 +797,53 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   }
   .ai-launch-label { display: none; }
 }
+
+/* ---------------------------------------------------------------- */
+/* The Flow studio                                                   */
+/* ---------------------------------------------------------------- */
+
+.flow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.flow-side { display: grid; gap: var(--space-4); }
+@media (max-width: 900px) {
+  .flow-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.flow-palette { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.flow-tabs { display: flex; gap: var(--space-2); margin-block: var(--space-2); }
+.flow-canvas { overflow: auto; }
+.flow-canvas svg { max-width: 100%; height: auto; }
+.flow-text { width: 100%; }
+.flow-dag-input { width: 100%; }
+.flow-log {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  max-height: 12rem;
+  overflow: auto;
+}
+.flow-log-line {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding-block: 1px;
+  border-block-end: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.flow-run-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-block: var(--space-2); }
+.flow-run-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.flow-run-mount { border: 1px dashed var(--border); border-radius: 8px; padding: var(--space-2); }
+.flow-output { max-height: 12rem; overflow: auto; }
+.btn.flow-armed { outline: 2px solid var(--accent); }
+
+/* diagram interaction affordances (injected by the decorate walk) */
+.mm-pick { cursor: pointer; }
+.mm-selected .mm-node-shape,
+.mm-selected .mm-edge-line { stroke-width: 2.5; }
+.mm-armed .mm-node-shape { stroke-dasharray: 4 3; stroke-width: 2.5; }
+.mm-active .mm-node-shape { filter: drop-shadow(0 0 3px var(--accent)); stroke-width: 2.5; }
+.mm-run-ok .mm-node-shape { stroke-width: 2.5; }
+.mm-run-error .mm-node-shape { stroke-dasharray: 2 2; stroke-width: 2.5; }
+.mm-run-aborted .mm-node-shape { opacity: 0.55; }

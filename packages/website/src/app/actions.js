@@ -402,6 +402,290 @@ export const ACTIONS = {
 
   // the generated form writes through the standard form actions
   ...createFormActions({ dataPointer: '/pg/data' }),
+
+  // ----------------------------------------------------------------
+  // The Flow studio. Every gesture is an RFC 6902 patch against
+  // /flow/doc; mutating gestures first snapshot the document into the
+  // history ring (copy-on-write makes snapshots cheap) and clear the
+  // redo side. Even the delete CASCADES are query-built — no JS
+  // assembles a patch anywhere on this page.
+  // ----------------------------------------------------------------
+
+  'flow/template': { effects: [{ run: 'flow-template', with: { name: '$payload' } }] },
+
+  'flow/load': {
+    patch: [
+      { op: 'replace', path: '/flow/kind', value: '$payload.kind' },
+      { op: 'replace', path: '/flow/doc', value: '$payload.doc' },
+      { op: 'replace', path: '/flow/selection', value: null },
+      { op: 'replace', path: '/flow/connect', value: null },
+      { op: 'replace', path: '/flow/tab', value: 'diagram' },
+      { op: 'replace', path: '/flow/parseError', value: null },
+      { op: 'replace', path: '/flow/history', value: { past: [], future: [] } },
+      { op: 'replace', path: '/flow/run', value: null },
+      { op: 'replace', path: '/flow/runContext', value: '$payload.runContext' },
+      { op: 'replace', path: '/flow/dagInput', value: '$payload.dagInput' },
+    ],
+  },
+
+  'flow/clear': {
+    patch: [
+      { op: 'replace', path: '/flow/kind', value: null },
+      { op: 'replace', path: '/flow/doc', value: null },
+      { op: 'replace', path: '/flow/selection', value: null },
+      { op: 'replace', path: '/flow/connect', value: null },
+      { op: 'replace', path: '/flow/parseError', value: null },
+      { op: 'replace', path: '/flow/history', value: { past: [], future: [] } },
+      { op: 'replace', path: '/flow/run', value: null },
+    ],
+  },
+
+  'flow/tab': { patch: [{ op: 'replace', path: '/flow/tab', value: '$payload' }] },
+
+  // A diagram click: plain pick — unless a connect source is armed and
+  // a node was clicked, in which case this IS the connect commit.
+  'flow/pick': {
+    $if: [
+      { $and: [
+        '$.flow.connect',
+        { $or: [{ $eq: ['$payload.type', 'state'] }, { $eq: ['$payload.type', 'node'] }] },
+      ] },
+      { $if: [
+        { $eq: ['$.flow.kind', 'fsm'] },
+        { patch: [
+          { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+          { op: 'replace', path: '/flow/history/future', value: [] },
+          { op: 'add', path: '/flow/doc/transitions/-',
+            value: { from: '$.flow.connect', event: null, to: '$payload.id' } },
+          { op: 'replace', path: '/flow/connect', value: null },
+          { op: 'replace', path: '/flow/selection', value: {
+            type: 'transition',
+            index: { $count: '$.flow.doc.transitions[*]' },
+            path: { $concat: ['/transitions/', { $string: { $count: '$.flow.doc.transitions[*]' } }] },
+          } },
+        ] },
+        { patch: [
+          { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+          { op: 'replace', path: '/flow/history/future', value: [] },
+          { op: 'add', path: '/flow/doc/edges/-',
+            value: { from: '$.flow.connect', to: '$payload.id' } },
+          { op: 'replace', path: '/flow/connect', value: null },
+          { op: 'replace', path: '/flow/selection', value: {
+            type: 'edge',
+            index: { $count: '$.flow.doc.edges[*]' },
+            path: { $concat: ['/edges/', { $string: { $count: '$.flow.doc.edges[*]' } }] },
+          } },
+        ] },
+      ] },
+      { patch: [
+        { op: 'replace', path: '/flow/connect', value: null },
+        { op: 'replace', path: '/flow/selection', value: '$payload' },
+      ] },
+    ],
+  },
+
+  'flow/connect-arm': {
+    $if: [
+      { $or: [{ $eq: ['$.flow.selection.type', 'state'] }, { $eq: ['$.flow.selection.type', 'node'] }] },
+      { patch: [{ op: 'replace', path: '/flow/connect', value: '$.flow.selection.id' }] },
+    ],
+  },
+  'flow/connect-cancel': { patch: [{ op: 'replace', path: '/flow/connect', value: null }] },
+
+  'flow/add-state': {
+    patch: [
+      { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+      { op: 'replace', path: '/flow/history/future', value: [] },
+      { op: 'add', path: '/flow/doc/states/-',
+        value: { $concat: ['s', { $string: { $add: [{ $count: '$.flow.doc.states[*]' }, 1] } }] } },
+      { op: 'replace', path: '/flow/selection', value: {
+        type: 'state',
+        id: { $concat: ['s', { $string: { $add: [{ $count: '$.flow.doc.states[*]' }, 1] } }] },
+        path: { $concat: ['/states/', { $string: { $count: '$.flow.doc.states[*]' } }] },
+      } },
+    ],
+  },
+
+  'flow/add-node': {
+    patch: [
+      { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+      { op: 'replace', path: '/flow/history/future', value: [] },
+      { op: 'add',
+        path: { $concat: ['/flow/doc/nodes/n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] },
+        value: { kind: 'task',
+          run: { $concat: ['n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] } } },
+      { op: 'replace', path: '/flow/selection', value: {
+        type: 'node',
+        id: { $concat: ['n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] },
+        path: { $concat: ['/nodes/n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] },
+      } },
+    ],
+  },
+
+  // Deleting a state or node cascades to every transition/edge that
+  // references it — the cascade is computed BY THE QUERY (a filtered
+  // rebuild of the document); simple members are a computed remove.
+  'flow/delete': {
+    $if: [
+      { $eq: ['$.flow.selection.type', 'state'] },
+      { patch: [
+        { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+        { op: 'replace', path: '/flow/history/future', value: [] },
+        { op: 'replace', path: '/flow/doc', value: { $map: [
+          ['$$fsm', '0.1'],
+          ['initial', { $if: [
+            { $eq: ['$.flow.doc.initial', '$.flow.selection.id'] }, null, '$.flow.doc.initial'] }],
+          ['states', [{ $for: { s: '$.flow.doc.states[*]' },
+            $where: { $ne: [{ $if: [{ '$is-string': '$s' }, '$s', '$s.id'] }, '$.flow.selection.id'] },
+            $return: '$s' }]],
+          ['transitions', [{ $for: { t: '$.flow.doc.transitions[*]' },
+            $where: { $and: [
+              { $ne: ['$t.from', '$.flow.selection.id'] },
+              { $ne: ['$t.to', '$.flow.selection.id'] } ] },
+            $return: '$t' }]],
+        ] } },
+        { op: 'replace', path: '/flow/selection', value: null },
+        { op: 'replace', path: '/flow/connect', value: null },
+      ] },
+      { $if: [
+        { $eq: ['$.flow.selection.type', 'node'] },
+        { patch: [
+          { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+          { op: 'replace', path: '/flow/history/future', value: [] },
+          { op: 'replace', path: '/flow/doc', value: { $map: [
+            ['$$dag', '0.1'],
+            ['nodes', { '$from-entries': { $for: { e: { $entries: '$.flow.doc.nodes' } },
+              $where: { $ne: ['$e.key', '$.flow.selection.id'] },
+              $return: '$e' } }],
+            ['edges', [{ $for: { g: '$.flow.doc.edges[*]' },
+              $where: { $and: [
+                { $ne: ['$g.from', '$.flow.selection.id'] },
+                { $ne: ['$g.to', '$.flow.selection.id'] } ] },
+              $return: '$g' }]],
+          ] } },
+          { op: 'replace', path: '/flow/selection', value: null },
+          { op: 'replace', path: '/flow/connect', value: null },
+        ] },
+        { patch: [
+          { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+          { op: 'replace', path: '/flow/history/future', value: [] },
+          { op: 'remove', path: { $concat: ['/flow/doc', '$.flow.selection.path'] } },
+          { op: 'replace', path: '/flow/selection', value: null },
+        ] },
+      ] },
+    ],
+  },
+
+  'flow/undo': {
+    $if: [{ $exists: '$.flow.history.past[*]' }, { patch: [
+      { op: 'add', path: '/flow/history/future/-', value: '$.flow.doc' },
+      { op: 'replace', path: '/flow/doc', value: '$.flow.history.past[-1]' },
+      { op: 'remove', path: { $concat: ['/flow/history/past/',
+        { $string: { $sub: [{ $count: '$.flow.history.past[*]' }, 1] } }] } },
+      { op: 'replace', path: '/flow/selection', value: null },
+    ] }],
+  },
+  'flow/redo': {
+    $if: [{ $exists: '$.flow.history.future[*]' }, { patch: [
+      { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+      { op: 'replace', path: '/flow/doc', value: '$.flow.history.future[-1]' },
+      { op: 'remove', path: { $concat: ['/flow/history/future/',
+        { $string: { $sub: [{ $count: '$.flow.history.future[*]' }, 1] } }] } },
+      { op: 'replace', path: '/flow/selection', value: null },
+    ] }],
+  },
+
+  // The text pane commits through the fail-closed parse effect: a
+  // broken edit reports here and never touches the document.
+  'flow/text': { effects: [{ run: 'flow-parse', with: { text: '$event.value', kind: '$.flow.kind' } }] },
+  'flow/parsed': {
+    patch: [
+      { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
+      { op: 'replace', path: '/flow/history/future', value: [] },
+      { op: 'replace', path: '/flow/doc', value: '$payload.doc' },
+      { op: 'replace', path: '/flow/parseError', value: null },
+      { op: 'replace', path: '/flow/selection', value: null },
+    ],
+  },
+  'flow/parse-error': { patch: [{ op: 'replace', path: '/flow/parseError', value: '$payload.message' }] },
+
+  // Machine runs: the nested sandbox app boots from the generated
+  // actions (the host widget owns its lifecycle; `revision` reboots).
+  'flow/run': {
+    patch: [
+      { op: 'replace', path: '/flow/run', value: { current: '$.flow.doc.initial', log: [] } },
+      { op: 'replace', path: '/flow/revision', value: { $add: ['$.flow.revision', 1] } },
+    ],
+  },
+  'flow/stop': { patch: [{ op: 'replace', path: '/flow/run', value: null }] },
+  'flow/send': { effects: [{ run: 'flow-run-send', with: { event: '$payload' } }] },
+  'flow/run-tx': {
+    $if: ['$.flow.run', { patch: [
+      { op: 'replace', path: '/flow/run/current', value: '$payload.current' },
+      { op: 'add', path: '/flow/run/log/-', value: '$payload' },
+    ] }],
+  },
+  'flow/run-log': {
+    $if: ['$.flow.run', { patch: [{ op: 'add', path: '/flow/run/log/-', value: '$payload' }] }],
+  },
+
+  // Dag runs: compile + execute through the boundary effect; per-node
+  // settlement records tint the diagram live.
+  'flow/dag-input': { patch: [{ op: 'replace', path: '/flow/dagInput', value: '$event.value' }] },
+  'flow/dag-run': {
+    patch: [
+      { op: 'replace', path: '/flow/run',
+        value: { running: true, nodes: {}, output: null, error: null, log: [] } },
+    ],
+    effects: [{ run: 'flow-dag-run', with: { doc: '$.flow.doc', inputText: '$.flow.dagInput' } }],
+  },
+  'flow/dag-node': {
+    $if: ['$.flow.run', { patch: [
+      { op: 'add', path: { $concat: ['/flow/run/nodes/', '$payload.id'] }, value: '$payload.status' },
+      { op: 'add', path: '/flow/run/log/-', value: '$payload' },
+    ] }],
+  },
+  'flow/dag-done': {
+    $if: ['$.flow.run', { patch: [
+      { op: 'replace', path: '/flow/run/running', value: false },
+      { op: 'replace', path: '/flow/run/output', value: '$payload.output' },
+    ] }],
+  },
+  'flow/dag-fail': {
+    $if: ['$.flow.run', { patch: [
+      { op: 'replace', path: '/flow/run/running', value: false },
+      { op: 'replace', path: '/flow/run/error', value: '$payload.message' },
+    ] }],
+  },
+  'flow/dag-abort': { effects: [{ run: 'flow-dag-abort' }] },
+
+  // The inspector writes through the six standard form actions,
+  // mirrored from @jarenjs/app's createFormActions with one change:
+  // the target prepends the SELECTION's pointer, so one static action
+  // set serves whichever member is selected.
+  'flow/f-input': { patch: [{
+    op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
+    path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },
+    value: '$event.value' }] },
+  'flow/f-check': { patch: [{
+    op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
+    path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },
+    value: '$event.checked' }] },
+  'flow/f-number': { patch: [{
+    op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
+    path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },
+    value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] } }] },
+  'flow/f-json': { patch: [{
+    op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
+    path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },
+    value: '$event.formJsonValue' }] },
+  'flow/f-add': { patch: [{
+    op: 'add',
+    path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer', '/-'] },
+    value: '$payload.value' }] },
+  'flow/f-remove': { patch: [{
+    op: 'remove',
+    path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] } }] },
 };
 
 /** The site's subscriptions: the hash router feed, always live. */

@@ -19,6 +19,7 @@ import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chart
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
+import { flowPageViewModel } from '../boundaries/flowstudio.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
 import { callout, error } from '../lib/nodes.js';
 import { formatJson, formatMs, formatRatio, memo1 } from '../lib/format.js';
@@ -28,6 +29,7 @@ const NAV = [
   { page: 'home', label: 'Home', href: '#/' },
   { page: 'playground', label: 'Playground', href: '#/playground' },
   { page: 'studio', label: 'Studio', href: '#/studio' },
+  { page: 'flow', label: 'Flow', href: '#/flow' },
   { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
   { page: 'charts', label: 'Charts', href: '#/charts' },
   { page: 'docs', label: 'Docs', href: '#/docs' },
@@ -111,6 +113,7 @@ export function viewModel(state) {
   if (page === 'charts') ui.chartsPage = chartsPage(state);
   if (page === 'playground') ui.pg = playgroundPage(state);
   if (page === 'studio') ui.studio = studioPage(state);
+  if (page === 'flow') ui.flow = flowPageViewModel(state.flow);
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
   if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
