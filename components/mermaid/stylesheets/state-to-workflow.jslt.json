@@ -11,7 +11,13 @@
         "transitions": [
           {
             "$for": { "t": "$.ast.transitions[?(@.to != \"[*]\" && @.from != \"[*]\")]" },
-            "$return": { "from": "$t.from", "event": "$t.event", "to": "$t.to" }
+            "$return": {
+              "from": "$t.from",
+              "event": "$t.event",
+              "guard": { "$if": ["$t.guard", "$t.guard"] },
+              "to": "$t.to",
+              "effects": { "$if": ["$t.effect", [{ "run": "$t.effect" }]] }
+            }
           }
         ]
       }

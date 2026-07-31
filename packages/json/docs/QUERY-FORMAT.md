@@ -423,8 +423,8 @@ array, `$for` unpacks it into its members — one level only — and iterates
 those. This is the ergonomic default for the JSON data model, where `[*]`
 already produced values, not nodes. To bind an array *as a value*, use `$let`
 or `{"$const": [...]}`. Objects are NOT auto-iterated; iterate an object's
-values with a `[*]` path segment (a future `$entries` operator is the planned
-counterpart for member pairs).
+values with a `[*]` path segment, or its member pairs with the `$entries`
+operator (§8.9).
 
 **Multiple bindings** nest left-to-right in document key order, exactly like
 consecutive XQuery `for` clauses, and **may be correlated**: a later source
@@ -972,7 +972,7 @@ clause/operator collision note.
 | `$min` | empty | The least item (`fn:min`). Items MUST be all numbers or all strings (`JQ2001` otherwise, including mixed); numbers compare mathematically, strings by Unicode scalar values. A `NaN` item makes the result `NaN` (F&O). |
 | `$max` | empty | The greatest item (`fn:max`), same rules as `$min`. |
 
-### 8.9 Sequence operators — `$distinct $reverse $sort $head $tail $subsequence $index-of $range $get`
+### 8.9 Sequence operators — `$distinct $reverse $sort $head $tail $subsequence $index-of $range $get $entries $from-entries`
 
 | Operator | Signature | Definition |
 |---|---|---|
@@ -985,6 +985,8 @@ clause/operator collision note.
 | `$index-of` | `[seq, item]` | The 0-based (D6) positions in *seq* of the items deep-equal to *item*, as a sequence, in order (`fn:index-of`). Equality is the `$eq` item relation (D2) — `NaN` matches nothing. *item* MUST be exactly one item (`JQ2001`). |
 | `$range` | `[start, end]` | The integers from *start* to *end* **inclusive** (the XQuery `to` operator). Either operand empty → empty; *start* > *end* → empty. A non-integral or non-number operand is `JQ2001`. A result of more than 2³² items is runtime error `JQ2007` (resource guard). |
 | `$get` | `[target, key]` | Dynamic lookup, the runtime counterpart of a path leaf: an object *target* with a string *key* yields the member value or empty; an array *target* with an integer *key* yields the element at that 0-based (D6) index — a negative index counts from the end, like the RFC 9535 index selector — or empty. **Every other combination** (wrong type pairing, non-integral index, empty or multi-item operands) is simply the empty sequence, never an error. |
+| `$entries` | `{"$entries": e}` | The member-pair counterpart of a `[*]` path segment (which yields values only): each OBJECT item of the operand contributes one `{"key": name, "value": v}` pair per member, in member order; non-object items contribute nothing, and an empty operand yields the empty sequence. `$from-entries` is the inverse; the `$map` constructor (§3.5.2) is the fixed-arity form for computed keys. |
+| `$from-entries` | `{"$from-entries": e}` | The inverse of `$entries`: assembles ONE object from the operand's `{"key": name, "value": v}` items, in sequence order — later pairs win on duplicate keys, exactly like the `$map` constructor. Items without a string `key` contribute nothing; a pair missing its `value` member reads as `null`; an empty operand constructs the empty object. |
 
 Combined example (also exercises the aggregates of §8.8):
 

@@ -586,6 +586,8 @@
           "$sort",
           "$head",
           "$tail",
+          "$entries",
+          "$from-entries",
           "$upper",
           "$lower",
           "$string-length",

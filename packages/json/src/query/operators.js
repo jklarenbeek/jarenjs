@@ -1292,6 +1292,59 @@ export const OPERATORS = Object.freeze({
     },
   },
 
+  '$entries': {
+    params: UNARY,
+    result: RESULT_MANY,
+    compile: (gets) => {
+      const get = gets[0];
+      // the member-pair counterpart of `[*]` (which yields values only):
+      // each OBJECT item contributes one `{ "key": name, "value": v }`
+      // per member, in member order; non-object items contribute
+      // nothing, like every other type mismatch in this family
+      return (f) => {
+        const v = get(f);
+        const items = v instanceof Seq ? v.items : (v === EMPTY ? [] : [v]);
+        const out = [];
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (typeof item !== 'object' || item === null || Array.isArray(item))
+            continue;
+          for (const key of Object.keys(item))
+            out.push({ key, value: item[key] });
+        }
+        return seqOf(out);
+      };
+    },
+  },
+
+  '$from-entries': {
+    params: UNARY,
+    result: RESULT_ONE,
+    compile: (gets) => {
+      const get = gets[0];
+      // the inverse of $entries: assemble one object from
+      // `{ "key": name, "value": v }` items, in sequence order. Later
+      // pairs win on duplicate keys, like the $map constructor; items
+      // without a string `key` contribute nothing; a missing `value`
+      // member reads as null (undefined is not a JSON value)
+      return (f) => {
+        const v = get(f);
+        const items = v instanceof Seq ? v.items : (v === EMPTY ? [] : [v]);
+        /** @type {Record<string, any>} */
+        const out = {};
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (typeof item !== 'object' || item === null || Array.isArray(item))
+            continue;
+          if (typeof item.key !== 'string')
+            continue;
+          out[item.key] = hasOwn(item, 'value') ? item.value : null;
+        }
+        return out;
+      };
+    },
+  },
+
   //#endregion
 
   //#region section 8.10 - types and casts

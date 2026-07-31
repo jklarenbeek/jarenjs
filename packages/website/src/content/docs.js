@@ -95,7 +95,7 @@ export const DOCS_SECTIONS = [
   {
     id: 'json-query', title: 'Jaren JSON Query',
     blocks: [
-      p('XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 91-operator library — as JSON documents with JSONPath leaves. The grammar is published as JSON Schema, so a constrained decoder cannot emit an invalid query.'),
+      p('XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 93-operator library — as JSON documents with JSONPath leaves. The grammar is published as JSON Schema, so a constrained decoder cannot emit an invalid query.'),
       code(null, '{ "$for": { "b": "$.store.book[*]" },\n  "$where": { "$lt": ["$b.price", 10] },\n  "$orderby": ["$b.price"],\n  "$return": { "title": "$b.title", "price": "$b.price" } }'),
       p('A $fold clause turns the same phrase into a reduction: the accumulator is a binding, not a lambda, so the language gets folds, running totals and runtime pointer walks without the JSON encoding ever needing to spell a function value. Extended $for bindings cover the rest of XQuery iteration — $allowing-empty for outer joins, and tumbling or sliding windows for moving aggregates.'),
       code(null, '{ "$fold": { "total": 0 },\n  "$for": { "b": "$.store.book[*]" },\n  "$where": { "$lt": ["$b.price", 10] },\n  "$return": { "$add": ["$total", "$b.price"] } }'),

@@ -118,19 +118,33 @@ classDiagram
 
 ## Bidirectional semantic model
 
-The geometry-free AST doubles as a reusable domain model. The flagship:
-a `stateDiagram-v2` projects via a JSLT stylesheet
-(`stylesheets/state-to-workflow.jslt.json`) into an `@jarenjs/app`
-workflow / FSM `{ initial, states, transitions }`, validated by
-`schemas/jaren-workflow.schema.json`; the reverse stylesheet plus
-`toMermaid` turns a workflow back into editable diagram text.
+The geometry-free AST doubles as a reusable domain model, projected
+both ways by plain JSLT stylesheets — no code, just documents. The
+flagship: a `stateDiagram-v2` projects via
+`stylesheets/state-to-workflow.jslt.json` into an executable machine
+(the `@jarenjs/flow` jaren-fsm superset shape `{ initial, states,
+transitions }`, validated by `schemas/jaren-workflow.schema.json`),
+with a transition label's UML parts parsed for it: `event [guard] /
+effect` become the machine's event, guard and `{ "run": effect }`
+descriptor. The reverse stylesheet plus `toMermaid` turns a machine
+back into editable diagram text — string guards round-trip exactly,
+structured members print as documented `[…]` placeholders.
+
+The same arrow exists for dataflow: `flowchart-to-dag.jslt.json`
+projects a flowchart into a jaren-dag **skeleton** (task stubs named by
+node id, edge labels becoming ports), and `dag-to-flowchart.jslt.json`
+draws a real dag document as a flowchart — one shape per node kind,
+ports and selects on the edge labels. Acyclicity stays `compileDag`'s
+job; the projection just draws.
 
 ```mermaid
 flowchart LR
   M[Mermaid text] --> A[state AST]
-  A -->|state-to-workflow.jslt| W[workflow / FSM]
+  A -->|state-to-workflow.jslt| W[machine / FSM]
   W -->|workflow-to-state.jslt| A2[state AST]
   A2 -->|toMermaid| M
+  F[flowchart AST] -->|flowchart-to-dag.jslt| D[jaren-dag]
+  D -->|dag-to-flowchart.jslt| F
 ```
 
 ## Diagram coverage

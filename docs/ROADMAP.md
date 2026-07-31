@@ -203,6 +203,19 @@ delete it or fix it.
   name, so today the safe profile is scoped to the *view* renderer and app
   documents are self-authored only.
 
+## @jarenjs/flow
+
+- [ ] **Statechart vocabulary** — jaren-fsm 0.1 deliberately has no
+  hierarchy/compound states, history states, parallel regions or
+  delayed/timed transitions (FLOW-FORMAT §1.1 names them as non-goals).
+  Revisit when a consumer needs one; hierarchy is the likely first,
+  since the mermaid state parser already records a flattened `parent`.
+- [ ] **Streaming dag input** — a run is one value in, one value out
+  (FLOW-FORMAT §7.5); feeding a graph chunk-by-chunk from the
+  `@jarenjs/josl` incremental readers is the natural 0.2 composition,
+  and doing it honestly changes the node contract, so it is a format
+  revision rather than an option.
+
 ## @jarenjs/md
 
 - [ ] **CommonMark conformance push** — 571/655 spec examples pass
@@ -233,7 +246,7 @@ delete it or fix it.
   one another, so the remaining work here is the routing itself: an edge still
   runs straight from border to border and can cross a node it has nothing to
   do with.
-- [ ] **More domain projections** — the flagship `stateDiagram ⇄ @jarenjs/app` workflow ships; flowchart⇄DAG executor, sequence⇄orchestration/saga, ER⇄JSON-Schema+`@jarenjs/forms` are follow-ups on the same geometry-free-AST-as-model idea.
+- [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships two executable arrows (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, both run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
 - [ ] **Diagram tooltips** — pan/zoom/touch ship as the opt-in
   `mermaidPlugin({ interactive: true })` hydrate; per-node tooltips are the
   remaining half, and they need a hover/focus target the pure render does not

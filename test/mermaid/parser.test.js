@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { parseMermaid, MermaidParseError, parseMermaidConfig } from '@jarenjs/mermaid';
+import { parseMermaid, toMermaid, MermaidParseError, parseMermaidConfig } from '@jarenjs/mermaid';
 
 describe('parseMermaid: flowchart', function () {
   it('parses directions, shapes, edges and labels', function () {
@@ -159,5 +159,64 @@ flowchart TD
     assert.deepEqual(config.flowchart, { curve: 'basis' });
     assert.equal(body.includes('%%'), false);
     assert.equal(body.trim().startsWith('flowchart'), true);
+  });
+});
+
+
+describe('state transition labels — the UML reading', function () {
+  const t = (label) => {
+    const src = label === null
+      ? 'stateDiagram-v2\nA --> B'
+      : `stateDiagram-v2\nA --> B : ${label}`;
+    return parseMermaid(src).ast.transitions[0];
+  };
+
+  it('parses all eight presence combinations of event/guard/effect', function () {
+    assert.deepEqual(t(null), {
+      from: 'A', to: 'B', label: null, event: null, guard: null, effect: null, parent: null,
+    });
+    assert.deepEqual(t('go'), {
+      from: 'A', to: 'B', label: 'go', event: 'go', guard: null, effect: null, parent: null,
+    });
+    assert.deepEqual(t('[x > 1]'), {
+      from: 'A', to: 'B', label: '[x > 1]', event: null, guard: 'x > 1', effect: null, parent: null,
+    });
+    assert.deepEqual(t('/ act'), {
+      from: 'A', to: 'B', label: '/ act', event: null, guard: null, effect: 'act', parent: null,
+    });
+    assert.deepEqual(t('go [x]'), {
+      from: 'A', to: 'B', label: 'go [x]', event: 'go', guard: 'x', effect: null, parent: null,
+    });
+    assert.deepEqual(t('go / act'), {
+      from: 'A', to: 'B', label: 'go / act', event: 'go', guard: null, effect: 'act', parent: null,
+    });
+    assert.deepEqual(t('[x] / act'), {
+      from: 'A', to: 'B', label: '[x] / act', event: null, guard: 'x', effect: 'act', parent: null,
+    });
+    assert.deepEqual(t('go [x] / act'), {
+      from: 'A', to: 'B', label: 'go [x] / act', event: 'go', guard: 'x', effect: 'act', parent: null,
+    });
+  });
+
+  it('reads no-pattern labels whole as the event (the historical meaning)', function () {
+    const cases = [
+      'array[0] fetch',       // text between ] and the end
+      'go [x] weird / act',   // text between ] and /
+      'broken [x',            // unmatched [
+    ];
+    for (const label of cases) {
+      assert.deepEqual(t(label), {
+        from: 'A', to: 'B', label, event: label, guard: null, effect: null, parent: null,
+      }, label);
+    }
+    assert.equal(t('go [a[0] > 1] / act').guard, 'a[0] > 1', 'nested brackets stay inside the guard');
+    assert.equal(t('go / a / b').effect, 'a / b', 'the effect starts at the FIRST slash');
+  });
+
+  it('prints the verbatim label back (toMermaid fixed point) and renders it', function () {
+    const src = 'stateDiagram-v2\nA --> B : go [x > 1] / act';
+    const doc = parseMermaid(src);
+    assert.match(toMermaid(doc), /A --> B : go \[x > 1\] \/ act/);
+    assert.deepEqual(parseMermaid(toMermaid(doc)).ast, doc.ast, 'label round-trips byte for byte');
   });
 });

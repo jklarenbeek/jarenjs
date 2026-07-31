@@ -257,7 +257,7 @@ function printState(ast) {
     if (s.label !== s.id) out.push(`${s.id} : ${s.label}`);
   }
   for (const t of ast.transitions) {
-    out.push(`${t.from} --> ${t.to}${t.event ? ' : ' + t.event : ''}`);
+    out.push(`${t.from} --> ${t.to}${t.label ? ' : ' + t.label : ''}`);
   }
   return out.join('\n') + '\n';
 }

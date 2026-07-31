@@ -1,0 +1,62 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "direction": "TD",
+        "nodes": [
+          {
+            "$for": { "e": { "$entries": "$.nodes" } },
+            "$return": {
+              "id": "$e.key",
+              "label": "$e.key",
+              "shape": {
+                "$if": [{ "$eq": ["$e.value.kind", "input"] }, "stadium",
+                { "$if": [{ "$eq": ["$e.value.kind", "output"] }, "doublecircle",
+                { "$if": [{ "$eq": ["$e.value.kind", "const"] }, "circle",
+                { "$if": [{ "$eq": ["$e.value.kind", "query"] }, "rect",
+                { "$if": [{ "$eq": ["$e.value.kind", "jslt"] }, "round",
+                  "subroutine"] }] }] }] }]
+              }
+            }
+          }
+        ],
+        "edges": [
+          {
+            "$for": { "g": "$.edges[*]" },
+            "$return": {
+              "$let": {
+                "portText": { "$if": ["$g.port", "$g.port"] },
+                "selectText": {
+                  "$if": [
+                    { "$and": [{ "$exists": "$g.select" }, { "$not": { "$is-null": "$g.select" } }] },
+                    { "$if": [{ "$is-string": "$g.select" }, "$g.select", "…"] }
+                  ]
+                }
+              },
+              "$return": {
+                "$let": {
+                  "pieces": { "$seq": ["$portText", "$selectText"] }
+                },
+                "$return": {
+                  "from": "$g.from",
+                  "to": "$g.to",
+                  "stroke": "solid",
+                  "head": "arrow",
+                  "tail": "none",
+                  "length": 2,
+                  "label": { "$coalesce": [{ "$if": [{ "$exists": "$pieces" }, { "$string-join": ["$pieces", " · "] }] }, null] }
+                }
+              }
+            }
+          }
+        ],
+        "subgraphs": [],
+        "classDefs": [],
+        "classes": [],
+        "styles": []
+      }
+    }
+  ]
+}

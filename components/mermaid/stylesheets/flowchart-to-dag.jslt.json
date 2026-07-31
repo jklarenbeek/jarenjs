@@ -1,0 +1,29 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "$map": [
+          ["$$dag", "0.1"],
+          ["nodes", {
+            "$from-entries": {
+              "$for": { "n": "$.ast.nodes[*]" },
+              "$return": { "key": "$n.id", "value": { "kind": "task", "run": "$n.id" } }
+            }
+          }],
+          ["edges", [
+            {
+              "$for": { "g": "$.ast.edges[*]" },
+              "$return": {
+                "from": "$g.from",
+                "to": "$g.to",
+                "port": { "$if": ["$g.label", "$g.label"] }
+              }
+            }
+          ]]
+        ]
+      }
+    }
+  ]
+}

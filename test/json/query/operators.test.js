@@ -540,6 +540,66 @@ describe('Jaren JSON Query operator library', () => {
     });
   });
 
+  describe('$entries (member pairs)', () => {
+    it('should yield one { key, value } pair per member, in member order', () => {
+      assert.deepStrictEqual(queryJson({ $entries: '$.store.bicycle' }, bookstore), [
+        { key: 'color', value: 'red' },
+        { key: 'price', value: 399 },
+      ]);
+      assert.strictEqual(queryJson({ $entries: { $const: {} } }, null), undefined,
+        'an empty object has no pairs');
+    });
+
+    it('should concatenate pairs over a multi-item operand and skip non-objects', () => {
+      assert.deepStrictEqual(
+        queryJson({ $entries: '$.rows[*]' }, { rows: [{ x: 1 }, 42, { y: 2 }] }),
+        [{ key: 'x', value: 1 }, { key: 'y', value: 2 }]);
+      assert.strictEqual(queryJson({ $entries: 42 }, null), undefined);
+      assert.strictEqual(queryJson({ $entries: { $const: [1, 2] } }, null), undefined,
+        'an array item is not an object');
+      assert.strictEqual(queryJson({ $entries: '$.missing' }, {}), undefined);
+    });
+
+    it('projects an object map into an id-carrying array (the FLWOR shape)', () => {
+      assert.deepStrictEqual(queryJson({
+        $for: { e: { $entries: '$' } },
+        $return: { id: '$e.key', decl: '$e.value' },
+      }, { a: { kind: 'input' }, b: { kind: 'output' } }), [
+        { id: 'a', decl: { kind: 'input' } },
+        { id: 'b', decl: { kind: 'output' } },
+      ]);
+    });
+  });
+
+  describe('$from-entries (the inverse)', () => {
+    it('assembles an object from pairs; later keys win, like $map', () => {
+      assert.deepStrictEqual(
+        queryJson({ '$from-entries': { $entries: '$' } }, { a: 1, b: [2] }),
+        { a: 1, b: [2] }, 'entries → from-entries is the identity on objects');
+      assert.deepStrictEqual(
+        queryJson({ '$from-entries': { $seq: [
+          { key: 'x', value: 1 }, { key: 'x', value: 2 },
+        ] } }, null), { x: 2 });
+    });
+
+    it('skips keyless items, nulls a missing value, and builds {} from empty', () => {
+      assert.deepStrictEqual(
+        queryJson({ '$from-entries': { $seq: [42, { value: 9 }, { key: 'y' }] } }, null),
+        { y: null });
+      assert.deepStrictEqual(queryJson({ '$from-entries': '$.missing' }, {}), {});
+    });
+
+    it('rebuilds a renamed object map through FLWOR (the projection shape)', () => {
+      assert.deepStrictEqual(queryJson({
+        '$from-entries': {
+          $for: { e: { $entries: '$' } },
+          $return: { key: { $concat: ['node_', '$e.key'] }, value: '$e.value.kind' },
+        },
+      }, { a: { kind: 'input' }, b: { kind: 'output' } }),
+      { node_a: 'input', node_b: 'output' });
+    });
+  });
+
   describe('$get (dynamic lookup)', () => {
     it('should look up object members by string key', () => {
       assert.strictEqual(queryJson({ $get: ['$.store.bicycle', 'color'] }, bookstore), 'red');
@@ -736,6 +796,8 @@ describe('Jaren JSON Query operator library', () => {
         1, 2, 3,
         1, 2, 3, 4, 5,
         'red',
+        { key: 'color', value: 'red' }, { key: 'price', value: 399 },
+        { color: 'red', price: 399 },
       ]);
     });
 

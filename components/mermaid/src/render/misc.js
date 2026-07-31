@@ -125,7 +125,7 @@ export function structuredSections(diagram, ast) {
       title: 'State machine',
       sections: [
         { heading: 'states', rows: ast.states.map((s) => (s.label !== s.id ? `${s.id}: ${s.label}` : s.id)) },
-        { heading: 'transitions', rows: ast.transitions.map((tr) => `${tr.from} → ${tr.to}${tr.event ? ' : ' + tr.event : ''}`) },
+        { heading: 'transitions', rows: ast.transitions.map((tr) => `${tr.from} → ${tr.to}${tr.label ? ' : ' + tr.label : ''}`) },
       ],
     };
   }

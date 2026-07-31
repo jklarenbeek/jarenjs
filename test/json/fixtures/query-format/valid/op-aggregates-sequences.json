@@ -54,6 +54,14 @@
         "$.store.bicycle",
         "color"
       ]
+    },
+    {
+      "$entries": "$.store.bicycle"
+    },
+    {
+      "$from-entries": {
+        "$entries": "$.store.bicycle"
+      }
     }
   ]
 }

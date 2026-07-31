@@ -281,7 +281,7 @@
         "enum": [
           "$exists", "$empty", "$not", "$neg",
           "$count", "$sum", "$avg", "$min", "$max",
-          "$distinct", "$reverse", "$sort", "$head", "$tail",
+          "$distinct", "$reverse", "$sort", "$head", "$tail", "$entries", "$from-entries",
           "$upper", "$lower", "$string-length", "$normalize-space",
           "$string", "$number", "$boolean",
           "$is-string", "$is-number", "$is-boolean", "$is-null", "$is-array", "$is-object",

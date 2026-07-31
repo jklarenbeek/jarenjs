@@ -109,8 +109,16 @@ loop/opt/alt/par/critical/break.
 
 Class: `{ classes:[{ name, label, members[] }], relations[] }`. ER:
 `{ entities:[{ name, attributes[] }], relationships[] }`. State:
-`{ states:[{ id, label }], transitions:[{ from, to, event, parent }] }`.
-Gantt: `{ meta, sections:[{ name, tasks[] }] }`. Pie:
+`{ states:[{ id, label }], transitions:[{ from, to, label, event,
+guard, effect, parent }] }` — a transition's `label` is the verbatim
+text after `:` (what renderers draw and `toMermaid` prints), and
+`event`/`guard`/`effect` are its UML reading, parsed as
+`event [guard] / effect` with every part optional: the first `[` opens
+the guard (nesting counted), the effect starts at the first `/` after
+it (or the first `/` at all when there is no guard), and a label that
+fits no pattern — an unmatched `[`, or text between `]` and `/` — reads
+whole as the event, which keeps plain labels meaning what they always
+meant. Gantt: `{ meta, sections:[{ name, tasks[] }] }`. Pie:
 `{ title, showData, slices:[{ label, value }] }`.
 
 ### 4.4 Secondary types
@@ -148,6 +156,49 @@ Because there is no per-plugin `toMarkdown` hook, a JSLT-transformed
 diagram round-trips through `toMarkdown` only when its fence `value` is
 refreshed with `toMermaid(newDoc)` — `refreshMermaidFence` is that
 primitive.
+
+### 5.1 Semantic projections
+
+The geometry-free AST doubles as a domain model, and four JSLT
+stylesheets in [`stylesheets/`](../stylesheets/) project it both ways —
+plain data documents, no code:
+
+| stylesheet | from → to |
+|---|---|
+| `state-to-workflow.jslt.json` | state DiagramDocument → executable machine (`@jarenjs/flow`'s jaren-fsm superset shape) |
+| `workflow-to-state.jslt.json` | machine document → state AST (print with `toMermaid`) |
+| `flowchart-to-dag.jslt.json` | flowchart DiagramDocument → jaren-dag **skeleton** (every node a `task` stub named by its id; edge labels become `port`s verbatim) |
+| `dag-to-flowchart.jslt.json` | jaren-dag document → flowchart AST |
+
+The forward state projection maps the parsed UML parts: `event` and
+`guard` carry over when present, and an `effect` becomes
+`effects: [{ "run": <effect text> }]` — the effect label **is** the
+registry name by convention. The reverse composes the label from the
+machine's parts and stays consistent with the parser by construction.
+
+The dag projection renders each node kind as a fixed flowchart shape:
+
+| kind | shape |
+|---|---|
+| `input` | stadium |
+| `output` | doublecircle |
+| `const` | circle |
+| `query` | rect |
+| `jslt` | round |
+| `task` | subroutine |
+
+Edge decorations print into the edge label as `port` / `port · select`
+(joined with ` · `).
+
+**Lossiness is documented, not hidden.** Diagrams are pictures of
+machines; the document is the truth. A structured (non-string) guard
+prints as the `[…]` placeholder; an effect prints its `run` name only
+(multiple effects join with `, `), dropping any `with`; a structured
+edge `select` prints as `…`. Round-tripping is exact for string guards
+and bare run names, and deliberately lossy beyond that. Division of
+labor: a cyclic flowchart **projects** to a dag skeleton without
+complaint — acyclicity is `compileDag`'s job (`JF0016`), not the
+projection's.
 
 ## 6. Layout & metrics (informative)
 

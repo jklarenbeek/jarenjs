@@ -386,7 +386,7 @@ queryJson({
 }, [1, 2, 3, 4, 5]); // [2, 3, 4] — a 3-point moving average
 ```
 
-The operator library (91 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, and the spatial family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+The operator library (93 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, and the spatial family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
 
 **Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), `$week`/`$week-year`/`$quarter`/`$weekday` add the derived calendar fields, and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
 
