@@ -17,6 +17,7 @@ const packageFiles = [
   'components/charts/package.json',
   'packages/josl/package.json',
   'packages/ai/package.json',
+  'packages/flow/package.json',
 ];
 
 // private workspaces that are never versioned but whose semver ranges on

@@ -1,5 +1,5 @@
 {
-  "name": "@jarenjs/md",
+  "name": "@jarenjs/flow",
   "private": false,
   "version": "0.23.0",
   "type": "module",
@@ -11,19 +11,6 @@
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
-    "./plugins": {
-      "types": "./dist/types/plugins/index.d.ts",
-      "default": "./src/plugins/index.js"
-    },
-    "./html": {
-      "types": "./dist/types/html.d.ts",
-      "default": "./src/html.js"
-    },
-    "./component": {
-      "types": "./dist/types/component/index.d.ts",
-      "default": "./src/component/index.js"
-    },
-    "./styles/md.css": "./styles/md.css",
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
@@ -31,15 +18,14 @@
     "dist/types/",
     "src/",
     "docs/",
-    "schemas/",
-    "styles/"
+    "schemas/"
   ],
-  "description": "Markdown + frontmatter as JSON documents: a compile-to-closures parser whose AST feeds the Jaren query, JSLT, view and forms engines natively",
+  "description": "Executable workflow documents for the Jaren suite: the jaren-fsm finite-state-machine format compiled to a pure step function, with query-document guards and effect descriptors as data",
   "author": "joham",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jklarenbeek/jarenjs.git",
-    "directory": "components/md"
+    "directory": "packages/flow"
   },
   "license": "MIT",
   "engines": {
@@ -52,12 +38,10 @@
   "keywords": [
     "jaren",
     "json",
-    "markdown",
-    "commonmark",
-    "gfm",
-    "frontmatter",
-    "ast",
-    "parser"
+    "fsm",
+    "finite-state-machine",
+    "workflow",
+    "state-machine"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -65,8 +49,6 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.23.0",
-    "@jarenjs/mermaid": "^0.23.0",
-    "@jarenjs/view": "^0.23.0"
+    "@jarenjs/json": "^0.23.0"
   }
 }

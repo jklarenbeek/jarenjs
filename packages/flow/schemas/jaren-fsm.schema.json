@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-fsm/0.1",
+  "title": "Jaren finite state machine 0.1",
+  "description": "Structural grammar of an executable jaren-fsm document (see packages/flow/docs/FLOW-FORMAT.md): declared states, an initial state and a document-ordered transition table whose guards and effect props are Jaren JSON Query documents — register the published query grammar alongside this artifact. The shape is a strict superset of the mermaid state-diagram projection ('jaren-workflow'): its version key is optional, a plain-string guard is a query document (a $-path expression; any other non-empty string is a literal and therefore always true), and null means no guard / any event. This schema is structural validation only: the compiler remains authoritative for semantic rules it cannot express — undeclared state references, duplicate ids and guard compilability are compile-time checks (JF0xxx), and unknown members are ignored for forward compatibility.",
+  "type": "object",
+  "properties": {
+    "$fsm": {
+      "description": "The fsm format version; absent implies 0.1.",
+      "const": "0.1"
+    },
+    "initial": {
+      "description": "The id of the machine's initial state, or null when the document does not choose one (a session must then be started with an explicit state).",
+      "type": ["string", "null"]
+    },
+    "states": {
+      "description": "Declared states, in document order. A string is shorthand for { id }.",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The state id transitions refer to.",
+                "type": "string"
+              },
+              "entry": { "$ref": "#/$defs/effects" },
+              "exit": { "$ref": "#/$defs/effects" },
+              "final": {
+                "description": "Marks a terminal state; a session reports done here.",
+                "type": "boolean"
+              }
+            },
+            "required": ["id"]
+          }
+        ]
+      }
+    },
+    "transitions": {
+      "description": "The transition table. Document order IS the selection order: the first entry whose from-state, event (a null or absent event matches any name) and guard all match fires.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "description": "The state this transition leaves.",
+            "type": "string"
+          },
+          "event": {
+            "description": "The event name this transition answers; null or absent matches any event (a wildcard). A transition never fires spontaneously.",
+            "type": ["string", "null"]
+          },
+          "guard": {
+            "description": "A Jaren JSON Query document asserted by effective boolean value against the evaluation scope { state, event, payload, context }; null or absent means no guard. A plain string not starting with '$' is a literal and therefore always true — projection-produced display guards are vacuous by design.",
+            "anyOf": [
+              { "type": "null" },
+              { "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }
+            ]
+          },
+          "to": {
+            "description": "The state this transition enters.",
+            "type": "string"
+          },
+          "effects": { "$ref": "#/$defs/effects" }
+        },
+        "required": ["from", "to"]
+      }
+    }
+  },
+  "required": ["initial", "states", "transitions"],
+  "$defs": {
+    "effects": {
+      "description": "Effect descriptors, returned as resolved data when their state or transition fires — the engine never executes them.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "description": "The host-registered handler name.",
+            "type": "string",
+            "minLength": 1
+          },
+          "with": {
+            "description": "Handler props: a Jaren JSON Query document evaluated against the scope at fire time; an empty result omits the member.",
+            "allOf": [{ "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }]
+          }
+        },
+        "required": ["run"]
+      }
+    }
+  }
+}

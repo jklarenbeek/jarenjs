@@ -551,3 +551,24 @@ const emittedSource: string = emitTypeScript({ type: 'string' },
   { name: 'Plain', banner: false, normalize: { useDefaults: true } });
 const emittedDocs: string = emitMarkdown({ type: 'string' }, { name: 'Plain' });
 void [emittedSource, emittedDocs];
+
+// @jarenjs/flow — compiled machine, pure step, session over it
+import { compileFsm, createFsmSession, FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
+
+const fsm = compileFsm({
+  initial: 'idle',
+  states: ['idle', { id: 'done', final: true }],
+  transitions: [{ from: 'idle', event: 'finish', guard: '$.payload.ok', to: 'done' }],
+});
+const fsmInitial: string | null = fsm.initial;
+const fsmStates: readonly string[] = fsm.states;
+const fsmEvents: readonly string[] = fsm.events('idle');
+const fsmResult = fsm.step('idle', 'finish', { payload: { ok: true }, context: null });
+const fsmMoved: boolean = fsmResult.changed;
+const fsmErrors: { code: string, docPath: string, message: string }[] = fsmResult.errors;
+void [fsmInitial, fsmStates, fsmEvents, fsmMoved, fsmErrors, fsm.final('done')];
+
+const fsmSession = createFsmSession(fsm, 'idle');
+const fsmDone: boolean = fsmSession.done;
+void [fsmSession.state, fsmSession.can('finish'), fsmSession.send('finish').state, fsmDone];
+void [FlowCompileError, FlowRuntimeError];

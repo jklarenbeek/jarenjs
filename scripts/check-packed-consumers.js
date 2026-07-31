@@ -209,6 +209,22 @@ if (tree !== null && tree.session !== undefined) {
   void (tree.session.errorCount + tree.session.serverErrorCount);
 }
 `,
+  '@jarenjs/flow': `
+import { compileFsm, createFsmSession } from '@jarenjs/flow';
+const fsm = compileFsm({
+  initial: 'a',
+  states: ['a', { id: 'b', final: true }],
+  transitions: [{ from: 'a', event: 'go', guard: '$.payload.ok', to: 'b' }],
+});
+const states: readonly string[] = fsm.states;
+void states;
+const result = fsm.step('a', 'go', { payload: { ok: true } });
+void (result.changed && result.final);
+const errors: { code: string, docPath: string }[] = result.errors;
+void errors;
+const session = createFsmSession(fsm);
+void (session.can('go') && session.send('go').state === session.state && session.done);
+`,
 };
 
 // lockfile hygiene is release evidence: an extraneous record means the
