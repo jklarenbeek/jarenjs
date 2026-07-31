@@ -169,6 +169,13 @@ export const FLOW_RULES = [
       ['p', { class: 'page-lead' },
         'Start from a seed — a complete, runnable document either way.'],
       ['div', { class: 'example-grid' }, [{ $apply: '$.templates[*]' }]],
+      ['p', { class: 'muted' },
+        'The formats are specified in ',
+        ['a', { href: 'https://github.com/jklarenbeek/jarenjs/blob/main/packages/flow/docs/FLOW-FORMAT.md' },
+          'FLOW-FORMAT.md'],
+        ', and the engine is measured against XState on the ',
+        ['a', { href: '#/benchmarks?suite=flow' }, 'benchmarks page'],
+        '.'],
     ],
   },
   {

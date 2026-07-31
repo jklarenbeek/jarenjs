@@ -43,6 +43,7 @@ export const SUITES = [
   { key: 'view', label: 'View' },
   { key: 'charts', label: 'Charts' },
   { key: 'geo', label: 'Geo' },
+  { key: 'flow', label: 'Flow' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -73,6 +74,7 @@ export function deriveSuite(state, suite) {
     case 'view': return view(data);
     case 'charts': return chartsSuite(data);
     case 'geo': return geoSuite(data);
+    case 'flow': return flowSuite(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -994,6 +996,109 @@ function geoSuite(data) {
       strong: !c.agrees,
     })),
     'A disagreement beyond the stated tolerance withholds the timing table at generation time.'));
+  return out;
+}
+
+/**
+ * The flow suite: the FSM head-to-head against XState (compile,
+ * transition, the serializability wedge, the memory loss) and the DAG
+ * abstraction price against a hand-written baseline. The wedge is a
+ * conformance row — yes/no, the toml-test register — not a timing.
+ */
+function flowSuite(data) {
+  const sizes = data.sizes ?? [];
+  const mid = sizes[1] ?? sizes[0];
+  const row = (rows, needle) => (rows ?? []).find((r) => r.label.includes(needle));
+  const transMid = data.transition?.[mid] ?? [];
+  const step = row(transMid, 'step');
+  const actor = row(transMid, 'xstate');
+  const compileMid = data.compile?.[mid] ?? [];
+  const jarenC = row(compileMid, 'jaren');
+  const xstateC = row(compileMid, 'xstate');
+  const wedge = data.wedge?.guardsSurviveJson ?? {};
+  const mem = data.memory;
+
+  const out = [];
+  out.push(cards([
+    {
+      title: 'Transition vs XState',
+      value: step !== undefined && actor !== undefined ? formatRatio(actor.ns / step.ns) : '—',
+      note: `pure step vs actor.send, ${mid}-state machine`,
+    },
+    {
+      title: 'Compile vs XState',
+      value: jarenC !== undefined && xstateC !== undefined ? formatRatio(xstateC.ns / jarenC.ns) : '—',
+      note: 'compileFsm vs createMachine + createActor',
+    },
+    {
+      title: 'Machine survives JSON',
+      value: wedge.jaren ? 'yes' : '—',
+      note: 'guards included — XState\'s are functions JSON drops',
+    },
+    {
+      title: 'Memory per machine',
+      value: mem ? `${(mem.jarenBytesPer / 1024).toFixed(0)} KiB` : '—',
+      // the honest loss, stated as a cost not a "faster than"
+      note: mem ? `${mem.states}-state machine; XState's actor holds ${(mem.xstateBytesPer / 1024).toFixed(0)} KiB — we compile every guard as a query, so we hold more` : '',
+    },
+  ]));
+
+  out.push(callout('What this suite measures — the wedge, and where we lose',
+    'A jaren-fsm is one JSON document — states, transitions AND guards — so it survives a JSON round trip and still compiles and still fires its guard identically; the conformance row below is that fact. An XState machine\'s guards are functions in the second createMachine argument, which JSON.stringify drops, so the round-tripped machine throws "Guard not implemented" at the guarded transition. That is the whole reason to speak JSON all the way down: a machine you can serialize, store, diff, ship and replay. The pure step is several times faster than XState\'s actor.send, and compile is faster too — but the actor does scheduling and snapshot work the pure function does not, and a compiled Jaren machine holds MORE memory than the actor because every guard compiles to its own query closure. Both are on the page. The dag half pays the documented dataflow tax below.'));
+
+  // the wedge, as a conformance table (toml-test register)
+  out.push(table('Serializability — does the guarded machine survive a JSON round trip?',
+    ['Engine', 'Guards are…', 'Survives JSON.stringify → parse'],
+    [
+      { cells: ['@jarenjs/flow', 'query documents (data)', wedge.jaren ? 'yes — compiles and the guard still fires' : 'no'], strong: true },
+      { cells: ['XState v5', 'functions (code)', wedge.xstate ? 'yes' : 'no — the guard is dropped; the transition throws'] },
+    ],
+    'The conformance half of this suite: a machine is only "data all the way down" if its guards survive with it.'));
+
+  for (const n of sizes) {
+    const tr = data.transition?.[n] ?? [];
+    if (tr.length > 0) {
+      out.push(chartNode(timingBars(tr, { title: `Transition — ${n}-state machine`, valLabel: 'ns/op' })));
+      out.push(table(`Transition — ${n}-state machine`,
+        ['Route', 'ns per transition'],
+        tr.map((r) => ({ cells: [r.label, formatNs(r.ns)], strong: r.label.startsWith('jaren') })),
+        'Both Jaren routes are shown: the pure total-function step and the mutable session wrapper.'));
+    }
+  }
+
+  const compileRows = sizes.map((n) => {
+    const c = data.compile?.[n] ?? [];
+    return { n, jaren: row(c, 'jaren'), xstate: row(c, 'xstate') };
+  }).filter((r) => r.jaren !== undefined && r.xstate !== undefined);
+  if (compileRows.length > 0) {
+    out.push(table('Compile — jaren-fsm vs XState (createMachine + createActor)',
+      ['States', 'compileFsm', 'XState', 'Ratio'],
+      compileRows.map((r) => ({
+        cells: [String(r.n), formatNs(r.jaren.ns), formatNs(r.xstate.ns), formatRatio(r.xstate.ns / r.jaren.ns)],
+        strong: true,
+      })),
+      'XState builds an actor (scheduling, snapshots); the Jaren column is the pure compile. Not like-for-like — the description→drivable cost each charges.'));
+  }
+
+  const dag = data.dag;
+  if (dag !== undefined) {
+    out.push(callout('The dataflow tax',
+      'No npm library executes schema-validated JSON dataflow, so the honest rival is the same pipeline (filter → join → project) written straight in JavaScript — the view suite\'s hand-written-vs-stylesheet honesty, applied to graphs. The ratio is the price of dataflow as one serializable, constrained-decodable JSON value, and it ships beside what it buys.'));
+    const dagRow = (variant, r) => ({
+      cells: [variant, `${r.rows}`, formatNs(r.dagMs * 1e6), formatNs(r.handMs * 1e6), `${(r.dagMs / r.handMs).toFixed(1)}× the baseline`],
+      strong: true,
+    });
+    out.push(table('Dag vs a hand-written baseline (same pipeline, byte-identical output)',
+      ['Variant', 'Rows', 'jaren-dag', 'hand-written JS', 'Abstraction price'],
+      [
+        ...(dag.sync ?? []).map((r) => dagRow('no-task', r)),
+        ...(dag.async ?? []).map((r) => dagRow('mixed-async', r)),
+      ],
+      'The dag is compiled once, then run per iteration; the hand-written baseline is wrapped so both await once. The tax is the dispatcher and the wavefront; what it buys is validation, projection and constrained decoding.'));
+  }
+
+  out.push(callout('Reproduce it',
+    'npm run benchmark:flow (the FSM head-to-head needs the xstate benchmark devDependency; the memory row needs node --expose-gc, which the script passes).'));
   return out;
 }
 

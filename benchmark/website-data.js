@@ -641,6 +641,47 @@ function generateGeo(tmp, options) {
   };
 }
 
+/**
+ * The flow suite: the FSM head-to-head against XState v5 (compile,
+ * transition, the serializability wedge, the memory loss) and the DAG
+ * abstraction price against a hand-written baseline. Two runners, one
+ * combined file — `--expose-gc` is a node flag, so it leads the args.
+ */
+function generateFlow(tmp, options) {
+  const fsmFile = path.join(tmp, 'flow-fsm.json');
+  const dagFile = path.join(tmp, 'flow-dag.json');
+  try {
+    runTool([
+      '--expose-gc', 'benchmark/flow-fsm.js',
+      '--iterations', String(options.quick ? 2_000 : 20_000),
+      '--output', 'json', '--filepath', fsmFile,
+    ]);
+    runTool([
+      'benchmark/flow-dag.js',
+      '--output', 'json', '--filepath', dagFile,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: flow run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the FSM head-to-head needs the xstate benchmark devDependency)');
+    return null;
+  }
+  const fsm = readJson(fsmFile);
+  const dag = readJson(dagFile);
+  const slim = (rows) => rows.map((r) => ({ label: r.label, ns: sig4(r.ns) }));
+  return {
+    date: fsm.date,
+    node: fsm.node,
+    xstate: fsm.xstate,
+    sizes: fsm.sizes,
+    compile: Object.fromEntries(fsm.sizes.map((n) => [n, slim(fsm.compile[n])])),
+    transition: Object.fromEntries(fsm.sizes.map((n) => [n, slim(fsm.transition[n])])),
+    wedge: fsm.wedge,
+    memory: fsm.memory,
+    dag: { sizes: dag.sizes, sync: dag.sync, async: dag.async },
+  };
+}
+
 function generateQt3() {
   let stdout;
   try {
@@ -683,7 +724,7 @@ function generateQt3() {
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
   'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
-  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo',
+  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -897,6 +938,24 @@ function buildHeadlines(generated, meta) {
       note: 'result equivalence asserted before timing; the point-in-polygon loss is deliberate (exact predicate)',
     });
   }
+  if (generated.flow !== undefined) {
+    // the headline ratio is the transition speedup at the mid machine
+    // size: our pure step vs XState's actor.send, both timed on the
+    // same logical machine
+    const mid = generated.flow.sizes?.[1] ?? generated.flow.sizes?.[0];
+    const rows = generated.flow.transition?.[mid] ?? [];
+    const step = rows.find((r) => r.label.includes('step'));
+    const actor = rows.find((r) => r.label.includes('xstate'));
+    const survives = generated.flow.wedge?.guardsSurviveJson ?? {};
+    add('flow', 'Flow', {
+      ratio: step !== undefined && actor !== undefined && step.ns > 0 ? actor.ns / step.ns : null,
+      rival: 'XState v5',
+      // the conformance half IS the wedge: the guarded machine survives
+      // a JSON round trip (jaren) or does not (the rival)
+      conformance: survives.jaren ? 'serializable' : '—',
+      note: 'pure step vs actor.send; the machine survives JSON round-trip with its guards, XState\'s do not — the dag pays the documented dataflow tax on the suite page',
+    });
+  }
   return out;
 }
 
@@ -964,6 +1023,11 @@ async function main() {
     const geo = generateGeo(tmp, options);
     if (geo !== null)
       generated.geo = geo;
+  }
+  if (!options.skip.has('flow')) {
+    const flow = generateFlow(tmp, options);
+    if (flow !== null)
+      generated.flow = flow;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

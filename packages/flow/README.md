@@ -181,6 +181,39 @@ by design, because a picture's annotation must not change execution.
 Real conditions are `$`-paths (`"$.payload.fresh"`) or operator
 documents (`{ "$gt": ["$.context.count", 3] }`).
 
+## Performance (measured)
+
+`npm run benchmark:flow` (run it yourself — the FSM head-to-head needs
+the `xstate` benchmark devDependency, and the memory row needs
+`node --expose-gc`, which the script passes). The same logical machine is
+built with `@jarenjs/flow` and XState v5 and asserted to agree before
+timing:
+
+- **Transitions** — the pure `step` runs several times faster than an
+  XState actor's `send` (≈6–11× across 5/50/500-state machines); the
+  `createFsmSession` wrapper is on the page too.
+- **Compile** — `compileFsm` beats `createMachine` + `createActor`
+  ≈1.5–2.6×. Not like-for-like: XState builds a scheduling actor, so the
+  row is each engine's description→drivable cost.
+- **The wedge** — a conformance fact, not a timing: a jaren-fsm document
+  is JSON *including its guards*, so it survives `JSON.stringify` →
+  `JSON.parse` and still compiles and still fires its guard. XState's
+  guards are functions JSON drops, so the round-tripped machine throws
+  "Guard not implemented" at the guarded transition. Serialize, store,
+  diff, ship, replay — that is the whole reason to speak JSON all the way
+  down.
+- **Where we lose** — a compiled Jaren machine holds **more** memory than
+  the XState actor (every guard compiles to its own query closure); the
+  benchmark publishes the KiB-per-machine loss beside the wins.
+- **The dag tax** — no npm library executes schema-validated JSON
+  dataflow, so the honest rival is the same pipeline hand-written in
+  JavaScript. A `compileDag` run costs ~8–20× the hand-written baseline —
+  the published price of dataflow as one serializable,
+  constrained-decodable JSON value, sitting beside what it buys.
+
+The full tables, the wedge as a conformance row, and the fairness notes
+are on the [benchmarks page](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=flow).
+
 ## Authoring with a model
 
 A jaren-fsm or jaren-dag document is JSON published as a schema, so a

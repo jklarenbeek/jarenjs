@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.23.6",
+  "version": "0.24.0",
   "packageManager": "npm@11.12.1",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
@@ -95,6 +95,9 @@
     "benchmark:markdown": "node ./benchmark/markdown.js",
     "benchmark:mermaid": "node ./benchmark/mermaid.js",
     "benchmark:jslt:profile": "node ./benchmark/jslt.js --profile --scale",
+    "benchmark:flow-fsm": "node --expose-gc ./benchmark/flow-fsm.js",
+    "benchmark:flow-dag": "node ./benchmark/flow-dag.js",
+    "benchmark:flow": "npm run benchmark:flow-fsm && npm run benchmark:flow-dag",
     "qt3:convert": "node ./benchmark/tools/qt3-convert.js --quiet",
     "benchmark:qt3": "node ./benchmark/qt3-runner.js",
     "benchmark:coverage": "node ./benchmark/coverage.js --dead-code",
@@ -140,15 +143,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/app": "^0.23.6",
-    "@jarenjs/core": "^0.23.6",
-    "@jarenjs/formats": "^0.23.6",
-    "@jarenjs/forms": "^0.23.6",
-    "@jarenjs/json": "^0.23.6",
-    "@jarenjs/md": "^0.23.6",
-    "@jarenjs/refs": "^0.23.6",
-    "@jarenjs/validate": "^0.23.6",
-    "@jarenjs/view": "^0.23.6"
+    "@jarenjs/app": "^0.24.0",
+    "@jarenjs/core": "^0.24.0",
+    "@jarenjs/formats": "^0.24.0",
+    "@jarenjs/forms": "^0.24.0",
+    "@jarenjs/json": "^0.24.0",
+    "@jarenjs/md": "^0.24.0",
+    "@jarenjs/refs": "^0.24.0",
+    "@jarenjs/validate": "^0.24.0",
+    "@jarenjs/view": "^0.24.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

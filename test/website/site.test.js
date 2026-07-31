@@ -205,7 +205,7 @@ describe('website — the site as one app document', function () {
     const fixtures = {
       meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
       jsonquery: load('jsonquery'), jslt: load('jslt'), markdown: load('markdown'),
-      mermaid: load('mermaid'),
+      mermaid: load('mermaid'), flow: load('flow'),
     };
     const { container, go } = mountSite({ fixtures });
 
@@ -246,6 +246,18 @@ describe('website — the site as one app document', function () {
     go('#/benchmarks?suite=jsonpath');
     await tick();
     assert.match(serialize(container), /Compliance by group/);
+
+    go('#/benchmarks?suite=flow');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /does the guarded machine survive a JSON round trip/,
+      'the serializability wedge conformance table renders');
+    assert.match(html, /Guard not implemented/, 'the wedge names the XState failure');
+    assert.match(html, /XState v5/, 'the FSM rival is named');
+    assert.match(html, /dataflow tax/, 'the dag abstraction-price section renders');
+    assert.match(html, /Abstraction price/, 'the dag baseline table renders');
+    assert.match(html, /we compile every guard as a query, so we hold more/,
+      'the memory loss is on the page, not omitted');
   });
 
   it('renders a Mermaid fence as inline SVG through the shared md boundary', async function () {

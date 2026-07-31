@@ -57,6 +57,19 @@ function formatDocExamples() {
   return [...md.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]));
 }
 
+describe('FLOW-FORMAT.md is in sync with the code', function () {
+  const src = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const codes = (text) => [...new Set(text.match(/JF[0-9]{4}/g) ?? [])].sort();
+
+  it('the JF error-code table matches errors.js exactly', function () {
+    const inCode = codes(src('../../packages/flow/src/errors.js'));
+    const inDoc = codes(src('../../packages/flow/docs/FLOW-FORMAT.md'));
+    assert.deepStrictEqual(inDoc, inCode,
+      'every JF code documented in errors.js appears in FLOW-FORMAT.md §5, and vice versa');
+    assert.ok(inCode.length >= 25, 'both fsm and dag code ranges are present');
+  });
+});
+
 describe('the FLOW-FORMAT examples are fixtures', function () {
   it('every example validates against its schema and compiles', function () {
     const validateFsm = compileFsmSchema();

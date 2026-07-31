@@ -215,6 +215,17 @@ delete it or fix it.
   `@jarenjs/josl` incremental readers is the natural 0.2 composition,
   and doing it honestly changes the node contract, so it is a format
   revision rather than an option.
+- [ ] **Editor: free-form geometry** — the Flow studio lays out every
+  diagram deterministically and connects by click-source-then-target;
+  free-form node dragging and *persisted* positions are out of scope for
+  0.1 (geometry never enters the document). A `meta.layout` side-table
+  would let a user override the auto-layout without polluting the AST —
+  the honest place to add it if a consumer asks.
+- [ ] **Editor: extract to a component package** — the studio ships as a
+  website mode, not a package. Extraction into a reusable
+  `@jarenjs/flow` component (the `@jarenjs/md`/`@jarenjs/mermaid`
+  two-layer shape) is gated on a second consumer; the engine is the
+  product, the editor is the proof.
 
 ## @jarenjs/md
 

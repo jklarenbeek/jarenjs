@@ -27,6 +27,8 @@ number in a README performance table names the command that produced it.
 | [`csv.js`](./csv.js) | CSV conformance, self-healing and performance vs the sync npm parsers | Benchmarking the josl CSV reader/writer |
 | [`markdown.js`](./markdown.js) | CommonMark scorecard + performance vs marked/markdown-it/micromark | Benchmarking the Markdown engine |
 | [`mermaid.js`](./mermaid.js) | Mermaid coverage scorecard + parse speed | Benchmarking the headless Mermaid engine |
+| [`flow-fsm.js`](./flow-fsm.js) | FSM compile/transition vs XState v5 + the serializability wedge | Benchmarking `@jarenjs/flow` machines |
+| [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
@@ -524,6 +526,51 @@ Competitors are **benchmark devDependencies only**
 (`@mermaid-js/parser`, `mermaid`, `jsdom`); if any is missing the run
 degrades gracefully (each is dynamically imported and its rows are
 skipped). npm shortcut: `npm run benchmark:mermaid`.
+
+## flow-fsm.js / flow-dag.js — @jarenjs/flow vs XState and a hand-written baseline
+
+Two runners, one `npm run benchmark:flow`. Each is labeled for what it
+fairly compares:
+
+1. **FSM head-to-head against XState v5** (`flow-fsm.js`). The *same
+   logical machine* — an N-state cycle, one guard per transition — is
+   built with `@jarenjs/flow` and XState v5 and **asserted to agree
+   before any timing**. Three things are measured at 5 / 50 / 500 states:
+   - **compile**: `compileFsm` vs `createMachine` + `createActor`. Not
+     like-for-like, and the row says so — XState builds a scheduling
+     actor with snapshots, so this is each engine's description→drivable
+     cost, not a bare compile.
+   - **transition**: our pure total-function `step` *and* the
+     `createFsmSession` wrapper (both routes on the page, so it is not
+     pure-function-vs-actor by omission) against an XState actor's `send`.
+   - **memory** as the live set after a forced GC (needs
+     `node --expose-gc`, which `npm run benchmark:flow-fsm` passes). This
+     is a **published loss**: a compiled Jaren machine holds more than the
+     actor, because every guard compiles to its own query closure.
+
+2. **The serializability wedge** — a conformance fact, not a timing. A
+   jaren-fsm document is JSON *including its guards*, so it survives
+   `JSON.stringify` → `JSON.parse` and still compiles and still fires its
+   guard (asserted). An XState machine's guards are functions in the
+   second `createMachine` argument; `JSON.stringify` drops them, and the
+   round-tripped machine throws "Guard not implemented" at the guarded
+   transition. Reported as a yes/no row in the toml-test register.
+
+3. **Dag abstraction price** (`flow-dag.js`). No npm library executes
+   schema-validated JSON dataflow, so — exactly like the view suite's
+   hand-written-vs-stylesheet rows — the honest rival is the *same
+   pipeline written straight in JavaScript*. Filter → join → project at
+   100 / 10 000 rows, no-task and mixed-async variants, output asserted
+   byte-identical before timing. The ratio is the documented price of
+   dataflow as one serializable, constrained-decodable JSON value; the
+   dag is compiled once and the hand-written baseline is wrapped so both
+   await once (no await-vs-no-await artifact).
+
+Fairness notes: XState is pinned as a `benchmark` devDependency and the
+machines are asserted equivalent before timing; both Jaren routes and
+both engines' losses are on the page; the hand-written JS is a floor, not
+a rival, because nothing else runs JSON dataflow. npm shortcuts:
+`npm run benchmark:flow`, `benchmark:flow-fsm`, `benchmark:flow-dag`.
 
 ## qt3-runner.js — the W3C QT3 scorecard
 
