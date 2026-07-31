@@ -613,7 +613,7 @@ export const ACTIONS = {
   // actions (the host widget owns its lifecycle; `revision` reboots).
   'flow/run': {
     patch: [
-      { op: 'replace', path: '/flow/run', value: { current: '$.flow.doc.initial', log: [] } },
+      { op: 'replace', path: '/flow/run', value: { current: '$.flow.doc.initial', prev: null, log: [] } },
       { op: 'replace', path: '/flow/revision', value: { $add: ['$.flow.revision', 1] } },
     ],
   },
@@ -621,6 +621,9 @@ export const ACTIONS = {
   'flow/send': { effects: [{ run: 'flow-run-send', with: { event: '$payload' } }] },
   'flow/run-tx': {
     $if: ['$.flow.run', { patch: [
+      // capture the state we're leaving BEFORE overwriting current, so
+      // the diagram can glow the transition just taken
+      { op: 'replace', path: '/flow/run/prev', value: '$.flow.run.current' },
       { op: 'replace', path: '/flow/run/current', value: '$payload.current' },
       { op: 'add', path: '/flow/run/log/-', value: '$payload' },
     ] }],

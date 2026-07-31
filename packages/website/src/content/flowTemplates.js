@@ -1,11 +1,20 @@
 //@ts-check
 /**
- * The Flow studio's seed documents — one executable machine and one
- * dataflow graph, both small enough to read whole and each exercising
- * the features the page demonstrates (guards reading context, entry
- * effects, task nodes, ports). `runContext` seeds the nested run
- * sandbox's data state (the machine's `$.context.*`), and `runInput`
- * pre-fills the dag run pane.
+ * The Flow studio's seed documents — machines and a dataflow graph,
+ * each small enough to read whole and each exercising the features the
+ * page demonstrates (guards reading context, entry effects, task nodes,
+ * ports). `runContext` seeds the nested run sandbox's data state (the
+ * machine's `$.context.*`), and `runInput` pre-fills the dag run pane.
+ *
+ * Three of the machines are ports of the classic finite-state examples
+ * from iMatix's **Libero** FSM code generator
+ * (https://imatix-legacy.github.io/libero/) — the Coke machine, the
+ * telephone dialogue and the lrcalc arithmetic-expression evaluator.
+ * Libero described logic as state / event / action / next-state tables
+ * and generated code from them; a jaren-fsm is that same table as one
+ * runnable JSON document. Each Libero action becomes an effect
+ * descriptor, and a row that terminated the program (Libero's "-"
+ * next-state) becomes a transition into a final `stopped`/`done` state.
  */
 
 export const FLOW_TEMPLATES = [
@@ -30,6 +39,169 @@ export const FLOW_TEMPLATES = [
       ],
     },
     runContext: { reviewer: 'sam' },
+  },
+  {
+    name: 'coke-machine',
+    kind: 'fsm',
+    title: 'The Coke machine (iMatix Libero)',
+    lead: 'Libero\'s classic vending-machine FSM, ported to jaren-fsm. Run it: Ok to wake it, Clink to pay, Ok to cooperate then pick a drink — or Nasty first to watch it eject the opposite can. Every Libero action is an effect in the run log.',
+    doc: {
+      $fsm: '0.1',
+      initial: 'should-be-gently-humming',
+      states: [
+        'should-be-gently-humming',
+        'something-happened',
+        'before-cooperating',
+        'cooperate',
+        'lets-be-nasty',
+        { id: 'stopped', final: true },
+      ],
+      transitions: [
+        { from: 'should-be-gently-humming', event: 'Ok', to: 'something-happened',
+          effects: [{ run: 'wait-for-a-punter' }] },
+        { from: 'should-be-gently-humming', event: 'Dead', to: 'stopped',
+          effects: [{ run: 'stop-the-programme' }] },
+        { from: 'something-happened', event: 'Clink', to: 'before-cooperating',
+          effects: [{ run: 'accept-punters-cash' }, { run: 'wait-for-punters-choice' }, { run: 'shall-we-cooperate' }] },
+        { from: 'something-happened', event: 'Clunk', to: 'stopped',
+          effects: [{ run: 'exit-stage-left-running' }, { run: 'stop-the-programme' }] },
+        { from: 'before-cooperating', event: 'Ok', to: 'cooperate',
+          effects: [{ run: 'consider-punters-choice' }] },
+        { from: 'before-cooperating', event: 'Nasty', to: 'lets-be-nasty',
+          effects: [{ run: 'consider-punters-choice' }] },
+        { from: 'before-cooperating', event: 'Play-Dead', to: 'something-happened',
+          effects: [{ run: 'switch-off-all-lights' }, { run: 'wait-until-punter-has-left' }, { run: 'switch-on-the-lights' }, { run: 'wait-for-a-punter' }] },
+        { from: 'cooperate', event: 'Coke', to: 'something-happened',
+          effects: [{ run: 'eject-appropriate-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'cooperate', event: 'Spring-Water', to: 'something-happened',
+          effects: [{ run: 'eject-appropriate-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'cooperate', event: 'Juice', to: 'something-happened',
+          effects: [{ run: 'eject-appropriate-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'cooperate', event: 'Sweeto-Sap', to: 'something-happened',
+          effects: [{ run: 'eject-appropriate-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'cooperate', event: 'Empty', to: 'stopped',
+          effects: [{ run: 'switch-off-all-lights' }, { run: 'stop-the-programme' }] },
+        { from: 'lets-be-nasty', event: 'Coke', to: 'something-happened',
+          effects: [{ run: 'eject-opposite-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'lets-be-nasty', event: 'Spring-Water', to: 'something-happened',
+          effects: [{ run: 'eject-opposite-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'lets-be-nasty', event: 'Juice', to: 'something-happened',
+          effects: [{ run: 'eject-opposite-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'lets-be-nasty', event: 'Sweeto-Sap', to: 'something-happened',
+          effects: [{ run: 'eject-opposite-can' }, { run: 'wait-for-a-punter' }] },
+        { from: 'lets-be-nasty', event: 'Empty', to: 'stopped',
+          effects: [{ run: 'switch-off-all-lights' }, { run: 'stop-the-programme' }] },
+      ],
+    },
+    runContext: {},
+  },
+  {
+    name: 'telephone',
+    kind: 'fsm',
+    title: 'Using a telephone (iMatix Libero)',
+    lead: 'Libero\'s telephone-call dialogue: Ok to lift the handset and dial, then answer the tones. Libero\'s cross-state "Defaults" row is left out — jaren-fsm 0.1 has no cross-state fallback (it is a roadmap item), so only the explicit rows are ported.',
+    doc: {
+      $fsm: '0.1',
+      initial: 'after-init',
+      states: [
+        'after-init',
+        'want-dialing-tone',
+        'want-ringing-tone',
+        'want-answer',
+        'after-engaged',
+        'have-answering-machine',
+        { id: 'done', final: true },
+      ],
+      transitions: [
+        { from: 'after-init', event: 'Ok', to: 'want-dialing-tone',
+          effects: [{ run: 'pick-up-telephone-handset' }, { run: 'listen-for-dialing-tone' }] },
+        { from: 'after-init', event: 'Error', to: 'done',
+          effects: [{ run: 'terminate-the-program' }] },
+        { from: 'want-dialing-tone', event: 'Ok', to: 'want-ringing-tone',
+          effects: [{ run: 'dial-required-number' }, { run: 'listen-for-ringing-tone' }] },
+        { from: 'want-dialing-tone', event: 'Silent', to: 'want-dialing-tone',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'pick-up-telephone-handset' }, { run: 'listen-for-dialing-tone' }] },
+        { from: 'want-dialing-tone', event: 'Voices', to: 'done',
+          effects: [{ run: 'apologise-telephone-busy' }, { run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'want-dialing-tone', event: 'Modem', to: 'done',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'apologise-cutting-modem' }, { run: 'terminate-the-program' }] },
+        { from: 'want-ringing-tone', event: 'Ok', to: 'want-answer',
+          effects: [{ run: 'listen-for-answer' }] },
+        { from: 'want-ringing-tone', event: 'Silence', to: 'want-dialing-tone',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'pick-up-telephone-handset' }, { run: 'listen-for-dialing-tone' }] },
+        { from: 'want-ringing-tone', event: 'Engaged', to: 'after-engaged',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'consider-trying-again' }] },
+        { from: 'want-ringing-tone', event: 'Voices', to: 'want-dialing-tone',
+          effects: [{ run: 'complain-crossed-connection' }, { run: 'put-down-telephone-handset' }, { run: 'pick-up-telephone-handset' }, { run: 'listen-for-dialing-tone' }] },
+        { from: 'want-answer', event: 'Ok', to: 'done',
+          effects: [{ run: 'have-conversation' }, { run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'want-answer', event: 'Wrong-Number', to: 'done',
+          effects: [{ run: 'apologise-wrong-number' }, { run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'want-answer', event: 'Impatient', to: 'done',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'want-answer', event: 'Answering-Machine', to: 'have-answering-machine',
+          effects: [{ run: 'consider-leaving-message' }] },
+        { from: 'want-answer', event: 'Modem-Or-Fax', to: 'done',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'want-answer', event: 'Doorbell', to: 'done',
+          effects: [{ run: 'end-conversation-quickly' }, { run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'after-engaged', event: 'Ok', to: 'want-ringing-tone',
+          effects: [{ run: 'dial-required-number' }, { run: 'listen-for-ringing-tone' }] },
+        { from: 'after-engaged', event: 'Impatient', to: 'done',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'have-answering-machine', event: 'Message', to: 'done',
+          effects: [{ run: 'leave-the-message' }, { run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+        { from: 'have-answering-machine', event: 'Impatient', to: 'done',
+          effects: [{ run: 'put-down-telephone-handset' }, { run: 'terminate-the-program' }] },
+      ],
+    },
+    runContext: {},
+  },
+  {
+    name: 'expression-parser',
+    kind: 'fsm',
+    title: 'Expression evaluator (iMatix Libero)',
+    lead: 'Libero\'s lrcalc — a shunting-yard arithmetic parser as a state table. The events are token TYPES (a lexer classifies the characters): to parse 2 * (3 + 4), feed Ok · Number · Factor-Op · Left-Par · Number · Term-Op · Number · Right-Par · End-Mark and watch the stack actions fire.',
+    doc: {
+      $fsm: '0.1',
+      initial: 'after-init',
+      states: [
+        'after-init',
+        'expecting-initial',
+        'expecting-operand',
+        'expecting-operator',
+        { id: 'done', final: true },
+      ],
+      transitions: [
+        { from: 'after-init', event: 'Ok', to: 'expecting-initial',
+          effects: [{ run: 'get-next-token' }] },
+        { from: 'after-init', event: 'Error', to: 'done',
+          effects: [{ run: 'terminate-the-program' }] },
+        { from: 'expecting-initial', event: 'Term-Op', to: 'done',
+          effects: [{ run: 'signal-invalid-token' }, { run: 'terminate' }] },
+        { from: 'expecting-initial', event: 'Number', to: 'expecting-operator',
+          effects: [{ run: 'stack-the-number' }, { run: 'get-next-token' }] },
+        { from: 'expecting-initial', event: 'Left-Par', to: 'expecting-operand',
+          effects: [{ run: 'stack-the-operator' }, { run: 'get-next-token' }] },
+        { from: 'expecting-initial', event: 'End-Mark', to: 'done',
+          effects: [{ run: 'terminate-the-program' }] },
+        { from: 'expecting-operand', event: 'Term-Op', to: 'done',
+          effects: [{ run: 'signal-invalid-token' }, { run: 'terminate' }] },
+        { from: 'expecting-operand', event: 'Number', to: 'expecting-operator',
+          effects: [{ run: 'stack-the-number' }, { run: 'get-next-token' }] },
+        { from: 'expecting-operand', event: 'Left-Par', to: 'expecting-operand',
+          effects: [{ run: 'stack-the-operator' }, { run: 'get-next-token' }] },
+        { from: 'expecting-operator', event: 'Term-Op', to: 'expecting-operand',
+          effects: [{ run: 'unstack-ge-operators' }, { run: 'stack-the-operator' }, { run: 'get-next-token' }] },
+        { from: 'expecting-operator', event: 'Factor-Op', to: 'expecting-operand',
+          effects: [{ run: 'unstack-ge-operators' }, { run: 'stack-the-operator' }, { run: 'get-next-token' }] },
+        { from: 'expecting-operator', event: 'Right-Par', to: 'expecting-operator',
+          effects: [{ run: 'unstack-all-operators' }, { run: 'unstack-if-left-par' }, { run: 'get-next-token' }] },
+        { from: 'expecting-operator', event: 'End-Mark', to: 'done',
+          effects: [{ run: 'unstack-all-operators' }, { run: 'unstack-if-end-mark' }, { run: 'terminate' }] },
+      ],
+    },
+    runContext: {},
   },
   {
     name: 'enrich',

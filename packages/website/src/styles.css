@@ -843,7 +843,46 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .mm-selected .mm-node-shape,
 .mm-selected .mm-edge-line { stroke-width: 2.5; }
 .mm-armed .mm-node-shape { stroke-dasharray: 4 3; stroke-width: 2.5; }
-.mm-active .mm-node-shape { filter: drop-shadow(0 0 3px var(--accent)); stroke-width: 2.5; }
-.mm-run-ok .mm-node-shape { stroke-width: 2.5; }
-.mm-run-error .mm-node-shape { stroke-dasharray: 2 2; stroke-width: 2.5; }
-.mm-run-aborted .mm-node-shape { opacity: 0.55; }
+
+/* The running machine's CURRENT state pulses with an accent glow, so
+   the eye follows the machine as events drive it. */
+.mm-active .mm-node-shape {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mm-pulse 1.5s ease-in-out infinite;
+}
+@keyframes mm-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px var(--accent)); }
+  50%      { filter: drop-shadow(0 0 9px var(--accent)); }
+}
+
+/* The transition JUST TAKEN flows accent-coloured marching ants from the
+   old state to the new one — the path the machine worked through. */
+.mm-fired .mm-edge-line {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+  animation: mm-flow 0.7s linear infinite;
+}
+.mm-fired .mm-edge-label { fill: var(--accent); font-weight: 600; }
+@keyframes mm-flow {
+  to { stroke-dashoffset: -20; }
+}
+
+/* The dag run's per-node status: ok settles green, the failing node
+   pulses, an aborted sibling dims. */
+.mm-run-ok .mm-node-shape { stroke: var(--ok, #16a34a); stroke-width: 2.5; }
+.mm-run-error .mm-node-shape {
+  stroke: var(--danger, #dc2626); stroke-width: 2.5;
+  animation: mm-pulse 1s ease-in-out infinite;
+}
+.mm-run-aborted .mm-node-shape { opacity: 0.5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-active .mm-node-shape,
+  .mm-fired .mm-edge-line,
+  .mm-run-error .mm-node-shape { animation: none; }
+  .mm-active .mm-node-shape { filter: drop-shadow(0 0 6px var(--accent)); }
+}

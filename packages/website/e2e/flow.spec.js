@@ -70,3 +70,28 @@ test('the dataflow seed runs: nodes settle, the output appears, abort works', as
 
   expect(errors).toEqual([]);
 });
+
+test('the ported Libero Coke machine loads as a graph and drives live', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/');
+  await page.evaluate(() => { window.location.hash = '#/flow'; });
+
+  await page.locator('article', { hasText: 'Coke machine' }).locator('button').click();
+  await page.waitForSelector('.flow-canvas svg.mm-state');
+  await expect(page.locator('[data-id="should-be-gently-humming"]')).toHaveCount(1);
+  await expect(page.locator('[data-id="cooperate"]')).toHaveCount(1);
+
+  // run it and walk Ok → Clink → Ok → Coke back to something-happened
+  await page.getByRole('button', { name: 'Run machine' }).click();
+  await expect(page.locator('[data-id="should-be-gently-humming"]')).toHaveClass(/mm-active/);
+  for (const ev of ['Ok', 'Clink', 'Ok', 'Coke']) {
+    await page.locator('.flow-run-buttons button', { hasText: new RegExp(`^${ev}$`) }).first().click();
+  }
+  await expect(page.locator('[data-id="something-happened"]')).toHaveClass(/mm-active/);
+  // a Libero action reached the run log
+  await expect(page.locator('.flow-log')).toContainText('accept-punters-cash');
+  await expect(page.locator('.flow-log')).toContainText('eject-appropriate-can');
+
+  expect(errors).toEqual([]);
+});

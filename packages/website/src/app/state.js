@@ -90,7 +90,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       tab: 'diagram',    // 'diagram' | 'text'
       parseError: null,  // fail-closed text commits report here
       history: { past: [], future: [] },
-      run: null,         // fsm: { current, log[] } · dag: { running, nodes, output, error, log[] }
+      run: null,         // fsm: { current, prev, log[] } · dag: { running, nodes, output, error, log[] }
       runContext: null,  // the machine sandbox's data state (from the template)
       dagInput: '',      // the dag run pane's JSON input text
       revision: 0,

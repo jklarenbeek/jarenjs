@@ -6,7 +6,7 @@ import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { textLossReason, flowText } from '../../packages/website/src/boundaries/flowstudio.js';
 import { FLOW_TEMPLATES, flowTemplate } from '../../packages/website/src/content/flowTemplates.js';
-import { compileFsm, compileDag } from '@jarenjs/flow';
+import { compileFsm, createFsmSession, compileDag } from '@jarenjs/flow';
 import { createStubHost, fire } from '../view/dom.stub.js';
 
 /** A headless site over the stub DOM, opened on the Flow page. */
@@ -200,6 +200,62 @@ describe('website — the Flow studio', function () {
     assert.strictEqual(flowState(app).run.current, 'a', 'a rerun starts fresh');
     app.dispatch('flow/send', 'go');
     assert.strictEqual(flowState(app).run.current, 'b');
+  });
+
+  it('the ported Libero Coke machine loads, renders as a graph, and drives with its effects logged', function () {
+    const { app, container } = mountSite();
+    const coke = /** @type {any} */ (flowTemplate('coke-machine'));
+    assert.ok(coke && coke.kind === 'fsm', 'the Libero Coke machine is a seed');
+    app.dispatch('flow/load', { kind: 'fsm', doc: coke.doc, runContext: {}, dagInput: '' });
+
+    // it renders as a state graph with the Libero state ids
+    assert.ok(byDataId(container, 'should-be-gently-humming'), 'the initial state rendered');
+    assert.ok(byDataId(container, 'cooperate'), 'a mid state rendered');
+
+    // run it and walk the canonical path: Ok → Clink → Ok → Coke
+    fire(findButton(container, 'Run machine'), 'click');
+    assert.match(byDataId(container, 'should-be-gently-humming').getAttribute('class'), /mm-active/);
+
+    // one step: the current state glows and the edge just taken flows
+    app.dispatch('flow/send', 'Ok');
+    assert.match(byDataId(container, 'something-happened').getAttribute('class'), /mm-active/,
+      'the new current state glows');
+    assert.strictEqual(flowState(app).run.prev, 'should-be-gently-humming',
+      'the previous state is tracked for the fired-edge highlight');
+    const firedEdge = find(container, (n) =>
+      /mm-fired/.test(n.getAttribute?.('class') ?? '')
+      && n.getAttribute?.('data-from') === 'should-be-gently-humming'
+      && n.getAttribute?.('data-to') === 'something-happened');
+    assert.ok(firedEdge, 'the transition just taken is marked mm-fired for the flow animation');
+
+    for (const ev of ['Clink', 'Ok', 'Coke']) app.dispatch('flow/send', ev);
+    assert.strictEqual(flowState(app).run.current, 'something-happened',
+      'a full cooperate cycle returns to something-happened');
+    const runs = flowState(app).run.log.map((l) => l.run);
+    assert.ok(runs.includes('accept-punters-cash'), 'a Libero action reached the run log');
+    assert.ok(runs.includes('eject-appropriate-can'), 'the drink was ejected');
+
+    // the nasty branch really ejects the OPPOSITE can (the joke works)
+    const nasty = compileFsm(coke.doc).step('lets-be-nasty', 'Coke');
+    assert.strictEqual(nasty.effects[0].run, 'eject-opposite-can');
+  });
+
+  it('the ported Libero expression evaluator parses a token stream to done', function () {
+    const parser = /** @type {any} */ (flowTemplate('expression-parser'));
+    assert.ok(parser && parser.kind === 'fsm', 'the lrcalc parser is a seed');
+    const fsm = compileFsm(parser.doc);
+    const session = createFsmSession(fsm);
+    // 2 * (3 + 4) as token TYPES — Libero's model: a lexer classifies chars
+    const tokens = ['Ok', 'Number', 'Factor-Op', 'Left-Par', 'Number', 'Term-Op', 'Number', 'Right-Par', 'End-Mark'];
+    for (const ev of tokens) session.send(ev);
+    assert.strictEqual(session.state, 'done', 'a valid expression parses to the final state');
+    assert.strictEqual(session.done, true);
+    // the shunting-yard action fires at the close
+    const close = fsm.step('expecting-operator', 'End-Mark');
+    assert.ok(close.effects.map((e) => e.run).includes('unstack-all-operators'),
+      'the operator stack is flushed at End-Mark');
+    // a leading operator is the documented error (no unary signs)
+    assert.strictEqual(fsm.step('expecting-initial', 'Term-Op').state, 'done');
   });
 
   it('runs the dag: nodes settle to ok, the output shows, and abort fails closed', async function () {

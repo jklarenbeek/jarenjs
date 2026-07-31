@@ -132,6 +132,13 @@ function decorate(vnode, targets, marks) {
         const target = targets.edges[edge];
         let cls = `${props.class ?? ''} mm-pick`;
         if (marks.selectedPath === target.path) cls += ' mm-selected';
+        // the transition just taken flows from the old state to the new
+        // one — matched by endpoints, so every parallel edge that could
+        // have fired lights up (a machine with 4 drinks → 4 glowing arcs)
+        if (marks.firedFrom != null
+          && props['data-from'] === marks.firedFrom && props['data-to'] === marks.firedTo) {
+          cls += ' mm-fired';
+        }
         nextProps = {
           ...props, class: cls,
           on: { click: { action: 'flow/pick', with: target } },
@@ -233,10 +240,10 @@ const fsmEvents = memo1((doc) => {
   return names;
 });
 
-const composeDiagram = memo1((kind, doc, selectedPath, armed, activeId, nodeStatus) => {
+const composeDiagram = memo1((kind, doc, selectedPath, armed, activeId, nodeStatus, firedFrom, firedTo) => {
   const compiled = compiledFor(flowText(kind, doc));
   return decorate(compiled.toVnode(), selectables(kind, doc), {
-    selectedPath, armed, activeId, nodeStatus,
+    selectedPath, armed, activeId, nodeStatus, firedFrom, firedTo,
   });
 });
 
@@ -257,7 +264,10 @@ export function flowPageViewModel(flow) {
       tab: flow.tab,
       diagram: composeDiagram(kind, flow.doc, selection?.path ?? null, flow.connect,
         run !== null && kind === 'fsm' ? run.current : null,
-        run !== null && kind === 'dag' ? run.nodes : null),
+        run !== null && kind === 'dag' ? run.nodes : null,
+        // the transition just taken: old → new state, only on a real move
+        run !== null && kind === 'fsm' && run.prev != null && run.prev !== run.current ? run.prev : null,
+        run !== null && kind === 'fsm' ? run.current : null),
       text: flowText(kind, flow.doc),
       textReadOnly: lossReason !== null,
       textLossReason: lossReason,
