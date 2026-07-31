@@ -211,6 +211,18 @@ border-clipped edges); sequence layout resolves lifelines, message
 y-advance, activation bars, notes and block frames. Geometry is
 deterministic, so golden-JSON tests catch drift.
 
+**State diagrams lay out through the flowchart engine** via an adapter
+(`layoutState`), not a second algorithm: states become rounded nodes,
+transition `label`s become edge labels verbatim, and the `[*]`
+pseudo-states become synthetic `__start`/`__end` nodes (a fixed-size
+filled `statedot` and an empty-labeled `doublecircle` ring — shapes
+only the adapter produces; flowchart source cannot spell them).
+Composite states stay flattened in v1, their recorded `parent` not yet
+drawn as a cluster. `compileMermaid(source).toLayout()` exposes the
+scene as a cached projection — reference-equal on repeated calls, null
+for types without a geometric layout — so an editor hit-tests against
+pure geometry without re-running layout.
+
 ## 7. Rendering
 
 `diagramToVnode` turns a `PositionedDiagram` into a tagged-array SVG
@@ -219,3 +231,12 @@ in the SVG namespace. It is synchronous, complete and **error-safe**: a
 parse/layout failure returns an error vnode, never throws. `toSvgString`
 is `renderToString` of that vnode — a valid standalone SVG with no
 browser.
+
+**Stable identity for editors.** In flowchart and state output, every
+node group carries `data-id="<AST node id>"` and every edge group
+carries `data-edge="<index>" data-from="<id>" data-to="<id>"`, where
+the index is the edge's AST position — which is also its docPath tail,
+so a click maps to a document member without translation. These are
+plain data props on the vnodes: SSR emits them, event delegation reads
+them, and the state renderer's root additionally carries the
+`mm-state` class for theming.

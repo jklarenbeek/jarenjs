@@ -10,6 +10,7 @@ import { parseMermaid } from '../parser/index.js';
 import { createTheme } from '../theme.js';
 import { MermaidParseError } from '../errors.js';
 import { layoutFlowchart } from '../layout/flowchart.js';
+import { layoutState } from '../layout/state.js';
 import { layoutSequence } from '../layout/sequence.js';
 import { renderFlowchart } from './flowchart.js';
 import { renderSequence } from './sequence.js';
@@ -25,6 +26,7 @@ import { errorVnode } from './error.js';
 export function layoutDiagram(doc) {
   switch (doc.diagram) {
     case 'flowchart': return layoutFlowchart(doc.ast);
+    case 'state': return layoutState(doc.ast);
     case 'sequence': return layoutSequence(doc.ast);
     default: return null;
   }
@@ -51,13 +53,16 @@ export function diagramToVnode(docOrSource, options = {}) {
     switch (doc.diagram) {
       case 'flowchart':
         return renderFlowchart(layoutFlowchart(doc.ast), theme, hash);
+      case 'state':
+        // a state diagram IS a graph: the state adapter feeds the same
+        // layout and renderer as flowcharts (MERMAID-FORMAT §6)
+        return renderFlowchart(layoutState(doc.ast), theme, hash, 'mermaid mm-svg mm-state');
       case 'sequence':
         return renderSequence(layoutSequence(doc.ast), theme, hash);
       case 'pie':
         return renderPie(doc.ast, theme, hash);
       case 'class':
       case 'er':
-      case 'state':
       case 'gantt': {
         const { title, sections } = structuredSections(doc.diagram, doc.ast);
         return renderStructured(title, sections, theme, hash);

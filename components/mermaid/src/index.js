@@ -20,7 +20,7 @@
 import { renderToString, createDomRenderer } from '@jarenjs/view';
 import { parseMermaid } from './parser/index.js';
 import { toMermaid } from './to-mermaid.js';
-import { diagramToVnode } from './render/index.js';
+import { diagramToVnode, layoutDiagram } from './render/index.js';
 import { hashContent } from './utils.js';
 
 export { parseMermaid } from './parser/index.js';
@@ -77,6 +77,7 @@ export function compileMermaid(source, options = {}) {
   let vnode;
   let svg;
   let text;
+  let layout;
   return {
     doc,
     parseError,
@@ -93,6 +94,15 @@ export function compileMermaid(source, options = {}) {
     toText() {
       if (text === undefined) text = doc !== null ? toMermaid(doc) : source;
       return text;
+    },
+    toLayout() {
+      // The editor's hit-testing substrate: the pure PositionedDiagram
+      // (nodes with x/y/w/h, edges with routed points), cached like the
+      // other projections — same compiled document, reference-equal
+      // scene. Null for types without a geometric layout, and for
+      // documents that failed to parse.
+      if (layout === undefined) layout = doc !== null ? layoutDiagram(doc) : null;
+      return layout;
     },
     walk(visitor) {
       if (doc !== null) walkDoc(doc, visitor);

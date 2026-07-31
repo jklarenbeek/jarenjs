@@ -14,12 +14,13 @@ import {
 import { shapeAttributes, shapeStyle, textColor } from '../styles.js';
 
 /**
- * @param {any} scene PositionedDiagram (flowchart)
+ * @param {any} scene PositionedDiagram (flowchart or state, via its adapter)
  * @param {{ tokens: Record<string,string>, cssVars: Record<string,string> }} theme
  * @param {string} hash content hash for the root key
+ * @param {string} [rootClass] root `class` — the state renderer adds `mm-state`
  * @returns {any}
  */
-export function renderFlowchart(scene, theme, hash) {
+export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg') {
   const t = theme.tokens;
   const children = [];
 
@@ -51,7 +52,7 @@ export function renderFlowchart(scene, theme, hash) {
     children.push(renderNode(node, t, scene.fontSize));
   }
 
-  return svgRoot('mermaid mm-svg', scene.width, scene.height, theme, children,
+  return svgRoot(rootClass, scene.width, scene.height, theme, children,
     'mmfc-' + hash, { fit: false });
 }
 
@@ -68,7 +69,9 @@ function renderNode(node, t, fontSize) {
     color === null
       ? { class: 'mm-label', fill: t.nodeText }
       : { class: 'mm-label', fill: color, style: `fill:${color}` });
-  return group({ class: 'mm-node', key: 'n-' + node.id }, [shapeEl, label]);
+  // `data-id` is the stable identity an editor's event delegation and
+  // hit-testing key on (MERMAID-FORMAT §7): the AST node id, verbatim.
+  return group({ class: 'mm-node', key: 'n-' + node.id, 'data-id': node.id }, [shapeEl, label]);
 }
 
 /**
@@ -108,6 +111,11 @@ function shapeVnode(node, t) {
     }
     case 'circle':
       return circle(x + w / 2, y + h / 2, Math.min(w, h) / 2, common);
+    case 'statedot':
+      // the state diagram's start marker: a small filled dot (the state
+      // layout is the only producer; flowchart source cannot spell it)
+      return circle(x + w / 2, y + h / 2, Math.min(w, h) / 2,
+        { ...common, fill: stroke });
     case 'doublecircle': {
       const r = Math.min(w, h) / 2;
       return group({}, [
@@ -194,7 +202,12 @@ function renderEdge(e, t, fontSize, i) {
     }));
   }
 
-  return group({ class: 'mm-edge', key: 'e-' + i }, parts);
+  // Edge identity for editors: endpoints plus `data-edge`, the edge's
+  // AST position — which is also its docPath tail (MERMAID-FORMAT §7).
+  return group({
+    class: 'mm-edge', key: 'e-' + i,
+    'data-edge': i, 'data-from': e.from, 'data-to': e.to,
+  }, parts);
 }
 
 /**

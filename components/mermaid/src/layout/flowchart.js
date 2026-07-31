@@ -214,10 +214,20 @@ export function layoutFlowchart(ast) {
  * @returns {any}
  */
 function sizeNode(node) {
+  const shape = node.shape;
+  // The state-diagram pseudo-states are fixed-size markers, never
+  // label-sized boxes. An empty-labeled doublecircle cannot come from
+  // flowchart source (the parser defaults a missing label to the id),
+  // so the branch only fires for the state layout's synthetic end node.
+  if (shape === 'statedot') {
+    return { x: 0, y: 0, w: 14, h: 14, lines: [] };
+  }
+  if (shape === 'doublecircle' && node.label === '') {
+    return { x: 0, y: 0, w: 22, h: 22, lines: [] };
+  }
   const m = measureText(node.label, FONT_SIZE);
   let w = m.width + 2 * PAD_X;
   let h = m.height + 2 * PAD_Y;
-  const shape = node.shape;
   if (shape === 'circle' || shape === 'doublecircle') {
     const d = Math.max(w, h, MIN_H + 8);
     w = d; h = d;

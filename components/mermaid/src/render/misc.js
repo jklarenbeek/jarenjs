@@ -120,16 +120,11 @@ export function structuredSections(diagram, ast) {
     }
     return { title: 'Entity–relationship', sections };
   }
-  if (diagram === 'state') {
-    return {
-      title: 'State machine',
-      sections: [
-        { heading: 'states', rows: ast.states.map((s) => (s.label !== s.id ? `${s.id}: ${s.label}` : s.id)) },
-        { heading: 'transitions', rows: ast.transitions.map((tr) => `${tr.from} → ${tr.to}${tr.label ? ' : ' + tr.label : ''}`) },
-      ],
-    };
+  // state diagrams left this path for the graph layout; a stray call
+  // must fail loudly rather than quietly resurrect the old panel
+  if (diagram !== 'gantt') {
+    throw new Error(`structuredSections: '${diagram}' is not a structured-panel type`);
   }
-  // gantt
   return {
     title: 'Gantt' + (ast.meta.title ? ': ' + ast.meta.title : ''),
     sections: ast.sections.map((s) => ({

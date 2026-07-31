@@ -125,3 +125,33 @@ test('a wide diagram still does not widen the page', async ({ page }) => {
   }));
   expect(scrollWidth).toBeLessThanOrEqual(innerWidth + 1);
 });
+
+test('a state diagram is a laid-out, zoomable graph', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/');
+  await page.evaluate(() => { window.location.hash = '#/playground?engine=markdown'; });
+  await page.locator('textarea').first().fill(
+    '# t\n\n```mermaid\nstateDiagram-v2\n  [*] --> draft\n  draft --> review : submit\n  review --> [*]\n```\n');
+  await page.waitForSelector('.md-mermaid svg.mm-state');
+
+  const graph = await page.evaluate(() => {
+    const svg = document.querySelector('.md-mermaid svg.mm-state');
+    return {
+      draft: svg.querySelectorAll('[data-id="draft"]').length,
+      start: svg.querySelectorAll('[data-id="__start"]').length,
+      edges: svg.querySelectorAll('[data-edge]').length,
+      viewBox: svg.getAttribute('viewBox'),
+    };
+  });
+  expect(graph.draft).toBe(1);
+  expect(graph.start).toBe(1);
+  expect(graph.edges).toBe(3);
+
+  await page.locator('.md-mermaid').first().focus();
+  await page.keyboard.press('+');
+  const zoomedBox = await page.evaluate(() =>
+    document.querySelector('.md-mermaid svg.mm-state').getAttribute('viewBox'));
+  expect(zoomedBox).not.toBe(graph.viewBox);
+  expect(errors).toEqual([]);
+});

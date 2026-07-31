@@ -69,3 +69,67 @@ describe('render to pure-vnode SVG', function () {
     assert.match(svg, /not yet laid out/);
   });
 });
+
+describe('state diagrams render as laid-out graphs', function () {
+  const SRC = `stateDiagram-v2
+  [*] --> draft
+  draft --> review : submit [ok] / notify
+  review --> approved
+  approved --> [*]`;
+
+  it('renders through the flowchart engine with the mm-state root class', function () {
+    const svg = compileMermaid(SRC).toSvgString();
+    assert.match(svg, /class="mermaid mm-svg mm-state"/);
+    assert.match(svg, /data-id="draft"/);
+    assert.match(svg, /data-id="review"/);
+    assert.match(svg, /submit \[ok\] \/ notify/, 'the verbatim label is the edge text');
+  });
+
+  it('draws the [*] pseudo-states as a filled dot and a ring', function () {
+    const svg = compileMermaid(SRC).toSvgString();
+    assert.match(svg, /data-id="__start"/);
+    assert.match(svg, /data-id="__end"/);
+    // the end ring is the two-circle doublecircle group
+    const rings = svg.match(/<circle/g) ?? [];
+    assert.ok(rings.length >= 3, 'start dot + end double ring');
+  });
+
+  it('is deterministic: same source, identical bytes', function () {
+    assert.equal(compileMermaid(SRC).toSvgString(), compileMermaid(SRC).toSvgString());
+  });
+
+  it('the old structured panel path refuses state loudly', async function () {
+    const { structuredSections } = await import('../../components/mermaid/src/render/misc.js');
+    assert.throws(() => structuredSections('state', {}), /not a structured-panel type/);
+  });
+});
+
+describe('stable identity attributes for editors', function () {
+  it('every flowchart node and edge carries its identity', function () {
+    const src = 'flowchart LR\n  A[Start] --> B{OK?}\n  B -->|yes| C((Done))\n  B -->|no| A';
+    const c = compileMermaid(src);
+    const svg = c.toSvgString();
+    for (const node of c.doc.ast.nodes) {
+      assert.ok(svg.includes(`data-id="${node.id}"`), node.id);
+    }
+    c.doc.ast.edges.forEach((e, i) => {
+      assert.ok(
+        svg.includes(`data-edge="${i}" data-from="${e.from}" data-to="${e.to}"`),
+        `edge ${i} carries its AST position and endpoints`);
+    });
+  });
+
+  it('toLayout() is the cached hit-testing substrate and agrees with the SVG', function () {
+    const c = compileMermaid('stateDiagram-v2\n  [*] --> a\n  a --> b : go');
+    const layout = c.toLayout();
+    assert.equal(c.toLayout(), layout, 'reference-stable per compiled document');
+    const a = layout.nodes.find((n) => n.id === 'a');
+    assert.ok(a.w > 0 && a.h > 0);
+    assert.ok(c.toSvgString().includes(`x="${a.x}"`),
+      'the layout rectangle is the rendered rectangle');
+    assert.equal(compileMermaid('pie\n"A" : 1').toLayout(), null,
+      'null for types without a geometric layout');
+    assert.equal(compileMermaid('%%not mermaid%%').toLayout(), null,
+      'null when the document failed to parse');
+  });
+});

@@ -55,6 +55,12 @@ c.doc;                              // the DiagramDocument
 c.toVnode();                        // pure-vnode SVG (reference-stable)
 c.toSvgString();                    // standalone SVG string — SSR, no browser
 c.toText();                         // canonical Mermaid (toMermaid)
+c.toLayout();                       // the PositionedDiagram — pure geometry
+                                    // (nodes x/y/w/h, routed edges); null for
+                                    // types without a layout. The rendered
+                                    // SVG also marks every node/edge with
+                                    // data-id / data-edge+data-from+data-to,
+                                    // so editors hit-test without re-layout.
 ```
 
 **Render pipeline:**
@@ -149,8 +155,11 @@ flowchart LR
 
 ## Diagram coverage
 
-Fully laid out: **flowchart**, **sequence**. Structured panels / chart:
-**class**, **ER**, **state**, **gantt**, **pie**. Parse-accepted with an
+Fully laid out: **flowchart**, **sequence**, **state** (through the
+flowchart engine via an adapter — states as rounded nodes, `[*]` as a
+filled start dot and an end ring, verbatim transition labels on the
+edges; composite states stay flattened in v1). Structured panels /
+chart: **class**, **ER**, **gantt**, **pie**. Parse-accepted with an
 honest "not yet laid out" placeholder: mindmap, gitGraph, journey,
 timeline, quadrantChart, requirement. The benchmark's coverage scorecard reports this
 without hiding gaps.
