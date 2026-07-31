@@ -21,13 +21,29 @@ import { PROVIDERS } from './providers.js';
 /** Validation errors reported per failed generation: enough to repair. */
 const MAX_ERRORS = 8;
 
-/** @param {any[]} raw */
+/**
+ * Normalize an injected check's errors into the compact records a
+ * repair prompt carries. The default `JarenValidator` check reports
+ * `{ instancePath, keyword, message }`; a compiler check (a Jaren
+ * engine caught into an outcome) reports `{ code, docPath, message }`.
+ * Both are the same idea — a location and a reason — so a compile error
+ * keeps its `code` and its `docPath` here rather than being flattened
+ * into a location-less message. `docPath` (the engine's pointer into
+ * the offending document) wins over `instancePath` when both appear.
+ * @param {any[]} raw
+ */
 function normalizeErrors(raw) {
-  return raw.slice(0, MAX_ERRORS).map((e) => ({
-    instancePath: e.instancePath ?? '',
-    keyword: e.keyword ?? '',
-    message: e.message ?? 'invalid',
-  }));
+  return raw.slice(0, MAX_ERRORS).map((e) => {
+    /** @type {any} */
+    const out = {
+      instancePath: e.docPath ?? e.instancePath ?? '',
+      keyword: e.code ?? e.keyword ?? '',
+      message: e.message ?? 'invalid',
+    };
+    if (e.code !== undefined) out.code = e.code;
+    if (e.docPath !== undefined) out.docPath = e.docPath;
+    return out;
+  });
 }
 
 /**

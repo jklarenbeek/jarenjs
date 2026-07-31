@@ -68,3 +68,50 @@ test('the transcript persists across a reload and clear wipes it', async ({ page
   const stored = await page.evaluate(() => localStorage.getItem('jaren-ai-chat'));
   expect(JSON.parse(stored).messages, 'clear wiped the persisted transcript').toEqual([]);
 });
+
+test('the flow authoring tools register on the WebMCP surface', async ({ page }) => {
+  // a WebMCP host stub captures the provided tools before the app boots;
+  // this drives the real registerModelContext path in a real browser,
+  // without any provider network (registration, not a live model)
+  await page.addInitScript(() => {
+    /** @type {any} */ (window).__mcpTools = [];
+    /** @type {any} */ (navigator).modelContext = {
+      provideContext: ({ tools }) => { /** @type {any} */ (window).__mcpTools = tools; },
+    };
+  });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/');
+  await page.waitForFunction(() => /** @type {any} */ (window).__mcpTools.length > 0);
+
+  const names = await page.evaluate(() =>
+    /** @type {any} */ (window).__mcpTools.map((t) => t.name));
+  for (const expected of ['jaren_flow_write', 'jaren_flow_patch', 'jaren_flow_check', 'jaren_flow_get_templates']) {
+    expect(names).toContain(expected);
+  }
+
+  // a rejected write returns the JF compile error AS the tool result —
+  // the agent loop's repair signal, proven through the registered tool
+  const rejected = await page.evaluate(async () => {
+    const write = /** @type {any} */ (window).__mcpTools.find((t) => t.name === 'jaren_flow_write');
+    return write.execute({
+      kind: 'fsm',
+      doc: { initial: 'a', states: ['a', 'b'], transitions: [{ from: 'a', event: 'go', to: 'zz' }] },
+    });
+  });
+  expect(rejected.ok).toBe(false);
+  expect(rejected.errors[0].code).toBe('JF0006');
+  expect(rejected.errors[0].docPath).toBe('/transitions/0/to');
+
+  // an accepted write is the document #/flow renders
+  const okName = await page.evaluate(async () => {
+    const templates = /** @type {any} */ (window).__mcpTools.find((t) => t.name === 'jaren_flow_get_templates');
+    const review = templates.execute({ name: 'review' });
+    const write = /** @type {any} */ (window).__mcpTools.find((t) => t.name === 'jaren_flow_write');
+    return write.execute({ kind: 'fsm', doc: review.doc });
+  });
+  expect(okName.ok).toBe(true);
+  await page.waitForSelector('.flow-canvas svg.mm-state');
+  await expect(page.locator('[data-id="draft"]')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});

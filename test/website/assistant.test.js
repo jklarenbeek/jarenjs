@@ -4,6 +4,7 @@ import * as assert from 'node:assert';
 
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
+import { flowGateTaskStub } from '../../packages/website/src/boundaries/assistant.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
 /** Build an SSE completion body from chat chunks + the [DONE] marker. */
@@ -352,6 +353,52 @@ describe('website — WebMCP over @jarenjs/ai', function () {
     assert.ok(saved.names.includes('from-chat'), 'the new experiment is listed');
     assert.match(tool('jaren_save_experiment').execute({ name: '' }).error, /invalid input/,
       'Jaren rejects an empty name before the tool runs');
+
+    // ---- the Flow authoring tools ----
+    for (const expected of ['jaren_flow_write', 'jaren_flow_patch', 'jaren_flow_check', 'jaren_flow_get_templates']) {
+      assert.ok(names.includes(expected), `${expected} registered`);
+    }
+
+    // the seed library, then write one in and watch it land at #/flow
+    const flowTemplates = tool('jaren_flow_get_templates').execute({});
+    assert.ok(flowTemplates.some((t) => t.name === 'review' && t.kind === 'fsm'));
+    const review = tool('jaren_flow_get_templates').execute({ name: 'review' });
+    const wrote = tool('jaren_flow_write').execute({ kind: 'fsm', doc: review.doc });
+    assert.strictEqual(wrote.ok, true);
+    assert.strictEqual(app.getState().route.page, 'flow', 'the human is taken to watch it');
+    assert.deepStrictEqual(app.getState().flow.doc, review.doc, 'the accepted document is live');
+
+    // a schema-valid but COMPILE-broken machine is rejected with JF errors
+    // AS the tool result — the agent loop is the repair loop
+    const brokenFsm = {
+      initial: 'a', states: ['a', 'b'],
+      transitions: [{ from: 'a', event: 'go', to: 'zz' }],   // undeclared target
+    };
+    const rejected = tool('jaren_flow_write').execute({ kind: 'fsm', doc: brokenFsm });
+    assert.strictEqual(rejected.ok, false);
+    assert.strictEqual(rejected.errors[0].code, 'JF0006', 'the compiler code is the tool result');
+    assert.strictEqual(rejected.errors[0].docPath, '/transitions/0/to');
+    assert.deepStrictEqual(app.getState().flow.doc, review.doc, 'the live document is untouched by a rejected write');
+
+    // check is the read-only verdict; patch re-gates
+    assert.strictEqual(tool('jaren_flow_check').execute({ kind: 'fsm', doc: brokenFsm }).ok, false);
+    assert.strictEqual(tool('jaren_flow_check').execute({ kind: 'fsm', doc: review.doc }).ok, true);
+    const patched = tool('jaren_flow_patch').execute({
+      patch: [{ op: 'add', path: '/states/-', value: 'archived' }],
+    });
+    assert.strictEqual(patched.ok, true);
+    assert.ok(app.getState().flow.doc.states.includes('archived'), 'the patch applied and re-gated');
+
+    // a dag template writes too, and navigate reaches #/flow
+    const enrich = tool('jaren_flow_get_templates').execute({ name: 'enrich' });
+    assert.strictEqual(tool('jaren_flow_write').execute({ kind: 'dag', doc: enrich.doc }).ok, true);
+    assert.strictEqual(app.getState().flow.kind, 'dag');
+    tool('jaren_navigate').execute({ page: 'flow' });
+    assert.strictEqual(app.getState().route.page, 'flow');
+  });
+
+  it('the dag-gate task stub is a never-called no-op (compileDag resolves handlers, never invokes them)', function () {
+    assert.strictEqual(flowGateTaskStub(), null);
   });
 
   it('the built-in storage/settings defaults boot and persist without env wiring', function () {

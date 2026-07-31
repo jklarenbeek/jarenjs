@@ -13,5 +13,6 @@ export { PROVIDERS, resolveEndpoint, probeProvider } from './providers.js';
 export { createSseDecoder } from './sse.js';
 export { createChatClient, createStreamAccumulator } from './client.js';
 export { createStructuredOutput } from './structured.js';
+export { checkOutcome, composeChecks } from './check.js';
 export { createToolbox, registerModelContext } from './toolbox.js';
 export { createAgent } from './agent.js';

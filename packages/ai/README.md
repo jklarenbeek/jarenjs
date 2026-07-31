@@ -93,6 +93,66 @@ the model with the instancePath'd errors for a bounded number of repairs (`maxRe
 default 1). The query/JSLT grammars ship LLM-profile twins built for exactly this
 (see `@jarenjs/json`'s README).
 
+## Authoring engine documents — validate *and* compile
+
+The Jaren engines are program languages published as JSON Schema — a query, a JSLT
+stylesheet, an app, a flow machine. A model can author one under the schema, but "it
+validates" is not "it compiles": a jaren-fsm can be structurally perfect and still name a
+transition to an undeclared state, which only the *compiler* catches. So the gate for
+generated programs is two checks in one, and `composeChecks` composes them:
+
+```javascript
+import { createStructuredOutput, composeChecks } from '@jarenjs/ai';
+import { JarenValidator } from '@jarenjs/validate';
+import { compileJsonQuery } from '@jarenjs/json/query';
+
+// the two-line compile gate: success → true, a compile error → an
+// outcome carrying the engine's own code + docPath
+const compiles = (doc) => {
+  try { compileJsonQuery(doc); return true; }
+  catch (e) { return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.message }] }; }
+};
+
+const out = createStructuredOutput({
+  client, schema: querySchema, name: 'jaren_query',
+  validator: composeChecks(new JarenValidator({ collectErrors: true }).compile(querySchema), compiles),
+});
+```
+
+The first invalid check wins, and its errors go back to the model. What makes this
+*repairable* rather than merely "failed": every Jaren compile error carries a stable
+`code` (`JQ0002`, `JT0007`, `JF0006`, …) and a `docPath` — a JSON Pointer into the exact
+offending member — and the structured-output error normalizer keeps both through the
+repair prompt. The model is told not "something failed" but *where* and *what*, which is
+the whole difference between a loop that converges and one that flails.
+
+Nothing here is engine-specific: the same `composeChecks(schema, compileGate)` shape gates
+a query, a JSLT stylesheet, an `@jarenjs/app` document or an `@jarenjs/flow` machine —
+`compileGate` just wraps the matching compiler. `@jarenjs/flow`'s
+[README](../flow/README.md#authoring-with-a-model) shows the flow worked example end to end.
+
+## A model as a dataflow node
+
+An `@jarenjs/flow` dag runs a graph whose nodes are the suite's engines — and a *model*
+is just another node. A `task` handler is three lines, and the run's shared `AbortSignal`
+reaches the client for free:
+
+```javascript
+const dag = compileDag(doc, {
+  tasks: {
+    llm: ({ with: w, input }, signal) =>
+      client.complete({ stream: false, messages: [{ role: 'user', content: prompt(w, input) }], signal })
+        .then((r) => JSON.parse(r.message.content)),
+  },
+});
+await dag.run(rows);        // the model's output flows to the next node; aborting the run aborts the request
+```
+
+That is the whole integration — no wrapper, no adapter. Guarding the model's *output*
+with a downstream `query`/`jslt` node, or with `createStructuredOutput` inside the
+handler, composes the same way. `@jarenjs/ai` and `@jarenjs/flow` never import each
+other; the graph is the only thing that knows about both.
+
 ## The toolbox
 
 ```js

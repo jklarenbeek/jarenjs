@@ -19,16 +19,70 @@
 
 import {
   createChatClient, createAgent, createToolbox, registerModelContext, PROVIDERS,
-  probeProvider,
+  probeProvider, composeChecks, checkOutcome,
 } from '@jarenjs/ai';
 
 import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
+import { compileFsm, compileDag } from '@jarenjs/flow';
+import { JarenValidator } from '@jarenjs/validate';
+
+import fsmSchema from '@jarenjs/flow/schemas/jaren-fsm.schema.json' with { type: 'json' };
+import dagSchema from '@jarenjs/flow/schemas/jaren-dag.schema.json' with { type: 'json' };
+import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
+import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 
 import { runValidation } from './validator.js';
 import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES } from './engines.js';
 import { validateAppDocument, auditDocumentRender } from './studio.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
+import { FLOW_TEMPLATES, flowTemplate } from '../content/flowTemplates.js';
 import { exampleSchemas } from '../content/schemas.js';
+
+// The flow authoring gate: schema-validate, THEN compile — one injected
+// check per kind, built from the shipped `composeChecks` and the
+// two-line compile-gate adapter (the engine-agnostic recipe, applied to
+// flow). A rejected document returns its JF errors AS the tool result,
+// so the agent loop is the repair loop — no second mechanism.
+const compileGate = (compile) => (doc) => {
+  try {
+    compile(doc);
+    return true;
+  }
+  catch (err) {
+    const e = /** @type {any} */ (err);
+    return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.message }] };
+  }
+};
+/**
+ * The registry stub the dag gate compiles against: `compileDag` only
+ * needs each task name to resolve to a FUNCTION (it validates the wiring
+ * and resolves handlers, but never calls them at compile time), so one
+ * shared no-op stands in for every task while gating. The real handlers
+ * are the caller's at run time. Exported so its trivial contract is
+ * covered directly — the gate never invokes it.
+ * @returns {null}
+ */
+export const flowGateTaskStub = () => null;
+
+const FLOW_CHECKS = {
+  fsm: composeChecks(
+    new JarenValidator({ collectErrors: true }).addSchema(querySchema).compile(fsmSchema),
+    compileGate(compileFsm)),
+  // a dag needs its task registry to compile; the assistant checks
+  // STRUCTURE (schema) + acyclicity/ports/output against a registry
+  // stubbed from the document's own task names, so a document naming a
+  // handler still passes the shape gate
+  dag: composeChecks(
+    new JarenValidator({ collectErrors: true }).addSchema(querySchema).addSchema(jsltSchema).compile(dagSchema),
+    compileGate((doc) => {
+      /** @type {Record<string, any>} */
+      const tasks = {};
+      for (const node of Object.values(doc?.nodes ?? {})) {
+        if (node?.kind === 'task' && typeof node.run === 'string') tasks[node.run] = flowGateTaskStub;
+      }
+      return compileDag(doc, { tasks });
+    })),
+};
 
 /** Provider options for the settings select (BYOK: three shapes). */
 export const PROVIDER_OPTIONS = Object.entries(PROVIDERS)
@@ -173,7 +227,7 @@ export function createSiteToolbox(env) {
     inputSchema: {
       type: 'object',
       properties: {
-        page: { enum: ['home', 'playground', 'studio', 'benchmarks', 'charts', 'docs', 'examples', 'calculator'] },
+        page: { enum: ['home', 'playground', 'studio', 'flow', 'benchmarks', 'charts', 'docs', 'examples', 'calculator'] },
         params: { type: 'object', additionalProperties: { type: 'string' } },
       },
       required: ['page'],
@@ -318,6 +372,104 @@ export function createSiteToolbox(env) {
       return template === undefined
         ? { error: `no template named '${input.name}'`, names: STUDIO_TEMPLATES.map((t) => t.name) }
         : { name: template.name, title: template.title, lead: template.lead, doc: template.doc };
+    },
+  });
+
+  // ---- the Flow studio: authoring an executable workflow document ----
+
+  /** The current flow document + kind, or nulls. */
+  const flowSlice = () => env.getApp()?.getState().flow ?? { kind: null, doc: null };
+
+  /**
+   * Gate a flow document (schema + compile), and on success load it into
+   * the Flow studio, navigating so the human watches it render. A
+   * rejected document returns its JF errors AS the tool result — the
+   * agent loop reads them and repairs, no second mechanism.
+   * @param {'fsm'|'dag'} kind @param {any} doc
+   */
+  const flowLoad = (kind, doc) => {
+    const outcome = checkOutcome(FLOW_CHECKS[kind](doc));
+    if (!outcome.valid) {
+      return {
+        ok: false,
+        errors: outcome.errors,
+        hint: 'The document must validate against the jaren-' + kind + ' schema AND compile. Each error carries a code (a JF/JQ/JT code) and a docPath JSON Pointer into your document — fix those and try again.',
+      };
+    }
+    const app = env.getApp();
+    if (app === null) return { error: 'the app is not running here' };
+    const template = kind === 'fsm' ? flowTemplate('review') : flowTemplate('enrich');
+    go('#/flow');
+    app.dispatch('flow/load', {
+      kind, doc,
+      runContext: kind === 'fsm' ? (template?.runContext ?? {}) : null,
+      dagInput: kind === 'dag' ? JSON.stringify(template?.runInput ?? [], null, 1) : '',
+    });
+    return { ok: true };
+  };
+
+  toolbox.add({
+    name: 'jaren_flow_write',
+    description: 'Load a COMPLETE executable workflow document into the Flow studio (#/flow), where it renders as a diagram and runs live. `kind` is "fsm" (a jaren-fsm state machine: initial, states, transitions with query-document guards) or "dag" (a jaren-dag dataflow: nodes of kind input/output/const/query/jslt/task, wired by edges). The document is validated against the schema AND compiled; on failure you get the errors (each with a JF/JQ/JT code and a docPath) to repair. Start from jaren_flow_get_templates.',
+    inputSchema: {
+      type: 'object',
+      properties: { kind: { enum: ['fsm', 'dag'] }, doc: { type: 'object' } },
+      required: ['kind', 'doc'],
+    },
+    execute: (input) => flowLoad(input.kind, input.doc),
+  });
+
+  toolbox.add({
+    name: 'jaren_flow_patch',
+    description: 'Modify the current Flow document with an RFC 6902 JSON Patch (applied by the suite\'s own patch engine). The patched result is re-validated and re-compiled before it swaps in — an invalid result is rejected and the current document stays live. Returns ok, or the errors to repair.',
+    inputSchema: {
+      type: 'object',
+      properties: { patch: { type: 'array', items: { type: 'object' } } },
+      required: ['patch'],
+    },
+    execute: (input) => {
+      const { kind, doc } = flowSlice();
+      if (doc === null) return { error: 'no flow document is loaded — load one with jaren_flow_write or a template first' };
+      let next;
+      try {
+        next = applyJSONPatch(doc, input.patch);
+      }
+      catch (err) {
+        return { error: `the patch failed to apply: ${/** @type {Error} */ (err).message}` };
+      }
+      return flowLoad(kind, next);
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_flow_check',
+    description: 'Validate and compile a workflow document WITHOUT loading it — a read-only verdict. Returns { ok: true } or the errors (code + docPath each). Use it to iterate a document before committing it with jaren_flow_write.',
+    inputSchema: {
+      type: 'object',
+      properties: { kind: { enum: ['fsm', 'dag'] }, doc: { type: 'object' } },
+      required: ['kind', 'doc'],
+    },
+    execute: (input) => {
+      const outcome = checkOutcome(FLOW_CHECKS[input.kind](input.doc));
+      return outcome.valid ? { ok: true } : { ok: false, errors: outcome.errors };
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_flow_get_templates',
+    description: 'The Flow seed library: complete, runnable jaren-fsm and jaren-dag documents. Without a name you get the list; with a name, the full document and its kind — load it with jaren_flow_write and adapt it with jaren_flow_patch.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { enum: FLOW_TEMPLATES.map((t) => t.name) } },
+    },
+    execute: (input) => {
+      if (input.name === undefined) {
+        return FLOW_TEMPLATES.map((t) => ({ name: t.name, kind: t.kind, title: t.title, lead: t.lead }));
+      }
+      const template = flowTemplate(input.name);
+      return template === null
+        ? { error: `no template named '${input.name}'`, names: FLOW_TEMPLATES.map((t) => t.name) }
+        : { name: template.name, kind: template.kind, title: template.title, lead: template.lead, doc: template.doc };
     },
   });
 

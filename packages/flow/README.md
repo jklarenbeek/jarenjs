@@ -181,6 +181,19 @@ by design, because a picture's annotation must not change execution.
 Real conditions are `$`-paths (`"$.payload.fresh"`) or operator
 documents (`{ "$gt": ["$.context.count", 3] }`).
 
+## Authoring with a model
+
+A jaren-fsm or jaren-dag document is JSON published as a schema, so a
+constrained decoder can author one — and because every compile error
+carries a `code` and a `docPath`, a schema-valid but semantically broken
+machine (a transition to an undeclared state, say) repairs in a bounded
+loop rather than flailing. `@jarenjs/ai`'s
+[*Authoring engine documents*](../ai/README.md#authoring-engine-documents-validate-and-compile)
+section shows the `composeChecks(schema, compileGate)` recipe, and
+[*A model as a dataflow node*](../ai/README.md#a-model-as-a-dataflow-node)
+runs a model as an ordinary dag `task`. Neither package imports the
+other — the composition is data.
+
 ## Development
 
 Unit tests live in `test/flow/` at the repository root
