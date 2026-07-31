@@ -1,0 +1,476 @@
+//@ts-check
+/**
+ * @file The jaren-dag engine: compile an acyclic dataflow document
+ * (docs/FLOW-FORMAT.md §6) once — every embedded query, stylesheet,
+ * `with` and `select` becomes a closure, the task registry is resolved,
+ * the wiring rules are proven — and run it many times. A run resolves
+ * nodes as their inputs arrive (independent branches concurrently),
+ * delivers values by reference, and fails closed: the first failing
+ * node aborts the shared signal and rejects the whole run (§7.3) — no
+ * retries, no partial results.
+ *
+ * Determinism is same input → same output VALUES, never same timing:
+ * results are keyed per node and port objects assemble in edge
+ * document order, so completion order cannot change a value (§7.2).
+ */
+
+import { compileJsonQuery } from '@jarenjs/json/query';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { FlowCompileError, FlowRuntimeError } from './errors.js';
+
+/**
+ * @param {unknown} v
+ * @returns {v is Record<string, any>}
+ */
+function isJsonObject(v) {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** @param {unknown} v @returns {Error} */
+function asError(v) {
+  return v instanceof Error ? v : new Error(`non-Error thrown (${typeof v})`);
+}
+
+/** JSON Pointer segment escaping (RFC 6901) for node ids in docPaths. */
+function escapeSegment(id) {
+  return id.replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
+const KINDS = ['input', 'output', 'const', 'query', 'jslt', 'task'];
+
+/** Kinds that must not receive an inbound edge / must have one. */
+const NO_INBOUND = new Set(['input', 'const']);
+const NEEDS_INBOUND = new Set(['query', 'jslt', 'task', 'output']);
+
+/**
+ * Compile one embedded document, wrapping the engine error as JF0014.
+ * @param {(d: any) => any} compile
+ * @param {any} embedded
+ * @param {string} docPath
+ */
+function compileEmbedded(compile, embedded, docPath) {
+  try {
+    return compile(embedded);
+  }
+  catch (err) {
+    const cause = asError(err);
+    throw new FlowCompileError('JF0014',
+      `the embedded document failed to compile: ${cause.message}`, docPath, cause);
+  }
+}
+
+/**
+ * A settlement record handed to `onNode` (§7.4).
+ * @typedef {{ id: string, status: 'ok'|'error'|'aborted', ms: number }} DagNodeRecord
+ */
+
+/**
+ * A compiled jaren-dag graph.
+ * @typedef {Object} CompiledDag
+ * @property {readonly string[]} nodes - Declared node ids, document order.
+ * @property {string} output - The output node's id.
+ * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void }) => Promise<any>} run -
+ *   Execute the graph for one input (`undefined` reads as `null`).
+ */
+
+/**
+ * Compile a jaren-dag document (docs/FLOW-FORMAT.md §6–§7) against a
+ * task registry. Everything is decided here: structural validation,
+ * the wiring rules, acyclicity, embedded-document compilation and
+ * registry resolution — `run` only executes closures.
+ *
+ * @param {any} doc - the jaren-dag document
+ * @param {{ tasks?: Record<string, (props: { with: any, input: any }, signal: AbortSignal) => any> }} [options]
+ * @returns {CompiledDag}
+ * @throws {FlowCompileError} when the document violates the format (JF0xxx)
+ * @throws {TypeError} when the options are malformed (a registry that is
+ *   not an object, or a registered handler that is not a function)
+ */
+export function compileDag(doc, options) {
+  const tasks = options?.tasks ?? {};
+  if (!isJsonObject(tasks)) {
+    throw new TypeError('compileDag: "tasks" must be an object of handler functions');
+  }
+
+  if (!isJsonObject(doc)) {
+    throw new FlowCompileError('JF0010', 'the dag document must be an object', '');
+  }
+  if (doc.$dag !== '0.1') {
+    throw new FlowCompileError('JF0010',
+      `the "$dag" member is required and must be '0.1' (got ${JSON.stringify(doc.$dag)})`,
+      '/$dag');
+  }
+  if (!isJsonObject(doc.nodes)) {
+    throw new FlowCompileError('JF0011',
+      'the "nodes" member must be an object of node declarations', '/nodes');
+  }
+
+  /** @type {Map<string, any>} */
+  const nodes = new Map();
+  const order = Object.keys(doc.nodes);
+  for (const id of order) {
+    const decl = doc.nodes[id];
+    const base = `/nodes/${escapeSegment(id)}`;
+    if (!isJsonObject(decl) || !KINDS.includes(decl.kind)) {
+      throw new FlowCompileError('JF0011',
+        `node '${id}' must be an object with a kind from ${KINDS.join('|')}`,
+        isJsonObject(decl) ? `${base}/kind` : base);
+    }
+    /** @type {any} */
+    const node = { id, kind: decl.kind, docPath: base, inbound: [] };
+    switch (decl.kind) {
+      case 'const':
+        if (!Object.hasOwn(decl, 'value')) {
+          throw new FlowCompileError('JF0011',
+            `const node '${id}' must carry a "value" member`, base);
+        }
+        node.value = decl.value;
+        break;
+      case 'query':
+        if (decl.query === undefined) {
+          throw new FlowCompileError('JF0011',
+            `query node '${id}' must carry a "query" member`, base);
+        }
+        node.query = compileEmbedded(compileJsonQuery, decl.query, `${base}/query`);
+        break;
+      case 'jslt':
+        if (decl.stylesheet === undefined) {
+          throw new FlowCompileError('JF0011',
+            `jslt node '${id}' must carry a "stylesheet" member`, base);
+        }
+        node.transform = compileEmbedded(compileJsltStylesheet, decl.stylesheet, `${base}/stylesheet`);
+        break;
+      case 'task': {
+        if (typeof decl.run !== 'string' || decl.run === '') {
+          throw new FlowCompileError('JF0011',
+            `task node '${id}' must carry a non-empty string "run"`, `${base}/run`);
+        }
+        if (!Object.hasOwn(tasks, decl.run)) {
+          throw new FlowCompileError('JF0018',
+            `task node '${id}' names the handler '${decl.run}', which the registry does not provide`,
+            `${base}/run`);
+        }
+        if (typeof tasks[decl.run] !== 'function') {
+          throw new TypeError(
+            `compileDag: the registered handler '${decl.run}' is not a function`);
+        }
+        node.handler = tasks[decl.run];
+        node.with = decl.with === undefined
+          ? null
+          : compileEmbedded(compileJsonQuery, decl.with, `${base}/with`);
+        break;
+      }
+      default:
+        break;
+    }
+    nodes.set(id, node);
+  }
+
+  const outputs = order.filter((id) => nodes.get(id).kind === 'output');
+  if (outputs.length !== 1) {
+    throw new FlowCompileError('JF0017',
+      `a dag declares exactly one output node (found ${outputs.length})`, '/nodes');
+  }
+  const outputId = outputs[0];
+
+  if (!Array.isArray(doc.edges)) {
+    throw new FlowCompileError('JF0012',
+      'the "edges" member must be an array of edge entries', '/edges');
+  }
+  for (let i = 0; i < doc.edges.length; i++) {
+    const e = doc.edges[i];
+    const base = `/edges/${i}`;
+    if (!isJsonObject(e)) {
+      throw new FlowCompileError('JF0012', `edge ${i} must be an object`, base);
+    }
+    if (typeof e.from !== 'string') {
+      throw new FlowCompileError('JF0012', `edge ${i} must carry a string "from"`, `${base}/from`);
+    }
+    if (typeof e.to !== 'string') {
+      throw new FlowCompileError('JF0012', `edge ${i} must carry a string "to"`, `${base}/to`);
+    }
+    if (e.port !== undefined && (typeof e.port !== 'string' || e.port === '')) {
+      throw new FlowCompileError('JF0012',
+        `edge ${i} has a "port" that is not a non-empty string`, `${base}/port`);
+    }
+    if (!nodes.has(e.from)) {
+      throw new FlowCompileError('JF0013',
+        `edge ${i} leaves the undeclared node '${e.from}'`, `${base}/from`);
+    }
+    if (!nodes.has(e.to)) {
+      throw new FlowCompileError('JF0013',
+        `edge ${i} enters the undeclared node '${e.to}'`, `${base}/to`);
+    }
+    if (NO_INBOUND.has(nodes.get(e.to).kind)) {
+      throw new FlowCompileError('JF0015',
+        `edge ${i} enters '${e.to}', but ${nodes.get(e.to).kind} nodes accept no inbound edge`,
+        `${base}/to`);
+    }
+    if (nodes.get(e.from).kind === 'output') {
+      throw new FlowCompileError('JF0015',
+        `edge ${i} leaves the output node '${e.from}'`, `${base}/from`);
+    }
+    nodes.get(e.to).inbound.push({
+      from: e.from,
+      port: e.port ?? null,
+      select: e.select === undefined
+        ? null
+        : compileEmbedded(compileJsonQuery, e.select, `${base}/select`),
+      edgeIndex: i,
+    });
+  }
+
+  // port completeness/uniqueness and inbound-required rules (§6.1)
+  for (const id of order) {
+    const node = nodes.get(id);
+    if (NEEDS_INBOUND.has(node.kind) && node.inbound.length === 0) {
+      throw new FlowCompileError('JF0015',
+        `${node.kind} node '${id}' has no inbound edge`, node.docPath);
+    }
+    const ported = node.inbound.some((e) => e.port !== null);
+    if (node.inbound.length > 1 || ported) {
+      const seen = new Set();
+      for (const e of node.inbound) {
+        if (e.port === null) {
+          throw new FlowCompileError('JF0015',
+            `edge ${e.edgeIndex} into '${id}' needs a "port": ported fan-in must be all-ported`,
+            `/edges/${e.edgeIndex}`);
+        }
+        if (seen.has(e.port)) {
+          throw new FlowCompileError('JF0015',
+            `edge ${e.edgeIndex} duplicates port '${e.port}' into '${id}'`,
+            `/edges/${e.edgeIndex}/port`);
+        }
+        seen.add(e.port);
+      }
+      node.ports = true;
+    }
+    else {
+      node.ports = false;
+    }
+  }
+
+  // acyclicity via Kahn (insertion-order tie-break). A forward pass's
+  // leftover holds cycles PLUS their downstream; a backward pass's
+  // leftover holds cycles PLUS their upstream — the intersection names
+  // exactly the cyclic core, so the message never accuses an innocent
+  // downstream node.
+  {
+    /** @param {(id: string) => string[]} depsOf */
+    const kahnLeftover = (depsOf) => {
+      const degree = new Map(order.map((id) => [id, depsOf(id).length]));
+      const consumers = new Map(order.map((id) => [id, /** @type {string[]} */ ([])]));
+      for (const id of order) {
+        for (const dep of depsOf(id)) /** @type {string[]} */ (consumers.get(dep)).push(id);
+      }
+      const ready = order.filter((id) => degree.get(id) === 0);
+      while (ready.length > 0) {
+        const id = /** @type {string} */ (ready.shift());
+        degree.set(id, -1);
+        for (const next of /** @type {string[]} */ (consumers.get(id))) {
+          const left = /** @type {number} */ (degree.get(next)) - 1;
+          degree.set(next, left);
+          if (left === 0) ready.push(next);
+        }
+      }
+      return new Set(order.filter((id) => /** @type {number} */ (degree.get(id)) > 0));
+    };
+    const forward = kahnLeftover((id) => nodes.get(id).inbound.map((e) => e.from));
+    if (forward.size > 0) {
+      const backward = kahnLeftover((id) => {
+        const out = [];
+        for (const other of order) {
+          for (const e of nodes.get(other).inbound) {
+            if (e.from === id) out.push(other);
+          }
+        }
+        return out;
+      });
+      const cyclic = new Set([...forward].filter((id) => backward.has(id)));
+      const offender = doc.edges.findIndex(
+        (e) => cyclic.has(e.from) && cyclic.has(e.to));
+      throw new FlowCompileError('JF0016',
+        `the graph has a cycle among: ${[...cyclic].join(', ')}`, `/edges/${offender}`);
+    }
+  }
+
+  /** @type {CompiledDag['run']} */
+  function run(input, opts) {
+    // option misuse throws synchronously, like every compile surface;
+    // only document-level outcomes travel through the promise
+    const signal = opts?.signal;
+    if (signal !== undefined && typeof signal?.addEventListener !== 'function') {
+      throw new TypeError('run: "signal" must be an AbortSignal');
+    }
+    const onNode = opts?.onNode;
+    if (onNode !== undefined && typeof onNode !== 'function') {
+      throw new TypeError('run: "onNode" must be a function');
+    }
+    return execute(input === undefined ? null : input, signal, onNode);
+  }
+
+  /**
+   * @param {any} runInput
+   * @param {AbortSignal|undefined} signal
+   * @param {((record: DagNodeRecord) => void)|undefined} onNode
+   */
+  async function execute(runInput, signal, onNode) {
+    const controller = new AbortController();
+    /** @type {FlowRuntimeError|null} */
+    let failure = null;
+
+    /** @param {DagNodeRecord} rec */
+    const record = (rec) => {
+      if (onNode === undefined) return;
+      try {
+        onNode(rec);
+      }
+      catch { /* observation must not change a run (§7.4) */ }
+    };
+
+    /**
+     * Register the canonical run failure exactly once and abort the
+     * shared signal (§7.3).
+     * @param {FlowRuntimeError} err
+     */
+    const fail = (err) => {
+      if (failure === null) {
+        failure = err;
+        controller.abort();
+      }
+    };
+
+    /** @type {(() => void) | null} */
+    let onAbort = null;
+    if (signal !== undefined) {
+      if (signal.aborted) {
+        throw new FlowRuntimeError('JF2007', 'the run was aborted before it started', '',
+          signal.reason instanceof Error ? signal.reason : undefined);
+      }
+      onAbort = () => {
+        fail(new FlowRuntimeError('JF2007', 'the run was aborted', '',
+          signal.reason instanceof Error ? signal.reason : undefined));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    /** @type {Map<string, Promise<any>>} */
+    const promises = new Map();
+
+    /** @param {string} id @returns {Promise<any>} */
+    const valueOf = (id) => {
+      let p = promises.get(id);
+      if (p === undefined) {
+        p = evaluate(/** @type {any} */ (nodes.get(id)));
+        promises.set(id, p);
+      }
+      return p;
+    };
+
+    /** @param {any} node @returns {Promise<any>} */
+    async function evaluate(node) {
+      // upstream failures propagate without a record: this node never
+      // started (§7.4)
+      const raw = await Promise.all(node.inbound.map((e) => valueOf(e.from)));
+      // a failed run launches no new work — inputs may have arrived,
+      // but the canonical failure propagates instead (§7.3)
+      if (failure !== null) throw failure;
+
+      const started = globalThis.performance.now();
+      /** @param {'ok'|'error'|'aborted'} status */
+      const settle = (status) =>
+        record({ id: node.id, status, ms: globalThis.performance.now() - started });
+
+      try {
+        // deliveries: per-edge select, empty → null (§6.1)
+        const delivered = node.inbound.map((e, i) => {
+          if (e.select === null) return raw[i];
+          try {
+            const v = e.select(raw[i]);
+            return v === undefined ? null : v;
+          }
+          catch (err) {
+            const cause = asError(err);
+            throw new FlowRuntimeError('JF2006',
+              `the select on edge ${e.edgeIndex} into '${node.id}' failed: ${cause.message}`,
+              `/edges/${e.edgeIndex}/select`, cause);
+          }
+        });
+        let scope = null;
+        if (node.ports) {
+          scope = {};
+          for (let i = 0; i < node.inbound.length; i++) {
+            scope[node.inbound[i].port] = delivered[i];
+          }
+        }
+        else if (node.inbound.length === 1) {
+          scope = delivered[0];
+        }
+
+        let value;
+        switch (node.kind) {
+          case 'input': value = runInput; break;
+          case 'const': value = node.value; break;
+          case 'output': value = scope; break;
+          case 'query': value = node.query(scope) ?? null; break;
+          case 'jslt': value = node.transform(scope) ?? null; break;
+          case 'task': {
+            const props = {
+              with: node.with === null ? null : node.with(scope) ?? null,
+              input: scope,
+            };
+            value = (await node.handler(props, controller.signal)) ?? null;
+            break;
+          }
+          default: value = null; break;
+        }
+        settle('ok');
+        return value;
+      }
+      catch (err) {
+        const mapped = err instanceof FlowRuntimeError && /** @type {any} */ (err).nodeId !== undefined
+          ? /** @type {FlowRuntimeError} */ (err)
+          : (() => {
+            const cause = err instanceof FlowRuntimeError ? err.cause : asError(err);
+            const wrapped = err instanceof FlowRuntimeError
+              ? err
+              : new FlowRuntimeError('JF2006',
+                `node '${node.id}' failed: ${asError(err).message}`,
+                node.docPath, /** @type {Error|undefined} */ (cause instanceof Error ? cause : undefined));
+            return wrapped;
+          })();
+        /** @type {any} */ (mapped).nodeId ??= node.id;
+        const status = failure !== null || controller.signal.aborted ? 'aborted' : 'error';
+        if (status === 'error') fail(mapped);
+        settle(status);
+        throw mapped;
+      }
+    }
+
+    const all = order.map((id) => {
+      const p = valueOf(id);
+      p.catch(() => { /* guarded: the run rethrows the canonical failure */ });
+      return p;
+    });
+
+    try {
+      await Promise.all(all);
+    }
+    catch (err) {
+      throw failure ?? err;
+    }
+    finally {
+      if (signal !== undefined && onAbort !== null) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    }
+    if (failure !== null) throw failure;
+    return promises.get(outputId);
+  }
+
+  return Object.freeze({
+    nodes: Object.freeze(order.slice()),
+    output: outputId,
+    run,
+  });
+}

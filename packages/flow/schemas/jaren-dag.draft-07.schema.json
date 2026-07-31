@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-dag/0.1/draft-07",
+  "title": "Jaren dataflow graph 0.1",
+  "description": "Structural grammar of an executable jaren-dag document (see packages/flow/docs/FLOW-FORMAT.md sections 6-7): named nodes from a closed kind vocabulary (input, output, const, query, jslt, task) wired by edges that carry data, with embedded Jaren JSON Query and JSLT documents composed by reference - register those published grammars alongside this artifact. This schema is structural validation only: the compiler remains authoritative for the wiring rules it cannot express - unknown node references, port completeness and uniqueness, acyclicity, the exactly-one-output rule and task-registry resolution are compile-time checks (JF0xxx), and unknown members are ignored for forward compatibility.",
+  "type": "object",
+  "required": [
+    "$dag",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "$dag": {
+      "description": "The dag format version; required.",
+      "const": "0.1"
+    },
+    "nodes": {
+      "description": "Node declarations, id to declaration. The id is what edges reference.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/node"
+      }
+    },
+    "edges": {
+      "description": "The wiring: data flows from a node's result to a consumer's input scope, in document order for port-object assembly.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/edge"
+      }
+    }
+  },
+  "definitions": {
+    "node": {
+      "oneOf": [
+        {
+          "description": "Yields the run's input value (null when absent). Accepts no inbound edge.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "input"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The run's result is this node's input scope value. Exactly one per document; no outbound edge.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "output"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Yields its literal value. Accepts no inbound edge.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "const"
+            },
+            "value": {
+              "description": "Any JSON value, delivered by reference."
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "description": "A Jaren JSON Query evaluated with $ bound to the node's input scope; an empty result yields null.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "query"
+            },
+            "query": {
+              "description": "The query document.",
+              "allOf": [
+                {
+                  "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "query"
+          ]
+        },
+        {
+          "description": "A JSLT stylesheet transforming the node's input scope; an empty result yields null.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "jslt"
+            },
+            "stylesheet": {
+              "description": "The stylesheet document (bare rule array or envelope form).",
+              "allOf": [
+                {
+                  "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "stylesheet"
+          ]
+        },
+        {
+          "description": "A registered async handler, called as handler({ with, input }, signal); the handler must honor the run's shared AbortSignal.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "task"
+            },
+            "run": {
+              "description": "The compile-time registry handler name.",
+              "type": "string",
+              "minLength": 1
+            },
+            "with": {
+              "description": "Handler props: a query resolved against the node's input scope (null when absent or empty).",
+              "allOf": [
+                {
+                  "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "run"
+          ]
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The producing node id.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The consuming node id.",
+          "type": "string"
+        },
+        "port": {
+          "description": "Names this delivery in the consumer's input-scope object; when any inbound edge of a node is ported, all must be, uniquely.",
+          "type": "string",
+          "minLength": 1
+        },
+        "select": {
+          "description": "A query applied to the source value before delivery; an empty result delivers null.",
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ]
+    }
+  }
+}

@@ -210,7 +210,7 @@ if (tree !== null && tree.session !== undefined) {
 }
 `,
   '@jarenjs/flow': `
-import { compileFsm, createFsmSession, fsmToApp, fsmStateSchema } from '@jarenjs/flow';
+import { compileFsm, createFsmSession, fsmToApp, fsmStateSchema, compileDag } from '@jarenjs/flow';
 const fsm = compileFsm({
   initial: 'a',
   states: ['a', { id: 'b', final: true }],
@@ -228,6 +228,14 @@ const hosted = fsmToApp({ initial: 'a', states: ['a'], transitions: [{ from: 'a'
 const hostedEvents: string[] = hosted.events;
 void [hostedEvents, hosted.slice.current, hosted.actions['fsm/go']];
 void fsmStateSchema({ initial: 'a', states: ['a'], transitions: [] }).properties.current.enum;
+const dag = compileDag({
+  $dag: '0.1',
+  nodes: { i: { kind: 'input' }, o: { kind: 'output' } },
+  edges: [{ from: 'i', to: 'o' }],
+});
+const dagNodes: readonly string[] = dag.nodes;
+void [dagNodes, dag.output];
+void dag.run(1, { onNode: (rec) => void (rec.id + rec.status + rec.ms) }).then((v) => v);
 `,
 };
 

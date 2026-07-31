@@ -195,3 +195,47 @@ And driven, each step observable through `app.observe`:
 Control state moved only through the machine's generated actions, data
 state only through the host's, and the one guard read across the
 boundary the only way the convention allows: through `context`.
+
+## A dag as one effect
+
+A compiled dataflow graph (FLOW-FORMAT §6–§7) needs **no adapter at
+all**: `run(input, { signal })` is already the exact shape
+`createTaskEffect` wants, so a whole graph becomes one ordinary app
+effect — with the task convention's per-slot cancellation and the
+id-guard staleness rule for free (the app's TASKS.md is the normative
+home for that pattern). The test suite runs this recipe:
+
+```js
+import { compileDag } from '@jarenjs/flow';
+import { createApp, createTaskEffect } from '@jarenjs/app';
+
+const dag = compileDag(enrichDoc, { tasks: { lookup } });
+
+const app = createApp({
+  state: { rows: [...], tasks: { enrich: { id: 0, status: 'idle' } }, result: null },
+  view,
+  actions: {
+    start: {
+      patch: [
+        { op: 'replace', path: '/tasks/enrich/id', value: { $add: ['$.tasks.enrich.id', 1] } },
+        { op: 'replace', path: '/tasks/enrich/status', value: 'busy' },
+      ],
+      effects: [{ run: 'enrich',
+        with: { input: '$.rows', id: { $add: ['$.tasks.enrich.id', 1] }, done: 'done' } }],
+    },
+    done: {
+      $if: [{ $eq: ['$payload.id', '$.tasks.enrich.id'] },
+        { patch: [
+          { op: 'replace', path: '/result', value: '$payload.result' },
+          { op: 'replace', path: '/tasks/enrich/status', value: 'idle' } ] }],
+    },
+  },
+}, {
+  effects: { enrich: createTaskEffect((props, signal) => dag.run(props.input, { signal })) },
+});
+```
+
+The division of labor is exact: the dag owns the computation and its
+internal abort fan-out (§7.3), `createTaskEffect` owns slot concurrency
+and cancellation, and the state-side id guard owns staleness —
+out-of-order completions are rejected by construction, never by luck.

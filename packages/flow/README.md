@@ -1,10 +1,14 @@
 # @jarenjs/flow
 
-Executable workflow documents. This package defines the **jaren-fsm
-format** — a finite state machine as one JSON value: declared states, an
+Executable workflow documents, in two formats. The **jaren-fsm format**
+is a finite state machine as one JSON value — declared states, an
 initial state, and a document-ordered transition table whose guards and
 effect props are [Jaren JSON Query](../json/docs/QUERY-FORMAT.md)
-documents — and compiles it, once, into a **pure step function**.
+documents — compiled, once, into a **pure step function**. The
+**jaren-dag format** is an acyclic dataflow whose nodes are the suite's
+own engines — query documents, JSLT stylesheets, registered async
+tasks — wired by edges that carry data and compiled into a
+run-to-completion executor.
 
 It is the executable half of a round trip the suite already ships: a
 `stateDiagram-v2` parsed by [`@jarenjs/mermaid`](../../components/mermaid)
@@ -117,6 +121,54 @@ effects agree. The convention, the scope mapping table, multi-machine
 layout and the honestly-stated divergences (a throwing guard fails the
 hosted transaction instead of reading false) live in
 [docs/APP-INTEGRATION.md](docs/APP-INTEGRATION.md).
+
+## The dataflow half — jaren-dag
+
+"Connect different parts together" as one schema-validated JSON value:
+nodes from a closed vocabulary (`input`, `output`, `const`, `query`,
+`jslt`, `task`) wired by edges, run to completion for one input. The
+suite's engines compose as **data** — a query filters, a stylesheet
+projects, and the result can be a vnode tree without this package ever
+importing a rendering line:
+
+```javascript
+import { compileDag } from '@jarenjs/flow';
+
+const dag = compileDag({
+  $dag: '0.1',
+  nodes: {
+    rows:   { kind: 'input' },
+    adults: { kind: 'query',
+      query: { $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' } },
+    view:   { kind: 'jslt',
+      stylesheet: [{ match: '$', body: ['ul', {},
+        [{ $for: { p: '$[*]' }, $return: ['li', {}, '$p.name'] }]] }] },
+    out:    { kind: 'output' },
+  },
+  edges: [
+    { from: 'rows', to: 'adults' },
+    { from: 'adults', to: 'view' },
+    { from: 'view', to: 'out' },
+  ],
+}, { tasks: {} });
+
+await dag.run(people);   // ['ul', {}, [['li', {}, 'ada'], …]] — a vnode, as JSON
+```
+
+Cycles, port rules and the exactly-one-output rule are **compile-time**
+rejections (JF0xxx with `docPath`); a `task` node's handler is resolved
+at compile too, and called as `handler({ with, input }, signal)` with
+the run's shared `AbortSignal`. Independent branches run concurrently,
+but determinism is *same input → same output values* — results are
+keyed and port objects assemble in edge document order, so completion
+timing can never change a value. Failure is fail-closed: the first
+failing node aborts the shared signal and rejects the whole run
+(`JF2006` with `nodeId`, `docPath`, `cause`; a caller abort is
+`JF2007`) — no retries, no partial results. Per-node observability is
+the `onNode` record stream (`{ id, status, ms }`), and a compiled dag
+hosts in an app as **one effect** through `createTaskEffect` — the
+recipe is in [docs/APP-INTEGRATION.md](docs/APP-INTEGRATION.md), the
+contract in [docs/FLOW-FORMAT.md](docs/FLOW-FORMAT.md) §6–§7.
 
 ## One scope, one honest quirk
 

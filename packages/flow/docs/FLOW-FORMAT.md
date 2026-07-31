@@ -192,6 +192,15 @@ tables there and here MUST stay in sync.
 | JF0007 | a guard failed to compile (`cause` carries the query error) |
 | JF0008 | an effects list or effect descriptor is malformed |
 | JF0009 | an effect's `with` failed to compile (`cause`) |
+| JF0010 | the dag document is not an object, or `$dag` is not `"0.1"` |
+| JF0011 | `nodes` is not an object, or a node declaration is malformed |
+| JF0012 | `edges` is not an array, or an edge entry is malformed |
+| JF0013 | an edge's `from` or `to` names no declared node |
+| JF0014 | an embedded query/stylesheet/`with`/`select` failed to compile (`cause`) |
+| JF0015 | wiring rules violated: inbound into `input`/`const`, outbound from `output`, incomplete/duplicate ports, or a consumer with no inbound edge |
+| JF0016 | the graph has a cycle (member ids in the message, `docPath` at the first edge inside it) |
+| JF0017 | not exactly one `output` node |
+| JF0018 | a `task` node names no registered handler |
 
 ### §5.2 Runtime: thrown vs recorded
 
@@ -213,10 +222,145 @@ A step with a non-empty `errors` array still returns a valid result —
 hosts SHOULD surface the records through their own error channel, and a
 repair loop gets a `docPath` pointing at exactly the query that failed.
 
+**Dag runs are different, deliberately** (§7.3): a dag has no
+recorded-error channel. A failure rejects the whole run promise —
+`JF2006` (a node failed: own `nodeId` property, `docPath`, `cause`) or
+`JF2007` (the caller's signal aborted the run) — because a dataflow
+result assembled from partially failed nodes is exactly the kind of
+partial result D7 forbids.
+
 ## §6 The jaren-dag document
 
-*Reserved for the dataflow format.*
+A **jaren-dag** document is an executable, acyclic dataflow: named
+nodes wired by edges that carry data, run to completion for one input.
+The nodes are the suite's own engines — a closed vocabulary, which is
+what keeps the schema a real contract for constrained decoding;
+extending it is a format revision, not an option.
+
+```json
+{
+  "$dag": "0.1",
+  "nodes": {
+    "rows": { "kind": "input" },
+    "adults": { "kind": "query",
+      "query": { "$for": { "r": "$[*]" }, "$where": { "$ge": ["$r.age", 18] }, "$return": "$r" } },
+    "names": { "kind": "jslt",
+      "stylesheet": [{ "match": "$", "body": ["ul", {},
+        [{ "$for": { "p": "$[*]" }, "$return": ["li", {}, "$p.name"] }]] }] },
+    "out": { "kind": "output" }
+  },
+  "edges": [
+    { "from": "rows", "to": "adults" },
+    { "from": "adults", "to": "names" },
+    { "from": "names", "to": "out" }
+  ]
+}
+```
+
+- **`$dag`** MUST be `"0.1"` and MUST be present — unlike `$fsm` there
+  is no earlier contract to stay compatible with, so the document says
+  what it is.
+- **`nodes`** MUST be an object of id → declaration. The kinds:
+
+  | kind | members | meaning |
+  |---|---|---|
+  | `input` | — | yields the `run(input)` value (`null` when absent) |
+  | `const` | `value` (required, any JSON) | yields its literal value |
+  | `query` | `query` | a Jaren JSON Query over the node's input scope |
+  | `jslt` | `stylesheet` | a JSLT stylesheet over the node's input scope |
+  | `task` | `run`, `with?` | a registered async handler (§7.2) |
+  | `output` | — | its input scope value is the run's result |
+
+- **`edges`** MUST be an array of `{ from, to, port?, select? }`.
+  `select` is a query applied to the source value before delivery.
+  Wiring rules (all compile-time): `input` and `const` nodes accept no
+  inbound edge; the `output` node has no outbound edge; `query`,
+  `jslt`, `task` and `output` nodes MUST have at least one inbound
+  edge; the graph MUST be acyclic; exactly one `output` node MUST be
+  declared. Unknown members are ignored for forward compatibility.
+
+### §6.1 The input scope
+
+A node's `$` is decided by its inbound edges:
+
+- **One unported edge** — `$` is the delivered value, verbatim.
+- **Ported edges** — when any inbound edge names a `port`, every
+  inbound edge MUST name one, ports MUST be unique, and `$` is the
+  object of port-named values, members in **edge document order**. A
+  single ported edge therefore yields `{ port: value }` — the way to
+  force the object shape.
+- Two or more unported inbound edges are a compile error (JF0015).
+
+A delivery whose `select` yields the empty sequence delivers `null`; a
+`query`/`jslt` node whose own result is empty likewise yields `null` —
+`undefined` is not a JSON value and never flows through a graph.
+Values pass **by reference**: nodes and hosts MUST NOT mutate what
+they receive.
 
 ## §7 Dag execution
 
-*Reserved for the dataflow format.*
+### §7.1 Compile once, run many
+
+`compileDag(doc, { tasks })` validates the document (§5.1 codes),
+compiles every embedded query, stylesheet, `with` and `select` exactly
+once, resolves every `task` node against the registry (a missing
+handler is compile-time JF0018 — fail early, not mid-run), and proves
+acyclicity. `run(input, { signal?, onNode? })` may then be called any
+number of times, concurrently; runs share nothing but the compiled
+closures.
+
+### §7.2 The run
+
+Nodes evaluate when their inputs are ready — topological order with
+insertion-order tie-break; independent branches run **concurrently**.
+Determinism is *same input → same output values*, never same timing:
+results are keyed and port objects are assembled in edge document
+order, so completion order cannot change a value. Each node evaluates
+at most once per run; every declared node evaluates, reachable from
+the output or not.
+
+A `task` node's handler is called as
+`handler({ with, input }, signal)` — `with` is its query resolved
+against the node's input scope (`null` when absent or empty), `input`
+is the scope value, and `signal` is the run's shared `AbortSignal`.
+The handler MAY return a plain value or a promise; a resolved
+`undefined` reads as `null`. **Handlers MUST honor the signal**: an
+ignoring handler can never block a run's rejection, but it blocks a
+run's successful resolution (the run resolves only when every node
+settled).
+
+### §7.3 Failure and abort
+
+The first failing node wins: the run rejects with `JF2006` (own
+`nodeId`, `docPath` to the failing member, `cause`), the shared signal
+aborts, and in-flight tasks are expected to reject promptly. The
+caller's `signal` aborting rejects the run with `JF2007`. There are no
+retries and no partial results — rerunning is the caller's decision,
+and the id-guard convention of `@jarenjs/app`'s TASKS.md is the
+staleness answer when a dag runs as an app effect
+(APP-INTEGRATION.md).
+
+### §7.4 Observability
+
+`onNode` receives one bounded JSON record per node **that started
+evaluating**, at settlement: `{ id, status, ms }` with `status` one of
+`ok` | `error` | `aborted` and `ms` the node's own evaluation time
+(waiting for inputs excluded). The first failure records `error`;
+concurrent losers and abort victims record `aborted`; nodes whose
+inputs never arrived produce no record. Records for stragglers MAY
+arrive after the run promise already rejected. A throwing observer is
+isolated and ignored — observation MUST NOT change a run.
+
+### §7.5 Non-goals of format 0.1
+
+- **Streaming.** A run is one value in, one value out; feeding a dag
+  from the `@jarenjs/josl` incremental readers chunk by chunk is the
+  natural 0.2 composition, and doing it well changes the node contract
+  — so it is not bolted on here.
+- **Retries.** A failed run is rerun by its caller; retry policy
+  belongs to the host (or the app's task convention), not the graph.
+- **Persistence / resume.** A run holds no durable state; checkpoints
+  would make every node contract a serialization contract.
+- **Cross-run caching.** Same-input memoization is a host concern;
+  the engine promising it would outlaw impure task handlers the
+  format explicitly allows.

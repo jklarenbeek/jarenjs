@@ -586,3 +586,22 @@ void [hostedEvents, hostedCurrent, hosted.actions['machine/go']];
 const sliceSchema = fsmStateSchema({ initial: 'idle', states: ['idle'], transitions: [] });
 const sliceEnum: string[] = sliceSchema.properties.current.enum;
 void sliceEnum;
+
+import { compileDag } from '@jarenjs/flow';
+
+const dag = compileDag({
+  $dag: '0.1',
+  nodes: {
+    i: { kind: 'input' },
+    t: { kind: 'task', run: 'work', with: { n: 1 } },
+    o: { kind: 'output' },
+  },
+  edges: [{ from: 'i', to: 't' }, { from: 't', to: 'o' }],
+}, { tasks: { work: async (props, signal) => [props.with, props.input, signal.aborted] } });
+const dagNodes: readonly string[] = dag.nodes;
+const dagOutput: string = dag.output;
+void [dagNodes, dagOutput];
+const dagResult: Promise<unknown> = dag.run({ rows: [] }, {
+  onNode: (rec) => void `${rec.id}:${rec.status}:${rec.ms}`,
+});
+void dagResult.catch(() => null);

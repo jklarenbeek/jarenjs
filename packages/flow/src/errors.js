@@ -29,6 +29,34 @@
  *    descriptor is not an object with a non-empty string `run`
  *  - `JF0009` — an effect's `with` failed to compile as a query
  *    document (see `cause`)
+ *
+ * Dag documents (`compileDag`):
+ *
+ *  - `JF0010` — the dag document is not an object, or `$dag` is not
+ *    `'0.1'` (the key is required — the dag format has no legacy
+ *    contract to stay compatible with)
+ *  - `JF0011` — `nodes` is not an object, or a node declaration is
+ *    malformed (not an object; unknown `kind`; a kind-specific member
+ *    missing or mistyped: `const` needs `value`, `query` needs
+ *    `query`, `jslt` needs `stylesheet`, `task` needs a non-empty
+ *    string `run`)
+ *  - `JF0012` — `edges` is not an array, or an edge entry is malformed
+ *    (not an object; `from`/`to` not strings; `port` present but not a
+ *    non-empty string)
+ *  - `JF0013` — an edge's `from` or `to` names no declared node
+ *  - `JF0014` — an embedded document failed to compile (a node's
+ *    `query`/`stylesheet`/`with` or an edge's `select`; see `cause`)
+ *  - `JF0015` — the wiring rules are violated: an edge enters an
+ *    `input`/`const` node or leaves the `output` node; fan-in without
+ *    complete unique ports (a ported inbound set must be all-ported
+ *    and duplicate-free); or a consuming node (`query`/`jslt`/`task`/
+ *    `output`) has no inbound edge
+ *  - `JF0016` — the graph has a cycle (the message lists the member
+ *    ids; `docPath` points at the first edge inside it)
+ *  - `JF0017` — the document does not declare exactly one `output`
+ *    node
+ *  - `JF0018` — a `task` node names a handler the compile-time
+ *    registry does not provide
  */
 export class FlowCompileError extends Error {
   /**
@@ -61,6 +89,16 @@ export class FlowCompileError extends Error {
  *    the step result; the effect is omitted)
  *  - `JF2005` — a session was created with no start state (`initial`
  *    is null and none was given) (thrown)
+ *
+ * Dag runs (`compileDag(...).run`) have no recorded-error channel —
+ * a failure rejects the run promise (fail closed, no partial results):
+ *
+ *  - `JF2006` — a node failed while evaluating; the run rejects, the
+ *    shared signal aborts in-flight siblings, and the error carries
+ *    the failing node's id as an own `nodeId` property beside
+ *    `docPath` and `cause`
+ *  - `JF2007` — the caller's `signal` aborted the run (`cause` is the
+ *    abort reason when one was given)
  */
 export class FlowRuntimeError extends Error {
   /**
