@@ -56,6 +56,17 @@ Named so nobody reads absence as oversight:
 - **Persistence.** A machine's current state is a string; storing it is
   the host's business.
 
+### §1.2 Hosting
+
+The engine is deliberately host-agnostic. For `@jarenjs/app` the
+package ships a generator, `fsmToApp`, that projects a machine into
+standard app documents — a state slice and one action document per
+named event, with this section's scope mapped onto app vocabulary
+(the host's state is the `context`). That convention, including its
+honestly-stated divergences, is specified in
+[APP-INTEGRATION.md](APP-INTEGRATION.md); nothing there changes the
+format defined here.
+
 ## §2 The jaren-fsm document
 
 ```json

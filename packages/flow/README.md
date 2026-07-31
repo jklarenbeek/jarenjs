@@ -89,6 +89,35 @@ Compile-time failures throw `FlowCompileError` with the same `code` +
 [FLOW-FORMAT.md §5](docs/FLOW-FORMAT.md)); a guard that cannot compile
 is a compile error, never a runtime surprise.
 
+## Hosting a machine in @jarenjs/app
+
+`fsmToApp` turns the same document into **generated standard app
+documents** — a state slice plus one plain-JSON action per named event,
+compiled by the app like any hand-written action, with no flow code at
+runtime:
+
+```javascript
+import { fsmToApp, fsmStateSchema } from '@jarenjs/flow';
+import { createApp } from '@jarenjs/app';
+
+const { slice, actions, events } = fsmToApp(doc);   // { pointer: '/fsm', namespace: 'fsm/' }
+const app = createApp({
+  state: { fsm: slice },
+  view,
+  actions: { ...actions, ...hostActions },
+}, { node, effects, validateState });               // fsmStateSchema(doc) guards the slice
+```
+
+Control state lives at `<pointer>/current`; the host's app state **is**
+the machine's `context`; guards and effect props evaluate
+pre-transition in both worlds, and target states are baked as literals.
+Selection semantics are provably the headless engine's — the test
+suite drives both through the same scripts and asserts state and
+effects agree. The convention, the scope mapping table, multi-machine
+layout and the honestly-stated divergences (a throwing guard fails the
+hosted transaction instead of reading false) live in
+[docs/APP-INTEGRATION.md](docs/APP-INTEGRATION.md).
+
 ## One scope, one honest quirk
 
 `$.state`, `$.event`, `$.payload`, `$.context` — control state lives in

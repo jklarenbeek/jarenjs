@@ -210,7 +210,7 @@ if (tree !== null && tree.session !== undefined) {
 }
 `,
   '@jarenjs/flow': `
-import { compileFsm, createFsmSession } from '@jarenjs/flow';
+import { compileFsm, createFsmSession, fsmToApp, fsmStateSchema } from '@jarenjs/flow';
 const fsm = compileFsm({
   initial: 'a',
   states: ['a', { id: 'b', final: true }],
@@ -224,6 +224,10 @@ const errors: { code: string, docPath: string }[] = result.errors;
 void errors;
 const session = createFsmSession(fsm);
 void (session.can('go') && session.send('go').state === session.state && session.done);
+const hosted = fsmToApp({ initial: 'a', states: ['a'], transitions: [{ from: 'a', event: 'go', to: 'a' }] });
+const hostedEvents: string[] = hosted.events;
+void [hostedEvents, hosted.slice.current, hosted.actions['fsm/go']];
+void fsmStateSchema({ initial: 'a', states: ['a'], transitions: [] }).properties.current.enum;
 `,
 };
 

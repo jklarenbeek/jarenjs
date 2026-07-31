@@ -7,4 +7,5 @@
  */
 
 export { compileFsm, createFsmSession } from './fsm.js';
+export { fsmToApp, fsmStateSchema } from './app.js';
 export { FlowCompileError, FlowRuntimeError } from './errors.js';

@@ -572,3 +572,17 @@ const fsmSession = createFsmSession(fsm, 'idle');
 const fsmDone: boolean = fsmSession.done;
 void [fsmSession.state, fsmSession.can('finish'), fsmSession.send('finish').state, fsmDone];
 void [FlowCompileError, FlowRuntimeError];
+
+import { fsmToApp, fsmStateSchema } from '@jarenjs/flow';
+
+const hosted = fsmToApp({
+  initial: 'idle',
+  states: ['idle'],
+  transitions: [{ from: 'idle', event: 'go', to: 'idle' }],
+}, { pointer: '/machine', namespace: 'machine/' });
+const hostedEvents: string[] = hosted.events;
+const hostedCurrent: string | null = hosted.slice.current;
+void [hostedEvents, hostedCurrent, hosted.actions['machine/go']];
+const sliceSchema = fsmStateSchema({ initial: 'idle', states: ['idle'], transitions: [] });
+const sliceEnum: string[] = sliceSchema.properties.current.enum;
+void sliceEnum;
