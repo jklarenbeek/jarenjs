@@ -30,6 +30,7 @@ export const DEFAULT_DATA = {
 
 import { initialEngineInputs } from '../boundaries/engines.js';
 import { calcInitialState } from '@jarenjs/calc/component';
+import { START_LOCATION } from '../content/gameContent.js';
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',  // 'openrouter' | 'ollama' | 'lmstudio' | 'custom'
@@ -116,6 +117,25 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       status: 'idle',        // 'idle' | 'streaming' | 'error'
       activity: null,        // the tool the model is currently calling
       error: null,
+    },
+
+    // the adventure game (boundaries/game.js): a point-and-click pirate
+    // comedy. Navigation is a jaren-fsm baked into actions (scene/go-*);
+    // `room` is that machine's slice. Static-playable; with an AI key the
+    // NPCs answer live. No death, no soft-locks.
+    game: {
+      started: false,           // false → the title card (name your pirate)
+      pirate: '',
+      room: { current: START_LOCATION },   // the scene FSM's slice
+      verb: 'look',             // the armed point-and-click verb
+      held: null,               // the armed inventory item (use/give/combine)
+      inv: [],                  // item ids held
+      flags: {},                // solved_<puzzle> / clue_* flags
+      log: [],                  // the narration feed ({ kind, text })
+      dialogue: null,           // { who, node } while talking
+      ask: '',                  // the dynamic-tier free-text question
+      thinking: false,          // an NPC is answering live
+      won: false,
     },
 
     calc: calcInitialState(),    // the @jarenjs/calc sub-app slice

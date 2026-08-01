@@ -1,0 +1,314 @@
+//@ts-check
+/**
+ * "The Unbearable Lightness of Being a Pirate" — the game's JS boundary.
+ * The site page stays a stylesheet; JavaScript lives only here, at the
+ * derivation (the page view model) and the resolver/AI effects.
+ *
+ * Scene navigation is the @jarenjs/flow engine: `sceneApp()` bakes the
+ * location-graph FSM into pure app actions (scene/go-<room>). The verb
+ * resolver is a small effect that reads state.game and dispatches narration
+ * + inventory patches — no game rule is hand-wired into the view. When the
+ * player brings an OpenRouter key, the same NPCs answer live through
+ * @jarenjs/ai, in the exact voice the content declares.
+ */
+import { createChatClient, createStructuredOutput } from '@jarenjs/ai';
+import { sceneApp } from '../content/gameFsms.js';
+import {
+  TITLE, GOAL, VERBS,
+  LOCATIONS, CHARACTERS, ITEMS, SCENERY, PUZZLES, DIALOGUE,
+} from '../content/gameContent.js';
+
+const scene = sceneApp();   // { slice: { current }, actions: { 'scene/go-*' } }
+
+/** Everything present in a room right now (items not yet taken, scenery, npcs). */
+function roomThings(room, inv) {
+  const items = Object.values(ITEMS).filter((i) => i.at === room && !inv.includes(i.id));
+  const scenery = Object.values(SCENERY).filter((s) => s.at === room);
+  const npcs = Object.values(CHARACTERS).filter((c) => c.at === room);
+  return { items, scenery, npcs };
+}
+
+/** Look up any addressable thing by id (room item, held item, scenery, npc). */
+function thing(id) {
+  return ITEMS[id] ?? SCENERY[id] ?? CHARACTERS[id] ?? null;
+}
+
+// ------------------------------------------------------------------
+// Actions (pure JSON) — scene navigation + the game's own verbs
+// ------------------------------------------------------------------
+export const GAME_ACTIONS = {
+  ...scene.actions,
+
+  'game/start': {
+    patch: [
+      { op: 'replace', path: '/game/started', value: true },
+      { op: 'add', path: '/game/log/-', value: { kind: 'sys', text: "A rival CULINARY pirate fleet docks at dawn. Assemble the World's Most Delicious Sea-Sandwich before they do. The gulls are already judging you." } },
+    ],
+  },
+  'game/name': { patch: [{ op: 'replace', path: '/game/pirate', value: '$event.value' }] },
+  'game/verb': { patch: [{ op: 'replace', path: '/game/verb', value: '$payload' }] },
+  'game/held': {
+    patch: [{ op: 'replace', path: '/game/held',
+      value: { $if: [{ $eq: ['$.game.held', '$payload'] }, null, '$payload'] } }],
+  },
+  // navigation goes through the flow engine: this triggers the fsmToApp
+  // scene/go-<room> action (guarded by the current room), so a bad exit is
+  // simply a no-op — the scene graph enforces "no dead ends".
+  'game/go': { effects: [{ run: 'game-move', with: { to: '$payload' } }] },
+  // arm/combine an inventory item
+  'game/inv': { effects: [{ run: 'game-inv', with: { id: '$payload' } }] },
+  // click a hotspot (or an inventory item with a verb armed) → resolve
+  'game/hotspot': { effects: [{ run: 'game-interact', with: { target: '$payload' } }] },
+  // narration + world mutations the resolver dispatches
+  'game/say': { patch: [{ op: 'add', path: '/game/log/-', value: '$payload' }] },
+  'game/give': { patch: [{ op: 'add', path: '/game/inv/-', value: '$payload' }] },
+  'game/consume': {
+    patch: [{ op: 'replace', path: '/game/inv',
+      value: [{ $for: { x: '$.game.inv[*]' }, $where: { $ne: ['$x', '$payload'] }, $return: '$x' }] }],
+  },
+  'game/flag': { patch: [{ op: 'add', path: { $concat: ['/game/flags/', '$payload'] }, value: true } ] },
+  'game/clear-held': { patch: [{ op: 'replace', path: '/game/held', value: null }] },
+  'game/won': {
+    patch: [
+      { op: 'replace', path: '/game/won', value: true },
+      { op: 'add', path: '/game/log/-', value: '$payload' },
+    ],
+  },
+
+  // dialogue
+  'game/talk': { effects: [{ run: 'game-talk', with: { who: '$payload' } }] },
+  'game/dialogue': { patch: [{ op: 'replace', path: '/game/dialogue', value: '$payload' }] },
+  'game/say-pick': { effects: [{ run: 'game-dialogue-pick', with: { index: '$payload' } }] },
+  'game/dialogue-close': { patch: [{ op: 'replace', path: '/game/dialogue', value: null }] },
+
+  // the dynamic (keyed) tier: ask an NPC anything in free text
+  'game/ask-draft': { patch: [{ op: 'replace', path: '/game/ask', value: '$event.value' }] },
+  'game/ask-send': { effects: [{ run: 'game-ai-say' }] },
+  'game/ai-reply': {
+    patch: [
+      { op: 'add', path: '/game/log/-', value: '$payload' },
+      { op: 'replace', path: '/game/ask', value: '' },
+      { op: 'replace', path: '/game/thinking', value: false },
+    ],
+  },
+  'game/ai-thinking': { patch: [{ op: 'replace', path: '/game/thinking', value: '$payload' }] },
+};
+
+// ------------------------------------------------------------------
+// The page view model (state.game → $.ui.game)
+// ------------------------------------------------------------------
+export function gamePageViewModel(game) {
+  const room = LOCATIONS[game.room.current];
+  const { items, scenery, npcs } = roomThings(game.room.current, game.inv);
+  const dlg = game.dialogue;
+  const npc = dlg ? CHARACTERS[dlg.who] : null;
+  const node = dlg ? DIALOGUE[dlg.who]?.nodes[dlg.node] : null;
+  return {
+    title: TITLE,
+    goal: GOAL,
+    started: game.started,
+    pirate: game.pirate,
+    won: game.won,
+    verb: game.verb,
+    held: game.held,
+    heldName: game.held ? (ITEMS[game.held]?.name ?? game.held) : null,
+    verbs: VERBS.map((v) => ({ ...v, active: v.id === game.verb })),
+    room: {
+      id: room.id, name: room.name, icon: room.icon, look: room.look,
+      exits: room.exits.map((id) => ({ id, name: LOCATIONS[id].name, event: `scene/go-${id}` })),
+      items: items.map((i) => ({ id: i.id, name: i.name })),
+      scenery: scenery.map((s) => ({ id: s.id, name: s.name })),
+      npcs: npcs.map((c) => ({ id: c.id, name: c.name })),
+    },
+    inv: game.inv.map((id) => ({ id, name: ITEMS[id]?.name ?? id, held: game.held === id })),
+    log: game.log,
+    dialogue: dlg && node ? {
+      who: npc.name,
+      text: node.text,
+      options: (node.options ?? []).map((o, i) => ({ index: i, text: o.text })),
+    } : null,
+    ask: game.ask ?? '',
+    thinking: game.thinking ?? false,
+    // the map is a mermaid projection of the scene graph, built in the runtime
+    mapSource: sceneMermaid(game.room.current),
+  };
+}
+
+/** The in-game map: the scene graph as a mermaid flowchart, current room marked. */
+function sceneMermaid(current) {
+  const lines = ['flowchart LR'];
+  const seen = new Set();
+  for (const from of Object.keys(LOCATIONS)) {
+    for (const to of LOCATIONS[from].exits) {
+      const key = [from, to].sort().join('~');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(`  ${from}[${LOCATIONS[from].name}] --- ${to}[${LOCATIONS[to].name}]`);
+    }
+  }
+  lines.push(`  class ${current} here;`);
+  lines.push('  classDef here fill:#2563eb,color:#fff,stroke:#1e40af;');
+  return lines.join('\n');
+}
+
+// ------------------------------------------------------------------
+// The runtime: the verb resolver + dialogue + the AI (keyed) effects
+// ------------------------------------------------------------------
+/** @param {{ getApp: () => any, aiFetch?: typeof fetch, isConfigured?: (s:any)=>boolean }} env */
+export function createGameRuntime(env) {
+  const say = (dispatch, text, kind = 'narrate') => dispatch('game/say', { kind, text });
+
+  const effects = {
+    // navigation: dispatch the flow engine's generated scene action. A move
+    // with no exit from here fails the FSM guard and changes nothing.
+    'game-move': (props, dispatch) => {
+      dispatch(`scene/go-${props.to}`);
+      dispatch('game/dialogue-close');
+    },
+
+    // resolve the armed verb against a clicked target
+    'game-interact': (props, dispatch) => {
+      const g = env.getApp().getState().game;
+      const id = props.target;
+      const t = thing(id);
+      if (t === null) return;
+      const verb = g.verb;
+
+      if (verb === 'look') { say(dispatch, `${cap(t.name)}: ${t.examine ?? t.look ?? 'Nothing remarkable.'}`); return; }
+
+      if (verb === 'talk') {
+        if (CHARACTERS[id]) dispatch('game/talk', id);
+        else say(dispatch, `You try talking to the ${t.name}. It does not talk back. This is a relief.`);
+        return;
+      }
+
+      if (verb === 'take') {
+        if (ITEMS[id] && ITEMS[id].at === g.room.current && ITEMS[id].portable && !g.inv.includes(id)) {
+          dispatch('game/give', id);
+          say(dispatch, `You pocket the ${t.name}. It fits, morally and spatially.`);
+        } else if (CHARACTERS[id]) say(dispatch, `${cap(t.name)} declines to be pocketed.`);
+        else say(dispatch, `You can't take the ${t.name}.`);
+        return;
+      }
+
+      if (verb === 'use') {
+        const held = g.held;
+        if (!held) { say(dispatch, `Use the ${t.name} with WHAT? Arm an inventory item first (click it).`); return; }
+        resolveUse(dispatch, g, held, id);
+        return;
+      }
+
+      if (verb === 'give') {
+        const held = g.held;
+        if (!held) { say(dispatch, 'Give WHICH item? Arm one from your inventory first.'); return; }
+        if (!CHARACTERS[id]) { say(dispatch, `The ${t.name} has no hands, no needs, and no interest.`); return; }
+        resolveGive(dispatch, g, held, id);
+        return;
+      }
+    },
+
+    // arm/combine from the inventory: click one to arm, click another to combine
+    'game-inv': (props, dispatch) => {
+      const g = env.getApp().getState().game;
+      const id = props.id;
+      if (!g.held || g.held === id) { dispatch('game/held', id); return; }
+      // both are inventory items → try a combine
+      resolveUse(dispatch, g, g.held, id);
+    },
+
+    // open a dialogue tree at its root
+    'game-talk': (props, dispatch) => {
+      const tree = DIALOGUE[props.who];
+      if (!tree) { say(dispatch, `${cap(CHARACTERS[props.who]?.name ?? 'They')} has nothing to say (yet — bring a key and they will).`); return; }
+      dispatch('game/dialogue', { who: props.who, node: tree.root });
+    },
+    // pick a dialogue option: apply its flag, advance or close
+    'game-dialogue-pick': (props, dispatch) => {
+      const g = env.getApp().getState().game;
+      const dlg = g.dialogue; if (!dlg) return;
+      const node = DIALOGUE[dlg.who].nodes[dlg.node];
+      const opt = node.options[props.index]; if (!opt) return;
+      if (opt.give) dispatch('game/flag', opt.give);
+      if (opt.to === null || opt.to === undefined) { dispatch('game/dialogue-close'); return; }
+      const next = DIALOGUE[dlg.who].nodes[opt.to];
+      if (next?.give) dispatch('game/flag', next.give);
+      dispatch('game/dialogue', { who: dlg.who, node: opt.to });
+    },
+
+    // the dynamic tier: an NPC answers free text live, in-character
+    'game-ai-say': (props, dispatch) => {
+      const state = env.getApp().getState();
+      const g = state.game;
+      const s = state.ai.settings;
+      const who = g.dialogue?.who;
+      const npc = who ? CHARACTERS[who] : null;
+      if (!npc) return;
+      const question = (g.ask ?? '').trim();
+      if (!question) return;
+      if (!env.isConfigured?.(s)) {
+        say(dispatch, `(${npc.name} would answer live if you added an AI key in the assistant settings — top-right robot.)`, 'sys');
+        return;
+      }
+      dispatch('game/ai-thinking', true);
+      const client = createChatClient({
+        provider: s.provider, baseUrl: s.baseUrl, apiKey: s.apiKey, model: s.model,
+        fetch: env.aiFetch,
+        headers: { 'HTTP-Referer': 'https://jklarenbeek.github.io/jarenjs/', 'X-Title': 'Jaren adventure' },
+      });
+      const out = createStructuredOutput({
+        client, name: 'npc_line', maxRepairs: 1,
+        schema: { type: 'object', required: ['line'], properties: { line: { type: 'string' }, mood: { type: 'string' } } },
+      });
+      const sys = `You are ${npc.name}, a character in a comedy pirate adventure. VOICE (stay in it, always): ${npc.voice}. The player's goal: ${GOAL}. Keep replies to 1-2 sentences, in-character, funny, never breaking the game. Reply as JSON {"line": "...", "mood": "..."}.`;
+      out.generate([{ role: 'system', content: sys }, { role: 'user', content: question }])
+        .then((r) => {
+          const line = r.value?.line ?? "(...they lost their train of thought. Very in-character.)";
+          dispatch('game/ai-reply', { kind: 'npc', who: npc.name, text: `${npc.name}: ${line}` });
+        })
+        .catch((err) => dispatch('game/ai-reply', { kind: 'sys', text: `(${npc.name} is briefly speechless: ${String(err.message ?? err).slice(0, 80)})` }));
+    },
+  };
+
+  /** use held item on target: combine, or solve a puzzle, else a funny miss. */
+  function resolveUse(dispatch, g, held, targetId) {
+    const combined = ITEMS[held]?.combine?.[targetId];
+    if (combined) {
+      dispatch('game/consume', held);
+      if (ITEMS[targetId] && g.inv.includes(targetId)) dispatch('game/consume', targetId);
+      dispatch('game/give', combined);
+      dispatch('game/clear-held');
+      say(dispatch, `You combine the ${ITEMS[held].name} with the ${thing(targetId).name}. Now you have ${ITEMS[combined].name}.`);
+      return;
+    }
+    const puz = Object.values(PUZZLES).find((p) => p.solve.verb === 'use' && p.solve.item === held && p.solve.target === targetId && !g.flags[`solved_${p.id}`]);
+    if (puz) {
+      dispatch('game/flag', `solved_${puz.id}`);
+      if (puz.reward && ITEMS[puz.reward]) dispatch('game/give', puz.reward);
+      dispatch('game/clear-held');
+      say(dispatch, puz.done, 'win');
+      return;
+    }
+    say(dispatch, `You wave the ${ITEMS[held]?.name ?? held} at the ${thing(targetId)?.name ?? targetId}. Nothing happens, but you feel briefly powerful.`);
+  }
+
+  /** give held item to an NPC: solve a give-puzzle, else a polite refusal. */
+  function resolveGive(dispatch, g, held, npcId) {
+    const puz = Object.values(PUZZLES).find((p) => p.solve.verb === 'give' && p.solve.item === held && p.solve.target === npcId && !g.flags[`solved_${p.id}`]);
+    if (puz) {
+      dispatch('game/consume', held);
+      dispatch('game/flag', `solved_${puz.id}`);
+      if (puz.reward && ITEMS[puz.reward]) dispatch('game/give', puz.reward);
+      dispatch('game/clear-held');
+      say(dispatch, puz.done, 'win');
+      if (puz.reward === 'recipe') dispatch('game/won', { kind: 'win', text: `🏆 You hold the legendary recipe. Both crews gather, share the World's Most Delicious Sea-Sandwich, and declare a culinary truce. THE END — and a lovely one at that.` });
+      return;
+    }
+    say(dispatch, `${cap(CHARACTERS[npcId].name)} accepts the ${ITEMS[held]?.name}, sighs, stamps a clipboard, and hands you an admiralty form in triplicate. "For the records."`);
+    dispatch('game/give', 'form');
+    dispatch('game/consume', held);
+  }
+
+  return { effects };
+}
+
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);

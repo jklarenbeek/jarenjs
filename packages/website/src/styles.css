@@ -886,3 +886,57 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .mm-run-error .mm-node-shape { animation: none; }
   .mm-active .mm-node-shape { filter: drop-shadow(0 0 6px var(--accent)); }
 }
+
+/* ---- The adventure game (#/game) ------------------------------------ */
+.game-title { display: grid; place-items: center; padding-block: var(--space-8); }
+.game-title-card { max-width: 44rem; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-8); }
+.game-goal { font-size: 1.1rem; color: var(--fg); background: var(--accent-soft); border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); }
+.game-name { display: flex; flex-direction: column; gap: var(--space-2); max-width: 22rem; margin: var(--space-6) auto; text-align: left; }
+.game-name input { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); }
+.game-start { font-size: 1.05rem; padding: var(--space-3) var(--space-6); }
+.game-hint { color: var(--muted); font-size: 0.9rem; margin-top: var(--space-5); }
+
+.game-goalbar { background: var(--accent-soft); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-4); margin-bottom: var(--space-4); }
+.game-won { color: var(--accent); font-weight: 700; }
+.game-stage { display: grid; grid-template-columns: 1fr 16rem; gap: var(--space-4); align-items: start; }
+@media (max-width: 720px) { .game-stage { grid-template-columns: 1fr; } }
+.game-scene { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); min-height: 14rem; }
+.game-scene h2 { margin-top: 0; }
+.game-look { color: var(--fg); line-height: 1.6; }
+.game-hotspots { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
+.hs-group h4 { margin: 0 0 var(--space-1); color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.hs { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.hs-btn { padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); cursor: pointer; font-size: 0.9rem; }
+.hs-btn:hover { border-color: var(--accent); color: var(--accent); }
+.hs-btn.exit { border-style: dashed; }
+.hs-btn.npc { border-color: var(--accent); }
+
+.game-side { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
+.game-side h4 { margin: 0 0 var(--space-2); }
+.game-inv { display: flex; flex-wrap: wrap; gap: var(--space-2); min-height: 2rem; }
+.game-item { padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); cursor: pointer; font-size: 0.85rem; }
+.game-item.armed { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
+.game-maph { margin-top: var(--space-4); }
+.game-map { font-size: 0.62rem; line-height: 1.35; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2); overflow-x: auto; }
+.game-muted { color: var(--muted); font-size: 0.85rem; }
+
+.game-verbs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; }
+.game-verb { padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); cursor: pointer; font-weight: 600; }
+.game-verb:hover { border-color: var(--accent); }
+.game-verb.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+.game-log { display: flex; flex-direction: column; gap: var(--space-1); max-height: 12rem; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
+.game-line { margin: 0; line-height: 1.5; }
+.game-line.sys { color: var(--muted); font-style: italic; }
+.game-line.win { color: var(--accent); font-weight: 600; }
+.game-line.npc { color: var(--fg); }
+
+.game-dialogue { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: grid; place-items: center; z-index: 50; padding: var(--space-4); }
+.gd-inner { position: relative; max-width: 36rem; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-6); }
+.gd-close { position: absolute; top: var(--space-3); right: var(--space-3); border: none; background: transparent; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
+.gd-text { line-height: 1.6; }
+.gd-options { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-4) 0; }
+.gd-option { text-align: left; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); cursor: pointer; }
+.gd-option:hover { border-color: var(--accent); color: var(--accent); }
+.gd-ask { display: flex; gap: var(--space-2); border-top: 1px dashed var(--border); padding-top: var(--space-4); }
+.gd-ask input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); }

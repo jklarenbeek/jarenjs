@@ -23,10 +23,11 @@ import { runValidation } from '../boundaries/validator.js';
 import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
 import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
 import {
-  createSiteToolbox, createAssistantEffects, registerSiteWebMcp,
+  createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget } from '../boundaries/studio.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
+import { createGameRuntime } from '../boundaries/game.js';
 import { studioTemplate } from '../content/appTemplates.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
@@ -317,7 +318,10 @@ export function createSiteApp(env) {
   // live-rates effect (plus the `when`-gated rates-poll subscription),
   // and the AI assistant's streaming-turn + settings effects.
   Object.assign(effects, calcEditEffects, rates.effects,
-    createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat }));
+    createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat }),
+    // the adventure game's resolver + dynamic-tier effects; it reuses the
+    // assistant's shared BYOK key (state.ai.settings) and fetch
+    createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured }).effects);
 
   app = createApp({
     $app: '0.1',

@@ -56,6 +56,7 @@ export const SHELL_RULES = [
         { $apply: ['$.ui.pg', 'playground'] },
         { $apply: ['$.ui.studio', 'studio'] },
         { $apply: ['$.ui.flow', 'flow'] },
+        { $apply: ['$.ui.game', 'game'] },
         { $apply: ['$.ui.bench', 'benchmarks'] },
         { $apply: ['$.ui.chartsPage', 'charts'] },
         { $apply: ['$.ui.docs', 'docs'] },

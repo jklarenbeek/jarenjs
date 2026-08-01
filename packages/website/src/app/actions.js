@@ -9,10 +9,14 @@
 
 import { createFormActions } from '@jarenjs/app';
 import { calcActions } from '@jarenjs/calc/component';
+import { GAME_ACTIONS } from '../boundaries/game.js';
 
 export const ACTIONS = {
   // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
   ...calcActions,
+
+  // the adventure game: scene/go-* (flow-engine navigation) + game/* verbs
+  ...GAME_ACTIONS,
 
   // hash changed: store the parsed route and fetch what the page needs
   // (the fetch-bench handler dedupes, so repeat visits are free)

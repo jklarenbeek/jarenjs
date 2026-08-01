@@ -21,6 +21,7 @@
     "@jarenjs/calc": "file:../../components/calc",
     "@jarenjs/charts": "file:../../components/charts",
     "@jarenjs/core": "file:../core",
+    "@jarenjs/flow": "file:../flow",
     "@jarenjs/formats": "file:../formats",
     "@jarenjs/forms": "file:../forms",
     "@jarenjs/josl": "file:../josl",
