@@ -15,6 +15,7 @@ const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
 const AI_KEY = 'jaren-ai';
 const AI_CHAT_KEY = 'jaren-ai-chat';
+const GAME_KEY = 'jaren-game';
 
 /** A localStorage-backed JSON slot; failures degrade to in-memory. */
 const jsonStore = (key) => ({
@@ -106,6 +107,11 @@ createSiteApp({
   aiFetch: (url, init) => fetch(url, init),
   aiStorage: jsonStore(AI_KEY),
   aiChat: jsonStore(AI_CHAT_KEY),
+  // the adventure save slot: a raw JSONX string (the game serializes itself)
+  gameSave: {
+    read: () => { try { return localStorage.getItem(GAME_KEY); } catch { return null; } },
+    write: (s) => { try { localStorage.setItem(GAME_KEY, s); } catch { /* private mode */ } },
+  },
   modelContext: /** @type {any} */ (navigator).modelContext,
 });
 

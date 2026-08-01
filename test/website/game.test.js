@@ -92,6 +92,82 @@ describe('website — the adventure game', function () {
     assert.strictEqual(app.getState().game.dialogue, null);
   });
 
+  it('the insult sword-fight: learn by losing, then win — never a soft-lock', function () {
+    const app = mountGame();
+    app.dispatch('game/start');
+    const g = () => app.getState().game;
+    // reach the lighthouse and provoke Finch
+    app.dispatch('game/go', 'diner'); app.dispatch('game/go', 'lighthouse');
+    assert.strictEqual(g().room.current, 'lighthouse');
+    app.dispatch('game/verb', 'talk'); app.dispatch('game/hotspot', 'finch');
+    assert.ok(g().duel, 'talking to Finch starts the duel');
+    // learn all three retorts by taking the hits (poise floors, never drops you)
+    app.dispatch('game/duel-learn');
+    app.dispatch('game/duel-learn');
+    app.dispatch('game/duel-learn');
+    assert.strictEqual(g().duel.known.length, 3, 'learned every retort');
+    assert.ok(g().duel.poise >= 1, 'poise never reaches zero — no soft-lock');
+    // now land the three matching comebacks (the insult cycles)
+    app.dispatch('game/duel-say', g().duel.insult);
+    app.dispatch('game/duel-say', g().duel.insult);
+    app.dispatch('game/duel-say', g().duel.insult);
+    assert.strictEqual(g().duel, null, 'the duel is won');
+    assert.strictEqual(g().flags.solved_duel, true);
+  });
+
+  it('the duel can always be fled and is safe to re-enter', function () {
+    const app = mountGame();
+    app.dispatch('game/start');
+    app.dispatch('game/go', 'diner'); app.dispatch('game/go', 'lighthouse');
+    app.dispatch('game/verb', 'talk'); app.dispatch('game/hotspot', 'finch');
+    assert.ok(app.getState().game.duel);
+    app.dispatch('game/duel-flee');
+    assert.strictEqual(app.getState().game.duel, null);
+    // re-provoking starts a fresh duel
+    app.dispatch('game/hotspot', 'finch');
+    assert.ok(app.getState().game.duel);
+  });
+
+  it('running gags fire once, and giving an item never soft-locks', function () {
+    const app = mountGame();
+    app.dispatch('game/start');
+    const g = () => app.getState().game;
+    // give the compass to Gullbert (not a puzzle) — it is handed back
+    app.dispatch('game/verb', 'take'); app.dispatch('game/hotspot', 'compass');
+    app.dispatch('game/verb', 'give'); app.dispatch('game/inv', 'compass'); app.dispatch('game/hotspot', 'gullbert');
+    assert.ok(g().inv.includes('compass'), 'the item comes back — no soft-lock');
+    assert.strictEqual(g().forms.length, 1, 'an admiralty form is filed');
+    // Reginald on first market arrival; the fourth-wall gag on the galleon
+    app.dispatch('game/go', 'market');
+    assert.match(JSON.stringify(g().log), /Reginald/);
+    app.dispatch('game/go', 'galleon');
+    assert.match(JSON.stringify(g().log), /pixel bleed/i);
+  });
+
+  it('exports the admiralty forms to CSV and round-trips a save via JSONX', function () {
+    let saved = null; const downloads = [];
+    const state = { game: { room: { current: 'wharf' }, forms: [{ item: 'magnetized compass', to: 'Gullbert the Gull' }], inv: ['compass'] } };
+    const rt = createGameRuntime({
+      getApp: () => ({ getState: () => state }),
+      download: (name, text) => downloads.push({ name, text }),
+      saveSlot: { read: () => saved, write: (s) => { saved = s; } },
+    });
+    const calls = [];
+    const dispatch = (a, p) => calls.push({ a, p });
+    // CSV export (@jarenjs/josl)
+    rt.effects['game-export-forms']({}, dispatch);
+    assert.strictEqual(downloads.length, 1);
+    assert.match(downloads[0].name, /\.csv$/);
+    assert.match(downloads[0].text, /Item surrendered|magnetized compass/);
+    // JSONX save → load round-trip
+    rt.effects['game-save']({}, dispatch);
+    assert.ok(saved && saved.includes('wharf'), 'save writes a JSONX string');
+    rt.effects['game-load']({}, dispatch);
+    const restore = calls.find((c) => c.a === 'game/restore');
+    assert.ok(restore, 'load dispatches game/restore');
+    assert.strictEqual(restore.p.room.current, 'wharf');
+  });
+
   it('the dynamic tier degrades gracefully without a key', function () {
     const calls = [];
     const state = {

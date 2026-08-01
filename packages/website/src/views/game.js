@@ -27,12 +27,32 @@ const dialogueOverlay =
     ['div', { class: 'gd-inner' },
       ['button', { class: 'gd-close', type: 'button', title: 'End conversation', on: { click: 'game/dialogue-close' } }, '✕'],
       ['h3', {}, '$.dialogue.who'],
-      ['p', { class: 'gd-text' }, '$.dialogue.text'],
+      ['div', { class: 'gd-text' }, ['jaren-widget', { name: 'markdown', props: { source: '$.dialogue.text' } }]],
       ['div', { class: 'gd-options' }, [{ $apply: '$.dialogue.options[*]' }]],
       ['div', { class: 'gd-ask' },
         ['input', { type: 'text', value: '$.ask', placeholder: 'Ask them anything…', on: { input: 'game/ask-draft' } }],
         ['button', { class: 'btn', type: 'button', on: { click: 'game/ask-send' } },
           { $if: ['$.thinking', '…', 'Ask 🤖'] }]],
+    ],
+  ];
+
+const duelOverlay =
+  ['div', { class: 'game-dialogue game-duel' },
+    ['div', { class: 'gd-inner' },
+      ['button', { class: 'gd-close', type: 'button', title: 'Step back', on: { click: 'game/duel-flee' } }, '✕'],
+      ['h3', {}, '⚔️ ', '$.duel.who'],
+      ['div', { class: 'duel-meters' },
+        ['span', { class: 'duel-poise' }, 'Poise ', ['b', {}, '$.duel.poiseText']],
+        ['span', { class: 'duel-landed' }, 'Landed ', ['b', {}, '$.duel.landed', ' / ', '$.duel.win']]],
+      ['div', { class: 'duel-chart' },
+        ['jaren-widget', { name: 'chart', props: { config: '$.duel.chart' } }]],
+      ['p', { class: 'gd-text duel-insult' }, '“', '$.duel.insult', '”'],
+      ['div', { class: 'gd-options' }, [{ $apply: '$.duel.known[*]' }]],
+      ['div', { class: 'duel-controls' },
+        { $if: ['$.duel.canLearn',
+          ['button', { class: 'btn', type: 'button', on: { click: 'game/duel-learn' } }, '🎓 Take the hit & learn the retort'],
+          ['span', { class: 'game-muted' }, 'You already know a retort for this — use it!']] },
+        ['button', { class: 'btn', type: 'button', on: { click: 'game/duel-flee' } }, 'Step back']],
     ],
   ];
 
@@ -47,7 +67,7 @@ const playScreen =
     ['div', { class: 'game-stage' },
       ['section', { class: 'game-scene' },
         ['h2', {}, '$.room.icon', ' ', '$.room.name'],
-        ['p', { class: 'game-look' }, '$.room.look'],
+        ['div', { class: 'game-look' }, ['jaren-widget', { name: 'markdown', props: { source: '$.room.look' } }]],
         ['div', { class: 'game-hotspots' },
           ['div', { class: 'hs-group' }, ['h4', {}, 'Exits'], ['div', { class: 'hs' }, [{ $apply: '$.room.exits[*]' }]]],
           hotGroup('Items', '$.room.items[*]'),
@@ -59,12 +79,18 @@ const playScreen =
         ['div', { class: 'game-inv' },
           { $if: [{ $exists: '$.inv[*]' }, [{ $apply: '$.inv[*]' }], ['p', { class: 'game-muted' }, '(empty — go find things)']] }],
         ['h4', { class: 'game-maph' }, '🗺️ Map'],
-        ['pre', { class: 'game-map' }, '$.mapSource'],
+        ['div', { class: 'game-map' },
+          ['jaren-widget', { name: 'mermaid', props: { source: '$.mapSource' } }]],
+        ['div', { class: 'game-controls' },
+          ['button', { class: 'btn', type: 'button', on: { click: 'game/save' } }, '💾 Save'],
+          ['button', { class: 'btn', type: 'button', on: { click: 'game/load' } }, '📂 Load'],
+          { $if: ['$.forms', ['button', { class: 'btn', type: 'button', on: { click: 'game/export-forms' } }, '📋 Forms (', '$.forms', ')'], ''] }],
       ],
     ],
     ['div', { class: 'game-verbs' }, [{ $apply: '$.verbs[*]' }]],
     ['div', { class: 'game-log' }, [{ $apply: '$.log[*]' }]],
     { $if: ['$.dialogue', dialogueOverlay, ''] },
+    { $if: ['$.duel', duelOverlay, ''] },
   ];
 
 export const GAME_RULES = [
@@ -123,5 +149,11 @@ export const GAME_RULES = [
     match: '$.ui.game.dialogue.options[*]', mode: 'game',
     body: ['button', { type: 'button', class: 'gd-option',
       on: { click: { action: 'game/say-pick', with: '$.index' } } }, '$.text'],
+  },
+  // learned comebacks in the insult duel
+  {
+    match: '$.ui.game.duel.known[*]', mode: 'game',
+    body: ['button', { type: 'button', class: 'gd-option duel-comeback',
+      on: { click: { action: 'game/duel-say', with: '$.index' } } }, '“', '$.text', '”'],
   },
 ];

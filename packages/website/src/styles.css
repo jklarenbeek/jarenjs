@@ -916,8 +916,13 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .game-inv { display: flex; flex-wrap: wrap; gap: var(--space-2); min-height: 2rem; }
 .game-item { padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); cursor: pointer; font-size: 0.85rem; }
 .game-item.armed { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
+.game-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.game-controls .btn { font-size: 0.8rem; padding: var(--space-1) var(--space-2); }
+.game-look p { margin: 0; line-height: 1.6; }
+.gd-text p { margin: 0; line-height: 1.6; }
 .game-maph { margin-top: var(--space-4); }
-.game-map { font-size: 0.62rem; line-height: 1.35; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2); overflow-x: auto; }
+.game-map { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2); overflow-x: auto; }
+.game-map svg { max-width: 100%; height: auto; }
 .game-muted { color: var(--muted); font-size: 0.85rem; }
 
 .game-verbs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; }
@@ -940,3 +945,13 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .gd-option:hover { border-color: var(--accent); color: var(--accent); }
 .gd-ask { display: flex; gap: var(--space-2); border-top: 1px dashed var(--border); padding-top: var(--space-4); }
 .gd-ask input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); }
+
+/* the insult sword-fight */
+.game-duel .gd-inner { border-color: var(--accent); }
+.duel-meters { display: flex; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); color: var(--muted); font-size: 0.9rem; }
+.duel-poise b { color: var(--accent); letter-spacing: 2px; }
+.duel-insult { font-style: italic; font-size: 1.05rem; }
+.duel-comeback { border-color: var(--accent); }
+.duel-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); border-top: 1px dashed var(--border); padding-top: var(--space-4); align-items: center; }
+.duel-chart { margin: var(--space-2) 0; }
+.duel-chart svg { max-width: 100%; height: auto; max-height: 9rem; }

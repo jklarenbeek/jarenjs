@@ -152,8 +152,13 @@ function chartVnode(props) {
 const markdownVnode = (props) => md.view(String(props?.source ?? ''));
 const mermaidVnode = (props) => mermaid.view(String(props?.source ?? ''));
 
-/** The render capabilities a studio document may name (and nothing else). */
-const STUDIO_WIDGETS = {
+/**
+ * The render capabilities a studio document may name (and nothing else).
+ * Also registered at the SITE level (createSiteApp) so a first-class page —
+ * the adventure game — can embed the same chart/mermaid/markdown/form widgets
+ * in its own view.
+ */
+export const STUDIO_WIDGETS = {
   form: vnodeWidget(formVnode),
   chart: vnodeWidget(chartVnode),
   markdown: vnodeWidget(markdownVnode),

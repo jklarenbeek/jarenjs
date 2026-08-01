@@ -25,7 +25,7 @@ import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
 import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
-import { validateAppDocument, createStudioHostWidget } from '../boundaries/studio.js';
+import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { studioTemplate } from '../content/appTemplates.js';
@@ -321,7 +321,7 @@ export function createSiteApp(env) {
     createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat }),
     // the adventure game's resolver + dynamic-tier effects; it reuses the
     // assistant's shared BYOK key (state.ai.settings) and fetch
-    createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured }).effects);
+    createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured, download: env.download, saveSlot: env.gameSave }).effects);
 
   app = createApp({
     $app: '0.1',
@@ -345,6 +345,9 @@ export function createSiteApp(env) {
     // the Studio host: a widget whose mount/destroy owns the nested,
     // isolated app a studio document boots into (boundaries/studio.js)
     widgets: {
+      // chart / mermaid / markdown / form — usable from any site-level view
+      // (the adventure game embeds chart + mermaid in its own page)
+      ...DOCUMENT_WIDGETS,
       'studio-doc': createStudioHostWidget({ schedule: env.schedule }),
       'flow-doc': flowRuntime.widget,
     },

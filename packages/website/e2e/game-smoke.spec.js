@@ -73,6 +73,50 @@ test('the adventure is winnable — no soft-lock: brine the biscuits, plate the 
   await shot(page, 'win');
 });
 
+test('the insult sword-fight — learn the retorts, then win', async ({ page }) => {
+  await page.goto('/#/game');
+  await page.getByRole('button', { name: /Set sail/ }).click();
+  // to the lighthouse (wharf → diner → Periscope Peak)
+  await page.getByRole('button', { name: /The Salty Spoon/ }).click();
+  await page.getByRole('button', { name: /Periscope Peak/ }).click();
+  // provoke Finch → the duel overlay
+  await page.getByRole('button', { name: 'Talk to', exact: true }).click();
+  await page.getByRole('button', { name: /Finch/ }).click();
+  await expect(page.locator('.game-duel')).toBeVisible();
+  await shot(page, 'duel');
+  // learn all three retorts by taking the hits
+  for (let i = 0; i < 3; i++) await page.getByRole('button', { name: /learn the retort/ }).click();
+  // land the three matching comebacks, in the order the insults cycle
+  await page.getByRole('button', { name: /gave up entirely/ }).click();
+  await page.getByRole('button', { name: /raise a lighthouse/ }).click();
+  await page.getByRole('button', { name: /aiming is exactly/ }).click();
+  // victory: the overlay closes and the log records Finch yielding the switch
+  await expect(page.locator('.game-duel')).toHaveCount(0);
+  await expect(page.locator('.game-log')).toContainText(/REAL wit|switch is yours/i);
+});
+
+test('save/load and the CSV admiralty-forms gag', async ({ page }) => {
+  await page.goto('/#/game');
+  await page.getByRole('button', { name: /Set sail/ }).click();
+  // save writes a JSONX slot
+  await page.getByRole('button', { name: /Save/ }).click();
+  await expect(page.locator('.game-log')).toContainText(/Voyage saved/);
+  // give an item to an NPC → a form is filed (and the item is handed back)
+  await page.getByRole('button', { name: 'Pick up', exact: true }).click();
+  await page.getByRole('button', { name: /magnetized compass/ }).click();
+  await page.getByRole('button', { name: 'Give', exact: true }).click();
+  await page.locator('.game-inv').getByRole('button', { name: /magnetized compass/ }).click();
+  await page.getByRole('button', { name: /Gullbert/ }).click();
+  await expect(page.locator('.game-inv')).toContainText('magnetized compass'); // no soft-lock
+  const exportBtn = page.getByRole('button', { name: /Forms/ });
+  await expect(exportBtn).toBeVisible();
+  await shot(page, 'forms');
+  // exporting downloads a CSV
+  const dl = page.waitForEvent('download');
+  await exportBtn.click();
+  expect((await dl).suggestedFilename()).toMatch(/\.csv$/);
+});
+
 // the DYNAMIC tier: with a real key, an NPC answers live and in-voice.
 // Skipped without OR_KEY so CI stays offline.
 test('dynamic tier — an NPC answers live when the player brings a key', async ({ page }) => {
