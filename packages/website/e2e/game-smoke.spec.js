@@ -13,8 +13,8 @@ test('the adventure boots, plays, and navigates via the flow engine', async ({ p
   await expect(page.getByRole('button', { name: /Set sail/ })).toBeVisible();
   await shot(page, 'title');
 
-  // start
-  await page.getByPlaceholder('Guybrush Threepwood').fill('Threepwood the Mildly Damp');
+  // start (the name is a @jarenjs/forms field now)
+  await page.locator('.game-name input').first().fill('Threepwood the Damp');
   await page.getByRole('button', { name: /Set sail/ }).click();
   await expect(page.locator('.game-play')).toBeVisible();
   await expect(page.locator('.game-scene h2')).toContainText('The Dock of Shame');
@@ -71,6 +71,22 @@ test('the adventure is winnable — no soft-lock: brine the biscuits, plate the 
   await verb('Give'); await arm(/brine-glazed/); await hotspot(/Miles/);
   await expect(page.locator('.game-goalbar')).toContainText(/TRUCE ACHIEVED/);
   await shot(page, 'win');
+});
+
+test('the name form validates, and the error localizes (forms + locales)', async ({ page }) => {
+  await page.goto('/#/game');
+  const field = page.locator('.game-name input').first();
+  await field.fill('Yo');   // too short (minLength 3)
+  await expect(page.locator('.game-name')).toContainText(/at least 3 characters/i);
+  await shot(page, 'name-en');
+  // switch the validation language → the message localizes to Dutch
+  await page.getByRole('button', { name: 'NL', exact: true }).click();
+  await expect(page.locator('.game-name')).toContainText(/ten minste 3 tekens/i);
+  await shot(page, 'name-nl');
+  // a valid name lets us set sail
+  await field.fill('Threepwood');
+  await page.getByRole('button', { name: /Set sail/ }).click();
+  await expect(page.locator('.game-play')).toBeVisible();
 });
 
 test('the insult sword-fight — learn the retorts, then win', async ({ page }) => {

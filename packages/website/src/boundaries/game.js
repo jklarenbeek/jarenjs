@@ -12,6 +12,10 @@
  * @jarenjs/ai, in the exact voice the content declares.
  */
 import { createChatClient, createStructuredOutput } from '@jarenjs/ai';
+import { createFormActions } from '@jarenjs/app';
+import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
+import { compileMessageCatalog } from '@jarenjs/validate';
+import { nl, de, fr, es } from '@jarenjs/locales';
 import { stringifyCsv } from '@jarenjs/josl/csv';
 import { stringifyJsonx, parseJsonx } from '@jarenjs/josl/jsonx';
 import { sceneApp } from '../content/gameFsms.js';
@@ -21,6 +25,27 @@ import {
 } from '../content/gameContent.js';
 
 const POISE_MAX = 3;
+
+// The "name your pirate" form (@jarenjs/forms) with localized validation
+// (@jarenjs/locales). Custom action names so it never collides with the
+// playground's form/* actions (the flowstudio inspector does the same).
+const NAME_MODEL = buildFormModel({
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 3, maxLength: 24, title: 'Pirate name', description: 'A true pirate name is 3–24 characters.' },
+  },
+  required: ['name'],
+});
+export const NAME_FORM_ACTIONS = {
+  input: 'game/f-input', check: 'game/f-check', number: 'game/f-number',
+  json: 'game/f-json', add: 'game/f-add', remove: 'game/f-remove',
+};
+export const GAME_LOCALES = [
+  { id: 'en', label: 'EN' }, { id: 'nl', label: 'NL' },
+  { id: 'de', label: 'DE' }, { id: 'fr', label: 'FR' }, { id: 'es', label: 'ES' },
+];
+// compiled forms catalogs per locale; 'en' uses the built-in default (undefined)
+const CATALOGS = { nl: compileMessageCatalog(nl), de: compileMessageCatalog(de), fr: compileMessageCatalog(fr), es: compileMessageCatalog(es) };
 
 const scene = sceneApp();   // { slice: { current }, actions: { 'scene/go-*' } }
 
@@ -49,7 +74,10 @@ export const GAME_ACTIONS = {
       { op: 'add', path: '/game/log/-', value: { kind: 'sys', text: "A rival CULINARY pirate fleet docks at dawn. Assemble the World's Most Delicious Sea-Sandwich before they do. The gulls are already judging you." } },
     ],
   },
-  'game/name': { patch: [{ op: 'replace', path: '/game/pirate', value: '$event.value' }] },
+  // the "name your pirate" form writes through custom-namespaced form actions
+  // (dataPointer /game/nameForm) so it never clashes with the playground's
+  ...createFormActions({ dataPointer: '/game/nameForm', actions: NAME_FORM_ACTIONS }),
+  'game/locale': { patch: [{ op: 'replace', path: '/game/locale', value: '$payload' }] },
   'game/verb': { patch: [{ op: 'replace', path: '/game/verb', value: '$payload' }] },
   'game/held': {
     patch: [{ op: 'replace', path: '/game/held',
@@ -132,7 +160,10 @@ export function gamePageViewModel(game) {
     title: TITLE,
     goal: GOAL,
     started: game.started,
-    pirate: game.pirate,
+    pirate: game.nameForm.name,
+    // the @jarenjs/forms name field, its validation localized (@jarenjs/locales)
+    nameForm: buildFormViewModel(NAME_MODEL, game.nameForm, { validateFields: true, catalog: CATALOGS[game.locale] }),
+    locales: GAME_LOCALES.map((l) => ({ ...l, active: l.id === game.locale })),
     won: game.won,
     verb: game.verb,
     held: game.held,

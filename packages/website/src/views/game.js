@@ -1,4 +1,6 @@
 //@ts-check
+import { createFormView } from '@jarenjs/app';
+import { NAME_FORM_ACTIONS } from '../boundaries/game.js';
 /**
  * The adventure page — mode 'game', dispatched with `$.ui.game` as the
  * current node (derived by boundaries/game.js). The whole point-and-click
@@ -12,9 +14,12 @@ const titleScreen =
     ['div', { class: 'game-title-card' },
       ['h1', {}, '🏴‍☠️ ', '$.title'],
       ['p', { class: 'game-goal' }, '🥪 ', '$.goal'],
-      ['label', { class: 'game-name' },
-        ['span', {}, 'Name your pirate'],
-        ['input', { type: 'text', value: '$.pirate', placeholder: 'Guybrush Threepwood', on: { input: 'game/name' } }]],
+      ['div', { class: 'game-name' },
+        ['div', { class: 'game-name-head' },
+          ['span', {}, 'Name your pirate'],
+          ['div', { class: 'game-locales', title: 'Validation language' }, [{ $apply: '$.locales[*]' }]]],
+        // a @jarenjs/forms field; its validation errors localize via the picker
+        { $apply: ['$.nameForm', 'game'] }],
       ['button', { class: 'btn primary game-start', type: 'button', on: { click: 'game/start' } }, 'Set sail ⛵'],
       ['p', { class: 'game-hint' },
         'Plays fully offline. Bring an OpenRouter key (assistant settings, top-right 🤖) and the whole crew answers you ',
@@ -156,4 +161,13 @@ export const GAME_RULES = [
     body: ['button', { type: 'button', class: 'gd-option duel-comeback',
       on: { click: { action: 'game/duel-say', with: '$.index' } } }, '“', '$.text', '”'],
   },
+  // the validation-language picker on the title card
+  {
+    match: '$.ui.game.locales[*]', mode: 'game',
+    body: ['button', { type: 'button', class: { $if: ['$.active', 'game-loc on', 'game-loc'] },
+      on: { click: { action: 'game/locale', with: '$.id' } } }, '$.label'],
+  },
+  // the @jarenjs/forms "name your pirate" field, rendered by the standard
+  // forms stylesheet through the game/f-* actions (no playground collision)
+  ...createFormView({ root: '$.ui.game.nameForm', actions: NAME_FORM_ACTIONS }).map((rule) => ({ ...rule, mode: 'game' })),
 ];

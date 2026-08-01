@@ -168,6 +168,15 @@ describe('website — the adventure game', function () {
     assert.strictEqual(restore.p.room.current, 'wharf');
   });
 
+  it('the name form renders and the locale switch re-localizes it (forms + locales)', function () {
+    const app = mountGame();
+    assert.match(renderToString(app.getVnode()), /Pirate name/, 'the @jarenjs/forms field renders on the title card');
+    app.dispatch('game/locale', 'nl');
+    assert.strictEqual(app.getState().game.locale, 'nl');
+    // re-derives buildFormViewModel with the compiled Dutch catalog
+    assert.match(renderToString(app.getVnode()), /Pirate name/);
+  });
+
   it('the dynamic tier degrades gracefully without a key', function () {
     const calls = [];
     const state = {

@@ -125,7 +125,8 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // NPCs answer live. No death, no soft-locks.
     game: {
       started: false,           // false → the title card (name your pirate)
-      pirate: '',
+      nameForm: { name: '' },   // the @jarenjs/forms name field data
+      locale: 'en',             // validation-message locale (@jarenjs/locales)
       room: { current: START_LOCATION },   // the scene FSM's slice
       verb: 'look',             // the armed point-and-click verb
       held: null,               // the armed inventory item (use/give/combine)
