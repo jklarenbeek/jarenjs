@@ -98,38 +98,72 @@ default 1). The query/JSLT grammars ship LLM-profile twins built for exactly thi
 The Jaren engines are program languages published as JSON Schema — a query, a JSLT
 stylesheet, an app, a flow machine. A model can author one under the schema, but "it
 validates" is not "it compiles": a jaren-fsm can be structurally perfect and still name a
-transition to an undeclared state, which only the *compiler* catches. So the gate for
-generated programs is two checks in one, and `composeChecks` composes them:
+transition to an undeclared state, which only the *compiler* catches. So the gate for a
+generated program is the schema (the **shape**) plus a compile check (the **semantics**),
+and `createStructuredOutput` composes them for you with `refs` and `gate`:
 
 ```javascript
-import { createStructuredOutput, composeChecks } from '@jarenjs/ai';
-import { JarenValidator } from '@jarenjs/validate';
-import { compileJsonQuery } from '@jarenjs/json/query';
+import { createStructuredOutput } from '@jarenjs/ai';
+import { compileFsm } from '@jarenjs/flow';
 
 // the two-line compile gate: success → true, a compile error → an
 // outcome carrying the engine's own code + docPath
 const compiles = (doc) => {
-  try { compileJsonQuery(doc); return true; }
+  try { compileFsm(doc); return true; }
   catch (e) { return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.message }] }; }
 };
 
 const out = createStructuredOutput({
-  client, schema: querySchema, name: 'jaren_query',
-  validator: composeChecks(new JarenValidator({ collectErrors: true }).compile(querySchema), compiles),
+  client, schema: fsmSchema, name: 'jaren_fsm',
+  refs: [querySchema],   // every engine grammar $refs the query grammar — register it
+  gate: compiles,        // shape (schema, constrained-decoded) + semantics (compile)
 });
 ```
 
-The first invalid check wins, and its errors go back to the model. What makes this
-*repairable* rather than merely "failed": every Jaren compile error carries a stable
-`code` (`JQ0002`, `JT0007`, `JF0006`, …) and a `docPath` — a JSON Pointer into the exact
-offending member — and the structured-output error normalizer keeps both through the
-repair prompt. The model is told not "something failed" but *where* and *what*, which is
-the whole difference between a loop that converges and one that flails.
+- **`refs`** are the schemas your `schema` references by `$id`. Every Jaren engine-document
+  grammar composes the published query/JSLT grammars by `$ref`, so without `refs` the
+  internal validator throws "Can not resolve schema". Pass the referenced grammars once.
+- **`gate`** is one or more checks run *after* schema validation (the schema still drives
+  constrained decoding). The first invalid check wins and its errors go back to the model.
 
-Nothing here is engine-specific: the same `composeChecks(schema, compileGate)` shape gates
-a query, a JSLT stylesheet, an `@jarenjs/app` document or an `@jarenjs/flow` machine —
-`compileGate` just wraps the matching compiler. `@jarenjs/flow`'s
+What makes this *repairable* rather than merely "failed": every Jaren compile error carries
+a stable `code` (`JQ0002`, `JT0007`, `JF0006`, …) and a `docPath` — a JSON Pointer into the
+exact offending member — kept through the repair prompt. The model is told not "something
+failed" but *where* and *what* — the difference between a loop that converges and one that
+flails.
+
+Nothing here is engine-specific: the same `refs` + `gate` shape authors a query, a JSLT
+stylesheet, an `@jarenjs/app` document or an `@jarenjs/flow` machine. `@jarenjs/flow`'s
 [README](../flow/README.md#authoring-with-a-model) shows the flow worked example end to end.
+
+### What holds up on a cheap model (field notes)
+
+Measured driving `qwen3.6-35b-a3b` (orchestration) and `qwen3.6-27b` (coding) through
+OpenRouter on a real, complex task — designing a Kubernetes self-management state machine
+and its remediation scripts. The pattern that *reliably* gets a valid, useful program out
+of a small model:
+
+- **Author with constrained structured output, not a free-form agent tool.** With
+  `response_format: json_schema` the schema constrains generation and a rich, valid
+  document comes back in one shot. Handing the model an *unconstrained* tool argument
+  (`{ doc: object }`) and hoping it emits the right shape is far weaker — a small model
+  degrades to a trivially-valid-but-empty document just to satisfy the gate, or stalls.
+- **Compile errors repair; quality asks do not.** A precise `JF0006 at /transitions/0/to`
+  is a fix the model lands. A terse "needs ≥6 events" invites narrow patching and burns
+  rounds — enforce *breadth* in the prompt and, if a whole document is inadequate,
+  **re-generate with a sharper prompt** rather than repair-patching it.
+- **A few-shot example fixes *shape*.** Told in prose to make an event-driven machine, a
+  small model tends to build an action *pipeline* chained by one generic event. One tiny
+  worked example in the prompt flips it to the intended shape (events → transitions).
+- **Pin caller-known fields.** If you ask for the script implementing action `X`, set the
+  result's `action` to `X` yourself — don't trust the model's free-form label.
+- **Match the adequacy metric to the shape.** An event-driven loop is *few states, many
+  events*; measuring "≥5 states" pushes the model toward the wrong (pipeline) design.
+
+The reliable *composition* of all this is a jaren-dag: one task node authors the machine
+(orchestrator model, `refs` + `gate`), a query node extracts its actions, a task node
+writes a validated script per action (coder model), and a query node assembles the system
+— every AI output schema-validated and compiled before the next stage, no `eval`.
 
 ## A model as a dataflow node
 

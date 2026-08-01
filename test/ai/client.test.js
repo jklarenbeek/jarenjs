@@ -276,6 +276,33 @@ describe('ai — the retry policy', function () {
     assert.deepStrictEqual(delays, [500], 'first backoff = baseMs · 2⁰ · full jitter(random=1)');
   });
 
+  it('retries a transient no-choices completion (AI0003) then succeeds', async function () {
+    // a 200 that carried no choices is a transient provider hiccup — common
+    // on busy cheap models — and must be retried, or one bad response kills
+    // a whole autonomous run
+    const { client, delays, calls } = scriptedClient([
+      new Response('{"choices":[]}', { status: 200 }),
+      ok(),
+    ]);
+    const result = await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.strictEqual(result.message.content, 'recovered');
+    assert.strictEqual(calls(), 2);
+    assert.deepStrictEqual(delays, [500]);
+  });
+
+  it('exhausts attempts on persistent AI0003 and reports the count', async function () {
+    // a fresh Response per attempt (a Response body reads only once)
+    let n = 0;
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { random: () => 1, sleep: () => Promise.resolve() },
+      fetch: () => { n++; return Promise.resolve(new Response('{"choices":[]}', { status: 200 })); },
+    });
+    await assert.rejects(client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false }),
+      (err) => err instanceof AiError && err.code === 'AI0003' && err.attempts === 3);
+    assert.strictEqual(n, 3);
+  });
+
   it('exhausts attempts on persistent 500s and reports them on AI0002', async function () {
     const { client, delays, calls } = scriptedClient([
       new Response('boom', { status: 500 }),

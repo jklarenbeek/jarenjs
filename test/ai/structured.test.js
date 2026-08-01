@@ -127,4 +127,63 @@ describe('ai — structured output', function () {
     const run = fn({ books: [{ price: 5 }, { price: 15 }, { price: 40 }] });
     assert.deepStrictEqual(run, [15, 40]);
   });
+
+  it('the `gate` option adds a compile check after schema validation, and repairs it', async function () {
+    // the reliable engine-document recipe: the schema keeps the SHAPE
+    // (and drives constrained decoding), a compile gate keeps the
+    // SEMANTICS. First reply is a structurally-fine object that does
+    // NOT compile (unknown operator); second reply compiles.
+    const { client, sent } = scriptedClient('openrouter', [
+      '{"$bogus":[1]}',
+      '{"$add":[1,2]}',
+    ]);
+    const compileGate = (doc) => {
+      try { compileJsonQuery(doc); return true; }
+      catch (e) { return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.message }] }; }
+    };
+    const out = createStructuredOutput({
+      client, schema: { type: 'object' }, name: 'jaren_query',
+      gate: compileGate, maxRepairs: 2,
+    });
+    const result = /** @type {any} */ (await out.generate([{ role: 'user', content: 'a query' }]));
+    assert.deepStrictEqual(result.value, { $add: [1, 2] });
+    assert.strictEqual(result.attempts, 2);
+    // the compile error's code + docPath reached the model in the repair turn
+    const repair = sent[1].messages.at(-1).content;
+    assert.match(repair, /"code":"JQ/, 'the query engine\'s compile code drives the repair');
+
+    // a schema-valid AND compilable document passes in one shot
+    const clean = scriptedClient('openrouter', ['{"$add":[1,2]}']);
+    const ok = createStructuredOutput({ client: clean.client, schema: { type: 'object' }, gate: compileGate });
+    const r2 = /** @type {any} */ (await ok.generate([{ role: 'user', content: 'x' }]));
+    assert.deepStrictEqual(r2.value, { $add: [1, 2] });
+    assert.strictEqual(r2.attempts, 1);
+  });
+
+  it('`refs` lets the internal validator resolve a composed schema (the real jaren-fsm case)', async function () {
+    // a schema that $refs another by $id — exactly the shape of every
+    // jaren engine-document grammar. Without `refs` the internal compile
+    // throws "Can not resolve schema".
+    const inner = { $id: 'https://example.test/inner', type: 'object', required: ['k'], properties: { k: { type: 'string' } } };
+    const outer = { type: 'object', required: ['item'], properties: { item: { $ref: 'https://example.test/inner' } } };
+    const { client } = scriptedClient('openrouter', ['{"item":{"k":"ok"}}']);
+    assert.throws(
+      () => createStructuredOutput({ client, schema: outer }),
+      /Can not resolve schema/, 'without refs it cannot compile the composed schema');
+    const out = createStructuredOutput({ client, schema: outer, refs: [inner], maxRepairs: 1 });
+    const r = /** @type {any} */ (await out.generate([{ role: 'user', content: 'x' }]));
+    assert.deepStrictEqual(r.value, { item: { k: 'ok' } });
+  });
+
+  it('`gate` accepts an array of checks, run in order after the schema', async function () {
+    const { client } = scriptedClient('openrouter', ['{"n":4}']);
+    const positive = (v) => (v.n > 0 ? true : { valid: false, errors: [{ message: 'not positive' }] });
+    const even = (v) => (v.n % 2 === 0 ? true : { valid: false, errors: [{ message: 'not even' }] });
+    const out = createStructuredOutput({
+      client, schema: { type: 'object', properties: { n: { type: 'integer' } } },
+      gate: [positive, even],
+    });
+    const r = /** @type {any} */ (await out.generate([{ role: 'user', content: 'x' }]));
+    assert.deepStrictEqual(r.value, { n: 4 });
+  });
 });

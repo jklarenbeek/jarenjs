@@ -371,12 +371,19 @@ export function createChatClient(options = {}) {
       }
       catch (err) {
         const failure = /** @type {any} */ (err);
-        const retryable = failure instanceof AiError && failure.code === 'AI0002'
-          && isRetryableStatus(failure.status ?? -1)
+        // AI0002 with a transient status (network/408/429/5xx) retries;
+        // so does AI0003 — a 200 that carried no choices, or a malformed
+        // chunk, is a transient provider hiccup (common on busy cheap
+        // models), safe to retry precisely because it means nothing was
+        // delivered. The `!state.delivered` guard keeps both from ever
+        // re-sending after the caller has observed streamed output.
+        const retryable = failure instanceof AiError
+          && (failure.code === 'AI0003'
+            || (failure.code === 'AI0002' && isRetryableStatus(failure.status ?? -1)))
           && !state.delivered
           && attempt < retry.attempts;
         if (!retryable) {
-          if (failure instanceof AiError && failure.code === 'AI0002')
+          if (failure instanceof AiError && (failure.code === 'AI0002' || failure.code === 'AI0003'))
             failure.attempts = attempt;
           throw err;
         }

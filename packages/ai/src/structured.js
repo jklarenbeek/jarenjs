@@ -15,7 +15,7 @@
  */
 
 import { JarenValidator } from '@jarenjs/validate';
-import { checkOutcome } from './check.js';
+import { checkOutcome, composeChecks } from './check.js';
 import { PROVIDERS } from './providers.js';
 
 /** Validation errors reported per failed generation: enough to repair. */
@@ -73,6 +73,21 @@ function unfence(text) {
 }
 
 /**
+ * Compile a schema that may reference others by `$id`, registering the
+ * referenced schemas first. Every Jaren engine-document grammar
+ * (fsm/dag/app/JSLT) composes the query grammar by `$ref`, so a plain
+ * `.compile(schema)` on one of them throws "Can not resolve schema".
+ * @param {any} schema
+ * @param {any[]} [refs]
+ * @returns {(value: any) => any}
+ */
+function compileWithRefs(schema, refs) {
+  const v = new JarenValidator({ skipErrors: false, collectErrors: true });
+  for (const ref of refs ?? []) v.addSchema(ref);
+  return v.compile(schema);
+}
+
+/**
  * Create a structured-output generator over a chat client.
  *
  * @param {{ client: { endpoint: { provider: string }, complete: (request: any) => Promise<any> },
@@ -80,9 +95,29 @@ function unfence(text) {
  *   name?: string,
  *   strict?: boolean,
  *   validator?: (value: any) => any,
+ *   refs?: any[],
+ *   gate?: ((value: any) => any) | Array<(value: any) => any>,
  *   maxRepairs?: number }} options
  *   - `validator` overrides the internally compiled check (any
  *     function returning a boolean or `{ valid, errors }`).
+ *   - `refs` are other JSON Schemas the `schema` references by `$id`,
+ *     registered before it is compiled — every Jaren engine-document
+ *     schema composes the published query/JSLT grammars by `$ref`, so
+ *     authoring an fsm/dag/app document needs them here (e.g. `refs:
+ *     [querySchema]`). Ignored when `validator` is given.
+ *   - `gate` is one or more extra checks run AFTER schema validation
+ *     (the schema still drives constrained decoding): the reliable way
+ *     to author an engine document — the schema keeps the *shape*, a
+ *     `compile` gate keeps the *semantics*. A gate is
+ *     `(doc) => { try { compile(doc); return true; } catch (e) {
+ *     return { valid: false, errors: [{ code: e.code, docPath:
+ *     e.docPath, message: e.message }] }; } }`; its coded, docPath'd
+ *     errors go back to the model for repair (compile errors repair
+ *     well — they are precise). Composes with `validator` when both are
+ *     given (validator first). NOTE: a *quality/adequacy* gate — "needs
+ *     ≥N of something" — repairs poorly on weaker models (they patch
+ *     narrowly); enforce breadth in the prompt and reserve gates for
+ *     schema/compile correctness.
  *   - `maxRepairs` is how many failed rounds may go back to the model
  *     with the validation errors (default 1).
  * @returns {{ generate: (messages: any[], hooks?: { signal?: AbortSignal }) => Promise<
@@ -95,8 +130,9 @@ export function createStructuredOutput(options) {
     throw new TypeError('createStructuredOutput needs a JSON Schema object');
   const name = options.name ?? 'result';
   const maxRepairs = options.maxRepairs ?? 1;
-  const check = options.validator
-    ?? new JarenValidator({ skipErrors: false, collectErrors: true }).compile(schema);
+  const base = options.validator ?? compileWithRefs(schema, options.refs);
+  const gates = options.gate === undefined ? [] : [].concat(options.gate);
+  const check = gates.length === 0 ? base : composeChecks(base, ...gates);
   const tier = PROVIDERS[client.endpoint.provider]?.structured ?? null;
 
   /**

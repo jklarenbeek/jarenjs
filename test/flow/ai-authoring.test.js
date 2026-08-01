@@ -88,6 +88,27 @@ describe('recipe 2 — authoring a machine with semantic repair', function () {
     assert.match(repairPrompt, /"code":"JF0006"/, 'the JF code reached the model');
     assert.match(repairPrompt, /"docPath":"\/transitions\/0\/to"/, 'the docPath reached the model');
   });
+
+  it('the reliable recipe as a one-liner: refs resolve the composed schema, gate adds compile', async function () {
+    // the same repair, without hand-wiring composeChecks + a ref-aware
+    // validator: `refs` lets createStructuredOutput compile the fsm
+    // schema (which $refs the query grammar) itself, and `gate` adds the
+    // compile check. This is the shape the K8s workflow uses.
+    const broken = { initial: 'a', states: ['a', 'b'], transitions: [{ from: 'a', event: 'go', to: 'zz' }] };
+    const fixed = { initial: 'a', states: ['a', 'b'], transitions: [{ from: 'a', event: 'go', to: 'b' }] };
+    const { client } = scriptedClient([JSON.stringify(broken), JSON.stringify(fixed)]);
+
+    const out = createStructuredOutput({
+      client, schema: fsmSchema, name: 'jaren_fsm',
+      refs: [querySchema],           // resolve the composed grammar
+      gate: fsmCompileGate,          // shape (schema) + semantics (compile)
+      maxRepairs: 2,
+    });
+    const result = /** @type {any} */ (await out.generate([{ role: 'user', content: 'a machine' }]));
+    assert.deepStrictEqual(result.value, fixed);
+    assert.strictEqual(result.attempts, 2, 'the JF0006 to-undeclared-state repaired');
+    assert.doesNotThrow(() => compileFsm(result.value));
+  });
 });
 
 describe('recipe 3 — a model as a dataflow node', function () {
