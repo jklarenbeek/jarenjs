@@ -228,6 +228,34 @@ describe('filter selector (RFC 9535 2.3.5)', () => {
     assert.deepEqual(values('$.a[?@ == @]', data), data.a);
   });
 
+  it('should re-read an absolute comparable after the document mutates', () => {
+    // the $-rooted comparable is memoized per filter application; a
+    // mutated document re-queried under the same root identity must be
+    // seen afresh on the next run
+    const q = compileJSONPath('$.items[?@ < $.max]');
+    const doc = { max: 3, items: [1, 2, 3, 4] };
+    assert.deepEqual(q(doc), [1, 2]);
+    doc.max = 5;
+    assert.deepEqual(q(doc), [1, 2, 3, 4]);
+    assert.deepEqual([...q.iterate(doc)], [1, 2, 3, 4]);
+    assert.deepEqual(q.paths(doc), ['$[\'items\'][0]', '$[\'items\'][1]', '$[\'items\'][2]', '$[\'items\'][3]']);
+  });
+
+  it('should resolve an absolute comparable against each root separately', () => {
+    const q = compileJSONPath('$.items[?@ < $.max]');
+    const docA = { max: 2, items: [1, 2, 3] };
+    const docB = { max: 4, items: [1, 2, 3] };
+    // interleave two lazy runs of the same compiled query
+    const a = q.iterate(docA);
+    const b = q.iterate(docB);
+    assert.strictEqual(a.next().value, 1);
+    assert.strictEqual(b.next().value, 1);
+    assert.strictEqual(a.next().done, true);
+    assert.strictEqual(b.next().value, 2);
+    assert.deepEqual(q(docA), [1]);
+    assert.deepEqual(q(docB), [1, 2, 3]);
+  });
+
   it('should filter object member values', () => {
     assert.deepEqual(values('$.o[?@ == 1]', data), [1]);
   });

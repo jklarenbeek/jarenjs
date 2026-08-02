@@ -43,7 +43,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `iso-date-time` | ISO 8601 date-time with optional timezone
 - `iso-time` | ISO 8601 time with optional timezone — the timezone offset is uniformly optional, so a zone-less time such as `12:30:00` validates
 
-*Note: All date time formats can use formatMinimum / formatMaximum and formatExclusiveMinimum and formatExclusiveMaximum*
+*Note: All date time formats can use formatMinimum / formatMaximum and formatExclusiveMinimum and formatExclusiveMaximum. The bounds are folded to epoch milliseconds at compile time and string values compare as numbers, so a validation allocates no `Date`; a raw `Date` instance as the value is still accepted and compares numerically.*
 
 #### 🗨 Formats for url's, hostnames and emails
 

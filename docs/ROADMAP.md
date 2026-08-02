@@ -75,18 +75,6 @@ delete it or fix it.
 
 ## @jarenjs/json — query engine & language
 
-- [ ] **Hoist `$`-absolute comparables out of filter loops** — inside a path
-  filter, a `$`-rooted comparable (`[?@.price < $.max]`) re-walks from the
-  root once per candidate node, though its value is invariant for the whole
-  filter run. The obvious fix — remember the last root and its value, the
-  monomorphic per-callsite cache `compileIRegexp` callers already use — is
-  **wrong**: a caller may mutate the document and re-query the same object
-  identity, and a root-keyed memo cannot see that. A safe version needs the
-  cache reset per filter *application*, which means the predicate tree
-  handing its reset hooks up to the selector that runs it. (The entry's
-  former sibling, fusing adjacent singular segments, is done and was already
-  done: `compileSingularGetter` flattens a whole singular chain into one
-  steps array.)
 - [ ] **Materializing `$range` still meets the heap before the guard** —
   iterating a range no longer materializes it (`$for` and quantifiers over a
   static `$range` compile to counting loops), so the shape the QT3
@@ -303,9 +291,10 @@ them, forms renders two of its three date formats as plain text boxes, and
 the locale packs contain no month names at all.
 
 The kernel (`@jarenjs/core/dates/*`), the query operators, the charts time
-axis, the forms date controls and the JOSL dedup are done; what they do is
+axis, the forms date controls, the JOSL dedup and the allocation-free
+`formatMinimum`/`formatMaximum` comparators are done; what they do is
 documented in `packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.13 and the
-respective package READMEs. Three entries are left.
+respective package READMEs. Two entries are left.
 
 Two constraints shape every entry. **There is no date type**: dates are RFC
 3339 strings (lexical, interchange) and epoch milliseconds (arithmetic), both
@@ -344,12 +333,6 @@ thing to avoid.
   *parsing by pattern* (`dateFormat: DD-MM-YYYY`) rather than RFC 3339, which
   is why the kernel owes a `compileDateParser` as well as a formatter.
   `excludes: weekends` additionally needs working-day arithmetic.
-- [ ] **`formatMinimum`/`formatMaximum` without allocating** — the bound
-  comparators parse *both* the bound and the value into `Date` objects on every
-  validation, where the lexical parser plus an epoch comparison would allocate
-  nothing. The catch is that the current path accepts a raw `Date` instance as
-  a value and compares it directly, so the fast path has to keep that door
-  open or the change is not behavior-preserving.
 
 ## Geospatial (cross-package)
 

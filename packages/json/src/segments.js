@@ -169,14 +169,72 @@ export function compileExists(query) {
   return (current, root) => runSegmentsV(segs, relative ? current : root, root).length > 0;
 }
 
+// Collector for the reset hooks of `$`-rooted comparable memos, active
+// while compileFilterPredicate compiles a filter's predicate tree; null
+// outside a filter, where a memo would have no reset and go stale.
+let pendingResets = null;
+
+// Hand-back from compileFilterPredicate to the filter selector that ran
+// it - module scope like sliceFrom/sliceTo: read immediately, never kept.
+let filterReset = null;
+
+/**
+ * Compile a filter's predicate expression, collecting the reset hooks of
+ * the `$`-rooted comparable memos inside it (see compileComparable) and
+ * handing their combined reset - or null when the tree has none - back
+ * through `filterReset`. The filter selector runs the reset before each
+ * application. A nested filter collects into its own frame, so an inner
+ * filter's memos reset per inner application.
+ * @returns {(current: any, root: any) => boolean}
+ */
+function compileFilterPredicate(expr) {
+  const saved = pendingResets;
+  pendingResets = [];
+  const pred = compileLogicalExpr(expr);
+  const resets = pendingResets;
+  pendingResets = saved;
+  if (resets.length === 0) {
+    filterReset = null;
+  }
+  else if (resets.length === 1) {
+    filterReset = resets[0];
+  }
+  else {
+    filterReset = () => {
+      for (let i = 0; i < resets.length; i++)
+        resets[i]();
+    };
+  }
+  return pred;
+}
+
 // getter producing a ValueType result (a JSON value or NOTHING)
 function compileComparable(node) {
   if (node.kind === 'literal') {
     const value = node.value;
     return () => value;
   }
-  if (node.kind === 'query')
-    return compileSingularGetter(node.query.segments, node.query.relative);
+  if (node.kind === 'query') {
+    const getter = compileSingularGetter(node.query.segments, node.query.relative);
+    if (node.query.relative || pendingResets === null)
+      return getter;
+    // A `$`-rooted comparable is invariant for one filter application,
+    // so it is computed at the first candidate and reused for the rest
+    // instead of re-walking from the root per candidate. The filter
+    // resets the memo before each application (a caller may mutate the
+    // document and re-run the query on the same root identity); the
+    // root check covers a reentrant run against a different document.
+    let cachedRoot = NOTHING;
+    let cachedValue = NOTHING;
+    pendingResets.push(() => { cachedRoot = NOTHING; });
+    return (current, root) => {
+      if (root !== cachedRoot) {
+        cachedValue = getter(current, root);
+        cachedRoot = root;
+      }
+      return cachedValue;
+    };
+  }
   return compileValueFunction(node);
 }
 
@@ -499,8 +557,11 @@ export function compileSelectorNodeV(sel) {
       };
     }
     default: { // 'filter'
-      const pred = compileLogicalExpr(sel.expr);
+      const pred = compileFilterPredicate(sel.expr);
+      const reset = filterReset;
       return (v, out, root) => {
+        if (reset !== null)
+          reset();
         if (Array.isArray(v)) {
           for (let i = 0; i < v.length; i++) {
             if (pred(v[i], root))
@@ -636,8 +697,11 @@ function compileSelectorNodeG(sel) {
       };
     }
     default: { // 'filter'
-      const pred = compileLogicalExpr(sel.expr);
+      const pred = compileFilterPredicate(sel.expr);
+      const reset = filterReset;
       return function* filterG(v, root) {
+        if (reset !== null)
+          reset();
         if (Array.isArray(v)) {
           for (let i = 0; i < v.length; i++) {
             if (pred(v[i], root))
@@ -815,8 +879,11 @@ export function compileSelectorNodeP(sel) {
       };
     }
     default: { // 'filter'
-      const pred = compileLogicalExpr(sel.expr);
+      const pred = compileFilterPredicate(sel.expr);
+      const reset = filterReset;
       return (v, p, outV, outP, root) => {
+        if (reset !== null)
+          reset();
         if (Array.isArray(v)) {
           for (let i = 0; i < v.length; i++) {
             if (pred(v[i], root)) {

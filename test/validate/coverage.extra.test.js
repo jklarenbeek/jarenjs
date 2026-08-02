@@ -309,6 +309,23 @@ describe('Date and time formats', function () {
     assert.isFalse(validate('2024-13-15T12:30:00'), 'month 13 does not exist');
   });
 
+  it('should validate the iso-date-time format between bounds', function () {
+    const compiler = new JarenValidator();
+    compiler.addFormats(dateTimeFormats);
+    const validate = compiler.compile({
+      format: 'iso-date-time',
+      formatMinimum: '2024-01-01T00:00:00Z',
+      formatMaximum: '2024-12-31T23:59:59Z',
+    });
+
+    assert.isTrue(validate('2024-01-01T00:00:00Z'), 'a valid exact minimum');
+    assert.isTrue(validate('2024-06-15T12:30:00'), 'a valid timezone-less date-time inside the range');
+    assert.isTrue(validate(new Date(Date.parse('2024-06-15T12:30:00Z'))), 'a valid datetype inside the range');
+    assert.isFalse(validate('2023-12-31T23:59:59Z'), 'a date-time under the minimum');
+    assert.isFalse(validate('2025-01-01T00:00:00Z'), 'a date-time above the maximum');
+    assert.isFalse(validate('2024-13-15T12:30:00'), 'month 13 does not exist');
+  });
+
   it('should validate the iso-time format', function () {
     const compiler = new JarenValidator();
     compiler.addFormats(dateTimeFormats);
@@ -316,6 +333,22 @@ describe('Date and time formats', function () {
 
     assert.isTrue(validate('12:30:00Z'));
     assert.isTrue(validate('12:30:00'), 'the timezone is optional');
+    assert.isFalse(validate('25:00:00'), 'hour 25 does not exist');
+  });
+
+  it('should validate the iso-time format between bounds', function () {
+    const compiler = new JarenValidator();
+    compiler.addFormats(dateTimeFormats);
+    const validate = compiler.compile({
+      format: 'iso-time',
+      formatMinimum: '08:00:00Z',
+      formatMaximum: '17:00:00Z',
+    });
+
+    assert.isTrue(validate('08:00:00Z'), 'a valid exact minimum');
+    assert.isTrue(validate('12:30:00Z'), 'a valid time inside the range');
+    assert.isFalse(validate('07:59:59Z'), 'a time under the minimum');
+    assert.isFalse(validate('17:00:01Z'), 'a time above the maximum');
     assert.isFalse(validate('25:00:00'), 'hour 25 does not exist');
   });
 

@@ -16,7 +16,10 @@
 //   - Singular queries (`$.a.b[3]`) compile to a direct property walk with
 //     no intermediate arrays.
 //   - Filter comparables compile to sentinel-returning getters; existence
-//     tests on singular queries never materialize nodelists.
+//     tests on singular queries never materialize nodelists. A `$`-rooted
+//     comparable is memoized per filter application (its value is invariant
+//     across the candidates), with the memo reset before each application so
+//     a mutated document re-queried under the same root reads fresh.
 //   - `match()`/`search()` with a literal pattern precompile their RegExp;
 //     dynamic patterns use a per-callsite monomorphic cache.
 //   - Normalized-path production (RFC 9535 section 2.7) is compiled lazily,

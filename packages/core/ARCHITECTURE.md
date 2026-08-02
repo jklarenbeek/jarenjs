@@ -460,7 +460,11 @@ intermediate and is plain data, never an opaque handle.
 Calendar math goes through day numbers (`daysFromCivil`/`civilFromDays`),
 never through `Date`: the conversions are ~10 integer operations and allocate
 nothing, where an allocate-mutate-read `Date` round trip costs about 165× as
-much for the same answer. Formatting is the two-stage compiler again — a
+much for the same answer. For the same reason every `getDateTypeOf*` getter
+has a `getEpochOf*` twin — the same validity check and the same engine parse,
+returning epoch milliseconds instead of a `Date` — so a consumer comparing
+against precomputed bounds (the `formatMinimum`/`formatMaximum` validators)
+allocates nothing per value. Formatting is the two-stage compiler again — a
 pattern is scanned once into a chain of appenders, which measured ~4.5×
 against re-scanning it per call.
 

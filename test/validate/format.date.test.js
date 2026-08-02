@@ -152,6 +152,24 @@ describe('Schema Date Formats', function () {
       // assert.isFalse(validate('06/19/1963'), 'an invalid date string');
       assert.isFalse(validate('2013-350'), 'only RFC3339 not all of ISO 8601 are valid');
     });
+    it('should validate format: \'date\', between minimum and maximum', function () {
+      const validate = compiler.compile({
+        format: 'date',
+        formatMinimum: '1975-01-17',
+        formatMaximum: '1981-10-01',
+      });
+
+      assert.isTrue(validate(undefined), 'ignore undefined');
+      assert.isTrue(validate(1), 'ignore number type');
+      assert.isTrue(validate('1975-01-17'), 'a valid exact minimum');
+      assert.isTrue(validate('1978-06-15'), 'a valid date inside the range');
+      assert.isTrue(validate('1981-10-01'), 'a valid exact maximum');
+      assert.isTrue(validate(new Date(Date.parse('1978-06-15'))), 'a valid datetype inside the range');
+      assert.isFalse(validate('1975-01-16'), 'a date under the minimum');
+      assert.isFalse(validate('1981-10-02'), 'a date above the maximum');
+      assert.isFalse(validate(new Date(Date.parse('1974-02-12'))), 'a datetype under the minimum');
+      assert.isFalse(validate('1978-13-15'), 'an invalid date string');
+    });
   });
 
   describe('#formatTime()', function () {
@@ -170,6 +188,25 @@ describe('Schema Date Formats', function () {
       assert.isFalse(validate('08:30:06'), 'an invalid time string without Z');
       assert.isFalse(validate('08:30:06 PST'), 'an invalid time string');
       assert.isFalse(validate('01:01:01,1111'), 'only RFC3339 not all of ISO 8601 are valid');
+    });
+    it('should validate format: \'time\', between minimum and maximum', function () {
+      const validate = compiler.compile({
+        format: 'time',
+        formatMinimum: '08:00:00Z',
+        formatMaximum: '17:00:00Z',
+      });
+
+      assert.isTrue(validate(undefined), 'ignore undefined');
+      assert.isTrue(validate(1), 'ignore number type');
+      assert.isTrue(validate('08:00:00Z'), 'a valid exact minimum');
+      assert.isTrue(validate('12:30:06Z'), 'a valid time inside the range');
+      assert.isTrue(validate('17:00:00Z'), 'a valid exact maximum');
+      assert.isTrue(validate('18:00:00+02:00'), 'a valid time inside the range through its offset');
+      assert.isTrue(validate(new Date(Date.parse('1970-01-01T12:30:06Z'))), 'a valid datetype inside the range');
+      assert.isFalse(validate('07:59:59Z'), 'a time under the minimum');
+      assert.isFalse(validate('17:00:01Z'), 'a time above the maximum');
+      assert.isFalse(validate(new Date(Date.parse('1970-01-01T07:59:59Z'))), 'a datetype under the minimum');
+      assert.isFalse(validate('25:00:00Z'), 'an invalid time string');
     });
   });
 });

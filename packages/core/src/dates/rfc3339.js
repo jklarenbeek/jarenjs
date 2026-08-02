@@ -229,6 +229,31 @@ export function getDateTypeOfDateTimeRFC3339(str, def = undefined) {
     : def;
 }
 
+// The epoch twins of the three getters above: the same validity check
+// and the same engine parse, but the result stays a number, so a
+// caller comparing against precomputed epoch bounds allocates no Date.
+// A string the grammar accepts but the engine cannot parse (a leap
+// second's `:60`) reads as NaN, exactly as its Date twin reads as an
+// invalid Date - every comparison against it is false.
+
+export function getEpochOfDateOnlyRFC3339(str, def = undefined) {
+  return isDateOnlyRFC3339(str)
+    ? Date.parse(str)
+    : def;
+}
+
+export function getEpochOfTimeOnlyRFC3339(str, def = undefined) {
+  return isTimeOnlyRFC3339(str)
+    ? Date.parse(CONST_TIME_INSERTDATE + str)
+    : def;
+}
+
+export function getEpochOfDateTimeRFC3339(str, def = undefined) {
+  return isDateTimeRFC3339(str)
+    ? Date.parse(str)
+    : def;
+}
+
 /**
  * Reads the full-date at index from as {year, month, day}. The region
  * must already have passed isDateOnlyRegion.
@@ -557,7 +582,7 @@ export function getDateTypeOfISODateTime(str, def = undefined) {
 /**
  * Parses an ISO 8601 time string with optional timezone.
  * Returns a Date object (with 1970-01-01 as date) if valid, otherwise undefined.
- * 
+ *
  * @param {string} str - The time string to parse
  * @param {any} [def=undefined] - Default value to return if invalid
  * @returns {Date|undefined} - The parsed Date or default value
@@ -570,5 +595,27 @@ export function getDateTypeOfISOTime(str, def = undefined) {
   const dateTimeStr = CONST_TIME_INSERTDATE + str;
   const date = new Date(Date.parse(dateTimeStr));
   return isNaN(date.getTime()) ? def : date;
+}
+
+// The epoch twins of the two ISO getters, mirroring their branch
+// structure exactly (including which branches fold a failed parse into
+// `def` and which surface it as NaN) so a comparison against either
+// twin's result answers the same.
+
+export function getEpochOfISODateTime(str, def = undefined) {
+  if (!isValidISODateTime(str))
+    return def;
+  if (!/[Z+-]\d{2}:\d{2}$/i.test(str) && !str.endsWith('Z')) {
+    const ms = Date.parse(str.replace(' ', 'T'));
+    return ms !== ms ? def : ms;
+  }
+  return Date.parse(str);
+}
+
+export function getEpochOfISOTime(str, def = undefined) {
+  if (!isValidISOTime(str))
+    return def;
+  const ms = Date.parse(CONST_TIME_INSERTDATE + str);
+  return ms !== ms ? def : ms;
 }
 //#endregion
