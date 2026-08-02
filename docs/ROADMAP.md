@@ -277,18 +277,17 @@ delete it or fix it.
 
 ## @jarenjs/josl
 
-- [ ] **CSV parse speed against a codegen parser** — `udsv` reads the 10k
-  record stream in ~1.5 ms against the CSV reader's ~3.0 ms, because it
-  compiles a parser per schema with `new Function`. The no-codegen rule is
-  absolute in this package, so closing that gap means finding it in the
-  closure-compiled shape: the remaining per-cell cost is the `slice` per
-  field and the object build per record. This is the same trade the
-  validator and query engine record under their own codegen-backend items.
-- [ ] **Stringify speed** — `stringifyJosl` runs ~2.5× behind `smol-toml`
-  on the 1k-record document (6.9 ms vs 2.7 ms, `npm run benchmark:toml
-  --profile`), roughly level with `@iarna/toml`. Parsing has had two
-  optimization passes and now leads on small documents; the writer has had
-  none, and is the larger relative gap of the two.
+- [ ] **CSV header-keyed objects against a codegen parser** — `udsv` reads
+  the 10k record stream to objects in ~1.6 ms against the CSV reader's
+  ~3.2 ms, because it compiles a parser per schema with `new Function` and
+  builds each record object with literal keys the engine can inline-cache.
+  String-array rows are now within ~1.3× (cell ends come from cached
+  `indexOf` cursors instead of a per-character scan), so the remaining gap
+  is concentrated in the object build per record — a computed-key store per
+  cell. The no-codegen rule is absolute in this package, so closing it
+  means finding a closure-compiled shape for record construction. This is
+  the same trade the validator and query engine record under their own
+  codegen-backend items.
 - [ ] **Streaming CST** — `parseJoslCst` records source spans, which only
   the whole-document driver produces; the cutter has the same slices in
   hand but reports them per cut line, without the terminator. Rewriting a

@@ -220,6 +220,7 @@ export class CsvMachine {
    */
   constructor(options = {}) {
     this.delimiter = charCodeOption(options.delimiter, 'delimiter', CC_COMMA);
+    this.delimChar = String.fromCharCode(this.delimiter);
     this.quote = options.quote === null || options.quote === ''
       ? -1
       : charCodeOption(options.quote, 'quote', CC_DQUOTE);
@@ -259,6 +260,14 @@ export class CsvMachine {
     this.started = false;
     this.ended = false;
 
+    // Next-occurrence cursors for the plain-field scanner, absolute in
+    // the span text and found lazily: -1 means "none in the rest of the
+    // text" and stays valid, -2 means not looked yet. They belong to one
+    // span's text, so `readSpan` resets them.
+    this.nextDelim = -2;
+    this.nextLf = -2;
+    this.nextCr = -2;
+
     // document state
     this.outRows = [];
     this.repairLog = [];
@@ -277,6 +286,14 @@ export class CsvMachine {
    * @returns {this} The machine, for chaining
    */
   feed(chunk) {
+    // Growth is append-only, so a found cursor position stays valid; but
+    // a cursor that had run off the end must look again in the new data.
+    if (this.nextDelim === -1)
+      this.nextDelim = -2;
+    if (this.nextLf === -1)
+      this.nextLf = -2;
+    if (this.nextCr === -1)
+      this.nextCr = -2;
     return feedMachine(this, chunk);
   }
 
@@ -362,95 +379,171 @@ export class CsvMachine {
     let pos = this.scanPos;
     let state = this.scanState;
     let start = 0;
+    // Lazily-found absolute positions of the next quote / LF / CR.
+    // -1 means "none in the rest of the buffer" and stays valid; -2 means
+    // not looked yet. Caching them is what keeps a CR-less buffer from
+    // being re-scanned for a CR once per record.
+    let qi = -2;
+    let lf = -2;
+    let cr = -2;
 
-    while (pos < len) {
-      const c = buf.charCodeAt(pos);
-      switch (state) {
-        case S_START:
-          if (c === quote) {
-            state = S_QUOTED;
-            pos++;
-            continue;
+    outer: while (pos < len) {
+      // Fast path. The cutter is permissive: it is in a quoted state
+      // whenever ANY reading could be inside a quote, so a plain state
+      // with no quote character ahead means every newline ahead is a
+      // real record end — indexOf can cut records without the
+      // per-character machine. A record that does contain a quote is
+      // handed to the machine below, one record at a time; one that
+      // visibly STARTS with a quote skips the lookups outright.
+      if (state === S_PLAIN || (state === S_START && buf.charCodeAt(pos) !== quote)) {
+        if (qi !== -1 && qi < pos)
+          qi = quote < 0 ? -1 : buf.indexOf(this.quoteChar, pos);
+        const qlimit = qi < 0 ? len : qi;
+        for (;;) {
+          if (lf !== -1 && lf < pos)
+            lf = buf.indexOf('\n', pos);
+          if (cr !== -1 && cr < pos)
+            cr = buf.indexOf('\r', pos);
+          let cut;
+          if (cr < 0) {
+            if (lf < 0)
+              cut = -1;
+            else
+              cut = lf + 1;
           }
-          state = S_PLAIN;
-          continue;
-        case S_PLAIN: {
-          if (c === delim) {
-            state = S_START;
-            pos++;
-            continue;
+          else if (lf >= 0 && lf < cr)
+            cut = lf + 1;
+          else if (lf === cr + 1) // CRLF
+            cut = lf + 1;
+          else if (cr + 1 < len || this.ended)
+            cut = cr + 1;
+          else {
+            // A bare CR at the buffer edge is only this record's end if
+            // no LF follows it, and that needs one character of
+            // lookahead from the next chunk.
+            if (qlimit <= cr)
+              break; // a quote precedes it: the machine reads this record
+            this.scanPos = cr;
+            this.scanState = S_PLAIN;
+            this.compact(start);
+            return;
           }
-          if (c === CC_LF) {
-            // The terminator belongs to the span, so the parser consumes
-            // it and counts the line exactly as it does whole-document.
-            pos++;
-            this.readSpan(buf, start, pos);
-            start = pos;
-            state = S_START;
-            continue;
+          if (cut < 0) {
+            // No terminator ahead. A quote in the partial tail needs the
+            // machine to scan it; otherwise the tail is consumed and its
+            // cutter state is decided by its last character.
+            if (qlimit < len)
+              break;
+            this.scanPos = len;
+            this.scanState = start === len || buf.charCodeAt(len - 1) === delim
+              ? S_START
+              : S_PLAIN;
+            this.compact(start);
+            return;
           }
-          if (c === CC_CR) {
-            // A CR is only this record's end if no LF follows it, and
-            // that needs one character of lookahead. Cutting here keeps
-            // a CR-only document from buffering to the last byte, and the
-            // parser still makes the call: it re-reads the same next
-            // character out of the same buffer and heals CSV1006 itself.
-            if (pos + 1 >= len) {
-              if (this.ended)
-                break;
-              this.scanPos = pos;
-              this.scanState = state;
-              this.compact(start);
-              return;
-            }
-            pos++;
-            if (buf.charCodeAt(pos) === CC_LF)
-              pos++;
-            this.readSpan(buf, start, pos);
-            start = pos;
-            state = S_START;
-            continue;
-          }
-          pos++;
-          continue;
-        }
-        case S_QUOTED: {
-          // quoted fields can be long, so let the engine find the quote
-          const q = buf.indexOf(this.quoteChar, pos);
-          if (q < 0) {
-            pos = len;
-            continue;
-          }
-          pos = q + 1;
-          state = S_QUOTE;
-          continue;
-        }
-        default: { // S_QUOTE - one lookahead decides doubled vs closing
-          if (c === quote) { // "" is a literal quote; stay inside
-            state = S_QUOTED;
-            pos++;
-            continue;
-          }
-          // Anything but a delimiter or terminator keeps the field open:
-          // the latest close any reading could pick, which is what makes
-          // the cutter permissive.
-          state = c === delim || c === CC_LF || c === CC_CR ? S_PLAIN : S_QUOTED;
-          continue;
+          if (cut > qlimit)
+            break; // this record holds a quote: the machine reads it
+          // The terminator belongs to the span, so the parser consumes
+          // it and counts the line exactly as it does whole-document.
+          this.readSpan(buf, start, cut);
+          start = cut;
+          pos = cut;
+          state = S_START;
         }
       }
-      break;
+
+      while (pos < len) {
+        const c = buf.charCodeAt(pos);
+        switch (state) {
+          case S_START:
+            if (c === quote) {
+              state = S_QUOTED;
+              pos++;
+              continue;
+            }
+            state = S_PLAIN;
+            continue;
+          case S_PLAIN: {
+            if (c === delim) {
+              state = S_START;
+              pos++;
+              continue;
+            }
+            if (c === CC_LF) {
+              pos++;
+              this.readSpan(buf, start, pos);
+              start = pos;
+              state = S_START;
+              continue outer;
+            }
+            if (c === CC_CR) {
+              // A CR is only this record's end if no LF follows it, and
+              // that needs one character of lookahead. Cutting here keeps
+              // a CR-only document from buffering to the last byte, and the
+              // parser still makes the call: it re-reads the same next
+              // character out of the same buffer and heals CSV1006 itself.
+              if (pos + 1 >= len) {
+                if (this.ended)
+                  break;
+                this.scanPos = pos;
+                this.scanState = state;
+                this.compact(start);
+                return;
+              }
+              pos++;
+              if (buf.charCodeAt(pos) === CC_LF)
+                pos++;
+              this.readSpan(buf, start, pos);
+              start = pos;
+              state = S_START;
+              continue outer;
+            }
+            pos++;
+            continue;
+          }
+          case S_QUOTED: {
+            // quoted fields can be long, so let the engine find the quote
+            const q = buf.indexOf(this.quoteChar, pos);
+            if (q < 0) {
+              pos = len;
+              continue;
+            }
+            pos = q + 1;
+            state = S_QUOTE;
+            continue;
+          }
+          default: { // S_QUOTE - one lookahead decides doubled vs closing
+            if (c === quote) { // "" is a literal quote; stay inside
+              state = S_QUOTED;
+              pos++;
+              continue;
+            }
+            // Anything but a delimiter or terminator keeps the field open:
+            // the latest close any reading could pick, which is what makes
+            // the cutter permissive.
+            state = c === delim || c === CC_LF || c === CC_CR ? S_PLAIN : S_QUOTED;
+            continue;
+          }
+        }
+        break;
+      }
+
+      // Out of input. A trailing S_QUOTE is undecided until the next
+      // character arrives, so stop one short and re-read it next time.
+      if (state === S_QUOTE && !this.ended) {
+        this.scanPos = pos - 1;
+        this.scanState = S_QUOTED;
+      }
+      else {
+        this.scanPos = pos;
+        this.scanState = state === S_QUOTE ? S_PLAIN : state;
+      }
+      this.compact(start);
+      return;
     }
 
-    // Out of input. A trailing S_QUOTE is undecided until the next
-    // character arrives, so stop one short and re-read it next time.
-    if (state === S_QUOTE && !this.ended) {
-      this.scanPos = pos - 1;
-      this.scanState = S_QUOTED;
-    }
-    else {
-      this.scanPos = pos;
-      this.scanState = state === S_QUOTE ? S_PLAIN : state;
-    }
+    this.scanPos = pos;
+    this.scanState = state;
     this.compact(start);
   }
 
@@ -460,6 +553,14 @@ export class CsvMachine {
       return;
     this.buf = this.buf.slice(start);
     this.scanPos -= start;
+    // The scanner cursors are absolute in the buffer, so they shift with
+    // it; one already consumed has no meaning in the new buffer.
+    if (this.nextDelim >= 0)
+      this.nextDelim = this.nextDelim >= start ? this.nextDelim - start : -2;
+    if (this.nextLf >= 0)
+      this.nextLf = this.nextLf >= start ? this.nextLf - start : -2;
+    if (this.nextCr >= 0)
+      this.nextCr = this.nextCr >= start ? this.nextCr - start : -2;
   }
 
   //#endregion
@@ -547,18 +648,29 @@ export class CsvMachine {
   }
 
   // An unquoted field: everything up to the next delimiter or terminator.
+  // The cursors make that the minimum of three cached indexOf results, so
+  // every character is scanned once per span by the engine's substring
+  // search instead of once per character here.
   parsePlain(text, pos, end, cells) {
-    const delim = this.delimiter;
-    const start = pos;
-    while (pos < end) {
-      const c = text.charCodeAt(pos);
-      if (c === delim || c === CC_LF || c === CC_CR)
-        break;
-      pos++;
-    }
-    const raw = text.slice(start, pos);
+    let nd = this.nextDelim;
+    let nlf = this.nextLf;
+    let ncr = this.nextCr;
+    if (nd !== -1 && nd < pos)
+      nd = this.nextDelim = text.indexOf(this.delimChar, pos);
+    if (nlf !== -1 && nlf < pos)
+      nlf = this.nextLf = text.indexOf('\n', pos);
+    if (ncr !== -1 && ncr < pos)
+      ncr = this.nextCr = text.indexOf('\r', pos);
+    let stop = end;
+    if (nd >= 0 && nd < stop)
+      stop = nd;
+    if (nlf >= 0 && nlf < stop)
+      stop = nlf;
+    if (ncr >= 0 && ncr < stop)
+      stop = ncr;
+    const raw = text.slice(pos, stop);
     cells.push(this.plainCells ? raw : this.finish(raw));
-    return pos;
+    return stop;
   }
 
   // A quoted field: `"` … `"`, with `""` for a literal quote.

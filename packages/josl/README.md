@@ -367,35 +367,41 @@ acceptance corpus, and on a scorecard of damaged documents.
 
 | engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |
 | --- | --- | --- | --- | --- |
-| **jaren** | **11/11** | 3.0 ms | 3.4 ms | 1.8 ms |
-| udsv | 11/11 | **1.5 ms** | **2.9 ms** | **1.0 ms** |
-| papaparse | 11/11 | 5.6 ms | 7.9 ms | 2.2 ms |
-| csv-parse | 11/11 | 19.8 ms | 13.4 ms | 12.5 ms |
-| d3-dsv | 11/11 | 4.5 ms | 6.2 ms | 2.7 ms |
-| @vanillaes/csv | n/a | 7.7 ms | 10.1 ms | 5.5 ms |
+| **jaren** | **11/11** | 1.9 ms | 3.4 ms | 1.4 ms |
+| udsv | 11/11 | **1.5 ms** | **3.0 ms** | **1.0 ms** |
+| papaparse | 11/11 | 5.4 ms | 8.2 ms | 2.3 ms |
+| csv-parse | 11/11 | 19.5 ms | 13.6 ms | 12.7 ms |
+| d3-dsv | 11/11 | 2.8 ms | 4.7 ms | 1.8 ms |
+| @vanillaes/csv | n/a | 7.7 ms | 9.8 ms | 5.6 ms |
 
 (The suite's twelfth fixture, `location_coordinates`, is excluded: its
 expectation is a bare object where every other case is an array, its
 phone number disagrees with its own CSV, and its degree sign is already
 U+FFFD in the source bytes. No parser can satisfy it.)
 
-**udsv is the honest loss, and it is not close on plain data: ~2× on the
-record stream, ~1.2× on quoted.** It earns it — udsv compiles a parser
-per schema with `new Function`. This package does not, anywhere, by house
-rule: everything here runs under a strict Content-Security-Policy, where
-runtime codegen is unavailable. That is the same trade the schema
-validator and the query engine make, and it is a trade rather than an
-excuse — against every parser that also avoids codegen, jaren leads.
+**udsv is the honest loss: ~1.3× on the plain record stream, ~1.15× on
+quoted, and ~2× when records become header-keyed objects.** It earns it —
+udsv compiles a parser per schema with `new Function`, so each record
+object is built with literal keys the engine can inline-cache, where this
+reader assigns computed keys one by one. This package does not use
+codegen, anywhere, by house rule: everything here runs under a strict
+Content-Security-Policy, where runtime codegen is unavailable. That is
+the same trade the schema validator and the query engine make, and it is
+a trade rather than an excuse — against every parser that also avoids
+codegen, jaren leads.
 
-Streaming costs about 1.6× the wholesale path (5.9 ms vs 3.0 ms on the
-record stream) and the reason is structural: whole-document parsing walks
-the source once, because with the whole text in hand the record parser
-finds each record's end itself. A chunk stream cannot — a chunk may stop
-mid-field — so `feed` runs a side-effect-free cutter first and the source
-is walked twice.
+The plain-field scanner finds each cell end as the minimum of three
+lazily-cached `indexOf` cursors (delimiter, LF, CR), so the source is
+scanned by the engine's substring search rather than one character at a
+time. Streaming is structurally a second walk — a chunk may stop
+mid-field, so `feed` runs a side-effect-free cutter before the parser —
+but the cutter cuts by the same substring search wherever no quote lies
+ahead, and on the plain record stream the whole streaming read now costs
+about 1.1× the wholesale path (2.1 ms vs 1.9 ms), level with udsv's
+chunked reader.
 
 Stringify leads everything that offers one: 3.6 ms against papaparse's
-6.1 ms and d3-dsv's 4.2 ms.
+6.1 ms and d3-dsv's 4.1 ms.
 
 ## Generating JOSL with LLMs
 
@@ -472,14 +478,15 @@ because only a side-effect-free pre-pass can decide whether a line is
 complete when a chunk may stop mid-token — and it is held to the same
 694 cases, fed one character at a time.
 
-Stringify is the honest loss: 6.9 ms against smol-toml's 2.7 ms on the
-same document, roughly level with `@iarna/toml`. Nothing has been done
-about it yet.
+Stringify leads: 2.5 ms against smol-toml's 2.7 ms and `@iarna/toml`'s
+6.9 ms on the same document. The writer keeps its error path on a
+mutable stack instead of allocating per key, emits each section header
+from its parent's already-formatted prefix, and copies unescaped string
+runs whole.
 
 ## Status
 
 Published alongside the rest of the suite. Both constrained-decoding
 twins ship — the JSON-Schema one over the data model and the GBNF one
 over the text — along with the CST mode, progressive `text-partial`
-events and single-walk whole-document parsing. Stringify speed is the
-open item: see the table above.
+events and single-walk whole-document parsing.
