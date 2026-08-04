@@ -1,0 +1,209 @@
+{
+ "group": "aggregates",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "count all",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it"
+    }
+   }
+  },
+  {
+   "name": "count filtered",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$it.n",
+       15
+      ]
+     },
+     "$return": "$it"
+    }
+   }
+  },
+  {
+   "name": "count empty",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$it.n",
+       999
+      ]
+     },
+     "$return": "$it"
+    }
+   }
+  },
+  {
+   "name": "sum with holes",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "sum over empty is zero",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$it.n",
+       999
+      ]
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "avg skips holes",
+   "query": {
+    "$avg": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "avg over empty is undefined",
+   "query": {
+    "$avg": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$it.n",
+       999
+      ]
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "min integer",
+   "query": {
+    "$min": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "max real",
+   "query": {
+    "$max": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.f"
+    }
+   }
+  },
+  {
+   "name": "min string codepoint",
+   "query": {
+    "$min": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "max string",
+   "query": {
+    "$max": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "count over projected return (residual)",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  }
+ ]
+}

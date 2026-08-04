@@ -1,0 +1,246 @@
+{
+ "group": "adversarial",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "n": {
+    "type": "number"
+   },
+   "first name": {
+    "type": "string"
+   },
+   "0": {
+    "type": "string"
+   }
+  }
+ },
+ "indexes": [],
+ "documents": [
+  {
+   "id": "big",
+   "n": 1e+308
+  },
+  {
+   "id": "tiny",
+   "n": 5e-324
+  },
+  {
+   "id": "negzero",
+   "n": 0.0
+  },
+  {
+   "id": "intish",
+   "n": 42
+  },
+  {
+   "id": "frac",
+   "n": 0.1
+  },
+  {
+   "id": "numstr",
+   "u": "42"
+  },
+  {
+   "id": "realnum",
+   "u": 42
+  },
+  {
+   "id": "spaced",
+   "first name": "Ada Lovelace"
+  },
+  {
+   "id": "zerokey",
+   "0": "member named zero"
+  },
+  {
+   "id": "deep",
+   "a": {
+    "b": {
+     "c": {
+      "d": {
+       "e": 5
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "datestr",
+   "u": "2026-08-04T12:00:00Z"
+  }
+ ],
+ "cases": [
+  {
+   "name": "huge number roundtrip",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      1e+307
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "denormal number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      0
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "fraction equality",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      0.1
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "int-valued real equality",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      42
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "numeric string is not a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      42
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "number is not a numeric string",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "42"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "member name with a space",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it",
+        "first name"
+       ]
+      },
+      "Ada Lovelace"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "member named 0",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it",
+       "0"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "deep nesting path",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.a.b.c.d.e",
+      5
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "date strings compare lexically",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.u",
+      "2026-01-01T00:00:00Z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "whole documents roundtrip",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": "$it"
+   }
+  }
+ ]
+}

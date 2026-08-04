@@ -72,6 +72,56 @@ they claim:
   submodules, which are development and demonstration code, not published
   packages.
 
+## Untrusted query documents against a store
+
+`@jarenjs/db` can run a query document that arrived from a tenant, a
+remote client or a language model against a SQLite database. The
+boundary is documented in MODEL-FORMAT.md §8 and enforced by the safe
+execution profile; the properties it claims — and the ones it
+deliberately does not — are these.
+
+Claimed, and each proven by a hostile-input test:
+
+- **Injection is structurally impossible.** Every literal and every
+  external binds as a positional parameter; no value ever reaches SQL
+  text, identifiers come only from the model document (validated
+  names), and a member name the JSON path grammar cannot carry falls
+  back to engine evaluation rather than being spliced.
+- **Reference containment.** Under a profile, an undeclared external,
+  host function, collation or collection is a compile error
+  (`JD0011`) before anything executes, and a foreign document can
+  never cause host-side function registration.
+- **Bounded fetches.** Every non-aggregate fetch carries a mandatory
+  `LIMIT`; crossing it is a coded refusal (`JD2007`), never a silent
+  truncation. The engine's execution limits bound the JavaScript
+  portion of any query with the engine's own codes.
+- **Mandatory tenant predicates.** A profile predicate is conjoined
+  into every plan after translation — native statements, residual
+  candidate fetches and diverted scans alike — so no document shape
+  removes it.
+- **Denials do not wedge.** Every refusal leaves the store usable; the
+  suite runs an ordinary query after each attack.
+- **Read-only means the database refuses.** A read-only store opens
+  the connection read-only at the driver, so a hypothetical
+  translation bug still cannot write.
+
+Not claimed, stated as plainly:
+
+- **No statement timeout exists on the SQLite drivers.** `node:sqlite`
+  and `bun:sqlite` expose no interrupt or progress handler, so a
+  long-running database-internal computation is not bounded by the
+  profile. The capability slot exists and is honestly `false`.
+- **No row-estimate bound exists** — SQLite's plan output is prose;
+  the structural full-scan refusal is the substitute.
+- **A shared database is not safe for mutually hostile tenants
+  without the mandatory predicate.** The profile is the mechanism,
+  not a default.
+
+A crash, a hang, an unbounded allocation, an escape from the coded
+error model, or a cross-tenant read that defeats a mandatory predicate
+while processing an untrusted query document is a vulnerability worth
+reporting.
+
 ## Supply chain
 
 Every published `@jarenjs/*` package has **zero third-party runtime

@@ -1,0 +1,209 @@
+{
+ "group": "residuals",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "$let binding",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$let": {
+     "d": {
+      "$default": [
+       "$it.n",
+       0
+      ]
+     }
+    },
+    "$where": {
+     "$gt": [
+      "$d",
+      15
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "$let with arithmetic",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$let": {
+     "twice": {
+      "$mul": [
+       {
+        "$default": [
+         "$it.n",
+         0
+        ]
+       },
+       2
+      ]
+     }
+    },
+    "$return": "$twice"
+   }
+  },
+  {
+   "name": "quantifier over range",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$every": {
+      "i": {
+       "$range": [
+        0,
+        2
+       ]
+      }
+     },
+     "$satisfies": {
+      "$ge": [
+       {
+        "$default": [
+         "$it.n",
+         100
+        ]
+       },
+       "$i"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "both-sides paths",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      "$it.o.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "arithmetic in predicate",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      {
+       "$add": [
+        {
+         "$default": [
+          "$it.n",
+          0
+         ]
+        },
+        5
+       ]
+      },
+      20
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "non-flwor root",
+   "query": {
+    "$count": "$[*]"
+   }
+  },
+  {
+   "name": "deep nesting mixed",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$let": {
+     "tag": {
+      "$default": [
+       "$it.s",
+       "?"
+      ]
+     }
+    },
+    "$where": {
+     "$or": [
+      {
+       "$starts-with": [
+        "$tag",
+        "a"
+       ]
+      },
+      {
+       "$empty": "$it.n"
+      }
+     ]
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "t": "$tag"
+    }
+   }
+  }
+ ]
+}

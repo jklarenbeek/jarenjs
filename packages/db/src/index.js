@@ -23,5 +23,9 @@ export { typeOfPath, isNumericType } from './types.js';
 export { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
 export { deterministicFragment, registerFragment } from './udf.js';
 export { createQueryEngine, createQueryState } from './query.js';
+export {
+  normalizeProfile, SAFE_PROFILE, translateProfilePredicate,
+  applyMandatoryPredicate, applyRowBound,
+} from './profile.js';
 export { translatePatch } from './patch-sql.js';
 export { DbCompileError, DbRuntimeError, DB_CODES } from './errors.js';

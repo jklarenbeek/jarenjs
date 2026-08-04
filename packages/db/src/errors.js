@@ -25,12 +25,14 @@ export const DB_CODES = Object.freeze({
   JD0004: 'an index path is not a singular member selection',
   JD0005: 'the model document is invalid',
   JD0010: 'strict mode refused a residual',
+  JD0011: 'the profile refused the document',
   JD2001: 'insert found the key already present',
   JD2002: 'a usable key could not be resolved for the write',
   JD2003: 'the write failed schema validation',
   JD2004: 'an undeclared collection was requested',
   JD2005: 'a database operation failed',
   JD2006: 'patch found no document at the key',
+  JD2007: 'the result exceeded the profile row bound',
 });
 
 /**
@@ -53,6 +55,9 @@ export const DB_CODES = Object.freeze({
  *    the offending member
  *  - `JD0010` — `strict: true` and part of the query would have run
  *    outside the database; the reason names the forcing construct
+ *  - `JD0011` — the active profile refused the document before any
+ *    execution: an undeclared external, host function, collation or
+ *    collection, or a refused full-table scan; the reason names it
  */
 export class DbCompileError extends CodedError {
   /**
@@ -83,6 +88,8 @@ export class DbCompileError extends CodedError {
  *  - `JD2005` — the database rejected an operation for a reason that
  *    is not a duplicate key; the original error is the `cause`
  *  - `JD2006` — `patch` addressed a key with no stored document
+ *  - `JD2007` — a fetch crossed the profile's `maxRows` bound; the
+ *    result is refused whole, never silently truncated
  */
 export class DbRuntimeError extends CodedError {
   /**

@@ -56,10 +56,13 @@ export function adaptBunDatabase(db) {
  * substitute module.
  * @param {any} mod - The `bun:sqlite` module (or a substitute)
  * @param {string} path
+ * @param {{ readOnly?: boolean }} [options]
  * @returns {any}
  */
-export function fromBunModule(mod, path) {
-  return adaptBunDatabase(new mod.Database(path));
+export function fromBunModule(mod, path, options) {
+  return adaptBunDatabase(options?.readOnly === true
+    ? new mod.Database(path, { readonly: true })
+    : new mod.Database(path));
 }
 
 /**
@@ -74,8 +77,8 @@ export function bunDriver() {
      * @param {string} path
      * @returns {Promise<any>}
      */
-    open: (path) => lazyOpen('bun:sqlite',
+    open: (path, options) => lazyOpen('bun:sqlite',
       "the Bun SQLite binding ('bun:sqlite') is unavailable on this runtime",
-      fromBunModule, [path]),
+      fromBunModule, [path, options]),
   });
 }

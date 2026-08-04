@@ -1,0 +1,226 @@
+{
+ "group": "ordering",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "asc empties least (default)",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.n"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "desc empties least",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$it.n",
+      "$dir": "desc"
+     }
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "asc empties greatest",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$it.n",
+      "$empty": "greatest"
+     }
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "string keys codepoint order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.s"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "multi-key with tie",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.n",
+     {
+      "$key": "$it.s",
+      "$dir": "desc"
+     }
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "stable ties keep insertion order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.n"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "skip",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": "$it.id"
+     },
+     2
+    ]
+   }
+  },
+  {
+   "name": "take",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": "$it.id"
+     },
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "skip+take composed",
+   "query": {
+    "$subsequence": [
+     {
+      "$subsequence": [
+       {
+        "$for": {
+         "it": "$[*]"
+        },
+        "$orderby": [
+         "$it.id"
+        ],
+        "$return": "$it.id"
+       },
+       1
+      ]
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "window past the end",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": "$it.id"
+     },
+     50,
+     3
+    ]
+   }
+  },
+  {
+   "name": "window without order (sequence order)",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$return": "$it.id"
+     },
+     1,
+     3
+    ]
+   }
+  }
+ ]
+}

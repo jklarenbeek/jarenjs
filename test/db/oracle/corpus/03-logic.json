@@ -1,0 +1,204 @@
+{
+ "group": "logic",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "and of three",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$exists": "$it.n"
+      },
+      {
+       "$exists": "$it.s"
+      },
+      {
+       "$gt": [
+        "$it.n",
+        0
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "or across kinds",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.s",
+        "zed"
+       ]
+      },
+      {
+       "$empty": "$it.s"
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not(or)",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$or": [
+       {
+        "$eq": [
+         "$it.s",
+         "ada"
+        ]
+       },
+       {
+        "$eq": [
+         "$it.s",
+         "kid"
+        ]
+       }
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nested not(and(not))",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$and": [
+       {
+        "$not": {
+         "$exists": "$it.n"
+        }
+       },
+       {
+        "$exists": "$it.s"
+       }
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "or with cross-type arm",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.n",
+        "x"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.n",
+        30
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "de morgan agreement",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$not": {
+        "$eq": [
+         "$it.n",
+         10
+        ]
+       }
+      },
+      {
+       "$not": {
+        "$eq": [
+         "$it.n",
+         20
+        ]
+       }
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  }
+ ]
+}

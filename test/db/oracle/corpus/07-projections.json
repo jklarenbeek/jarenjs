@@ -1,0 +1,185 @@
+{
+ "group": "projections",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "object projection",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "who": "$it.id",
+     "num": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "object with default",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "id": "$it.id",
+     "num": {
+      "$default": [
+       "$it.n",
+       -1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "array packing return",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.id",
+      "a"
+     ]
+    },
+    "$return": [
+     "$it.id",
+     "$it.s"
+    ]
+   }
+  },
+  {
+   "name": "bare path projection",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": "$it.n"
+   }
+  },
+  {
+   "name": "nested path projection",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "k": {
+      "$default": [
+       "$it.o.k",
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "computed projection",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "twice": {
+      "$mul": [
+       "$it.n",
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "projection under window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "i": "$it.id"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  }
+ ]
+}

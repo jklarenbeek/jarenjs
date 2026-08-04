@@ -1,0 +1,165 @@
+{
+ "group": "null-and-missing",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "eq null hits stored null only",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      null
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ne null hits present non-null",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.u",
+      null
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "exists includes stored null",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "empty is the missing set",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$empty": "$it.u"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "exists on typed member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not over missing flips honestly",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$eq": [
+       "$it.n",
+       10
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not(exists)",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$exists": "$it.f"
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "comparison against missing is false",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.f",
+      1000
+     ]
+    },
+    "$return": "$it.id"
+   }
+  }
+ ]
+}

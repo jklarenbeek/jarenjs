@@ -250,19 +250,91 @@ error.
 | `JD0004` | an index path is not a singular member selection |
 | `JD0005` | the model document is invalid |
 | `JD0010` | strict mode refused a residual |
+| `JD0011` | the profile refused the document |
 | `JD2001` | insert found the key already present |
 | `JD2002` | a usable key could not be resolved for the write |
 | `JD2003` | the write failed schema validation |
 | `JD2004` | an undeclared collection was requested |
 | `JD2005` | a database operation failed |
 | `JD2006` | patch found no document at the key |
+| `JD2007` | the result exceeded the profile row bound |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
 
 ## 8. The safe execution profile
 
-Reserved.
+A query document that arrives from a tenant, a remote client or a
+language model can reach a database. Parameter binding makes injection
+structurally impossible; it does nothing about resource exhaustion or
+cross-tenant reads. A **profile** composes four independent bounds:
+
+```js
+const store = await openStore(model, { driver, profile: 'safe' });
+// or per call:
+collection.query(doc, { profile: { maxRows: 200, externals: ['min'] } });
+```
+
+`'safe'` is the default table; a profile object overrides members over
+it. The defaults: engine limits
+`{ sequenceItems: 100000, resultItems: 10000, steps: 1000000, depth: 32 }`,
+`maxRows: 1000`, no externals, no host functions, no collations, all
+of the store's collections, no mandatory predicates, no scan refusal.
+
+1. **Engine limits.** The four engine limits ride into every residual
+   compilation, so the JavaScript portion of a query is bounded by the
+   engine's own enforcement and fails with the engine's own codes.
+2. **The mandatory row bound.** Every non-aggregate fetch carries a
+   database-side `LIMIT` of `maxRows + 1`. A fetch that crosses
+   `maxRows` — a result set, a residual's candidate set, a diverted
+   full scan — is the coded `JD2007` and the result is refused WHOLE.
+   It is never silently truncated.
+3. **Reference containment.** The document may reference only the
+   externals, host functions and collations the profile declares, and
+   only collections the profile allows; an undeclared reference is the
+   compile error `JD0011`, never a runtime surprise. No UDF
+   registration happens under a profile. Optionally
+   (`refuseFullScan: true`), a plan whose `EXPLAIN QUERY PLAN`
+   narrative shows a full-table SCAN of the collection is refused with
+   `JD0011` — a structural gate, because SQLite exposes no row
+   estimates to bound by.
+4. **Mandatory predicates.** `predicates: { users: { $eq:
+   ['$it.tenant', 'acme'] } }` conjoins the predicate into EVERY plan
+   for that collection at the plan's root, after translation — the
+   native statement, the residual's candidate fetch and the diverted
+   full scan all wear it, so no document shape (`$or` at the top, a
+   negation, a quantifier, a residual, a window, an aggregate) can
+   produce a fetch without it. A predicate MUST translate natively; a
+   host-configured predicate that cannot is a `TypeError` at first
+   use, because there is no residual to hide it in.
+
+**Read-only stores.** `openStore(model, { readOnly: true })` opens the
+connection read-only at the DRIVER, so every write is refused by the
+database itself (`JD2005` wrapping `SQLITE_READONLY`), not merely by
+the API surface — a translation bug cannot become a write. A read-only
+store verifies the declared shape and creates nothing (`JD0002` when a
+table is missing), and leaves the file's journal mode untouched.
+
+**The non-claims, stated plainly.** This profile does NOT claim:
+
+- a statement timeout on the shipped drivers — `node:sqlite` and
+  `bun:sqlite` expose no interrupt and no progress handler, the
+  `statementTimeout` capability is `false`, and a long-running
+  database-internal computation (a native aggregate over a large
+  table) is bounded by nothing here. A driver whose capability is
+  filled gets a real timeout without a contract change.
+- a row-estimate bound — SQLite's plan output is prose, so the
+  structural SCAN refusal is the honest substitute.
+- safety for arbitrary untrusted SQL — none can be expressed.
+- tenant isolation without the mandatory predicate — a shared database
+  is NOT safe for mutually hostile tenants unless the profile carries
+  one.
+
+The containment story on SQLite is exactly this composition: engine
+limits (bounding the residual portion), the mandatory `LIMIT`, the
+optional SCAN refusal, the allow-lists, and the mandatory predicates.
+Each bound is proven to fire by the hostile-input suite, and the store
+is proven usable after every refusal.
 
 ## 9. Entities, the `x-entity` vocabulary, relations
 

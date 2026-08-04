@@ -1,0 +1,244 @@
+//@ts-check
+/**
+ * @file The differential-oracle harness. Each case runs the SAME query
+ * document through two genuinely independent sides — the in-memory
+ * engine over the raw documents, and the store's translator over the
+ * same documents freshly inserted — and the results must be identical
+ * (deep equality: member order insignificant, array order
+ * significant); when the engine THROWS, the store must throw the same
+ * code. The harness never compiles the translator's output — both
+ * sides share only the query document, which is what makes agreement
+ * evidence.
+ *
+ * Coverage is measured, not asserted: {@link recordConstructs} tallies
+ * which grammar constructs each query exercises against
+ * {@link CONSTRUCT_ROSTER}, and the table is printed so an uncovered
+ * construct is an open finding, not a silent gap.
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { compileJsonQuery } from '@jarenjs/json/query';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** The default oracle collection schema: typed members the pushdown
+ * can promote, untyped members (`u`, `o`, anything else) it cannot. */
+export const DEFAULT_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    n: { type: 'integer' },
+    s: { type: 'string' },
+    f: { type: 'number' },
+    b: { type: 'boolean' },
+    o: { type: 'object', properties: { k: { type: 'integer' } } },
+  },
+};
+export const DEFAULT_INDEXES = [
+  { name: 'by_n', path: '$.n' },
+  { name: 'by_s', path: '$.s' },
+];
+
+/**
+ * Load every corpus group file (one JSON file per construct group).
+ * @returns {{ group: string, schema?: any, indexes?: any[],
+ *   documents: any[], cases: { name: string, query: any,
+ *   externals?: any }[] }[]}
+ */
+export function loadGroups() {
+  const dir = path.join(__dirname, 'corpus');
+  return fs.readdirSync(dir)
+    .filter((file) => file.endsWith('.json'))
+    .sort()
+    .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')));
+}
+
+/**
+ * Open a fresh store seeded with a group's documents.
+ * @param {any} group
+ * @returns {Promise<{ store: any, collection: any }>}
+ */
+export async function storeForGroup(group) {
+  const model = {
+    $model: '0.1',
+    collections: {
+      rows: {
+        schema: group.schema ?? DEFAULT_SCHEMA,
+        key: null,
+        identity: 'integer',
+        indexes: group.indexes ?? DEFAULT_INDEXES,
+      },
+    },
+  };
+  const store = await openStore(model, { driver: nodeDriver() });
+  const collection = store.collection('rows');
+  for (const document of group.documents) await collection.insert(document);
+  return { store, collection };
+}
+
+/**
+ * Run one case through both sides and assert agreement. Returns the
+ * divergence report instead of throwing, so the caller can attach the
+ * case name and mode.
+ * @param {any} collection - the seeded store collection
+ * @param {any[]} documents - the group's raw documents
+ * @param {{ query: any, externals?: any }} kase
+ * @param {'native' | 'residual'} mode
+ * @returns {Promise<null | { expected: any, actual: any, sql?: string }>}
+ */
+export async function runCase(collection, documents, kase, mode) {
+  let expected;
+  let expectedCode = null;
+  try {
+    expected = compileJsonQuery(kase.query)(structuredClone(documents), kase.externals);
+  }
+  catch (error) {
+    expectedCode = /** @type {any} */ (error).code ?? String(error);
+  }
+
+  let actual;
+  let actualCode = null;
+  const options = {
+    externals: kase.externals,
+    pushdown: mode === 'residual' ? false : undefined,
+  };
+  try {
+    actual = await Promise.resolve(collection.execute(kase.query, options));
+  }
+  catch (error) {
+    actualCode = /** @type {any} */ (error).code ?? String(error);
+  }
+
+  if (expectedCode !== null || actualCode !== null) {
+    if (expectedCode === actualCode) return null;
+    return { expected: `throws ${expectedCode}`, actual: `throws ${actualCode}` };
+  }
+  if (deepEquals(actual, expected)) return null;
+  let sql;
+  try {
+    sql = (await collection.explain(kase.query, options)).sql;
+  }
+  catch {
+    sql = '<explain failed>';
+  }
+  return { expected, actual, sql };
+}
+
+/**
+ * Deep JSON equality: member order insignificant, array order
+ * significant, numbers by value.
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+export function deepEquals(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEquals(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object'
+    && !Array.isArray(a) && !Array.isArray(b)) {
+    const aKeys = Object.keys(a);
+    if (aKeys.length !== Object.keys(b).length) return false;
+    return aKeys.every((key) => Object.hasOwn(b, key) && deepEquals(a[key], b[key]));
+  }
+  return false;
+}
+
+/**
+ * The construct roster the coverage table reports against: the
+ * pushdown table's rows plus the deliberate residuals.
+ */
+export const CONSTRUCT_ROSTER = [
+  '$eq', '$ne', '$lt', '$le', '$gt', '$ge',
+  '$and', '$or', '$not',
+  '$exists', '$empty',
+  '$starts-with', '$ends-with', '$contains', '$match',
+  '$orderby', '$subsequence',
+  '$count', '$sum', '$avg', '$min', '$max',
+  '$let', '$for', '$return',
+  'external', 'null-literal', 'boolean-literal', 'cross-type',
+  'object-return', 'array-return', 'quantifier',
+];
+
+/**
+ * Tally the constructs one query document exercises.
+ * @param {any} query
+ * @param {Map<string, number>} tally
+ */
+export function recordConstructs(query, tally) {
+  const bump = (name) => tally.set(name, (tally.get(name) ?? 0) + 1);
+  const walk = (node, context) => {
+    if (Array.isArray(node)) {
+      if (context === '$return') bump('array-return');
+      node.forEach((item) => walk(item, null));
+      return;
+    }
+    if (typeof node === 'string') {
+      if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(node) && node !== '$') bump('external');
+      return;
+    }
+    if (node === null || typeof node !== 'object') return;
+    for (const key of Object.keys(node)) {
+      if (CONSTRUCT_ROSTER.includes(key)) bump(key);
+      if (key === '$every' || key === '$some' || key === '$satisfies') bump('quantifier');
+      if ((key === '$eq' || key === '$ne') && Array.isArray(node[key])) {
+        if (node[key].includes(null)) bump('null-literal');
+        if (node[key].some((v) => typeof v === 'boolean')) bump('boolean-literal');
+      }
+      if (/^\$(eq|ne|lt|le|gt|ge)$/.test(key) && Array.isArray(node[key])) {
+        // the corpus convention: `.n`/`.f`/`.o.k` are numeric members,
+        // `.s` is a string member — a literal of the other type is the
+        // cross-type category
+        const [left, right] = node[key];
+        const pathOf = (v) => (typeof v === 'string' && v.startsWith('$it') ? v : null);
+        const litOf = (v) => (typeof v !== 'string' || !v.startsWith('$') ? v : undefined);
+        const p2 = pathOf(left) ?? pathOf(right);
+        const lit = pathOf(left) !== null ? litOf(right) : litOf(left);
+        if (p2 !== null && lit !== undefined) {
+          const numeric = /\.(n|f|k)$/.test(p2);
+          const stringy = /\.s$/.test(p2);
+          if ((numeric && typeof lit === 'string') || (stringy && typeof lit === 'number'))
+            bump('cross-type');
+        }
+      }
+      if (key === '$return' && node[key] !== null && typeof node[key] === 'object'
+        && !Array.isArray(node[key])) bump('object-return');
+      walk(node[key], key);
+    }
+  };
+  walk(query, null);
+}
+
+/**
+ * Render the coverage table and the missing list.
+ * @param {Map<string, number>} tally
+ * @returns {{ table: string, missing: string[] }}
+ */
+export function coverageTable(tally) {
+  const missing = CONSTRUCT_ROSTER.filter((name) => !tally.has(name));
+  const rows = CONSTRUCT_ROSTER
+    .map((name) => `${name.padEnd(16)} ${String(tally.get(name) ?? 0).padStart(4)}`);
+  return { table: rows.join('\n'), missing };
+}
+
+/** A tiny seeded PRNG (mulberry32) — no Math.random in the oracle. */
+export function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}

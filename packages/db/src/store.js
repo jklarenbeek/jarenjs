@@ -28,6 +28,7 @@ import { chain, toPromise } from './driver.js';
 import { planCollection } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState } from './query.js';
+import { normalizeProfile } from './profile.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -320,7 +321,7 @@ function verifyShape(connection, plan, collection, docPath) {
  * @param {Map<string, any>} plans
  * @returns {any} value-or-promise
  */
-function ensureShape(connection, collections, plans) {
+function ensureShape(connection, collections, plans, readOnly) {
   const dialect = connection.dialect;
   const names = [...collections.keys()];
   return connection.transaction(() => {
@@ -332,6 +333,11 @@ function ensureShape(connection, collections, plans) {
       return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
         chain(statement.get([name]), (row) => {
           if (row === undefined) {
+            if (readOnly) {
+              throw new DbCompileError('JD0002',
+                `collection '${name}': the table does not exist and a read-only store creates nothing`,
+                collection.docPath);
+            }
             const run = (j) => (j >= plan.createSql.length
               ? null
               : chain(connection.exec(plan.createSql[j]), () => run(j + 1)));
@@ -354,9 +360,10 @@ function ensureShape(connection, collections, plans) {
  * @param {any} plan
  * @param {((doc: any) => any) | null} validate
  * @param {any} queryState - the store-wide statement cache and UDF set
+ * @param {{ profile: any }} storeProfileRef - the store-level profile
  * @returns {any}
  */
-function collectionCore(connection, collection, plan, validate, queryState) {
+function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef) {
   const dialect = connection.dialect;
   const shape = {
     table: plan.table,
@@ -376,6 +383,7 @@ function collectionCore(connection, collection, plan, validate, queryState) {
   const stats = { patchTranslated: 0, patchFallback: 0 };
   const engine = createQueryEngine({
     connection, state: queryState, collection, physicalPlan: plan,
+    profile: storeProfileRef.profile,
   });
 
   const checkValid = (doc) => {
@@ -493,8 +501,9 @@ function collectionCore(connection, collection, plan, validate, queryState) {
     },
     delete(key) {
       requireKey(key, collection.name, collection.docPath);
-      return chain(prepared('delete', dialect.dml.del(shape)), (statement) =>
-        chain(statement.run([key]), (result) => Number(result?.changes ?? 0) > 0));
+      return chain(
+        runWrite('delete', dialect.dml.del(shape), [key], key, false),
+        (result) => Number(result?.changes ?? 0) > 0);
     },
   };
   return core;
@@ -544,7 +553,8 @@ function asyncCollection(core) {
  * @param {any} model - A `jaren-model` document (the 0.1 subset)
  * @param {{ driver: any, path?: string, compileSchema?: Function,
  *   busyTimeout?: number, journalMode?: string,
- *   statementCacheBound?: number }} options
+ *   statementCacheBound?: number, profile?: any,
+ *   readOnly?: boolean }} options
  * @returns {Promise<any>}
  */
 export function openStore(model, options) {
@@ -568,9 +578,13 @@ export function openStore(model, options) {
   const busyTimeout = options.busyTimeout ?? 5000;
   const journalMode = options.journalMode ?? 'wal';
   const memory = path === ':memory:' || path === '';
+  const readOnly = options.readOnly === true;
+  const storeProfile = options.profile === undefined
+    ? null
+    : normalizeProfile(options.profile);
 
   return toPromise(chain(
-    options.driver.open(path, { timeout: busyTimeout }),
+    options.driver.open(path, { timeout: busyTimeout, readOnly }),
     (connection) => {
       const dialect = connection.dialect;
       /** @type {Map<string, any>} */
@@ -581,10 +595,12 @@ export function openStore(model, options) {
       const pragmas = memory
         ? null
         : chain(connection.exec(dialect.pragma.busyTimeout(busyTimeout)),
-          () => connection.exec(dialect.pragma.journalMode(journalMode)));
+          // a journal-mode change writes; a read-only store keeps
+          // whatever mode the file already has
+          () => (readOnly ? null : connection.exec(dialect.pragma.journalMode(journalMode))));
 
       return chain(pragmas, () =>
-        chain(ensureShape(connection, collections, plans), () => {
+        chain(ensureShape(connection, collections, plans, readOnly), () => {
           /** @type {Map<string, any>} */
           const cores = new Map();
           const coreFor = (name) => {
@@ -602,7 +618,8 @@ export function openStore(model, options) {
               if (validate !== null && typeof validate !== 'function')
                 throw new TypeError('openStore: compileSchema must return a validation function');
               core = collectionCore(connection, collection,
-                plans.get(name), validate, queryState);
+                plans.get(name), validate, queryState,
+                { profile: storeProfile });
               cores.set(name, core);
             }
             return core;
@@ -612,7 +629,9 @@ export function openStore(model, options) {
             ...connection.capabilities,
             validated: options.compileSchema !== undefined,
             busyTimeoutMs: memory ? null : busyTimeout,
-            journalMode: memory ? null : journalMode,
+            journalMode: memory || readOnly ? null : journalMode,
+            readOnly,
+            profiled: storeProfile !== null,
           });
 
           const queryState = createQueryState(options.statementCacheBound);

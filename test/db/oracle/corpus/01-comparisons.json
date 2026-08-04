@@ -1,0 +1,363 @@
+{
+ "group": "comparisons",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "eq int typed",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      20
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ne int (present-vs-missing)",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.n",
+      20
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "lt / le boundaries",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$le": [
+        "$it.n",
+        20
+       ]
+      },
+      {
+       "$lt": [
+        0,
+        "$it.n"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "gt / ge negative",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.n",
+      -5
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "real-typed comparisons",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.f",
+      1.0
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "zero is not missing",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.f",
+      0
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "string eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "ada"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "string ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.s",
+      "ada"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "string ordering",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.s",
+      "kid"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "empty string equals",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      ""
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "cross-type eq int/str",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      "20"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "cross-type ne str/int",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.s",
+      20
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "cross-type ordering false",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.s",
+      100
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "untyped member eq str",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "text"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "untyped member eq num",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      7
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nested typed path",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.o.k",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "flipped operand",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      15,
+      "$it.n"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "boolean eq true",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.b",
+      true
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "boolean ne false",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.b",
+      false
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "boolean ordering constant false",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.b",
+      false
+     ]
+    },
+    "$return": "$it.id"
+   }
+  }
+ ]
+}

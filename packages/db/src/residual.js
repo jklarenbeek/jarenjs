@@ -19,25 +19,30 @@
 import { compileJsonQuery } from '@jarenjs/json/query';
 
 /**
- * Compile the whole document for set-mode evaluation.
+ * Compile the whole document for set-mode evaluation. A profile's
+ * engine limits ride into the compilation so the JavaScript portion is
+ * bounded by the engine's own enforcement.
  * @param {any} document
+ * @param {any} [limits]
  * @returns {(candidates: any[], externals: any) => any}
  */
-export function compileSetResidual(document) {
-  const compiled = compileJsonQuery(document);
+export function compileSetResidual(document, limits) {
+  const compiled = compileJsonQuery(document,
+    limits === undefined ? undefined : { limits });
   return (candidates, externals) => compiled(candidates, externals);
 }
 
 /**
  * Compile the per-row projection for row-mode evaluation.
  * @param {any} returnExpression - The document's raw `$return` value
+ * @param {any} [limits]
  * @returns {(row: any, externals: any) => any[]} the row's items
  */
-export function compileRowResidual(returnExpression) {
+export function compileRowResidual(returnExpression, limits) {
   const compiled = compileJsonQuery({
     $for: { it: '$[*]' },
     $return: [returnExpression],
-  });
+  }, limits === undefined ? undefined : { limits });
   return (row, externals) => {
     const packed = compiled([row], externals);
     // one binding → exactly one packed array of that row's items

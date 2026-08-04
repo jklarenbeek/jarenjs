@@ -1,0 +1,206 @@
+{
+ "group": "externals",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  }
+ ],
+ "cases": [
+  {
+   "name": "numeric external",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.n",
+      "$min"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "min": 20
+   }
+  },
+  {
+   "name": "string external",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "$who"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "who": "ada"
+   }
+  },
+  {
+   "name": "cross-type external at bind",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      "$who"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "who": "ada"
+   }
+  },
+  {
+   "name": "external ordering both branches",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.s",
+      "$cap"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "cap": "kid"
+   }
+  },
+  {
+   "name": "two externals",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$ge": [
+        "$it.n",
+        "$lo"
+       ]
+      },
+      {
+       "$le": [
+        "$it.n",
+        "$hi"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "lo": 10,
+    "hi": 25
+   }
+  },
+  {
+   "name": "missing external raises the engine error",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      "$gone"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {}
+  },
+  {
+   "name": "boolean external diverts",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.b",
+      "$flag"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "flag": true
+   }
+  },
+  {
+   "name": "null external diverts",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$nothing"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "nothing": null
+   }
+  }
+ ]
+}

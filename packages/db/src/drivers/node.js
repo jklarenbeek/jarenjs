@@ -52,12 +52,16 @@ export function adaptNodeDatabase(db) {
  * whole open path runs under any runtime with a substitute module.
  * @param {any} mod - The `node:sqlite` module (or a substitute)
  * @param {string} path
- * @param {{ timeout?: number }} [options]
+ * @param {{ timeout?: number, readOnly?: boolean }} [options]
  * @returns {any}
  */
 export function fromNodeModule(mod, path, options) {
-  const db = options?.timeout !== undefined
-    ? new mod.DatabaseSync(path, { timeout: options.timeout })
+  /** @type {any} */
+  const open = {};
+  if (options?.timeout !== undefined) open.timeout = options.timeout;
+  if (options?.readOnly === true) open.readOnly = true;
+  const db = Object.keys(open).length > 0
+    ? new mod.DatabaseSync(path, open)
     : new mod.DatabaseSync(path);
   return adaptNodeDatabase(db);
 }
@@ -72,7 +76,7 @@ export function nodeDriver() {
     dialect: sqliteDialect,
     /**
      * @param {string} path
-     * @param {{ timeout?: number }} [options]
+     * @param {{ timeout?: number, readOnly?: boolean }} [options]
      * @returns {Promise<any>}
      */
     open: (path, options) => lazyOpen('node:sqlite',

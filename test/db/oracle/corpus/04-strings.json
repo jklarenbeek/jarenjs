@@ -1,0 +1,204 @@
+{
+ "group": "strings",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   }
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   }
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "u": "text",
+   "s": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": 7
+  },
+  {
+   "id": "h",
+   "s": "Ada"
+  },
+  {
+   "id": "i",
+   "s": "adamant"
+  },
+  {
+   "id": "j",
+   "s": "éclair"
+  },
+  {
+   "id": "k",
+   "s": "𐀀stral"
+  }
+ ],
+ "cases": [
+  {
+   "name": "starts-with case sensitive",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$starts-with": [
+      "$it.s",
+      "ada"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "starts-with uppercase",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$starts-with": [
+      "$it.s",
+      "A"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ends-with",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ends-with": [
+      "$it.s",
+      "d"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "contains middle",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$contains": [
+      "$it.s",
+      "da"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "contains unicode",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$contains": [
+      "$it.s",
+      "é"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "starts-with astral",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$starts-with": [
+      "$it.s",
+      "𐀀"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "empty pattern (vacuous corner, residual)",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$starts-with": [
+      "$it.s",
+      ""
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "match full-match semantics",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$match": [
+      "$it.s",
+      "a.*"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "match no anchors literal",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$match": [
+      "$it.s",
+      "ada"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  }
+ ]
+}
