@@ -28,6 +28,9 @@ export {
   applyMandatoryPredicate, applyRowBound,
 } from './profile.js';
 export { translatePatch } from './patch-sql.js';
+export { normalizeEntities, explainMapping } from './model.js';
+export { planEntity, planJoinTable } from './ddl.js';
+export { entityCore } from './entity.js';
 export {
   planMigration, migrate, shapeHash, migrationChecksum,
   MIGRATION_VERSION, HISTORY_TABLE,

@@ -133,6 +133,8 @@ export function fullDoubleDialect(createDialect) {
       columns: (t) => `GET columns ${t}`,
       indexes: (t) => `GET indexes ${t}`,
       indexColumns: (i) => `GET indexcolumns ${i}`,
+      foreignKeysOn: () => 'GET fkon',
+      foreignKeyList: (t) => `GET fklist ${t}`,
     },
   });
 }

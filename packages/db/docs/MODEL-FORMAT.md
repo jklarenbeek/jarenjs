@@ -251,6 +251,8 @@ error.
 | `JD0005` | the model document is invalid |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |
+| `JD0030` | an unknown x-entity member was declared |
+| `JD0031` | relation declarations contradict each other |
 | `JD2001` | insert found the key already present |
 | `JD2002` | a usable key could not be resolved for the write |
 | `JD2003` | the write failed schema validation |
@@ -338,7 +340,138 @@ is proven usable after every refusal.
 
 ## 9. Entities, the `x-entity` vocabulary, relations
 
-Reserved.
+### 9.1 Scope, and the phase-A relationship
+
+An **entity** is a generalisation of a collection, not a replacement:
+a collection is an entity whose every property is JSONB and which
+declares no relations, and one physical engine sits underneath both.
+A model document MAY declare `collections`, `entities`, or both, and
+a phase-A store document opens unchanged under the entity engine
+(test-asserted). Entities live under `entities`, keyed by identifier
+names:
+
+```json
+{
+  "$model": "0.1",
+  "entities": {
+    "User": {
+      "schema": {
+        "type": "object",
+        "required": ["id", "email"],
+        "properties": {
+          "id":      { "type": "string", "x-entity": { "key": true, "default": "uuid" } },
+          "email":   { "type": "string", "format": "email",
+                       "x-entity": { "unique": true } },
+          "created": { "type": "string", "format": "date-time",
+                       "x-entity": { "default": "now", "column": "integer", "index": true } },
+          "profile": { "type": "object" },
+          "posts":   { "x-entity": { "relation": { "to": "Post", "many": true,
+                       "via": "authorId", "onDelete": "cascade" } } }
+        }
+      }
+    }
+  }
+}
+```
+
+The schema stays a valid JSON Schema throughout: strip every
+`x-entity` member and it accepts and rejects exactly the same values
+(test-asserted over a corpus). The vocabulary is invisible to the
+validator by the same argument as `x-form`.
+
+### 9.2 The `x-entity` vocabulary (a closed set)
+
+| member | on | meaning |
+|---|---|---|
+| `key` | a property | this property is (part of) the primary key; several form a composite key |
+| `unique` | a property | a unique index over the property's column |
+| `index` | a property | a non-unique index over the property's column |
+| `default` | a property | applied on write, in JavaScript (§9.6): `"now"` (insert stamp), `"updated"` (insert AND every update), `"uuid"`, `"auto"` (single INTEGER key, database-allocated), `{ "value": … }` (a literal), `{ "query": … }` (a query document over the document being written) |
+| `column` | a property | storage override: `"integer"` on a `date-time`/`date` string stores epoch milliseconds in a real column (index-friendly range predicates); `"json"` keeps a scalar in the JSONB document (the opt-out that preserves present-`null`, §9.3) |
+| `relation` | a property | `{ to, many?, via?, through?, onDelete? }` — §9.4 |
+
+**An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
+silently ignored mapping directive is a data-loss bug waiting to
+happen, so this vocabulary is deliberately stricter than the
+validator's ignore-unknown posture — the strictness is local to the
+one namespace this package owns.
+
+### 9.3 The hybrid mapping
+
+Stated once, mechanically applied, and returned as data by
+`explainMapping(model)` so it can be golden-tested and printed:
+
+| Schema shape | Storage |
+|---|---|
+| scalar (`string`/`number`/`integer`/`boolean`) at the top level | a real typed column |
+| `format: date-time`/`date` with `column: "integer"` | an epoch-milliseconds `INTEGER` column; the document keeps the RFC 3339 string, the column carries the derived epoch |
+| `enum` of scalars | a column plus a `CHECK (column IN (…))` |
+| nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |
+| relation | a foreign-key column, or a join table for many-to-many (§9.4) |
+
+`STRICT` tables throughout. The physical row is the key column(s),
+the mapped scalar columns, and one JSONB `doc` column holding
+everything else; a read merges them back. **The absent-versus-null
+rule, plainly**: for a column-mapped scalar, JSON `null` and absence
+both store as SQL `NULL` and read back as ABSENT. A property that
+needs present-`null` semantics declares `column: "json"` and stays in
+the document.
+
+### 9.4 Relations and referential integrity
+
+Declared on one side, inferred on the other; when both sides declare,
+the inverses MUST agree (`JD0031` on any contradiction).
+
+- **one-to-many** — `{ to, many: true, via, onDelete }`: `via` names
+  the foreign-key property on the TARGET entity (`authorId` on
+  `Post`). If the target declares that property it MUST be a
+  column-mapped scalar of the key's type; otherwise the column is
+  inferred.
+- **one-to-one** — `{ to, via, onDelete }` (no `many`): `via` names
+  the foreign-key property on the DECLARING entity, and its column is
+  unique.
+- **many-to-many** — `{ to, many: true, through? }` (no `via`): a
+  join table, named `through` when given, otherwise the deterministic
+  `<A>_<B>` with the entity names sorted — implicit names are exactly
+  the thing teams later regret, so the explicit name exists. Its two
+  foreign keys cascade on delete (join rows die with either side; not
+  configurable in this version).
+
+`onDelete` is REQUIRED wherever a foreign-key column is created —
+`"cascade"`, `"restrict"` or `"setNull"` — never defaulted silently.
+Referential integrity is real SQLite foreign keys:
+`PRAGMA foreign_keys = ON` is set AND VERIFIED per connection (it
+defaults off), a violating write fails with the wrapped database
+error, and the declared on-delete behaviour is observed by test.
+
+### 9.5 Identity
+
+Per entity, by the key properties (D11 — platform primitives only):
+caller-supplied (any scalar key, composite included);
+`default: "uuid"` on a single string key (`crypto.randomUUID()`);
+`default: "auto"` on a single integer key (the database allocates —
+an index-locality choice, documented as NOT a sortable-id guarantee).
+Composite keys are ordinary: mark several properties `key: true`;
+reads and deletes take `{ prop: value, … }`.
+
+### 9.6 Defaults
+
+Applied on write in JavaScript, never by SQL `DEFAULT`, so the value
+the application sees and the value stored are the same — and the
+behaviour is identical on every driver. `"now"` stamps an RFC 3339
+UTC string on insert when the property is absent; `"updated"` stamps
+on insert AND on every update, always; `{ "value": … }` fills a
+literal when absent; `{ "query": … }` evaluates a query document over
+the document being written. Defaults run BEFORE validation, so the
+injected hook sees the completed document.
+
+### 9.7 Error-code additions
+
+The entity engine adds two codes to the package's single table (§7):
+`JD0030` — an unknown `x-entity` member; `JD0031` — relation
+declarations whose inverses contradict. Everything else raises the
+existing codes (`JD0005` for structural model defects, `JD2005` for
+database-refused writes including foreign-key violations).
 
 ## 10. Relational translation
 

@@ -69,6 +69,7 @@ const doubleDialect = createDialect({
   pragma: {
     busyTimeout: (ms) => `SET busy ${ms}`,
     journalMode: (mode) => `SET journal ${mode}`,
+    foreignKeys: (on) => `SET fk ${on ? 1 : 0}`,
   },
   introspect: {
     version: () => 'GET version',

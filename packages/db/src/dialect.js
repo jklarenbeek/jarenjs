@@ -62,11 +62,14 @@
  *     savepoint: (n: string) => string, release: (n: string) => string,
  *     rollbackTo: (n: string) => string },
  *   pragma: { busyTimeout: (ms: number) => string,
- *     journalMode: (mode: string) => string },
+ *     journalMode: (mode: string) => string,
+ *     foreignKeys: (on: boolean) => string },
  *   introspect: { version: () => string, compileOptions: () => string,
  *     tableExists: () => string, columns: (table: string) => string,
  *     indexes: (table: string) => string,
- *     indexColumns: (index: string) => string },
+ *     indexColumns: (index: string) => string,
+ *     foreignKeysOn: () => string,
+ *     foreignKeyList: (table: string) => string },
  * }} spec
  * @returns {any} the frozen dialect
  */
@@ -142,6 +145,36 @@ export function createDialect(spec) {
      */
     renameTable(from, to) {
       return `ALTER TABLE ${q(from)} RENAME TO ${q(to)}`;
+    },
+    /**
+     * A relational entity table: typed columns (keys, mapped scalars,
+     * foreign keys), per-column CHECKs, real REFERENCES clauses with
+     * declared on-delete behaviour, and the JSONB document column for
+     * everything unmapped. One generator, both document kinds.
+     * @param {{ table: string, columns: {
+     *   name: string, type: string, notNull?: boolean,
+     *   primaryKey?: boolean, check?: string,
+     *   references?: { table: string, column: string,
+     *     onDelete: 'cascade' | 'restrict' | 'setNull' } }[],
+     *   compositeKey?: string[] }} shape
+     * @returns {string}
+     */
+    createRelationalTable({ table, columns, compositeKey }) {
+      const onDeleteSql = { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
+      const rendered = columns.map((column) => {
+        let sql = `${q(column.name)} ${column.type}`;
+        if (column.primaryKey === true) sql += ' PRIMARY KEY';
+        if (column.notNull === true) sql += ' NOT NULL';
+        if (column.check !== undefined) sql += ` CHECK (${column.check})`;
+        if (column.references !== undefined) {
+          sql += ` REFERENCES ${q(column.references.table)} (${q(column.references.column)})`
+            + ` ON DELETE ${onDeleteSql[column.references.onDelete]}`;
+        }
+        return sql;
+      });
+      if (compositeKey !== undefined && compositeKey.length > 0)
+        rendered.push(`PRIMARY KEY (${compositeKey.map(q).join(', ')})`);
+      return `CREATE TABLE ${q(table)} (${rendered.join(', ')})${spec.tableSuffix}`;
     },
     /**
      * A plain (non-collection) table — the migration history table.

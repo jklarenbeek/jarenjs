@@ -297,3 +297,139 @@ export function verifyShape(connection, plan, collection, docPath) {
     }));
 }
 
+
+/**
+ * Plan one ENTITY's physical shape from the mapping data
+ * `explainMapping` derived: the relational table (typed columns,
+ * checks, foreign keys, the JSONB document column), its indexes, and
+ * the structural facts an existing table must match. One verify path
+ * serves both document kinds.
+ * @param {string} name
+ * @param {any} entityMapping - `explainMapping(model).entities[name]`
+ * @param {any} entities - the full `explainMapping` result (key types
+ *   come from the referenced entity's columns)
+ * @param {any} dialect
+ * @returns {{ table: string, createSql: string[], expected: any,
+ *   columnNames: Set<string> }}
+ */
+export function planEntity(name, entityMapping, entities, dialect) {
+  const storageType = (storage) => dialect.typeFor(storage, 'generated');
+  const keyType = (entityName) => {
+    const target = entities.entities[entityName];
+    const keyColumn = target.columns.find((column) => column.key);
+    return storageType(keyColumn.storage);
+  };
+  const renderCheck = (columnName, values) => {
+    const rendered = values.map((value) => (typeof value === 'string'
+      ? dialect.stringLiteral(value)
+      : typeof value === 'boolean' ? dialect.booleanLiteral(value) : String(value)));
+    return `${dialect.quoteIdentifier(columnName)} IN (${rendered.join(', ')})`;
+  };
+
+  const singleKey = entityMapping.keys.length === 1;
+  // a declared `via` property and its foreign key are ONE column: the
+  // FK definition claims it, so the scalar list must not repeat it
+  const fkNames = new Set(entityMapping.foreignKeys.map((fk) => fk.column));
+  const columns = [];
+  for (const column of entityMapping.columns) {
+    if (fkNames.has(column.name)) continue;
+    columns.push({
+      name: column.name,
+      type: storageType(column.storage),
+      primaryKey: singleKey && column.key,
+      notNull: column.key && !singleKey,
+      check: column.check !== undefined ? renderCheck(column.name, column.check) : undefined,
+    });
+  }
+  for (const fk of entityMapping.foreignKeys) {
+    columns.push({
+      name: fk.column,
+      type: keyType(fk.references),
+      references: { table: fk.references, column: fk.referencesKey, onDelete: fk.onDelete },
+    });
+  }
+  columns.push({ name: DOC_COLUMN, type: dialect.docColumnType, notNull: true });
+
+  const createSql = [dialect.ddl.createRelationalTable({
+    table: name,
+    columns,
+    compositeKey: singleKey ? undefined : entityMapping.keys,
+  })];
+  const expectedIndexes = [];
+  for (const index of entityMapping.indexes) {
+    const indexName = `${name}_${index.property}`;
+    createSql.push(dialect.ddl.createIndex({
+      name: indexName, table: name, columns: [index.property], unique: index.unique,
+    }));
+    expectedIndexes.push({ name: indexName, unique: index.unique, columns: [index.property] });
+  }
+  for (const fk of entityMapping.foreignKeys) {
+    if (fk.unique) {
+      const indexName = `${name}_${fk.column}`;
+      createSql.push(dialect.ddl.createIndex({
+        name: indexName, table: name, columns: [fk.column], unique: true,
+      }));
+      expectedIndexes.push({ name: indexName, unique: true, columns: [fk.column] });
+    }
+  }
+
+  return {
+    table: name,
+    createSql,
+    columnNames: new Set(columns.map((column) => column.name)),
+    expectedForeignKeys: columns
+      .filter((column) => column.references !== undefined)
+      .map((column) => ({ column: column.name, references: column.references.table })),
+    expected: {
+      columns: columns
+        .map((column) => ({ name: column.name, type: column.type, generated: false }))
+        .sort((a, b) => (a.name < b.name ? -1 : 1)),
+      indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
+    },
+  };
+}
+
+/**
+ * Plan a many-to-many join table.
+ * @param {string} tableName
+ * @param {any} join - `explainMapping(model).joinTables[tableName]`
+ * @param {any} entities - the full mapping
+ * @param {any} dialect
+ * @returns {{ table: string, createSql: string[], expected: any }}
+ */
+export function planJoinTable(tableName, join, entities, dialect) {
+  const keyType = (entityName) => {
+    const target = entities.entities[entityName];
+    const keyColumn = target.columns.find((column) => column.key);
+    return dialect.typeFor(keyColumn.storage, 'generated');
+  };
+  const columns = [
+    {
+      name: join.left.column,
+      type: keyType(join.left.entity),
+      references: { table: join.left.entity, column: join.left.referencesKey, onDelete: 'cascade' },
+    },
+    {
+      name: join.right.column,
+      type: keyType(join.right.entity),
+      references: { table: join.right.entity, column: join.right.referencesKey, onDelete: 'cascade' },
+    },
+  ];
+  return {
+    table: tableName,
+    createSql: [dialect.ddl.createRelationalTable({
+      table: tableName,
+      columns,
+      compositeKey: [join.left.column, join.right.column],
+    })],
+    expectedForeignKeys: columns.map((column) => ({
+      column: column.name, references: column.references.table,
+    })),
+    expected: {
+      columns: columns
+        .map((column) => ({ name: column.name, type: column.type, generated: false }))
+        .sort((a, b) => (a.name < b.name ? -1 : 1)),
+      indexes: [],
+    },
+  };
+}

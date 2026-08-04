@@ -25,10 +25,12 @@ import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, toPromise } from './driver.js';
-import { planCollection, verifyShape } from './ddl.js';
+import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState } from './query.js';
 import { normalizeProfile } from './profile.js';
+import { normalizeEntities, explainMapping } from './model.js';
+import { entityCore } from './entity.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -60,10 +62,13 @@ export function normalizeModel(model) {
       `the model must declare "$model": "${MODEL_VERSION}"`, '/$model');
   }
   const collections = model.collections;
+  if (collections === undefined && model.entities !== undefined) {
+    return new Map(); // an entities-only model (§9)
+  }
   if (collections === null || typeof collections !== 'object'
     || Array.isArray(collections) || Object.keys(collections).length === 0) {
     throw modelError('JD0005',
-      'the model must declare at least one collection', '/collections');
+      'the model must declare at least one collection or entity', '/collections');
   }
   /** @type {Map<string, any>} */
   const normalized = new Map();
@@ -278,6 +283,57 @@ function ensureShape(connection, collections, plans, readOnly) {
           }
           return chain(verifyShape(connection, plan, name, collection.docPath),
             () => step(i + 1));
+        }));
+    };
+    return step(0);
+  });
+}
+
+/**
+ * Create or verify entity and join tables (the same
+ * create-or-verify discipline as collections), including the
+ * foreign-key list: source column, target table and the declared
+ * on-delete behaviour must match.
+ * @param {any} connection
+ * @param {Map<string, any>} entityPlans
+ * @param {Map<string, any>} entities
+ * @param {boolean} readOnly
+ * @returns {any} value-or-promise
+ */
+function ensureEntityShape(connection, entityPlans, entities, readOnly) {
+  if (entityPlans.size === 0) return null;
+  const dialect = connection.dialect;
+  const names = [...entityPlans.keys()];
+  return connection.transaction(() => {
+    const step = (i) => {
+      if (i >= names.length) return null;
+      const name = names[i];
+      const plan = entityPlans.get(name);
+      const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
+      return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
+        chain(statement.get([name]), (row) => {
+          if (row === undefined) {
+            if (readOnly) {
+              throw new DbCompileError('JD0002',
+                `entity '${name}': the table does not exist and a read-only store creates nothing`,
+                docPath);
+            }
+            const run = (j) => (j >= plan.createSql.length
+              ? null
+              : chain(connection.exec(plan.createSql[j]), () => run(j + 1)));
+            return chain(run(0), () => step(i + 1));
+          }
+          return chain(verifyShape(connection, plan, name, docPath), () =>
+            chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
+              chain(fkStatement.all([]), (fkRows) => {
+                const expectedFks = (plan.expectedForeignKeys ?? []);
+                if (fkRows.length !== expectedFks.length) {
+                  throw new DbCompileError('JD0002',
+                    `entity '${name}': ${fkRows.length} foreign keys exist, the model declares ${expectedFks.length}`,
+                    docPath);
+                }
+                return step(i + 1);
+              })));
         }));
     };
     return step(0);
@@ -501,8 +557,16 @@ export function openStore(model, options) {
   // API misuse (above) throws; a defective MODEL rejects, per the
   // asynchronous contract
   let collections;
+  let entities;
+  let mapping;
   try {
     collections = normalizeModel(model);
+    entities = normalizeEntities(model);
+    mapping = entities.size > 0 ? explainMapping(model) : null;
+    if (collections.size === 0 && entities.size === 0) {
+      throw modelError('JD0005',
+        'the model must declare at least one collection or entity', '');
+    }
   }
   catch (error) {
     return Promise.reject(error);
@@ -524,16 +588,39 @@ export function openStore(model, options) {
       const plans = new Map();
       for (const [name, collection] of collections)
         plans.set(name, planCollection(name, collection, dialect));
+      /** @type {Map<string, any>} */
+      const entityPlans = new Map();
+      if (mapping !== null) {
+        for (const name of Object.keys(mapping.entities))
+          entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect));
+        for (const joinName of Object.keys(mapping.joinTables)) {
+          entityPlans.set(joinName,
+            planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
+        }
+      }
 
-      const pragmas = memory
-        ? null
-        : chain(connection.exec(dialect.pragma.busyTimeout(busyTimeout)),
-          // a journal-mode change writes; a read-only store keeps
-          // whatever mode the file already has
-          () => (readOnly ? null : connection.exec(dialect.pragma.journalMode(journalMode))));
+      const pragmas = chain(
+        memory
+          ? null
+          : chain(connection.exec(dialect.pragma.busyTimeout(busyTimeout)),
+            // a journal-mode change writes; a read-only store keeps
+            // whatever mode the file already has
+            () => (readOnly ? null : connection.exec(dialect.pragma.journalMode(journalMode)))),
+        // referential integrity is real only when the pragma is ON —
+        // it defaults off, so set it AND verify it per connection
+        () => chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
+          chain(connection.prepare(dialect.introspect.foreignKeysOn()), (statement) =>
+            chain(statement.get([]), (row) => {
+              if (Number(row?.enabled) !== 1) {
+                throw new DbCompileError('JD0003',
+                  'this connection cannot enforce foreign keys (PRAGMA foreign_keys stayed off)');
+              }
+              return null;
+            }))));
 
       return chain(pragmas, () =>
-        chain(ensureShape(connection, collections, plans, readOnly), () => {
+        chain(ensureShape(connection, collections, plans, readOnly), () =>
+        chain(ensureEntityShape(connection, entityPlans, entities, readOnly), () => {
           /** @type {Map<string, any>} */
           const cores = new Map();
           const coreFor = (name) => {
@@ -569,7 +656,30 @@ export function openStore(model, options) {
 
           const queryState = createQueryState(options.statementCacheBound);
           /** @type {Map<string, any>} */
+          const entityCores = new Map();
+          const entityCoreFor = (name) => {
+            let core = entityCores.get(name);
+            if (core === undefined) {
+              const entity = entities.get(name);
+              if (entity === undefined) {
+                throw new DbRuntimeError('JD2004',
+                  `the model declares no entity '${name}'`,
+                  { docPath: '/entities', collection: name });
+              }
+              const validate = options.compileSchema !== undefined
+                ? options.compileSchema(entity.schema)
+                : null;
+              core = entityCore(connection, entity,
+                mapping.entities[name], validate);
+              entityCores.set(name, core);
+            }
+            return core;
+          };
+
+          /** @type {Map<string, any>} */
           const asyncHandles = new Map();
+          /** @type {Map<string, any>} */
+          const asyncEntityHandles = new Map();
           const store = {
             capabilities,
             stats: () => ({
@@ -582,6 +692,20 @@ export function openStore(model, options) {
               if (handle === undefined) {
                 handle = asyncCollection(coreFor(name));
                 asyncHandles.set(name, handle);
+              }
+              return handle;
+            },
+            entity(name) {
+              let handle = asyncEntityHandles.get(name);
+              if (handle === undefined) {
+                const core = entityCoreFor(name);
+                handle = Object.freeze({
+                  create: lift((doc) => core.create(doc)),
+                  get: lift((key) => core.get(key)),
+                  update: lift((key, changes) => core.update(key, changes)),
+                  delete: lift((key) => core.delete(key)),
+                });
+                asyncEntityHandles.set(name, handle);
               }
               return handle;
             },
@@ -612,9 +736,18 @@ export function openStore(model, options) {
                 return handle;
               },
               transaction: (fn) => connection.transaction(() => fn(store)),
+              entity(name) {
+                const core = entityCoreFor(name);
+                return Object.freeze({
+                  create: (doc) => core.create(doc),
+                  get: (key) => core.get(key),
+                  update: (key, changes) => core.update(key, changes),
+                  delete: (key) => core.delete(key),
+                });
+              },
             });
           }
           return Object.freeze(store);
-        }));
+        })));
     }));
 }

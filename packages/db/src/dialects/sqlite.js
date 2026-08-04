@@ -129,6 +129,7 @@ export const sqliteDialect = createDialect({
   pragma: {
     busyTimeout: (ms) => `PRAGMA busy_timeout = ${Math.trunc(ms)}`,
     journalMode: (mode) => `PRAGMA journal_mode = ${pragmaWord(mode)}`,
+    foreignKeys: (on) => `PRAGMA foreign_keys = ${on ? 'ON' : 'OFF'}`,
   },
   introspect: {
     version: () => 'SELECT sqlite_version() AS version',
@@ -142,5 +143,9 @@ export const sqliteDialect = createDialect({
       `SELECT name, "unique" AS uniq, origin FROM pragma_index_list(${stringLiteral(table)})`,
     indexColumns: (index) =>
       `SELECT name FROM pragma_index_info(${stringLiteral(index)})`,
+    foreignKeysOn: () => 'SELECT foreign_keys AS enabled FROM pragma_foreign_keys',
+    foreignKeyList: (table) =>
+      `SELECT "table" AS target, "from" AS source_column, "to" AS target_column, on_delete `
+      + `FROM pragma_foreign_key_list(${stringLiteral(table)})`,
   },
 });

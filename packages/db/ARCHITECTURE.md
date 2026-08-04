@@ -76,8 +76,13 @@ binds arrays.
   in force), identity strategies, savepoint-nested transactions, and
   the sync surface.
 
-Dependency arrows: `core → json → db`. Nothing else — no validate, no
-linq, no app. The linq package couples by contract (`execute(document,
+Dependency arrows: `core → json → db`, plus `validate → db` for
+exactly ONE reason: the entity walk resolves `$ref` and merges `allOf`
+through the schema resolvers `@jarenjs/validate/normalize` exports for
+other packages to walk schemas with (emit already does). Validation
+itself still arrives only through the injected `compileSchema` hook —
+this package never calls the validator. No linq, no app, no view, no
+flow. The linq package couples by contract (`execute(document,
 options)`), never by import.
 
 ## The decisions that cost something

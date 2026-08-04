@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://jarenjs.dev/schemas/jaren-model/draft-07",
   "title": "Jaren model document",
-  "description": "A jaren-model document declares the collections of a store: each collection is a JSON Schema for its documents, a key declaration (an RFC 6901 pointer for caller-supplied keys, or null with a declared identity for store-allocated ones), and the indexes over singular JSONPath expressions. This is the 0.1 subset, where every collection is an entity with no relations and a single JSON document column; later vocabulary is added to THIS format, never as a second format.",
+  "description": "A jaren-model document declares the collections of a store: each collection is a JSON Schema for its documents, a key declaration (an RFC 6901 pointer for caller-supplied keys, or null with a declared identity for store-allocated ones), and the indexes over singular JSONPath expressions. A model declares collections (the storage subset: every property JSONB, no relations), entities (the relational subset: keys, typed columns, relations via the x-entity vocabulary), or both; vocabulary is added to THIS format, never as a second format.",
   "type": "object",
   "properties": {
     "$model": {
@@ -19,11 +19,21 @@
       "additionalProperties": {
         "$ref": "#/definitions/collection"
       }
+    },
+    "entities": {
+      "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md §9; stripping it leaves a plain JSON Schema.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/entity"
+      }
     }
   },
   "required": [
-    "$model",
-    "collections"
+    "$model"
   ],
   "additionalProperties": false,
   "definitions": {
@@ -105,6 +115,31 @@
         "path"
       ],
       "additionalProperties": false
+    },
+    "entity": {
+      "description": "One entity: an object schema whose top-level properties map to columns per the hybrid rule (scalars become typed columns, nested shapes stay JSONB); keys, indexes, defaults and relations are declared with x-entity inside the schema.",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "additionalProperties": false
     }
-  }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "collections"
+      ]
+    },
+    {
+      "required": [
+        "entities"
+      ]
+    }
+  ]
 }
