@@ -32,6 +32,7 @@
  * the queue always drains, cleanups are never skipped.
  */
 
+import { stableStringify } from '@jarenjs/core/object';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createDomRenderer } from '@jarenjs/view';
@@ -102,6 +103,11 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './e
  *   1000): the maximum number of transactions one drain may process
  *   before the queue is abandoned with `JA2010` — an accidental
  *   action→effect→action loop diagnoses instead of hanging.
+ * @property {number} [maxSubInstances] - The subscription fan-out
+ *   bound (default 256): a `for` declaration resolving more instances
+ *   than this reports `JA2017` and keeps its previous instance set —
+ *   an unbounded fan-out driven by state is a resource bug waiting for
+ *   a bad query.
  * @property {boolean} [capturePayloads] - Include `payload` and `event`
  *   values in transaction records handed to observers (default false —
  *   diagnostics must not leak data by default).
@@ -215,6 +221,13 @@ export function createApp(appDoc, options = {}) {
   if (!Number.isInteger(maxTurns) || maxTurns <= 0) {
     throw new TypeError('createApp: options.maxTurns must be a positive integer');
   }
+  // Fan-out containment (D-discipline: a bound is printed, never
+  // silent): a `for` subscription resolving more instances than this
+  // reports JA2017 and keeps its previous instance set.
+  const maxSubInstances = options.maxSubInstances ?? 256;
+  if (!Number.isInteger(maxSubInstances) || maxSubInstances <= 0) {
+    throw new TypeError('createApp: options.maxSubInstances must be a positive integer');
+  }
   const capturePayloads = options.capturePayloads === true;
 
   let state = appDoc.state;
@@ -225,8 +238,15 @@ export function createApp(appDoc, options = {}) {
   const stateListeners = new Set();
   /** @type {Set<(tx: TransactionRecord) => void>} */
   const observers = new Set();
-  /** Per compiled sub: `{ live: boolean, cleanup: (() => void) | void }`. */
-  const subStates = subs.map(() => ({ live: false, cleanup: undefined }));
+  /** Per compiled sub: the single-instance slot (`live`/`cleanup` plus
+   * the dynamic restart `key`) and, for `for` declarations, the keyed
+   * instance map (`key -> { cleanup, propsKey }`, insertion order =
+   * document order of the resolved item sequence). */
+  const subStates = subs.map(() => ({
+    live: false, cleanup: undefined, key: null,
+    /** @type {Map<string, { cleanup: any, propsKey: string }> | null} */
+    instances: null,
+  }));
 
   /**
    * The FIFO transaction queue (APP-FORMAT §8). Entries carry the
@@ -649,18 +669,208 @@ export function createApp(appDoc, options = {}) {
   }
 
   /**
+   * The restart key of a resolved value, BY VALUE: `stableStringify`
+   * (never `stableKeyString` — package-private to the query engine, and
+   * its `NaN`-by-name rule is a grouping decision this key does not
+   * want). `undefined` (an empty query result) normalizes to `null`
+   * first, so absence keys deterministically. A cyclic value overflows
+   * `stableStringify` (it has no cycle guard) — callers catch and reject
+   * with `JA2016` rather than hanging.
+   * @param {any} value
+   * @returns {string}
+   */
+  function subKeyOf(value) {
+    return stableStringify(value === undefined ? null : value) ?? 'null';
+  }
+
+  /**
+   * Report a failing dynamic subscription member (`withQuery`, `key`,
+   * `for`) — `JA2016`, carrying the member's own docPath. The
+   * subscription fails CLOSED, like a broken `when`.
+   * @param {any} sub
+   * @param {number} i
+   * @param {string} member
+   * @param {unknown} err
+   */
+  function reportSubQueryFailure(sub, i, member, err) {
+    const cause = toError(err);
+    safeError(new AppRuntimeError('JA2016',
+      `subscription '${sub.run}' has a "${member}" that failed: ${safeErrorMessage(cause)}`,
+      { docPath: `/subs/${i}/${member === 'keyQuery' ? 'key' : member}`, cause }));
+  }
+
+  /**
+   * Look up a subscription handler; `undefined` after a report means
+   * "cannot start" (`JA2008`/`JA2013`-lookup, matching the historical
+   * single-instance behaviour).
+   * @param {any} sub
+   * @returns {any}
+   */
+  function lookupSubHandler(sub) {
+    let handler;
+    try {
+      handler = subHandlers[sub.run];
+    }
+    catch (err) {
+      const cause = toError(err);
+      safeError(new AppRuntimeError('JA2013',
+        `subscription '${sub.run}' threw during lookup; it stays stopped: ${safeErrorMessage(cause)}`,
+        { cause }));
+      return undefined;
+    }
+    if (handler === undefined) {
+      safeError(new AppRuntimeError('JA2008',
+        `subscription '${sub.run}' has no registered handler`));
+    }
+    return handler;
+  }
+
+  /**
+   * Run one subscription cleanup with the standard isolation (`JA2012`
+   * via `reportCleanup`, so destroy-scope collection still applies).
+   * @param {any} sub
+   * @param {any} cleanup
+   */
+  function runSubCleanup(sub, cleanup) {
+    if (typeof cleanup !== 'function') return;
+    try {
+      cleanup();
+    }
+    catch (err) {
+      const cause = toError(err);
+      reportCleanup(
+        `subscription '${sub.run}' threw while cleaning up: ${safeErrorMessage(cause)}`,
+        cause);
+    }
+  }
+
+  /**
+   * Reconcile a `for` declaration's keyed instance set against the
+   * current state: stop removed instances (previous insertion order),
+   * then start added — and restart changed — instances in the document
+   * order of the resolved item sequence. Duplicate keys collapse to the
+   * first occurrence. Resolution failures fail the whole declaration
+   * closed (`JA2016`); exceeding `maxSubInstances` reports `JA2017` and
+   * keeps the previous set (the bound is printed, never silent).
+   * @param {any} sub
+   * @param {any} slot
+   * @param {number} i
+   * @param {boolean} live
+   */
+  function refreshFanout(sub, slot, i, live) {
+    const instances = slot.instances ?? (slot.instances = new Map());
+    let next = null;
+    if (live) {
+      next = new Map();
+      let failingMember = 'for';
+      try {
+        const resolved = sub.forQuery(state);
+        const items = resolved === undefined ? []
+          : Array.isArray(resolved) ? resolved : [resolved];
+        for (let k = 0; k < items.length; k++) {
+          const item = items[k];
+          failingMember = sub.keyQuery !== null ? 'key' : 'for';
+          const key = sub.keyQuery !== null
+            ? subKeyOf(sub.keyQuery(state, { item }))
+            : subKeyOf(item);
+          if (next.has(key)) continue; // duplicates collapse, first wins
+          let props;
+          if (sub.withQuery !== null) {
+            failingMember = 'withQuery';
+            const v = sub.withQuery(state, { item });
+            props = v === undefined ? null : v;
+          }
+          else {
+            props = item === undefined ? null : item;
+          }
+          const propsKey = sub.withQuery !== null ? subKeyOf(props) : key;
+          next.set(key, { props, propsKey });
+          failingMember = 'for';
+        }
+      }
+      catch (err) {
+        reportSubQueryFailure(sub, i, failingMember, err);
+        next = null; // fail closed: treat as not live this refresh
+      }
+      if (next !== null && next.size > maxSubInstances) {
+        safeError(new AppRuntimeError('JA2017',
+          `subscription '${sub.run}' fan-out resolved ${next.size} instances, more than maxSubInstances (${maxSubInstances})`,
+          { docPath: `/subs/${i}/for` }));
+        return; // the previous instance set is kept, deliberately
+      }
+    }
+    if (next === null) { // dead (or failed closed): stop everything
+      if (instances.size === 0) return;
+      for (const [key, inst] of [...instances]) {
+        instances.delete(key);
+        runSubCleanup(sub, inst.cleanup);
+      }
+      return;
+    }
+    // stops first, in previous insertion order
+    for (const [key, inst] of [...instances]) {
+      if (!next.has(key)) {
+        instances.delete(key);
+        runSubCleanup(sub, inst.cleanup);
+      }
+    }
+    // starts and restarts, in resolved document order; the handler is
+    // looked up lazily so a refresh with nothing to start reports no
+    // JA2008, matching the single-instance path's would-start timing
+    let handler;
+    let handlerLooked = false;
+    for (const [key, spec] of next) {
+      const existing = instances.get(key);
+      if (existing !== undefined && existing.propsKey === spec.propsKey)
+        continue; // unchanged instance: untouched
+      if (!handlerLooked) {
+        handlerLooked = true;
+        handler = lookupSubHandler(sub);
+      }
+      if (handler === undefined) break; // reported; retried next refresh
+      if (existing !== undefined) {
+        instances.delete(key);
+        runSubCleanup(sub, existing.cleanup); // restart: stop-then-start
+      }
+      let cleanup;
+      try {
+        cleanup = handler(spec.props, subDispatch);
+      }
+      catch (err) {
+        const cause = toError(err);
+        safeError(new AppRuntimeError('JA2013',
+          `subscription '${sub.run}' threw while starting; it stays stopped: ${safeErrorMessage(cause)}`,
+          { cause }));
+        continue; // this instance stays stopped; siblings proceed
+      }
+      instances.set(key, { cleanup, propsKey: spec.propsKey });
+    }
+  }
+
+  /**
    * Start and stop subscriptions to match their `when` queries against
-   * the current state. A broken `when` fails CLOSED (the subscription
-   * stops — a broken rule must never keep side effects alive) and is
-   * reported through `onError`.
+   * the current state. A broken `when` — or a broken dynamic member
+   * (`withQuery`/`key`/`for`, `JA2016`) — fails CLOSED (the
+   * subscription stops; a broken rule must never keep side effects
+   * alive) and is reported through `onError`.
+   *
+   * A DYNAMIC subscription (one with `withQuery`) also restarts when
+   * its resolved key changes: stop, then start with the new props,
+   * within one reconciliation. The key derives from the resolved props
+   * by value, or from the explicit `key` query; a static `with` entry
+   * has no key and never restarts (the historical behaviour, preserved
+   * exactly). `for` declarations reconcile per instance
+   * ({@link refreshFanout}). This is the same "key plus supersede
+   * policy" shape `createTaskEffect` models for effects.
    *
    * Startup is resource acquisition: a slot is committed live only
    * after its handler returned. A throwing handler leaves the slot
    * stopped (`JA2013`); a throwing cleanup is isolated (`JA2012`) and
-   * never skips its siblings. Because dispatches queue (they never
-   * nest), condition changes made by a starting handler coalesce: they
-   * are observed by the next transaction's reconciliation, which then
-   * disposes the just-started resource through the ordinary stop path.
+   * never skips its siblings — and never prevents the restart's start
+   * half. Because dispatches queue (they never nest), condition changes
+   * made by a starting handler coalesce: they are observed by the next
+   * transaction's reconciliation, which then disposes the just-started
+   * resource through the ordinary stop path.
    */
   function refreshSubs() {
     for (let i = 0; i < subs.length; i++) {
@@ -678,26 +888,48 @@ export function createApp(appDoc, options = {}) {
             `subscription '${sub.run}' has a "when" that failed: ${safeErrorMessage(cause)}`, { cause }));
         }
       }
-      if (live && !slot.live) {
-        let handler;
+      if (sub.forQuery !== null) {
+        refreshFanout(sub, slot, i, live);
+        continue;
+      }
+      // resolve dynamic props and the restart key while live
+      let props = sub.props;
+      let key = null;
+      if (live && sub.withQuery !== null) {
         try {
-          handler = subHandlers[sub.run];
+          const v = sub.withQuery(state);
+          props = v === undefined ? null : v;
         }
         catch (err) {
-          const cause = toError(err);
-          safeError(new AppRuntimeError('JA2013',
-            `subscription '${sub.run}' threw during lookup; it stays stopped: ${safeErrorMessage(cause)}`,
-            { cause }));
-          continue;
+          live = false;
+          reportSubQueryFailure(sub, i, 'withQuery', err);
         }
-        if (handler === undefined) {
-          safeError(new AppRuntimeError('JA2008',
-            `subscription '${sub.run}' has no registered handler`));
-          continue;
+      }
+      if (live && (sub.withQuery !== null || sub.keyQuery !== null)) {
+        try {
+          key = sub.keyQuery !== null
+            ? subKeyOf(sub.keyQuery(state))
+            : subKeyOf(props);
         }
+        catch (err) {
+          live = false;
+          reportSubQueryFailure(sub, i, sub.keyQuery !== null ? 'key' : 'withQuery', err);
+        }
+      }
+      const restart = live && slot.live && key !== slot.key;
+      if (restart || (!live && slot.live)) {
+        const cleanup = slot.cleanup;
+        slot.live = false;
+        slot.cleanup = undefined;
+        slot.key = null;
+        runSubCleanup(sub, cleanup);
+      }
+      if (live && !slot.live) {
+        const handler = lookupSubHandler(sub);
+        if (handler === undefined) continue;
         let cleanup;
         try {
-          cleanup = handler(sub.props, subDispatch);
+          cleanup = handler(props, subDispatch);
         }
         catch (err) {
           const cause = toError(err);
@@ -708,22 +940,7 @@ export function createApp(appDoc, options = {}) {
         }
         slot.live = true;
         slot.cleanup = cleanup;
-      }
-      else if (!live && slot.live) {
-        const cleanup = slot.cleanup;
-        slot.live = false;
-        slot.cleanup = undefined;
-        if (typeof cleanup === 'function') {
-          try {
-            cleanup();
-          }
-          catch (err) {
-            const cause = toError(err);
-            reportCleanup(
-              `subscription '${sub.run}' threw while cleaning up: ${safeErrorMessage(cause)}`,
-              cause);
-          }
-        }
+        slot.key = key;
       }
     }
   }

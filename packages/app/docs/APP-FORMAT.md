@@ -246,11 +246,12 @@ reason: derivations are recomputed, never dispatched.
 ### 5.3 Subscriptions
 
 A subscription entry is `{ "run": name, "with"?: props, "when"?:
-query }`. After boot and after every state change, the runtime
-evaluates each entry's `when` by **effective boolean value** against
-the current state (no externals) and reconciles:
+query, "withQuery"?: query, "key"?: query, "for"?: query }`. After
+boot and after every state change, the runtime evaluates each entry's
+`when` by **effective boolean value** against the current state (no
+externals) and reconciles:
 
-- newly live → `cleanup = handler(props ?? null, dispatch)`;
+- newly live → `cleanup = handler(props, dispatch)`;
 - newly dead → `cleanup()` if the handler returned one.
 
 An absent `when` means always live while the app runs; `stop()` kills
@@ -259,6 +260,53 @@ broken `when` fails **closed** — the subscription stops and the error
 is reported — because a broken rule must never keep side effects
 alive. An unregistered `run` name is `JA2008`, reported each time the
 entry would start.
+
+**Static versus dynamic props.** `with` is verbatim data — never
+evaluated, and a static entry never restarts (the original contract,
+preserved exactly). `withQuery` makes the entry DYNAMIC: a query
+compiled like `when` and evaluated against the state per
+reconciliation; its result (empty → `null`) is the handler's props. The
+two are mutually exclusive (`JA0008`), because a member that is
+sometimes data and sometimes executable is how a document becomes
+accidentally executable.
+
+**The restart rule.** A live dynamic subscription restarts — stop,
+then start with the new props, within one reconciliation — exactly
+when its **key** changes. The key derives from the resolved props BY
+VALUE (`stableStringify`; structurally equal props share a key
+regardless of member order), or from the explicit `key` query when
+recomputing a deep key per transaction is worth opting out of
+(`key` without `withQuery` or `for` is `JA0008`). A cyclic resolved
+value cannot key and fails closed (`JA2016`) rather than hanging. An
+unchanged key performs zero handler calls. A throwing cleanup is
+isolated (`JA2012`) and never prevents the restart's start half; a
+throwing start leaves the slot stopped (`JA2013`) until the next key
+change retries it. This is the same "key plus supersede policy" shape
+`createTaskEffect` (§9) models for effects — a reader who knows one
+knows the other.
+
+**Fan-out.** `for` names a query whose result is the entry's ITEM set
+(one array value fans out over its elements; a single item over
+itself; empty over none), and the runtime maintains **one instance per
+item key** — `stableStringify(item)`, or the `key` query with `$item`
+bound. `withQuery` (also with `$item`) shapes per-instance props;
+without it the props ARE the item; `with` beside `for` is `JA0008`.
+Reconciliation is deterministic: removed instances stop in their
+previous order, then added — and changed, by resolved props value —
+instances start in the document order of the item sequence; duplicate
+keys collapse to the first occurrence. A resolution failure fails the
+whole declaration closed (`JA2016`, naming the member). Exceeding
+`maxSubInstances` (a `createApp` option, default 256) is `JA2017`, and
+the previous instance set is KEPT — the bound is printed, never
+silent.
+
+**Scope.** Dynamic members are compiled closed-world: the only
+external a document may reference is `$item`, and only under `for` —
+any other free variable is `JA0008` at compile time. Reconciliation
+runs when the state changed, which is precisely correct for
+state-derived keys and props; a key derived from anything outside the
+state is NOT supported, and no member sees the DOM, the clock or the
+host.
 
 ### 5.4 Event-field extractors
 
@@ -646,6 +694,7 @@ Pointer into the app document):
 | `JA0005` | `subs` is not an array |
 | `JA0006` | a subscription entry is malformed / its `when` failed to compile |
 | `JA0007` | boot failed after compilation (renderer construction, initial-state check, initial subscriptions, first frame or queued boot work); everything acquired was rolled back (§8.2) |
+| `JA0008` | a subscription dynamic member (`withQuery`/`key`/`for`) failed to compile, or the members combine invalidly (§5.3) |
 
 Runtime (`AppRuntimeError`, routed through `options.onError`, which
 defaults to rethrowing):
@@ -667,6 +716,8 @@ defaults to rethrowing):
 | `JA2013` | a subscription handler threw while starting; the slot stays stopped |
 | `JA2014` | a post-render intent named a `data-ref` with no rendered target (§8.4) |
 | `JA2015` | the `validateState` hook itself threw (the transaction failed; the queue keeps draining) |
+| `JA2016` | a subscription dynamic query (`withQuery`/`key`/`for`) threw while evaluating — cyclic resolved values included; the subscription failed closed (§5.3) |
+| `JA2017` | a subscription fan-out resolved more instances than `maxSubInstances`; the previous instance set was kept (§5.3) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —

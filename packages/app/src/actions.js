@@ -66,11 +66,53 @@ export function compileActions(actions, options) {
  * @property {string} run - The registered handler name.
  * @property {any} props - The entry's `with` value (`null` when absent).
  * @property {any} when - Compiled liveness query, or `null` (always live).
+ * @property {any} withQuery - Compiled props query evaluated against the
+ *   state (with `$item` bound per instance under `for`), or `null`.
+ * @property {any} keyQuery - Compiled restart-key query, or `null` (the
+ *   key derives from the resolved props by value).
+ * @property {any} forQuery - Compiled fan-out query yielding the item
+ *   set, or `null` (a single-instance subscription).
  */
 
 /**
+ * Compile one dynamic member of a subscription entry as a query,
+ * closed-world: `externals` names the only variables the document may
+ * leave free (`$item` under `for`, nothing otherwise), so a typo'd
+ * variable is JA0008 at compile time instead of an unbound-external
+ * error at runtime.
+ * @param {any} entry
+ * @param {number} i
+ * @param {string} member
+ * @param {ActionCompileOptions} options
+ * @param {readonly string[]} externals
+ * @returns {any} the compiled query, or `null` when absent
+ */
+function compileSubQuery(entry, i, member, options, externals) {
+  const doc = entry[member];
+  if (doc === undefined) return null;
+  try {
+    return compileJsonQuery(doc, { ...options, externals });
+  }
+  catch (err) {
+    const cause = toError(err);
+    throw new AppCompileError('JA0008',
+      `subscription ${i} ('${entry.run}') has a "${member}" that failed to compile: ${safeErrorMessage(cause)}`,
+      `/subs/${i}/${member}`, cause);
+  }
+}
+
+/**
  * Compile the `subs` member of an app document:
- * `[{ "run": name, "with"?: props, "when"?: <EBV query> }]`.
+ * `[{ "run": name, "with"?: props, "when"?: <EBV query>,
+ *     "withQuery"?: query, "key"?: query, "for"?: query }]`.
+ *
+ * `with` is verbatim data; `withQuery` derives the props from the state
+ * and makes the subscription DYNAMIC — it restarts when its resolved
+ * key changes (`key` overrides the derived-from-props default). `for`
+ * fans the declaration out to one instance per item of its result. The
+ * combinations that would make one entry ambiguous are JA0008: `with`
+ * beside `withQuery`, `with` beside `for`, and `key` without either
+ * `withQuery` or `for`.
  * @param {any} subs
  * @param {ActionCompileOptions} options
  * @returns {CompiledSub[]}
@@ -101,6 +143,25 @@ export function compileSubs(subs, options) {
           `/subs/${i}/when`, cause);
       }
     }
-    return { run: entry.run, props: entry.with ?? null, when };
+    if (entry.with !== undefined && entry.withQuery !== undefined) {
+      throw new AppCompileError('JA0008',
+        `subscription ${i} ('${entry.run}') carries both "with" and "withQuery" — one entry, one props source`,
+        `/subs/${i}`);
+    }
+    if (entry.with !== undefined && entry.for !== undefined) {
+      throw new AppCompileError('JA0008',
+        `subscription ${i} ('${entry.run}') carries "with" beside "for" — fan-out props come from "withQuery" or default to the item`,
+        `/subs/${i}`);
+    }
+    if (entry.key !== undefined && entry.withQuery === undefined && entry.for === undefined) {
+      throw new AppCompileError('JA0008',
+        `subscription ${i} ('${entry.run}') carries "key" without "withQuery" or "for" — a static subscription has no restart key`,
+        `/subs/${i}`);
+    }
+    const instanceExternals = entry.for !== undefined ? ['item'] : [];
+    const forQuery = compileSubQuery(entry, i, 'for', options, []);
+    const withQuery = compileSubQuery(entry, i, 'withQuery', options, instanceExternals);
+    const keyQuery = compileSubQuery(entry, i, 'key', options, instanceExternals);
+    return { run: entry.run, props: entry.with ?? null, when, withQuery, keyQuery, forQuery };
   });
 }

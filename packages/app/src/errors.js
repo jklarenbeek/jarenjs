@@ -22,6 +22,7 @@ export const APP_CODES = Object.freeze({
   JA0005: 'subs is not an array of subscription entries',
   JA0006: 'a subscription entry is malformed or its when failed to compile',
   JA0007: 'the app failed to boot after compilation succeeded',
+  JA0008: 'a subscription dynamic member failed to compile or combines invalidly',
   JA2001: 'an unknown action was dispatched',
   JA2002: 'an action, when document or event-field extractor threw',
   JA2003: 'an action produced a transition that is not an object',
@@ -37,6 +38,8 @@ export const APP_CODES = Object.freeze({
   JA2013: 'a subscription handler threw while starting',
   JA2014: 'a post-render intent named a data-ref with no rendered target',
   JA2015: 'the validateState hook itself threw',
+  JA2016: 'a subscription dynamic query (withQuery, key or for) failed at runtime',
+  JA2017: 'a subscription fan-out exceeded maxSubInstances',
 });
 
 /**
@@ -54,6 +57,10 @@ export const APP_CODES = Object.freeze({
  *    initial-state check, the initial subscriptions, the first frame or
  *    the queued boot work failed after compilation succeeded; every
  *    already-acquired resource was rolled back (see `cause`)
+ *  - `JA0008` — a subscription's dynamic member (`withQuery`, `key`,
+ *    `for`) failed to compile (see `cause`), or the members combine
+ *    invalidly (`with` beside `withQuery` or `for`; `key` without
+ *    either)
  */
 export class AppCompileError extends CodedError {
   /**
@@ -101,6 +108,12 @@ export class AppCompileError extends CodedError {
  *  - `JA2015` — the `validateState` hook itself threw (see `cause`) —
  *    distinct from a rejection verdict (`JA2005`); the transaction
  *    fails and the queue keeps draining
+ *  - `JA2016` — a subscription's dynamic query (`withQuery`, `key` or
+ *    `for`) threw while evaluating — a cyclic resolved value included —
+ *    and the subscription failed closed (see `cause`; `docPath` names
+ *    the member)
+ *  - `JA2017` — a subscription fan-out resolved more instances than
+ *    `maxSubInstances`; the previous instance set was kept
  */
 export class AppRuntimeError extends CodedError {
   /**

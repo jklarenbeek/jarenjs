@@ -39,10 +39,34 @@
             "minLength": 1
           },
           "with": {
-            "description": "Handler props, passed verbatim."
+            "description": "Handler props, passed verbatim (never evaluated). Mutually exclusive with \"withQuery\" and \"for\"."
           },
           "when": {
             "description": "Liveness query, asserted by effective boolean value against the state; absent means always live.",
+            "allOf": [
+              {
+                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+              }
+            ]
+          },
+          "withQuery": {
+            "description": "Dynamic props: a query evaluated against the state per reconciliation; the subscription restarts when its resolved key changes. Under \"for\", \"$item\" is bound per instance. Mutually exclusive with \"with\".",
+            "allOf": [
+              {
+                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+              }
+            ]
+          },
+          "key": {
+            "description": "Explicit restart key: a query whose resolved value keys the subscription (by value) instead of the resolved props. Requires \"withQuery\" or \"for\"; \"$item\" is bound per instance under \"for\".",
+            "allOf": [
+              {
+                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+              }
+            ]
+          },
+          "for": {
+            "description": "Fan-out: a query whose result is the item set — one running instance per item key, reconciled per state change. \"with\" is not allowed beside it.",
             "allOf": [
               {
                 "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
