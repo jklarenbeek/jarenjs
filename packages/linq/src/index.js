@@ -9,4 +9,6 @@
  */
 
 export { from, fromDocument, Sequence } from './sequence.js';
+export { fromAsync, AsyncSequence } from './async.js';
+export { createPushQueue } from './sources.js';
 export { LinqBuildError, LinqRuntimeError, LINQ_CODES } from './errors.js';

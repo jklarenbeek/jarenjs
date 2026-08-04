@@ -301,6 +301,12 @@ export class Sequence<T = unknown, P = {}> {
 
   any(predicate?: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): boolean;
   all(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): boolean;
+
+  /** Cross into the async surface (LINQ-FORMAT.md §11): the sync chain
+   * becomes the pushed prefix; the element re-types to the callback's
+   * RESOLVED type. */
+  mapAsync<R>(fn: (item: T, signal: AbortSignal) => R, options: MapAsyncOptions):
+    AsyncSequence<Awaited<R>, P>;
 }
 
 export function from<T>(source: Iterable<T>, options?: LinqOptions): Sequence<T, {}>;
@@ -326,3 +332,99 @@ export class LinqRuntimeError extends Error {
   readonly reason: string;
   readonly docPath: string | undefined;
 }
+
+// ————— The asynchronous surface (LINQ-FORMAT.md §§10–12) —————
+
+export interface MapAsyncOptions {
+  /** REQUIRED: the in-flight bound (a positive integer, `JL0005`
+   * otherwise) — there is no unbounded default. */
+  concurrency: number;
+  /** The `createTaskEffect` vocabulary; default `'parallel'`. */
+  mode?: 'parallel' | 'concat' | 'switch' | 'exhaust';
+  /** Source order (default) versus completion order. */
+  ordered?: boolean;
+}
+
+export interface AsyncExplanation {
+  barriers: { operator: string, reason: string }[];
+  /** Present when the chain is document-representable (no mapAsync). */
+  document?: unknown;
+  /** Present when a mapAsync splits the chain. */
+  split?: { pushed: unknown, residual: string[] };
+}
+
+/** The cursor shape (§12): an async iterator by another name. */
+export interface AsyncCursor<T = unknown> {
+  next(): Promise<IteratorResult<T>>;
+  return?(): Promise<IteratorResult<T>>;
+}
+
+/** The deferred async sequence: the same operator surface, promise
+ * terminals, streaming semantics per §10. */
+export class AsyncSequence<T = unknown, P = {}> {
+  private constructor();
+
+  where(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): AsyncSequence<T, P>;
+  select<R extends ExprResult>(projection: (it: Expr<T>, p: ParamsExpr<P>) => R): AsyncSequence<Unwrap<R>, P>;
+  selectMany<R extends ExprResult>(selector: (it: Expr<T>, p: ParamsExpr<P>) => R): AsyncSequence<Element<Unwrap<R>>, P>;
+  orderBy(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
+  orderByDescending(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
+  thenBy(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
+  thenByDescending(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
+  groupBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R):
+    AsyncSequence<{ key: Unwrap<R> | null, items: T[] }, P>;
+  aggregate<A>(seed: A, step: (acc: Expr<A>, it: Expr<T>, p: ParamsExpr<P>) => ExprResult): AsyncSequence<A, P>;
+  skip(count: number): AsyncSequence<T, P>;
+  take(count: number): AsyncSequence<T, P>;
+  distinct(): AsyncSequence<T, P>;
+  reverse(): AsyncSequence<T, P>;
+  /** Only a CONSTANT array can join an async stream (§10). */
+  concat(other: readonly T[]): AsyncSequence<T, P>;
+  defaultIfEmpty(fallback?: T | null): AsyncSequence<T | null, P>;
+  ofType<S = unknown>(schema: object): AsyncSequence<S, P>;
+  cast<S = unknown>(schema: object): AsyncSequence<S, P>;
+  zip(...args: never[]): never;
+  params<Q extends Record<string, unknown>>(bindings: Q): AsyncSequence<T, P & Q>;
+
+  /** The bounded-concurrency boundary (§11): re-types the element to
+   * the callback's RESOLVED type. */
+  mapAsync<R>(fn: (item: T, signal: AbortSignal) => R, options: MapAsyncOptions):
+    AsyncSequence<Awaited<R>, P>;
+
+  toDocument(): unknown;
+  explain(): AsyncExplanation;
+
+  [Symbol.asyncIterator](): AsyncIterator<T>;
+  toArray(): Promise<T[]>;
+  first(): Promise<T>;
+  firstOrDefault(): Promise<T | undefined>;
+  firstOrDefault<D>(defaultValue: D): Promise<T | D>;
+  single(): Promise<T>;
+  singleOrDefault(): Promise<T | undefined>;
+  singleOrDefault<D>(defaultValue: D): Promise<T | D>;
+  last(): Promise<T>;
+  lastOrDefault(): Promise<T | undefined>;
+  lastOrDefault<D>(defaultValue: D): Promise<T | D>;
+  elementAt(index: number): Promise<T>;
+  elementAtOrDefault(index: number): Promise<T | undefined>;
+  elementAtOrDefault<D>(index: number, defaultValue: D): Promise<T | D>;
+  count(): Promise<number>;
+  sum(): Promise<number>;
+  average(): Promise<number>;
+  min(): Promise<T extends string ? string : number>;
+  max(): Promise<T extends string ? string : number>;
+  any(predicate?: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): Promise<boolean>;
+  all(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): Promise<boolean>;
+}
+
+export function fromAsync<T>(
+  source: AsyncIterable<T> | Iterable<T> | AsyncCursor<T>,
+  options?: LinqOptions,
+): AsyncSequence<T, {}>;
+
+/** The push→pull adapter for feed/end readers (§12). */
+export function createPushQueue<T = unknown>(options?: { highWaterMark?: number }): {
+  feed(value: T): boolean;
+  end(error?: unknown): void;
+  [Symbol.asyncIterator](): AsyncIterator<T>;
+};

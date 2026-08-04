@@ -228,14 +228,102 @@ Runtime errors (`LinqRuntimeError`):
 Engine errors (`JQ…`) from a hand-written `fromDocument` document pass
 through unwrapped — they already carry their own code and `docPath`.
 
-## 10. Streaming and barriers (reserved)
+## 10. The asynchronous surface: streaming and barriers
 
-Reserved for the asynchronous surface order.
+`fromAsync(source, options?)` gives the SAME operator surface over
+async sources, emitting the SAME query documents — the same chain
+through `from` and `fromAsync` MUST emit byte-identical documents (the
+one-operator-set proof) — with terminals returning promises. The rule:
+**the pipeline is synchronous, the boundaries are async.** A compiled
+query never awaits; what is asynchronous is where rows come from and
+where element-wise host work happens (§11).
 
-## 11. The concurrency boundary (reserved)
+Per operator, whether it STREAMS (per-item evaluation, flat memory) or
+is a BARRIER (materialises the stream so far and runs the maximal run
+of document stages through the engine over the buffer — inherent,
+because the engine itself materialises for `$orderby`/`$groupby`):
 
-Reserved for the asynchronous surface order.
+| Operator | Async behaviour |
+|---|---|
+| `where`, `select`, `selectMany`, `ofType`, `cast` | stream (per-item compiled evaluators — the engine, one item at a time) |
+| `skip`, `take` | stream; `take` CLOSES the source when satisfied |
+| `distinct` | stream, with a running key set (the grouping relation: `NaN` groups with `NaN`) |
+| `defaultIfEmpty` | stream (an emptiness flag) |
+| `concat` | stream for a CONSTANT array; another sequence is refused (`JL0005`) — an async source is single-pass and cannot be re-iterated for a second chain |
+| `orderBy`/`thenBy`, `groupBy`, `join`, `aggregate`, `reverse` | BARRIER, named by `explain()` with the reason |
+| `count`, `any`, `all`, `first`, `single`, `elementAt` | stream with early exit where semantics allow |
+| `sum`, `average`, `min`, `max`, `last` | consume the stream; the aggregate itself runs through the ENGINE over the collected items, so its semantics (type errors included) are identical to the sync surface |
 
-## 12. The cursor contract (reserved)
+**Early termination MUST close the source**: `first()`, `any()`,
+`take(n)`, and an exception mid-chain all call `.return()` on the
+iterator — a generator left suspended holds a file handle or a read
+transaction open. `explain()` reports `{ barriers: [{ operator,
+reason }], document }` — or, when a `mapAsync` sits in the chain,
+`{ split: { pushed, residual } }` instead of `document`
+(`toDocument()` refuses with `JL0005`: a host callback has no document
+form). No silent caps, no silent buffering: if a chain materialises,
+the report says which operator forced it.
 
-Reserved for the asynchronous surface order.
+Re-enumeration follows the sync contract: each enumeration calls the
+source's iterator method again. A one-shot generator object simply
+exhausts — the same way it does under `from`.
+
+## 11. The concurrency boundary
+
+```js
+await fromAsync(rows)
+  .mapAsync(async (row, signal) => fetchScore(row.id, signal),
+            { concurrency: 8, mode: 'parallel', ordered: true })
+  .where((r) => r.score.gt(0.5))
+  .toArray();
+```
+
+`mapAsync` is the ONE explicit boundary for element-wise asynchronous
+host work. There is no parallel universe of `selectAwait`-shaped
+operators; a per-element async *predicate* is `mapAsync` then `where`.
+
+- `concurrency` is REQUIRED and MUST be a positive integer (`JL0005`)
+  — the unbounded default is how libraries like this take down a
+  downstream service.
+- `mode` reuses the `createTaskEffect` vocabulary (`@jarenjs/app` §9),
+  deliberately, so a reader who knows one knows the other:
+  `parallel` (a sliding window of N), `concat` (strictly sequential),
+  `switch` (a newer item supersedes and ABORTS the in-flight task),
+  `exhaust` (items arriving while busy are dropped). The source is
+  pulled eagerly under `switch`/`exhaust` — that race IS the mode.
+- `ordered: true` (default) preserves source order and buffers at most
+  `concurrency` results — the stated cost; `ordered: false` yields on
+  completion.
+- An `AbortSignal` is threaded to every callback and aborted on early
+  termination and on failure. A rejected callback FAILS CLOSED: the
+  first failure wins, every in-flight sibling aborts, the source
+  closes (the `compileDag` discipline).
+- `mapAsync` is NOT translatable to a provider. A provider-backed
+  chain that reaches it SPLITS: everything before is pushed to the
+  provider whole, everything after runs locally, and `explain()`
+  reports `{ split: { pushed, residual } }` — the same residual
+  honesty the SQL pushdown owes (D8), applied to the async boundary.
+
+## 12. The cursor contract and the source adapters
+
+`fromAsync` accepts, in order of preference:
+
+- any **`AsyncIterable`** (async generators, `ReadableStream` — every
+  target exposes `Symbol.asyncIterator` on it, josl's
+  `iterateCsvStream` output);
+- any sync iterable (wrapped);
+- a **cursor**: `{ next(): Promise<{done, value}>, return?() }` — the
+  shape the SQL provider's row iterator implements later, adopted
+  as-is;
+- a **push queue** (`createPushQueue({ highWaterMark = 1024 })`) for
+  feed/end-style readers with no pull protocol of their own (josl's
+  push parsers deliberately have no backpressure protocol; the queue
+  is where one appears): `feed(value)` returns `false` once the queue
+  exceeds the mark — a pause HINT, never a hard stop — and
+  `end(error?)` closes (or fails) the stream. Anything else is
+  `JL0001` at `fromAsync()` time.
+
+What this surface does NOT do, by design: it does not make the query
+engine async (`packages/json` is untouched and strictly synchronous),
+it does not add a second operator table, and it does not add
+`selectAwait`/`whereAwait` variants.

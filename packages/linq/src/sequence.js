@@ -16,6 +16,7 @@
 import { captureExpression, toExpression } from './expression.js';
 import { emitDocument, wrapTerminal } from './document.js';
 import { classifySource, compileDocument, executeInMemory } from './provider.js';
+import { asyncFromSequence } from './async.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 
 /** Binding names the emitted documents own; parameters may not shadow
@@ -237,6 +238,21 @@ export class Sequence {
   /** Assert every item against the JSON Schema (`$assert`). */
   cast(schema) {
     return this.#with({ kind: 'cast', schema });
+  }
+
+  /** Cross into the async surface: everything BEFORE this call is the
+   * prefix — compiled in memory, or pushed WHOLE to the provider — and
+   * `mapAsync` plus everything after runs locally over its rows.
+   * `explain()` on the result reports the split (LINQ-FORMAT.md §11).
+   * @param {(item: any, signal: AbortSignal) => any} fn
+   * @param {{ concurrency: number, mode?: string, ordered?: boolean }} options */
+  mapAsync(fn, options) {
+    return asyncFromSequence({
+      runPrefix: () => this.toArray(),
+      prefixDocument: () => this.toDocument(),
+      params: this.#params,
+      options: this.#options,
+    }, fn, options);
   }
 
   /** Recorded `unsupported` (LINQ-FORMAT.md §4): the grammar has no

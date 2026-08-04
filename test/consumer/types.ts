@@ -717,3 +717,38 @@ const linqCodes: Readonly<Record<string, string>> = LINQ_CODES;
 void linqCodes.JL2001;
 void (LinqBuildError.name.length + LinqRuntimeError.name.length);
 for (const row of linqFrom(linqUsers)) void row.id;
+
+// @jarenjs/linq — the async surface: promise terminals, the typed
+// mapAsync re-typing, the split-aware explain
+import { fromAsync, createPushQueue } from '@jarenjs/linq';
+
+async function linqAsyncBlock(): Promise<void> {
+  const scored = fromAsync(linqUsers)
+    .where((u) => u.age.gt(21))
+    .mapAsync(async (u, signal) => ({ id: u.id, score: u.age * (signal.aborted ? 0 : 1) }),
+      { concurrency: 4, mode: 'parallel', ordered: true });
+  const scoredRows: { id: number, score: number }[] = await scored.toArray();
+  void scoredRows;
+  const maybe: { id: number, score: number } | undefined = await scored.firstOrDefault();
+  void maybe;
+  const asyncCount: number = await fromAsync(linqUsers).count();
+  void asyncCount;
+  const asyncMin: string = await fromAsync(linqUsers).select((u) => u.name).min();
+  void asyncMin;
+  const ok: boolean = await fromAsync(linqUsers).any((u) => u.active);
+  void ok;
+  for await (const row of fromAsync(linqUsers).select((u) => u.id)) {
+    const n: number = row;
+    void n;
+  }
+  const explanation = scored.explain();
+  void explanation.split?.residual.length;
+  // @ts-expect-error — concurrency is required
+  void fromAsync(linqUsers).mapAsync(async (u) => u, {});
+}
+void linqAsyncBlock;
+
+const queue = createPushQueue<number>({ highWaterMark: 16 });
+const fed: boolean = queue.feed(1);
+void fed;
+queue.end();
