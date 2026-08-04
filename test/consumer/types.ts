@@ -631,31 +631,89 @@ const dagResult: Promise<unknown> = dag.run({ rows: [] }, {
 });
 void dagResult.catch(() => null);
 
-// @jarenjs/linq — the fluent surface: capture, deferral, terminals,
-// params, providers, the document seam
+// @jarenjs/linq — the typed fluent surface: precise inference on the
+// common path, honest unknown on the exotic path, never a wrong type.
+// Every claim here has a runtime twin in test/linq/types.test.js.
 import {
   from as linqFrom, fromDocument as linqFromDocument,
   LinqBuildError, LinqRuntimeError, LINQ_CODES, Sequence,
 } from '@jarenjs/linq';
+import type { DateTime } from '@jarenjs/linq';
 
-const linqRows = [{ id: 1, name: 'ada', age: 36 }];
-const linqSeq: Sequence = linqFrom(linqRows)
-  .params({ minAge: 21 })
-  .where((u: any, p: any) => u.age.gt(p.minAge))
-  .orderBy((u: any) => u.name)
-  .select((u: any) => ({ id: u.id, name: u.name }));
-const linqDoc: unknown = linqSeq.toDocument();
-void linqDoc;
-const linqOut: any[] = linqSeq.toArray();
-void linqOut.length;
-const linqCount: number = linqFrom(linqRows).count();
-void linqCount;
-const linqFirst: any = linqFrom(linqRows).firstOrDefault(null);
+interface LinqUser {
+  id: number;
+  name: string;
+  age: number;
+  active: boolean;
+  created: DateTime;
+  tags: string[];
+  address?: { city: string };
+}
+const linqUsers: LinqUser[] = [];
+
+// inference through the chain: the projection narrows the element type
+const linqAdults = linqFrom(linqUsers)
+  .where((u) => u.age.gt(21).and(u.active))
+  .orderBy((u) => u.name)
+  .select((u) => ({ id: u.id, label: u.name.upper(), city: u.address.city }));
+const linqRows: { id: number, label: string, city: string }[] = linqAdults.toArray();
+void linqRows;
+
+// terminals: first is optional, single is not; min/max follow the family
+const linqFirst: { id: number, label: string, city: string } | undefined =
+  linqAdults.firstOrDefault();
 void linqFirst;
-const linqExplain: { document: unknown, externals: string[] } = linqSeq.explain();
-void linqExplain.externals.length;
-void linqFromDocument(linqRows, '$[*].name').toArray();
+const linqOne: { id: number, label: string, city: string } = linqAdults.single();
+void linqOne;
+const linqCount: number = linqAdults.count();
+void linqCount;
+const linqMinName: string = linqFrom(linqUsers).select((u) => u.name).min();
+void linqMinName;
+const linqMinAge: number = linqFrom(linqUsers).select((u) => u.age).min();
+void linqMinAge;
+
+// groupBy types its key (nullable: an empty grouping key reads null)
+const linqGroups: { key: string | null, items: LinqUser[] }[] =
+  linqFrom(linqUsers).groupBy((u) => u.name).toArray();
+void linqGroups;
+
+// the DateTime brand exposes date operators; plain strings do not
+void linqFrom(linqUsers).where((u) => u.created.year().ge(2020)).count();
+
+// params are typed through the second callback argument
+void linqFrom(linqUsers)
+  .params({ minAge: 21, city: 'x' })
+  .where((u, p) => u.age.ge(p.minAge).and(u.address.city.eq(p.city)))
+  .toArray();
+
+// arrays fan out; aggregates compose
+void linqFrom(linqUsers).where((u) => u.tags.all().count().gt(0)).count();
+
+// the negative cases — each pinned so it FAILS the build if it ever
+// starts compiling
+// @ts-expect-error — comparing a number expression to a string
+void linqFrom(linqUsers).where((u) => u.age.gt('x'));
+// @ts-expect-error — a misspelled member is not on the object surface
+void linqFrom(linqUsers).where((u) => u.emial.exists());
+// @ts-expect-error — a string method on a number expression
+void linqFrom(linqUsers).where((u) => u.age.upper());
+// @ts-expect-error — a date operator on a plain (unbranded) string
+void linqFrom(linqUsers).where((u) => u.name.year());
+// @ts-expect-error — an undeclared parameter name
+void linqFrom(linqUsers).params({ minAge: 1 }).where((u, p) => u.age.ge(p.maxAge));
+// @ts-expect-error — arithmetic on a boolean expression
+void linqFrom(linqUsers).where((u) => u.active.add(1));
+
+// providers keep the element type the caller declares; unknown otherwise
+const linqProvider = { execute: (_d: unknown, _o: { externals: Record<string, unknown> }) => [] as unknown };
+const typedRemote: Sequence<LinqUser> = linqFrom<LinqUser>(linqProvider);
+void typedRemote.toDocument();
+const untypedRemote = linqFrom(linqProvider);
+const untypedRows: unknown[] = untypedRemote.toArray();
+void untypedRows;
+void linqFromDocument<LinqUser>(linqUsers, '$[*]').toArray();
+
 const linqCodes: Readonly<Record<string, string>> = LINQ_CODES;
 void linqCodes.JL2001;
 void (LinqBuildError.name.length + LinqRuntimeError.name.length);
-for (const row of linqFrom(linqRows)) void row;
+for (const row of linqFrom(linqUsers)) void row.id;

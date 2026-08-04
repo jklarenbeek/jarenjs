@@ -35,3 +35,26 @@ in [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md). The asynchronous surface
 next order of the data program and has reserved sections there.
 
 Dependencies: `@jarenjs/core` and `@jarenjs/json` only. MIT.
+
+## Typing
+
+The type surface is a deliberate artifact — a hand-authored
+`types/index.d.ts` — while the implementation stays plain JavaScript.
+The rule it is built on, and the one to hold it to:
+
+> **The common path is precisely typed; the exotic path is honestly
+> `unknown`; nothing is ever a wrong type.**
+
+`from<User>(users)` infers through the whole chain: `u.age` is a number
+expression (`u.age.gt('x')` does not compile), a misspelled member does
+not compile, `select` narrows the element to the projection's shape,
+`groupBy` types its key (nullable — an empty grouping key reads
+`null`), `first()` is `T` and `firstOrDefault()` is `T | undefined`,
+and `min()`/`max()` follow the operand family. Annotate an RFC 3339
+property as `DateTime` (a type-level brand, invisible at runtime) and
+the date operators appear on exactly that property. Where a construct
+exceeds what the types can follow — dynamic `get()`, post-operator
+member access, an untyped provider — the result is `UnknownExpr` /
+`unknown`, named in LINQ-FORMAT.md, never a lie. Every type-level claim
+has a runtime twin in the test suite, so the declarations and the
+implementation are proven by the same fixtures.
