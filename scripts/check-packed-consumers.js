@@ -251,6 +251,25 @@ const dagNodes: readonly string[] = dag.nodes;
 void [dagNodes, dag.output];
 void dag.run(1, { onNode: (rec) => void (rec.id + rec.status + rec.ms) }).then((v) => v);
 `,
+  '@jarenjs/db': `
+import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { bunDriver } from '@jarenjs/db/bun';
+import { wasmDriver } from '@jarenjs/db/wasm';
+const model = { $model: '0.1', collections: { users: { schema: { type: 'object' }, key: '/id', indexes: [] } } };
+void normalizeModel(model).size;
+const driver = nodeDriver();
+void (driver.name === 'node-sqlite' && bunDriver().name === 'bun-sqlite');
+void wasmDriver;
+const opening: Promise<any> = openStore(model, { driver });
+void opening.catch(() => undefined);
+void sqliteDialect.quoteIdentifier('users');
+void createDialect;
+const codes: Readonly<Record<string, string>> = DB_CODES;
+void codes.JD0001;
+void (DbCompileError.name === 'DbCompileError' && DbRuntimeError.name === 'DbRuntimeError');
+void SQLITE_FLOOR.length;
+`,
 };
 
 // lockfile hygiene is release evidence: an extraneous record means the

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-model",
+  "title": "Jaren model document",
+  "description": "A jaren-model document declares the collections of a store: each collection is a JSON Schema for its documents, a key declaration (an RFC 6901 pointer for caller-supplied keys, or null with a declared identity for store-allocated ones), and the indexes over singular JSONPath expressions. This is the 0.1 subset, where every collection is an entity with no relations and a single JSON document column; later vocabulary is added to THIS format, never as a second format.",
+  "type": "object",
+  "properties": {
+    "$model": {
+      "description": "The model format version.",
+      "const": "0.1"
+    },
+    "collections": {
+      "description": "Collection name (an identifier) to collection declaration.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/collection"
+      }
+    }
+  },
+  "required": ["$model", "collections"],
+  "additionalProperties": false,
+  "$defs": {
+    "collection": {
+      "description": "One collection: a document schema, the key declaration, and the declared indexes. A collection without a key pointer MUST declare how keys are allocated; allocation is declared, never guessed.",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "description": "The JSON Schema every stored document validates against (through the injected hook). Also the type source for indexed paths.",
+          "type": "object"
+        },
+        "key": {
+          "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member — or null when the store allocates.",
+          "type": ["string", "null"],
+          "pattern": "^/"
+        },
+        "identity": {
+          "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or — only with \"key\": null — 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
+          "enum": ["caller", "uuid", "integer"]
+        },
+        "indexes": {
+          "description": "Declared indexes; each singular path becomes a generated column plus an index.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          }
+        }
+      },
+      "required": ["schema"],
+      "additionalProperties": false
+    },
+    "index": {
+      "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The index name, unique within its collection.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "path": {
+          "description": "A singular JSONPath expression into the stored document ($.email), or a non-empty array of them for a composite index.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "unique": {
+          "description": "Whether the index enforces uniqueness. Defaults to false.",
+          "type": "boolean"
+        }
+      },
+      "required": ["name", "path"],
+      "additionalProperties": false
+    }
+  }
+}

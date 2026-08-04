@@ -752,3 +752,61 @@ const queue = createPushQueue<number>({ highWaterMark: 16 });
 const fed: boolean = queue.feed(1);
 void fed;
 queue.end();
+
+// @jarenjs/db — the store surface: model normalization, the driver
+// seam (all three bindings importable anywhere; builtins load lazily
+// inside open()), the dialect seam, and the coded errors
+import {
+  openStore, normalizeModel, sqliteDialect, createDialect,
+  DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR,
+} from '@jarenjs/db';
+import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
+import { bunDriver } from '@jarenjs/db/bun';
+import { wasmDriver } from '@jarenjs/db/wasm';
+
+const dbModel = {
+  $model: '0.1',
+  collections: {
+    users: {
+      schema: { type: 'object', properties: { id: { type: 'string' } } },
+      key: '/id',
+      indexes: [{ name: 'by_id', path: '$.id', unique: true }],
+    },
+  },
+};
+const dbCollections = normalizeModel(dbModel);
+void dbCollections.size;
+const dbDriver = nodeDriver();
+const dbDriverName: string = dbDriver.name;
+void dbDriverName;
+void (bunDriver().name === 'bun-sqlite');
+void wasmDriver;
+void adaptNodeDatabase;
+
+async function dbBlock(): Promise<void> {
+  const store = await openStore(dbModel, { driver: dbDriver, busyTimeout: 2500 });
+  const users = store.collection('users');
+  const key = await users.insert({ id: 'u1' });
+  void key;
+  const fetched = await users.get('u1');
+  void fetched;
+  const patched = await users.patch('u1', [{ op: 'add', path: '/name', value: 'Ada' }]);
+  void patched;
+  const removed: boolean = await users.delete('u1');
+  void removed;
+  const inTx = await store.transaction(async () => 'done');
+  void inTx;
+  await store.close();
+}
+void dbBlock;
+
+const quoted: string = sqliteDialect.quoteIdentifier('users');
+void quoted;
+void createDialect;
+const dbCodes: Readonly<Record<string, string>> = DB_CODES;
+void dbCodes.JD0005;
+const dbCompileErr = new DbCompileError('JD0005', 'reason', '/collections');
+void dbCompileErr.docPath;
+const dbRuntimeErr = new DbRuntimeError('JD2001', 'reason', { collection: 'users', key: 'u1' });
+void dbRuntimeErr.code;
+void SQLITE_FLOOR.length;

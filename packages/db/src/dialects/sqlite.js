@@ -1,0 +1,134 @@
+//@ts-check
+/**
+ * @file The SQLite dialect — the first spelling of the dialect
+ * contract, not the only conceivable one. Documents are stored JSONB
+ * in a BLOB column of a STRICT table; indexed paths become virtual
+ * generated columns over `jsonb_extract`; reads render back to text
+ * through `json()`. Parameters are positional (`?`) because every
+ * binding this package ships binds arrays.
+ */
+
+import { createDialect } from '../dialect.js';
+
+/** @param {string} s */
+function quoteIdentifier(s) {
+  return `"${String(s).replace(/"/g, '""')}"`;
+}
+
+/** @param {string} s */
+function stringLiteral(s) {
+  return `'${String(s).replace(/'/g, "''")}'`;
+}
+
+/**
+ * SQLite JSON path text from typed segments. Object members are always
+ * quoted (`$."name"`), which covers spaces, dots and leading digits; a
+ * member name SQLite's path grammar cannot carry (an embedded `"` or a
+ * control character) returns `null` so the caller falls back to a
+ * whole-document strategy instead of emitting a wrong path.
+ * @param {import('../dialect.js').JsonPathSegment[]} segments
+ * @returns {string | null}
+ */
+function jsonPathText(segments) {
+  let text = '$';
+  for (const segment of segments) {
+    if ('index' in segment) {
+      text += `[${segment.index}]`;
+      continue;
+    }
+    // eslint-disable-next-line no-control-regex
+    if (/["\u0000-\u001f]/.test(segment.name)) return null;
+    text += `."${segment.name}"`;
+  }
+  return text;
+}
+
+/**
+ * The declared column type for a schema-declared value type. Under
+ * STRICT tables every column needs a type from the strict set; a path
+ * whose schema declares none is honestly `ANY`.
+ * @param {string | undefined} schemaType
+ * @param {string} hint - `'key'` or `'generated'`
+ * @returns {string}
+ */
+function typeFor(schemaType, hint) {
+  switch (schemaType) {
+    case 'string': return 'TEXT';
+    case 'integer': return 'INTEGER';
+    case 'number': return 'REAL';
+    case 'boolean': return 'INTEGER';
+    default: return hint === 'key' ? 'TEXT' : 'ANY';
+  }
+}
+
+/**
+ * A guarded PRAGMA argument: journal modes and similar keywords are a
+ * closed word set, never interpolated user text.
+ * @param {string} word
+ * @returns {string}
+ */
+function pragmaWord(word) {
+  if (!/^[a-z_]+$/i.test(String(word)))
+    throw new TypeError(`not a PRAGMA keyword: '${word}'`);
+  return String(word);
+}
+
+export const sqliteDialect = createDialect({
+  name: 'sqlite',
+  capabilities: {
+    jsonb: true,
+    generatedColumns: true,
+    returning: true,
+    upsert: true,
+    savepoints: true,
+    alterTableFull: false,
+  },
+  tableSuffix: ' STRICT',
+  docColumnType: 'BLOB',
+  quoteIdentifier,
+  parameterRef: () => '?',
+  stringLiteral,
+  booleanLiteral: (b) => (b ? '1' : '0'),
+  typeFor,
+  limitClause: (limit, offset) => (offset !== undefined && offset > 0
+    ? `LIMIT ${limit} OFFSET ${offset}`
+    : `LIMIT ${limit}`),
+  jsonPathText,
+  jsonExtract: (columnSql, pathText) =>
+    `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
+  jsonSet: (exprSql, pathText, valueSql) =>
+    `jsonb_set(${exprSql}, ${stringLiteral(pathText)}, ${valueSql})`,
+  jsonRemove: (exprSql, pathText) =>
+    `jsonb_remove(${exprSql}, ${stringLiteral(pathText)})`,
+  jsonAppend: (exprSql, arrayPathText, valueSql) =>
+    `jsonb_insert(${exprSql}, ${stringLiteral(`${arrayPathText}[#]`)}, ${valueSql})`,
+  jsonEncode: (paramSql) => `jsonb(${paramSql})`,
+  jsonText: (columnSql) => `json(${columnSql})`,
+  jsonAgg: (exprSql) => `json_group_array(${exprSql})`,
+  excludedRef: (columnSql) => `excluded.${columnSql}`,
+  tx: {
+    begin: 'BEGIN',
+    commit: 'COMMIT',
+    rollback: 'ROLLBACK',
+    savepoint: (n) => `SAVEPOINT ${quoteIdentifier(n)}`,
+    release: (n) => `RELEASE SAVEPOINT ${quoteIdentifier(n)}`,
+    rollbackTo: (n) => `ROLLBACK TO SAVEPOINT ${quoteIdentifier(n)}`,
+  },
+  pragma: {
+    busyTimeout: (ms) => `PRAGMA busy_timeout = ${Math.trunc(ms)}`,
+    journalMode: (mode) => `PRAGMA journal_mode = ${pragmaWord(mode)}`,
+  },
+  introspect: {
+    version: () => 'SELECT sqlite_version() AS version',
+    compileOptions: () =>
+      'SELECT compile_options AS name FROM pragma_compile_options',
+    tableExists: () =>
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
+    columns: (table) =>
+      `SELECT name, type, hidden FROM pragma_table_xinfo(${stringLiteral(table)})`,
+    indexes: (table) =>
+      `SELECT name, "unique" AS uniq, origin FROM pragma_index_list(${stringLiteral(table)})`,
+    indexColumns: (index) =>
+      `SELECT name FROM pragma_index_info(${stringLiteral(index)})`,
+  },
+});

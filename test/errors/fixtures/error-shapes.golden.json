@@ -174,5 +174,27 @@
     "message": "ZZ0042: golden reason at /golden/doc",
     "hasOwnCause": true,
     "causeValue": "<the fixed cause>"
+  },
+  {
+    "class": "DbCompileError",
+    "name": "DbCompileError",
+    "code": "ZZ0042",
+    "docPath": "/golden/doc",
+    "dataPath": "<absent>",
+    "reason": "golden reason",
+    "message": "ZZ0042: golden reason at /golden/doc",
+    "hasOwnCause": true,
+    "causeValue": "<the fixed cause>"
+  },
+  {
+    "class": "DbRuntimeError",
+    "name": "DbRuntimeError",
+    "code": "ZZ0042",
+    "docPath": "/golden/doc",
+    "dataPath": "<absent>",
+    "reason": "golden reason",
+    "message": "ZZ0042: golden reason at /golden/doc",
+    "hasOwnCause": true,
+    "causeValue": "<the fixed cause>"
   }
 ]

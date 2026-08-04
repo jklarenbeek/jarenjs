@@ -22,6 +22,7 @@ import { QUERY_CODES } from '@jarenjs/json/query';
 import { APP_CODES } from '@jarenjs/app';
 import { FLOW_CODES } from '@jarenjs/flow';
 import { LINQ_CODES } from '@jarenjs/linq';
+import { DB_CODES } from '@jarenjs/db';
 
 /**
  * Extract every code with the given prefix from a format doc's
@@ -43,6 +44,7 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['APP_CODES', APP_CODES, 'packages/app/docs/APP-FORMAT.md', 'JA'],
   ['FLOW_CODES', FLOW_CODES, 'packages/flow/docs/FLOW-FORMAT.md', 'JF'],
   ['LINQ_CODES', LINQ_CODES, 'packages/linq/docs/LINQ-FORMAT.md', 'JL'],
+  ['DB_CODES', DB_CODES, 'packages/db/docs/MODEL-FORMAT.md', 'JD'],
 ]);
 
 describe('runtime code tables match the format docs', () => {

@@ -32,6 +32,7 @@ import { AppCompileError, AppRuntimeError } from '@jarenjs/app';
 import { FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
 import { AiError } from '@jarenjs/ai';
 import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
+import { DbCompileError, DbRuntimeError } from '@jarenjs/db';
 import { createStructuredOutput } from '@jarenjs/ai/structured';
 
 const CAUSE = new Error('matrix cause');
@@ -82,6 +83,7 @@ describe('T6 — the cause matrix', () => {
       ['FlowRuntimeError', (c) => new FlowRuntimeError('ZZ0001', 'r', '/p', c)],
       ['LinqBuildError', (c) => new LinqBuildError('ZZ0001', 'r', '/p', c)],
       ['LinqRuntimeError', (c) => new LinqRuntimeError('ZZ0001', 'r', '/p', c)],
+      ['DbCompileError', (c) => new DbCompileError('ZZ0001', 'r', '/p', c)],
     ])) {
       it(`${cls}: omitted → no own cause`, () => assertNoCause(make()));
       it(`${cls}: positional undefined → STILL no own cause`, () => assertNoCause(make(undefined)));
@@ -92,6 +94,14 @@ describe('T6 — the cause matrix', () => {
       assertNoCause(new AppRuntimeError('ZZ0001', 'r'));
       assertNoCause(new AppRuntimeError('ZZ0001', 'r', { cause: undefined }));
       assertRealCause(new AppRuntimeError('ZZ0001', 'r', { cause: CAUSE }));
+    });
+
+    it('DbRuntimeError (details form, hasOwn semantics): an explicitly undefined cause is preserved', () => {
+      assertNoCause(new DbRuntimeError('ZZ0001', 'r', { docPath: '/p' }));
+      const explicit = new DbRuntimeError('ZZ0001', 'r', { docPath: '/p', cause: undefined });
+      assert.strictEqual(Object.hasOwn(explicit, 'cause'), true);
+      assert.strictEqual(explicit.cause, undefined);
+      assertRealCause(new DbRuntimeError('ZZ0001', 'r', { docPath: '/p', cause: CAUSE }));
     });
 
     it('AiError (meta form, ai semantics): undefined cause is absence', () => {
@@ -119,6 +129,8 @@ describe('T6a — the location matrix', () => {
     ['FlowRuntimeError', (p) => new FlowRuntimeError('ZZ0001', 'why', p)],
     ['LinqBuildError', (p) => new LinqBuildError('ZZ0001', 'why', p)],
     ['LinqRuntimeError', (p) => new LinqRuntimeError('ZZ0001', 'why', p)],
+    ['DbCompileError', (p) => new DbCompileError('ZZ0001', 'why', p)],
+    ['DbRuntimeError', (p) => new DbRuntimeError('ZZ0001', 'why', { docPath: p })],
   ];
 
   for (const [cls, make] of docPathClasses) {

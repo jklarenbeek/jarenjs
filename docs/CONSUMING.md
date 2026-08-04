@@ -72,7 +72,7 @@ suffice:
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
 
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `josl`,
-`ai`, `flow` and `linq` are independent of that set — leave them out unless you use them.
+`ai`, `flow`, `linq` and `db` are independent of that set — leave them out unless you use them.
 
 ### Wire the packages into your workspace
 
