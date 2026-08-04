@@ -1,9 +1,11 @@
 # @jarenjs/linq
 
-A C#-familiar fluent LINQ surface for the Jaren suite. Expressions are
-captured as **plain Jaren query documents** — never
-`Function.prototype.toString` — executed deferred over any iterable, or
-handed whole to any provider exposing `execute(document, options)`.
+A C#-familiar fluent query surface whose output is a **plain JSON
+query document**. You write `from(users).where(u =>
+u.age.gt(21)).orderBy(u => u.name)`; what exists afterwards is data —
+inspectable, serializable, executable by the `@jarenjs/json` engine in
+memory, streamed over a cursor, or pushed into a database by any
+provider. The chain is the pen; the document is the deliverable.
 
 ```js
 import { from } from '@jarenjs/linq';
@@ -13,48 +15,49 @@ const adults = from(users)
   .orderBy((u) => u.name)
   .select((u) => ({ id: u.id, name: u.name }));
 
-adults.toArray();
-adults.toDocument();
-// { "$for": { "it": "$[*]" },
-//   "$where": { "$gt": ["$it.age", 21] },
-//   "$orderby": { "$key": "$it.name" },
-//   "$return": { "id": "$it.id", "name": "$it.name" } }
+adults.toArray();     // runs in memory, deferred until now
+adults.toDocument();  // { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 21] }, … }
 ```
 
-The emitted document is the whole contract: loggable, storable,
-diffable, transportable, authorable by a constrained decoder, and
-compilable by a bare `compileJsonQuery` with no linq involvement.
-Parameters (`.params({ tenantId })`) become the document's externals —
-the seam that later becomes bound SQL parameters.
+**The C# comparison, stated honestly.** The operator names, deferred
+execution and the query-as-data idea are LINQ's. What differs: capture
+is a recording proxy, never source-text inspection, so callbacks must
+use the expression surface (`u.age.gt(21)`, not `u.age > 21` — a
+JavaScript proxy cannot overload `>`); the operator vocabulary is the
+query engine's, closed and documented in the
+[mapping table](docs/LINQ-FORMAT.md); and `IQueryable`'s role is
+played by the provider seam below.
 
-The normative surface — the complete C#-method mapping table (native /
-emulated / unsupported, honestly), deferred-execution semantics, the C#
-terminal matrix, the provider contract and the `JL` error codes — lives
-in [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md). The asynchronous surface
-(async sources, streaming, the bounded-concurrency boundary) is the
-next order of the data program and has reserved sections there.
+- **Deferred and immutable.** A `Sequence` holds a stage list; nothing
+  runs until a terminal (`toArray`, `first`, `count`, …). Every
+  operator returns a new sequence.
+- **Typed where it counts.** Hand-authored declarations type the
+  common path precisely and degrade to honest `unknown` — never a
+  wrong type — with runtime twins pinning every claim.
+- **The async story (the obvious objection, answered).** `fromAsync`
+  runs the SAME operator set over cursors and streams — async is a
+  boundary, not a colour (the same chain emits a byte-identical
+  document through both drivers, test-pinned). Element-wise async
+  work happens in exactly one place, `mapAsync`, with a REQUIRED
+  concurrency bound and the `parallel`/`concat`/`switch`/`exhaust`
+  vocabulary; barrier operators buffer and run through the one engine
+  so streaming answers equal in-memory answers by construction.
+- **The provider contract.** Any object with
+  `execute(queryDocument, { externals })` is a provider.
+  `@jarenjs/db` implements it — a chain over a SQLite-backed
+  collection pushes to SQL with no import edge in either direction.
+  `mapAsync` splits a provider chain into a pushed prefix and a local
+  residual, and `explain()` shows the split.
 
-Dependencies: `@jarenjs/core` and `@jarenjs/json` only. MIT.
+## What this is not
 
-## Typing
+Not an ORM — entities, storage and migrations live in `@jarenjs/db`.
+Not expression trees over arbitrary methods — the vocabulary is the
+query engine's, and a construct outside it fails loudly at build time
+with a coded error (`JL0001`–`JL0006`) rather than guessing. Not a
+general lazy-iterable library — if you don't want a query document,
+you don't want this package.
 
-The type surface is a deliberate artifact — a hand-authored
-`types/index.d.ts` — while the implementation stays plain JavaScript.
-The rule it is built on, and the one to hold it to:
-
-> **The common path is precisely typed; the exotic path is honestly
-> `unknown`; nothing is ever a wrong type.**
-
-`from<User>(users)` infers through the whole chain: `u.age` is a number
-expression (`u.age.gt('x')` does not compile), a misspelled member does
-not compile, `select` narrows the element to the projection's shape,
-`groupBy` types its key (nullable — an empty grouping key reads
-`null`), `first()` is `T` and `firstOrDefault()` is `T | undefined`,
-and `min()`/`max()` follow the operand family. Annotate an RFC 3339
-property as `DateTime` (a type-level brand, invisible at runtime) and
-the date operators appear on exactly that property. Where a construct
-exceeds what the types can follow — dynamic `get()`, post-operator
-member access, an untyped provider — the result is `UnknownExpr` /
-`unknown`, named in LINQ-FORMAT.md, never a lie. Every type-level claim
-has a runtime twin in the test suite, so the declarations and the
-implementation are proven by the same fixtures.
+The normative mapping — every operator, its emitted phrase, and the
+deliberate deviations — is [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md);
+internals are in [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -24,6 +24,7 @@
  *   charts.json       charts.js         — chart compile + SVG render throughput
  *   geo.json          geo.js            — spatial kernel vs turf/geolib/flatbush (equivalence-gated)
  *   flow.json         flow-fsm.js/-dag.js — FSM step + DAG run throughput vs XState
+ *   db.json           db.js             — document store + pushdown vs PouchDB/RxDB/lowdb
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -56,7 +57,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, qt3');
+        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, qt3');
         process.exit(0);
         break;
       default:
@@ -729,7 +730,7 @@ function generateQt3() {
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
   'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
-  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow',
+  'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -961,7 +962,49 @@ function buildHeadlines(generated, meta) {
       note: 'pure step vs actor.send; the machine survives JSON round-trip with its guards, XState\'s do not — the dag pays the documented dataflow tax on the suite page',
     });
   }
+  if (generated.db !== undefined) {
+    add('db', 'Data', {
+      ratio: generated.db.meta.headlineRatio,
+      rival: 'the residual path',
+      conformance: `${generated.db.meta.docs} docs`,
+      note: 'the same query document pushed to SQL versus forced to the residual — the measured value of the planner; PouchDB/RxDB/lowdb rows (including the ones jaren loses) are on the suite page',
+    });
+  }
   return out;
+}
+
+/**
+ * The data suite: the phase-A store and its LINQ front door against
+ * PouchDB, RxDB and lowdb, with the pushed-versus-residual ratio as
+ * the headline. The rows where jaren loses stay in the payload — the
+ * suite page renders them with their reasons.
+ */
+function generateDb(tmp, options) {
+  const file = path.join(tmp, 'db.json');
+  try {
+    runTool([
+      'benchmark/db.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: db run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the store head-to-head needs the pouchdb/rxdb/lowdb benchmark devDependencies)');
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    meta: raw.meta,
+    tables: raw.tables.map((table) => ({
+      title: table.title,
+      columns: table.columns,
+      rows: table.rows.map((row) => ({
+        name: row.name,
+        results: row.results.map((ns) => (ns === null ? null : sig4(ns))),
+      })),
+    })),
+  };
 }
 
 //#endregion
@@ -1033,6 +1076,11 @@ async function main() {
     const flow = generateFlow(tmp, options);
     if (flow !== null)
       generated.flow = flow;
+  }
+  if (!options.skip.has('db')) {
+    const db = generateDb(tmp, options);
+    if (db !== null)
+      generated.db = db;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

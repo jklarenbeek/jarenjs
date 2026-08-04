@@ -44,6 +44,7 @@ export const SUITES = [
   { key: 'charts', label: 'Charts' },
   { key: 'geo', label: 'Geo' },
   { key: 'flow', label: 'Flow' },
+  { key: 'db', label: 'Data' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -75,6 +76,7 @@ export function deriveSuite(state, suite) {
     case 'charts': return chartsSuite(data);
     case 'geo': return geoSuite(data);
     case 'flow': return flowSuite(data);
+    case 'db': return dbSuite(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -386,6 +388,25 @@ function genericTables(data, note) {
       t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
       note),
   ]);
+}
+
+/**
+ * The data suite: the phase-A store and LINQ front door. The engines
+ * and their storage adapters render above the tables, and the rows
+ * where jaren loses stay in — a table that only shows wins is worth
+ * nothing to a reader who has to make a decision.
+ */
+function dbSuite(data) {
+  const meta = data.meta ?? {};
+  const engineLines = (meta.engines ?? [])
+    .map((engine) => `${engine.label}: ${engine.adapter}`).join(' · ');
+  const out = [];
+  out.push(callout(
+    `Pushdown headline: ${meta.headlineRatio}× — the same query document pushed to SQL versus forced to the residual over ${meta.docs} documents (~${meta.docBytes} JSON bytes each)`,
+    `${engineLines}. Every engine is verified to answer the same result set before it is timed; jaren pays SQLite and JSON materialisation where the in-process rivals pay neither — the rows it loses are the price of durability, transactions and a planner, and they are shown.`));
+  out.push(...genericTables(data,
+    'Per-operation timings; lower is better. A dash is an engine dropped for a row because it disagreed on the result set rather than being timed doing less work.'));
+  return out;
 }
 
 /**

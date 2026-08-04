@@ -32,6 +32,8 @@ const ENTRIES = [
   { name: '@jarenjs/charts', dir: 'components/charts', blurb: 'Headless charts: definitions to geometry-free ASTs to pure-vnode SVG, streamable.' },
   { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset, incremental JSON/JSONX readers, and a self-healing CSV reader/writer.' },
   { name: '@jarenjs/ai', dir: 'packages/ai', blurb: 'Browser-side AI: one OpenAI-compatible client (OpenRouter/Ollama/LM Studio), a Jaren-guarded tool registry, a bounded agent loop and WebMCP.' },
+  { name: '@jarenjs/linq', dir: 'packages/linq', blurb: 'C#-familiar fluent chains captured into plain query documents: deferred, typed, async-capable, and pushable to any provider.' },
+  { name: '@jarenjs/db', dir: 'packages/db', blurb: 'Documents in SQLite: model-declared collections, a pushdown planner with honest residuals, a safe profile for untrusted queries, and migrations as documents.' },
 ];
 
 export const PACKAGES = ENTRIES.map((entry) => ({

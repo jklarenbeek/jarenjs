@@ -282,6 +282,36 @@ delete it or fix it.
   document implies having all of it, so this waits for a consumer that
   genuinely edits a stream.
 
+## @jarenjs/linq & @jarenjs/db — the data pair
+
+The fluent front door and the SQLite document store shipped as a pair;
+what each does is its own documentation's job
+([linq](../packages/linq/README.md) ·
+[db](../packages/db/README.md)). What remains open:
+
+- [ ] **Pushdown promotions.** The planner's deliberate-residual table
+  still holds `$groupby`, joins/`$for` over non-singular paths, and
+  `$match` beyond the UDF hatch. Each promotion needs its equivalence
+  proof in the differential oracle first — residual-by-default is the
+  standing rule, and the oracle's forced-residual mode is the
+  regression net that makes promotion safe.
+- [ ] **Other SQL dialects.** The dialect seam is real (proven by a
+  test double) and the capability slots for statement timeouts and
+  row estimates are deliberately empty on SQLite; a second dialect is
+  the day they fill. The constraint: a dialect must reproduce the
+  truth table's guarded semantics, not merely parse.
+- [ ] **Down migrations.** Named a non-goal for 0.1 with its reason (a
+  JSLT transform is not generally invertible); if it ever lands it is
+  an explicit author-written document, never an inferred inverse.
+- [ ] **UDF-expression indexes.** Refused today because an index over
+  a registered function makes the file unwritable from any connection
+  that has not registered it; shipping it needs the model-declared
+  opt-in plus re-registration duties on every shadow and rebuild
+  connection.
+- [ ] **Cross-source linq joins.** `join`/`groupJoin` are same-source
+  in 0.1 (one document, one root); the relational order lifts the
+  restriction.
+
 ## Dates & times (cross-package)
 
 One program. The motivating observation is that the suite does not lack a

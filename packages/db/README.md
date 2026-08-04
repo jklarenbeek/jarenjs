@@ -3,9 +3,13 @@
 Document storage for the Jaren suite, over SQLite. A **model
 document** declares collections — each a JSON Schema plus declared
 indexes — and `openStore` creates or opens a database, applies the
-physical mapping, and gives transactional, schema-validated reads and
-writes. The same code runs on Node, on Bun, and in a browser against
-an injected wasm handle, with zero dependencies outside `@jarenjs/*`.
+physical mapping through a dialect, and gives transactional,
+schema-validated reads and writes. Queries arrive as plain Jaren query
+documents (usually written through `@jarenjs/linq`) and are **pushed
+down to SQL** where equivalence is proven, with everything else
+running honestly in the engine. The same code runs on Node, on Bun,
+and in a browser against an injected wasm handle, with zero
+dependencies outside `@jarenjs/*`.
 
 ```js
 import { openStore } from '@jarenjs/db';
@@ -25,45 +29,73 @@ const store = await openStore({
         },
       },
       key: '/id',
-      indexes: [
-        { name: 'by_email', path: '$.email', unique: true },
-        { name: 'by_age', path: '$.age' },
-      ],
+      indexes: [{ name: 'by_age', path: '$.age' }],
     },
   },
 }, { driver: nodeDriver(), path: 'app.db' });
 
 const users = store.collection('users');
 await users.insert({ id: 'u1', email: 'ada@example.test', age: 36 });
-await users.patch('u1', [{ op: 'replace', path: '/age', value: 37 }]);
-const ada = await users.get('u1');
-await store.transaction(async (s) => {
-  await s.collection('users').put({ id: 'u2', email: 'lin@example.test' });
+
+// a query document — here written by hand; linq writes the same thing
+const adults = await users.execute({
+  $for: { it: '$[*]' },
+  $where: { $ge: ['$it.age', 21] },
+  $return: '$it',
 });
 ```
 
+- **The pushdown planner with `explain()`.** A query compiles through
+  the engine's published AST into a dialect-neutral plan and renders
+  to guarded, parameter-bound SQL; whatever cannot be proven
+  equivalent runs as a real compiled Jaren query (the residual), and
+  `explain()` always says which is which — the SQL, the bound
+  parameters, the indexes used (verified against the database's own
+  plan output), and the residual's named reasons. A 418-run
+  differential oracle keeps both paths agreeing. `strict: true` turns
+  any residual into a compile error.
 - **Storage is declarative.** Indexed paths become generated columns
-  plus real indexes; the collection's schema types them. Opening an
+  plus real indexes, typed from the collection's schema. Opening an
   existing database verifies the declared shape and refuses to alter
-  it (`JD0002`) — reshaping is a migration concern, not a side effect.
-- **Writes validate** through an injected hook (for example
-  `@jarenjs/validate`'s `createTypeTestCompiler`); without one,
+  it — reshaping is the migration story.
+- **Migrations are documents.** `planMigration` diffs two models into
+  rendered-DDL + JSLT-transform + assertion steps; a shadow database
+  replays the whole chain before the real store is touched; a
+  checksummed history refuses edited or reordered migrations; a
+  narrowing without an adequate transform is refused against the REAL
+  data, inside the transaction.
+- **The safe profile.** Untrusted query documents run under composed
+  bounds: engine limits on the residual, a mandatory row bound that
+  refuses rather than truncates, reference allow-lists, optional
+  full-scan refusal, and per-collection mandatory predicates no
+  document shape can shed. Read-only stores refuse writes at the
+  driver.
+- **Writes validate** through an injected hook; without one,
   `store.capabilities.validated` is `false` and the docs say what that
-  costs. This package never imports a validator.
-- **The public API is asynchronous** — the browser's OPFS story forces
-  that — with a declared synchronous fast path: where the driver is
-  synchronous, the same operations exist promise-free under
-  `store.sync`. Where it is not, `store.sync` is absent, not stubbed.
-- **`patch` updates in place.** RFC 6902 operations translate to
-  JSON-set primitives so a one-field update does not rewrite a large
-  document; untranslatable operations fall back to a whole-document
-  write, and the fallback is counted at `collection.stats()`.
-- **Capabilities over sniffing.** `store.capabilities` reports what
-  the opened library and binding can actually do — including, honestly,
-  what SQLite cannot (`statementTimeout: false`,
-  `rowEstimates: false`).
+  costs. The public API is asynchronous (the browser's OPFS story
+  forces it) with a promise-free `store.sync` twin where the driver is
+  synchronous.
 
-The normative format is [`docs/MODEL-FORMAT.md`](docs/MODEL-FORMAT.md);
-the seams are documented in [`ARCHITECTURE.md`](ARCHITECTURE.md).
-SQLite — 3.45 or newer — is the supported backend; nothing else is
-promised.
+## What SQLite-only means, frankly
+
+SQLite is the supported backend — 3.45 or newer, on `node:sqlite`,
+`bun:sqlite`, or your injected wasm build — and nothing else is
+promised. The dialect seam exists and is tested against a double, but
+no second dialect ships. Concretely: there is **no statement timeout**
+(the drivers expose no interrupt; the capability slot is honestly
+`false`), no server, no replication, and cross-process concurrency is
+SQLite's own story (WAL plus a busy timeout, both set and visible on
+`store.capabilities`).
+
+## What this is not
+
+Not an ORM with entities and relations (a collection is one schema,
+one key, one document column — by design, in this version). Not a
+sync engine or a replication layer. Not safe for mutually hostile
+tenants without the profile's mandatory predicate — the SECURITY
+policy states the claims and the non-claims plainly.
+
+The normative formats are
+[docs/MODEL-FORMAT.md](docs/MODEL-FORMAT.md) and
+[docs/MIGRATION-FORMAT.md](docs/MIGRATION-FORMAT.md); the seams and
+the pushdown contract are in [ARCHITECTURE.md](ARCHITECTURE.md).

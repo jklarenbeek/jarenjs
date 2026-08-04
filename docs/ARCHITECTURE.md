@@ -47,6 +47,8 @@ flowchart BT
     EMIT["@jarenjs/emit<br/>schemas to TypeScript/docs<br/>(build-time, JTLT stylesheets)"]
     FORMS["@jarenjs/forms<br/>form model + x-form rules"]
     LOCALES["@jarenjs/locales<br/>error-message locale packs<br/>(zero deps, platform Intl only)"]
+    LINQ["@jarenjs/linq<br/>fluent chains to query documents"]
+    DB["@jarenjs/db<br/>documents in SQLite,<br/>pushdown + migrations"]
 
     JSON --> CORE
     VALIDATE --> CORE
@@ -59,6 +61,11 @@ flowchart BT
     FORMS --> CORE
     FORMS --> JSON
     FORMS --> FORMATS
+    LINQ --> CORE
+    LINQ --> JSON
+    DB --> CORE
+    DB --> JSON
+    LINQ -. "execute(document)" .-> DB
 ```
 
 | Package | Role | Internals documented in |
@@ -78,6 +85,8 @@ flowchart BT
 | [`@jarenjs/mermaid`](../components/mermaid) | Headless Mermaid clone → geometry-free JSON AST → pure-vnode SVG through view; a format component | [mermaid ARCHITECTURE](../components/mermaid/ARCHITECTURE.md) |
 | [`@jarenjs/calc`](../components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](../components/calc/ARCHITECTURE.md) |
 | [`@jarenjs/charts`](../components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG through view, with a stream adapter over the josl readers' unified events; mermaid's pie delegates here | [charts ARCHITECTURE](../components/charts/ARCHITECTURE.md) |
+| [`@jarenjs/linq`](../packages/linq) | Fluent chains captured by a recording proxy into plain query documents; deferred sequences, a typed surface, the async boundary, and the provider contract `@jarenjs/db` fulfils without an import edge | [linq ARCHITECTURE](../packages/linq/ARCHITECTURE.md) · [FORMAT](../packages/linq/docs/LINQ-FORMAT.md) |
+| [`@jarenjs/db`](../packages/db) | Documents in SQLite behind driver and dialect seams: model-declared collections, the pushdown planner with honest residuals, the safe execution profile, document migrations | [db ARCHITECTURE](../packages/db/ARCHITECTURE.md) · [MODEL-FORMAT](../packages/db/docs/MODEL-FORMAT.md) · [MIGRATION-FORMAT](../packages/db/docs/MIGRATION-FORMAT.md) |
 | [`@jarenjs/ai`](../packages/ai) | Browser-side AI: one OpenAI-compatible chat client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs `@jarenjs/validate` checks before every call, a bounded agent loop, and WebMCP registration; depends only on validate | [ai README](../packages/ai/README.md) |
 | [`@jarenjs/website`](../packages/website) | The GitHub Pages site, playground, AI assistant and the Studio — a meta-schema-gated host for AI-authored app documents (not part of the library chain) | [website README](../packages/website/README.md) |
 

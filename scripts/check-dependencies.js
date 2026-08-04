@@ -55,6 +55,25 @@ const KNOWN_TOOLING_ADVISORIES = {
   'glob': 'transitive under c8 and the benchmark workspace, via minimatch',
   'test-exclude': 'transitive under c8, via glob',
   'c8': 'the coverage runner used by the dead-code audit, via test-exclude',
+  // the PouchDB benchmark rival (D16): the db suite measures against the
+  // version readers actually install; overriding its internals would make
+  // the comparison a measurement of something nobody runs. The advisory is
+  // an unbounded-uuid concern inside PouchDB's own machinery; nothing in
+  // this family is in any published package's closure (the check below
+  // proves that separately).
+  'pouchdb': 'benchmark rival (db suite); pinned to the version the store benchmark measures',
+  'pouchdb-abstract-mapreduce': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-adapter-leveldb-core': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-adapter-memory': 'the stated storage adapter of the pouchdb benchmark rival',
+  'pouchdb-adapter-utils': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-changes-filter': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-core': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-find': 'the stated Mango query route of the pouchdb benchmark rival',
+  'pouchdb-mapreduce-utils': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-merge': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-selector-core': 'transitive under pouchdb (benchmark rival)',
+  'pouchdb-utils': 'transitive under pouchdb (benchmark rival)',
+  'uuid': 'the advisory-flagged version is pinned inside the pouchdb rival family',
 };
 
 /*

@@ -80,6 +80,27 @@ Dependency arrows: `core → json → db`. Nothing else — no validate, no
 linq, no app. The linq package couples by contract (`execute(document,
 options)`), never by import.
 
+## The decisions that cost something
+
+- **D3 — the normalized AST is a compatibility surface.** The planner
+  walks the engine's PUBLISHED AST, which promoted an internal shape
+  to a versioned contract the engine must now keep. Paid for: a
+  load-time exhaustiveness pact means a new language construct breaks
+  the build instead of silently becoming a residual.
+- **D6 — the store API is asynchronous** even though every shipped
+  driver is synchronous. Measured cost: ~0.17 µs per point read
+  (~6 %) over the `store.sync` twin. Paid for: the browser's OPFS
+  story and any future non-embedded driver need no API change, and
+  the sync-capable `chain` keeps the internal composition
+  allocation-free so the surface pays exactly one promise per call.
+- **D21 — the dialect indirection is paid for a second backend that
+  does not exist.** Every byte of SQL routes through a spelling spec;
+  the test double proves the seam by rendering the same plans and the
+  same DDL differently. The cost is one indirection and a larger
+  contract; the alternative was a rewrite on the day a second dialect
+  matters — and the capability slots (`statementTimeout`,
+  `rowEstimates`) already model what a server would fill in.
+
 ## The pushdown contract (`src/plan.js`, `src/emit.js`, `src/query.js`)
 
 This is an implementation contract, not a format: it binds the planner,

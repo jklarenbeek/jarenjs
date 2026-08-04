@@ -205,7 +205,7 @@ describe('website — the site as one app document', function () {
     const fixtures = {
       meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
       jsonquery: load('jsonquery'), jslt: load('jslt'), markdown: load('markdown'),
-      mermaid: load('mermaid'), flow: load('flow'),
+      mermaid: load('mermaid'), flow: load('flow'), db: load('db'),
     };
     const { container, go } = mountSite({ fixtures });
 
@@ -258,6 +258,15 @@ describe('website — the site as one app document', function () {
     assert.match(html, /Abstraction price/, 'the dag baseline table renders');
     assert.match(html, /we compile every guard as a query, so we hold more/,
       'the memory loss is on the page, not omitted');
+
+    go('#/benchmarks?suite=db');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /Pushdown headline/, 'the pushed-versus-residual claim renders');
+    assert.match(html, /the rows it loses are the price of durability/,
+      'the losses framing is on the page, not omitted');
+    assert.match(html, /PouchDB/, 'the rivals are named with their adapters');
+    assert.match(html, /lowdb/);
   });
 
   it('renders a Mermaid fence as inline SVG through the shared md boundary', async function () {
@@ -289,8 +298,12 @@ describe('website — the site as one app document', function () {
     assert.match(html, /class="readme-btn"[^>]*>@jarenjs\/forms/);
     assert.match(html, /@jarenjs\/md/);
     assert.match(html, /@jarenjs\/flow/, 'every published package is readable here, flow included');
-    // the docs sections cover flow too
+    assert.match(html, /@jarenjs\/linq/, 'the data pair is readable here too');
+    assert.match(html, /@jarenjs\/db/);
+    // the docs sections cover flow and the data pair too
     assert.match(html, /Flow — executable workflows/);
+    assert.match(html, /LINQ — chains to query documents/);
+    assert.match(html, /Data — documents in SQLite/);
   });
 
   it('opens a README in the dialog, rendered by @jarenjs/md', async function () {

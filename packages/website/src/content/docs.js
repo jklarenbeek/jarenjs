@@ -298,6 +298,23 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
+    id: 'linq', title: 'LINQ — chains to query documents',
+    blocks: [
+      p('A C#-familiar chain whose product is a plain JSON query document. Capture is a recording proxy (never source-text inspection), execution is deferred, and the emitted document runs in memory, over async streams, or against any provider exposing execute(document, options) — @jarenjs/db implements that contract with no import edge in either direction.'),
+      code(null, "import { from } from '@jarenjs/linq';\n\nconst adults = from(users)\n  .where((u) => u.age.gt(21))\n  .orderBy((u) => u.name)\n  .select((u) => ({ id: u.id, name: u.name }));\n\nadults.toArray();    // deferred until a terminal\nadults.toDocument(); // { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 21] }, … }"),
+      p('The async surface runs the SAME operator set over cursors: streamable stages go per item, barrier operators buffer and run through the one engine, and mapAsync is the single bounded-concurrency boundary (concurrency is required; the modes are parallel / concat / switch / exhaust). Async answers equal sync answers by construction — the same chain emits a byte-identical document through both drivers.'),
+    ],
+  },
+  {
+    id: 'db', title: 'Data — documents in SQLite',
+    blocks: [
+      p('A model document declares collections (a JSON Schema, a key declaration, indexes over singular JSONPaths); openStore applies the physical mapping through a dialect and gives transactional, schema-validated reads and writes on Node, Bun, or an injected wasm build. Queries push down to guarded, parameter-bound SQL where equivalence is proven — a 418-run differential oracle keeps the pushed path and the engine agreeing — and explain() always names the SQL, the indexes and the residual reasons.'),
+      code(null, "import { openStore } from '@jarenjs/db';\nimport { nodeDriver } from '@jarenjs/db/node';\n\nconst store = await openStore(model, { driver: nodeDriver(), path: 'app.db' });\nconst users = store.collection('users');\nawait users.insert({ id: 'u1', email: 'ada@example.test', age: 36 });\nconst plan = await users.explain({\n  $for: { it: '$[*]' }, $where: { $ge: ['$it.age', 21] }, $return: '$it',\n});\n// plan.sql, plan.indexes, plan.residual, plan.scanNarrative"),
+      p('Migrations are documents too: planMigration diffs two models into rendered DDL, JSLT data transforms and assertion steps; the whole chain replays on a shadow database first; a checksummed history refuses edited or reordered migrations; and a schema narrowing without an adequate transform is refused against the real data, inside the transaction.'),
+      callout('SQLite only, said plainly', 'The dialect seam is real and tested against a double, but SQLite (3.45+) is the one shipped backend. There is no statement timeout on these drivers — the capability slot is honestly false — and the safe profile composes what CAN be bounded: engine limits, a mandatory row bound that refuses rather than truncates, allow-lists, and per-collection mandatory predicates no document shape can shed. The live in-browser store rides on an injected wasm handle and is not part of this site yet; the examples here are Node examples.'),
+    ],
+  },
+  {
     id: 'further-reading', title: 'Further reading',
     blocks: [
       p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, FLOW-FORMAT.md, ERROR-MESSAGES.md and the JOSL FORMAT.md. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),
