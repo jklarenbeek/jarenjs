@@ -24,6 +24,7 @@ export const DB_CODES = Object.freeze({
   JD0003: 'the driver binding is unavailable on this runtime',
   JD0004: 'an index path is not a singular member selection',
   JD0005: 'the model document is invalid',
+  JD0010: 'strict mode refused a residual',
   JD2001: 'insert found the key already present',
   JD2002: 'a usable key could not be resolved for the write',
   JD2003: 'the write failed schema validation',
@@ -50,6 +51,8 @@ export const DB_CODES = Object.freeze({
  *    the reason names the expression
  *  - `JD0005` — the model document is invalid; `docPath` points at
  *    the offending member
+ *  - `JD0010` — `strict: true` and part of the query would have run
+ *    outside the database; the reason names the forcing construct
  */
 export class DbCompileError extends CodedError {
   /**

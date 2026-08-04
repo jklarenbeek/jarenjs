@@ -249,6 +249,7 @@ error.
 | `JD0003` | the driver binding is unavailable on this runtime |
 | `JD0004` | an index path is not a singular member selection |
 | `JD0005` | the model document is invalid |
+| `JD0010` | strict mode refused a residual |
 | `JD2001` | insert found the key already present |
 | `JD2002` | a usable key could not be resolved for the write |
 | `JD2003` | the write failed schema validation |

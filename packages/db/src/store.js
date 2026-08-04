@@ -27,6 +27,7 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, toPromise } from './driver.js';
 import { planCollection } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
+import { createQueryEngine, createQueryState } from './query.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -352,9 +353,10 @@ function ensureShape(connection, collections, plans) {
  * @param {any} collection - normalized collection
  * @param {any} plan
  * @param {((doc: any) => any) | null} validate
+ * @param {any} queryState - the store-wide statement cache and UDF set
  * @returns {any}
  */
-function collectionCore(connection, collection, plan, validate) {
+function collectionCore(connection, collection, plan, validate, queryState) {
   const dialect = connection.dialect;
   const shape = {
     table: plan.table,
@@ -372,6 +374,9 @@ function collectionCore(connection, collection, plan, validate) {
     return statement;
   };
   const stats = { patchTranslated: 0, patchFallback: 0 };
+  const engine = createQueryEngine({
+    connection, state: queryState, collection, physicalPlan: plan,
+  });
 
   const checkValid = (doc) => {
     if (validate === null) return;
@@ -412,6 +417,11 @@ function collectionCore(connection, collection, plan, validate) {
 
   const core = {
     stats: () => ({ ...stats }),
+    // the D2 provider: value-or-promise, deliberately NOT lifted — a
+    // synchronous driver answers a linq chain synchronously
+    execute: (document, options) => engine.execute(document, options),
+    query: (document, options) => engine.query(document, options),
+    explain: (document, options) => engine.explain(document, options),
     get(key) {
       requireKey(key, collection.name, collection.docPath);
       return chain(prepared('get', dialect.dml.get(shape)), (statement) =>
@@ -521,6 +531,11 @@ function asyncCollection(core) {
     put: lift(core.put),
     patch: lift(core.patch),
     delete: lift(core.delete),
+    // the provider contract (D2): execute stays value-or-promise so a
+    // linq chain over a synchronous driver stays synchronous
+    execute: (document, options) => core.execute(document, options),
+    query: (document, options) => core.query(document, options),
+    explain: lift(core.explain),
   });
 }
 
@@ -528,7 +543,8 @@ function asyncCollection(core) {
  * Open (or create) a store described by a model document.
  * @param {any} model - A `jaren-model` document (the 0.1 subset)
  * @param {{ driver: any, path?: string, compileSchema?: Function,
- *   busyTimeout?: number, journalMode?: string }} options
+ *   busyTimeout?: number, journalMode?: string,
+ *   statementCacheBound?: number }} options
  * @returns {Promise<any>}
  */
 export function openStore(model, options) {
@@ -586,7 +602,7 @@ export function openStore(model, options) {
               if (validate !== null && typeof validate !== 'function')
                 throw new TypeError('openStore: compileSchema must return a validation function');
               core = collectionCore(connection, collection,
-                plans.get(name), validate);
+                plans.get(name), validate, queryState);
               cores.set(name, core);
             }
             return core;
@@ -599,10 +615,15 @@ export function openStore(model, options) {
             journalMode: memory ? null : journalMode,
           });
 
+          const queryState = createQueryState(options.statementCacheBound);
           /** @type {Map<string, any>} */
           const asyncHandles = new Map();
           const store = {
             capabilities,
+            stats: () => ({
+              statementCache: { ...queryState.counters },
+              udfRegistrations: queryState.registered.size,
+            }),
             dialect,
             collection(name) {
               let handle = asyncHandles.get(name);
@@ -631,6 +652,8 @@ export function openStore(model, options) {
                     put: (doc, key) => core.put(doc, key),
                     patch: (key, ops) => core.patch(key, ops),
                     delete: (key) => core.delete(key),
+                    execute: (document, options) => core.execute(document, options),
+                    explain: (document, options) => core.explain(document, options),
                   });
                   syncHandles.set(name, handle);
                 }

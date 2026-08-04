@@ -91,8 +91,8 @@ export const sqliteDialect = createDialect({
   booleanLiteral: (b) => (b ? '1' : '0'),
   typeFor,
   limitClause: (limit, offset) => (offset !== undefined && offset > 0
-    ? `LIMIT ${limit} OFFSET ${offset}`
-    : `LIMIT ${limit}`),
+    ? `LIMIT ${limit === null ? -1 : limit} OFFSET ${offset}`
+    : `LIMIT ${limit === null ? -1 : limit}`),
   jsonPathText,
   jsonExtract: (columnSql, pathText) =>
     `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
@@ -105,6 +105,17 @@ export const sqliteDialect = createDialect({
   jsonEncode: (paramSql) => `jsonb(${paramSql})`,
   jsonText: (columnSql) => `json(${columnSql})`,
   jsonAgg: (exprSql) => `json_group_array(${exprSql})`,
+  jsonTypeOf: (columnSql, pathText) =>
+    `json_type(${columnSql}, ${stringLiteral(pathText)})`,
+  valueTypeOf: (paramSql) => `typeof(${paramSql})`,
+  strStartsWith: (valueSql, patternA, patternB) =>
+    `substr(${valueSql}, 1, length(${patternA})) = ${patternB}`,
+  strEndsWith: (valueSql, patternA, patternB, patternC) =>
+    `(length(${patternA}) = 0 OR substr(${valueSql}, -length(${patternB})) = ${patternC})`,
+  strContains: (valueSql, patternSql) => `instr(${valueSql}, ${patternSql}) > 0`,
+  orderNulls: (nullsFirst) => (nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
+  rowIdentity: () => '"rowid"',
+  explainQuery: (sql) => `EXPLAIN QUERY PLAN ${sql}`,
   excludedRef: (columnSql) => `excluded.${columnSql}`,
   tx: {
     begin: 'BEGIN',

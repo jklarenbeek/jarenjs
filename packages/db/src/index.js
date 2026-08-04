@@ -16,5 +16,12 @@ export {
   openConnection, wrapStatement, lazyOpen,
 } from './driver.js';
 export { planCollection, compileIndexPath, schemaTypeAt, KEY_COLUMN, DOC_COLUMN } from './ddl.js';
+export { planQuery, assertDecidedKind } from './plan.js';
+export { emitPlan } from './emit.js';
+export { selectPlan, conjoin, assertNoSqlText, PLAN_VERSION } from './algebra.js';
+export { typeOfPath, isNumericType } from './types.js';
+export { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
+export { deterministicFragment, registerFragment } from './udf.js';
+export { createQueryEngine, createQueryState } from './query.js';
 export { translatePatch } from './patch-sql.js';
 export { DbCompileError, DbRuntimeError, DB_CODES } from './errors.js';
