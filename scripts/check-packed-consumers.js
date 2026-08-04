@@ -209,6 +209,20 @@ if (tree !== null && tree.session !== undefined) {
   void (tree.session.errorCount + tree.session.serverErrorCount);
 }
 `,
+  '@jarenjs/linq': `
+import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
+const rows = [{ id: 1, name: 'ada' }, { id: 2, name: 'lin' }];
+const seq = from(rows).where((r: any) => r.id.gt(1)).select((r: any) => ({ n: r.name }));
+const doc: unknown = seq.toDocument();
+void doc;
+const out: any[] = seq.toArray();
+void out.length;
+void from(rows).count();
+void fromDocument(rows, '$[*].name').toArray();
+const codes: Readonly<Record<string, string>> = LINQ_CODES;
+void codes.JL0001;
+void (LinqBuildError.name === 'LinqBuildError' && LinqRuntimeError.name === 'LinqRuntimeError');
+`,
   '@jarenjs/flow': `
 import { compileFsm, createFsmSession, fsmToApp, fsmStateSchema, compileDag } from '@jarenjs/flow';
 const fsm = compileFsm({

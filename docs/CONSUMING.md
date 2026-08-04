@@ -71,8 +71,8 @@ suffice:
 | `@jarenjs/refs` | Only if you `$ref` the official meta-schemas offline |
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
 
-`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `josl`
-and `ai` are independent of that set — leave them out unless you use them.
+`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `josl`,
+`ai`, `flow` and `linq` are independent of that set — leave them out unless you use them.
 
 ### Wire the packages into your workspace
 

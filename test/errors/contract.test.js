@@ -31,6 +31,7 @@ import { JsonWriteError } from '@jarenjs/json/write';
 import { AppCompileError, AppRuntimeError } from '@jarenjs/app';
 import { FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
 import { AiError } from '@jarenjs/ai';
+import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
 import { createStructuredOutput } from '@jarenjs/ai/structured';
 
 const CAUSE = new Error('matrix cause');
@@ -79,6 +80,8 @@ describe('T6 — the cause matrix', () => {
       ['AppCompileError', (c) => new AppCompileError('ZZ0001', 'r', '/p', c)],
       ['FlowCompileError', (c) => new FlowCompileError('ZZ0001', 'r', '/p', c)],
       ['FlowRuntimeError', (c) => new FlowRuntimeError('ZZ0001', 'r', '/p', c)],
+      ['LinqBuildError', (c) => new LinqBuildError('ZZ0001', 'r', '/p', c)],
+      ['LinqRuntimeError', (c) => new LinqRuntimeError('ZZ0001', 'r', '/p', c)],
     ])) {
       it(`${cls}: omitted → no own cause`, () => assertNoCause(make()));
       it(`${cls}: positional undefined → STILL no own cause`, () => assertNoCause(make(undefined)));
@@ -114,6 +117,8 @@ describe('T6a — the location matrix', () => {
     ['AppRuntimeError', (p) => new AppRuntimeError('ZZ0001', 'why', { docPath: p })],
     ['FlowCompileError', (p) => new FlowCompileError('ZZ0001', 'why', p)],
     ['FlowRuntimeError', (p) => new FlowRuntimeError('ZZ0001', 'why', p)],
+    ['LinqBuildError', (p) => new LinqBuildError('ZZ0001', 'why', p)],
+    ['LinqRuntimeError', (p) => new LinqRuntimeError('ZZ0001', 'why', p)],
   ];
 
   for (const [cls, make] of docPathClasses) {

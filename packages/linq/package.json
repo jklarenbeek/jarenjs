@@ -1,5 +1,5 @@
 {
-  "name": "@jarenjs/md",
+  "name": "@jarenjs/linq",
   "private": false,
   "version": "0.25.3",
   "type": "module",
@@ -11,35 +11,19 @@
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
-    "./plugins": {
-      "types": "./dist/types/plugins/index.d.ts",
-      "default": "./src/plugins/index.js"
-    },
-    "./html": {
-      "types": "./dist/types/html.d.ts",
-      "default": "./src/html.js"
-    },
-    "./component": {
-      "types": "./dist/types/component/index.d.ts",
-      "default": "./src/component/index.js"
-    },
-    "./styles/md.css": "./styles/md.css",
-    "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/types/",
     "src/",
-    "docs/",
-    "schemas/",
-    "styles/"
+    "docs/"
   ],
-  "description": "Markdown + frontmatter as JSON documents: a compile-to-closures parser whose AST feeds the Jaren query, JSLT, view and forms engines natively",
+  "description": "A C#-familiar fluent LINQ surface for the Jaren suite: expression capture into plain query documents, deferred immutable sequences, and a provider seam that runs the same document in memory or anywhere else",
   "author": "joham",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jklarenbeek/jarenjs.git",
-    "directory": "components/md"
+    "directory": "packages/linq"
   },
   "license": "MIT",
   "engines": {
@@ -52,12 +36,10 @@
   "keywords": [
     "jaren",
     "json",
-    "markdown",
-    "commonmark",
-    "gfm",
-    "frontmatter",
-    "ast",
-    "parser"
+    "linq",
+    "query",
+    "fluent",
+    "expression-tree"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -66,7 +48,6 @@
   },
   "dependencies": {
     "@jarenjs/core": "^0.25.3",
-    "@jarenjs/mermaid": "^0.25.3",
-    "@jarenjs/view": "^0.25.3"
+    "@jarenjs/json": "^0.25.3"
   }
 }

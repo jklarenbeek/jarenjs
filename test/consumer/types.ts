@@ -630,3 +630,32 @@ const dagResult: Promise<unknown> = dag.run({ rows: [] }, {
   onNode: (rec) => void `${rec.id}:${rec.status}:${rec.ms}`,
 });
 void dagResult.catch(() => null);
+
+// @jarenjs/linq — the fluent surface: capture, deferral, terminals,
+// params, providers, the document seam
+import {
+  from as linqFrom, fromDocument as linqFromDocument,
+  LinqBuildError, LinqRuntimeError, LINQ_CODES, Sequence,
+} from '@jarenjs/linq';
+
+const linqRows = [{ id: 1, name: 'ada', age: 36 }];
+const linqSeq: Sequence = linqFrom(linqRows)
+  .params({ minAge: 21 })
+  .where((u: any, p: any) => u.age.gt(p.minAge))
+  .orderBy((u: any) => u.name)
+  .select((u: any) => ({ id: u.id, name: u.name }));
+const linqDoc: unknown = linqSeq.toDocument();
+void linqDoc;
+const linqOut: any[] = linqSeq.toArray();
+void linqOut.length;
+const linqCount: number = linqFrom(linqRows).count();
+void linqCount;
+const linqFirst: any = linqFrom(linqRows).firstOrDefault(null);
+void linqFirst;
+const linqExplain: { document: unknown, externals: string[] } = linqSeq.explain();
+void linqExplain.externals.length;
+void linqFromDocument(linqRows, '$[*].name').toArray();
+const linqCodes: Readonly<Record<string, string>> = LINQ_CODES;
+void linqCodes.JL2001;
+void (LinqBuildError.name.length + LinqRuntimeError.name.length);
+for (const row of linqFrom(linqRows)) void row;

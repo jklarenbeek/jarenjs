@@ -18,6 +18,7 @@ const packageFiles = [
   'packages/josl/package.json',
   'packages/ai/package.json',
   'packages/flow/package.json',
+  'packages/linq/package.json',
 ];
 
 // private workspaces that are never versioned but whose semver ranges on
