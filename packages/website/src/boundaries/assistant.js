@@ -50,7 +50,7 @@ const compileGate = (compile) => (doc) => {
   }
   catch (err) {
     const e = /** @type {any} */ (err);
-    return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.message }] };
+    return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.reason ?? e.message }] };
   }
 };
 /**

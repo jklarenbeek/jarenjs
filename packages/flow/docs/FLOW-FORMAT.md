@@ -204,10 +204,13 @@ tables there and here MUST stay in sync.
 
 ### §5.2 Runtime: thrown vs recorded
 
-Only **caller mistakes** throw (`FlowRuntimeError`): JF2001 (an
-undeclared state id passed to `step`/`events`/`final`, or as a session
-start), JF2002 (a non-string event), JF2005 (a session with no start
-state anywhere).
+Only **caller mistakes** throw (`FlowRuntimeError`):
+
+| code | condition |
+|---|---|
+| JF2001 | an undeclared state id passed to `step`/`events`/`final`, or as a session start |
+| JF2002 | a non-string event passed to `step` |
+| JF2005 | a session created with no start state anywhere |
 
 **Document-level evaluation failures never throw.** They fail closed
 and are recorded as plain data in the step result's `errors` array,
@@ -224,10 +227,13 @@ repair loop gets a `docPath` pointing at exactly the query that failed.
 
 **Dag runs are different, deliberately** (§7.3): a dag has no
 recorded-error channel. A failure rejects the whole run promise —
-`JF2006` (a node failed: own `nodeId` property, `docPath`, `cause`) or
-`JF2007` (the caller's signal aborted the run) — because a dataflow
-result assembled from partially failed nodes is exactly the kind of
-partial result D7 forbids.
+because a dataflow result assembled from partially failed nodes is
+exactly the kind of partial result D7 forbids:
+
+| code | condition |
+|---|---|
+| JF2006 | a node failed while evaluating (own `nodeId` property beside `docPath` and `cause`) |
+| JF2007 | the caller's signal aborted the run |
 
 ## §6 The jaren-dag document
 

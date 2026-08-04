@@ -14,6 +14,7 @@
  */
 
 import { equalsJson } from '@jarenjs/core/object';
+import { createBoundedCache } from '@jarenjs/core/cache';
 import {
   parseJSONPointer,
   compileJSONPointer,
@@ -38,25 +39,17 @@ export function parsePointer(pointer) {
   return parseJSONPointer(pointer);
 }
 
-const getterCache = new Map();
-const GETTER_CACHE_LIMIT = 512;
+const getterCache = createBoundedCache(512);
 
 /**
- * Compiled getter for a pointer string, cached FIFO (the same pattern as
- * the query engine's string cache): form field pointers are a small,
- * stable set, so every keystroke after the first hits the cache.
+ * Compiled getter for a pointer string, cached in the shared bounded
+ * LRU (`@jarenjs/core/cache`): form field pointers are a small, stable
+ * set, so every keystroke after the first hits the cache.
  * @param {string} pointer
  * @returns {(root: any) => any}
  */
 function getPointerGetter(pointer) {
-  let getter = getterCache.get(pointer);
-  if (getter === undefined) {
-    getter = compileJSONPointer(pointer);
-    if (getterCache.size >= GETTER_CACHE_LIMIT)
-      getterCache.delete(getterCache.keys().next().value);
-    getterCache.set(pointer, getter);
-  }
-  return getter;
+  return getterCache.getOrCreate(pointer, compileJSONPointer);
 }
 
 /**
@@ -77,29 +70,16 @@ export function getValueAtPointer(data, pointer) {
 // be the first write into an untouched branch) and setting `undefined`
 // deletes (parseFieldInput maps a cleared input to undefined).
 
-const setterCache = new Map();
-const removerCache = new Map();
+const setterCache = createBoundedCache(512);
+const removerCache = createBoundedCache(512);
 
 function getPointerSetter(pointer) {
-  let setter = setterCache.get(pointer);
-  if (setter === undefined) {
-    setter = compileJSONPointerSetter(pointer, { parents: 'create' });
-    if (setterCache.size >= GETTER_CACHE_LIMIT)
-      setterCache.delete(setterCache.keys().next().value);
-    setterCache.set(pointer, setter);
-  }
-  return setter;
+  return setterCache.getOrCreate(pointer,
+    (p) => compileJSONPointerSetter(p, { parents: 'create' }));
 }
 
 function getPointerRemover(pointer) {
-  let remover = removerCache.get(pointer);
-  if (remover === undefined) {
-    remover = compileJSONPointerRemover(pointer);
-    if (removerCache.size >= GETTER_CACHE_LIMIT)
-      removerCache.delete(removerCache.keys().next().value);
-    removerCache.set(pointer, remover);
-  }
-  return remover;
+  return removerCache.getOrCreate(pointer, compileJSONPointerRemover);
 }
 
 /**

@@ -447,7 +447,7 @@ export function createApp(appDoc, options = {}) {
         const cause = toError(value);
         safeError(new AppRuntimeError('JA2002',
           `action '${entry.name}' event-field extractor '${field}' threw: ${safeErrorMessage(cause)}`,
-          cause));
+          { cause }));
       }
     }
 
@@ -465,7 +465,7 @@ export function createApp(appDoc, options = {}) {
     catch (err) {
       const cause = toError(err);
       safeError(new AppRuntimeError('JA2002',
-        `action '${entry.name}' failed: ${safeErrorMessage(cause)}`, cause));
+        `action '${entry.name}' failed: ${safeErrorMessage(cause)}`, { cause }));
       finish('failed', 'JA2002');
       return;
     }
@@ -496,7 +496,7 @@ export function createApp(appDoc, options = {}) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2004',
           `action '${entry.name}' produced a patch that failed to apply: ${safeErrorMessage(cause)}`,
-          cause));
+          { cause }));
         finish('failed', 'JA2004');
         return;
       }
@@ -518,7 +518,7 @@ export function createApp(appDoc, options = {}) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2015',
           `the validateState hook threw for action '${entry.name}': ${safeErrorMessage(cause)}`,
-          cause));
+          { cause }));
         finish('failed', 'JA2015');
         return;
       }
@@ -546,7 +546,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2011',
-            `a state listener threw: ${safeErrorMessage(cause)}`, cause));
+            `a state listener threw: ${safeErrorMessage(cause)}`, { cause }));
         }
       }
       refreshSubs();
@@ -599,7 +599,7 @@ export function createApp(appDoc, options = {}) {
         catch (err) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2011',
-            `a transaction observer threw: ${safeErrorMessage(cause)}`, cause));
+            `a transaction observer threw: ${safeErrorMessage(cause)}`, { cause }));
         }
       }
     }
@@ -628,7 +628,7 @@ export function createApp(appDoc, options = {}) {
       catch (err) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2007',
-          `effect '${String(run)}' threw during lookup: ${safeErrorMessage(cause)}`, cause));
+          `effect '${String(run)}' threw during lookup: ${safeErrorMessage(cause)}`, { cause }));
         continue;
       }
       if (handler === undefined) {
@@ -643,7 +643,7 @@ export function createApp(appDoc, options = {}) {
       catch (err) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2007',
-          `effect '${run}' threw: ${safeErrorMessage(cause)}`, cause));
+          `effect '${run}' threw: ${safeErrorMessage(cause)}`, { cause }));
       }
     }
   }
@@ -675,7 +675,7 @@ export function createApp(appDoc, options = {}) {
           live = false;
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2002',
-            `subscription '${sub.run}' has a "when" that failed: ${safeErrorMessage(cause)}`, cause));
+            `subscription '${sub.run}' has a "when" that failed: ${safeErrorMessage(cause)}`, { cause }));
         }
       }
       if (live && !slot.live) {
@@ -687,7 +687,7 @@ export function createApp(appDoc, options = {}) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2013',
             `subscription '${sub.run}' threw during lookup; it stays stopped: ${safeErrorMessage(cause)}`,
-            cause));
+            { cause }));
           continue;
         }
         if (handler === undefined) {
@@ -703,7 +703,7 @@ export function createApp(appDoc, options = {}) {
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2013',
             `subscription '${sub.run}' threw while starting; it stays stopped: ${safeErrorMessage(cause)}`,
-            cause));
+            { cause }));
           continue;
         }
         slot.live = true;
@@ -831,7 +831,7 @@ export function createApp(appDoc, options = {}) {
         : new AggregateError(failures, 'multiple cleanup failures in one destroy');
       safeError(new AppRuntimeError('JA2012',
         `cleanup failed while destroying the app: ${failures.length} failure(s)`,
-        /** @type {any} */ (cause)));
+        { cause: /** @type {any} */ (cause) }));
     }
   }
 
@@ -843,7 +843,7 @@ export function createApp(appDoc, options = {}) {
    */
   function reportCleanup(message, cause) {
     if (destroyFailures !== null) destroyFailures.push(cause);
-    else safeError(new AppRuntimeError('JA2012', message, cause));
+    else safeError(new AppRuntimeError('JA2012', message, { cause }));
   }
 
   /** Dispose registered effect handlers, each identity exactly once.
@@ -1038,7 +1038,7 @@ export function createApp(appDoc, options = {}) {
     catch (err) {
       const cause = toError(err);
       safeError(new AppRuntimeError('JA2015',
-        `the validateState hook threw for the initial state: ${safeErrorMessage(cause)}`, cause));
+        `the validateState hook threw for the initial state: ${safeErrorMessage(cause)}`, { cause }));
       return;
     }
     if (verdict === false

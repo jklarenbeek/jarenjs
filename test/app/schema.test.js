@@ -7,6 +7,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import {
   downlevelDraft07,
   draftNeutralSubsetViolations,
+  mapRefs,
 } from '../json/schema-artifact-helpers.js';
 
 const load = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
@@ -78,17 +79,6 @@ describe('the jaren-app meta-schema', function () {
   it('stays in the draft-neutral subset and its draft-07 twin is in sync', function () {
     assert.deepStrictEqual(draftNeutralSubsetViolations(appSchema), []);
     const twin = downlevelDraft07(appSchema);
-    const mapRefs = (node) => {
-      if (Array.isArray(node)) return node.map(mapRefs);
-      if (node === null || typeof node !== 'object') return node;
-      return Object.fromEntries(Object.entries(node).map(([k, v]) => [
-        k,
-        k === '$ref' && typeof v === 'string'
-          && v.startsWith('https://jarenjs.dev/schemas/jaren-') && !v.endsWith('/draft-07')
-          ? `${v}/draft-07`
-          : mapRefs(v),
-      ]));
-    };
     assert.deepStrictEqual(appSchema07, mapRefs(twin),
       'regenerate the committed twin from the canonical artifact');
   });

@@ -11,4 +11,4 @@ export { createFormView, createFormActions, formEventFields } from './forms.js';
 export { createTaskEffect } from './tasks.js';
 export { createFocusEffect } from './focus.js';
 export { createTransactionLog } from './diagnostics.js';
-export { AppCompileError, AppRuntimeError, HostValueError, toError } from './errors.js';
+export { AppCompileError, AppRuntimeError, HostValueError, toError, APP_CODES } from './errors.js';

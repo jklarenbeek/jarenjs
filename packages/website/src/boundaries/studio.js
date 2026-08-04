@@ -34,6 +34,7 @@ import { createDomRenderer } from '@jarenjs/view';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 import { compileChart } from '@jarenjs/charts';
+import { errorMessage } from '../lib/nodes.js';
 import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
@@ -52,7 +53,7 @@ const validateApp = new JarenValidator({ skipErrors: false, collectErrors: true 
   .addSchema(jsltSchema)
   .compile(appSchema);
 
-const message = (err) => /** @type {Error} */ (err)?.message ?? String(err);
+const message = errorMessage;
 
 /**
  * Validate a candidate document against the jaren-app meta-schema.

@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.24.9",
+  "version": "0.25.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -44,6 +44,10 @@
       "types": "./dist/types/bigint.d.ts",
       "default": "./src/bigint.js"
     },
+    "./cache": {
+      "types": "./dist/types/cache.d.ts",
+      "default": "./src/cache.js"
+    },
     "./color": {
       "types": "./dist/types/color.d.ts",
       "default": "./src/color.js"
@@ -51,6 +55,10 @@
     "./dates": {
       "types": "./dist/types/dates/index.d.ts",
       "default": "./src/dates/index.js"
+    },
+    "./errors": {
+      "types": "./dist/types/errors.d.ts",
+      "default": "./src/errors.js"
     },
     "./dates/*": {
       "types": "./dist/types/dates/*.d.ts",
@@ -91,6 +99,10 @@
     "./scan": {
       "types": "./dist/types/scan.d.ts",
       "default": "./src/scan.js"
+    },
+    "./schema": {
+      "types": "./dist/types/schema.d.ts",
+      "default": "./src/schema.js"
     },
     "./string": {
       "types": "./dist/types/string.d.ts",

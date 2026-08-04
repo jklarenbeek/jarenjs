@@ -44,6 +44,11 @@ import {
 } from '@jarenjs/core/object';
 
 import {
+  NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
+} from '@jarenjs/core/schema';
+
+import {
   compileDataRef,
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
@@ -145,13 +150,14 @@ function compileDollarDataRequired(schemaObj, ref) {
 //#region Main Compilation
 
 /** Application order of the $data-capable keywords (error order is part
- * of the observable behavior, so this list preserves the historical
- * per-keyword dispatch sequence). */
+ * of the observable behavior; the shared groups' internal order IS the
+ * historical per-keyword dispatch sequence — `@jarenjs/core/schema`
+ * documents that order as contract). */
 const DOLLAR_KEYWORD_ORDER = [
-  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
-  'minLength', 'maxLength', 'pattern', 'format',
-  'minItems', 'maxItems', 'uniqueItems',
-  'minProperties', 'maxProperties', 'required',
+  ...NUMERIC_CONSTRAINTS,
+  ...STRING_CONSTRAINTS,
+  ...ARRAY_CONSTRAINTS,
+  ...OBJECT_CONSTRAINTS, 'required',
   'enum', 'const',
 ];
 

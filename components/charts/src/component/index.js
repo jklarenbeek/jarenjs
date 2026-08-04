@@ -13,8 +13,7 @@
  * stable-stringified config hash.
  */
 
-import { hashContent } from '@jarenjs/core/string';
-import { stableStringify } from '@jarenjs/core/object';
+import { contentKey } from '@jarenjs/core/object';
 import { compileChart } from '../core/chart.js';
 import { createChartSession } from '../core/session.js';
 
@@ -74,7 +73,7 @@ export function createChartComponent(options = {}) {
         byConfig = new Map();
         byData.set(data, byConfig);
       }
-      const key = hashContent(stableStringify(config) ?? '');
+      const key = contentKey(config);
       let vnode = byConfig.get(key);
       if (vnode === undefined) {
         vnode = compile(config, data).toVnode();

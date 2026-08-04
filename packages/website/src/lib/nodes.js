@@ -28,15 +28,34 @@ export const callout = (title, text, href, link) =>
 export const code = (title, text, badge) =>
   ({ kind: 'code', title: title ?? null, text, badge: badge ?? null });
 
+/**
+ * One error → one display string. Coded errors compose their own
+ * message (`code: reason at path` per the @jarenjs/core contract), so
+ * this never prefixes anything — prefixing again is how the same suite
+ * used to show one error two different ways on two pages.
+ * @param {unknown} err
+ * @returns {string}
+ */
+export const errorMessage = (err) =>
+  (typeof (/** @type {any} */ (err))?.message === 'string'
+    ? /** @type {any} */ (err).message
+    : String(err));
+
 /** An error block in the engine-error shape (code/docPath/dataPath/position). */
 export function error(err, fallbackTitle) {
   const parts = [];
-  if (err.code) parts.push(`code: ${err.code}`);
-  if (err.docPath !== undefined && err.docPath !== null) {
-    parts.push(`docPath: ${err.docPath === '' ? '"" (document root)' : err.docPath}`);
-  }
-  if (err.dataPath !== undefined && err.dataPath !== null) {
-    parts.push(`dataPath: ${err.dataPath === '' ? '"" (document root)' : err.dataPath}`);
+  // A coded error (it carries `reason`) already renders its code and
+  // its location inside `message` — the detail line repeats only what
+  // the message does NOT contain.
+  const composed = typeof err.reason === 'string';
+  if (!composed) {
+    if (err.code) parts.push(`code: ${err.code}`);
+    if (err.docPath !== undefined && err.docPath !== null) {
+      parts.push(`docPath: ${err.docPath === '' ? '"" (document root)' : err.docPath}`);
+    }
+    if (err.dataPath !== undefined && err.dataPath !== null) {
+      parts.push(`dataPath: ${err.dataPath === '' ? '"" (document root)' : err.dataPath}`);
+    }
   }
   if (typeof err.position === 'number') parts.push(`position: ${err.position}`);
   if (typeof err.line === 'number') parts.push(`line: ${err.line}`);
@@ -45,7 +64,7 @@ export function error(err, fallbackTitle) {
   return {
     kind: 'error',
     title: err.code ?? fallbackTitle ?? err.name ?? 'Error',
-    message: err.message ?? String(err),
+    message: errorMessage(err),
     detail: parts.length > 0 ? parts.join(' · ') : null,
   };
 }

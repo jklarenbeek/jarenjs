@@ -15,7 +15,7 @@ import { parseExpression } from '../parser/index.js';
 import { compileExpr } from '../compile.js';
 import { defaultEnv } from '../env.js';
 import { createTheme } from '../theme.js';
-import { hashContent } from '../utils.js';
+import { contentKey } from '@jarenjs/core/object';
 
 const DEFAULTS = {
   width: 420,
@@ -161,7 +161,7 @@ export function scene3dToVnode(scene, options = {}) {
     'stroke-linejoin': 'round',
     class: 'calc-face',
   }));
-  const key = 'p3:' + hashContent(JSON.stringify({ z: scene.zrange, n: scene.quads.length, q0: scene.quads[0] }));
+  const key = 'p3:' + contentKey({ z: scene.zrange, n: scene.quads.length, q0: scene.quads[0] });
   return svgRoot('calc-plot', scene.width, scene.height, theme, children, key);
 }
 

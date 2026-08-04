@@ -6,7 +6,7 @@ import {
   isBooleanType,
   isTypedArray,
 } from './index.js';
-import { compareCodePoints } from './string.js';
+import { compareCodePoints, hashContent } from './string.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -274,6 +274,27 @@ export function stableStringify(value) {
     first = false;
   }
   return out + '}';
+}
+
+/**
+ * The suite's one MEMO-GRADE content key: `hashContent(stableStringify
+ * (value) ?? '')`. Two structurally equal plain-JSON values produce the
+ * same key regardless of property insertion order — which is exactly
+ * what a cache wants and exactly what `JSON.stringify`-based keys get
+ * wrong.
+ *
+ * Two properties a caller must know, inherited from `stableStringify`:
+ * **`undefined` members are dropped** (two values differing only in an
+ * `undefined` member share a key) and there is **no cycle guard** (a
+ * cyclic value overflows the stack). Both are fine for a memo key and
+ * wrong for a checksum — for anything hashed, signed or recorded, use
+ * `canonicalizeJson` (`@jarenjs/json/canonical`, RFC 8785) instead.
+ * Do not conflate the two.
+ * @param {*} value - The value to derive a cache key for
+ * @returns {string} base-36 content hash of the stable serialization
+ */
+export function contentKey(value) {
+  return hashContent(stableStringify(value) ?? '');
 }
 
 /**

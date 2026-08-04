@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/app",
   "private": false,
-  "version": "0.24.9",
+  "version": "0.25.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -50,7 +50,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/json": "^0.24.9",
-    "@jarenjs/view": "^0.24.9"
+    "@jarenjs/core": "^0.25.0",
+    "@jarenjs/json": "^0.25.0",
+    "@jarenjs/view": "^0.25.0"
   }
 }

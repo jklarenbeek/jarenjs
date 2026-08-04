@@ -25,11 +25,16 @@ const MAX_ERRORS = 8;
  * Normalize an injected check's errors into the compact records a
  * repair prompt carries. The default `JarenValidator` check reports
  * `{ instancePath, keyword, message }`; a compiler check (a Jaren
- * engine caught into an outcome) reports `{ code, docPath, message }`.
+ * engine caught into an outcome) reports `{ code, docPath, reason }`.
  * Both are the same idea — a location and a reason — so a compile error
  * keeps its `code` and its `docPath` here rather than being flattened
  * into a location-less message. `docPath` (the engine's pointer into
- * the offending document) wins over `instancePath` when both appear.
+ * the offending document) wins over `instancePath` when both appear;
+ * `''` is a real docPath (the document root) and only `undefined`
+ * falls through. `reason` (the bare text of a coded error) wins over
+ * `message` so the record never carries the code and the path twice —
+ * the composed `message` already contains both, and the fields beside
+ * it are the structured copies.
  * @param {any[]} raw
  */
 function normalizeErrors(raw) {
@@ -38,7 +43,7 @@ function normalizeErrors(raw) {
     const out = {
       instancePath: e.docPath ?? e.instancePath ?? '',
       keyword: e.code ?? e.keyword ?? '',
-      message: e.message ?? 'invalid',
+      message: e.reason ?? e.message ?? 'invalid',
     };
     if (e.code !== undefined) out.code = e.code;
     if (e.docPath !== undefined) out.docPath = e.docPath;
@@ -111,7 +116,7 @@ function compileWithRefs(schema, refs) {
  *     `compile` gate keeps the *semantics*. A gate is
  *     `(doc) => { try { compile(doc); return true; } catch (e) {
  *     return { valid: false, errors: [{ code: e.code, docPath:
- *     e.docPath, message: e.message }] }; } }`; its coded, docPath'd
+ *     e.docPath, message: e.reason ?? e.message }] }; } }`; its coded, docPath'd
  *     errors go back to the model for repair (compile errors repair
  *     well — they are precise). Composes with `validator` when both are
  *     given (validator first). NOTE: a *quality/adequacy* gate — "needs

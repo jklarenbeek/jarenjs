@@ -5,6 +5,10 @@ import {
   getStringType,
   isObjectClass,
 } from '@jarenjs/core';
+import {
+  NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
+} from '@jarenjs/core/schema';
 
 import {
   getUniqueArray,
@@ -449,13 +453,16 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   let refWithSiblings = false;
   if (hasSchemaRef(jsonSchema) && !hasSchemaRecursiveRef(jsonSchema)) {
     // Check if there are any validation-related sibling keywords
-    // In draft 2019-09+, if there are validation siblings, we process them together
-    const validationKeywords = ['type', 'const', 'enum', 'multipleOf', 'maximum', 'exclusiveMaximum',
-      'minimum', 'exclusiveMinimum', 'maxLength', 'minLength', 'pattern', 'maxItems', 'minItems',
-      'uniqueItems', 'maxContains', 'minContains', 'maxProperties', 'minProperties', 'required',
+    // In draft 2019-09+, if there are validation siblings, we process
+    // them together. Membership-only (order-insensitive): the shared
+    // constraint groups plus the applicators and extras.
+    const validationKeywords = ['type', 'const', 'enum',
+      ...NUMERIC_CONSTRAINTS, ...STRING_CONSTRAINTS,
+      ...ARRAY_CONSTRAINTS, 'maxContains', 'minContains',
+      ...OBJECT_CONSTRAINTS, 'required',
       'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
       'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
-      'then', 'else', 'propertyNames', 'format', 'contentEncoding', 'contentMediaType',
+      'then', 'else', 'propertyNames', 'contentEncoding', 'contentMediaType',
       'unevaluatedProperties', 'unevaluatedItems', '$query'];
     const hasValidationSiblings = keys.some(k => validationKeywords.includes(k));
     // In draft 7 and earlier, $ref always overrides siblings regardless

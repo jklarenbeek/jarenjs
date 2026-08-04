@@ -7,15 +7,14 @@
  *
  * Memoization strategy (deliberate, see the component layer): identity
  * of the *data object* is the cache key, held in a WeakMap by
- * `createChartComponent` — never `hashContent(object)`, which would
- * stringify every object to `"[object Object]"` and collide
- * universally. `hashContent` is used only on the stable-stringified
- * config to derive the root vnode key.
+ * `createChartComponent` — never a hash of the object itself, which
+ * would stringify every object to `"[object Object]"` and collide
+ * universally. `contentKey` (the memo-grade stable-stringify hash from
+ * `@jarenjs/core/object`) derives the root vnode key from the config.
  */
 
 import { renderToString } from '@jarenjs/view';
-import { hashContent } from '@jarenjs/core/string';
-import { stableStringify } from '@jarenjs/core/object';
+import { contentKey } from '@jarenjs/core/object';
 
 import { createTheme } from './palette.js';
 import { buildPieAST, renderPieAST } from '../types/pie.js';
@@ -82,7 +81,7 @@ export function compileChart(config, data = config, options = {}) {
     throw new TypeError(`unknown chart type '${config?.type}'`);
   const ast = def.build(data, config);
   const theme = createTheme(options.theme);
-  const hash = hashContent(stableStringify(config) ?? '');
+  const hash = contentKey(config);
   // Only the render half takes options; passing the object through
   // whole would let a `theme` member reach a type's palette options.
   const renderOptions = options.tooltip === undefined ? undefined : { tooltip: options.tooltip };

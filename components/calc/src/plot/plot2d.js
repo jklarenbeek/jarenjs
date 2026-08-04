@@ -15,7 +15,7 @@ import { parseExpression } from '../parser/index.js';
 import { compileExpr } from '../compile.js';
 import { defaultEnv } from '../env.js';
 import { createTheme } from '../theme.js';
-import { hashContent } from '../utils.js';
+import { contentKey } from '@jarenjs/core/object';
 
 const DEFAULTS = {
   width: 480,
@@ -194,7 +194,10 @@ export function scene2dToVnode(scene, options = {}) {
     if (d) children.push(path(d, { stroke: colors[i % colors.length], 'stroke-width': 2, fill: 'none', class: 'calc-series' }));
   });
 
-  const key = 'p2:' + hashContent(JSON.stringify({ d: scene.domain, r: scene.range, s: scene.series.map((s) => s.source) }));
+  // contentKey stable-stringifies, so two structurally equal scenes
+  // share a key regardless of property order (the old JSON.stringify
+  // key was insertion-order fragile).
+  const key = 'p2:' + contentKey({ d: scene.domain, r: scene.range, s: scene.series.map((s) => s.source) });
   return svgRoot('calc-plot', scene.width, scene.height, theme, children, key);
 }
 

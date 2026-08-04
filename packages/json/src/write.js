@@ -43,6 +43,7 @@ import { parseJSONPath, compileJSONPath } from './path.js';
 import { scanArrayIndex, isSingularSegments } from './segments.js';
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
+import { CodedError } from '@jarenjs/core/errors';
 
 import {
   makeState,
@@ -59,14 +60,13 @@ const hasOwn = Object.hasOwn;
  * Error thrown when a write target is malformed (`JW0001`) or a write
  * fails to apply (`JW2xxx`). `dataPath` is the write target as given
  * (a JSON Pointer or JSONPath), or the normalized path of the failing
- * location for query-selected writes.
+ * location for query-selected writes — rendered `in data <path>` per
+ * the `@jarenjs/core` coded contract, because it locates *data*, not a
+ * document.
  */
-export class JsonWriteError extends Error {
-  constructor(code, message, dataPath) {
-    super(`${code}: ${message} at ${dataPath === '' ? "''" : dataPath}`);
-    this.name = 'JsonWriteError';
-    this.code = code;
-    this.dataPath = dataPath;
+export class JsonWriteError extends CodedError {
+  constructor(code, reason, dataPath) {
+    super('JsonWriteError', code, reason, { dataPath });
   }
 }
 

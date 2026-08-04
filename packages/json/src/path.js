@@ -79,6 +79,7 @@ import {
   isNameCharCode,
 } from '@jarenjs/core/scan';
 import { deepFreeze } from '@jarenjs/core/object';
+import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
 import { LabeledSyntaxError } from './errors.js';
 
 /**
@@ -1054,18 +1055,19 @@ export function compileJSONPath(source, options = undefined) {
   return query;
 }
 
-const QUERY_CACHE = new Map();
-const QUERY_CACHE_LIMIT = 512;
+const QUERY_CACHE = createBoundedCache(512);
 // One cache per registry, because the same source compiles differently
 // under different extensions; keyed weakly so a registry that goes out
-// of scope takes its compiled queries with it.
-const REGISTRY_CACHES = new WeakMap();
+// of scope takes its compiled queries with it. A WeakMap of bounded
+// caches — the two axes of `@jarenjs/core/cache`, composed.
+const REGISTRY_CACHES = createWeakCache();
+const boundedCacheFor = () => createBoundedCache(512);
 
 /**
  * Apply a JSONPath query to a JSON value in one call. Compiled queries
- * are cached (FIFO, 512 entries), so repeated calls with the same query
- * string reuse the compiled function. A query compiled against a
- * function-extension registry is cached under that registry.
+ * are cached (bounded LRU, 512 entries), so repeated calls with the
+ * same query string reuse the compiled function. A query compiled
+ * against a function-extension registry is cached under that registry.
  * @param {string} source - The JSONPath expression
  * @param {any} data - The JSON value to query
  * @param {JSONPathOptions} [options] - Compile options
@@ -1073,22 +1075,11 @@ const REGISTRY_CACHES = new WeakMap();
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
  */
 export function queryJSONPath(source, data, options = undefined) {
-  let cache = QUERY_CACHE;
   const functions = options == null ? null : options.pathFunctions;
-  if (functions != null) {
-    cache = REGISTRY_CACHES.get(functions);
-    if (cache === undefined) {
-      cache = new Map();
-      REGISTRY_CACHES.set(functions, cache);
-    }
-  }
-  let query = cache.get(source);
-  if (query === undefined) {
-    query = compileJSONPath(source, options);
-    if (cache.size >= QUERY_CACHE_LIMIT)
-      cache.delete(cache.keys().next().value);
-    cache.set(source, query);
-  }
+  const cache = functions == null
+    ? QUERY_CACHE
+    : REGISTRY_CACHES.getOrCreate(functions, boundedCacheFor);
+  const query = cache.getOrCreate(source, (src) => compileJSONPath(src, options));
   return query(data);
 }
 

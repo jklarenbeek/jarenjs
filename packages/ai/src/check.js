@@ -32,7 +32,9 @@ export function checkOutcome(outcome) {
  *
  * A compile gate is the two-line adapter `(doc) => { try { compile(doc);
  * return true; } catch (e) { return { valid: false, errors: [{ code:
- * e.code, docPath: e.docPath, message: e.message }] }; } }`.
+ * e.code, docPath: e.docPath, message: e.reason ?? e.message }] }; } }`
+ * — `reason` is the bare text of a coded error; falling back to
+ * `message` keeps the adapter total over non-coded throws.
  *
  * @param {...(value: any) => any} checks - each returns a boolean or a
  *   `{ valid, errors }` outcome (mixed freely)

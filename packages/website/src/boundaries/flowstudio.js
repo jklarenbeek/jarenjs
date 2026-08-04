@@ -30,6 +30,7 @@ import flowchartToDag from '@jarenjs/mermaid/stylesheets/flowchart-to-dag.jslt.j
 
 import { flowTemplate, FLOW_TEMPLATES } from '../content/flowTemplates.js';
 import { memo1 } from '../lib/format.js';
+import { errorMessage } from '../lib/nodes.js';
 
 // ------------------------------------------------------------------
 // The projection chain: document → mermaid text → decorated vnode
@@ -346,12 +347,10 @@ function runNames(doc) {
   return [...names];
 }
 
-/** @param {unknown} err @returns {string} */
-function message(err) {
-  const e = /** @type {any} */ (err);
-  const code = typeof e?.code === 'string' ? `${e.code}: ` : '';
-  return `${code}${typeof e?.message === 'string' ? e.message : String(err)}`;
-}
+// One shared normalizer (lib/nodes.js): coded errors compose their own
+// `code: reason at path` message now, so the hand prefix this module
+// used to add would print the code twice.
+const message = errorMessage;
 
 /**
  * The Flow studio runtime: the nested-app host widget for machine runs

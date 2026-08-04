@@ -29,6 +29,10 @@
 // own TypeScript and Markdown emitters have no privileged access.
 
 import { isJsonObject } from '@jarenjs/core/object';
+import {
+  NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
+} from '@jarenjs/core/schema';
 import { parseJSONPointer } from '@jarenjs/json';
 import {
   collectSameDocumentAnchors,
@@ -119,12 +123,13 @@ export const EMIT_MODEL_VERSION = '0.1';
  *   must be able to avoid the names its predecessors used.
  */
 
-/** Keywords that constrain a value without narrowing its TYPE. */
+/** Keywords that constrain a value without narrowing its TYPE — the
+ * shared constraint groups plus the emit-specific extras. */
 const DROPPED_CONSTRAINTS = [
-  'minLength', 'maxLength', 'pattern', 'format',
-  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
-  'minItems', 'maxItems', 'uniqueItems', 'contains', 'minContains', 'maxContains',
-  'minProperties', 'maxProperties', 'propertyNames', 'dependentRequired',
+  ...STRING_CONSTRAINTS,
+  ...NUMERIC_CONSTRAINTS,
+  ...ARRAY_CONSTRAINTS, 'contains', 'minContains', 'maxContains',
+  ...OBJECT_CONSTRAINTS, 'propertyNames', 'dependentRequired',
   'dependentSchemas', 'dependencies', 'not',
   '$query', 'data', '$data',
 ];

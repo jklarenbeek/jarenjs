@@ -51,6 +51,7 @@ import {
 
 import { NOTHING, scanArrayIndex } from './segments.js';
 
+import { CodedError } from '@jarenjs/core/errors';
 import { CodedDocPathError } from './errors.js';
 
 import {
@@ -80,15 +81,13 @@ export class JsonPatchCompileError extends CodedDocPathError {
  * Error thrown when applying a compiled JSON Patch fails (`JP2xxx`
  * codes). `docPath` points at the failing operation in the patch
  * document; `dataPath` is the operation's target location in the
- * document being patched.
+ * document being patched — both render, separately identifiable, per
+ * the `@jarenjs/core` coded contract (`at` = document, `in data` =
+ * data).
  */
-export class JsonPatchRuntimeError extends Error {
-  constructor(code, message, docPath, dataPath) {
-    super(`${code}: ${message} at ${docPath}`);
-    this.name = 'JsonPatchRuntimeError';
-    this.code = code;
-    this.docPath = docPath;
-    this.dataPath = dataPath;
+export class JsonPatchRuntimeError extends CodedError {
+  constructor(code, reason, docPath, dataPath) {
+    super('JsonPatchRuntimeError', code, reason, { docPath, dataPath });
   }
 }
 

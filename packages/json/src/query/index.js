@@ -13,12 +13,13 @@
 // plain JSON out (empty sequence -> undefined, singleton -> the item,
 // longer sequence -> array of items).
 
+import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
 import { normalizeQuery, deepFreezeCopy } from './normalize.js';
 import { compileQueryRoot, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
 import { JsonQueryRuntimeError } from './errors.js';
 
-export { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
+export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -260,15 +261,15 @@ export function compileJsonQuery(doc, options = {}) {
   return query;
 }
 
-const OBJECT_CACHE = new WeakMap();
-const STRING_CACHE = new Map();
-const STRING_CACHE_LIMIT = 512;
+const OBJECT_CACHE = createWeakCache();
+const STRING_CACHE = createBoundedCache(512);
+const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);
 
 /**
  * Apply a Jaren JSON Query document to a JSON value in one call.
- * Compiled queries are cached: object documents by identity (WeakMap),
- * string documents (the degenerate JSONPath case) by value (FIFO, 512
- * entries - the same pattern as `queryJSONPath`).
+ * Compiled queries are cached: object documents by identity (weak),
+ * string documents (the degenerate JSONPath case) by value (bounded
+ * LRU, 512 entries — the shared `@jarenjs/core/cache` primitive).
  * @param {any} doc - the query document
  * @param {any} data - the JSON value to query
  * @param {object} [externals] - external parameter bindings (`{ name: value }`)
@@ -279,20 +280,10 @@ const STRING_CACHE_LIMIT = 512;
 export function queryJson(doc, data, externals) {
   let query;
   if (typeof doc === 'string') {
-    query = STRING_CACHE.get(doc);
-    if (query === undefined) {
-      query = compileJsonQuery(doc);
-      if (STRING_CACHE.size >= STRING_CACHE_LIMIT)
-        STRING_CACHE.delete(STRING_CACHE.keys().next().value);
-      STRING_CACHE.set(doc, query);
-    }
+    query = STRING_CACHE.getOrCreate(doc, compileUncached);
   }
   else if (typeof doc === 'object' && doc !== null) {
-    query = OBJECT_CACHE.get(doc);
-    if (query === undefined) {
-      query = compileJsonQuery(doc);
-      OBJECT_CACHE.set(doc, query);
-    }
+    query = OBJECT_CACHE.getOrCreate(doc, compileUncached);
   }
   else { // scalar documents are trivial literals; compiling is cheaper than caching
     query = compileJsonQuery(doc);

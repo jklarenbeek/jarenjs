@@ -54,6 +54,29 @@ export function downlevelDraft07(schema) {
 }
 
 /**
+ * Rewrite every same-suite `$ref` (`https://jarenjs.dev/schemas/jaren-*`)
+ * to point at its draft-07 twin, so a downleveled artifact references
+ * downleveled grammars. The companion to {@link downlevelDraft07} for
+ * artifacts that compose other jaren schemas by `$ref` (app, fsm, dag).
+ * Hoisted from two token-identical test-local copies when the third
+ * consumer appeared — exactly the threshold the flow copy's comment
+ * named.
+ * @param {any} node
+ * @returns {any}
+ */
+export function mapRefs(node) {
+  if (Array.isArray(node)) return node.map(mapRefs);
+  if (node === null || typeof node !== 'object') return node;
+  return Object.fromEntries(Object.entries(node).map(([k, v]) => [
+    k,
+    k === '$ref' && typeof v === 'string'
+      && v.startsWith('https://jarenjs.dev/schemas/jaren-') && !v.endsWith('/draft-07')
+      ? `${v}/draft-07`
+      : mapRefs(v),
+  ]));
+}
+
+/**
  * Return every violation of the repository's draft-neutral schema subset.
  * An empty result means the artifact can use the mechanical draft-07
  * transform above without changing its validation semantics.

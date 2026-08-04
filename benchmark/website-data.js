@@ -9,6 +9,7 @@
  * the page can load them lazily per tab:
  *
  *   validate.json     profiler.js       — JSON Schema suite vs Ajv (per test)
+ *   contracts.json    contracts.js      — contract validation vs Zod 4/3/mini and Ajv
  *   jsonpath.json     jsonpath.js       — CTS compliance + per-query profile vs json-p3
  *   jsonquery.json    jsonquery.js      — scenario matrix vs fontoxpath/jsonata (+ sources)
  *   jslt.json         jslt.js           — scenario matrix vs native JS/JSONata (+ sources)
@@ -16,9 +17,13 @@
  *   jsonpointer.json  jsonpointer.js    — compiled vs legacy vs jsonpointer npm
  *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
  *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
+ *   csv.json          csv.js            — CSV reader/writer vs udsv/csv-parse/d3-dsv
  *   markdown.json     markdown.js       — @jarenjs/md vs marked/markdown-it/micromark (CommonMark spec)
  *   mermaid.json      mermaid.js        — @jarenjs/mermaid coverage + parse-speed vs @mermaid-js/parser
+ *   view.json         view.js           — vnode building vs React/hyperapp/preact + engine decomposition
+ *   charts.json       charts.js         — chart compile + SVG render throughput
  *   geo.json          geo.js            — spatial kernel vs turf/geolib/flatbush (equivalence-gated)
+ *   flow.json         flow-fsm.js/-dag.js — FSM step + DAG run throughput vs XState
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -51,7 +56,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, qt3');
+        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, qt3');
         process.exit(0);
         break;
       default:

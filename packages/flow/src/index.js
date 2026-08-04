@@ -9,4 +9,4 @@
 export { compileFsm, createFsmSession } from './fsm.js';
 export { fsmToApp, fsmStateSchema } from './app.js';
 export { compileDag } from './dag.js';
-export { FlowCompileError, FlowRuntimeError } from './errors.js';
+export { FlowCompileError, FlowRuntimeError, FLOW_CODES } from './errors.js';

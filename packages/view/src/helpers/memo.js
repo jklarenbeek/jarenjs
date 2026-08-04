@@ -8,6 +8,8 @@
  * in O(1) (the O(change) contract).
  */
 
+import { createBoundedCache } from '@jarenjs/core/cache';
+
 /**
  * @typedef {object} ProjectionMemo
  * @property {(source: string) => any} compile memoized compile
@@ -32,29 +34,14 @@
  * @returns {ProjectionMemo}
  */
 export function createProjectionMemo({ compile, toVnode, docToVnode, memoLimit = 32 }) {
-  /** Source-string memo (LRU by Map re-insertion). */
-  /** @type {Map<string, any>} */
-  const bySource = new Map();
+  /** Source-string memo (the shared bounded LRU, `@jarenjs/core/cache`). */
+  const bySource = createBoundedCache(memoLimit);
   /** Parsed-document memo (reference-keyed). */
   /** @type {WeakMap<object, any>} */
   const byDoc = new WeakMap();
 
   /** @type {(source: string) => any} */
-  const memoCompile = (source) => {
-    let compiled = bySource.get(source);
-    if (compiled !== undefined) {
-      // Refresh recency.
-      bySource.delete(source);
-      bySource.set(source, compiled);
-      return compiled;
-    }
-    compiled = compile(source);
-    bySource.set(source, compiled);
-    if (bySource.size > memoLimit) {
-      bySource.delete(bySource.keys().next().value);
-    }
-    return compiled;
-  };
+  const memoCompile = (source) => bySource.getOrCreate(source, compile);
 
   /** @type {(sourceOrDoc: any) => any} */
   const view = (sourceOrDoc) => {

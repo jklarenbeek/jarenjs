@@ -1,10 +1,43 @@
 //@ts-check
 /**
- * @file Error types for @jarenjs/app, following the suite convention:
- * every failure carries a stable `code` (JA0xxx compile, JA2xxx runtime)
- * and, where one exists, the `docPath` of the offending member of the
- * app document — the feedback shape a repair loop needs.
+ * @file Error types for @jarenjs/app, built on `@jarenjs/core`'s coded
+ * contract: every failure carries a stable `code` (JA0xxx compile,
+ * JA2xxx runtime), a bare `reason`, a composed `message`, and — where
+ * one exists — the `docPath` of the offending member of the app
+ * document. The feedback shape a repair loop needs.
  */
+
+import { CodedError } from '@jarenjs/core/errors';
+
+/**
+ * The runtime code table (the `CSV_CODES` shape): one entry per code
+ * this package can raise, proven in sync with APP-FORMAT.md's normative
+ * table by a test.
+ */
+export const APP_CODES = Object.freeze({
+  JA0001: 'the app document is not an object',
+  JA0002: 'view is missing or failed to compile',
+  JA0003: 'actions is not an object of named documents',
+  JA0004: 'an action document failed to compile',
+  JA0005: 'subs is not an array of subscription entries',
+  JA0006: 'a subscription entry is malformed or its when failed to compile',
+  JA0007: 'the app failed to boot after compilation succeeded',
+  JA2001: 'an unknown action was dispatched',
+  JA2002: 'an action, when document or event-field extractor threw',
+  JA2003: 'an action produced a transition that is not an object',
+  JA2004: 'a transition patch failed to apply',
+  JA2005: 'the next state violated the app invariants',
+  JA2006: 'a transition named an effect with no registered handler',
+  JA2007: 'an effect handler threw',
+  JA2008: 'a subscription entry names no registered handler',
+  JA2009: 'a binding requested an unknown event field',
+  JA2010: 'the dispatch loop exceeded maxTurns transactions in one drain',
+  JA2011: 'a state listener or transaction observer threw',
+  JA2012: 'a cleanup threw while stopping, reconciling or destroying',
+  JA2013: 'a subscription handler threw while starting',
+  JA2014: 'a post-render intent named a data-ref with no rendered target',
+  JA2015: 'the validateState hook itself threw',
+});
 
 /**
  * A defect in the app document itself, raised while `createApp` compiles
@@ -22,18 +55,19 @@
  *    the queued boot work failed after compilation succeeded; every
  *    already-acquired resource was rolled back (see `cause`)
  */
-export class AppCompileError extends Error {
+export class AppCompileError extends CodedError {
   /**
    * @param {string} code
-   * @param {string} message
-   * @param {string} [docPath] - JSON Pointer into the app document.
+   * @param {string} reason - The bare reason; `message` is composed as
+   *   `${code}: ${reason} at ${docPath}` per the coded contract.
+   * @param {string} [docPath] - JSON Pointer into the app document;
+   *   `''` is the document root, `undefined` means no location (never
+   *   normalized to `''` — root and unknown are different facts).
    * @param {Error} [cause]
    */
-  constructor(code, message, docPath, cause) {
-    super(message, cause !== undefined ? { cause } : undefined);
-    this.name = 'AppCompileError';
-    this.code = code;
-    this.docPath = docPath ?? '';
+  constructor(code, reason, docPath, cause) {
+    super('AppCompileError', code, reason, docPath,
+      cause !== undefined ? { cause } : undefined);
   }
 }
 
@@ -68,16 +102,21 @@ export class AppCompileError extends Error {
  *    distinct from a rejection verdict (`JA2005`); the transaction
  *    fails and the queue keeps draining
  */
-export class AppRuntimeError extends Error {
+export class AppRuntimeError extends CodedError {
   /**
    * @param {string} code
-   * @param {string} message
-   * @param {Error} [cause]
+   * @param {string} reason - The bare reason; `message` is composed
+   *   from `code`, `reason` and the location per the coded contract.
+   * @param {{ docPath?: string, cause?: Error }} [options] - `docPath`
+   *   is a JSON Pointer into the app document where one exists
+   *   (`undefined` when there is no location — never `''`, which means
+   *   the document root); `cause` retains what host code threw.
    */
-  constructor(code, message, cause) {
-    super(message, cause !== undefined ? { cause } : undefined);
-    this.name = 'AppRuntimeError';
-    this.code = code;
+  constructor(code, reason, options) {
+    super('AppRuntimeError', code, reason, options?.docPath,
+      options !== undefined && options.cause !== undefined
+        ? { cause: options.cause }
+        : undefined);
     /** Structured detail, e.g. validateState errors for JA2005. */
     this.detail = undefined;
   }

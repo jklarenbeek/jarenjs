@@ -8,6 +8,7 @@ import { compileFsm, compileDag } from '@jarenjs/flow';
 import {
   downlevelDraft07,
   draftNeutralSubsetViolations,
+  mapRefs,
 } from '../json/schema-artifact-helpers.js';
 
 const load = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
@@ -198,21 +199,3 @@ describe('the jaren-dag schema artifact', function () {
   });
 });
 
-/**
- * Twin refs point at the draft-07 grammar twins. The same transform as
- * the app meta-schema test — a third copy would justify moving it into
- * the shared helpers.
- * @param {any} node
- * @returns {any}
- */
-function mapRefs(node) {
-  if (Array.isArray(node)) return node.map(mapRefs);
-  if (node === null || typeof node !== 'object') return node;
-  return Object.fromEntries(Object.entries(node).map(([k, v]) => [
-    k,
-    k === '$ref' && typeof v === 'string'
-      && v.startsWith('https://jarenjs.dev/schemas/jaren-') && !v.endsWith('/draft-07')
-      ? `${v}/draft-07`
-      : mapRefs(v),
-  ]));
-}

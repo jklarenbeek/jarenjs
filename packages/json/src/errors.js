@@ -6,32 +6,36 @@
 // as a string literal because the bundle is minified and a mangled
 // class name must not leak into `error.name`.
 
+import { CodedError } from '@jarenjs/core/errors';
+
 /**
  * Base for errors that carry a stable `code` and a `docPath`, an RFC
  * 6901 JSON Pointer into the offending document. A wrapped error is
- * exposed through the native `cause` option when one is given.
+ * exposed through the native `cause` option when one is given. This is
+ * the positional adapter over `@jarenjs/core`'s {@link CodedError}: a
+ * trailing `undefined` cause means "no cause" (no own property), per
+ * the base's contract.
  */
-export class CodedDocPathError extends Error {
+export class CodedDocPathError extends CodedError {
   /**
    * @param {string} name - The public class name for `error.name`
    * @param {string} code - Stable diagnosis code
-   * @param {string} message - What is wrong
+   * @param {string} reason - What is wrong (bare; the message is composed)
    * @param {string} docPath - JSON Pointer into the offending document
    * @param {unknown} [cause] - Wrapped error, when there is one
    */
-  constructor(name, code, message, docPath, cause = undefined) {
-    super(`${code}: ${message} at ${docPath}`,
+  constructor(name, code, reason, docPath, cause = undefined) {
+    super(name, code, reason, docPath,
       cause === undefined ? undefined : { cause });
-    this.name = name;
-    this.code = code;
-    this.docPath = docPath;
   }
 }
 
 /**
  * Base for syntax errors over a source string: `source` and `position`
  * locate the offending token, and the message is prefixed with a
- * human-readable language label.
+ * human-readable language label. Deliberately NOT a {@link CodedError}:
+ * this family carries no stable code and locates by source offset, not
+ * by document pointer.
  */
 export class LabeledSyntaxError extends SyntaxError {
   /**

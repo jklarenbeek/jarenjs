@@ -11,12 +11,17 @@
  */
 
 import { isJsonObject } from '@jarenjs/core/object';
-
+import { createWeakCache } from '@jarenjs/core/cache';
 import {
-  compileJSONPointer,
-  encodeJSONPointerSegment,
-  JSONPOINTER_NOTHING,
-} from '@jarenjs/json/pointer';
+  NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
+} from '@jarenjs/core/schema';
+
+import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import {
+  collectSameDocumentAnchors,
+  resolveSameDocumentRef,
+} from '@jarenjs/validate/normalize';
 
 import {
   getFormatInfo,
@@ -78,24 +83,38 @@ export function humanizeKey(key) {
 }
 
 /**
- * Resolve a local JSON pointer ('#/$defs/foo') inside the root document
- * through the shared @jarenjs/json pointer walk (RFC 6901: the URI
- * fragment percent-decodes to the pointer text).
+ * Anchor maps per root schema, computed once and held exactly as long
+ * as the root object itself (`collectSameDocumentAnchors` walks the
+ * whole document — per-field recomputation would be quadratic).
+ */
+const ANCHOR_MAPS = createWeakCache();
+
+/**
+ * Resolve a same-document `$ref` — `#` (the root), `#/pointer`, or
+ * `#anchor` — with the validator's own exported resolver, so a form
+ * derives its model from exactly the schema the validator would
+ * enforce. (The previous private re-implementation resolved only
+ * `#/pointer`, silently rendering `$ref: "#"` and `#anchor` fields as
+ * `unknown`.) External refs stay unresolvable by design.
  * @param {string} ref
  * @param {object} rootSchema
  * @returns {object|boolean|null} The referenced schema or null when unresolvable
  */
 function resolveLocalRef(ref, rootSchema) {
-  if (typeof ref !== 'string' || !ref.startsWith('#/')) return null;
-  let pointer = ref.slice(1);
+  if (typeof ref !== 'string' || !ref.startsWith('#')) return null;
+  let fragment = ref;
   try {
-    if (pointer.indexOf('%') >= 0) pointer = decodeURIComponent(pointer);
-    const target = compileJSONPointer(pointer)(rootSchema);
-    return target === JSONPOINTER_NOTHING ? null : target;
+    if (fragment.indexOf('%') >= 0) fragment = decodeURIComponent(fragment);
   }
   catch (_e) {
     return null; // malformed fragment: same 'unresolvable' answer as a missing target
   }
+  const anchors = (rootSchema !== null && typeof rootSchema === 'object')
+    ? ANCHOR_MAPS.getOrCreate(rootSchema, collectSameDocumentAnchors)
+    : undefined;
+  const target = resolveSameDocumentRef(fragment, rootSchema,
+    /** @type {Map<string, object>|undefined} */ (anchors));
+  return target === undefined ? null : target;
 }
 
 /**
@@ -231,18 +250,21 @@ function getControl(kind, schema) {
  * @param {object} schema
  * @returns {object}
  */
+/** The form-relevant constraint keywords: the shared groups plus the
+ * date bounds — constraints like any other; without them a date control
+ * has no min/max to offer and the user only learns the range by
+ * submitting. */
+const FORM_CONSTRAINTS = [
+  ...STRING_CONSTRAINTS,
+  ...NUMERIC_CONSTRAINTS,
+  'formatMinimum', 'formatMaximum', 'formatExclusiveMinimum', 'formatExclusiveMaximum',
+  ...ARRAY_CONSTRAINTS,
+  ...OBJECT_CONSTRAINTS,
+];
+
 function getConstraints(schema) {
   const c = {};
-  for (const key of [
-    'minLength', 'maxLength', 'pattern', 'format',
-    'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
-    // the date bounds are constraints like any other; without them a
-    // date control has no min/max to offer and the user only learns the
-    // range by submitting
-    'formatMinimum', 'formatMaximum', 'formatExclusiveMinimum', 'formatExclusiveMaximum',
-    'minItems', 'maxItems', 'uniqueItems',
-    'minProperties', 'maxProperties',
-  ]) {
+  for (const key of FORM_CONSTRAINTS) {
     if (schema[key] !== undefined) c[key] = schema[key];
   }
   return c;

@@ -1,12 +1,49 @@
 //@ts-check
 /**
- * @file Error types for @jarenjs/flow, following the suite convention:
- * every failure carries a stable `code` (JF0xxx compile, JF2xxx runtime)
- * and, where one exists, the `docPath` of the offending member of the
- * flow document — the feedback shape a repair loop needs. The normative
- * table lives in docs/FLOW-FORMAT.md §5 and must stay in sync with the
- * lists below.
+ * @file Error types for @jarenjs/flow, built on `@jarenjs/core`'s coded
+ * contract: every failure carries a stable `code` (JF0xxx compile,
+ * JF2xxx runtime), a bare `reason`, a composed `message`, and — where
+ * one exists — the `docPath` of the offending member of the flow
+ * document. The feedback shape a repair loop needs. The normative
+ * table lives in docs/FLOW-FORMAT.md §5, proven in sync with
+ * `FLOW_CODES` below by a test.
  */
+
+import { CodedError } from '@jarenjs/core/errors';
+
+/**
+ * The runtime code table (the `CSV_CODES` shape): one entry per code
+ * this package can raise, proven in sync with FLOW-FORMAT.md §5's
+ * normative table by a test — the "must stay in sync by hand" note this
+ * file used to carry is now a checked fact.
+ */
+export const FLOW_CODES = Object.freeze({
+  JF0001: 'the document is not an object, or $fsm is not 0.1',
+  JF0002: 'states is not an array, or a state entry is malformed',
+  JF0003: 'two state entries share one id',
+  JF0004: 'initial is neither null nor a declared state id',
+  JF0005: 'transitions is not an array, or an entry is malformed',
+  JF0006: 'a transition from/to names no declared state',
+  JF0007: 'a guard failed to compile as a query document',
+  JF0008: 'an effects list or effect descriptor is malformed',
+  JF0009: 'an effect with failed to compile as a query document',
+  JF0010: 'the dag document is not an object, or $dag is not 0.1',
+  JF0011: 'nodes is not an object, or a node declaration is malformed',
+  JF0012: 'edges is not an array, or an edge entry is malformed',
+  JF0013: 'an edge from/to names no declared node',
+  JF0014: 'an embedded document failed to compile',
+  JF0015: 'the wiring rules are violated',
+  JF0016: 'the graph has a cycle',
+  JF0017: 'the document does not declare exactly one output node',
+  JF0018: 'a task node names a handler the registry does not provide',
+  JF2001: 'a state id the machine does not declare',
+  JF2002: 'step was called with a non-string event',
+  JF2003: 'a guard threw while evaluating',
+  JF2004: 'an effect with threw while evaluating',
+  JF2005: 'a session was created with no start state',
+  JF2006: 'a dag node failed while evaluating; the run rejects',
+  JF2007: 'the caller signal aborted the run',
+});
 
 /**
  * A defect in the flow document itself, raised while `compileFsm`
@@ -58,18 +95,18 @@
  *  - `JF0018` — a `task` node names a handler the compile-time
  *    registry does not provide
  */
-export class FlowCompileError extends Error {
+export class FlowCompileError extends CodedError {
   /**
    * @param {string} code
-   * @param {string} message
-   * @param {string} [docPath] - JSON Pointer into the flow document.
+   * @param {string} reason - The bare reason; `message` is composed per
+   *   the coded contract.
+   * @param {string} [docPath] - JSON Pointer into the flow document;
+   *   `''` is the document root, `undefined` means no location.
    * @param {Error} [cause]
    */
-  constructor(code, message, docPath, cause) {
-    super(message, cause !== undefined ? { cause } : undefined);
-    this.name = 'FlowCompileError';
-    this.code = code;
-    this.docPath = docPath ?? '';
+  constructor(code, reason, docPath, cause) {
+    super('FlowCompileError', code, reason, docPath,
+      cause !== undefined ? { cause } : undefined);
   }
 }
 
@@ -100,17 +137,17 @@ export class FlowCompileError extends Error {
  *  - `JF2007` — the caller's `signal` aborted the run (`cause` is the
  *    abort reason when one was given)
  */
-export class FlowRuntimeError extends Error {
+export class FlowRuntimeError extends CodedError {
   /**
    * @param {string} code
-   * @param {string} message
-   * @param {string} [docPath] - JSON Pointer into the flow document.
+   * @param {string} reason - The bare reason; `message` is composed per
+   *   the coded contract.
+   * @param {string} [docPath] - JSON Pointer into the flow document;
+   *   `''` is the document root, `undefined` means no location.
    * @param {Error} [cause]
    */
-  constructor(code, message, docPath, cause) {
-    super(message, cause !== undefined ? { cause } : undefined);
-    this.name = 'FlowRuntimeError';
-    this.code = code;
-    this.docPath = docPath ?? '';
+  constructor(code, reason, docPath, cause) {
+    super('FlowRuntimeError', code, reason, docPath,
+      cause !== undefined ? { cause } : undefined);
   }
 }

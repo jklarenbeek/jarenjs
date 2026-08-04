@@ -207,8 +207,10 @@ describe('compileDag — THE PROGRAM THESIS', function () {
 
     const manifest = JSON.parse(readFileSync(
       new URL('../../packages/flow/package.json', import.meta.url), 'utf8'));
-    assert.deepStrictEqual(Object.keys(manifest.dependencies), ['@jarenjs/json'],
-      'the composition is data-only: flow depends on the json engines and nothing else');
+    assert.deepStrictEqual(Object.keys(manifest.dependencies).sort(),
+      ['@jarenjs/core', '@jarenjs/json'],
+      'the composition is data-only: flow depends on the json engines '
+      + 'and the core primitives (the coded-error base), nothing else');
   });
 });
 

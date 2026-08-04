@@ -22,7 +22,10 @@ function failsWith(doc, code, docPath) {
     if (docPath !== undefined)
       assert.strictEqual(e.docPath, docPath, `expected docPath '${docPath}', got '${e.docPath}'`);
     assert.strictEqual(e.message.startsWith(`${e.code}: `), true, 'message must start with the code');
-    assert.strictEqual(e.message.endsWith(` at ${e.docPath}`), true, 'message must end with the docPath');
+    // The root pointer renders as `at ''` (a real location, not absence)
+    // per the @jarenjs/core coded contract.
+    assert.strictEqual(e.message.endsWith(` at ${e.docPath === '' ? "''" : e.docPath}`), true,
+      'message must end with the docPath');
     return true;
   });
 }

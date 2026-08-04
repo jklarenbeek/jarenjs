@@ -8,6 +8,7 @@
 // reimplemented.
 
 import { deepFreezeCopy } from '../query/normalize.js';
+import { createOptionVariantCache, identityOf } from '../option-variants.js';
 import {
   compileJsltStylesheet,
   JsltCompileError,
@@ -85,41 +86,23 @@ export function compileJtltStylesheet(doc, options = {}) {
   return render;
 }
 
-const TEMPLATE_CACHE = new WeakMap();
+const TEMPLATE_CACHE = createOptionVariantCache();
 
 function cachedRender(template, options) {
-  let record = TEMPLATE_CACHE.get(template);
-  if (record === undefined) {
-    record = {
-      defaultRender: null,
-      variants: null,
-    };
-    TEMPLATE_CACHE.set(template, record);
-  }
-
+  // The FULL option tuple keys the cache. `compileJtltStylesheet`
+  // forwards its options to the JSLT compiler, which also honours
+  // `memo` and `pathFunctions` — the old two-field comparison dropped
+  // both, so a one-call render with `pathFunctions` compiled without
+  // them (a live cache-poisoning bug, fixed by keying on everything).
   const compileTypeTest = typeof options?.compileTypeTest === 'function'
     ? options.compileTypeTest
     : null;
   const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
-  if (compileTypeTest === null && maxDepth === 1024) {
-    if (record.defaultRender === null)
-      record.defaultRender = compileJtltStylesheet(template);
-    return record.defaultRender;
-  }
-
-  let variants = record.variants;
-  if (variants === null) {
-    variants = [];
-    record.variants = variants;
-  }
-  for (let i = 0; i < variants.length; i++) {
-    const variant = variants[i];
-    if (variant.compileTypeTest === compileTypeTest && variant.maxDepth === maxDepth)
-      return variant.render;
-  }
-  const render = compileJtltStylesheet(template, options);
-  variants.push({ compileTypeTest, maxDepth, render });
-  return render;
+  const memo = options?.memo === true;
+  const pathFunctions = options?.pathFunctions == null ? null : options.pathFunctions;
+  const key = `${identityOf(compileTypeTest)}|${maxDepth}|${memo ? 1 : 0}|${identityOf(pathFunctions)}`;
+  return TEMPLATE_CACHE.getOrCompile(template, key,
+    () => compileJtltStylesheet(template, options));
 }
 
 /**

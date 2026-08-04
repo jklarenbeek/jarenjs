@@ -5,6 +5,7 @@
 
 import { deepFreezeCopy } from '../query/normalize.js';
 import { EMPTY, Seq } from '../query/runtime.js';
+import { createOptionVariantCache, identityOf } from '../option-variants.js';
 import { normalizeJsltStylesheet } from './stylesheet.js';
 import { compileJsltDispatch } from './dispatch.js';
 
@@ -67,47 +68,22 @@ export function compileJsltStylesheet(doc, options = {}) {
   return transform;
 }
 
-const STYLESHEET_CACHE = new WeakMap();
+const STYLESHEET_CACHE = createOptionVariantCache();
 
 function cachedTransform(stylesheet, options) {
-  let record = STYLESHEET_CACHE.get(stylesheet);
-  if (record === undefined) {
-    record = {
-      defaultTransform: null,
-      variants: null,
-    };
-    STYLESHEET_CACHE.set(stylesheet, record);
-  }
-
-  // Every option that changes what compiles has to be part of the cache
-  // key, or a second call with different options silently reuses the
-  // first compilation.
+  // Every option that changes what compiles is part of the derived key,
+  // or a second call with different options silently reuses the first
+  // compilation. Hooks and registries compare by identity, so they are
+  // interned to per-process ids.
   const compileTypeTest = typeof options?.compileTypeTest === 'function'
     ? options.compileTypeTest
     : null;
   const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
   const memo = options?.memo === true;
   const pathFunctions = options?.pathFunctions == null ? null : options.pathFunctions;
-  if (compileTypeTest === null && maxDepth === 1024 && !memo && pathFunctions === null) {
-    if (record.defaultTransform === null)
-      record.defaultTransform = compileJsltStylesheet(stylesheet);
-    return record.defaultTransform;
-  }
-
-  let variants = record.variants;
-  if (variants === null) {
-    variants = [];
-    record.variants = variants;
-  }
-  for (let i = 0; i < variants.length; i++) {
-    const variant = variants[i];
-    if (variant.compileTypeTest === compileTypeTest && variant.maxDepth === maxDepth
-      && variant.memo === memo && variant.pathFunctions === pathFunctions)
-      return variant.transform;
-  }
-  const transform = compileJsltStylesheet(stylesheet, options);
-  variants.push({ compileTypeTest, maxDepth, memo, pathFunctions, transform });
-  return transform;
+  const key = `${identityOf(compileTypeTest)}|${maxDepth}|${memo ? 1 : 0}|${identityOf(pathFunctions)}`;
+  return STYLESHEET_CACHE.getOrCompile(stylesheet, key,
+    () => compileJsltStylesheet(stylesheet, options));
 }
 
 /**

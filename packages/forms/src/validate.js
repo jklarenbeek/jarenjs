@@ -26,6 +26,7 @@ import {
   equalsDeep,
   isUniqueDeepArray,
 } from '@jarenjs/core/object';
+import { createBoundedCache } from '@jarenjs/core/cache';
 
 import {
   encodeJSONPointerSegment,
@@ -47,20 +48,19 @@ import {
  * @property {string} message - Human readable message (rendered through a catalog)
  */
 
-const regexCache = new Map();
+// Bounded LRU (`@jarenjs/core/cache`) replacing the old flush-all-at-500
+// variant; `null` is the cached "invalid pattern" verdict (the cache's
+// miss sentinel is `undefined`, so a negative result is a real entry).
+const regexCache = createBoundedCache(500);
 function getPattern(source) {
-  let regex = regexCache.get(source);
-  if (regex === undefined) {
+  return regexCache.getOrCreate(source, (src) => {
     try {
-      regex = createRegExp(source);
+      return createRegExp(src);
     }
     catch (_e) {
-      regex = null;
+      return null;
     }
-    if (regexCache.size > 500) regexCache.clear();
-    regexCache.set(source, regex);
-  }
-  return regex;
+  });
 }
 
 /**

@@ -1,0 +1,80 @@
+[
+  {
+    "family": "query",
+    "record": {
+      "instancePath": "/a",
+      "keyword": "JQ0002",
+      "message": "unknown operator '$frobnicate'",
+      "code": "JQ0002",
+      "docPath": "/a"
+    }
+  },
+  {
+    "family": "jslt",
+    "record": {
+      "instancePath": "/0/body",
+      "keyword": "JT0003",
+      "message": "a template body must be a vnode or a phrase",
+      "code": "JT0003",
+      "docPath": "/0/body"
+    }
+  },
+  {
+    "family": "jtlt",
+    "record": {
+      "instancePath": "/rules/1",
+      "keyword": "TL0002",
+      "message": "a rule needs a \"match\" pattern",
+      "code": "TL0002",
+      "docPath": "/rules/1"
+    }
+  },
+  {
+    "family": "patch",
+    "record": {
+      "instancePath": "/2",
+      "keyword": "JP0001",
+      "message": "an operation must carry an \"op\" member",
+      "code": "JP0001",
+      "docPath": "/2"
+    }
+  },
+  {
+    "family": "app",
+    "record": {
+      "instancePath": "/subs",
+      "keyword": "JA0005",
+      "message": "the \"subs\" member must be an array of subscription entries",
+      "code": "JA0005",
+      "docPath": "/subs"
+    }
+  },
+  {
+    "family": "app-runtime",
+    "record": {
+      "instancePath": "",
+      "keyword": "JA2008",
+      "message": "subscription 'tick' has no registered handler",
+      "code": "JA2008"
+    }
+  },
+  {
+    "family": "flow",
+    "record": {
+      "instancePath": "/transitions/0/from",
+      "keyword": "JF0006",
+      "message": "transition 0 leaves the undeclared state 'nope'",
+      "code": "JF0006",
+      "docPath": "/transitions/0/from"
+    }
+  },
+  {
+    "family": "ai",
+    "record": {
+      "instancePath": "",
+      "keyword": "AI0003",
+      "message": "the provider answered with a malformed payload",
+      "code": "AI0003"
+    }
+  }
+]
