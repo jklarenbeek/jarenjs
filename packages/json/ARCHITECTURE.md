@@ -52,6 +52,8 @@ flowchart LR
 
 Stage 1 owns *all* static errors: the JSONPath parser is a single-pass, character-level recursive-descent parser (the `fail(message, position)` idiom, `JSONPathSyntaxError`), and the query normalizer raises every `JQ0xxx` compile error with a `docPath`. Stage 2 never re-checks structure; it specializes: selector kinds, slice bound arithmetic, comparison operators, literal regexes, operator arities and cardinality fast paths are all resolved before the first document is seen. A compiled query closes over nothing mutable and is reusable across documents and calls.
 
+For the query engine, stage 1's output is a **published contract**, not an internal shape: `analyzeQuery` (the `./query` subpath) returns the frozen normalized tree, `NODE_KINDS` enumerates its twelve node kinds, and `AST_VERSION` versions the shape under the compatibility policy of QUERY-FORMAT.md Appendix C. Stage 2 — the closures — remains unpromised and changes freely. The reasoning: an exhaustive consumer of the normalized form (a translator, a planner) fails loudly when the language grows a construct, where a raw-document walker would silently degrade it; publishing stage 1 freezes the language's *resolved* form, not the implementation. An exhaustiveness gate in `test/json/query/` keeps `NODE_KINDS`, the appendix's table and the operator count in agreement with the code.
+
 ### JSON Pointer: segment-count specialization
 
 `pointer.js` follows the pipeline in miniature. The strict parsers (`parseJSONPointer`, `parseRelativeJSONPointer`) are single-pass char-code scanners with a lazy-decode fast path: an escape-free segment is a direct slice, and only segments containing `~` build a decoded string. The compilers pre-decode every member name and pre-parse every array index (one segment, two forms — RFC 6901 lets `"2"` address both a `"2"` member and array element 2), then specialize the getter by segment count (0 = identity, 1 to 4 = unrolled hops, N = a loop over parallel name/index arrays). A relative pointer trims its level count off the runtime location by scanning **backwards** for the N-th `/` — no split, no arrays — and resolution returns the `NOTHING` sentinel shared with `segments.js`, so pointer and JSONPath results compose. Nothing is allocated on any resolution path.
@@ -161,7 +163,7 @@ Grouping, `$distinct` and the `$orderby` machinery need a total, deterministic e
 
 ### The operator registry
 
-All 91 §8 operators live in one table in `operators.js` — the query-language analogue of `path.js`'s `FUNCTIONS` table:
+All 93 §8 operators live in one table in `operators.js` — the query-language analogue of `path.js`'s `FUNCTIONS` table (the count is cross-checked against QUERY-FORMAT §8 by a test, so it cannot go stale again):
 
 ```javascript
 '$substring': {

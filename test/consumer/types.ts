@@ -1,6 +1,9 @@
 import { isStringType } from '@jarenjs/core';
 import { getStringLength } from '@jarenjs/core/string';
-import { compileJsonQuery } from '@jarenjs/json/query';
+import {
+  compileJsonQuery, analyzeQuery, annotateTypes,
+  NODE_KINDS, TYPE_TAGS, AST_VERSION,
+} from '@jarenjs/json/query';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import {
   canonicalizeJson,
@@ -198,6 +201,28 @@ void explanation.limits?.sequenceItems;
 void limitedQuery.first({ rows: [] });
 void limitedQuery.exists({ rows: [] });
 void limitedQuery.ebv({ rows: [1] });
+
+// @jarenjs/json/query — the published normalized form (Appendix C):
+// analyzeQuery, the version/kind constants and the type pass
+const analysis = analyzeQuery({ $eq: ['$.a', '$x'] });
+const astVersion: number = analysis.astVersion;
+void astVersion;
+void analysis.frameSize;
+const analysisExternals: readonly { name: string; slot: number }[] = analysis.externals;
+void analysisExternals;
+void analysis.dependencies.operators.length;
+const kinds: readonly string[] = NODE_KINDS;
+void kinds;
+const versionPin: number = AST_VERSION;
+void versionPin;
+const annotated = annotateTypes(analysis, {
+  typeOf: (node: unknown) => (node ? 'string' : null),
+});
+void annotated;
+const tags: readonly string[] = TYPE_TAGS;
+void tags;
+const withAnalysis = compileJsonQuery('$.a', { analysis: true });
+void withAnalysis.analysis;
 
 // @jarenjs/forms — the session view model surface
 import { buildFormViewModel } from '@jarenjs/forms';

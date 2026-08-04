@@ -101,6 +101,23 @@ const resultOfOperand = (cards) => cards[0];
 // a singleton operand stays a singleton; anything else may come out empty
 const resultEmptyPropagates = (cards) => (cards[0] === CARD_ONE ? CARD_ONE : CARD_OPT);
 
+// Static result-type declarations for `annotateTypes` (QUERY-FORMAT.md
+// Appendix C.8): `resultType(argTypes)` returns a tag name from the
+// closed lattice, or null for unknown. Declared only for the
+// comparison, arithmetic, string and aggregate families, and only where
+// the answer is certain — a wrong tag is a defect, `unknown` never is.
+const RT_BOOLEAN = () => 'boolean';
+const RT_NUMBER = () => 'number';
+const RT_INTEGER = () => 'integer';
+const RT_STRING = () => 'string';
+// $min/$max keep their operand family: numbers yield a number, strings
+// a string, anything else stays unknown (mixed input is JQ2001 anyway).
+const RT_MINMAX = (types) => {
+  const t = types[0].type;
+  if (t === 'number' || t === 'integer') return 'number';
+  return t === 'string' ? 'string' : null;
+};
+
 //#endregion
 
 //#region runtime argument helpers
@@ -220,6 +237,7 @@ function comparisonEntry(itemCmp) {
   return {
     params: ARGS_2,
     result: RESULT_ONE,
+    resultType: RT_BOOLEAN,
     compile: (gets, args) => {
       const left = gets[0];
       const right = gets[1];
@@ -273,10 +291,11 @@ function arithOperandError(v, docPath) {
 // non-number singletons and longer sequences are JQ2001. `makeApply`
 // builds the two-number kernel (it closes over the operator docPath for
 // the JQ2002 zero-divisor errors of $idiv/$mod).
-function arithmeticEntry(makeApply) {
+function arithmeticEntry(makeApply, resultType = RT_NUMBER) {
   return {
     params: ARGS_2,
     result: (cards) => (cards[0] === CARD_ONE && cards[1] === CARD_ONE ? CARD_ONE : CARD_OPT),
+    resultType,
     compile: (gets, args, docPath) => {
       const apply = makeApply(docPath);
       const left = gets[0];
@@ -337,10 +356,11 @@ function logicEntry(stopOn) {
 //#region string operators
 
 // unary string operator: coerce per stringArg, apply the kernel
-function stringUnaryEntry(apply) {
+function stringUnaryEntry(apply, resultType = RT_STRING) {
   return {
     params: UNARY,
     result: RESULT_ONE,
+    resultType,
     compile: (gets, args) => {
       const get = gets[0];
       const docPath = args[0].docPath;
@@ -354,6 +374,7 @@ function stringPairEntry(test) {
   return {
     params: ARGS_2,
     result: RESULT_ONE,
+    resultType: RT_BOOLEAN,
     compile: (gets, args) => {
       const aGet = gets[0];
       const aPath = args[0].docPath;
@@ -393,6 +414,7 @@ function regexTestEntry(fullMatch) {
   return {
     params: ARGS_2,
     result: RESULT_ONE,
+    resultType: RT_BOOLEAN,
     compile: (gets, args) => {
       const inGet = gets[0];
       const inPath = args[0].docPath;
@@ -499,6 +521,7 @@ function minmaxEntry(isMax) {
   return {
     params: UNARY,
     result: resultEmptyPropagates,
+    resultType: RT_MINMAX,
     compile: (gets, args) => {
       const get = gets[0];
       const docPath = args[0].docPath;
@@ -858,7 +881,7 @@ export const OPERATORS = Object.freeze({
     if (b === 0)
       throw runtimeError('JQ2002', "'$idiv' by zero", docPath);
     return Math.trunc(a / b);
-  }),
+  }, RT_INTEGER),
   // XQuery double mod takes the sign of the dividend = JS %
   '$mod': arithmeticEntry((docPath) => (a, b) => {
     if (b === 0)
@@ -915,6 +938,7 @@ export const OPERATORS = Object.freeze({
   '$concat': {
     params: ARGS_0N,
     result: RESULT_ONE,
+    resultType: RT_STRING,
     compile: (gets, args) => {
       if (gets.length === 0)
         return () => '';
@@ -935,6 +959,7 @@ export const OPERATORS = Object.freeze({
   '$string-join': {
     params: ARGS_1_2,
     result: RESULT_ONE,
+    resultType: RT_STRING,
     compile: (gets, args) => {
       const seqGet = gets[0];
       const seqPath = args[0].docPath;
@@ -959,6 +984,7 @@ export const OPERATORS = Object.freeze({
   '$substring': {
     params: ARGS_2_3,
     result: RESULT_ONE,
+    resultType: RT_STRING,
     compile: (gets, args) => {
       const sGet = gets[0];
       const sPath = args[0].docPath;
@@ -998,7 +1024,7 @@ export const OPERATORS = Object.freeze({
 
   '$upper': stringUnaryEntry((s) => s.toUpperCase()),
   '$lower': stringUnaryEntry((s) => s.toLowerCase()),
-  '$string-length': stringUnaryEntry(countCodePoints),
+  '$string-length': stringUnaryEntry(countCodePoints, RT_INTEGER),
   '$normalize-space': stringUnaryEntry(normalizeSpace),
 
   '$match': regexTestEntry(true),
@@ -1007,6 +1033,7 @@ export const OPERATORS = Object.freeze({
   '$replace': {
     params: ARGS_3,
     result: RESULT_ONE,
+    resultType: RT_STRING,
     compile: compileReplace,
   },
 
@@ -1019,6 +1046,7 @@ export const OPERATORS = Object.freeze({
   '$count': {
     params: UNARY,
     result: RESULT_ONE,
+    resultType: RT_INTEGER,
     compile: (gets) => {
       const get = gets[0];
       return (f) => itemCount(get(f));
@@ -1028,6 +1056,7 @@ export const OPERATORS = Object.freeze({
   '$sum': {
     params: UNARY,
     result: RESULT_ONE,
+    resultType: RT_NUMBER,
     compile: (gets, args) => {
       const get = gets[0];
       const docPath = args[0].docPath;
@@ -1050,6 +1079,7 @@ export const OPERATORS = Object.freeze({
   '$avg': {
     params: UNARY,
     result: resultEmptyPropagates,
+    resultType: RT_NUMBER,
     compile: (gets, args) => {
       const get = gets[0];
       const docPath = args[0].docPath;

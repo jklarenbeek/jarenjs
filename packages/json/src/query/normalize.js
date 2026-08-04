@@ -30,6 +30,17 @@ import { OPERATORS } from './operators.js';
 
 //#region cardinality
 
+/**
+ * The twelve node kinds of the normalized form, sorted — the published
+ * AST contract (QUERY-FORMAT.md Appendix C). An exhaustiveness gate
+ * asserts a corpus exercising every construct produces exactly this
+ * set, so a new kind cannot ship undocumented.
+ */
+export const NODE_KINDS = Object.freeze([
+  'array', 'call', 'flwor', 'let', 'literal', 'map',
+  'object', 'op', 'path', 'quant', 'raw', 'var',
+]);
+
 /** Statically empty (the node always evaluates to the empty sequence). */
 export const CARD_ZERO = 0;
 /** Always exactly one item; compile.js skips all sequence checks. */
@@ -415,8 +426,15 @@ function normalizeElements(arg, docPath, scope, ctx) {
 // No hook installed is JQ0008; a hook rejection (invalid schema) is
 // JQ0009, both at the owning operator's/clause's docPath.
 function compileSchemaLiteral(value, schemaPath, opPath, ctx) {
-  if (ctx.compileTypeTest === null)
+  if (ctx.compileTypeTest === null) {
+    // Analysis mode (QUERY-FORMAT.md Appendix C.1): the schema literal
+    // normalizes without a compiled predicate, so a consumer can analyse
+    // a document it could not execute. Strictly opt-in — compilation
+    // never sets ctx.analysis, so its behaviour is untouched.
+    if (ctx.analysis)
+      return { schema: deepFreezeCopy(value), test: null };
     fail('JQ0008', 'schema operators require a type-test compiler (options.compileTypeTest)', opPath);
+  }
   const schema = deepFreezeCopy(value);
   let test;
   try {
@@ -1332,6 +1350,9 @@ export function normalizeQuery(doc, options = {}) {
   const ctx = {
     nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
     functions, collations, limits, pathOptions, declaredExternals,
+    // package-internal: set only by analyzeQuery (Appendix C.1); the
+    // compile entry point never passes it
+    analysis: options.analysis === true,
     usedOps: new Set(), usedFunctions: new Set(), usedCollations: new Set(),
   };
   let expr = doc;

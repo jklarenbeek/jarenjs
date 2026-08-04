@@ -1675,3 +1675,190 @@ The same constrained-decoding model applies to complete recursive
 stylesheets; see
 [JSLT-FORMAT Appendix B](./JSLT-FORMAT.md#appendix-b-llm-structured-output-non-normative)
 and its mechanically query-derived schema twins.
+
+## Appendix C. The normalized form (normative)
+
+The engine compiles in two stages: stage 1 **normalizes** a query
+document into a frozen abstract syntax tree (the grammar of §§3–9
+resolved — object partitioning, phrase classification, string forms,
+scope resolution, cardinality analysis); stage 2 specializes that tree
+into closures. Stage 2 is an optimisation artifact and changes freely.
+**Stage 1 is the language resolved, and this appendix publishes it as a
+contract**: `analyzeQuery` (the package's `./query` subpath) returns the
+normalized tree so a consumer — a translator, a planner, an analyzer —
+can walk *the engine's own reading* of a document instead of inventing a
+second one.
+
+### C.1 The analysis entry point
+
+```js
+analyzeQuery(doc, options) -> {
+  astVersion,   // integer; see the compatibility policy (C.7)
+  root,         // the frozen node tree (C.3)
+  externals,    // [{ name, slot }] in order of first appearance (§9)
+  frameSize,    // total frame slots the tree addresses (C.5)
+  dependencies, // { externals, operators, functions, collations }
+  limits,       // the normalized limits record, or null
+}
+```
+
+`analyzeQuery` accepts the same options as `compileJsonQuery` and
+applies the same JQ0xxx rejections, with one deliberate difference:
+**schema literals do not require `options.compileTypeTest`**. Where
+compilation without the hook is `JQ0008`, analysis normalizes the schema
+literal to its `raw` node carrying the frozen schema with **no compiled
+predicate** (`test` is `null`), so a consumer can analyse a document it
+could not execute. When the hook IS supplied, analysis compiles the
+predicate exactly as compilation would (and can therefore still raise
+`JQ0009`). Everything else — `$call`/`$collation` registry resolution,
+closed-world externals, limits validation — behaves identically in both
+modes.
+
+A caller wanting both pays for one normalization:
+`compileJsonQuery(doc, { analysis: true })` exposes the same record at
+`query.analysis` on the compiled query.
+
+`NODE_KINDS` (same subpath) is the frozen, sorted list of the twelve
+node kinds of C.3; `AST_VERSION` is the current version integer.
+
+### C.2 The cardinality lattice
+
+Every node carries `card`, a static **upper approximation** of its
+runtime sequence length:
+
+| value | constant | meaning |
+|---|---|---|
+| 0 | `CARD_ZERO` | statically the empty sequence |
+| 1 | `CARD_ONE` | always exactly one item |
+| 2 | `CARD_OPT` | zero or one item |
+| 3 | `CARD_MANY` | any number of items (the top) |
+
+Two combinators are part of the contract: `joinCard(a, b)` is the least
+upper bound (the cardinality of "one branch or the other", `$if`), and
+`sumCard(a, b)` is concatenation (`$seq`): `ZERO` is its identity and
+any two non-`ZERO` contributions give `MANY`. Path nodes additionally
+carry `singular` (C.3), the RFC 9535 singular-query judgement of their
+segment list.
+
+### C.3 The twelve node kinds
+
+Every node is a plain frozen object carrying at least
+`{ kind, card, docPath }`. The complete field sets:
+
+| kind | fields beyond `kind`/`card`/`docPath` |
+|---|---|
+| `literal` | `value` — a frozen JSON value (scalars, `$const` payloads, non-`$` strings) |
+| `var` | `slot`, `external` (boolean), `name` (`'$'` for the input document, slot 0) |
+| `path` | `name` (root variable), `rootSlot`, `external`, `rootCard`, `segments` (the frozen RFC 9535 segment list of `parseJSONPath`), `singular` |
+| `object` | `entries` — `[{ name, expr }]`, the map constructor of Rule 1 |
+| `map` | `pairs` — `[{ key, value }]`, the general `$map` constructor |
+| `array` | `elements` — `[node]`, the Rule 3 array constructor |
+| `raw` | `value` — a frozen verbatim JSON value (operator `raw`/`name`/`schema` argument positions); schema positions also carry `test` — the compiled predicate, or `null` under analysis without a hook |
+| `op` | `name`, `args` — `[node]`; `$range` under `limits` also carries `limits`; host extension operators also carry `entry` (the host's registry entry, an opaque host value) |
+| `call` | `name`, `fn` (the registered host function — an opaque host value), `args` |
+| `let` | `bindings` — `[{ name, slot, expr }]`, `ret` (the degenerate `{$let, $return}` phrase) |
+| `quant` | `some` (boolean), `bindings` — `[{ name, slot, expr }]`, `satisfies` |
+| `flwor` | see C.4 |
+
+**Host-valued members.** `raw.test`, `call.fn`, `op.entry` and an
+orderby spec's `collation` are the four places the tree carries host
+functions rather than JSON. A consumer that serializes or diffs the tree
+MUST treat them as opaque presence/absence facts; everything else in the
+tree is plain JSON.
+
+### C.4 The `flwor` node
+
+The full phrase (§6) normalizes to one node with the clauses in their
+fixed semantic order regardless of JSON key order:
+
+- `fold` — `null` or `{ name, slot, expr, docPath }` (§6.9); the initial
+  value is normalized in the ENCLOSING scope.
+- `forBindings` — `[{ name, slot, expr, atSlot, allowingEmpty, window }]`;
+  `atSlot` is `-1` without `$at`; `window` is `null` or
+  `{ sliding, size, step }` (§6.10).
+- `letBindings` — `[{ name, slot, expr }]`.
+- `asChecks` — `null` or `[{ name, slot, isLet, schema, test, docPath }]`
+  (§6.8); `test` is `null` under analysis without a hook.
+- `where` — `null` or a node.
+- `groupby` — `null` or `{ keys: [{ name, slot, expr, docPath }],
+  docPath, accSlots }`; `accSlots` is the frozen list of pre-group
+  binding slots that later clauses actually read (barrier liveness — an
+  over-approximation-free artifact of `collectReadSlots`).
+- `orderby` — `null` or `{ specs: [{ key, desc, emptyGreatest,
+  collation, collationName, docPath }], docPath, liveSlots }`;
+  `liveSlots` is the analogous snapshot liveness list at the sort
+  barrier.
+- `count` — `null` or `{ name, slot }`.
+- `ret` — the `$return` node.
+- `limits` — the normalized limits record, or `null`.
+
+### C.5 Slots, frames, and external resolution
+
+A compiled query evaluates against one frame array. **Slot 0 is the
+input document.** Every binding site — `$for` names, `$at` names, `$let`
+names, `$fold`'s accumulator, `$groupby` key names, `$count` — and every
+external parameter is allocated the next slot from a single counter, in
+normalization order; nested phrases keep allocating in the same frame.
+`frameSize` is the final counter (one more than the highest slot; under
+`limits.steps` one extra slot holds the step counter). Scoping is
+lexical: a name resolves to the innermost binding; a free name is an
+**external parameter**, allocated a slot at its first appearance (use is
+the declaration, §9) and reported in `externals` in that order. Under a
+closed-world compilation (`options.externals`) a free name outside the
+declared set is `JQ0005` at its own reference site. An external's `card`
+is `CARD_ONE` (the caller binds one JSON value).
+
+### C.6 `docPath` and the freezing guarantee
+
+Every node's `docPath` is an RFC 6901 JSON Pointer into the query
+document as written: `''` is the document root (or `/$expr`-prefixed
+under the version envelope, §4), object member names are
+pointer-escaped, operator argument positions append the operator key and
+the array index (`/$where/$eq/0`). It is the same pointer surface the
+`JQ0xxx` errors carry.
+
+The tree is **deeply frozen at every level** — nodes, binding records,
+segment lists, captured values. That is a guarantee, not an
+implementation detail: a consumer may hold, share and index the tree
+without defensive copies, and MUST NOT mutate it (annotation passes
+return new trees; see `annotateTypes`). Captured document fragments
+(`literal`/`raw` values, schemas) are deep-frozen COPIES — the caller's
+objects are never frozen.
+
+### C.7 The compatibility policy
+
+`AST_VERSION` (currently **1**) is bumped when a node kind is added or
+removed, a published field is removed or retyped, or an invariant of
+this appendix changes.
+
+- Adding a **new optional field** to a node is NOT a version bump;
+  consumers must tolerate unknown fields.
+- Adding a **node kind** IS a version bump: an exhaustive consumer
+  dispatching on `kind` must fail loudly on a kind it does not know,
+  and the version tells it why.
+- Explicitly **not** promised: the compiled closures, the operator
+  registry's internals (`compile` bodies), evaluation order beyond what
+  §§2–9 already require, and the two liveness lists' exact contents
+  beyond "the slots later clauses read".
+
+### C.8 Type annotation (optional pass)
+
+The tree carries cardinality but no value types. `annotateTypes`
+(same subpath) is a separate, optional pass:
+
+```js
+annotateTypes(analysis, { typeOf }) -> analysis'
+```
+
+It returns a NEW analysis whose tree mirrors the input with a frozen
+`type` tag on every node — `{ type: 'unknown' | 'null' | 'boolean' |
+'number' | 'integer' | 'string' | 'array' | 'object', optional:
+boolean }` — never mutating the input and never running during
+compilation. `typeOf(pathNode)` is the caller's answer for path nodes
+(a store schema, a model — whatever the caller knows); returning
+`null`/`undefined` means unknown. Literals and constructors type
+themselves; quantifiers are boolean; operators propagate through the
+registry's declared `resultType` families (comparison, arithmetic,
+string, aggregate — everything undeclared yields `unknown`).
+**`unknown` is always a safe answer; a wrong tag is a defect.** General
+inference beyond these rules is out of scope here.

@@ -24,6 +24,16 @@
  * index: `$.a.b[*].c` reduces to `/a/b`, and a filter's own comparisons
  * are collected separately because a filter can name another part of
  * the document (`$.lines[?@.id == $.selected]`).
+ *
+ * RETAINED beside `analyzeQuery` (QUERY-FORMAT.md Appendix C),
+ * deliberately: the published analysis reports which OPERATORS,
+ * functions and externals a query uses — not the data-pointer prefixes
+ * this invalidation needs — and this scanner is total over any JSON
+ * value (a rule that does not even normalize still yields a sound
+ * "depends on everything" answer) where analysis would throw. Deriving
+ * prefixes from the analysis tree's `path` nodes would be exact, at the
+ * price of a full normalization per rule per form build; take that
+ * route only if the over-approximation ever measurably hurts.
  */
 
 import { parseJSONPath } from '@jarenjs/json/path';

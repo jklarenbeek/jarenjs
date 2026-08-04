@@ -14,12 +14,14 @@
 // longer sequence -> array of items).
 
 import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
-import { normalizeQuery, deepFreezeCopy } from './normalize.js';
+import { normalizeQuery, deepFreezeCopy, NODE_KINDS } from './normalize.js';
 import { compileQueryRoot, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
 import { JsonQueryRuntimeError } from './errors.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
+export { NODE_KINDS };
+export { annotateTypes, TYPE_TAGS } from './types.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -89,6 +91,23 @@ const hasOwn = Object.hasOwn;
  *   reference site, so a query cannot silently acquire a parameter the
  *   host never meant to expose. `[]` declares none. Omitted, the open
  *   world of QUERY-FORMAT.md section 9 applies: use is the declaration.
+ * @property {boolean} [analysis] - On `compileJsonQuery`: additionally
+ *   expose the normalized-form record (QUERY-FORMAT.md Appendix C.1) at
+ *   `query.analysis`, from the same normalization. Compilation itself
+ *   stays strict — schema hooks remain required.
+ */
+
+/**
+ * The published normalized-form record (QUERY-FORMAT.md Appendix C.1):
+ * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`
+ * option exposes.
+ * @typedef {Object} JsonQueryAnalysis
+ * @property {number} astVersion - see the compatibility policy (C.7)
+ * @property {object} root - the frozen node tree (C.3)
+ * @property {readonly { name: string, slot: number }[]} externals
+ * @property {number} frameSize
+ * @property {Readonly<JsonQueryDependencies>} dependencies
+ * @property {object | null} limits
  */
 
 /**
@@ -124,6 +143,7 @@ const hasOwn = Object.hasOwn;
  *   doc: any,
  *   dependencies: Readonly<JsonQueryDependencies>,
  *   explain: () => JsonQueryExplanation,
+ *   analysis?: Readonly<JsonQueryAnalysis>,
  * }} CompiledJsonQuery
  */
 
@@ -177,8 +197,15 @@ const hasOwn = Object.hasOwn;
  * q(data, { max: 10 }); // { title: 'Sayings of the Century', cheap: true }
  */
 export function compileJsonQuery(doc, options = {}) {
+  // `analysis: true` additionally exposes the normalized-form record at
+  // `query.analysis` (QUERY-FORMAT.md Appendix C.1) from the SAME
+  // normalization — but compilation itself stays strict (the flag is
+  // stripped before normalizeQuery, so schema hooks stay required).
+  const wantAnalysis = options.analysis === true;
+  const normalized =
+    normalizeQuery(doc, wantAnalysis ? { ...options, analysis: false } : options);
   const { root, frameSize, externals, limits, stepSlot, usedOps, usedFunctions, usedCollations } =
-    normalizeQuery(doc, options);
+    normalized;
   const get = compileQueryRoot(root,
     stepSlot < 0 ? null : { slot: stepSlot, limit: limits.steps });
   const extCount = externals.length;
@@ -258,7 +285,68 @@ export function compileJsonQuery(doc, options = {}) {
       depth: limits.depth,
     },
   });
+  if (wantAnalysis)
+    query.analysis = analysisRecord(normalized);
   return query;
+}
+
+/**
+ * The version of the published normalized form (QUERY-FORMAT.md
+ * Appendix C.7): bumped when a node kind is added or removed, a
+ * published field is removed or retyped, or an appendix invariant
+ * changes. Adding an optional field is NOT a bump.
+ */
+export const AST_VERSION = 1;
+
+/**
+ * Build the frozen analysis record from a `normalizeQuery` result —
+ * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option
+ * so both expose byte-identical shapes from one normalization.
+ * @param {ReturnType<typeof normalizeQuery>} normalized
+ */
+function analysisRecord(normalized) {
+  const { root, frameSize, externals, limits, usedOps, usedFunctions, usedCollations } = normalized;
+  return Object.freeze({
+    astVersion: AST_VERSION,
+    root,
+    externals,
+    frameSize,
+    dependencies: Object.freeze({
+      externals: Object.freeze(externals.map((e) => e.name)),
+      operators: Object.freeze([...usedOps].sort()),
+      functions: Object.freeze([...usedFunctions].sort()),
+      collations: Object.freeze([...usedCollations].sort()),
+    }),
+    limits,
+  });
+}
+
+/**
+ * Analyse a query document WITHOUT compiling it: the engine's own
+ * normalized reading of the document — the frozen node tree, the
+ * externals in first-appearance order, the frame size and the
+ * dependency sets — published as the versioned contract of
+ * QUERY-FORMAT.md Appendix C. Another package walks this instead of
+ * re-implementing the grammar, and an unknown `kind` in its dispatch is
+ * a loud failure instead of a silent divergence.
+ *
+ * Analysis applies every JQ0xxx rejection compilation would, with one
+ * difference (Appendix C.1): schema literals do not require
+ * `options.compileTypeTest` — without the hook they normalize to `raw`
+ * nodes whose `test` is `null`, so a document can be analysed by a
+ * consumer that could not execute it. With the hook supplied, analysis
+ * compiles the predicates exactly as compilation would.
+ * @param {any} doc - the query document (any JSON value)
+ * @param {JsonQueryOptions} [options] - the same options as
+ *   `compileJsonQuery`
+ * @returns {{ astVersion: number, root: object, externals: readonly
+ *   { name: string, slot: number }[], frameSize: number,
+ *   dependencies: Readonly<JsonQueryDependencies>, limits: object | null }}
+ * @throws {JsonQueryCompileError} on any JQ0xxx condition (except
+ *   JQ0008, which analysis does not raise)
+ */
+export function analyzeQuery(doc, options = {}) {
+  return analysisRecord(normalizeQuery(doc, { ...options, analysis: true }));
 }
 
 const OBJECT_CACHE = createWeakCache();
