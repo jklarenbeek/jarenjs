@@ -57,6 +57,11 @@
           "items": {
             "$ref": "#/definitions/index"
           }
+        },
+        "x-rename": {
+          "description": "Migration hint: this collection was previously named the given identifier. Read by the migration planner (a rename cannot be inferred from a diff); ignored by the store.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
         }
       },
       "required": [

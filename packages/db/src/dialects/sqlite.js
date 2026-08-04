@@ -119,6 +119,7 @@ export const sqliteDialect = createDialect({
   excludedRef: (columnSql) => `excluded.${columnSql}`,
   tx: {
     begin: 'BEGIN',
+    beginImmediate: 'BEGIN IMMEDIATE',
     commit: 'COMMIT',
     rollback: 'ROLLBACK',
     savepoint: (n) => `SAVEPOINT ${quoteIdentifier(n)}`,

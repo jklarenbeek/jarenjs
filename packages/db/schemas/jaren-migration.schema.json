@@ -1,0 +1,144 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://jarenjs.dev/schemas/jaren-migration",
+ "title": "Jaren migration document",
+ "description": "A jaren-migration document evolves a store from one shape to another: ordered steps of rendered DDL, JSLT data transforms and query assertions, between two shape hashes. The hashes identify SHAPES (hashContent over the canonicalized model document), not version numbers a human must remember to bump; a migration whose from-hash does not match the database's recorded shape refuses to run.",
+ "type": "object",
+ "properties": {
+  "$migration": {
+   "description": "The migration format version.",
+   "const": "0.1"
+  },
+  "id": {
+   "description": "The migration's unique identifier, recorded in the history table.",
+   "type": "string",
+   "minLength": 1
+  },
+  "from": {
+   "description": "The shape hash this migration applies to.",
+   "type": "string",
+   "minLength": 1
+  },
+  "to": {
+   "description": "The shape hash this migration produces.",
+   "type": "string",
+   "minLength": 1
+  },
+  "note": {
+   "description": "Free prose for the reader; ignored by the runner.",
+   "type": "string"
+  },
+  "steps": {
+   "description": "Ordered steps; the order is the contract. A pure widening may carry NO steps — the migration then only moves the recorded shape.",
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/step"
+   }
+  }
+ },
+ "required": [
+  "$migration",
+  "id",
+  "from",
+  "to",
+  "steps"
+ ],
+ "additionalProperties": false,
+ "$defs": {
+  "step": {
+   "oneOf": [
+    {
+     "$ref": "#/$defs/ddlStep"
+    },
+    {
+     "$ref": "#/$defs/jsltStep"
+    },
+    {
+     "$ref": "#/$defs/queryStep"
+    }
+   ]
+  },
+  "ddlStep": {
+   "description": "One rendered DDL statement, produced by the planner through the dialect and shown before it is executed.",
+   "type": "object",
+   "properties": {
+    "kind": {
+     "const": "ddl"
+    },
+    "sql": {
+     "type": "string",
+     "minLength": 1
+    },
+    "note": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "kind",
+    "sql"
+   ],
+   "additionalProperties": false
+  },
+  "jsltStep": {
+   "description": "Rewrite every document of a collection through a compiled JSLT stylesheet, in batches, inside the migration's transaction. A draft step (the planner's identity placeholder) refuses to run until the author fills it in.",
+   "type": "object",
+   "properties": {
+    "kind": {
+     "const": "jslt"
+    },
+    "collection": {
+     "type": "string",
+     "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "stylesheet": {
+     "description": "A JSLT stylesheet (an array of match/body rules; the empty array is the identity transform).",
+     "type": "array"
+    },
+    "draft": {
+     "description": "True on a planner-emitted placeholder: the schema changed and no transform can be inferred. The runner refuses a draft step.",
+     "type": "boolean"
+    },
+    "note": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "kind",
+    "collection",
+    "stylesheet"
+   ],
+   "additionalProperties": false
+  },
+  "queryStep": {
+   "description": "An assertion: the query runs over the collection's documents and must answer an empty sequence (expect 'empty', the default) or an EBV-true value (expect 'ebv') for the migration to proceed. This is how a migration states its own precondition.",
+   "type": "object",
+   "properties": {
+    "kind": {
+     "const": "query"
+    },
+    "collection": {
+     "type": "string",
+     "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "assert": {
+     "description": "A Jaren query document over the collection's documents."
+    },
+    "expect": {
+     "enum": [
+      "empty",
+      "ebv"
+     ]
+    },
+    "note": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "kind",
+    "collection",
+    "assert"
+   ],
+   "additionalProperties": false
+  }
+ }
+}

@@ -26,6 +26,10 @@ export const DB_CODES = Object.freeze({
   JD0005: 'the model document is invalid',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
+  JD0020: "the migration's from-shape does not match the database",
+  JD0021: 'the migration is missing a required data transform',
+  JD0022: 'an applied migration disagrees with the history record',
+  JD0023: 'a migration step failed',
   JD2001: 'insert found the key already present',
   JD2002: 'a usable key could not be resolved for the write',
   JD2003: 'the write failed schema validation',
@@ -58,6 +62,15 @@ export const DB_CODES = Object.freeze({
  *  - `JD0011` — the active profile refused the document before any
  *    execution: an undeclared external, host function, collation or
  *    collection, or a refused full-table scan; the reason names it
+ *  - `JD0020` — a migration's `from` hash does not match the
+ *    database's recorded shape; running it would corrupt
+ *  - `JD0021` — a draft transform was not filled in, or a document no
+ *    longer validates after the migration (a narrowing without an
+ *    adequate transform)
+ *  - `JD0022` — the migration list disagrees with the applied history
+ *    (an edited file, a missing file, a reordered sequence)
+ *  - `JD0023` — a step failed: an assertion returned rows, DDL was
+ *    rejected, or a transform produced an unstorable value
  */
 export class DbCompileError extends CodedError {
   /**

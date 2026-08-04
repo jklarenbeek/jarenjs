@@ -57,7 +57,8 @@
  *   rowIdentity: () => string,
  *   explainQuery: (sql: string) => string,
  *   excludedRef: (columnSql: string) => string,
- *   tx: { begin: string, commit: string, rollback: string,
+ *   tx: { begin: string, beginImmediate: string, commit: string,
+ *     rollback: string,
  *     savepoint: (n: string) => string, release: (n: string) => string,
  *     rollbackTo: (n: string) => string },
  *   pragma: { busyTimeout: (ms: number) => string,
@@ -100,6 +101,58 @@ export function createDialect(spec) {
     createIndex({ name, table, columns, unique }) {
       return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(name)} `
         + `ON ${q(table)} (${columns.map(q).join(', ')})`;
+    },
+    /**
+     * Add one virtual generated column to an existing table (a new
+     * indexed path arriving through a migration).
+     * @param {{ table: string, docColumn: string,
+     *   column: { name: string, type: string, pathText: string } }} shape
+     * @returns {string}
+     */
+    addGeneratedColumn({ table, docColumn, column }) {
+      return `ALTER TABLE ${q(table)} ADD COLUMN ${q(column.name)} ${column.type} `
+        + `GENERATED ALWAYS AS (${spec.jsonExtract(q(docColumn), column.pathText)}) VIRTUAL`;
+    },
+    /**
+     * @param {string} table
+     * @param {string} column
+     * @returns {string}
+     */
+    dropColumn(table, column) {
+      return `ALTER TABLE ${q(table)} DROP COLUMN ${q(column)}`;
+    },
+    /**
+     * @param {string} name
+     * @returns {string}
+     */
+    dropIndex(name) {
+      return `DROP INDEX ${q(name)}`;
+    },
+    /**
+     * @param {string} table
+     * @returns {string}
+     */
+    dropTable(table) {
+      return `DROP TABLE ${q(table)}`;
+    },
+    /**
+     * @param {string} from
+     * @param {string} to
+     * @returns {string}
+     */
+    renameTable(from, to) {
+      return `ALTER TABLE ${q(from)} RENAME TO ${q(to)}`;
+    },
+    /**
+     * A plain (non-collection) table — the migration history table.
+     * @param {{ table: string, columns: { name: string, type: string,
+     *   primaryKey?: boolean }[] }} shape
+     * @returns {string}
+     */
+    createPlainTable({ table, columns }) {
+      const rendered = columns.map((column) =>
+        `${q(column.name)} ${column.type}${column.primaryKey === true ? ' PRIMARY KEY' : ''}`);
+      return `CREATE TABLE IF NOT EXISTS ${q(table)} (${rendered.join(', ')})${spec.tableSuffix}`;
     },
   });
 

@@ -117,7 +117,7 @@ export function fullDoubleDialect(createDialect) {
     explainQuery: (sql) => `PLANFOR ${sql}`,
     excludedRef: (column) => `NEW.${column}`,
     tx: {
-      begin: 'BEGIN', commit: 'COMMIT', rollback: 'ROLLBACK',
+      begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK',
       savepoint: (n) => `MARK ${n}`,
       release: (n) => `UNMARK ${n}`,
       rollbackTo: (n) => `BACKTO ${n}`,

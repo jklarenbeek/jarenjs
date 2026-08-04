@@ -28,4 +28,8 @@ export {
   applyMandatoryPredicate, applyRowBound,
 } from './profile.js';
 export { translatePatch } from './patch-sql.js';
+export {
+  planMigration, migrate, shapeHash, migrationChecksum,
+  MIGRATION_VERSION, HISTORY_TABLE,
+} from './migrate.js';
 export { DbCompileError, DbRuntimeError, DB_CODES } from './errors.js';

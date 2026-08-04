@@ -25,17 +25,21 @@ import { LINQ_CODES } from '@jarenjs/linq';
 import { DB_CODES } from '@jarenjs/db';
 
 /**
- * Extract every code with the given prefix from a format doc's
- * normative markdown tables (rows shaped `| JX0001 |` or `| \`JX0001\` |`).
- * @param {string} path
+ * Extract every code with the given prefix from one or more format
+ * docs' normative markdown tables (rows shaped `| JX0001 |` or
+ * `| \`JX0001\` |`). A package with more than one format doc (db's
+ * MODEL and MIGRATION docs) unions them; the runtime table stays one.
+ * @param {string | string[]} paths
  * @param {string} prefix
  * @returns {string[]}
  */
-function docCodes(path, prefix) {
-  const text = fs.readFileSync(path, 'utf8');
+function docCodes(paths, prefix) {
   const pattern = new RegExp(`^\\|\\s*\`?(${prefix}[0-9]{4})\`?\\s*\\|`, 'gm');
   const codes = new Set();
-  for (const match of text.matchAll(pattern)) codes.add(match[1]);
+  for (const path of Array.isArray(paths) ? paths : [paths]) {
+    const text = fs.readFileSync(path, 'utf8');
+    for (const match of text.matchAll(pattern)) codes.add(match[1]);
+  }
   return [...codes].sort();
 }
 
@@ -44,12 +48,13 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['APP_CODES', APP_CODES, 'packages/app/docs/APP-FORMAT.md', 'JA'],
   ['FLOW_CODES', FLOW_CODES, 'packages/flow/docs/FLOW-FORMAT.md', 'JF'],
   ['LINQ_CODES', LINQ_CODES, 'packages/linq/docs/LINQ-FORMAT.md', 'JL'],
-  ['DB_CODES', DB_CODES, 'packages/db/docs/MODEL-FORMAT.md', 'JD'],
+  ['DB_CODES', DB_CODES,
+    ['packages/db/docs/MODEL-FORMAT.md', 'packages/db/docs/MIGRATION-FORMAT.md'], 'JD'],
 ]);
 
 describe('runtime code tables match the format docs', () => {
   for (const [name, table, doc, prefix] of TABLES) {
-    it(`${name} and ${doc} list exactly the same codes`, () => {
+    it(`${name} and ${Array.isArray(doc) ? doc.join(' + ') : doc} list exactly the same codes`, () => {
       const runtime = Object.keys(table).sort();
       const documented = docCodes(doc, prefix);
       assert.ok(documented.length > 0, `no ${prefix} table rows found in ${doc}`);

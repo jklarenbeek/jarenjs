@@ -25,7 +25,7 @@ import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, toPromise } from './driver.js';
-import { planCollection } from './ddl.js';
+import { planCollection, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState } from './query.js';
 import { normalizeProfile } from './profile.js';
@@ -244,73 +244,6 @@ function wrapWriteError(error, plan, collection, docPath, key) {
     key === undefined
       ? { docPath, collection, cause: error }
       : { docPath, collection, key, cause: error });
-}
-
-/**
- * Verify an existing table against the planned shape; any difference
- * is `JD0002` and nothing is altered.
- * @param {any} connection
- * @param {any} plan
- * @param {string} collection
- * @param {string} docPath
- * @returns {any} value-or-promise
- */
-function verifyShape(connection, plan, collection, docPath) {
-  const dialect = connection.dialect;
-  const disagree = (difference) => {
-    throw new DbCompileError('JD0002',
-      `collection '${collection}': the existing table does not match the declared model (${difference}); reshaping a live database is the migration story, and nothing was altered`,
-      docPath);
-  };
-  return chain(connection.prepare(dialect.introspect.columns(plan.table)), (columnsStatement) =>
-    chain(columnsStatement.all([]), (columnRows) => {
-      const actual = columnRows
-        .map((row) => ({
-          name: String(row.name),
-          type: String(row.type).toUpperCase(),
-          generated: Number(row.hidden) !== 0,
-        }))
-        .sort((a, b) => (a.name < b.name ? -1 : 1));
-      const expected = [...plan.expected.columns]
-        .map((c) => ({ ...c, type: c.type.toUpperCase() }))
-        .sort((a, b) => (a.name < b.name ? -1 : 1));
-      if (actual.length !== expected.length)
-        disagree(`${actual.length} columns exist, the model declares ${expected.length}`);
-      for (let i = 0; i < expected.length; i++) {
-        const want = expected[i];
-        const have = actual[i];
-        if (want.name !== have.name || want.type !== have.type
-          || want.generated !== have.generated) {
-          disagree(`column '${have.name}' is ${have.type}${have.generated ? ' generated' : ''}, `
-            + `the model declares '${want.name}' ${want.type}${want.generated ? ' generated' : ''}`);
-        }
-      }
-      return chain(connection.prepare(dialect.introspect.indexes(plan.table)), (indexesStatement) =>
-        chain(indexesStatement.all([]), (indexRows) => {
-          const created = indexRows
-            .filter((row) => String(row.origin) === 'c')
-            .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0 }))
-            .sort((a, b) => (a.name < b.name ? -1 : 1));
-          const wantedIndexes = plan.expected.indexes;
-          if (created.length !== wantedIndexes.length)
-            disagree(`${created.length} declared indexes exist, the model declares ${wantedIndexes.length}`);
-          const collectColumns = (i) => {
-            if (i >= created.length) return null;
-            const have = created[i];
-            const want = wantedIndexes[i];
-            if (have.name !== want.name || have.unique !== want.unique)
-              disagree(`index '${have.name}'${have.unique ? ' (unique)' : ''} does not match the declared '${want.name}'`);
-            return chain(connection.prepare(dialect.introspect.indexColumns(have.name)), (statement) =>
-              chain(statement.all([]), (rows) => {
-                const haveColumns = rows.map((row) => String(row.name)).sort();
-                if (haveColumns.join(',') !== want.columns.join(','))
-                  disagree(`index '${have.name}' covers (${haveColumns.join(', ')}), the model declares (${want.columns.join(', ')})`);
-                return collectColumns(i + 1);
-              }));
-          };
-          return collectColumns(0);
-        }));
-    }));
 }
 
 /**
