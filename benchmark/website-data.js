@@ -25,6 +25,7 @@
  *   geo.json          geo.js            — spatial kernel vs turf/geolib/flatbush (equivalence-gated)
  *   flow.json         flow-fsm.js/-dag.js — FSM step + DAG run throughput vs XState
  *   db.json           db.js             — document store + pushdown vs PouchDB/RxDB/lowdb
+ *   orm.json          orm.js            — entities + graph loads vs Prisma/Drizzle/Kysely (Node + Bun)
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -57,7 +58,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, qt3');
+        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, qt3');
         process.exit(0);
         break;
       default:
@@ -731,6 +732,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
+  'orm',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -962,6 +964,14 @@ function buildHeadlines(generated, meta) {
       note: 'pure step vs actor.send; the machine survives JSON round-trip with its guards, XState\'s do not — the dag pays the documented dataflow tax on the suite page',
     });
   }
+  if (generated.orm !== undefined) {
+    add('orm', 'ORM', {
+      ratio: generated.orm.meta.headlineRatio,
+      rival: generated.orm.meta.headlineRival ?? 'Prisma',
+      conformance: '1 statement',
+      note: 'the two-level graph load in ONE statement versus the rivals\' round trips; statement counts published beside every timing; the rows jaren loses are on the suite page with their reasons',
+    });
+  }
   if (generated.db !== undefined) {
     add('db', 'Data', {
       ratio: generated.db.meta.headlineRatio,
@@ -971,6 +981,60 @@ function buildHeadlines(generated, meta) {
     });
   }
   return out;
+}
+
+/**
+ * The phase-B ORM suite: entities, the one-statement graph load, the
+ * unit of work and the typed surface against Prisma, Drizzle and
+ * Kysely — on Node, and on Bun where a first-party route exists. The
+ * merged payload keeps the Bun tables beside the Node ones with the
+ * capability cliff stated.
+ */
+function generateOrm(tmp, options) {
+  const nodeFile = path.join(tmp, 'orm-node.json');
+  try {
+    runTool([
+      'benchmark/orm.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', nodeFile,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: orm run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the ORM head-to-head needs the prisma/drizzle/kysely benchmark devDependencies)');
+    return null;
+  }
+  const nodeRun = readJson(nodeFile);
+  let bunRun = null;
+  const bunFile = path.join(tmp, 'orm-bun.json');
+  try {
+    const bunResult = spawnSync('bun', ['benchmark/orm.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', bunFile],
+    { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' });
+    if (bunResult.status !== 0) throw new Error('bun run failed');
+    bunRun = readJson(bunFile);
+  }
+  catch {
+    console.warn('  note: bun unavailable — the ORM suite ships Node tables only.');
+  }
+  const headline = (nodeRun.meta.notes ?? [])
+    .find((note) => note.startsWith('graph-load headline'));
+  return {
+    meta: {
+      ...nodeRun.meta,
+      bunRuntime: bunRun?.meta.runtime ?? null,
+      bunNotes: bunRun?.meta.notes ?? [],
+      headlineRival: headline?.includes('Prisma') ? 'Prisma (graph load)'
+        : 'Drizzle (graph load)',
+    },
+    tables: [
+      ...nodeRun.tables,
+      ...(bunRun === null ? [] : bunRun.tables.map((table) => ({
+        ...table, title: `[Bun] ${table.title}`,
+      }))),
+    ],
+  };
 }
 
 /**
@@ -1081,6 +1145,11 @@ async function main() {
     const db = generateDb(tmp, options);
     if (db !== null)
       generated.db = db;
+  }
+  if (!options.skip.has('orm')) {
+    const orm = generateOrm(tmp, options);
+    if (orm !== null)
+      generated.orm = orm;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

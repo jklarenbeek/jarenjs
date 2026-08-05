@@ -31,7 +31,10 @@ export function adaptBunDatabase(db) {
       const statement = db.prepare(sql);
       return {
         run: (params = []) => statement.run(...params),
-        get: (params = []) => statement.get(...params),
+        // the driver contract says a missing row reads UNDEFINED;
+        // bun:sqlite answers null — normalize at the seam, or every
+        // create-or-verify and absence check misfires
+        get: (params = []) => statement.get(...params) ?? undefined,
         all: (params = []) => statement.all(...params),
         // no native lazy row iterator is assumed; the driver-level
         // wrapper composes one over `all`

@@ -268,3 +268,56 @@ no cycle guard; both properties acceptable for a cache key), never
 `canonicalizeJson` (signature-grade, throws on `undefined`).
 `store.stats()` exposes hits, misses and evictions, so the cache is
 proven rather than assumed.
+
+## The relational half (`src/model.js`, `src/plan.js` §entities, `src/query.js`)
+
+The same planner, a second document kind: entity query documents
+address the multi-entity root (`$.User[*]`), the ONLY shape a
+differential oracle can prove (the engine has no embedded relation
+members to walk — which is why relation-name sugar is deliberately
+absent from the query surface and lives on `load`). Three reference
+flavors decide emission: entity COLUMNS get total forms with no
+`json_type` guard (a mapped property has no present-null), entity
+EPOCH columns get a ±1 s index range plus the exact document-string
+recheck (mixed stored precisions can never diverge from the engine's
+codepoint order), and everything else rides the phase-A guarded truth
+table aliased per binding. Two-binding equijoins emit INNER JOIN with
+binding-order row-identity tiebreakers — exactly the engine's
+nested-loop order. The graph loader compiles include trees to
+correlated `json_group_array`/`json_object` subqueries: one statement
+per load, proven by a counting driver, never promised.
+
+## The unit of work (`src/tracker.js`)
+
+Materialised entities are deep-frozen plain JSON and the frozen
+document IS the snapshot — one retained reference, structural sharing
+made safe by the freeze. `saveChanges()` diffs with the suite's own
+diff engine and maps operations to minimal statements (column writes,
+`jsonb_set` chains, join-table key-set sync, a counted whole-row
+fallback); inserts batch parent-first, deletes run child-first,
+foreign-key cycles among the changed set are `JD0040`, and a declared
+`version` property turns every update into an optimistic
+`WHERE version = ?` with `JD2040` on conflict. The tracker mutates
+ONLY after commit: a failed save retries.
+
+## The migration engine, relationally (`src/migrate.js`, `src/cli.js`)
+
+The strategy-table diff renders SELF-CONTAINED steps — additive
+columns, data steps, and one rebuild implementation following
+SQLite's documented twelve-step procedure with `foreign_key_check`
+inside the transaction. Shape EQUALITY (schemaShapeOf versus a fresh
+createModelShape build) is the acceptance criterion, asserted on the
+shadow before the real database is touched and again after. Probed
+and designed around: node:sqlite enables foreign keys BY DEFAULT (the
+pragma bracket is load-bearing), `jsonb()` PARSES its argument
+(column folds pass plain SQL values), and a table rename does not
+rename columns (join tables rename their endpoint keys explicitly).
+
+## One cross-runtime seam worth remembering
+
+`bun:sqlite` answers **null** for a missing row where `node:sqlite`
+answers undefined; the bun adapter normalizes at the seam (and the
+bun-shaped test double mimics the null so the packed run pins it).
+Found by the ORM benchmark's first real-Bun file-store open — the
+in-memory tests never reopen a database, so create-or-verify had
+never seen bun's null.

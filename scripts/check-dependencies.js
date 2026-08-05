@@ -55,6 +55,12 @@ const KNOWN_TOOLING_ADVISORIES = {
   'glob': 'transitive under c8 and the benchmark workspace, via minimatch',
   'test-exclude': 'transitive under c8, via glob',
   'c8': 'the coverage runner used by the dead-code audit, via test-exclude',
+  // the ORM benchmark rival (D16): the orm suite measures Drizzle at the
+  // version readers actually install; the advisory (identifier escaping
+  // in Drizzle's own SQL generation) lives entirely inside the rival's
+  // machinery, and nothing in this family is in any published package's
+  // closure (the check below proves that separately).
+  'drizzle-orm': 'ORM benchmark rival (benchmark workspace only); the advisory is in Drizzle\'s own SQL generation, not in anything jaren ships',
   // the PouchDB benchmark rival (D16): the db suite measures against the
   // version readers actually install; overriding its internals would make
   // the comparison a measurement of something nobody runs. The advisory is

@@ -45,6 +45,7 @@ export const SUITES = [
   { key: 'geo', label: 'Geo' },
   { key: 'flow', label: 'Flow' },
   { key: 'db', label: 'Data' },
+  { key: 'orm', label: 'ORM' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -77,6 +78,7 @@ export function deriveSuite(state, suite) {
     case 'geo': return geoSuite(data);
     case 'flow': return flowSuite(data);
     case 'db': return dbSuite(data);
+    case 'orm': return ormSuite(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -404,6 +406,25 @@ function dbSuite(data) {
   out.push(callout(
     `Pushdown headline: ${meta.headlineRatio}× — the same query document pushed to SQL versus forced to the residual over ${meta.docs} documents (~${meta.docBytes} JSON bytes each)`,
     `${engineLines}. Every engine is verified to answer the same result set before it is timed; jaren pays SQLite and JSON materialisation where the in-process rivals pay neither — the rows it loses are the price of durability, transactions and a planner, and they are shown.`));
+  out.push(...genericTables(data,
+    'Per-operation timings; lower is better. A dash is an engine dropped for a row because it disagreed on the result set rather than being timed doing less work.'));
+  return out;
+}
+
+/**
+ * The phase-B ORM suite. The honest framing renders FIRST — a
+ * skeptical reader should meet it before any number.
+ */
+function ormSuite(data) {
+  const meta = data.meta ?? {};
+  const out = [];
+  out.push(callout('Read this before the numbers',
+    'Prisma, Drizzle and Kysely are mature, support several databases, and are faster on some rows below — those losses are published with their reasons. What none of them has: a query that is one serializable JSON document, executable by two independent engines proven to agree by a differential oracle, running unchanged in Node, Bun and the browser, with schema-validated writes from the fastest validator in the ecosystem. The composition is the product; the individual numbers are what they are.'));
+  out.push(callout(
+    `Graph-load headline: one statement, ${meta.headlineRatio}× faster than ${meta.headlineRival ?? 'Prisma'} on ${meta.users} users / ${meta.posts} posts / ${meta.comments} comments`,
+    `${(meta.engines ?? []).map((engine) => `${engine.label}: ${engine.adapter}`).join(' · ')}. Every engine answers the same normalized result before it is timed; statement counts are printed beside the graph rows because the structural claim (one statement versus round trips) is what timings alone would hide. Runtime: ${meta.runtime}${meta.bunRuntime ? `; the [Bun] tables ran on ${meta.bunRuntime}` : ''}.`));
+  if ((meta.bunNotes ?? []).length > 0)
+    out.push(callout('The Bun capability cliff', meta.bunNotes.join(' ')));
   out.push(...genericTables(data,
     'Per-operation timings; lower is better. A dash is an engine dropped for a row because it disagreed on the result set rather than being timed doing less work.'));
   return out;

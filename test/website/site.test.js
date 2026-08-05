@@ -206,6 +206,7 @@ describe('website — the site as one app document', function () {
       meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
       jsonquery: load('jsonquery'), jslt: load('jslt'), markdown: load('markdown'),
       mermaid: load('mermaid'), flow: load('flow'), db: load('db'),
+      orm: load('orm'),
     };
     const { container, go } = mountSite({ fixtures });
 
@@ -267,6 +268,14 @@ describe('website — the site as one app document', function () {
       'the losses framing is on the page, not omitted');
     assert.match(html, /PouchDB/, 'the rivals are named with their adapters');
     assert.match(html, /lowdb/);
+
+    go('#/benchmarks?suite=orm');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /Read this before the numbers/, 'the honest framing renders FIRST');
+    assert.match(html, /Graph-load headline: one statement/, 'the structural claim renders');
+    assert.match(html, /statement\(s\)/, 'statement counts sit beside the graph rows');
+    assert.match(html, /\[Bun\]/, 'the Bun tables render beside the Node ones');
   });
 
   it('renders a Mermaid fence as inline SVG through the shared md boundary', async function () {

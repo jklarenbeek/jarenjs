@@ -1,0 +1,38 @@
+// The Prisma side of benchmark/orm.js — its own documented route:
+// schema-first, generated client, engine binary. SQLite provider.
+// `profile` is a String column holding JSON text: Prisma's SQLite
+// connector has no Json field type, which is exactly the JSONB-wedge
+// row's point (stated beside the numbers).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("ORM_BENCH_DB")
+}
+
+model User {
+  id      String @id
+  name    String
+  age     Int
+  profile String
+  posts   Post[]
+}
+
+model Post {
+  pid      Int       @id
+  title    String
+  stars    Int
+  authorId String
+  author   User      @relation(fields: [authorId], references: [id])
+  comments Comment[]
+}
+
+model Comment {
+  cid    Int    @id
+  text   String
+  postId Int
+  post   Post   @relation(fields: [postId], references: [pid])
+}

@@ -593,8 +593,9 @@ documented in [qt3-README.md](./qt3-README.md).
 
 - Competitor engines (`ajv`, `json-p3`, `fontoxpath`, `jsonata`,
   `jsonpointer`, `fast-xml-parser`, `marked`, `markdown-it`, `micromark`,
-  `@mermaid-js/parser`, `mermaid`, `jsdom`) are devDependencies of this
-  benchmark workspace only — the `packages/*` and `components/*`
+  `@mermaid-js/parser`, `mermaid`, `jsdom`, `pouchdb`, `rxdb`, `lowdb`,
+  `prisma`/`@prisma/client`, `drizzle-orm`, `better-sqlite3`, `kysely`)
+  are devDependencies of this benchmark workspace only — the `packages/*` and `components/*`
   workspaces stay zero-dependency. (`mermaid` + `jsdom` power the
   flowchart/sequence Jison head-to-head; `@mermaid-js/parser` the pie
   head-to-head.)
@@ -605,3 +606,28 @@ documented in [qt3-README.md](./qt3-README.md).
 - All profile numbers in package READMEs state the date and Node version they
   were measured with; run-to-run spread on micro-timings is real, so treat
   pass/fail counts as the invariant and ratios as indicative.
+
+## orm.js — the phase-B ORM head-to-head
+
+`node benchmark/orm.js` (and `bun benchmark/orm.js` for the Bun table)
+measures `@jarenjs/db`'s entities against Prisma, Drizzle and Kysely
+over SQLite: inserts (single/batched/validated), point reads, indexed
+predicates at three selectivities, the two-level graph load WITH
+STATEMENT COUNTS beside the timings (the structural claim — one
+statement versus round trips), aggregate+group over a join, offset
+versus keyset pagination at depth, updates (the unit of work versus
+prepared statements), cold start (fresh process, median of three), and
+a nested-JSON member filter both indexed and unindexed.
+
+Fairness: every engine gets WAL and a fresh file database; every
+engine must answer the SAME normalized result before it is timed
+(`lib/equals.js`); each rival runs its own documented fast route
+(Prisma's generated client with a warmed engine and `$on('query')`
+statement counting; Drizzle's prepared statements and relational query
+builder; Kysely as the hand-written-SQL contrast). Prisma's SQLite
+connector has no Json field type, so its JSONB rows run its only
+available route — fetch and filter in JS — stated beside the number.
+On Bun, Kysely and Prisma have no first-party `bun:sqlite` route and
+are Node-only rows; the capability cliff (no UDF hatch, no session
+capture) is stated beside the Bun tables. The losses stay in the
+tables with their reasons.

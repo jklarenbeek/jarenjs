@@ -289,25 +289,39 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **Pushdown promotions.** The planner's deliberate-residual table
-  still holds `$groupby`, joins/`$for` over non-singular paths, and
-  `$match` beyond the UDF hatch. Each promotion needs its equivalence
-  proof in the differential oracle first — residual-by-default is the
-  standing rule, and the oracle's forced-residual mode is the
-  regression net that makes promotion safe.
+- [ ] **Pushdown promotions.** Two-binding equijoins shipped in phase
+  B; the deliberate-residual table still holds `$groupby` (the
+  post-group cardinality rebinding deserves its own order —
+  MODEL-FORMAT §10.6), three-plus bindings, non-equi joins,
+  projections over joins, and `$match` beyond the UDF hatch. Each
+  promotion needs its oracle proof first; the forced-residual mode is
+  the regression net that makes promotion safe.
+- [ ] **Relation-name query sugar and entity linq roots.** `load` owns
+  name navigation today because `$.author.name` over the multi-entity
+  root is engine-unexecutable and therefore oracle-unprovable; a linq
+  `from` over `$.User[*]` needs a root-path emission option in the
+  builder.
+- [ ] **A many-to-many membership API.** The join tables, their
+  synchronisation through the unit of work and the read side all
+  shipped; a first-class link/unlink surface (and m2m attach for
+  auto-key pending inserts) did not.
 - [ ] **Other SQL dialects.** The dialect seam is real (proven by a
   test double) and the capability slots for statement timeouts and
   row estimates are deliberately empty on SQLite; a second dialect is
   the day they fill. The constraint: a dialect must reproduce the
   truth table's guarded semantics, not merely parse.
-- [ ] **Down migrations.** Named a non-goal for 0.1 with its reason (a
-  JSLT transform is not generally invertible); if it ever lands it is
-  an explicit author-written document, never an inferred inverse.
-- [ ] **UDF-expression indexes.** Refused today because an index over
-  a registered function makes the file unwritable from any connection
-  that has not registered it; shipping it needs the model-declared
-  opt-in plus re-registration duties on every shadow and rebuild
-  connection.
+- [ ] **Introspection of an existing database.** `jaren-db` plans from
+  model FILES (a database stores shape hashes, not models); deriving a
+  first model from a live schema is unwritten.
+- [ ] **Down migrations.** Named a non-goal with its reason restated in
+  MIGRATION-FORMAT §12 (a transform is not generally invertible); if
+  it ever lands it is an explicit author-written document, never an
+  inferred inverse.
+- [ ] **Model-declared UDF-expression indexes.** The migration engine
+  re-registers declared functions (`registerFunctions`) and data steps
+  over UDF-indexed tables are tested; what remains is the model-level
+  vocabulary to DECLARE such an index rather than hand-creating it as
+  drift.
 - [ ] **Cross-source linq joins.** `join`/`groupJoin` are same-source
   in 0.1 (one document, one root); the relational order lifts the
   restriction.

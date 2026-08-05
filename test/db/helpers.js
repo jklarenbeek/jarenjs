@@ -28,8 +28,11 @@ export class BunShapedDatabase {
     return {
       /** @param {any[]} params */
       run: (...params) => statement.run(...params),
+      // real bun:sqlite answers NULL for a missing row (node:sqlite
+      // answers undefined) — the double mimics bun so the adapter's
+      // normalization is pinned by the packed run
       /** @param {any[]} params */
-      get: (...params) => statement.get(...params),
+      get: (...params) => statement.get(...params) ?? null,
       /** @param {any[]} params */
       all: (...params) => statement.all(...params),
     };
