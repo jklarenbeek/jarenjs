@@ -10,6 +10,8 @@ import { normalizeJsltStylesheet } from './stylesheet.js';
 import { compileJsltDispatch } from './dispatch.js';
 
 export { JsltCompileError, JsltRuntimeError } from './errors.js';
+export { createJsltRegistry } from './registry.js';
+export { mathPack, financePack, statsPack, allPacks } from './packs/index.js';
 
 /**
  * Compile a Jaren JSLT 0.1 stylesheet into a reusable transformation.
@@ -81,7 +83,14 @@ function cachedTransform(stylesheet, options) {
   const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
   const memo = options?.memo === true;
   const pathFunctions = options?.pathFunctions == null ? null : options.pathFunctions;
-  const key = `${identityOf(compileTypeTest)}|${maxDepth}|${memo ? 1 : 0}|${identityOf(pathFunctions)}`;
+  // registered operators/functions (the JSLT operator registry) change
+  // what compiles, so they join the key by identity — a registry hands a
+  // STABLE extensions/functions object per instance (registry.js), so
+  // two transforms with the same registry still hit the cache.
+  const extensions = options?.extensions == null ? null : options.extensions;
+  const functions = options?.functions == null ? null : options.functions;
+  const key = `${identityOf(compileTypeTest)}|${maxDepth}|${memo ? 1 : 0}`
+    + `|${identityOf(pathFunctions)}|${identityOf(extensions)}|${identityOf(functions)}`;
   return STYLESHEET_CACHE.getOrCompile(stylesheet, key,
     () => compileJsltStylesheet(stylesheet, options));
 }

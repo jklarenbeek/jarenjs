@@ -1183,6 +1183,18 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
 // vocabulary - the closed format is unchanged, extensions are host
 // machinery. Violations are host programming errors (TypeError), not
 // JQ0xxx document errors.
+// True when `name` is already part of the closed query vocabulary — a
+// FLWOR/quantifier/escape key, a reserved member, or a core operator.
+// A host extension (options.extensions) or a registry pack (the JSLT
+// operator registry) must not shadow any of these. Exported so the
+// registry builder can reject a colliding pack at `.use()` time with the
+// same rule the compiler enforces at normalize time.
+export function isReservedQueryName(name) {
+  return FLWOR_KEYS.has(name) || QUANTIFIER_KEYS.has(name) || ESCAPE_KEYS.has(name)
+    || ORDERBY_SPEC_KEYS.has(name) || name === '$in' || name === '$at'
+    || name === '$query' || name === '$expr' || hasOwn(OPERATORS, name);
+}
+
 function validateExtensions(extensions) {
   if (!isJsonObject(extensions))
     throw new TypeError('options.extensions must be a plain object of operator entries');
@@ -1191,9 +1203,7 @@ function validateExtensions(extensions) {
     const name = names[i];
     if (name.charCodeAt(0) !== 0x24) // '$'
       throw new TypeError(`extension operator '${name}' must start with '$'`);
-    if (FLWOR_KEYS.has(name) || QUANTIFIER_KEYS.has(name) || ESCAPE_KEYS.has(name)
-      || ORDERBY_SPEC_KEYS.has(name) || name === '$in' || name === '$at'
-      || name === '$query' || name === '$expr' || hasOwn(OPERATORS, name))
+    if (isReservedQueryName(name))
       throw new TypeError(`extension operator '${name}' collides with the core vocabulary`);
   }
   return extensions;

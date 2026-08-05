@@ -136,7 +136,11 @@ export function annotateTypes(analysis, hooks = {}) {
         return Object.freeze({ ...node, type: tagOf('unknown', false) });
       case 'op': {
         const args = Object.freeze(node.args.map(annotate));
-        const entry = OPERATORS[node.name];
+        // a registered operator (options.extensions / the JSLT registry)
+        // carries its entry on the node — fall back to it so a pack op's
+        // declared resultType flows through the analyzer, exactly as
+        // compileOp resolves `OPERATORS[name] ?? node.entry`
+        const entry = OPERATORS[node.name] ?? node.entry;
         const resultType = entry !== undefined && typeof entry.resultType === 'function'
           ? entry.resultType(args.map((a) => a.type))
           : null;

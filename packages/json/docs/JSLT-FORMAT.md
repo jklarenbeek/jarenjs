@@ -601,6 +601,64 @@ for a singleton, an array of items for a longer sequence. `options` carries
 caching compiled stylesheets by document identity and compile-option
 values in a WeakMap.
 
+## 13. Registered operators (host opt-in, non-normative)
+
+The operator vocabulary (QUERY-FORMAT §8) is **closed** — a document
+using `$npv` fails `JQ0002` exactly as one using `$frobnicate` does. A
+host can EXTEND it, the way `@jarenjs/validate` gains formats from
+`@jarenjs/formats`: compose packs of pure functions into a registry and
+compile against it. The published format is unchanged; the extension
+lives entirely in the caller's compile options.
+
+```js
+import { createJsltRegistry, mathPack, financePack, statsPack }
+  from '@jarenjs/json/jslt';
+
+const jslt = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
+const transform = jslt.compile(stylesheet);   // bound compileJsltStylesheet
+const q = jslt.compileQuery(queryDocument);    // bound compileJsonQuery
+jslt.names();                                  // every registered name
+jslt.toOptions();                              // { extensions, functions }
+```
+
+`createJsltRegistry()` is **immutable-by-copy**: `.use(pack)` returns a
+new registry (a value, not a mutable singleton), and a name that collides
+with the core vocabulary or a name already registered throws a
+`TypeError` at `.use()` — a host programming error, never a `JQ`
+document error.
+
+A **pack** is plain data — `{ name, entries }` — wrapping pure functions,
+free of the operator internals. Each entry declares a **kind**:
+
+- **`op`** — a scalar `$`-operator over scalar operands (`$sqrt`,
+  `$pow`). An empty operand propagates to an empty result.
+- **`agg`** — an operator whose declared `seq` operands are FOLDED to
+  arrays before the call, then the pure function runs and its result is
+  wrapped: a number as one item, an array under a `seq<number>` result as
+  a SEQUENCE (which packs into a JSON array with `[...]`, the same rule
+  `$range` follows). This is core `$sum`'s fold generalized, so
+  `{ "$npv": ["$.rate", "$.cashflows[*]"] }` computes the present value
+  of a filtered cashflow series. `sum`/`min`/`max`/`avg`/`count` are
+  already core operators and are NOT re-registered.
+- **`fn`** — a bare `$call` function, the low-level escape.
+
+**Purity is required.** A pack function must be a pure deterministic
+function of its arguments (no clock, randomness, or changing closure) —
+the same discipline `$call` and `$orderby`'s collations demand. A
+throwing function surfaces as the coded runtime error `JQ2010`, never a
+crash; a function returning `NaN`/`null` is the caller's data problem.
+
+The built-in packs wrap `@jarenjs/core`: `mathPack` (`$sqrt`, `$pow`,
+`$hypot`, trigonometry, logs — scalar ops), `financePack` (`$npv`,
+`$irr`, `$mirr`, `$fv`/`$pv`/`$pmt`, `$sma`/`$ema`/`$wma`/`$rsi`,
+`$volatility`/`$sharpe`/`$maxDrawdown` — aggregators over a series), and
+`statsPack` (`$mean`, `$median`, `$variance`, `$stddev`, `$percentile`).
+Because a registry compiles both stylesheets and bare query documents,
+registered operators also work through `@jarenjs/linq` over an in-memory
+source. Their behaviour against `@jarenjs/db` is a separate story
+(they run in the SQL residual, correct but not pushed) — see
+MODEL-FORMAT and the roadmap.
+
 ---
 
 ## Appendix A. Worked examples (normative fixtures)

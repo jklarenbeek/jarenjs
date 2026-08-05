@@ -64,7 +64,8 @@ function compileMatchPath(rule, pathQueryCache, pathOptions) {
   if (cached !== undefined)
     return cached;
   try {
-    const query = compileJSONPath(match.path, pathOptions);
+    const query = compileJSONPath(match.path,
+      pathOptions === undefined ? undefined : { pathFunctions: pathOptions.pathFunctions });
     pathQueryCache.set(match.path, query);
     return query;
   }
@@ -202,7 +203,12 @@ function compileBody(rule, compileTypeTest, tableBox, targetModes, pathOptions) 
   try {
     normalized = normalizeQuery(rule.body, {
       compileTypeTest,
-      extensions: { '$apply': applyEntry },
+      // the host's registered operators merge in, but $apply ALWAYS wins
+      // (a pack cannot shadow the dispatch operator)
+      extensions: pathOptions === undefined || pathOptions.extensions === undefined
+        ? { '$apply': applyEntry }
+        : { ...pathOptions.extensions, '$apply': applyEntry },
+      functions: pathOptions === undefined ? undefined : pathOptions.functions,
       pathFunctions: pathOptions === undefined ? undefined : pathOptions.pathFunctions,
     });
     ruleBox.locSlot = normalized.frameSize;
@@ -935,16 +941,26 @@ export function compileJsltDispatch(model, options = {}) {
   // JSONPath function extensions reach both places a stylesheet embeds
   // a path: the rules' match paths, and the path strings inside rule
   // bodies (through the query normalizer).
-  const pathOptions = options.pathFunctions == null
+  // options carried into each rule body's normalizeQuery: the RFC 9535
+  // path-function registry, plus the host's registered operators
+  // (options.extensions) and $call functions (options.functions) — the
+  // JSLT operator registry (registry.js) flows in exactly here. Built
+  // whenever ANY of the three is present.
+  const bodyOptions = (options.pathFunctions == null
+    && options.extensions == null && options.functions == null)
     ? undefined
-    : { pathFunctions: options.pathFunctions };
+    : {
+      pathFunctions: options.pathFunctions ?? undefined,
+      extensions: options.extensions ?? undefined,
+      functions: options.functions ?? undefined,
+    };
 
   const tableBox = {
     dispatch: null,
     needsLoc: false,
   };
   const targetModes = new Set();
-  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, pathOptions);
+  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, bodyOptions);
   tableBox.needsLoc = model.anyPathRule || compiled.readsPath;
   const built = buildModes(model, compiled.rules, targetModes);
   const modes = built.modes;
