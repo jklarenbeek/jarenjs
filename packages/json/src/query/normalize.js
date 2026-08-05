@@ -366,11 +366,57 @@ function levenshtein(a, b) {
 // suggestion candidates, built lazily (see the isVocabularyKey note)
 let VOCABULARY_NAMES = null;
 
-// JQ0002 for an unknown $-key, with a "did you mean" suggestion when a
-// vocabulary key is within Levenshtein distance 2 (compile-time only).
-// With host extensions the candidate list is built per call (this is the
-// error path); the lazy global stays for the core-only case.
+// SEMANTIC aliases — the names a writer reaches for from other query
+// languages (SQL, XPath, JSONata, JS array methods) or a plausible
+// synonym, which Levenshtein cannot reach because they are lexically
+// far from the real operator. This is the failure mode an LLM lands in
+// most: it guesses `$first`/`$filter`/`$map` and, without a pointer,
+// abandons the language. Each entry is the CLOSEST real spelling; a
+// value of null means "no operator does this — here is how instead".
+const OPERATOR_ALIASES = {
+  // sequence access
+  $first: "$head", $last: "$head of $reverse", $nth: "$get", $at: "$get",
+  $take: "$subsequence", $skip: "$subsequence", $slice: "$subsequence",
+  $drop: "$subsequence", $limit: "$subsequence",
+  // filtering / mapping / folding: these are FLWOR or a JSONPath filter,
+  // not operators ($where, $map, $fold, $orderby ARE real keys and never
+  // reach here — only the guesses that miss them are listed)
+  $filter: "a JSONPath filter like $[?(@.x > 1)] or $where in a $for",
+  $select: "a $for phrase with $return", $flatmap: "a $for phrase",
+  $reduce: "$fold", $foldl: "$fold", $aggregate: "$fold",
+  $group: "$groupby", "$group-by": "$groupby",
+  $sortby: "$sort (sorts scalars; order objects via a $for over a sorted key)",
+  "$sort-by": "$sort (scalars only)", $order: "$sort",
+  // aggregates / arithmetic
+  $size: "$count", $len: "$length", $abs: null, $round: null, $floor: "$idiv",
+  $ceil: null, $sqrt: null, $pow: null, $modulo: "$mod", $remainder: "$mod",
+  $subtract: "$sub", $multiply: "$mul", $divide: "$div", $minus: "$sub",
+  $times: "$mul", $negate: "$neg", $product: "$mul", $total: "$sum",
+  // strings / collections
+  $join: "$string-join", $split: null, $includes: "$contains",
+  $indexof: "$index-of", $find: "$index-of", $keys: "$entries",
+  $values: "$entries then $get", $has: "$exists", $tostring: "$string",
+  $tonumber: "$number", $len_str: "$string-length", $trim: "$normalize-space",
+  $lowercase: "$lower", $uppercase: "$upper", $startswith: "$starts-with",
+  $endswith: "$ends-with", $unique: "$distinct", $flatten: "a $for phrase",
+  // conditionals ($coalesce is a real operator; the guesses are here)
+  $case: "$if", $cond: "$if", $switch: "$if", $ternary: "$if",
+  $ifnull: "$default", $ifempty: "$default", $nvl: "$default",
+};
+
+// JQ0002 for an unknown $-key, with a "did you mean" suggestion. A
+// curated SEMANTIC alias wins first (the cross-language guesses
+// Levenshtein misses); otherwise the nearest vocabulary key within
+// Levenshtein distance 2. Compile-time only; with host extensions the
+// candidate list is built per call.
 function failUnknownOperator(key, docPath, ctx) {
+  if (hasOwn(OPERATOR_ALIASES, key)) {
+    const target = OPERATOR_ALIASES[key];
+    const hint = target === null
+      ? ' (no operator does this in jaren-query)'
+      : ` (use ${target.startsWith('$') && !target.includes(' ') ? `'${target}'` : target})`;
+    return fail('JQ0002', `unknown operator '${key}'${hint}`, docPath);
+  }
   if (VOCABULARY_NAMES === null) {
     VOCABULARY_NAMES = [
       ...FLWOR_KEYS, ...QUANTIFIER_KEYS, ...ESCAPE_KEYS, ...Object.keys(OPERATORS),

@@ -516,7 +516,7 @@ export const ENGINE_DEFS = {
   },
   jslt: {
     label: 'JSLT',
-    lead: 'Template rules: JSONPath matches position, JSON Schema matches shape, query documents produce output.',
+    lead: 'Template rules that COMPUTE: JSONPath matches position, JSON Schema matches shape, and each rule body is a query document — so it can filter, aggregate ($min/$max/$sum/$count), pick ($head), and branch ($if), not just reshape.',
     inputs: [
       { key: 'stylesheet', title: 'Stylesheet', control: 'json', rows: 12 },
       DATA_FIELD,

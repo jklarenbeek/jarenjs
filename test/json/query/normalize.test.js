@@ -323,6 +323,40 @@ describe('Jaren JSON Query normalizer', () => {
         return true;
       });
     });
+
+    // SEMANTIC aliases — the cross-language / synonym names a writer (or
+    // an LLM) reaches for, which Levenshtein cannot reach. The JQ0002
+    // message points at the real spelling so the mistake self-repairs.
+    it('should map a semantic alias to the real operator on JQ0002', () => {
+      const cases = [
+        ['$first', "use '$head'"],
+        ['$join', "use '$string-join'"],
+        ['$reduce', "use '$fold'"],
+        ['$size', "use '$count'"],
+        ['$multiply', "use '$mul'"],
+        ['$includes', "use '$contains'"],
+        ['$filter', 'use a JSONPath filter'],
+        ['$case', "use '$if'"],
+      ];
+      for (const [op, expected] of cases) {
+        assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
+          assert.strictEqual(e.code, 'JQ0002');
+          assert.ok(e.message.includes(expected),
+            `${op}: expected "${expected}" in "${e.message}"`);
+          return true;
+        });
+      }
+    });
+
+    it('should say plainly when no operator does it (e.g. $abs)', () => {
+      for (const op of ['$abs', '$sqrt', '$ceil']) {
+        assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
+          assert.strictEqual(e.code, 'JQ0002');
+          assert.ok(e.message.includes('no operator does this'), e.message);
+          return true;
+        });
+      }
+    });
   });
 
   describe('escape hatches', () => {

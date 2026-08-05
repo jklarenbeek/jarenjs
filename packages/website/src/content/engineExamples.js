@@ -472,6 +472,74 @@ export const jsltExamples = [
     },
     document: BOOKSTORE,
   },
+  {
+    // A COMPUTATIONAL stylesheet — the pattern people reach for and then
+    // assume JSLT cannot do: filter a list with a JSONPath predicate, then
+    // pick the one element nearest a target. The body is a jaren-query
+    // expression, so it computes. Idioms shown: a JSONPath filter to the
+    // subset, `$for/$where/$return` to iterate, `$min` over a computed
+    // sequence, `$head` for the first item, and |x−t| built from `$if`
+    // + `$sub` (there is no `$abs`).
+    name: 'Nearest: the upper-class item closest to a target probability',
+    stylesheet: {
+      $jslt: '0.1',
+      rules: [
+        {
+          match: '$',
+          body: {
+            $let: {
+              pool: '$.people[?(@.class == "upper")]',
+              target: '$.target',
+            },
+            $return: {
+              $let: {
+                gaps: {
+                  $for: { p: '$pool' },
+                  $return: {
+                    $if: [
+                      { $lt: [{ $sub: ['$p.probability', '$target'] }, 0] },
+                      { $sub: ['$target', '$p.probability'] },
+                      { $sub: ['$p.probability', '$target'] },
+                    ],
+                  },
+                },
+              },
+              $return: {
+                target: '$target',
+                nearest: {
+                  $head: {
+                    $for: { p: '$pool' },
+                    $where: {
+                      $eq: [
+                        {
+                          $if: [
+                            { $lt: [{ $sub: ['$p.probability', '$target'] }, 0] },
+                            { $sub: ['$target', '$p.probability'] },
+                            { $sub: ['$p.probability', '$target'] },
+                          ],
+                        },
+                        { $min: '$gaps' },
+                      ],
+                    },
+                    $return: '$p',
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    document: {
+      target: 0.7,
+      people: [
+        { name: 'Ada', class: 'upper', probability: 0.55 },
+        { name: 'Bram', class: 'lower', probability: 0.71 },
+        { name: 'Cato', class: 'upper', probability: 0.66 },
+        { name: 'Dies', class: 'upper', probability: 0.95 },
+      ],
+    },
+  },
 ];
 
 /**
