@@ -348,6 +348,64 @@ optional SCAN refusal, the allow-lists, and the mandatory predicates.
 Each bound is proven to fire by the hostile-input suite, and the store
 is proven usable after every refusal.
 
+### 8.1 Registered operators run in the residual
+
+A store MAY open with a registry (`createJsltRegistry()` from
+`@jarenjs/json/jslt`, or raw `functions` / `extensions` maps), and its
+operators — `$npv`, `$mean`, `$sqrt`, … — become engine vocabulary a
+query or entity document may use:
+
+```js
+import { createJsltRegistry, financePack, statsPack } from '@jarenjs/json/jslt';
+const store = await openStore(model, {
+  driver,
+  operators: createJsltRegistry().use(financePack).use(statsPack),
+});
+store.capabilities.operators; // ['$npv', '$irr', …, '$mean', …]
+```
+
+A registered operator is a vocabulary extension of the **engine**, and
+the engine runs against a store in JavaScript over the fetched rows —
+the **residual**. So in this ring every registered operator is
+**correct everywhere and accelerated nowhere**: the planner recognises
+its name (it is not the unknown-operator error `JQ0002`), keeps it in
+the residual, compiles the residual with the same registered
+`{ functions, extensions }`, and `explain()` names it as the reason the
+query did not translate natively — never silently:
+
+```js
+store.collection('deals').explain(doc).residual.reasons;
+// [{ construct: '$npv', reason: "registered operator '$npv' runs in the
+//    residual (Ring 2 — correct, not pushed to SQL)" }, …]
+```
+
+The result is identical to the same document run over the same rows by
+the in-memory engine — differential-tested — and to the direct core
+function. **SQL pushdown of the pushable subset (scalar functions as
+SQLite deterministic UDFs, aggregators as SQLite aggregate UDFs) is a
+separate, driver-gated concern** on the roadmap; it is an optimisation,
+never a correctness requirement, and `bun:sqlite`, which registers no
+UDFs, is always the residual.
+
+**Profile interaction.** A first-class registered `op`/`agg` (a native
+operator like `$npv`) is host-provided machinery — the store owner
+registered it, not the foreign document — so it is **allowed by default**
+under a profile, exactly as the internal `$apply` is. What the profile
+still governs:
+
+- the mandatory bounds apply to the residual as always: a registered-
+  operator query fetches at most `maxRows + 1` candidate rows and is
+  refused with `JD2007` past `maxRows`; the mandatory predicate still
+  conjoins into the candidate fetch; engine limits still bound the JS;
+- the profile's `functions` allow-list still governs a registered `fn`
+  reached through `$call` — a `$call('clamp', …)` name must be declared
+  in `functions`, or it is the compile error `JD0011`, because a `fn` is
+  a host function like any other. Only the first-class `op`/`agg`
+  operators are exempt.
+
+Without a registry the store is byte-identical to before: a document
+using `$npv` fails `JQ0002`, and `capabilities.operators` is `[]`.
+
 ## 9. Entities, the `x-entity` vocabulary, relations
 
 ### 9.1 Scope, and the phase-A relationship

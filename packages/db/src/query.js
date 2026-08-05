@@ -38,15 +38,20 @@ import {
 
 /**
  * The store-wide query state shared by every collection's engine: one
- * bounded statement cache, its counters, and the UDF registration set.
+ * bounded statement cache, its counters, the UDF registration set, and
+ * the store's resolved registered operators (Ring 2 — `{ functions,
+ * extensions }` or `null`), threaded to every engine that builds a
+ * residual.
  * @param {number} [bound]
+ * @param {{ functions?: any, extensions?: any } | null} [operators]
  * @returns {any}
  */
-export function createQueryState(bound = undefined) {
+export function createQueryState(bound = undefined, operators = null) {
   return {
     cache: createBoundedCache(bound ?? 128),
     counters: { hits: 0, misses: 0, evictions: 0 },
     registered: new Set(),
+    operators: operators ?? null,
   };
 }
 
@@ -68,16 +73,37 @@ function bindable(value) {
 export function createQueryEngine(context) {
   const { connection, state, collection, physicalPlan } = context;
   const storeProfile = context.profile ?? null;
+  // the store's registered operators (Ring 2): recognised by the planner
+  // as vocabulary, evaluated in the residual, threaded into every
+  // residual compilation here. `null` when the store opened with no
+  // registry — the whole engine is then byte-identical to before.
+  const operators = state.operators ?? null;
   const dialect = connection.dialect;
   const shape = {
     collection: collection.name,
     schema: collection.schema,
     columnByCanonical: physicalPlan.columnByCanonical,
+    operators,
   };
   const physical = {
     table: physicalPlan.table,
     keyColumn: physicalPlan.keyColumn,
     docColumn: physicalPlan.docColumn,
+  };
+
+  /** The `compileJsonQuery` options for an inline residual: the
+   * profile's engine limits plus the store's registered operators. */
+  const residualCompileOptions = (limits) => {
+    const functions = operators?.functions;
+    const extensions = operators?.extensions;
+    if (limits === undefined && functions === undefined && extensions === undefined)
+      return undefined;
+    /** @type {any} */
+    const options = {};
+    if (limits !== undefined) options.limits = limits;
+    if (functions !== undefined) options.functions = functions;
+    if (extensions !== undefined) options.extensions = extensions;
+    return options;
   };
 
   const udfHook = connection.capabilities.userFunctions
@@ -192,7 +218,7 @@ export function createQueryEngine(context) {
       setResidual: null,
       packedResidual: null,
       rowResidual: planned.mode === 'row'
-        ? compileRowResidual(planned.rowReturn, limits)
+        ? compileRowResidual(planned.rowReturn, limits, operators)
         : null,
       fullScanSql: null,
       fullScanShape: () => shapePlan(selectPlan(collection.name)),
@@ -210,15 +236,14 @@ export function createQueryEngine(context) {
   };
   const setResidualOf = (entry, document) => {
     if (entry.setResidual === null)
-      entry.setResidual = compileSetResidual(document, entry.residualLimits);
+      entry.setResidual = compileSetResidual(document, entry.residualLimits, operators);
     return entry.setResidual;
   };
   /** The item-packing variant for cursors: `[document]` packs the
    * whole result sequence into one unambiguous array. */
   const packedResidualOf = (entry, document) => {
     if (entry.packedResidual === null) {
-      const compiled = compileJsonQuery([document],
-        entry.residualLimits === undefined ? undefined : { limits: entry.residualLimits });
+      const compiled = compileJsonQuery([document], residualCompileOptions(entry.residualLimits));
       entry.packedResidual = (candidates, externals) => compiled(candidates, externals);
     }
     return entry.packedResidual;
@@ -529,6 +554,7 @@ export const INCLUDE_DEPTH_DEFAULT = 3;
  */
 export function createEntityQueryEngine(context) {
   const { connection, entities, mapping, state } = context;
+  const operators = state.operators ?? null;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const physicalOf = (name) => ({ table: mapping.entities[name].table });
@@ -541,7 +567,7 @@ export function createEntityQueryEngine(context) {
       return cached;
     }
     state.counters.misses++;
-    let planned = planEntityQuery(document, entities, mapping);
+    let planned = planEntityQuery(document, entities, mapping, operators);
     if (!pushdown) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: 'disabled by the harness switch' }] };
@@ -594,7 +620,7 @@ export function createEntityQueryEngine(context) {
 
   const runResidual = (entry, document, externals) => {
     if (entry.setResidual === null)
-      entry.setResidual = compileSetResidual(document);
+      entry.setResidual = compileSetResidual(document, undefined, operators);
     return chain(fetchRoot(entry), (root) => entry.setResidual(root, externals));
   };
 
@@ -673,6 +699,10 @@ export function createEntityQueryEngine(context) {
  */
 export function createLoadEngine(context, entityName) {
   const { connection, entities, mapping, state } = context;
+  // a registered operator (Ring 2) is recognised as vocabulary so a
+  // where/orderBy that uses one refuses cleanly (JD0032 — the load path
+  // is all-SQL, with no residual), never as an unknown operator
+  const analyzeOpts = state.operators ?? undefined;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
 
@@ -685,7 +715,7 @@ export function createLoadEngine(context, entityName) {
     const wrapper = { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
     let analysis;
     try {
-      analysis = analyzeQuery(wrapper);
+      analysis = analyzeQuery(wrapper, analyzeOpts);
     }
     catch (cause) {
       throw new DbCompileError('JD0032',
@@ -716,7 +746,7 @@ export function createLoadEngine(context, entityName) {
     const wrapper = { $for: { it: '$[*]' }, $orderby: specs, $return: '$it' };
     let analysis;
     try {
-      analysis = analyzeQuery(wrapper);
+      analysis = analyzeQuery(wrapper, analyzeOpts);
     }
     catch (cause) {
       throw new DbCompileError('JD0032',

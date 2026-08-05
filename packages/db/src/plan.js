@@ -104,6 +104,100 @@ function refusal(construct, reason) {
   return { construct, reason };
 }
 
+// ————— Registered operators (Ring 2 — TODO_OPS) —————
+//
+// A store may open with a registry (createJsltRegistry()) whose
+// operators become engine vocabulary. Ring 2 treats every registered
+// operator as CORRECT but UN-pushable: the planner must KNOW its name
+// (so the AST analysis does not fail `JQ0002`) yet still route it to the
+// residual, where the compilation carries the same `{ functions,
+// extensions }`. Ring 3 will promote the pushable subset to SQL; here
+// everything registered runs in JavaScript over the fetched rows.
+
+/**
+ * The analyze options carrying the store's registered operators. A
+ * registered operator is engine vocabulary, so the AST analysis must be
+ * told its `{ functions, extensions }` or it rejects the document as an
+ * unknown operator. `null`/absent operators → `undefined`, so a store
+ * without a registry analyses byte-identically to before.
+ * @param {{ functions?: any, extensions?: any } | null | undefined} operators
+ * @returns {any}
+ */
+function analyzeOptionsFor(operators) {
+  if (operators == null) return undefined;
+  /** @type {any} */
+  const options = {};
+  if (operators.functions !== undefined) options.functions = operators.functions;
+  if (operators.extensions !== undefined) options.extensions = operators.extensions;
+  return options;
+}
+
+/**
+ * The set of registered first-class operator names (the `op`/`agg`
+ * entries that appear as document keys), or `null` when none.
+ * @param {{ extensions?: any } | null | undefined} operators
+ * @returns {Set<string> | null}
+ */
+function registeredNamesOf(operators) {
+  if (operators == null) return null;
+  const names = new Set(Object.keys(operators.extensions ?? {}));
+  return names.size === 0 ? null : names;
+}
+
+/**
+ * Which registered operator names a raw document mentions (a `$`-key is
+ * an operator call). Robust across where/return/root placement, since it
+ * walks the document rather than the AST.
+ * @param {any} document
+ * @param {Set<string>} registered
+ * @returns {string[]}
+ */
+function registeredOpsUsed(document, registered) {
+  const found = new Set();
+  const walk = (node) => {
+    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+    if (node !== null && typeof node === 'object') {
+      for (const key of Object.keys(node)) {
+        if (registered.has(key)) found.add(key);
+        walk(node[key]);
+      }
+    }
+  };
+  walk(document);
+  return [...found];
+}
+
+/**
+ * Prepend an honest, named residual reason when a non-native plan used a
+ * registered operator: `explain()` then says plainly that the operator
+ * forced the residual, never silently. Native plans and no-registry
+ * stores pass through untouched.
+ * @param {any} planned - a planner result carrying `mode` and `reasons`
+ * @param {any} document
+ * @param {{ extensions?: any } | null | undefined} operators
+ * @returns {any}
+ */
+function prependRegisteredReason(planned, document, operators) {
+  if (planned.mode === 'native') return planned;
+  const registered = registeredNamesOf(operators);
+  if (registered === null) return planned;
+  const used = registeredOpsUsed(document, registered);
+  if (used.length === 0) return planned;
+  const many = used.length > 1;
+  return {
+    ...planned,
+    reasons: [
+      {
+        construct: used.join(', '),
+        reason: `registered operator${many ? 's' : ''} `
+          + `${used.map((n) => `'${n}'`).join(', ')} run${many ? '' : 's'} in the residual `
+          + '(Ring 2 — correct, not pushed to SQL)',
+      },
+      ...planned.reasons,
+    ],
+  };
+}
+
 /**
  * Is this node the bare binding variable (the whole item)?
  * @param {any} node
@@ -400,8 +494,8 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
  *   udfs: string[],
  * }}
  */
-export function planQuery(document, shape, options = undefined) {
-  const analysis = analyzeQuery(document);
+function planCollectionCore(document, shape, options = undefined) {
+  const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
   let root = analysis.root;
   assertDecidedKind(root);
 
@@ -533,6 +627,29 @@ export function planQuery(document, shape, options = undefined) {
   plan.window = null;
   return { analysis, plan, mode: 'set', reasons: flwor.reasons, rowReturn: null,
     udfs: flwor.udfs };
+}
+
+/**
+ * Plan a whole document against one collection. The store's registered
+ * operators (Ring 2) ride in `shape.operators` — the planner recognises
+ * them as vocabulary but keeps them in the residual, and names them in
+ * the reasons when it does.
+ * @param {any} document - The raw query document (kept beside the AST
+ *   for residual construction — the AST has no unparser)
+ * @param {any} shape - { collection, schema, columnByCanonical, operators? }
+ * @param {{ udf?: (fragment: any) => { name: string, key: string } | null }} [options]
+ * @returns {{
+ *   analysis: any,
+ *   plan: import('./algebra.js').Plan | null,
+ *   mode: 'native' | 'row' | 'set',
+ *   reasons: { construct: string, reason: string }[],
+ *   rowReturn: any,
+ *   udfs: string[],
+ * }}
+ */
+export function planQuery(document, shape, options = undefined) {
+  const planned = planCollectionCore(document, shape, options);
+  return prependRegisteredReason(planned, document, shape?.operators);
 }
 
 // ————— The entity document kind (one planner, two document kinds) —————
@@ -670,10 +787,13 @@ export function planEntityPredicate(node, slot, shape) {
  * @param {any} document
  * @param {Map<string, any>} entities - normalized entities
  * @param {any} mapping - explainMapping result
+ * @param {{ functions?: any, extensions?: any } | null} [operators] -
+ *   the store's registered operators (Ring 2); recognised as vocabulary,
+ *   kept in the set residual over the fetched root
  * @returns {any}
  */
-export function planEntityQuery(document, entities, mapping) {
-  const analysis = analyzeQuery(document);
+function planEntityQueryCore(document, entities, mapping, operators) {
+  const analysis = analyzeQuery(document, analyzeOptionsFor(operators));
   let root = analysis.root;
   assertDecidedKind(root);
 
@@ -860,6 +980,21 @@ export function planEntityQuery(document, entities, mapping) {
       ret: retBinding.name,
     },
   };
+}
+
+/**
+ * Plan an ENTITY query document (one planner, two document kinds). The
+ * store's registered operators (Ring 2) are recognised as vocabulary and
+ * kept in the set residual over the fetched root, named in the reasons.
+ * @param {any} document
+ * @param {Map<string, any>} entities - normalized entities
+ * @param {any} mapping - explainMapping result
+ * @param {{ functions?: any, extensions?: any } | null} [operators]
+ * @returns {any}
+ */
+export function planEntityQuery(document, entities, mapping, operators = null) {
+  const planned = planEntityQueryCore(document, entities, mapping, operators);
+  return prependRegisteredReason(planned, document, operators);
 }
 
 /** Which binding slots a subtree references (via path roots). */

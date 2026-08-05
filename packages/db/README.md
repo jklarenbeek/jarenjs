@@ -65,6 +65,15 @@ const adults = await users.execute({
   plan output), and the residual's named reasons. A 418-run
   differential oracle keeps both paths agreeing. `strict: true` turns
   any residual into a compile error.
+- **Registered operators, correct in the residual.** Open with a
+  registry (`operators: createJsltRegistry().use(financePack)`) and a
+  query may use `$npv`, `$mean`, `$sqrt`, … over stored documents. Each
+  runs in the residual — identical to the in-memory engine, `explain()`
+  names it, never pushed to SQL (that acceleration is a driver-gated
+  roadmap item, never a correctness claim). A first-class operator is
+  allowed under a profile by default; the profile's `functions`
+  allow-list still governs a `$call`-reached `fn`; the row bound still
+  fires. Without a registry the store is unchanged — `$npv` is `JQ0002`.
 - **Storage is declarative.** Indexed paths become generated columns
   plus real indexes, typed from the collection's schema. Opening an
   existing database verifies the declared shape and refuses to alter

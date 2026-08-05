@@ -19,16 +19,41 @@
 import { compileJsonQuery } from '@jarenjs/json/query';
 
 /**
+ * The compile options for a residual: the profile's engine limits plus
+ * the store's registered operators (Ring 2 — a registered operator runs
+ * in the residual, so the residual compilation must carry its
+ * `{ functions, extensions }` or it would fail `JQ0002`/`JQ0010`).
+ * Returns `undefined` when neither is present, so a store opened with no
+ * profile and no registry compiles byte-identically to before.
+ * @param {any} limits
+ * @param {{ functions?: any, extensions?: any } | null} [operators]
+ * @returns {any}
+ */
+function residualOptions(limits, operators) {
+  const functions = operators?.functions;
+  const extensions = operators?.extensions;
+  if (limits === undefined && functions === undefined && extensions === undefined)
+    return undefined;
+  /** @type {any} */
+  const options = {};
+  if (limits !== undefined) options.limits = limits;
+  if (functions !== undefined) options.functions = functions;
+  if (extensions !== undefined) options.extensions = extensions;
+  return options;
+}
+
+/**
  * Compile the whole document for set-mode evaluation. A profile's
  * engine limits ride into the compilation so the JavaScript portion is
  * bounded by the engine's own enforcement.
  * @param {any} document
  * @param {any} [limits]
+ * @param {{ functions?: any, extensions?: any } | null} [operators] -
+ *   the store's registered operators, so the residual can evaluate them
  * @returns {(candidates: any[], externals: any) => any}
  */
-export function compileSetResidual(document, limits) {
-  const compiled = compileJsonQuery(document,
-    limits === undefined ? undefined : { limits });
+export function compileSetResidual(document, limits, operators) {
+  const compiled = compileJsonQuery(document, residualOptions(limits, operators));
   return (candidates, externals) => compiled(candidates, externals);
 }
 
@@ -36,13 +61,14 @@ export function compileSetResidual(document, limits) {
  * Compile the per-row projection for row-mode evaluation.
  * @param {any} returnExpression - The document's raw `$return` value
  * @param {any} [limits]
+ * @param {{ functions?: any, extensions?: any } | null} [operators]
  * @returns {(row: any, externals: any) => any[]} the row's items
  */
-export function compileRowResidual(returnExpression, limits) {
+export function compileRowResidual(returnExpression, limits, operators) {
   const compiled = compileJsonQuery({
     $for: { it: '$[*]' },
     $return: [returnExpression],
-  }, limits === undefined ? undefined : { limits });
+  }, residualOptions(limits, operators));
   return (row, externals) => {
     const packed = compiled([row], externals);
     // one binding → exactly one packed array of that row's items

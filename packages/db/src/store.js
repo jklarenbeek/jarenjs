@@ -554,11 +554,49 @@ function asyncCollection(core, live) {
 }
 
 /**
+ * Resolve the store's operator seam (Ring 2 — TODO_OPS) to a single
+ * `{ functions, extensions }` or `null`. Accepts `options.operators` (a
+ * registry from `@jarenjs/json/jslt`'s `createJsltRegistry()`) and/or
+ * raw `options.functions` / `options.extensions`. A registered operator
+ * becomes engine vocabulary the query planner recognises and the
+ * residual evaluates — it runs correctly in JavaScript over the fetched
+ * rows, and is never pushed to SQL in this ring (that is Ring 3). Bad
+ * input is API misuse (a synchronous `TypeError`), consistent with the
+ * driver check. When no registry is threaded the return is `null`, and
+ * the whole query engine is byte-identical to before.
+ * @param {any} options
+ * @returns {{ functions: any, extensions: any } | null}
+ */
+function resolveOperators(options) {
+  const registry = options.operators;
+  const hasRegistry = registry !== undefined && registry !== null;
+  const hasRaw = options.functions !== undefined || options.extensions !== undefined;
+  if (!hasRegistry && !hasRaw) return null;
+  let functions = {};
+  let extensions = {};
+  if (hasRegistry) {
+    if (typeof registry.toOptions !== 'function') {
+      throw new TypeError('openStore: operators must be a registry '
+        + '(createJsltRegistry()) exposing toOptions()');
+    }
+    const resolved = registry.toOptions();
+    // reuse the registry's stable frozen maps by reference when there
+    // are no raw overrides, so the engine's identity-keyed caches hit
+    functions = resolved.functions ?? {};
+    extensions = resolved.extensions ?? {};
+  }
+  if (options.functions !== undefined) functions = { ...functions, ...options.functions };
+  if (options.extensions !== undefined) extensions = { ...extensions, ...options.extensions };
+  return Object.freeze({ functions, extensions });
+}
+
+/**
  * Open (or create) a store described by a model document.
  * @param {any} model - A `jaren-model` document (the 0.1 subset)
  * @param {{ driver: any, path?: string, compileSchema?: Function,
  *   busyTimeout?: number, journalMode?: string,
- *   statementCacheBound?: number, profile?: any,
+ *   statementCacheBound?: number, profile?: any, operators?: any,
+ *   functions?: any, extensions?: any,
  *   readOnly?: boolean }} options
  * @returns {Promise<any>}
  */
@@ -569,6 +607,7 @@ export function openStore(model, options) {
     throw new TypeError('openStore needs { driver } from @jarenjs/db/node, /bun or /wasm');
   if (options.compileSchema !== undefined && typeof options.compileSchema !== 'function')
     throw new TypeError('openStore: compileSchema must be a function when present');
+  const operators = resolveOperators(options);
 
   // API misuse (above) throws; a defective MODEL rejects, per the
   // asynchronous contract
@@ -894,6 +933,11 @@ export function openStore(model, options) {
             journalMode: memory || readOnly ? null : journalMode,
             readOnly,
             profiled: storeProfile !== null,
+            // the registered operator vocabulary (Ring 2): the names a
+            // query may use; they run in the residual, never SQL (Ring 3)
+            operators: operators === null
+              ? Object.freeze([])
+              : Object.freeze(Object.keys(operators.extensions)),
             capture: captureMode,
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true
@@ -903,7 +947,7 @@ export function openStore(model, options) {
               || (options.jobs !== undefined && options.jobs !== false),
           });
 
-          const queryState = createQueryState(options.statementCacheBound);
+          const queryState = createQueryState(options.statementCacheBound, operators);
           const entityEngine = entities.size > 0
             ? createEntityQueryEngine({ connection, entities, mapping, state: queryState })
             : null;
