@@ -381,11 +381,9 @@ store.collection('deals').explain(doc).residual.reasons;
 
 The result is identical to the same document run over the same rows by
 the in-memory engine — differential-tested — and to the direct core
-function. **SQL pushdown of the pushable subset (scalar functions as
-SQLite deterministic UDFs, aggregators as SQLite aggregate UDFs) is a
-separate, driver-gated concern** on the roadmap; it is an optimisation,
-never a correctness requirement, and `bun:sqlite`, which registers no
-UDFs, is always the residual.
+function. The pushable subset of these operators can be accelerated into
+SQL where the driver allows — §8.2 — but that is an optimisation layered
+over this residual, never a change to the answer.
 
 **Profile interaction.** A first-class registered `op`/`agg` (a native
 operator like `$npv`) is host-provided machinery — the store owner
@@ -405,6 +403,66 @@ still governs:
 
 Without a registry the store is byte-identical to before: a document
 using `$npv` fails `JQ0002`, and `capabilities.operators` is `[]`.
+
+### 8.2 SQL pushdown of the pushable-scalar subset (driver-gated)
+
+A pack marks each entry `pushable: 'scalar'` (a per-row scalar function —
+the math ops), `'aggregate'`, or `false`. Where the driver has user
+functions, a `pushable:'scalar'` operator used in a **WHERE predicate**
+is registered as a SQLite **deterministic UDF** and the plan emits the
+call (`… WHERE jaren_p_<hash>(json_text(doc))`), so SQLite drives the row
+iteration and the operator runs inside the callback — instead of every
+candidate row crossing into the residual. It is the same compiled engine
+fragment either way, so the answer is identical by construction; the
+only question is where the loop runs.
+
+The per-driver capability matrix — read once at open, on
+`store.capabilities`:
+
+| capability | node:sqlite | bun:sqlite | wasm |
+|---|---|---|---|
+| `userFunctions` (scalar UDF) | ✅ | ❌ | probed |
+| `aggregateFunctions` (aggregate UDF) | ✅ | ❌ | probed |
+| `pushableOperators` | the scalar subset | `[]` | scalar subset if `userFunctions` |
+
+On **bun:sqlite** there is no UDF API, so `pushableOperators` is `[]` and
+every registered operator is the residual (§8.1) — no failure, the same
+result, reported by capability. A **profiled (untrusted) document never
+triggers host-side registration** — the UDF hatch is gated on `profile
+=== null`, exactly as the engine-internal hatch is; a profiled `$sqrt`
+predicate runs in the residual.
+
+**When it wins — measured, published honestly.** The push narrows *before*
+rows cross into JavaScript, so it wins exactly when something else
+narrows too (20 000 rows, node:sqlite, median ms):
+
+| shape | pushed | residual | verdict |
+|---|---|---|---|
+| solo `$sqrt` predicate, ~20 % match | 22 | 21 | ~even |
+| solo `$sqrt` predicate, ~90 % match | 41 | 23 | residual **1.75×** |
+| indexed `$eq` **and** `$sqrt` (5 % pass the index) | 5.2 | 21 | push **3.9×** |
+| `$sqrt` predicate with `LIMIT 10` | 0.03 | 21 | push **615×** |
+
+So a `$sqrt` predicate beside a selective native predicate or a `LIMIT`
+is a large win; a `$sqrt` predicate that is the *sole* filter of a full
+table scan is a wash to a modest loss (the UDF re-parses each row in the
+callback). **The push is not gated behind a cost heuristic**, because
+SQLite exposes no row estimates (`capabilities.rowEstimates` is `false`)
+to build one on — a crude guess would be dishonest. It pushes
+deterministically and this profile is published so the shape of the win
+is known; add a narrowing predicate or a `LIMIT` and the push pays.
+
+**The honest ceiling.** A `pushable:false` operator (a whole-series
+`$npv`, an `$sma`) is never a UDF — it stays the residual, `explain()`
+lists no `udfs` for it. Aggregate-UDF pushdown (`db.aggregate` step/final
+over `GROUP BY`) is **not emitted**: no shipped pack marks an entry
+`pushable:'aggregate'` (the finance/stats aggregators fold a *per-document*
+sequence — that is a per-row scalar to SQL, already covered by the scalar
+path where marked — not a cross-row column), and cross-row aggregate
+pushdown additionally waits on `$groupby` pushdown, itself a deliberate
+residual today. The `aggregateFunctions` capability is probed and
+reported regardless, so the day a pack marks `'aggregate'` the driver
+gate is already in place.
 
 ## 9. Entities, the `x-entity` vocabulary, relations
 

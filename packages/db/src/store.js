@@ -574,6 +574,11 @@ function resolveOperators(options) {
   if (!hasRegistry && !hasRaw) return null;
   let functions = {};
   let extensions = {};
+  // the SQL-pushable scalar subset (Ring 3): the registered operators a
+  // pack marked `pushable: 'scalar'`, eligible to become deterministic
+  // UDFs where the driver supports them. Raw (registry-free) extensions
+  // are never pushed — only a registry declares pushability.
+  const pushableScalar = new Set();
   if (hasRegistry) {
     if (typeof registry.toOptions !== 'function') {
       throw new TypeError('openStore: operators must be a registry '
@@ -584,10 +589,15 @@ function resolveOperators(options) {
     // are no raw overrides, so the engine's identity-keyed caches hit
     functions = resolved.functions ?? {};
     extensions = resolved.extensions ?? {};
+    if (typeof registry.forSql === 'function') {
+      for (const [name, meta] of Object.entries(registry.forSql())) {
+        if (meta.pushable === 'scalar') pushableScalar.add(name);
+      }
+    }
   }
   if (options.functions !== undefined) functions = { ...functions, ...options.functions };
   if (options.extensions !== undefined) extensions = { ...extensions, ...options.extensions };
-  return Object.freeze({ functions, extensions });
+  return Object.freeze({ functions, extensions, pushableScalar });
 }
 
 /**
@@ -934,10 +944,17 @@ export function openStore(model, options) {
             readOnly,
             profiled: storeProfile !== null,
             // the registered operator vocabulary (Ring 2): the names a
-            // query may use; they run in the residual, never SQL (Ring 3)
+            // query may use; they run in the residual by default
             operators: operators === null
               ? Object.freeze([])
               : Object.freeze(Object.keys(operators.extensions)),
+            // the subset this driver actually pushes into SQL as
+            // deterministic UDFs (Ring 3): `pushable:'scalar'` operators
+            // when the driver has user functions; `[]` on bun:sqlite
+            // (no UDF API — always the residual) and without a registry
+            pushableOperators: operators === null || connection.capabilities.userFunctions !== true
+              ? Object.freeze([])
+              : Object.freeze([...operators.pushableScalar]),
             capture: captureMode,
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true

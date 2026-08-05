@@ -108,7 +108,8 @@ export function createQueryEngine(context) {
 
   const udfHook = connection.capabilities.userFunctions
     ? (fragment) => {
-      const qualified = deterministicFragment(fragment);
+      // Ring 3: admit the registry's pushable:'scalar' operators too
+      const qualified = deterministicFragment(fragment, operators);
       if (qualified === null) return null;
       registerFragment(connection, state.registered, qualified);
       return qualified;

@@ -171,6 +171,7 @@ export function wasmDriver(handle) {
           userFunctions: handle.declares?.userFunctions === true,
           deterministicIndexableFunctions:
             handle.declares?.deterministicIndexableFunctions === true,
+          aggregateFunctions: handle.declares?.aggregateFunctions === true,
         },
       })),
   });

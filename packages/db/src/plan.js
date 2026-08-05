@@ -181,7 +181,12 @@ function prependRegisteredReason(planned, document, operators) {
   if (planned.mode === 'native') return planned;
   const registered = registeredNamesOf(operators);
   if (registered === null) return planned;
-  const used = registeredOpsUsed(document, registered);
+  // only the part that actually runs in the residual can name an operator
+  // as "residual": in `row` mode the where/order are pushed (a scalar
+  // operator there may even be a Ring 3 UDF) and just the projection runs
+  // per row; in `set` mode the whole document re-runs over the candidates
+  const residualPart = planned.mode === 'row' ? planned.rowReturn : document;
+  const used = registeredOpsUsed(residualPart, registered);
   if (used.length === 0) return planned;
   const many = used.length > 1;
   return {

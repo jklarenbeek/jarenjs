@@ -49,6 +49,7 @@ export function adaptBunDatabase(db) {
       sessions: false,
       userFunctions: false,
       deterministicIndexableFunctions: false,
+      aggregateFunctions: false,
     },
   });
 }

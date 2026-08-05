@@ -44,6 +44,7 @@ export function adaptNodeDatabase(db) {
       sessions: true,
       userFunctions: true,
       deterministicIndexableFunctions: true,
+      aggregateFunctions: true,
     },
   });
 }

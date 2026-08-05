@@ -65,13 +65,21 @@ const adults = await users.execute({
   plan output), and the residual's named reasons. A 418-run
   differential oracle keeps both paths agreeing. `strict: true` turns
   any residual into a compile error.
-- **Registered operators, correct in the residual.** Open with a
-  registry (`operators: createJsltRegistry().use(financePack)`) and a
-  query may use `$npv`, `$mean`, `$sqrt`, … over stored documents. Each
-  runs in the residual — identical to the in-memory engine, `explain()`
-  names it, never pushed to SQL (that acceleration is a driver-gated
-  roadmap item, never a correctness claim). A first-class operator is
-  allowed under a profile by default; the profile's `functions`
+- **Registered operators, correct in the residual, pushed where it
+  pays.** Open with a registry (`operators:
+  createJsltRegistry().use(mathPack).use(financePack)`) and a query may
+  use `$npv`, `$mean`, `$sqrt`, … over stored documents. Each runs
+  correctly in the residual — identical to the in-memory engine,
+  `explain()` names it. The `pushable:'scalar'` subset (the math ops) is
+  additionally accelerated into SQLite as **deterministic UDFs** where
+  the driver allows (node:sqlite yes; bun:sqlite has no UDF API and stays
+  the residual — reported by `capabilities.pushableOperators`). Pushdown
+  is a large win beside a selective native predicate or a `LIMIT` (3.9×,
+  615× measured) and a wash on a solo full-table computed predicate —
+  published honestly in MODEL-FORMAT §8.2, not gated behind a cost model
+  SQLite gives no row estimates to build. A first-class operator is
+  allowed under a profile by default (which also blocks host-side UDF
+  registration for untrusted documents); the profile's `functions`
   allow-list still governs a `$call`-reached `fn`; the row bound still
   fires. Without a registry the store is unchanged — `$npv` is `JQ0002`.
 - **Storage is declarative.** Indexed paths become generated columns

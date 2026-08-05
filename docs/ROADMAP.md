@@ -296,15 +296,17 @@ what each does is its own documentation's job
   projections over joins, and `$match` beyond the UDF hatch. Each
   promotion needs its oracle proof first; the forced-residual mode is
   the regression net that makes promotion safe.
-- [ ] **SQL pushdown of registered operators.** A store opened with a
-  registry (`operators:`, MODEL-FORMAT §8.1) runs every registered
-  operator correctly in the residual today. Promoting the *pushable*
-  subset — scalar functions as SQLite deterministic UDFs, aggregators
-  as SQLite aggregate UDFs over `GROUP BY` — is the acceleration ring.
-  It is driver-gated (`node:sqlite` registers UDFs; `bun:sqlite` does
-  not and stays residual) and a pure optimisation: the residual keeps it
-  about speed, never correctness. Whole-series functions like `$irr` are
-  never index-eligible; the ceiling is stated, not hidden.
+- [ ] **Aggregate-UDF pushdown for registered operators.** The
+  `pushable:'scalar'` subset already pushes into SQLite as deterministic
+  UDFs (MODEL-FORMAT §8.2, node:sqlite; bun stays residual). What remains
+  is `pushable:'aggregate'` — `db.aggregate` step/final over `GROUP BY` —
+  which no shipped pack yet marks (the finance/stats aggregators fold a
+  per-document sequence, a per-row scalar to SQL, not a cross-row column)
+  and which additionally waits on `$groupby` pushdown, itself a
+  deliberate residual above. The `aggregateFunctions` capability is
+  already probed and reported, so the driver gate is in place; whole-
+  series functions like `$irr` are never index-eligible — the ceiling is
+  stated, not hidden.
 - [ ] **Relation-name query sugar and entity linq roots.** `load` owns
   name navigation today because `$.author.name` over the multi-entity
   root is engine-unexecutable and therefore oracle-unprovable; a linq
