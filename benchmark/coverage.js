@@ -395,6 +395,13 @@ function runDeadCodeAudit(opts) {
     // needs a TTY no headless test has); the five commands are
     // subprocess-tested in test/db/cli.test.js
     '--exclude', 'packages/db/src/cli.js',
+    // the data studio's browser transport and its owner worker: they
+    // are Worker/BroadcastChannel/OPFS code no headless Node test can
+    // load — their logic is proven by the real-browser e2e
+    // (packages/website/e2e/data.spec.js across three engines), the
+    // same rule main.js follows
+    '--exclude', 'packages/website/src/boundaries/data.js',
+    '--exclude', 'packages/website/src/db-worker.js',
     '--temp-directory', opts.tempDir,
     '--clean',
     process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',

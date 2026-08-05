@@ -383,11 +383,36 @@ export function createCaptureEngine(options) {
   };
 
   const journalOps = () => {
-    /** @type {any[]} */
-    const ops = [];
+    // ONE NET OP PER ROW (§2), the same discipline sessions get for
+    // free: fold every entry for one (table, key) into first-before /
+    // last-after, so insert+update coalesces, insert+delete vanishes,
+    // and an update back to the original emits nothing. Found by the
+    // wasm parity suite — the TODO_18 differential script never wrote
+    // the same row twice in one transaction.
+    /** @type {Map<string, any>} */
+    const netted = new Map();
+    /** @type {string[]} */
+    const order = [];
     for (const entry of journal) {
       const token = keyToken(entry.keyParts);
-      const prefix = pointerOf(entry.table, token);
+      const key = `${entry.table}\u0000${token}`;
+      const existing = netted.get(key);
+      if (existing === undefined) {
+        netted.set(key, {
+          table: entry.table, token,
+          before: entry.before, after: entry.after,
+        });
+        order.push(key);
+      }
+      else {
+        existing.after = entry.after;
+      }
+    }
+    /** @type {any[]} */
+    const ops = [];
+    for (const key of order) {
+      const entry = netted.get(key);
+      const prefix = pointerOf(entry.table, entry.token);
       if (entry.before === null && entry.after === null) continue;
       if (entry.before === null) {
         ops.push({ op: 'add', path: prefix, value: entry.after });

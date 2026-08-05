@@ -15,6 +15,7 @@ import { PLAYGROUND_RULES } from './playground.js';
 import { STUDIO_RULES } from './studio.js';
 import { FLOW_RULES } from './flowstudio.js';
 import { GAME_RULES } from './game.js';
+import { DATA_RULES } from './data.js';
 import { STATIC_RULES } from './staticpages.js';
 import { README_RULES } from './readme.js';
 import { ASSISTANT_RULES } from './assistant.js';
@@ -31,6 +32,7 @@ export const STYLESHEET = {
     studio: { unmatched: 'error' },
     flow: { unmatched: 'error' },
     game: { unmatched: 'error' },
+    data: { unmatched: 'error' },
     benchmarks: { unmatched: 'error' },
     charts: { unmatched: 'error' },
     docs: { unmatched: 'error' },
@@ -50,6 +52,7 @@ export const STYLESHEET = {
     ...STUDIO_RULES,
     ...FLOW_RULES,
     ...GAME_RULES,
+    ...DATA_RULES,
     ...STATIC_RULES,
     ...README_RULES,
     ...ASSISTANT_RULES,

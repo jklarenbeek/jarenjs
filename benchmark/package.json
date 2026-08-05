@@ -27,15 +27,15 @@
     "@jarenjs/charts": "*",
     "@jarenjs/core": "*",
     "@jarenjs/json": "*",
+    "@prisma/client": "^6.13.0",
     "ajv-formats": "^3.0.1",
     "benchmark": "^2.1.4",
+    "better-sqlite3": "^12.2.0",
+    "drizzle-orm": "^0.44.2",
     "glob": "^11.0.0",
     "json-p3": "^2.2.2",
-    "drizzle-orm": "^0.44.2",
-    "better-sqlite3": "^12.2.0",
     "kysely": "^0.28.2",
-    "prisma": "^6.13.0",
-    "@prisma/client": "^6.13.0"
+    "prisma": "^6.13.0"
   },
   "devDependencies": {
     "@iarna/toml": "^2.2.5",
@@ -70,6 +70,7 @@
     "react-dom": "^19.0.0",
     "rxdb": "^17.4.0",
     "smol-toml": "^1.7.0",
+    "tinybase": "^5.4.9",
     "toml": "^5.0.0",
     "udsv": "^0.7.3",
     "xstate": "^5.32.5",

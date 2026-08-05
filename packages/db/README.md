@@ -127,20 +127,75 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   EQUALITY against a fresh build as the acceptance criterion, drift
   detection, and `jaren-db check` for CI.
 
-## What this is not
+## The reactive and durable half (phase C)
 
-Not a sync engine or a replication layer. Not multi-database — see
-above. Not safe for mutually hostile tenants without the profile's
-mandatory predicate — the SECURITY policy states the claims and the
-non-claims plainly. `$groupby` pushdown, relation-name query sugar
-and a many-to-many membership API are named future work
-(MODEL-FORMAT §10.6, the roadmap), not silent gaps.
+- **Change capture** (LIVE-FORMAT §§1–6): every committed write
+  becomes an observable stream of RFC 6902 patches — from SQLite's
+  own session changesets where the binding has them, from a write-path
+  journal where it does not (`bun:sqlite`, the wasm build). One diff
+  format runs store → patch → live query → O(k) render. Capture is
+  opt-in; the overhead is published, not waved away.
+- **Live queries** (LIVE-FORMAT §§7–12): `collection.live(document)`
+  maintains a result as writes arrive and emits patches — incremental
+  for `where`/`select`/`orderBy`+`limit`/aggregates/single-level
+  `groupBy` (the normative maintenance table), re-run for everything
+  else, **declared, never silent** (`live.mode` names the reason).
+  Unaffected rows stay reference-identical; a seeded oracle holds the
+  maintained result equal to a fresh re-query after every mutation.
+- **Durable runs and the job queue** (JOBS-FORMAT, FLOW-FORMAT §7.6):
+  a `@jarenjs/flow` DAG run checkpoints declared nodes and RESUMES
+  after a crash; `store.jobs` leases work in one guarded statement
+  (exactly-once completion, no distributed lock), retries with
+  backoff, dead-letters, and reclaims expired leases as recovery.
+- **The browser** (`@jarenjs/db/wasm`): the same store, the same
+  queries, the same live updates run on the official SQLite wasm build
+  over the header-free OPFS SAH-pool VFS — one tab owns the
+  connection, others are clients. Proven in the `#/data` studio across
+  Chromium, Firefox and WebKit.
+
+## Sync-readiness — what exists and what does not
+
+The change stream is an ordered log of RFC 6902 patches with a
+monotonic sequence, and SQLite's own changeset/conflict primitives are
+available — which is what a replication protocol would be *built
+from*. **No replication is shipped.** There is no conflict resolution,
+no site identity, no causal ordering across writers, and no capture of
+writes made by another connection (the coarse `dataVersion()` signal
+is the honest mitigation, not a pretend fine-grained one). Building
+replication on these primitives is a roadmap item, not a hint.
+
+## What this is not — every non-claim in one place
+
+- **SQLite only.** One backend (3.45+); the dialect seam is tested
+  against a double but no second dialect ships. No server.
+- **No replication or sync engine** (see above). No cross-connection
+  change capture — another connection's writes are invisible locally.
+- **No statement timeout** on SQLite (the drivers expose no interrupt;
+  the capability slot is honestly `false`), no row estimates.
+- **Not safe for mutually hostile tenants** without the profile's
+  mandatory predicate — SECURITY states the claims and non-claims.
+- **The job queue is one database, one machine.** A shared SQLite file
+  over a NETWORK FILESYSTEM (NFS, SMB, many container volume mounts) is
+  NOT a safe coordination substrate — SQLite's locking is unreliable
+  there. Same-host processes over WAL are the supported topology. No
+  priority classes, no cron, no workflow compensation.
+- **Live-query maintenance is limited to the declared table** (§7);
+  joins, entity queries and non-canonical shapes re-run, reported.
+- **The wasm build journals** (its session extension is not yet
+  adapted); OPFS needs a secure context, and where it is absent the
+  store runs in memory with the durability difference stated.
+- **Named future work, not silent gaps**: `$groupby` pushdown,
+  relation-name query sugar, a many-to-many membership API, incremental
+  joins, other SQL dialects, replication, database introspection
+  (MODEL-FORMAT §10.6, the roadmap).
 
 The normative formats are
 [docs/MODEL-FORMAT.md](docs/MODEL-FORMAT.md) (storage §§1–7, safe
 profile §8, entities §9, relational translation §10, the unit of work
-§11) and [docs/MIGRATION-FORMAT.md](docs/MIGRATION-FORMAT.md)
-(documents §§1–8, relational changes §§9–12); the seams, the pushdown
-contract and the phase-B engines are in
-[ARCHITECTURE.md](ARCHITECTURE.md); the ORM benchmark methodology is
-in [benchmark/README.md](../../benchmark/README.md).
+§11), [docs/MIGRATION-FORMAT.md](docs/MIGRATION-FORMAT.md) (documents
+§§1–8, relational changes §§9–12),
+[docs/LIVE-FORMAT.md](docs/LIVE-FORMAT.md) (capture §§1–6, live queries
+§§7–12) and [docs/JOBS-FORMAT.md](docs/JOBS-FORMAT.md) (the durable
+queue §§1–9); the seams, the pushdown contract and every engine are in
+[ARCHITECTURE.md](ARCHITECTURE.md); the benchmark methodology is in
+[benchmark/README.md](../../benchmark/README.md).

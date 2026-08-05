@@ -31,6 +31,7 @@ import flowchartToDag from '@jarenjs/mermaid/stylesheets/flowchart-to-dag.jslt.j
 import { flowTemplate, FLOW_TEMPLATES } from '../content/flowTemplates.js';
 import { memo1 } from '../lib/format.js';
 import { errorMessage } from '../lib/nodes.js';
+import { createHostWidget } from './host-widget.js';
 
 // ------------------------------------------------------------------
 // The projection chain: document → mermaid text → decorated vnode
@@ -403,21 +404,7 @@ export function createFlowRuntime(env = {}) {
     handle.app = null;
   };
 
-  const widget = {
-    mount(host, props, emit) {
-      const handle = { host, emit, app: null };
-      boot(handle, props);
-      return handle;
-    },
-    update(handle, props, prevProps) {
-      if (props.doc === prevProps.doc && props.revision === prevProps.revision) return;
-      destroy(handle);
-      boot(handle, props);
-    },
-    unmount(handle) {
-      destroy(handle);
-    },
-  };
+  const widget = createHostWidget({ boot, destroy });
 
   const effects = {
     'flow-template': (props, dispatch) => {

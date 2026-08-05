@@ -28,6 +28,7 @@ import {
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
+import { createDataRuntime } from '../boundaries/data.js';
 import { studioTemplate } from '../content/appTemplates.js';
 import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
@@ -83,6 +84,9 @@ export function createSiteApp(env) {
   const requested = new Set();
   /** @type {any} */
   let app = null;
+  // the data studio's owner-worker runtime (its boot sub lives in the
+  // boundary, which is coverage-excluded as browser-only)
+  const dataRuntime = createDataRuntime({});
 
   // the @jarenjs/calc live-rates layer: the impure half (fetch); the pure
   // conversion stays in @jarenjs/core/convert. The static fallback keeps
@@ -321,7 +325,9 @@ export function createSiteApp(env) {
     createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat }),
     // the adventure game's resolver + dynamic-tier effects; it reuses the
     // assistant's shared BYOK key (state.ai.settings) and fetch
-    createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured, download: env.download, saveSlot: env.gameSave }).effects);
+    createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured, download: env.download, saveSlot: env.gameSave }).effects,
+    // the data studio's owner-worker transport + effects
+    dataRuntime.effects);
 
   app = createApp({
     $app: '0.1',
@@ -353,6 +359,8 @@ export function createSiteApp(env) {
     },
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),
+      // the data studio's boot: fires once when #/data first appears
+      'data-owner': dataRuntime.ownerSub,
       ...rates.subs,
     },
   });

@@ -321,3 +321,77 @@ bun-shaped test double mimics the null so the packed run pins it).
 Found by the ORM benchmark's first real-Bun file-store open — the
 in-memory tests never reopen a database, so create-or-verify had
 never seen bun's null.
+
+## Change capture (`src/capture.js`)
+
+Every committed write becomes an ordered stream of RFC 6902 patches.
+Two sources behind one contract: SQLite's **session changeset** where
+the binding exposes `createSession` (node:sqlite), parsed from its
+binary format by a hand-written decoder; a **write-path journal**
+where it does not (bun:sqlite, the wasm build), buffering before/after
+documents as the store writes them. Both net ONE op per row — insert+
+update coalesces, insert+delete vanishes, an update back to the
+original emits nothing — so the two modes agree as SETS (a differential
+test pins it). The journal's netting was added when the wasm parity
+suite ran a same-row multi-op transaction the original TODO_18 script
+never wrote. Op order within a record is UNSPECIFIED; every op targets
+a distinct pointer. The persisted `_jaren_changes` log rides the same
+transaction as the writes it describes; a caught inner-savepoint
+rollback truncates the journal buffer to its checkpoint. Overhead is
+measured and published: capture off ~6µs, journal ~17µs, session ~69µs
+per single-op commit, amortizing across a transaction.
+
+## Live queries (`src/live.js`, `src/window.js`)
+
+A live query classifies its document against the normative maintenance
+table by reading the COMPILED PLAN — translated filters, order terms
+and aggregates are exactly the planner's, never re-derived. Five
+strategies: incremental **rows** (per-key items, arrival order), the
+maintained **window** (all matching rows sorted, ties by key token, a
+delete inside the visible slice answered without re-query), running
+**accumulators** (per-row contributions retained so a capture `remove`
+— which carries no old value — is still answerable; min/max recompute
+over contributions when the extremum's holder leaves), per-group
+**deltas** (the accumulator machinery once per group), and **re-run**
+for everything else — declared, reported through `live.mode`, never
+silent. Invalidation matches a record by table plus pointer prefix,
+over-approximating toward re-evaluation (a missed update would be a
+correctness bug; an extra one is only slower). Emissions preserve
+reference identity for untouched rows — the O(k) renderer's contract —
+proven by a seeded oracle that holds the maintained result equal to a
+fresh re-query after every mutation. Incremental beats re-run 13× at
+1k rows, 51× at 10k.
+
+## Durable runs and the job queue (`src/jobs.js`, `src/dag-job.js`)
+
+The queue's whole correctness story is one guarded statement: the
+claim UPDATE selects the earliest eligible row (pending, failed, or an
+expired lease — so recovery IS the next claim, not a sweeper) whose
+kind the worker registered, sets it leased with a deadline, and
+RETURNs it. One statement is one transaction, so no two workers claim
+the same job without any distributed lock; every later transition
+wears `state='leased' AND lease_owner=?`, making execution
+at-least-once and completion exactly-once (proven by four workers on
+four connections over one WAL file). The `@jarenjs/flow` composition
+injects `compileDag` (db never imports flow — an import-graph test
+enforces it) and binds a per-job checkpoint store; a DAG run's
+completion records the result, marks the job done and prunes the
+checkpoint rows in ONE transaction, so a crash resumes from its
+checkpointed nodes rather than restarting. Non-goals stated plainly: a
+shared SQLite file over a network filesystem is not a safe
+coordination substrate.
+
+## The wasm driver (`src/drivers/wasm.js`)
+
+An injected handle, never an import: the host loads the official
+SQLite wasm build and this driver adapts its `oo1` object API — which
+is SYNCHRONOUS in a dedicated worker over the SAH-pool OPFS VFS, which
+is exactly what keeps journal capture, live queries and the job queue
+working unchanged in a browser. The engine parity is proven in Node
+against the real wasm bytes (the full pushdown oracle, entities, live
+queries, jobs, a shadow-verified migration); the browser suite proves
+the ENVIRONMENT — OPFS persistence across reloads, the owner topology
+(one context holds the sole connection, tabs are clients over a
+BroadcastChannel), and the second-writer refusal — across Chromium,
+Firefox and WebKit, with the memory fallback stated where OPFS is
+absent.

@@ -70,6 +70,18 @@ async function script(store) {
     await notes.delete('n2');
     await items.delete('i1'); // cascades nothing; tags row via UoW below
   });
+  // same-row multi-op transactions must NET identically in both modes
+  await store.transaction(async () => {
+    await notes.insert({ id: 'ghost', body: 'in' });
+    await notes.put({ id: 'ghost', body: 'still in' }, 'ghost');
+    await notes.delete('ghost'); // insert+update+delete nets to NOTHING
+    await notes.insert({ id: 'kept', body: 'v1' });
+    await notes.put({ id: 'kept', body: 'v2' }, 'kept'); // nets to one add
+    await notes.put({ id: 'n1', body: 'a', meta: { deep: [1, 9] } }, 'n1');
+    await notes.put({ id: 'n1', body: 'a', meta: { deep: [1, 2] } }, 'n1');
+    await notes.patch('n1', [{ op: 'replace', path: '/meta/deep/1', value: 9 }]);
+    // n1 ends exactly where it started: nothing may be emitted for it
+  });
   const tagged = await store.entity('Tag').get('t1');
   store.entity('Tag').remove(tagged);
   await store.saveChanges();

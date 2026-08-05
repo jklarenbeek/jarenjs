@@ -206,7 +206,7 @@ describe('website — the site as one app document', function () {
       meta: load('meta'), validate: load('validate'), jsonpath: load('jsonpath'),
       jsonquery: load('jsonquery'), jslt: load('jslt'), markdown: load('markdown'),
       mermaid: load('mermaid'), flow: load('flow'), db: load('db'),
-      orm: load('orm'),
+      orm: load('orm'), live: load('live'),
     };
     const { container, go } = mountSite({ fixtures });
 
@@ -276,6 +276,14 @@ describe('website — the site as one app document', function () {
     assert.match(html, /Graph-load headline: one statement/, 'the structural claim renders');
     assert.match(html, /statement\(s\)/, 'statement counts sit beside the graph rows');
     assert.match(html, /\[Bun\]/, 'the Bun tables render beside the Node ones');
+
+    go('#/benchmarks?suite=live');
+    await tick();
+    html = serialize(container);
+    assert.match(html, /What incremental maintenance actually buys/,
+      'the live honesty framing renders FIRST');
+    assert.match(html, /faster than re-running/, 'the incremental-vs-re-run ratio renders');
+    assert.match(html, /TinyBase/, 'the published loss to TinyBase is on the page');
   });
 
   it('renders a Mermaid fence as inline SVG through the shared md boundary', async function () {

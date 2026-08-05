@@ -46,6 +46,7 @@ export const SUITES = [
   { key: 'flow', label: 'Flow' },
   { key: 'db', label: 'Data' },
   { key: 'orm', label: 'ORM' },
+  { key: 'live', label: 'Live' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -79,6 +80,7 @@ export function deriveSuite(state, suite) {
     case 'flow': return flowSuite(data);
     case 'db': return dbSuite(data);
     case 'orm': return ormSuite(data);
+    case 'live': return liveSuite(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -427,6 +429,25 @@ function ormSuite(data) {
     out.push(callout('The Bun capability cliff', meta.bunNotes.join(' ')));
   out.push(...genericTables(data,
     'Per-operation timings; lower is better. A dash is an engine dropped for a row because it disagreed on the result set rather than being timed doing less work.'));
+  return out;
+}
+
+/**
+ * The phase-C live suite: incremental-vs-re-run, capture overhead, the
+ * update-latency head-to-head against RxDB and TinyBase (where jaren
+ * LOSES to the in-memory store, published with the reason), the
+ * end-to-end path, and job throughput.
+ */
+function liveSuite(data) {
+  const meta = data.meta ?? {};
+  const out = [];
+  out.push(callout('What incremental maintenance actually buys',
+    `Maintaining a live query's result as writes arrive, in time proportional to what changed rather than the size of the result. ${(meta.incrementalRatios ?? []).map((entry) => `${entry.size} rows: ${entry.ratio.toFixed(1)}× faster than re-running the query`).join('; ')}. TinyBase, an in-memory store, beats jaren on raw update latency below — it is not a SQL database and does not persist the same way; that gap is the honest cost of durability. Runtime: ${meta.runtime}.`));
+  if ((meta.omitted ?? []).length > 0) {
+    out.push(callout('Omitted rivals', `${meta.omitted.join('; ')}.`));
+  }
+  out.push(...genericTables(data,
+    'Per-single-write medians in nanoseconds (job throughput in jobs/second); lower is better except throughput. Every row states what it measures and, for the rivals, the trade it makes.'));
   return out;
 }
 

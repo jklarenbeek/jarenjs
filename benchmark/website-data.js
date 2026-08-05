@@ -26,6 +26,7 @@
  *   flow.json         flow-fsm.js/-dag.js — FSM step + DAG run throughput vs XState
  *   db.json           db.js             — document store + pushdown vs PouchDB/RxDB/lowdb
  *   orm.json          orm.js            — entities + graph loads vs Prisma/Drizzle/Kysely (Node + Bun)
+ *   live.json         live.js           — live queries/capture/jobs vs RxDB/TinyBase (incremental vs re-run)
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -58,7 +59,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, qt3');
+        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, qt3');
         process.exit(0);
         break;
       default:
@@ -732,7 +733,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'orm',
+  'orm', 'live',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -980,7 +981,51 @@ function buildHeadlines(generated, meta) {
       note: 'the same query document pushed to SQL versus forced to the residual — the measured value of the planner; PouchDB/RxDB/lowdb rows (including the ones jaren loses) are on the suite page',
     });
   }
+  if (generated.live !== undefined) {
+    const topRatio = (generated.live.meta.incrementalRatios ?? [])
+      .reduce((best, entry) => Math.max(best, entry.ratio), 0);
+    add('live', 'Live', {
+      ratio: Number(topRatio.toFixed(1)),
+      rival: 're-run',
+      conformance: 'RFC 6902',
+      note: 'incremental live-query maintenance versus re-running the query; measured against RxDB and TinyBase (which wins raw update latency — the honest cost of durability, published on the suite page)',
+    });
+  }
   return out;
+}
+
+/**
+ * The phase-C live suite: incremental-vs-re-run maintenance, capture
+ * overhead, update latency against RxDB and TinyBase (TinyBase wins —
+ * published with the reason), the end-to-end path, and job throughput.
+ * The rival devDependencies live in benchmark/package.json.
+ */
+function generateLive(tmp, options) {
+  const file = path.join(tmp, 'live.json');
+  try {
+    runTool([
+      'benchmark/live.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: live run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the live head-to-head needs the rxdb/tinybase benchmark devDependencies)');
+    return null;
+  }
+  const run = readJson(file);
+  return {
+    meta: {
+      suite: 'live',
+      title: 'Live queries, capture and jobs',
+      description: 'Incremental live-query maintenance versus re-running the query, '
+        + 'capture overhead, update latency against RxDB and TinyBase, the '
+        + 'end-to-end write→patch→DOM path, and durable job throughput.',
+      ...run.meta,
+    },
+    tables: run.tables,
+  };
 }
 
 /**
@@ -1150,6 +1195,11 @@ async function main() {
     const orm = generateOrm(tmp, options);
     if (orm !== null)
       generated.orm = orm;
+  }
+  if (!options.skip.has('live')) {
+    const live = generateLive(tmp, options);
+    if (live !== null)
+      generated.live = live;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

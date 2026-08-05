@@ -217,6 +217,58 @@ export const ACTIONS = {
   'studio/template': { effects: [{ run: 'studio-template', with: { name: '$payload' } }] },
   'studio/download': { effects: [{ run: 'studio-download' }] },
 
+  // the data studio (boundaries/data.js): boot the owner worker, edit
+  // the model/query panes, run + explain, insert, live-event, migrate.
+  // A patch-only action carries its changed paths to the O(k) renderer.
+  'data/boot': { effects: [{ run: 'data-boot' }] },
+  'data/seed': {
+    patch: [
+      { op: 'replace', path: '/data/modelText', value: '$payload.modelText' },
+      { op: 'replace', path: '/data/queryText', value: '$payload.queryText' },
+    ],
+  },
+  'data/model-text': { patch: [{ op: 'replace', path: '/data/modelText', value: '$event.value' }] },
+  'data/query-text': { patch: [{ op: 'replace', path: '/data/queryText', value: '$event.value' }] },
+  'data/open': { effects: [{ run: 'data-open', with: { text: '$.data.modelText' } }] },
+  'data/run': { effects: [{ run: 'data-run', with: { text: '$.data.queryText' } }] },
+  'data/insert': { effects: [{ run: 'data-insert', with: { title: '$event.value' } }] },
+  'data/migrate': { effects: [{ run: 'data-migrate' }] },
+  'data/status': {
+    patch: [
+      { op: 'replace', path: '/data/topology', value: '$payload.topology' },
+      { op: 'replace', path: '/data/vfs', value: '$payload.vfs' },
+      { op: 'replace', path: '/data/version', value: { $default: ['$payload.version', ''] } },
+      { op: 'replace', path: '/data/refusal', value: { $default: ['$payload.refusal', null] } },
+    ],
+  },
+  'data/opened': {
+    patch: [
+      { op: 'replace', path: '/data/status', value: 'ready' },
+      { op: 'replace', path: '/data/capture', value: '$payload.capabilities.capture' },
+      { op: 'replace', path: '/data/version', value: '$payload.capabilities.version' },
+    ],
+  },
+  'data/rows': { patch: [{ op: 'replace', path: '/data/rows', value: '$payload.rows' }] },
+  'data/results': {
+    patch: [
+      { op: 'replace', path: '/data/results', value: '$payload.results' },
+      { op: 'replace', path: '/data/explain', value: '$payload.explain' },
+      { op: 'replace', path: '/data/error', value: null },
+    ],
+  },
+  'data/live': {
+    patch: [{ op: 'replace', path: '/data/live',
+      value: { mode: '$payload.mode', rows: '$payload.rows', seq: null } }],
+  },
+  'data/live-event': {
+    patch: [
+      { op: 'replace', path: '/data/live/rows', value: '$payload.rows' },
+      { op: 'replace', path: '/data/live/seq', value: '$payload.seq' },
+    ],
+  },
+  'data/migrated': { patch: [{ op: 'replace', path: '/data/migration', value: '$payload.report' }] },
+  'data/error': { patch: [{ op: 'replace', path: '/data/error', value: '$payload.message' }] },
+
   // the package-README dialog: open (fetch), receive, fail, close.
   // Opening from the docs page starts a fresh navigation trail; a
   // repo-relative link inside the rendered document navigates in place
@@ -696,4 +748,10 @@ export const ACTIONS = {
 };
 
 /** The site's subscriptions: the hash router feed, always live. */
-export const SUBS = [{ run: 'hash' }];
+export const SUBS = [
+  { run: 'hash' },
+  // the data studio boots its owner worker the first time the route
+  // reaches #/data — a dynamic subscription whose `when` is the page,
+  // so it fires once and the effect's own `booted` guard keeps it idempotent
+  { run: 'data-owner', when: { $eq: ['$.route.page', 'data'] } },
+];

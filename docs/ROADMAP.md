@@ -325,6 +325,30 @@ what each does is its own documentation's job
 - [ ] **Cross-source linq joins.** `join`/`groupJoin` are same-source
   in 0.1 (one document, one root); the relational order lifts the
   restriction.
+- [ ] **Replication.** Change capture (LIVE-FORMAT) is an ordered log
+  of RFC 6902 patches with a monotonic sequence, and SQLite's
+  changeset/conflict primitives are available — the raw material a
+  replication protocol is built from. None is shipped: there is no
+  conflict resolution, no site identity, no causal ordering across
+  writers. This is the design constraint written down as an open
+  item, not a hint that it is nearly there.
+- [ ] **Richer incremental live maintenance.** The maintenance table
+  (LIVE-FORMAT §7) covers `where`/`select`, the ordered window,
+  whole-query aggregates and single-level `groupBy`; joins,
+  multi-entity roots, offset windows and the linq chain's nested
+  two-level `groupBy` emission all RE-RUN on invalidation (declared,
+  reported through `live.mode`). Incremental joins in particular are
+  the open research half this program deliberately did not open-end.
+- [ ] **The session extension in the wasm build.** The official SQLite
+  wasm build compiles `ENABLE_SESSION`, but the oo1 adapter does not
+  yet map the session C API, so browser capture runs in the journal
+  mode (stated in the capability matrix). Adapting it makes wasm
+  capture session-complete.
+- [ ] **The SharedArrayBuffer OPFS VFS and a header-capable host.**
+  The deployed demo uses the header-free SAH-pool VFS because GitHub
+  Pages cannot set COOP/COEP; a host that can set them may use the
+  faster SharedArrayBuffer VFS family. Wiring that path (and an
+  IndexedDB-backed fallback for hosts with neither) is unwritten.
 
 ## Dates & times (cross-package)
 

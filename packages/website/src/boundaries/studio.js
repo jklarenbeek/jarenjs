@@ -42,6 +42,7 @@ import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { typ
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
+import { createHostWidget } from './host-widget.js';
 
 /** Schema errors kept per report: enough to repair, bounded for state. */
 const MAX_ERRORS = 20;
@@ -397,19 +398,5 @@ export function createStudioHostWidget(env = {}) {
     }
     handle.app = null;
   };
-  return {
-    mount(host, props, emit) {
-      const handle = { host, emit, app: null };
-      boot(handle, props);
-      return handle;
-    },
-    update(handle, props, prevProps) {
-      if (props.doc === prevProps.doc && props.revision === prevProps.revision) return;
-      destroy(handle);
-      boot(handle, props);
-    },
-    unmount(handle) {
-      destroy(handle);
-    },
-  };
+  return createHostWidget({ boot, destroy });
 }

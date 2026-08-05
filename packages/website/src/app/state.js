@@ -143,6 +143,28 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
 
     calc: calcInitialState(),    // the @jarenjs/calc sub-app slice
 
+    // the data studio (boundaries/data.js): the browser store over the
+    // OPFS-backed wasm driver. A worker owns the connection; this slice
+    // holds the derived text panes and the last observed results/live
+    // set. Booted on first navigation to #/data.
+    data: {
+      status: 'boot',          // 'boot' | 'ready' | 'error'
+      topology: '—',           // 'owner' | 'client'
+      vfs: '—',                // 'opfs-sahpool' | 'memory'
+      version: '',
+      capture: '—',            // 'journal' on wasm (sessions not adapted)
+      refusal: null,           // the JD2061 second-writer message, if any
+      modelText: '',           // the editable model document (JSON)
+      queryText: '',           // the editable query document (JSON)
+      rows: [],                // the whole collection, last read
+      results: [],             // the last query() result
+      explain: null,           // the last explain() { sql, params, indexes, residual }
+      live: { mode: null, rows: [], seq: null },
+      migration: null,         // the last planned/applied migration report
+      booted: false,           // the boot effect fires exactly once
+      error: null,
+    },
+
     // the package-README dialog: a fetched Markdown source rendered by
     // the @jarenjs/md visual component in a near-fullscreen overlay.
     // `stack`/`at` are the dialog's own navigation history — repo-

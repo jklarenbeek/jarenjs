@@ -63,7 +63,7 @@ export function loadGroups() {
  * @param {any} group
  * @returns {Promise<{ store: any, collection: any }>}
  */
-export async function storeForGroup(group) {
+export async function storeForGroup(group, driver = nodeDriver()) {
   const model = {
     $model: '0.1',
     collections: {
@@ -75,7 +75,7 @@ export async function storeForGroup(group) {
       },
     },
   };
-  const store = await openStore(model, { driver: nodeDriver() });
+  const store = await openStore(model, { driver });
   const collection = store.collection('rows');
   for (const document of group.documents) await collection.insert(document);
   return { store, collection };

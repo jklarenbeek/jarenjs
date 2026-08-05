@@ -27,7 +27,7 @@ test('the app boots with landmark semantics intact', async ({ page }) => {
   await expect(page.locator('nav#site-nav')).toBeVisible();
   await expect(page.locator('main.main')).toBeVisible();
   await expect(page.locator('h1').first()).toBeVisible();
-  await expect(page.locator('#site-nav .nav-link')).toHaveCount(10);
+  await expect(page.locator('#site-nav .nav-link')).toHaveCount(11);
 
   const toggle = page.locator('button[aria-controls="site-nav"]');
   await expect(toggle).toHaveAttribute('aria-label', 'Toggle navigation');
