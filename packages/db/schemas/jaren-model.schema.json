@@ -21,7 +21,7 @@
    }
   },
   "entities": {
-   "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md §9; stripping it leaves a plain JSON Schema.",
+   "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md \u00a79; stripping it leaves a plain JSON Schema.",
    "type": "object",
    "minProperties": 1,
    "propertyNames": {
@@ -46,7 +46,7 @@
      "type": "object"
     },
     "key": {
-     "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member — or null when the store allocates.",
+     "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member \u2014 or null when the store allocates.",
      "type": [
       "string",
       "null"
@@ -54,7 +54,7 @@
      "pattern": "^/"
     },
     "identity": {
-     "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or — only with \"key\": null — 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
+     "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or \u2014 only with \"key\": null \u2014 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
      "enum": [
       "caller",
       "uuid",
@@ -122,6 +122,10 @@
    "properties": {
     "schema": {
      "type": "object"
+    },
+    "x-rename": {
+     "type": "string",
+     "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT \u00a79): a rename is declared, never inferred."
     }
    },
    "required": [

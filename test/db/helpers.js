@@ -91,6 +91,7 @@ export function fullDoubleDialect(createDialect) {
     name: 'double',
     capabilities: { jsonb: false },
     tableSuffix: '',
+    epochFromRfc3339: (v) => `EPOCHMS(${v})`,
     docColumnType: 'JSONDOC',
     quoteIdentifier: (s) => `[${s}]`,
     parameterRef: (i) => `@p${i}`,
@@ -125,6 +126,8 @@ export function fullDoubleDialect(createDialect) {
     pragma: {
       busyTimeout: (ms) => `SET busy ${ms}`,
       journalMode: (mode) => `SET journal ${mode}`,
+      foreignKeys: (on) => `SET fk ${on ? 'on' : 'off'}`,
+      foreignKeyCheck: () => 'CHECK fk',
     },
     introspect: {
       version: () => 'GET version',
@@ -135,6 +138,7 @@ export function fullDoubleDialect(createDialect) {
       indexColumns: (i) => `GET indexcolumns ${i}`,
       foreignKeysOn: () => 'GET fkon',
       foreignKeyList: (t) => `GET fklist ${t}`,
+      schemaDump: () => 'GET schema-dump',
     },
   });
 }

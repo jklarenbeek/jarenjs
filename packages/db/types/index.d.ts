@@ -281,12 +281,41 @@ export interface MigrateOptions {
   dryRun?: boolean;
   batchSize?: number;
   shadow?: boolean;
+  /** Re-register declared deterministic functions on every connection
+   * the migration opens (real, shadow, reference) — §10. */
+  registerFunctions?: (connection: unknown) => unknown;
 }
 
 export declare function migrate(
   target: unknown, migrations: readonly unknown[], options: MigrateOptions,
 ): Promise<unknown>;
 export declare function planMigration(from: unknown, to: unknown, options?: unknown): unknown;
+/** The whole-model diff — collections AND entities (MIGRATION-FORMAT §9). */
+export declare function planModelMigration(from: unknown, to: unknown, options?: unknown): unknown;
+export interface MigrationStatusReport {
+  applied: string[];
+  pending: string[];
+  /** A one-line difference when the database drifted; null in sync. */
+  drift: string | null;
+  upToDate: boolean;
+}
+export declare function migrationStatus(
+  target: { driver: Driver; path?: string },
+  migrations: readonly unknown[],
+  options: { baseline: unknown; model?: unknown;
+    registerFunctions?: (connection: unknown) => unknown },
+): Promise<MigrationStatusReport>;
+/** Create a model's whole physical shape on a connection. */
+export declare function createModelShape(connection: unknown, model: unknown): unknown;
+/** The declared schema, normalized for shape-equality comparison. */
+export declare function schemaShapeOf(connection: unknown):
+  Promise<Array<{ type: string; name: string; owner: string; sql: string }>>
+  | Array<{ type: string; name: string; owner: string; sql: string }>;
+/** Null when the database's shape equals a fresh build of the model. */
+export declare function compareShapeToModel(
+  driver: Driver, connection: unknown, model: unknown,
+  registerFunctions?: (connection: unknown) => unknown,
+): Promise<string | null> | string | null;
 export declare function shapeHash(model: unknown): string;
 export declare function migrationChecksum(migration: unknown): string;
 export declare const MIGRATION_VERSION: string;

@@ -176,3 +176,127 @@ hash of the `baseline` model when no migration has run.
 These live in the same runtime `DB_CODES` table as the storage codes
 (MODEL-FORMAT §7); the union of both documents is proven in sync with
 the runtime table by a test.
+
+## 9. Relational changes (entities)
+
+`planModelMigration(fromModel, toModel, { dialect })` extends the §3
+planner to models with `entities`. The strategy table is the design;
+every row has a shadow-verified test that migrates seeded data:
+
+| Change | Strategy |
+|---|---|
+| add mapped column (property added, or moved out of the document) | `ALTER TABLE ADD COLUMN` — always nullable (absent reads back absent, MODEL-FORMAT §9.3) — plus a `sql` data step when the property's values already live in the document |
+| drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
+| change type / enum CHECK / key / epoch flavor | **rebuild** (§10) |
+| add or drop an index (`unique`/`index`/version) | plain DDL |
+| add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder; join tables create/drop directly |
+| entity added / dropped | create / `DROP TABLE` (destructive, named) |
+| entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints |
+| scalar ⇄ JSONB move (`column: "json"` toggled, shape change) | rebuild + a data step |
+
+Two rules keep the diff honest:
+
+- **Document changes are compared with `x-entity` stripped.** A pure
+  mapping change (an index added, a column toggle) is NOT a document
+  schema change and demands no transform; a real document change
+  yields the §3 draft-`jslt` step over the entity's table.
+- **Epoch columns populate in SQL** via
+  `(julianday(value) − 2440587.5) × 86 400 000`, rounded to the
+  millisecond — fractional seconds beyond that are the write
+  contract's business (MODEL-FORMAT §10.3), not the migration's.
+
+### 9.4 The `sql` step
+
+```json
+{ "kind": "sql", "sql": "UPDATE …", "note": "why" }
+```
+
+A data step spelled directly — for row-shuffling that is more honest
+as SQL than as a stylesheet. Runs like `ddl` (inside the migration's
+transaction, its own savepoint), but a dry run ALWAYS prints it with
+its note, and reviewers read intent from the kind.
+
+## 10. The rebuild procedure
+
+SQLite's `ALTER TABLE` cannot drop a constraint, change a type or
+reorder columns; the documented procedure for "making other kinds of
+table schema changes" (sqlite.org/lang_altertable.html §7) is followed
+literally, as one implementation used by every rebuilding strategy:
+
+```json
+{ "kind": "rebuild", "table": "User",
+  "create": ["CREATE TABLE \"User__rebuild\" (…)"],
+  "copy": "INSERT INTO \"User__rebuild\" (…) SELECT … FROM \"User\"",
+  "indexes": ["CREATE INDEX …"], "note": "…" }
+```
+
+The step is SELF-CONTAINED rendered SQL — reviewable in the migration
+document, mechanical to run: create the new shape under the temporary
+name, copy (the planner renders the column mapping: surviving columns
+verbatim, new ones from the document, dropped ones already folded),
+`DROP` the old table, `RENAME` the new one into place, recreate every
+index from the target model, then **`PRAGMA foreign_key_check` inside
+the transaction** — a broken reference fails the migration rather
+than shipping.
+
+Two deviations from the cited twelve steps, recorded: (1) the
+procedure brackets itself with `PRAGMA foreign_keys=OFF/ON`, which is
+a no-op inside a transaction — the migration connection never enables
+the pragma (SQLite's default is off; `openStore` enables AND verifies
+it per connection), so enforcement during the rebuild is off exactly
+as the procedure wants, and `foreign_key_check` provides the
+guarantee; (2) triggers and views are not re-created because this
+store creates none — a hand-added trigger is outside the model and
+outside the diff, which drift (§12) will name.
+
+**Shape equality is the acceptance criterion.** After a rebuild —
+after ANY relational migration — the database's declared schema
+(`schemaShapeOf`) must equal what a fresh `createModelShape(toModel)`
+produces, indexes, foreign keys and constraints included. The shadow
+asserts it before the real database is touched, and the real run
+asserts it again after the last migration.
+
+**UDF-expression indexes.** An index over a registered deterministic
+function is invisible to any connection that has not registered the
+function (probed): `migrate(…, { registerFunctions })` re-registers
+every declared function on the real, shadow AND reference connections
+before any DDL runs — without it, a rebuild would fail (or silently
+drop the index) on a schema the store accepts.
+
+## 11. The CLI
+
+`jaren-db` drives the workflow (mirroring `jaren-emit`):
+
+```
+jaren-db plan   --from <model> --to <model> [--store <db>] [--id x] [--out file]
+jaren-db status --model <model> --store <db> --baseline <model> [--migrations <dir>]
+jaren-db apply  --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
+jaren-db check  --model <model> --store <db> --baseline <model> [--migrations <dir>]
+jaren-db shape  --model <model>
+```
+
+- `plan` diffs two model FILES (a database stores shape hashes, not
+  models — the from-model is the previous model file); with `--store`
+  it first verifies the from-model's hash matches the database's
+  recorded shape.
+- `check` is the CI command: exit 1 when migrations are pending OR the
+  database drifted; 0 in sync.
+- `apply` prints every statement before running; destructive steps
+  (drop table/column, rebuild) require `--yes` or an interactive
+  confirmation that NAMES what is lost. Default is dry-run + ask.
+- `status` lists applied/pending and reports drift (§12).
+- `shape` prints the physical mapping a model produces.
+
+## 12. Drift
+
+Drift is the database not matching what its history says it should
+be: someone changed it by hand. `status`/`check` detect it by
+verifying the current model's physical shape against the actual
+database (`schemaShapeOf` against `createModelShape`, when the chain
+is fully applied) — a hand-added index, a dropped column or a foreign
+key edited outside a migration is named early, which is the
+difference between a puzzled afternoon and a five-minute fix.
+
+Down migrations REMAIN a non-goal (§7's reasoning is unchanged): a
+down migration is a data-loss generator wearing a seatbelt; recovery
+is a backup restored plus the forward chain.

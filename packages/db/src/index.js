@@ -43,7 +43,8 @@ export {
   createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,
 } from './tracker.js';
 export {
-  planMigration, migrate, shapeHash, migrationChecksum,
+  planMigration, planModelMigration, migrate, migrationStatus, shapeHash,
+  migrationChecksum, createModelShape, schemaShapeOf, compareShapeToModel,
   MIGRATION_VERSION, HISTORY_TABLE,
 } from './migrate.js';
 export { DbCompileError, DbRuntimeError, DB_CODES } from './errors.js';

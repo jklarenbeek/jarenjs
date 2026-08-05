@@ -125,6 +125,24 @@ export function createDialect(spec) {
       return `ALTER TABLE ${q(table)} DROP COLUMN ${q(column)}`;
     },
     /**
+     * Add one plain (non-generated) column — the additive migration
+     * strategy. The column shape matches `createRelationalTable`'s.
+     * @param {{ table: string, column: { name: string, type: string,
+     *   check?: string, references?: { table: string, column: string,
+     *   onDelete: 'cascade' | 'restrict' | 'setNull' } } }} shape
+     * @returns {string}
+     */
+    addColumn({ table, column }) {
+      const onDeleteSql = { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
+      let sql = `ALTER TABLE ${q(table)} ADD COLUMN ${q(column.name)} ${column.type}`;
+      if (column.check !== undefined) sql += ` CHECK (${column.check})`;
+      if (column.references !== undefined) {
+        sql += ` REFERENCES ${q(column.references.table)} (${q(column.references.column)})`
+          + ` ON DELETE ${onDeleteSql[column.references.onDelete]}`;
+      }
+      return sql;
+    },
+    /**
      * @param {string} name
      * @returns {string}
      */
@@ -145,6 +163,15 @@ export function createDialect(spec) {
      */
     renameTable(from, to) {
       return `ALTER TABLE ${q(from)} RENAME TO ${q(to)}`;
+    },
+    /**
+     * @param {string} table
+     * @param {string} from
+     * @param {string} to
+     * @returns {string}
+     */
+    renameColumn(table, from, to) {
+      return `ALTER TABLE ${q(table)} RENAME COLUMN ${q(from)} TO ${q(to)}`;
     },
     /**
      * A relational entity table: typed columns (keys, mapped scalars,
@@ -260,6 +287,7 @@ export function createDialect(spec) {
     rowIdentity: spec.rowIdentity,
     explainQuery: spec.explainQuery,
     excludedRef: spec.excludedRef,
+    epochFromRfc3339: spec.epochFromRfc3339,
     tx: Object.freeze({ ...spec.tx }),
     pragma: Object.freeze({ ...spec.pragma }),
     introspect: Object.freeze({ ...spec.introspect }),

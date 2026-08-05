@@ -84,6 +84,11 @@ export const sqliteDialect = createDialect({
     alterTableFull: false,
   },
   tableSuffix: ' STRICT',
+  // RFC 3339 text → epoch milliseconds, in SQL: the migration planner
+  // populates derived instant columns with it (rounded to the ms;
+  // finer precision is the write contract's business, §10.3)
+  epochFromRfc3339: (valueSql) =>
+    `CAST(round((julianday(${valueSql}) - 2440587.5) * 86400000.0) AS INTEGER)`,
   docColumnType: 'BLOB',
   quoteIdentifier,
   parameterRef: () => '?',
@@ -130,6 +135,7 @@ export const sqliteDialect = createDialect({
     busyTimeout: (ms) => `PRAGMA busy_timeout = ${Math.trunc(ms)}`,
     journalMode: (mode) => `PRAGMA journal_mode = ${pragmaWord(mode)}`,
     foreignKeys: (on) => `PRAGMA foreign_keys = ${on ? 'ON' : 'OFF'}`,
+    foreignKeyCheck: () => 'PRAGMA foreign_key_check',
   },
   introspect: {
     version: () => 'SELECT sqlite_version() AS version',
@@ -147,5 +153,10 @@ export const sqliteDialect = createDialect({
     foreignKeyList: (table) =>
       `SELECT "table" AS target, "from" AS source_column, "to" AS target_column, on_delete `
       + `FROM pragma_foreign_key_list(${stringLiteral(table)})`,
+    // the whole declared schema, for shape-equality comparison after a
+    // rebuild: every object that carries SQL text, in a stable order
+    schemaDump: () =>
+      "SELECT type, name, tbl_name AS owner, sql FROM sqlite_schema "
+      + "WHERE sql IS NOT NULL ORDER BY type, name",
   },
 });

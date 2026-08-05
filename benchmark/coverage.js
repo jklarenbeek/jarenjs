@@ -391,6 +391,10 @@ function runDeadCodeAudit(opts) {
     '--exclude', '**/dist/**',
     '--exclude', 'packages/website/src/main.js',
     '--exclude', 'packages/emit/src/cli.js',
+    // the jaren-db CLI follows the same rule (its interactive confirm()
+    // needs a TTY no headless test has); the five commands are
+    // subprocess-tested in test/db/cli.test.js
+    '--exclude', 'packages/db/src/cli.js',
     '--temp-directory', opts.tempDir,
     '--clean',
     process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',
