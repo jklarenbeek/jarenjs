@@ -76,6 +76,38 @@ an emitter quotes it if its target language requires that. `default` is
 present only when the source schema declares one. Members appear in the order
 the schema declared them.
 
+### 4.1 The extension seam
+
+Unknown keywords normally vanish from the model — only the listed
+constraint groups are carried. A producer MAY be told to preserve
+named extension keywords instead:
+
+```js
+compileEmitModel(schema, { extensions: ['x-entity'] })
+```
+
+Every property member whose schema declares a listed keyword gains
+
+```json
+{ "kind": "member", "name": "posts",
+  "extensions": { "x-entity": { "relation": { "to": "Post" } } }, … }
+```
+
+with the value copied **verbatim and uninterpreted** — the compiler
+learns "keep these keywords", never what they mean. Keywords are read
+from the property schema node itself: a vocabulary that wants to ride
+this seam declares its members inline, not behind `$ref`. `extensions`
+is absent when no listed keyword is present, and the option is absent
+by default, so models without it are byte-identical to before.
+
+This is the contract for vocabulary-aware artifacts: a downstream
+package post-processes the MODEL DOCUMENT (replace member types,
+adjust `required`, add declarations) and hands the result back to any
+renderer. `@jarenjs/db` renders entity-aware TypeScript from
+`x-entity` this way, and `x-form` is the obvious second customer —
+the seam serves any vocabulary, which is why it lives here and not in
+either consumer.
+
 ## 5. Type references
 
 Every type reference carries a `kind`, so an emitter dispatches on shape

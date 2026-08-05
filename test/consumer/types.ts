@@ -810,3 +810,105 @@ void dbCompileErr.docPath;
 const dbRuntimeErr = new DbRuntimeError('JD2001', 'reason', { collection: 'users', key: 'u1' });
 void dbRuntimeErr.code;
 void SQLITE_FLOOR.length;
+
+// ---------------------------------------------------------------------------
+// @jarenjs/db — generated entity types (TODO_15): the model document is the
+// `T`. `db-generated.ts` is produced by scripts/generate-db-fixture.js from
+// test/db/emit-model-fixture.js; test/db/emit-model.test.js fails if it
+// drifts. The negative cases here are the deliverable: each @ts-expect-error
+// fails the build the day it starts compiling.
+import type {
+  User, UserInput, Post, Grade, EntityMetaMap, DateTime as DbDateTime,
+} from './db-generated.js';
+import { typedStore } from '@jarenjs/db/typed';
+
+// entity interfaces: schema-valid documents are assignable…
+const genUser: User = {
+  id: 'u1', email: 'ada@x.test', name: 'ada', age: 36, active: true,
+  role: 'admin', joined: '2026-01-05T10:00:00Z' as DbDateTime, rev: 0,
+  profile: { bio: 'x', links: ['https://x.test'] },
+};
+void genUser;
+// …the input variant leaves generated and defaulted members out…
+const genInput: UserInput = { email: 'ada@x.test', joined: '2026-01-05T10:00:00Z' };
+void genInput;
+// …and membership attaches by key or document
+const genWithLabels: UserInput = { email: 'a@x', labels: ['admin', { name: 'dev' }] };
+void genWithLabels;
+
+// @ts-expect-error — a required input member cannot be omitted
+const genMissing: UserInput = { name: 'no email' };
+void genMissing;
+// @ts-expect-error — a required input member cannot be undefined
+const genUndefined: UserInput = { email: undefined };
+void genUndefined;
+// @ts-expect-error — entity interfaces are closed: no phantom members
+const genExcess: User = { id: 'u', email: 'e@x', nope: true };
+void genExcess;
+// @ts-expect-error — enum members stay literal unions
+const genBadRole: User = { id: 'u', email: 'e@x', role: 'emperor' };
+void genBadRole;
+// @ts-expect-error — a one-to-many projection is not writable
+const genProjection: UserInput = { email: 'e@x', posts: [] };
+void genProjection;
+
+// the linq surface binds the generated T: precise members, date brand
+const genUsers: User[] = [];
+const genRows: { who: string, posts: number }[] = linqFrom(genUsers)
+  .where((u) => u.age.gt(21).and(u.joined.year().ge(2026)))
+  .select((u) => ({ who: u.name.upper(), posts: u.posts.all().count() }))
+  .toArray();
+void genRows;
+
+// @ts-expect-error — a number property does not compare to a string
+void linqFrom(genUsers).where((u) => u.age.gt('x'));
+// @ts-expect-error — string methods do not exist on numbers
+void linqFrom(genUsers).where((u) => u.age.upper());
+// @ts-expect-error — date operators need the brand, not any string
+void linqFrom(genUsers).where((u) => u.email.year());
+// @ts-expect-error — a misspelled member is a compile error
+void linqFrom(genUsers).select((u) => u.nope);
+
+// the typed store: entity(name) speaks the generated shapes
+declare const rawDbStore: import('@jarenjs/db').Store;
+const genStore = typedStore<EntityMetaMap>(rawDbStore);
+
+async function dbTypedBlock(): Promise<void> {
+  const users = genStore.entity('User');
+  const made: Readonly<User> = users.add({ email: 'a@x.test' });
+  void made;
+  // get is optional — the row may not exist
+  const got: User | undefined = await users.get('u1');
+  void got;
+  // load widens by the include specification, relation by relation
+  const graph = await users.load({
+    orderBy: '$it.email',
+    include: { posts: { include: { author: true } }, labels: { count: true } },
+  });
+  const graphPosts: Post[] = graph[0].posts;
+  const nestedAuthor: User | null = graph[0].posts[0].author;
+  const labelCount: number = graph[0].labels;
+  void [graphPosts, nestedAuthor, labelCount];
+  // without an include the member is not materialised
+  const flat = await users.load({});
+  // @ts-expect-error — posts was not included, so it is not present
+  void flat[0].posts.length;
+  // composite keys type as their parts
+  const grades = genStore.entity('Grade');
+  const grade: Grade | undefined = await grades.get({ student: 'ada', course: 'math' });
+  void grade;
+  const report = await genStore.saveChanges?.();
+  const fallbacks: number | undefined = report?.fallbacks;
+  void fallbacks;
+}
+void dbTypedBlock;
+
+// @ts-expect-error — get() may be undefined; a non-optional binding fails
+async function dbTypedFirst(): Promise<User> { return genStore.entity('User').get('u1'); }
+void dbTypedFirst;
+// @ts-expect-error — an unknown entity name never types
+void genStore.entity('Ghost');
+// @ts-expect-error — an unknown relation cannot be included
+void genStore.entity('User').load({ include: { ghosts: true } });
+// @ts-expect-error — add() takes the INPUT shape, checked
+void genStore.entity('User').add({ email: 7 });

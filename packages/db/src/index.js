@@ -38,6 +38,7 @@ export { translatePatch } from './patch-sql.js';
 export { normalizeEntities, explainMapping } from './model.js';
 export { planEntity, planJoinTable } from './ddl.js';
 export { entityCore } from './entity.js';
+export { entityEmitModel } from './emit-model.js';
 export {
   createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,
 } from './tracker.js';

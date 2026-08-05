@@ -1,32 +1,37 @@
 {
   "name": "@jarenjs/db",
   "private": false,
-  "version": "0.26.2",
+  "version": "0.26.3",
   "type": "module",
   "main": "./src/index.js",
-  "types": "./dist/types/index.d.ts",
+  "types": "./types/index.d.ts",
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/types/index.d.ts",
+      "types": "./types/index.d.ts",
       "default": "./src/index.js"
     },
     "./node": {
-      "types": "./dist/types/drivers/node.d.ts",
+      "types": "./types/node.d.ts",
       "default": "./src/drivers/node.js"
     },
     "./bun": {
-      "types": "./dist/types/drivers/bun.d.ts",
+      "types": "./types/bun.d.ts",
       "default": "./src/drivers/bun.js"
     },
     "./wasm": {
-      "types": "./dist/types/drivers/wasm.d.ts",
+      "types": "./types/wasm.d.ts",
       "default": "./src/drivers/wasm.js"
+    },
+    "./typed": {
+      "types": "./types/typed.d.ts",
+      "default": "./src/typed.js"
     },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "files": [
+    "types/",
     "dist/types/",
     "src/",
     "schemas/",
@@ -62,8 +67,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.26.2",
-    "@jarenjs/json": "^0.26.2",
-    "@jarenjs/validate": "^0.26.2"
+    "@jarenjs/core": "^0.26.3",
+    "@jarenjs/json": "^0.26.3",
+    "@jarenjs/validate": "^0.26.3"
   }
 }

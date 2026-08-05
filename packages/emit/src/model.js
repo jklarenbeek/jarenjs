@@ -121,6 +121,13 @@ export const EMIT_MODEL_VERSION = '0.1';
  * @property {string[]} [reserved] - Declaration names already taken outside
  *   this model. Bundling concatenates models into one file, so each model
  *   must be able to avoid the names its predecessors used.
+ * @property {string[]} [extensions] - Extension keyword names (typically
+ *   `x-*`) to PRESERVE: when a property schema carries one of these, the
+ *   member node gains `extensions: { '<keyword>': value }` with the value
+ *   copied verbatim. The compiler itself never interprets them — a
+ *   downstream consumer of the model does. Keywords are read from the
+ *   property node itself (a vocabulary declares them inline, not through
+ *   `$ref`). Absent by default, so existing models are byte-identical.
  */
 
 /** Keywords that constrain a value without narrowing its TYPE — the
@@ -813,6 +820,18 @@ function objectShape(node, ctx, hint) {
         doc: docLinesFor(subNode, constraints),
       };
       if (subNode.default !== undefined) member.default = subNode.default;
+      // the extension seam: declared keywords ride the member verbatim,
+      // uninterpreted — a downstream consumer of the model reads them
+      const declaredExtensions = ctx.options.extensions;
+      if (Array.isArray(declaredExtensions)) {
+        let carried = null;
+        for (const keyword of declaredExtensions) {
+          if (subNode[keyword] === undefined) continue;
+          if (carried === null) carried = {};
+          carried[keyword] = subNode[keyword];
+        }
+        if (carried !== null) member.extensions = carried;
+      }
       members.push(member);
     }
   }
