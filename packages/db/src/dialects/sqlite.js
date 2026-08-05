@@ -150,6 +150,7 @@ export const sqliteDialect = createDialect({
     indexColumns: (index) =>
       `SELECT name FROM pragma_index_info(${stringLiteral(index)})`,
     foreignKeysOn: () => 'SELECT foreign_keys AS enabled FROM pragma_foreign_keys',
+    dataVersion: () => 'SELECT data_version AS v FROM pragma_data_version',
     foreignKeyList: (table) =>
       `SELECT "table" AS target, "from" AS source_column, "to" AS target_column, on_delete `
       + `FROM pragma_foreign_key_list(${stringLiteral(table)})`,

@@ -32,6 +32,7 @@ import { normalizeProfile } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
 import { createTracker } from './tracker.js';
+import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -638,12 +639,199 @@ export function openStore(model, options) {
                 : null;
               if (validate !== null && typeof validate !== 'function')
                 throw new TypeError('openStore: compileSchema must return a validation function');
-              core = collectionCore(connection, collection,
+              core = captureCollection(name, collectionCore(connection, collection,
                 plans.get(name), validate, queryState,
-                { profile: storeProfile });
+                { profile: storeProfile }));
               cores.set(name, core);
             }
             return core;
+          };
+
+          // ————— change capture (LIVE-FORMAT §§1–6) —————
+          const captureRequested = options.capture === true
+            ? {}
+            : (options.capture === undefined || options.capture === false
+              ? null : options.capture);
+          let captureMode = 'none';
+          if (captureRequested !== null) {
+            const wanted = captureRequested.mode ?? 'auto';
+            const hasSessions = connection.capabilities.sessions === true
+              && typeof connection.session === 'function';
+            if (wanted === 'session' && !hasSessions) {
+              throw new TypeError(
+                "capture mode 'session' is unavailable on this driver "
+                + '(bun:sqlite and some wasm builds ship no session extension) — '
+                + "use mode 'journal' or 'auto'");
+            }
+            captureMode = wanted === 'auto'
+              ? (hasSessions ? 'session' : 'journal')
+              : wanted;
+          }
+          const captureShapes = new Map();
+          if (captureMode !== 'none') {
+            for (const [collectionName, plan] of plans) {
+              captureShapes.set(plan.table ?? collectionName, {
+                kind: 'collection',
+                columns: [
+                  { name: plan.keyColumn, role: 'key' },
+                  { name: plan.docColumn, role: 'doc' },
+                ],
+                keyIndexes: [0],
+                docIndex: 1,
+              });
+            }
+            for (const [entityName, entity] of (mapping === null ? [] : entities)) {
+              const em = mapping.entities[entityName];
+              const fkNames = new Set(em.foreignKeys.map((fk) => fk.column));
+              const columns = [];
+              for (const column of em.columns) {
+                if (fkNames.has(column.name)) continue;
+                columns.push({
+                  name: column.name,
+                  role: column.key ? 'key'
+                    : column.source === 'epoch(document)' ? 'epoch' : 'scalar',
+                  storage: column.storage,
+                });
+              }
+              for (const fk of em.foreignKeys)
+                columns.push({ name: fk.column, role: 'fk' });
+              columns.push({ name: 'doc', role: 'doc' });
+              captureShapes.set(entityName, {
+                kind: 'entity',
+                columns,
+                keyIndexes: em.keys.map((key) =>
+                  columns.findIndex((column) => column.name === key)),
+                docIndex: columns.length - 1,
+                relationNames: [...entity.properties.values()]
+                  .filter((property) => property.relation !== undefined)
+                  .map((property) => property.name),
+              });
+            }
+            for (const joinName of Object.keys(mapping?.joinTables ?? {})) {
+              const pair = joinName.split('_');
+              const columns = pair.map((part) => ({ name: `${part}_key`, role: 'key' }));
+              captureShapes.set(joinName, {
+                kind: 'join', columns,
+                keyIndexes: columns.map((_, i) => i), docIndex: -1,
+              });
+            }
+          }
+          const capture = captureMode === 'none' ? null : createCaptureEngine({
+            connection,
+            shapes: captureShapes,
+            mode: captureMode,
+            log: captureRequested.log === true
+              || (captureRequested.log !== undefined && captureRequested.log !== false),
+            retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
+          });
+          const guard = capture === null ? (fn) => fn() : capture.wrap;
+          /** Strip relation members before journal diffs — sessions
+           * never see them (they are not stored), so the two modes
+           * stay identical. */
+          const stripRelations = (entityName, doc) => {
+            if (doc === null || doc === undefined) return doc;
+            const names = captureShapes.get(entityName)?.relationNames;
+            if (names === undefined || names.length === 0) return doc;
+            const out = { ...doc };
+            for (const name of names) delete out[name];
+            return out;
+          };
+          /** Journal mode cannot see ON DELETE CASCADE side effects;
+           * the ONE store-shaped case — join-table membership dying
+           * with its entity — is read and recorded before the delete.
+           * Deeper cascades (child rows) stay documented-invisible. */
+          const captureJoinDelete = capture === null || capture.mode !== 'journal'
+            ? null
+            : (entityName, keyParts) => {
+              const joins = Object.keys(mapping?.joinTables ?? {})
+                .filter((joinName) => joinName.split('_').includes(entityName));
+              const nextJoin = (i) => {
+                if (i >= joins.length) return null;
+                const joinName = joins[i];
+                const pair = joinName.split('_');
+                const sql = `SELECT ${pair.map((part) => dialect.quoteIdentifier(`${part}_key`)).join(', ')} `
+                  + `FROM ${dialect.quoteIdentifier(joinName)} `
+                  + `WHERE ${dialect.quoteIdentifier(`${entityName}_key`)} = ${dialect.parameterRef(1, 'v')}`;
+                return chain(connection.prepare(sql), (statement) =>
+                  chain(statement.all([keyParts[0]]), (rows) => {
+                    for (const row of rows) {
+                      capture.record(joinName,
+                        pair.map((part) => row[`${part}_key`]), undefined, null);
+                    }
+                    return nextJoin(i + 1);
+                  }));
+              };
+              return nextJoin(0);
+            };
+          /** Journal-mode write wrappers for a collection core. */
+          const captureCollection = (collectionName, core) => {
+            if (capture === null) return core;
+            const journal = capture.mode === 'journal';
+            return {
+              ...core,
+              insert: (doc) => guard(() => chain(core.insert(doc), (key) => {
+                if (journal) capture.record(collectionName, [key], null, doc);
+                return key;
+              })),
+              put: (doc, key) => guard(() => (journal
+                ? chain(key === undefined ? undefined : core.get(key), (before) =>
+                  chain(core.put(doc, key), (storedKey) => {
+                    capture.record(collectionName, [storedKey], before ?? null, doc);
+                    return storedKey;
+                  }))
+                : core.put(doc, key))),
+              patch: (key, ops) => guard(() => (journal
+                ? chain(core.get(key), (before) =>
+                  chain(core.patch(key, ops), (after) => {
+                    capture.record(collectionName, [key], before ?? null, after);
+                    return after;
+                  }))
+                : core.patch(key, ops))),
+              delete: (key) => guard(() => (journal
+                ? chain(core.get(key), (before) =>
+                  chain(core.delete(key), (deleted) => {
+                    if (deleted && before !== undefined)
+                      capture.record(collectionName, [key], before, null);
+                    return deleted;
+                  }))
+                : core.delete(key))),
+            };
+          };
+          /** Journal-mode write wrappers for an entity core. */
+          const captureEntity = (entityName, core) => {
+            if (capture === null) return core;
+            const journal = capture.mode === 'journal';
+            const keysOf = (doc) => core.plan.keys.map((key) => doc[key]);
+            return {
+              ...core,
+              create: (doc) => guard(() => chain(core.create(doc), (made) => {
+                if (journal) {
+                  capture.record(entityName, keysOf(made), null,
+                    stripRelations(entityName, made));
+                }
+                return made;
+              })),
+              update: (key, changes) => guard(() => (journal
+                ? chain(core.get(key), (before) =>
+                  chain(core.update(key, changes), (next) => {
+                    capture.record(entityName, keysOf(next),
+                      stripRelations(entityName, before ?? null),
+                      stripRelations(entityName, next));
+                    return next;
+                  }))
+                : core.update(key, changes))),
+              delete: (key) => guard(() => (journal
+                ? chain(captureJoinDelete(entityName, core.normalizeKey(key)), () =>
+                  chain(core.get(key), (before) =>
+                    chain(core.delete(key), (deleted) => {
+                      if (deleted && before !== undefined) {
+                        capture.record(entityName, core.normalizeKey(key),
+                          stripRelations(entityName, before), null);
+                      }
+                      return deleted;
+                    })))
+                : core.delete(key))),
+            };
           };
 
           const capabilities = Object.freeze({
@@ -653,6 +841,10 @@ export function openStore(model, options) {
             journalMode: memory || readOnly ? null : journalMode,
             readOnly,
             profiled: storeProfile !== null,
+            capture: captureMode,
+            captureLog: captureMode !== 'none'
+              && (captureRequested.log === true
+                || (captureRequested.log !== undefined && captureRequested.log !== false)),
           });
 
           const queryState = createQueryState(options.statementCacheBound);
@@ -689,15 +881,23 @@ export function openStore(model, options) {
               const validate = options.compileSchema !== undefined
                 ? options.compileSchema(entity.schema)
                 : null;
-              core = entityCore(connection, entity,
-                mapping.entities[name], validate);
+              core = captureEntity(name, entityCore(connection, entity,
+                mapping.entities[name], validate));
               entityCores.set(name, core);
             }
             return core;
           };
 
           const tracker = entities.size > 0
-            ? createTracker({ connection, entities, mapping, coreFor: entityCoreFor })
+            ? createTracker({
+              connection, entities, mapping, coreFor: entityCoreFor,
+              captureRecord: capture === null || capture.mode !== 'journal'
+                ? undefined
+                : (table, keyParts, before, after) => capture.record(table, keyParts,
+                  before === undefined ? undefined : stripRelations(table, before),
+                  stripRelations(table, after)),
+              captureJoinDelete: captureJoinDelete ?? undefined,
+            })
             : null;
           /** @type {Map<string, any>} */
           const trackedOps = new Map();
@@ -783,13 +983,27 @@ export function openStore(model, options) {
               return handle;
             },
             saveChanges: entities.size === 0 ? undefined
-              : lift(() => tracker.saveChanges()),
+              : lift(() => guard(() => tracker.saveChanges())),
             // entity DOCUMENTS query the multi-entity root at the store
             execute: entityEngine === null ? undefined
               : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
-            transaction: lift((fn) => connection.transaction(() => fn(store))),
+            transaction: lift((fn) => (capture === null
+              ? connection.transaction(() => fn(store))
+              : capture.nest(() => connection.transaction(() => fn(store))))),
+            observe: (fn) => {
+              if (capture === null) {
+                throw new TypeError(
+                  'observe needs capture — open the store with { capture: true }');
+              }
+              return capture.observe(fn);
+            },
+            changesSince: capture === null ? undefined
+              : lift((after) => capture.changesSince(after)),
+            dataVersion: lift(() => chain(
+              connection.prepare(dialect.introspect.dataVersion()),
+              (statement) => chain(statement.get([]), (row) => Number(row.v)))),
             close: lift(() => connection.close()),
           };
 
@@ -815,7 +1029,9 @@ export function openStore(model, options) {
                 }
                 return handle;
               },
-              transaction: (fn) => connection.transaction(() => fn(store)),
+              transaction: (fn) => (capture === null
+                ? connection.transaction(() => fn(store))
+                : capture.nest(() => connection.transaction(() => fn(store)))),
               entity(name) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
@@ -837,12 +1053,13 @@ export function openStore(model, options) {
                 });
               },
               saveChanges: entities.size === 0 ? undefined
-                : () => tracker.saveChanges(),
+                : () => guard(() => tracker.saveChanges()),
               execute: entityEngine === null ? undefined
                 : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             });
           }
-          return Object.freeze(store);
+          return chain(capture === null ? null : capture.ready,
+            () => Object.freeze(store));
         })));
     }));
 }

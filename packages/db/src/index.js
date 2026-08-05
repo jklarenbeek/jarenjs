@@ -40,6 +40,10 @@ export { planEntity, planJoinTable } from './ddl.js';
 export { entityCore } from './entity.js';
 export { entityEmitModel } from './emit-model.js';
 export {
+  parseChangeset, translateOperations, keyToken, createCaptureEngine,
+  CHANGES_TABLE, DEFAULT_RETENTION,
+} from './capture.js';
+export {
   createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,
 } from './tracker.js';
 export {

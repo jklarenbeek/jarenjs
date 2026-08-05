@@ -263,6 +263,8 @@ error.
 | `JD2006` | patch found no document at the key |
 | `JD2007` | the result exceeded the profile row bound |
 | `JD2040` | the row changed under an optimistic update |
+| `JD2050` | a changeset could not be decoded |
+| `JD2051` | the change log is not enabled |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.

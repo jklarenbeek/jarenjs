@@ -141,6 +141,7 @@ export function fullDoubleDialect(createDialect) {
       indexColumns: (i) => `GET indexcolumns ${i}`,
       foreignKeysOn: () => 'GET fkon',
       foreignKeyList: (t) => `GET fklist ${t}`,
+      dataVersion: () => 'GET data-version',
       schemaDump: () => 'GET schema-dump',
     },
   });

@@ -33,7 +33,9 @@ export function adaptNodeDatabase(db) {
     close: () => db.close(),
     registerFunction: (name, options, fn) => db.function(name, options, fn),
     registerAggregate: (name, spec) => db.aggregate(name, spec),
-    session: (table) => db.createSession(table === undefined ? undefined : { table }),
+    session: (table) => (table === undefined
+      ? db.createSession()
+      : db.createSession({ table })),
   };
   return openConnection(raw, {
     dialect: sqliteDialect,

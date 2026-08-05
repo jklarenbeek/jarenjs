@@ -108,6 +108,8 @@ export interface StoreCapabilities {
   readonly profiled: boolean;
   readonly busyTimeoutMs: number | null;
   readonly journalMode: string | null;
+  readonly capture: 'session' | 'journal' | 'none';
+  readonly captureLog: boolean;
   readonly [capability: string]: unknown;
 }
 
@@ -205,14 +207,39 @@ export interface Store {
   /** The unit of work (§11); present only with entities. */
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
+  /** Register a change observer; requires capture. Returns unsubscribe. */
+  observe(fn: (record: ChangeRecord) => void): () => void;
+  /** Read the persisted log forward (JD2051 without capture.log). */
+  changesSince?(after: number): Promise<ChangeRecord[]>;
+  /** PRAGMA data_version — the coarse cross-connection signal. */
+  dataVersion(): Promise<number>;
   close(): Promise<void>;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
 }
 
+/** One committed transaction's change record (LIVE-FORMAT §§1–5). */
+export interface ChangeRecord {
+  /** Monotonic; continues across reopens when the log is enabled. */
+  seq: number;
+  at: number;
+  source: 'session' | 'journal';
+  collections: readonly string[];
+  /** RFC 6902 ops with `/<table>/<key>/<path…>` pointers. */
+  patch: ReadonlyArray<{ op: string; path: string; value?: unknown; from?: string }>;
+}
+
+export interface CaptureOptions {
+  /** 'auto' (default) picks sessions where the driver has them. */
+  mode?: 'auto' | 'session' | 'journal';
+  log?: boolean | { retention?: number };
+}
+
 export interface OpenStoreOptions {
   driver: Driver;
   path?: string;
+  /** Change capture (LIVE-FORMAT): off unless requested. */
+  capture?: boolean | CaptureOptions;
   /** The injected validation hook (D10); absent means unvalidated,
    * declared through `capabilities.validated`. */
   compileSchema?: (schema: unknown) => (doc: unknown) => unknown;
@@ -267,6 +294,14 @@ export declare function entityEmitModel(model: unknown, options: {
 // ————— the unit of work —————
 
 export declare function createTracker(context: unknown): unknown;
+export declare function parseChangeset(bytes: Uint8Array): unknown[];
+export declare function translateOperations(
+  connection: unknown, shapes: Map<string, unknown>, operations: unknown[],
+): unknown;
+export declare function keyToken(parts: readonly unknown[]): string;
+export declare function createCaptureEngine(options: unknown): unknown;
+export declare const CHANGES_TABLE: string;
+export declare const DEFAULT_RETENTION: number;
 /** Deep-freeze a JSON value in place and return it (idempotent). */
 export declare function deepFreeze<T>(value: T): T;
 export declare const BATCH_PARAM_BUDGET: number;

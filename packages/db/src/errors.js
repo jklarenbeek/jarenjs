@@ -42,6 +42,8 @@ export const DB_CODES = Object.freeze({
   JD2006: 'patch found no document at the key',
   JD2007: 'the result exceeded the profile row bound',
   JD2040: 'the row changed under an optimistic update',
+  JD2050: 'a changeset could not be decoded',
+  JD2051: 'the change log is not enabled',
 });
 
 /**
@@ -122,6 +124,10 @@ export class DbCompileError extends CodedError {
  *    declared version changed under the save (or the row is gone);
  *    the error names the entity and key, and the whole save rolled
  *    back
+ *  - `JD2050` — a session changeset carried bytes this decoder does
+ *    not recognise (a future SQLite format change would land here)
+ *  - `JD2051` — `changesSince` was called on a store whose capture
+ *    has no persisted log
  */
 export class DbRuntimeError extends CodedError {
   /**

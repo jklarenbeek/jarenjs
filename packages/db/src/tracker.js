@@ -60,6 +60,8 @@ export function deepFreeze(value) {
  */
 export function createTracker(context) {
   const { connection, entities, mapping, coreFor } = context;
+  const captureRecord = context.captureRecord ?? null;
+  const captureJoinDelete = context.captureJoinDelete ?? null;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
@@ -296,15 +298,21 @@ export function createTracker(context) {
         return key;
       });
     };
-    const beforeKeys = new Set(extract(before?.[member]));
-    const afterKeys = new Set(extract(after[member]));
+    // a snapshot that never LOADED the member knows nothing about the
+    // current membership — treating unknown as empty would re-insert
+    // existing rows (a UNIQUE violation the seeded corpus found); the
+    // save resolves unknowns by reading the join table first
+    const memberValue = before === null ? [] : before[member];
+    const beforeKeys = before !== null && memberValue === undefined
+      ? null
+      : [...new Set(extract(memberValue))];
     return {
       joinTable: relation.joinTable,
       ownColumn: `${entityName}_key`,
       targetColumn: `${relation.to}_key`,
       ownKey,
-      added: [...afterKeys].filter((key) => !beforeKeys.has(key)),
-      removed: [...beforeKeys].filter((key) => !afterKeys.has(key)),
+      beforeKeys,
+      afterKeys: [...new Set(extract(after[member]))],
     };
   };
 
@@ -389,147 +397,179 @@ export function createTracker(context) {
         unversioned.add(removal.entity);
     }
 
-    const insertOrder = orderEntities([...inserts.keys()], 'inserts');
-    const deleteOrder = orderEntities(
-      [...new Set(deletes.map((removal) => removal.entity))], 'deletes').reverse();
+    // resolve unknown membership baselines, then finalize each op
+    const resolveJoins = (i) => {
+      if (i >= joinOps.length) return null;
+      const op = joinOps[i];
+      if (op.beforeKeys !== null) return resolveJoins(i + 1);
+      const sql = `SELECT ${q(op.targetColumn)} AS ${q('t')} FROM ${q(op.joinTable)} `
+        + `WHERE ${q(op.ownColumn)} = ${parameterAt(1)}`;
+      return chain(connection.prepare(sql), (statement) =>
+        chain(statement.all([op.ownKey]), (rows) => {
+          op.beforeKeys = rows.map((row) => row.t);
+          return resolveJoins(i + 1);
+        }));
+    };
+    const finalizeJoins = () => {
+      for (const op of joinOps) {
+        const before = new Set(op.beforeKeys);
+        const after = new Set(op.afterKeys);
+        op.added = op.afterKeys.filter((key) => !before.has(key));
+        op.removed = op.beforeKeys.filter((key) => !after.has(key));
+      }
+    };
 
-    /** @type {any[]} */
-    const statements = [];
+    const assemble = () => {
+      finalizeJoins();
+      const insertOrder = orderEntities([...inserts.keys()], 'inserts');
+      const deleteOrder = orderEntities(
+        [...new Set(deletes.map((removal) => removal.entity))], 'deletes').reverse();
 
-    // 1. inserts, parent-first, batched per column-name signature
-    for (const entityName of insertOrder) {
-      const plan = coreFor(entityName).plan;
-      /** @type {Map<string, any[]>} */
-      const shapes = new Map();
-      for (const record of inserts.get(entityName)) {
-        const split = plan.split(record.current);
-        const signature = split.values.map((value) => value.name).join(',');
-        let group = shapes.get(signature);
-        if (group === undefined) {
-          shapes.set(signature, group = []);
-        }
-        group.push({ record, split });
-      }
-      for (const group of shapes.values()) {
-        const names = group[0].split.values.map((value) => value.name);
-        const paramsPerRow = names.length + 1;
-        const rowsPerBatch = Math.max(1, Math.min(BATCH_ROW_BOUND,
-          Math.floor(BATCH_PARAM_BUDGET / paramsPerRow)));
-        for (let at = 0; at < group.length; at += rowsPerBatch) {
-          const batch = group.slice(at, at + rowsPerBatch);
-          const returning = plan.autoKey !== null && !names.includes(plan.autoKey);
-          const rowSql = (base) => `(${[...names.map((_, i) => parameterAt(base + i + 1)),
-            dialect.jsonEncode(parameterAt(base + names.length + 1))].join(', ')})`;
-          const sql = `INSERT INTO ${q(plan.table)} `
-            + `(${[...names.map(q), q('doc')].join(', ')}) VALUES `
-            + batch.map((_, i) => rowSql(i * paramsPerRow)).join(', ')
-            + (returning ? ` RETURNING ${q(plan.autoKey)} AS ${q('key')}` : '');
-          const params = batch.flatMap(({ split }) => [
-            ...split.values.map((value) => value.value),
-            JSON.stringify(split.rest),
-          ]);
-          statements.push({
-            kind: 'insert', entity: entityName, sql, params, returning,
-            records: batch.map(({ record }) => record),
-          });
-        }
-      }
-    }
+      /** @type {any[]} */
+      const statements = [];
 
-    // 2. updates (inserts already exist; deletes still ahead)
-    for (const { record, parts } of updates) {
-      const plan = coreFor(record.entity).plan;
-      const params = [];
-      const assignments = [];
-      if (parts.fallback) {
-        const split = plan.split(record.stamped);
-        for (const value of split.values) {
-          if (value.name === plan.version) continue;
-          assignments.push(`${q(value.name)} = ${parameterAt(params.length + 1)}`);
-          params.push(value.value);
+      // 1. inserts, parent-first, batched per column-name signature
+      for (const entityName of insertOrder) {
+        const plan = coreFor(entityName).plan;
+        /** @type {Map<string, any[]>} */
+        const shapes = new Map();
+        for (const record of inserts.get(entityName)) {
+          const split = plan.split(record.current);
+          const signature = split.values.map((value) => value.name).join(',');
+          let group = shapes.get(signature);
+          if (group === undefined) {
+            shapes.set(signature, group = []);
+          }
+          group.push({ record, split });
         }
-        assignments.push(`${q('doc')} = ${dialect.jsonEncode(parameterAt(params.length + 1))}`);
-        params.push(JSON.stringify(split.rest));
-      }
-      else {
-        for (const [name, value] of parts.columnSets) {
-          assignments.push(`${q(name)} = ${parameterAt(params.length + 1)}`);
-          params.push(value);
+        for (const group of shapes.values()) {
+          const names = group[0].split.values.map((value) => value.name);
+          const paramsPerRow = names.length + 1;
+          const rowsPerBatch = Math.max(1, Math.min(BATCH_ROW_BOUND,
+            Math.floor(BATCH_PARAM_BUDGET / paramsPerRow)));
+          for (let at = 0; at < group.length; at += rowsPerBatch) {
+            const batch = group.slice(at, at + rowsPerBatch);
+            const returning = plan.autoKey !== null && !names.includes(plan.autoKey);
+            const rowSql = (base) => `(${[...names.map((_, i) => parameterAt(base + i + 1)),
+              dialect.jsonEncode(parameterAt(base + names.length + 1))].join(', ')})`;
+            const sql = `INSERT INTO ${q(plan.table)} `
+              + `(${[...names.map(q), q('doc')].join(', ')}) VALUES `
+              + batch.map((_, i) => rowSql(i * paramsPerRow)).join(', ')
+              + (returning ? ` RETURNING ${q(plan.autoKey)} AS ${q('key')}` : '');
+            const params = batch.flatMap(({ split }) => [
+              ...split.values.map((value) => value.value),
+              JSON.stringify(split.rest),
+            ]);
+            statements.push({
+              kind: 'insert', entity: entityName, sql, params, returning,
+              records: batch.map(({ record }) => record),
+            });
+          }
         }
-        if (parts.docBuild !== null) {
-          const built = parts.docBuild.build(q('doc'), params.length);
-          assignments.push(`${q('doc')} = ${built.expression}`);
-          params.push(...built.params);
-        }
       }
-      const snapshotVersion = plan.version === null
-        ? null : Number(record.snapshot[plan.version]) || 0;
-      if (plan.version !== null) {
-        assignments.push(`${q(plan.version)} = ${parameterAt(params.length + 1)}`);
-        params.push(snapshotVersion + 1);
-      }
-      const wheres = plan.keys.map((key) => {
-        params.push(record.snapshot[key]);
-        return `${q(key)} = ${parameterAt(params.length)}`;
-      });
-      if (plan.version !== null) {
-        params.push(snapshotVersion);
-        wheres.push(`${q(plan.version)} = ${parameterAt(params.length)}`);
-      }
-      statements.push({
-        kind: 'update', entity: record.entity, record,
-        sql: `UPDATE ${q(plan.table)} SET ${assignments.join(', ')} `
-          + `WHERE ${wheres.join(' AND ')}`,
-        params,
-        guarded: plan.version !== null,
-        newVersion: plan.version === null ? null : snapshotVersion + 1,
-      });
-    }
 
-    // 3. join-table rows: after both endpoints exist, before deletes
-    for (const op of joinOps) {
-      if (op.added.length > 0) {
-        const sql = `INSERT INTO ${q(op.joinTable)} `
-          + `(${q(op.ownColumn)}, ${q(op.targetColumn)}) VALUES `
-          + op.added.map((_, i) => `(${parameterAt(i * 2 + 1)}, ${parameterAt(i * 2 + 2)})`).join(', ');
-        statements.push({
-          kind: 'join-insert', entity: op.joinTable, sql,
-          params: op.added.flatMap((key) => [op.ownKey, key]),
+      // 2. updates (inserts already exist; deletes still ahead)
+      for (const { record, parts } of updates) {
+        const plan = coreFor(record.entity).plan;
+        const params = [];
+        const assignments = [];
+        if (parts.fallback) {
+          const split = plan.split(record.stamped);
+          for (const value of split.values) {
+            if (value.name === plan.version) continue;
+            assignments.push(`${q(value.name)} = ${parameterAt(params.length + 1)}`);
+            params.push(value.value);
+          }
+          assignments.push(`${q('doc')} = ${dialect.jsonEncode(parameterAt(params.length + 1))}`);
+          params.push(JSON.stringify(split.rest));
+        }
+        else {
+          for (const [name, value] of parts.columnSets) {
+            assignments.push(`${q(name)} = ${parameterAt(params.length + 1)}`);
+            params.push(value);
+          }
+          if (parts.docBuild !== null) {
+            const built = parts.docBuild.build(q('doc'), params.length);
+            assignments.push(`${q('doc')} = ${built.expression}`);
+            params.push(...built.params);
+          }
+        }
+        const snapshotVersion = plan.version === null
+          ? null : Number(record.snapshot[plan.version]) || 0;
+        if (plan.version !== null) {
+          assignments.push(`${q(plan.version)} = ${parameterAt(params.length + 1)}`);
+          params.push(snapshotVersion + 1);
+        }
+        const wheres = plan.keys.map((key) => {
+          params.push(record.snapshot[key]);
+          return `${q(key)} = ${parameterAt(params.length)}`;
         });
-      }
-      for (const key of op.removed) {
-        statements.push({
-          kind: 'join-delete', entity: op.joinTable,
-          sql: `DELETE FROM ${q(op.joinTable)} WHERE ${q(op.ownColumn)} = ${parameterAt(1)} `
-            + `AND ${q(op.targetColumn)} = ${parameterAt(2)}`,
-          params: [op.ownKey, key],
-        });
-      }
-    }
-
-    // 4. deletes, child-first
-    for (const entityName of deleteOrder) {
-      const plan = coreFor(entityName).plan;
-      for (const removal of deletes) {
-        if (removal.entity !== entityName) continue;
-        const params = [...removal.parts];
-        const wheres = plan.keys.map((key, i) => `${q(key)} = ${parameterAt(i + 1)}`);
-        const snapshotVersion = plan.version !== null && removal.snapshot !== null
-          ? Number(removal.snapshot[plan.version]) || 0 : null;
-        if (snapshotVersion !== null) {
+        if (plan.version !== null) {
           params.push(snapshotVersion);
           wheres.push(`${q(plan.version)} = ${parameterAt(params.length)}`);
         }
         statements.push({
-          kind: 'delete', entity: entityName, removal,
-          sql: `DELETE FROM ${q(plan.table)} WHERE ${wheres.join(' AND ')}`,
+          kind: 'update', entity: record.entity, record,
+          sql: `UPDATE ${q(plan.table)} SET ${assignments.join(', ')} `
+            + `WHERE ${wheres.join(' AND ')}`,
           params,
-          guarded: snapshotVersion !== null,
+          guarded: plan.version !== null,
+          newVersion: plan.version === null ? null : snapshotVersion + 1,
         });
       }
-    }
 
-    return { statements, fallbacks, unversioned: [...unversioned].sort() };
+      // 3. join-table rows: after both endpoints exist, before deletes
+      for (const op of joinOps) {
+        if (op.added.length > 0) {
+          const sql = `INSERT INTO ${q(op.joinTable)} `
+            + `(${q(op.ownColumn)}, ${q(op.targetColumn)}) VALUES `
+            + op.added.map((_, i) => `(${parameterAt(i * 2 + 1)}, ${parameterAt(i * 2 + 2)})`).join(', ');
+          statements.push({
+            kind: 'join-insert', entity: op.joinTable, sql,
+            params: op.added.flatMap((key) => [op.ownKey, key]),
+            joinRows: op.added.map((key) => ({
+              own: op.ownKey, target: key,
+              ownColumn: op.ownColumn, targetColumn: op.targetColumn,
+            })),
+          });
+        }
+        for (const key of op.removed) {
+          statements.push({
+            kind: 'join-delete', entity: op.joinTable,
+            sql: `DELETE FROM ${q(op.joinTable)} WHERE ${q(op.ownColumn)} = ${parameterAt(1)} `
+              + `AND ${q(op.targetColumn)} = ${parameterAt(2)}`,
+            params: [op.ownKey, key],
+            joinRows: [{ own: op.ownKey, target: key,
+              ownColumn: op.ownColumn, targetColumn: op.targetColumn }],
+          });
+        }
+      }
+
+      // 4. deletes, child-first
+      for (const entityName of deleteOrder) {
+        const plan = coreFor(entityName).plan;
+        for (const removal of deletes) {
+          if (removal.entity !== entityName) continue;
+          const params = [...removal.parts];
+          const wheres = plan.keys.map((key, i) => `${q(key)} = ${parameterAt(i + 1)}`);
+          const snapshotVersion = plan.version !== null && removal.snapshot !== null
+            ? Number(removal.snapshot[plan.version]) || 0 : null;
+          if (snapshotVersion !== null) {
+            params.push(snapshotVersion);
+            wheres.push(`${q(plan.version)} = ${parameterAt(params.length)}`);
+          }
+          statements.push({
+            kind: 'delete', entity: entityName, removal,
+            sql: `DELETE FROM ${q(plan.table)} WHERE ${wheres.join(' AND ')}`,
+            params,
+            guarded: snapshotVersion !== null,
+          });
+        }
+      }
+
+      return { statements, fallbacks, unversioned: [...unversioned].sort() };
+    };
+    return chain(resolveJoins(0), assemble);
   };
 
   // ————— execution —————
@@ -588,6 +628,11 @@ export function createTracker(context) {
             return next(i + 1);
           });
         }
+        return chain(
+          statement.kind === 'delete' && captureJoinDelete !== null
+            ? captureJoinDelete(statement.entity, statement.removal.parts)
+            : null,
+          () => {
         let ran;
         try {
           ran = prepared.run(statement.params);
@@ -605,12 +650,14 @@ export function createTracker(context) {
           }
           else if (statement.kind === 'delete') {
             if (changed === 0 && statement.guarded) throw conflict(statement);
+            statement.deletedRows = changed;
             report.deleted += changed;
           }
           else if (statement.kind === 'join-insert') report.joinInserted += changed;
           else if (statement.kind === 'join-delete') report.joinDeleted += changed;
           return next(i + 1);
         });
+          });
       });
     };
     return next(0);
@@ -633,22 +680,48 @@ export function createTracker(context) {
             entity: statement.entity, snapshot: doc, current: doc, pendingInsert: false,
           });
           record.saved = doc;
+          captureRecord?.(statement.entity,
+            plan.keys.map((k) => doc[k]), null, doc);
         });
       }
       else if (statement.kind === 'update') {
         const record = statement.record;
         const plan = coreFor(statement.entity).plan;
+        const before = record.snapshot;
         const saved = statement.newVersion === null
           ? record.stamped
           : deepFreeze({ ...record.stamped, [plan.version]: statement.newVersion });
         record.snapshot = deepFreeze(saved);
         record.current = record.snapshot;
         record.stamped = undefined;
+        captureRecord?.(statement.entity,
+          plan.keys.map((k) => record.snapshot[k]), before, record.snapshot);
       }
       else if (statement.kind === 'delete') {
         const removal = statement.removal;
         records.delete(keyOf(removal.entity, removal.parts));
         removals.delete(keyOf(removal.entity, removal.parts));
+        if ((statement.deletedRows ?? 0) > 0) {
+          captureRecord?.(removal.entity, removal.parts,
+            removal.snapshot ?? undefined, null);
+        }
+      }
+      else if (statement.kind === 'join-insert' || statement.kind === 'join-delete') {
+        for (const row of statement.joinRows ?? []) {
+          // the join-row "document" lists its columns in table order
+          // (the sorted pair) so both capture modes agree exactly
+          const pair = statement.entity.split('_');
+          const value = { [row.ownColumn]: row.own, [row.targetColumn]: row.target };
+          const ordered = {};
+          for (const part of pair) ordered[part + '_key'] = value[part + '_key'];
+          const keyParts = pair.map((part) => ordered[part + '_key']);
+          if (statement.kind === 'join-insert') {
+            captureRecord?.(statement.entity, keyParts, null, ordered);
+          }
+          else {
+            captureRecord?.(statement.entity, keyParts, undefined, null);
+          }
+        }
       }
     }
     // join-only records: their member state is now persisted
@@ -665,7 +738,7 @@ export function createTracker(context) {
 
   const saveChanges = () => {
     const startedAt = performance.now();
-    const { statements, fallbacks, unversioned } = planSave();
+    return chain(planSave(), ({ statements, fallbacks, unversioned }) => {
     const report = {
       inserted: 0, updated: 0, deleted: 0,
       joinInserted: 0, joinDeleted: 0,
@@ -688,6 +761,7 @@ export function createTracker(context) {
         finished.elapsedMs = performance.now() - startedAt;
         return finished;
       });
+    });
   };
 
   /** Drop tracking for a key without scheduling anything. */
