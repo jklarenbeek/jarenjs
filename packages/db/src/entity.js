@@ -43,7 +43,12 @@ export function entityCore(connection, entity, entityMapping, validate) {
     epoch: column.source === 'epoch(document)',
     property: entity.properties.get(column.name),
   }));
-  const fkColumns = entityMapping.foreignKeys.map((fk) => fk.column);
+  // a declared via property is ALREADY a scalar column — the foreign
+  // key adds a column only when no property claims it
+  const scalarNames = new Set(scalarColumns.map((column) => column.name));
+  const fkColumns = entityMapping.foreignKeys
+    .map((fk) => fk.column)
+    .filter((name) => !scalarNames.has(name));
   const columnNames = [
     ...scalarColumns.map((column) => column.name),
     ...fkColumns,
@@ -73,13 +78,19 @@ export function entityCore(connection, entity, entityMapping, validate) {
       { docPath, collection: entity.name });
   };
 
-  /** Split a completed document into bound column values + the rest. */
+  const relationNames = new Set(
+    [...entity.properties.values()]
+      .filter((property) => property.relation !== undefined)
+      .map((property) => property.name));
+
+  /** Split a completed document into bound column values + the rest.
+   * Relation members are PROJECTIONS (§10.1) — never stored. */
   const split = (doc) => {
     const values = [];
     /** @type {any} */
     const rest = {};
     for (const key of Object.keys(doc)) {
-      if (!columnSet.has(key)) rest[key] = doc[key];
+      if (!columnSet.has(key) && !relationNames.has(key)) rest[key] = doc[key];
     }
     for (const column of scalarColumns) {
       if (column.name === autoKey && doc[column.name] === undefined) continue;
@@ -230,8 +241,54 @@ export function entityCore(connection, entity, entityMapping, validate) {
         : { docPath, collection: entity.name, key, cause: error });
   };
 
+  const columnByName = new Map(scalarColumns.map((column) => [column.name, column]));
+  /** Encode ONE column assignment the way {@link split} would. */
+  const encodeColumn = (name, value) => {
+    const column = columnByName.get(name);
+    if (column !== undefined && column.epoch)
+      return value === undefined ? null : epochOf(column.property, value);
+    if (value === undefined || value === null) return null;
+    return typeof value === 'boolean' ? (value ? 1 : 0) : value;
+  };
+
   return {
+    // the unit-of-work exposure (tracker.js): the column plan and the
+    // completion/validation/stamping machinery, one source of truth
+    plan: {
+      table,
+      keys,
+      autoKey,
+      version: entity.version ?? null,
+      scalarColumns,
+      fkColumns,
+      columnSet,
+      split,
+      merge,
+      encodeColumn,
+    },
+    complete: (doc, { updating }) => {
+      const completed = applyDefaults(doc, { updating });
+      checkValid(completed);
+      return completed;
+    },
+    validateOnly: (doc) => checkValid(doc),
+    stampUpdated: (doc) => {
+      if (updateStamps.length === 0) return doc;
+      const out = { ...doc };
+      for (const { name, fill } of updateStamps) out[name] = fill(out);
+      return out;
+    },
+    normalizeKey: (key) => normalizeKeyArg(key),
     create(doc) {
+      for (const name of relationNames) {
+        const value = doc?.[name];
+        if (value !== undefined && (!Array.isArray(value) || value.length > 0)) {
+          throw new DbRuntimeError('JD2003',
+            `'${name}' is a relation member — create() stores no `
+            + 'projections; use the unit of work for membership',
+            { docPath, collection: entity.name });
+        }
+      }
       const completed = applyDefaults(doc, { updating: false });
       checkValid(completed);
       const { values, rest } = split(completed);
@@ -267,6 +324,11 @@ export function entityCore(connection, entity, entityMapping, validate) {
             { docPath, collection: entity.name });
         }
         const next = applyDefaults({ ...current, ...changes }, { updating: true });
+        // an explicit update is last-write-wins by contract (§11.2),
+        // but it still moves a declared version token so optimistic
+        // savers see the row changed
+        if (entity.version !== null && entity.version !== undefined)
+          next[entity.version] = (Number(current[entity.version]) || 0) + 1;
         checkValid(next);
         const { values, rest } = split(next);
         const assignments = [

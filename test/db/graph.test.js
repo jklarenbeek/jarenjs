@@ -210,6 +210,10 @@ describe('one-statement graph loading', () => {
       $return: '$u.id',
     });
     assert.deepStrictEqual(rows, ['u1', 'u2']);
+    const untracked = store.sync.entity('User').asNoTracking()
+      .load({ orderBy: '$it.id' });
+    assert.strictEqual(Object.isFrozen(untracked[0]), false,
+      'the untracked twin returns plain data');
   });
 });
 

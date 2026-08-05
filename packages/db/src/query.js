@@ -954,6 +954,9 @@ export function createLoadEngine(context, entityName) {
   };
 
   return {
+    treeFor(spec) {
+      return buildLoad(spec).tree;
+    },
     load(spec) {
       const entry = buildLoad(spec);
       if (entry.statement === null) entry.statement = connection.prepare(entry.sql);

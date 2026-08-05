@@ -31,6 +31,7 @@ import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoa
 import { normalizeProfile } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
+import { createTracker } from './tracker.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -695,6 +696,47 @@ export function openStore(model, options) {
             return core;
           };
 
+          const tracker = entities.size > 0
+            ? createTracker({ connection, entities, mapping, coreFor: entityCoreFor })
+            : null;
+          /** @type {Map<string, any>} */
+          const trackedOps = new Map();
+          // the unit-of-work surface (§11): reads register frozen
+          // snapshots; add/put/remove are LOCAL bookkeeping (no
+          // database round trip, deliberately synchronous on both
+          // surfaces); asNoTracking() reads retain nothing
+          const trackedOpsFor = (name) => {
+            let ops = trackedOps.get(name);
+            if (ops !== undefined) return ops;
+            const core = entityCoreFor(name);
+            const loads = loadEngineFor(name);
+            ops = {
+              create: (doc) => chain(core.create(doc),
+                (made) => tracker.register(name, made)),
+              get: (key) => chain(core.get(key), (doc) =>
+                (doc === undefined ? undefined : tracker.register(name, doc))),
+              update: (key, changes) => chain(core.update(key, changes),
+                (next) => tracker.register(name, next)),
+              delete: (key) => chain(core.delete(key), (done) => {
+                tracker.discard(name, key);
+                return done;
+              }),
+              load: (spec) => chain(loads.load(spec),
+                (docs) => tracker.registerGraph(loads.treeFor(spec), docs)),
+              explainLoad: (spec) => loads.explainLoad(spec),
+              add: (doc) => tracker.add(name, doc),
+              put: (next) => tracker.put(name, next),
+              remove: (keyOrDoc) => tracker.remove(name, keyOrDoc),
+              discard: (keyOrDoc) => tracker.discard(name, keyOrDoc),
+              noTracking: {
+                get: (key) => core.get(key),
+                load: (spec) => loads.load(spec),
+              },
+            };
+            trackedOps.set(name, ops);
+            return ops;
+          };
+
           /** @type {Map<string, any>} */
           const asyncHandles = new Map();
           /** @type {Map<string, any>} */
@@ -704,6 +746,7 @@ export function openStore(model, options) {
             stats: () => ({
               statementCache: { ...queryState.counters },
               udfRegistrations: queryState.registered.size,
+              tracker: tracker === null ? null : tracker.counts(),
             }),
             dialect,
             collection(name) {
@@ -717,20 +760,30 @@ export function openStore(model, options) {
             entity(name) {
               let handle = asyncEntityHandles.get(name);
               if (handle === undefined) {
-                const core = entityCoreFor(name);
-                const loads = loadEngineFor(name);
+                const ops = trackedOpsFor(name);
+                const untracked = Object.freeze({
+                  get: lift((key) => ops.noTracking.get(key)),
+                  load: lift((spec) => ops.noTracking.load(spec)),
+                });
                 handle = Object.freeze({
-                  create: lift((doc) => core.create(doc)),
-                  get: lift((key) => core.get(key)),
-                  update: lift((key, changes) => core.update(key, changes)),
-                  delete: lift((key) => core.delete(key)),
-                  load: lift((spec) => loads.load(spec)),
-                  explainLoad: (spec) => loads.explainLoad(spec),
+                  create: lift((doc) => ops.create(doc)),
+                  get: lift((key) => ops.get(key)),
+                  update: lift((key, changes) => ops.update(key, changes)),
+                  delete: lift((key) => ops.delete(key)),
+                  load: lift((spec) => ops.load(spec)),
+                  explainLoad: ops.explainLoad,
+                  add: ops.add,
+                  put: ops.put,
+                  remove: ops.remove,
+                  discard: ops.discard,
+                  asNoTracking: () => untracked,
                 });
                 asyncEntityHandles.set(name, handle);
               }
               return handle;
             },
+            saveChanges: entities.size === 0 ? undefined
+              : lift(() => tracker.saveChanges()),
             // entity DOCUMENTS query the multi-entity root at the store
             execute: entityEngine === null ? undefined
               : (document, queryOptions) => entityEngine.execute(document, queryOptions),
@@ -764,17 +817,27 @@ export function openStore(model, options) {
               },
               transaction: (fn) => connection.transaction(() => fn(store)),
               entity(name) {
-                const core = entityCoreFor(name);
-                const loads = loadEngineFor(name);
+                const ops = trackedOpsFor(name);
+                const untracked = Object.freeze({
+                  get: (key) => ops.noTracking.get(key),
+                  load: (spec) => ops.noTracking.load(spec),
+                });
                 return Object.freeze({
-                  create: (doc) => core.create(doc),
-                  get: (key) => core.get(key),
-                  update: (key, changes) => core.update(key, changes),
-                  delete: (key) => core.delete(key),
-                  load: (spec) => loads.load(spec),
-                  explainLoad: (spec) => loads.explainLoad(spec),
+                  create: (doc) => ops.create(doc),
+                  get: (key) => ops.get(key),
+                  update: (key, changes) => ops.update(key, changes),
+                  delete: (key) => ops.delete(key),
+                  load: (spec) => ops.load(spec),
+                  explainLoad: ops.explainLoad,
+                  add: ops.add,
+                  put: ops.put,
+                  remove: ops.remove,
+                  discard: ops.discard,
+                  asNoTracking: () => untracked,
                 });
               },
+              saveChanges: entities.size === 0 ? undefined
+                : () => tracker.saveChanges(),
               execute: entityEngine === null ? undefined
                 : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             });

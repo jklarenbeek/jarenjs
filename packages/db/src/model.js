@@ -28,7 +28,7 @@ import {
 import { DbCompileError } from './errors.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
-const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation']);
+const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
 const RELATION_MEMBERS = new Set(['to', 'many', 'via', 'through', 'onDelete']);
 const ON_DELETE = new Set(['cascade', 'restrict', 'setNull']);
 const ENTITY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -93,7 +93,7 @@ function normalizeEntityBlock(block, docPath) {
     if (!ENTITY_MEMBERS.has(member)) {
       throw new DbCompileError('JD0030',
         `unknown x-entity member '${member}' — the vocabulary is closed `
-        + '(key, unique, index, default, column, relation) because a silently '
+        + '(key, unique, index, default, column, relation, version) because a silently '
         + 'ignored mapping directive loses data',
         `${docPath}/${member}`);
     }
@@ -199,6 +199,7 @@ export function normalizeEntities(model) {
         key: entityBlock.key === true,
         unique: entityBlock.unique === true,
         index: entityBlock.index === true,
+        version: entityBlock.version === true,
         default: entityBlock.default,
         column: entityBlock.column,
         // COPIED: relation resolution annotates this object (kind,
@@ -227,6 +228,18 @@ export function normalizeEntities(model) {
     if (uuidKeys.length > 0 && (keys.length > 1
       || properties.get(uuidKeys[0]).type !== 'string'))
       throw modelError("default: 'uuid' needs a single string key", docPath);
+    // the optimistic-concurrency token (§11.5): one integer, mapped to
+    // its own column, never the key
+    const versions = [...properties.values()].filter((p) => p.version);
+    for (const p of versions) {
+      if (p.type !== 'integer' || p.key || p.relation !== undefined
+        || p.column !== undefined) {
+        throw modelError('a version property is a plain integer column '
+          + '(not a key, not a relation, not column-mapped)', p.docPath);
+      }
+    }
+    if (versions.length > 1)
+      throw modelError(`entity '${name}' declares more than one version property`, docPath);
 
     entities.set(name, {
       name,
@@ -235,6 +248,7 @@ export function normalizeEntities(model) {
       properties,
       keys,
       relations,
+      version: versions.length === 1 ? versions[0].name : null,
     });
   }
 
@@ -334,6 +348,18 @@ function resolveRelations(entities) {
         }
         continue;
       }
+      if (relationA.via !== relationB.via) {
+        // a mutual one/many pair is presumed ONE edge and must agree
+        // on its key; a mutual SAME-kind pair with different vias is
+        // two independent edges (how a legitimate cycle is written)
+        if (relationA.kind !== relationB.kind) {
+          throw new DbCompileError('JD0031',
+            `relation '${a.owner}.${a.property.name}' and '${b.owner}.${b.property.name}' `
+            + `disagree on the foreign key ('${relationA.via}' vs '${relationB.via}')`,
+            `${a.property.docPath}/x-entity/relation`);
+        }
+        continue;
+      }
       if (relationA.kind === relationB.kind) {
         throw new DbCompileError('JD0031',
           `relation '${a.owner}.${a.property.name}' and '${b.owner}.${b.property.name}' `
@@ -341,12 +367,6 @@ function resolveRelations(entities) {
           `${a.property.docPath}/x-entity/relation`);
       }
       if (relationA.fkEntity !== relationB.fkEntity) continue; // different edges
-      if (relationA.via !== relationB.via) {
-        throw new DbCompileError('JD0031',
-          `relation '${a.owner}.${a.property.name}' and '${b.owner}.${b.property.name}' `
-          + `disagree on the foreign key ('${relationA.via}' vs '${relationB.via}')`,
-          `${a.property.docPath}/x-entity/relation`);
-      }
       if (relationA.onDelete !== relationB.onDelete) {
         throw new DbCompileError('JD0031',
           `relation '${a.owner}.${a.property.name}' and '${b.owner}.${b.property.name}' `
@@ -434,6 +454,7 @@ export function explainMapping(model) {
       foreignKeys,
       indexes,
       document,
+      version: entity.version ?? null,
     };
   }
 

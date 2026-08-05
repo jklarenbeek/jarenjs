@@ -29,6 +29,7 @@ export const DB_CODES = Object.freeze({
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
+  JD0040: 'the save spans a relation cycle',
   JD0020: "the migration's from-shape does not match the database",
   JD0021: 'the migration is missing a required data transform',
   JD0022: 'an applied migration disagrees with the history record',
@@ -40,6 +41,7 @@ export const DB_CODES = Object.freeze({
   JD2005: 'a database operation failed',
   JD2006: 'patch found no document at the key',
   JD2007: 'the result exceeded the profile row bound',
+  JD2040: 'the row changed under an optimistic update',
 });
 
 /**
@@ -72,6 +74,9 @@ export const DB_CODES = Object.freeze({
  *  - `JD0032` — a graph-load include specification is invalid: an
  *    unknown relation, a cycle, an untranslatable filter, or the
  *    depth bound exceeded (the bound is printed, never silent)
+ *  - `JD0040` — `saveChanges()` cannot order its statements: the
+ *    entities being inserted or deleted form a foreign-key cycle
+ *    (self-references included); break the save in two
  *  - `JD0020` — a migration's `from` hash does not match the
  *    database's recorded shape; running it would corrupt
  *  - `JD0021` — a draft transform was not filled in, or a document no
@@ -113,6 +118,10 @@ export class DbCompileError extends CodedError {
  *  - `JD2006` — `patch` addressed a key with no stored document
  *  - `JD2007` — a fetch crossed the profile's `maxRows` bound; the
  *    result is refused whole, never silently truncated
+ *  - `JD2040` — an optimistic update or delete matched no row: the
+ *    declared version changed under the save (or the row is gone);
+ *    the error names the entity and key, and the whole save rolled
+ *    back
  */
 export class DbRuntimeError extends CodedError {
   /**

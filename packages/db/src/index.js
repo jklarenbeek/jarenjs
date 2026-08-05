@@ -39,6 +39,9 @@ export { normalizeEntities, explainMapping } from './model.js';
 export { planEntity, planJoinTable } from './ddl.js';
 export { entityCore } from './entity.js';
 export {
+  createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,
+} from './tracker.js';
+export {
   planMigration, migrate, shapeHash, migrationChecksum,
   MIGRATION_VERSION, HISTORY_TABLE,
 } from './migrate.js';

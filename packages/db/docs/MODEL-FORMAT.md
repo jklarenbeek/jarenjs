@@ -6,9 +6,9 @@ MAY are to be interpreted as described in RFC 2119.
 Canonical schema: [`schemas/jaren-model.schema.json`](../schemas/jaren-model.schema.json)
 (draft 2020-12), with the mechanically derived draft-07 twin beside it.
 
-Section allocation is fixed: §§1–7 are written here; §§8–11 are
-reserved, numbered placeholders owned by later work, so no two
-documents ever claim the same section number.
+Section allocation is fixed so no two documents ever claim the same
+section number: §§1–7 the storage subset, §8 the safe profile, §9
+entities, §10 relational translation, §11 the unit of work.
 
 ## 1. Scope
 
@@ -254,6 +254,7 @@ error.
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
+| `JD0040` | the save spans a relation cycle |
 | `JD2001` | insert found the key already present |
 | `JD2002` | a usable key could not be resolved for the write |
 | `JD2003` | the write failed schema validation |
@@ -261,6 +262,7 @@ error.
 | `JD2005` | a database operation failed |
 | `JD2006` | patch found no document at the key |
 | `JD2007` | the result exceeded the profile row bound |
+| `JD2040` | the row changed under an optimistic update |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
@@ -390,6 +392,7 @@ validator by the same argument as `x-form`.
 | `default` | a property | applied on write, in JavaScript (§9.6): `"now"` (insert stamp), `"updated"` (insert AND every update), `"uuid"`, `"auto"` (single INTEGER key, database-allocated), `{ "value": … }` (a literal), `{ "query": … }` (a query document over the document being written) |
 | `column` | a property | storage override: `"integer"` on a `date-time`/`date` string stores epoch milliseconds in a real column (index-friendly range predicates); `"json"` keeps a scalar in the JSONB document (the opt-out that preserves present-`null`, §9.3) |
 | `relation` | a property | `{ to, many?, via?, through?, onDelete? }` — §9.4 |
+| `version` | a property | the optimistic-concurrency token (§11.5): a plain integer column, one per entity, never the key — engine-owned and bumped on every successful write |
 
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
@@ -617,4 +620,117 @@ a number appears only where `capabilities.rowEstimates` is filled):
 
 ## 11. The unit of work
 
-Reserved.
+Read entities, produce changed plain JSON, call `saveChanges()`: the
+minimal set of parameterised statements runs inside ONE transaction,
+ordered so no foreign key is violated mid-flight, with optimistic
+concurrency where a version property is declared. Change tracking is
+copy-on-write diffing — **no proxies exist on any read path**, and the
+assertion is a test, not a promise.
+
+### 11.1 Snapshot tracking (the default)
+
+A materialised entity — from `create`, `get`, `update` or `load`
+(root AND included children) — is plain, **deep-frozen** JSON,
+registered under its identity. The frozen document itself is the
+snapshot: the tracker retains exactly one reference per entity, no
+copies. Mutation is replacement:
+
+```js
+const ada = await users.get('u1');            // frozen, tracked
+users.put({ ...ada, age: 37 });               // the next version
+users.add({ id: 'u9', name: 'new' });         // pending insert
+users.remove('u2');                           // pending delete
+const report = await store.saveChanges();     // one transaction
+```
+
+- `put(next)` requires the key to be tracked (`JD2006` otherwise) and
+  validates through the injected hook. `add()` completes defaults and
+  validates immediately; an `auto` key stays absent until the save
+  allocates it. `remove()` of a pending add cancels it. Documents
+  handed to `add`/`put` are adopted and frozen.
+- A re-read refreshes a CLEAN record's snapshot; a DIRTY record stays
+  authoritative — the read still returns the fresh row. `discard(key)`
+  drops tracking without scheduling anything; it is the recovery step
+  after a `JD2040` conflict (discard, re-read, reapply, save again).
+- `asNoTracking()` returns a read-only surface (`get`, `load`) whose
+  results are plain UNfrozen data, registered nowhere — a 100k-row
+  report retains no snapshots (proven by a forced-GC live-set test).
+- Query results (`store.execute`, linq) are plain data, never tracked:
+  a projection has no identity to track.
+
+### 11.2 Explicit updates (the other mode)
+
+`set.update(key, changes)` and `set.delete(key)` skip tracking: one
+immediate statement, last-write-wins by contract. An explicit update
+still bumps a declared version property, so optimistic savers observe
+the row changed. This is the path reactive layers and job runners use.
+
+### 11.3 The diff-to-statement table
+
+`saveChanges()` diffs snapshot against current with the suite's own
+diff engine (`createJSONPatch`) and maps each operation:
+
+| Diff operation | Statement |
+|---|---|
+| a top-level mapped scalar (or foreign-key) member | one column assignment (`SET col = ?`; removal writes `NULL` — reads absent, §9.3) |
+| a top-level instant member (`column: "integer"`) | the epoch column AND a `jsonb_set` of the document string, one statement |
+| a path inside the JSONB document | a `jsonb_set` / `jsonb_remove` chain over the `doc` column (the §5 patch translation) |
+| a many-to-many relation member | join-table `INSERT`/`DELETE` rows from the KEY-SET difference (element internals belong to the child entity) |
+| the version member | dropped — engine-owned, always written as snapshot + 1 |
+| a one-to-many / one-to-one relation member EDIT | refused (`JD2003`): projections are not stored state |
+| anything else (`move`, a mid-array insert, …) | the whole-row fallback — full column set + full document, **counted** in the report |
+
+All assignments for one entity coalesce into ONE `UPDATE`. Relation
+members never enter the stored document (`split` strips them on every
+write path).
+
+### 11.4 Ordering and batching
+
+Statements run: inserts parent-first (topological over the foreign-key
+edges among the inserted entities) → updates → join-table rows (both
+endpoints exist by then) → deletes child-first. An update may
+reference a parent inserted in the same save. A foreign-key cycle —
+self-references included — among the entities being inserted or
+deleted is **`JD0040`** naming the cycle; break the save in two.
+
+Same-shape inserts of one entity coalesce into multi-row `VALUES`
+statements, bounded by `min(100 rows, ⌊900 parameters / row width⌋)`
+(`BATCH_ROW_BOUND`, `BATCH_PARAM_BUDGET`). Generated keys come back
+through `RETURNING` in one round trip; ascending keys pair with
+insertion order (asserted by test). Measured on this machine: 2000
+inserts = 20 statements at ~22 ms versus 2000 single-row statements at
+~31 ms in one transaction — the wall-clock gap is modest in-process,
+the 100× statement reduction is the point for anything remote.
+
+### 11.5 Optimistic concurrency
+
+Declare a token with `version: true` (§9.2). Every `saveChanges()`
+update and guarded delete carries `WHERE version = ?` (the SNAPSHOT
+version) and writes snapshot + 1; a zero-row result is **`JD2040`**
+carrying the entity and key, and the whole save rolls back. Without a
+version property there is no concurrency check and the report says so:
+`concurrency.unversioned` names every touched entity that has none —
+never a silent last-write-wins the reader believes is protected. (A
+row that vanished entirely still conflicts an update: zero rows is
+zero rows.) An unguarded delete of a missing row is a no-op.
+
+### 11.6 Failure semantics and the return shape
+
+`saveChanges()` is all-or-nothing inside one transaction. On ANY
+failure the tracker is left exactly as it was before the call — the
+same save can be retried once the cause is gone; a half-applied
+tracker is worse than a rollback. Only a committed save advances
+snapshots (bumped versions, generated keys) and clears pending work.
+
+The return value is data, not a boolean:
+
+```js
+{
+  inserted, updated, deleted,          // row counts
+  joinInserted, joinDeleted,           // membership rows
+  fallbacks,                           // whole-row writes, counted
+  statements: [{ sql, rows }, …],      // what actually ran
+  concurrency: { checked, unversioned: [names] },
+  elapsedMs,
+}
+```
