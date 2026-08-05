@@ -89,7 +89,11 @@ describe('json — the LLM-profile schema twins', function () {
   });
 
   it('every canonical-valid query document is profile-valid (pure relaxation)', function () {
-    const docs = [...QUERY_CORPUS, ...queryExamples.map((e) => e.query)];
+    // `registry` examples use host-registered operators ($mean, $sqrt, …)
+    // that are deliberately OUTSIDE the published closed grammar, so they
+    // are not canonical-valid — the site mounts a registry to run them
+    const docs = [...QUERY_CORPUS,
+      ...queryExamples.filter((e) => e.registry !== true).map((e) => e.query)];
     for (const doc of docs) {
       assert.strictEqual(checks.query(doc), true,
         `corpus doc is canonical-valid: ${JSON.stringify(doc).slice(0, 60)}`);
@@ -99,7 +103,8 @@ describe('json — the LLM-profile schema twins', function () {
   });
 
   it('every canonical-valid JSLT stylesheet is profile-valid (pure relaxation)', function () {
-    const docs = [...JSLT_CORPUS, ...jsltExamples.map((e) => e.stylesheet)];
+    const docs = [...JSLT_CORPUS,
+      ...jsltExamples.filter((e) => e.registry !== true).map((e) => e.stylesheet)];
     for (const doc of docs) {
       assert.strictEqual(checks.jslt(doc), true,
         `corpus stylesheet is canonical-valid: ${JSON.stringify(doc).slice(0, 60)}`);

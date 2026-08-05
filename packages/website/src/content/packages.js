@@ -16,7 +16,7 @@ export const REPO = 'https://github.com/jklarenbeek/jarenjs';
 /** @type {{ name: string, dir: string, blurb: string }[]} */
 const ENTRIES = [
   { name: '@jarenjs/core', dir: 'packages/core', blurb: 'Zero-dependency foundation: type guards, Unicode strings, text validators, math.' },
-  { name: '@jarenjs/json', dir: 'packages/json', blurb: 'Pointer, JSONPath, the JSON Query language, JSLT & JTLT stylesheets.' },
+  { name: '@jarenjs/json', dir: 'packages/json', blurb: 'Pointer, JSONPath, the JSON Query language, JSLT & JTLT stylesheets — with a registry (createJsltRegistry) that mounts math/finance/stats operator packs.' },
   { name: '@jarenjs/validate', dir: 'packages/validate', blurb: 'The JSON Schema validating compiler.' },
   { name: '@jarenjs/formats', dir: 'packages/formats', blurb: 'Format validators for the format keyword.' },
   { name: '@jarenjs/refs', dir: 'packages/refs', blurb: 'The official meta-schemas, bundled for offline use.' },
@@ -33,7 +33,7 @@ const ENTRIES = [
   { name: '@jarenjs/josl', dir: 'packages/josl', blurb: 'JOSL & JSONX: a streaming TOML superset, incremental JSON/JSONX readers, and a self-healing CSV reader/writer.' },
   { name: '@jarenjs/ai', dir: 'packages/ai', blurb: 'Browser-side AI: one OpenAI-compatible client (OpenRouter/Ollama/LM Studio), a Jaren-guarded tool registry, a bounded agent loop and WebMCP.' },
   { name: '@jarenjs/linq', dir: 'packages/linq', blurb: 'C#-familiar fluent chains captured into plain query documents: deferred, typed, async-capable, and pushable to any provider.' },
-  { name: '@jarenjs/db', dir: 'packages/db', blurb: 'Documents in SQLite: model-declared collections, a pushdown planner with honest residuals, a safe profile for untrusted queries, and migrations as documents.' },
+  { name: '@jarenjs/db', dir: 'packages/db', blurb: 'Documents in SQLite: model-declared collections, a pushdown planner with honest residuals, registered operators (residual, and math pushed to SQLite UDFs), a safe profile for untrusted queries, and migrations as documents.' },
 ];
 
 export const PACKAGES = ENTRIES.map((entry) => ({

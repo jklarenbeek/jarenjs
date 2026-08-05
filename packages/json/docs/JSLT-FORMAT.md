@@ -655,9 +655,12 @@ The built-in packs wrap `@jarenjs/core`: `mathPack` (`$sqrt`, `$pow`,
 `statsPack` (`$mean`, `$median`, `$variance`, `$stddev`, `$percentile`).
 Because a registry compiles both stylesheets and bare query documents,
 registered operators also work through `@jarenjs/linq` over an in-memory
-source. Their behaviour against `@jarenjs/db` is a separate story
-(they run in the SQL residual, correct but not pushed) — see
-MODEL-FORMAT and the roadmap.
+source. Against `@jarenjs/db` a store opens with `openStore(model, {
+operators })`: every registered operator runs **correctly** in the query
+residual (JS over the fetched rows, named by `explain()`), and the
+`pushable:'scalar'` subset (the math ops) is additionally pushed into
+SQLite as deterministic UDFs where the driver allows (`node:sqlite` yes;
+`bun:sqlite` stays the residual). See MODEL-FORMAT §8.1–8.2.
 
 ---
 

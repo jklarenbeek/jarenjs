@@ -277,6 +277,20 @@ export function dataViewModel(state) {
     vfs: data.vfs,
     version: data.version,
     capture: data.capture,
+    operators: data.operators,
+    pushableOperators: data.pushableOperators,
+    operatorSummary: data.operators.length === 0
+      ? 'none registered'
+      : `${data.operators.length} registered · ${data.pushableOperators.length} pushed to SQLite as UDFs`,
+    operatorList: data.operators.join(' ') || '—',
+    // a copyable query that exercises both paths: $sqrt is a pushable
+    // scalar (a wasm UDF — watch explain() show jaren_p_ in the SQL),
+    // $mean folds a series in the residual (explain names it)
+    operatorSample: JSON.stringify({
+      $for: { it: '$[*]' },
+      $where: { $gt: [{ $sqrt: '$it.points' }, 4] },
+      $return: '$it',
+    }, null, 2),
     refusal: data.refusal,
     durability: data.vfs === 'opfs-sahpool'
       ? 'persistent (OPFS access-handle pool, no special headers)'

@@ -153,6 +153,8 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       vfs: '—',                // 'opfs-sahpool' | 'memory'
       version: '',
       capture: '—',            // 'journal' on wasm (sessions not adapted)
+      operators: [],           // registered operator vocabulary (math/finance/stats packs)
+      pushableOperators: [],   // the subset pushed to SQLite as deterministic UDFs
       refusal: null,           // the JD2061 second-writer message, if any
       modelText: '',           // the editable model document (JSON)
       queryText: '',           // the editable query document (JSON)

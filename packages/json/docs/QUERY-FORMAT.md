@@ -1096,7 +1096,7 @@ README's "`$query` — cross-field assertions" section.
 
 ---
 
-### 8.12 Registered functions, collations, and execution limits
+### 8.12 Registered functions, operators, collations, and execution limits
 
 Three compile options make a compilation's **trusted host capabilities**
 explicit — none of them changes the closed format: a document using them
@@ -1117,6 +1117,25 @@ sequence as `undefined`. The function's return value is one item;
 `undefined` is the empty sequence. A throwing function is runtime error
 `JQ2010`. Functions MUST be pure over JSON: they are part of the query's
 semantics, not an effect hatch.
+
+**`options.extensions` and host `$`-operators.** A registry of named
+operator entries that extend the closed operator vocabulary (§8) with
+host-provided `$`-operators. Each entry has the same shape the built-in
+operators use — `{ params, result, resultType, compile, normalize? }` —
+so a registered `{ "$sqrt": "$b.x" }` normalizes, type-annotates (its
+declared `resultType` flows through `annotateTypes`, Appendix C.8) and
+compiles exactly like a built-in, and appears in
+`query.dependencies.operators`. A name that collides with the closed
+vocabulary is a `TypeError` at compile — a host programming error, never
+a `JQ` document error. The intended way to build this registry is
+`createJsltRegistry()` from `@jarenjs/json/jslt` (JSLT-FORMAT §13), which
+composes plain-data packs of pure `@jarenjs/core` functions (math,
+finance, statistics) into `{ extensions, functions }` and works across
+stylesheets, bare queries and `@jarenjs/linq` — and, through
+`@jarenjs/db`, in the query residual and (for the `pushable:'scalar'`
+subset) as SQLite deterministic UDFs (MODEL-FORMAT §8.1–8.2). A document
+compiled *without* a registry keeps exactly the spec vocabulary — `$sqrt`
+is then `JQ0002`.
 
 **`options.collations`.** A registry of named pure compare functions for
 `$orderby`'s `$collation` member (§6.6).

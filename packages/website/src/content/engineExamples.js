@@ -405,6 +405,26 @@ export const queryExamples = [
     },
     document: BOOKSTORE,
   },
+  {
+    // Registered operators in a BARE query document — the same form
+    // @jarenjs/linq compiles to and @jarenjs/db runs (in the residual,
+    // with $sqrt pushed to SQLite). $mean/$stddev/$percentile fold a
+    // JSONPath sequence; $sqrt is a scalar op. This playground mounts the
+    // math/finance/stats packs; a plain compile rejects them (JQ0002).
+    name: 'Registered operators: summarise a series (mean, σ, RMS)',
+    registry: true,
+    query: {
+      mean: { $mean: '$.readings[*]' },
+      stddev: { $stddev: '$.readings[*]' },
+      p95: { $percentile: ['$.readings[*]', 95] },
+      rms: {
+        $sqrt: {
+          $mean: { $for: { r: '$.readings[*]' }, $return: { $mul: ['$r', '$r'] } },
+        },
+      },
+    },
+    document: { readings: [2, 4, 4, 4, 5, 5, 7, 9] },
+  },
 ];
 
 export const jsltExamples = [
@@ -532,6 +552,89 @@ export const jsltExamples = [
     },
     document: {
       target: 0.7,
+      people: [
+        { name: 'Ada', class: 'upper', probability: 0.55 },
+        { name: 'Bram', class: 'lower', probability: 0.71 },
+        { name: 'Cato', class: 'upper', probability: 0.66 },
+        { name: 'Dies', class: 'upper', probability: 0.95 },
+      ],
+    },
+  },
+  {
+    // The SAME "nearest" computation as above — but this playground mounts
+    // the MATH pack, so `$abs` exists and |p − target| is one operator
+    // instead of the $if/$sub dance. Registered operators are a host
+    // opt-in (createJsltRegistry().use(mathPack)…); a plain compile still
+    // rejects them with JQ0002.
+    name: 'Registered math: nearest, the easy way ($abs)',
+    // host opt-in operators — outside the published closed grammar
+    registry: true,
+    stylesheet: {
+      $jslt: '0.1',
+      rules: [
+        {
+          match: '$',
+          body: {
+            $let: { pool: '$.people[?(@.class == "upper")]', target: '$.target' },
+            $return: {
+              target: '$target',
+              nearest: {
+                $head: {
+                  $for: { p: '$pool' },
+                  $where: {
+                    $eq: [
+                      { $abs: { $sub: ['$p.probability', '$target'] } },
+                      {
+                        $min: {
+                          $for: { q: '$pool' },
+                          $return: { $abs: { $sub: ['$q.probability', '$target'] } },
+                        },
+                      },
+                    ],
+                  },
+                  $return: '$p',
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    document: {
+      target: 0.7,
+      people: [
+        { name: 'Ada', class: 'upper', probability: 0.55 },
+        { name: 'Bram', class: 'lower', probability: 0.71 },
+        { name: 'Cato', class: 'upper', probability: 0.66 },
+        { name: 'Dies', class: 'upper', probability: 0.95 },
+      ],
+    },
+  },
+  {
+    // The FINANCE and STATS packs: an aggregator folds a JSONPath-selected
+    // sequence before its pure @jarenjs/core function runs. $npv discounts
+    // a cashflow series; $mean/$stddev/$percentile summarise a filtered
+    // distribution. Over @jarenjs/db these run in the query residual (the
+    // math ops above additionally push to SQLite) — see the docs.
+    name: 'Registered finance & stats: NPV + a distribution',
+    registry: true,
+    stylesheet: {
+      $jslt: '0.1',
+      rules: [
+        {
+          match: '$',
+          body: {
+            npv: { $npv: ['$.rate', '$.cashflows[*]'] },
+            upperMean: { $mean: '$.people[?(@.class == "upper")].probability' },
+            upperStddev: { $stddev: '$.people[?(@.class == "upper")].probability' },
+            upperP90: { $percentile: ['$.people[?(@.class == "upper")].probability', 90] },
+          },
+        },
+      ],
+    },
+    document: {
+      rate: 0.1,
+      cashflows: [-1000, 300, 400, 500, 300],
       people: [
         { name: 'Ada', class: 'upper', probability: 0.55 },
         { name: 'Bram', class: 'lower', probability: 0.71 },

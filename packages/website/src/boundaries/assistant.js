@@ -32,7 +32,7 @@ import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { t
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 
 import { runValidation } from './validator.js';
-import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES } from './engines.js';
+import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES, operatorRegistry } from './engines.js';
 import { validateAppDocument, auditDocumentRender } from './studio.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
 import { FLOW_TEMPLATES, flowTemplate } from '../content/flowTemplates.js';
@@ -137,6 +137,11 @@ function engineCatalogue() {
       lead: def.lead,
       inputs: def.inputs.map((f) => ({ key: f.key, control: f.control, options: f.options ?? null })),
     };
+    // the jslt/query/jtlt engines mount the operator packs here, so the
+    // model sees the exact registered vocabulary it may use (host opt-in)
+    if (key === 'jslt' || key === 'query' || key === 'jtlt') {
+      out[key].registeredOperators = operatorRegistry.names();
+    }
   }
   return out;
 }
@@ -575,6 +580,15 @@ export const SYSTEM_PROMPT = [
   '   A JSLT stylesheet is { "$jslt": "0.1", "rules": [ { "match": "$…", "body": <expr> } ] }',
   '   where <expr> is a jaren-query expression: JSONPath ($.a, $.items[?(@.x>1)]), operators',
   '   ($min $max $sum $count $head $sub $mul $if $default), and $for/$where/$return phrases.',
+  '4a. This playground also MOUNTS the math / finance / statistics operator packs, so these',
+  '   REGISTERED operators run in the jslt, query and jtlt engines here: math ($sqrt $pow $abs',
+  '   $hypot $log $exp and the trig family), finance ($npv $irr $sma $ema $fv $pv $pmt), and',
+  '   statistics ($mean $median $variance $stddev $percentile). Use them directly, e.g.',
+  '   { "$npv": ["$.rate", "$.flows[*]"] }, { "$mean": "$.readings[*]" }, or |a−b| as',
+  '   { "$abs": { "$sub": ["$a", "$b"] } }. They are a host opt-in — not the closed spec',
+  '   vocabulary — so they run HERE, but a document saved and compiled WITHOUT the packs',
+  '   rejects them (JQ0002). Call jaren_get_examples("jslt") or ("query") for the',
+  '   "Registered …" worked examples.',
   '5. When a run turns out well, offer to keep it: jaren_save_experiment stores it by name,',
   '   jaren_share_link copies a link that restores it.',
   '6. Keep replies to a sentence or two — the full output is already visible on the page.',

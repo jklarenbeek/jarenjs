@@ -20,10 +20,19 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { openStore, migrate, planModelMigration } from '@jarenjs/db';
 import { wasmDriver, sqlite3Handle } from '@jarenjs/db/wasm';
+import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 
 const CHANNEL = 'jaren-data-studio';
 const POOL = 'jaren-data';
 const DB_NAME = '/jaren-data-studio.db';
+
+// The data studio mounts the operator packs (MODEL-FORMAT §8.1–8.2), so
+// registered operators run over the store: finance/stats ($npv, $mean, …)
+// in the query residual, and the math ops ($sqrt, $pow, …) pushed to
+// SQLite as deterministic UDFs — the wasm build declares user functions.
+// `explain()` shows which path each query took; `capabilities.operators`
+// and `pushableOperators` report the vocabulary.
+const OPERATORS = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 
 const state = {
   /** @type {any} */ sqlite3: null,
@@ -128,13 +137,16 @@ async function open(args) {
   const path = state.vfs === 'opfs-sahpool' ? DB_NAME : ':memory:';
   state.model = args.model;
   state.store = await openStore(args.model,
-    { driver: wasmDriver(handle), path, capture: true });
+    { driver: wasmDriver(handle), path, capture: true, operators: OPERATORS });
   return {
     vfs: state.vfs,
     capabilities: {
       version: state.store.capabilities.version,
       capture: state.store.capabilities.capture,
       live: state.store.capabilities.live,
+      userFunctions: state.store.capabilities.userFunctions,
+      operators: state.store.capabilities.operators,
+      pushableOperators: state.store.capabilities.pushableOperators,
     },
   };
 }
@@ -201,7 +213,7 @@ async function handle(kind, args, push) {
       }
       finally {
         state.model = args.to;
-        state.store = await openStore(args.to, { driver, path, capture: true });
+        state.store = await openStore(args.to, { driver, path, capture: true, operators: OPERATORS });
         state.lives.clear();
       }
       return {

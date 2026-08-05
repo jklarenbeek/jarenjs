@@ -28,7 +28,10 @@ import {
   JsonWriteError,
   compileJsonQuery,
 } from '@jarenjs/json';
-import { compileJsltStylesheet, transformJson } from '@jarenjs/json/jslt';
+import {
+  compileJsltStylesheet, transformJson,
+  createJsltRegistry, mathPack, financePack, statsPack,
+} from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
@@ -50,6 +53,18 @@ import {
 } from '../content/engineExamples.js';
 
 const compileTypeTest = createTypeTestCompiler();
+
+// The playground mounts the built-in operator packs (math / finance /
+// stats) so REGISTERED operators — $sqrt, $npv, $mean, $stddev,
+// $percentile, … — run live in the jslt, query and jtlt engines. They
+// are a host opt-in, not part of the closed spec vocabulary: a document
+// compiled WITHOUT this registry still rejects them with JQ0002. One
+// frozen instance is built once, so the engines' compile caches stay
+// keyed by a stable options identity. `.toOptions()` is `{ extensions,
+// functions }`; `.names()` feeds the assistant's engine catalogue.
+export const operatorRegistry = createJsltRegistry()
+  .use(mathPack).use(financePack).use(statsPack);
+const registryOptions = operatorRegistry.toOptions();
 
 /** Parse a JSON input; returns `{ value }` or `{ node }` (an error node). */
 function parseJson(text, label) {
@@ -198,7 +213,7 @@ function runQuery(inputs) {
     externals = parsed.value;
   }
   try {
-    const compiled = timed(() => compileJsonQuery(query.value, { compileTypeTest }));
+    const compiled = timed(() => compileJsonQuery(query.value, { compileTypeTest, ...registryOptions }));
     const fn = compiled.value;
     const unbound = fn.externals.filter((name) => !(name in externals));
     if (unbound.length > 0) {
@@ -228,7 +243,7 @@ function runJslt(inputs) {
   const data = parseJson(inputs.data, 'data');
   if (data.node) return [data.node];
   try {
-    const compiled = timed(() => compileJsltStylesheet(stylesheet.value, { compileTypeTest }));
+    const compiled = timed(() => compileJsltStylesheet(stylesheet.value, { compileTypeTest, ...registryOptions }));
     const run = timed(() => compiled.value(data.value));
     return [
       cards([
@@ -249,7 +264,7 @@ function runJtlt(inputs) {
   const data = parseJson(inputs.data, 'data');
   if (data.node) return [data.node];
   try {
-    const render = compileJtltStylesheet(template.value, { compileTypeTest });
+    const render = compileJtltStylesheet(template.value, { compileTypeTest, ...registryOptions });
     const run = timed(() => render(data.value));
     const nodes = [
       code('Output', run.value === '' ? '(empty)' : run.value, `output "${render.output}" · ${formatMsUnscaled(run.ms)}`),
@@ -260,7 +275,7 @@ function runJtlt(inputs) {
     if (render.output === 'xml') {
       try {
         const asText = compileJtltStylesheet(
-          { ...template.value, output: 'text' }, { compileTypeTest })(data.value);
+          { ...template.value, output: 'text' }, { compileTypeTest, ...registryOptions })(data.value);
         nodes.push(asText === run.value
           ? callout('XML escaping', 'The interpolated data contains none of & < > " \' — the xml and text methods render this document identically. Escaping applies to data, never to your literal markup.')
           : details('What the xml method escaped (same template as output "text")', [code(null, asText)]));
@@ -506,7 +521,7 @@ export const ENGINE_DEFS = {
   },
   query: {
     label: 'JSON Query',
-    lead: 'XQuery 3.1 semantics — FLWOR, joins, grouping — as JSON documents with JSONPath leaves.',
+    lead: 'XQuery 3.1 semantics — FLWOR, joins, grouping — as JSON documents with JSONPath leaves. This playground also mounts the math/finance/stats packs, so registered operators ($sqrt, $npv, $mean, $stddev, $percentile) work here — a host opt-in, not the closed vocabulary.',
     inputs: [
       { key: 'query', title: 'Query document', control: 'json', rows: 12 },
       DATA_FIELD,
@@ -516,7 +531,7 @@ export const ENGINE_DEFS = {
   },
   jslt: {
     label: 'JSLT',
-    lead: 'Template rules that COMPUTE: JSONPath matches position, JSON Schema matches shape, and each rule body is a query document — so it can filter, aggregate ($min/$max/$sum/$count), pick ($head), and branch ($if), not just reshape.',
+    lead: 'Template rules that COMPUTE: JSONPath matches position, JSON Schema matches shape, and each rule body is a query document — so it can filter, aggregate ($min/$max/$sum/$count), pick ($head), and branch ($if), not just reshape. With the math/finance/stats packs mounted here, registered operators ($sqrt, $npv, $mean) compute alongside the built-ins.',
     inputs: [
       { key: 'stylesheet', title: 'Stylesheet', control: 'json', rows: 12 },
       DATA_FIELD,
