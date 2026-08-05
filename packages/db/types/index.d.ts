@@ -99,6 +99,7 @@ export interface StoreStats {
     pendingInserts: number;
     pendingDeletes: number;
   } | null;
+  liveQueries: number;
 }
 
 export interface StoreCapabilities {
@@ -110,6 +111,7 @@ export interface StoreCapabilities {
   readonly journalMode: string | null;
   readonly capture: 'session' | 'journal' | 'none';
   readonly captureLog: boolean;
+  readonly live: boolean;
   readonly [capability: string]: unknown;
 }
 
@@ -127,6 +129,8 @@ export interface Collection<T = unknown> {
   execute(document: unknown, options?: ExecuteOptions): unknown;
   query(document: unknown, options?: ExecuteOptions): unknown;
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
+  /** Register a live query (LIVE-FORMAT §7); requires capture. */
+  live(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
 }
 
 export interface SyncCollection<T = unknown> {
@@ -213,6 +217,9 @@ export interface Store {
   changesSince?(after: number): Promise<ChangeRecord[]>;
   /** PRAGMA data_version — the coarse cross-connection signal. */
   dataVersion(): Promise<number>;
+  /** Register a live query over an entity-root document (re-run
+   * strategy in this version); present only with entities. */
+  live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
   close(): Promise<void>;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
@@ -235,11 +242,69 @@ export interface CaptureOptions {
   log?: boolean | { retention?: number };
 }
 
+// ————— live queries (LIVE-FORMAT §§7–12) —————
+
+export interface LiveOptions {
+  /** Fixed at registration; a query whose inputs change is a new
+   * registration. */
+  externals?: Record<string, unknown>;
+  /** 'incremental' DEMANDS incrementality (JD0051 when the shape
+   * re-runs); 'rerun' forces the re-run strategy. */
+  mode?: 'auto' | 'incremental' | 'rerun';
+}
+
+export interface LiveMode {
+  readonly strategy: 'rows' | 'window' | 'accumulator' | 'group' | 'rerun';
+  readonly mode: 'incremental' | 'rerun';
+  /** Present exactly when the strategy is 'rerun': the named reason. */
+  readonly reason?: string;
+}
+
+export interface LiveEvent {
+  /** RFC 6902 ops against the `{ rows }` result document. */
+  patch?: ReadonlyArray<{ op: string; path: string; value?: unknown }>;
+  seq?: number;
+  /** A maintenance failure (JD2060 …): the query closed after this. */
+  error?: unknown;
+}
+
+export interface LiveStats {
+  records: number;
+  matched: number;
+  emissions: number;
+  /** min/max extremum-removal recomputes (accumulator strategy). */
+  fallbacks?: number;
+  /** whole-query re-executions (re-run strategy). */
+  reruns?: number;
+}
+
+export interface LiveQuery {
+  /** The maintained result document; a fresh object per emission with
+   * unaffected rows REFERENCE-IDENTICAL (§9). */
+  readonly result: { readonly rows: readonly unknown[] };
+  readonly state: 'live' | 'closed' | 'errored';
+  readonly error: unknown;
+  readonly mode: LiveMode;
+  stats(): LiveStats;
+  subscribe(observer: (event: LiveEvent) => void): () => void;
+  close(): void;
+}
+
+export interface LiveBounds {
+  /** Registrations beyond it are JD0052 (default 64). */
+  maxQueries?: number;
+  /** Per-query ceiling on maintained entries — rows, window entries
+   * and contributions all count (default 10 000; JD2060 beyond). */
+  maxMaintained?: number;
+}
+
 export interface OpenStoreOptions {
   driver: Driver;
   path?: string;
   /** Change capture (LIVE-FORMAT): off unless requested. */
   capture?: boolean | CaptureOptions;
+  /** Live-query bounds (LIVE-FORMAT §12). */
+  live?: LiveBounds;
   /** The injected validation hook (D10); absent means unvalidated,
    * declared through `capabilities.validated`. */
   compileSchema?: (schema: unknown) => (doc: unknown) => unknown;
@@ -409,3 +474,15 @@ export declare function compareVersions(a: string, b: string): number;
 export declare function openConnection(raw: unknown, options: unknown): unknown;
 export declare function wrapStatement(statement: unknown): unknown;
 export declare function lazyOpen(spec: unknown, reason: string, use: unknown, args?: unknown): unknown;
+export declare function classifyLiveQuery(
+  document: unknown, queryShape: unknown, keyed: boolean): unknown;
+export declare function createLiveRegistry(
+  bounds: { maxQueries: number; maxMaintained: number }): unknown;
+export declare function diffRows(oldRows: readonly unknown[], newRows: readonly unknown[]):
+  Array<{ op: string; path: string; value?: unknown }>;
+export declare const LIVE_DEFAULTS: { maxQueries: number; maxMaintained: number };
+export declare function createSortedWindow(
+  terms: unknown[], limit: number | null): unknown;
+export declare function compareCodepoint(a: string, b: string): number;
+export declare function collectEntityRoots(
+  document: unknown, entities: ReadonlyMap<string, unknown>): Set<string>;

@@ -209,11 +209,13 @@ export function translateOperations(connection, shapes, operations) {
 
   /** @type {any[]} */
   const ops = [];
-  const next = (i) => {
-    if (i >= operations.length) return ops;
-    const operation = operations[i];
+  /** Translate ONE operation, mutating `ops`; value-or-promise. The
+   * caller drives ITERATIVELY — a self-recursive walk overflowed the
+   * stack on a 10k-row transaction (found by the live-query
+   * measurement, fixed here). */
+  const translateOne = (operation) => {
     const shape = shapes.get(operation.table);
-    if (shape === undefined) return next(i + 1); // an internal table
+    if (shape === undefined) return null; // an internal table
     const record = operation.newValues ?? operation.oldValues ?? [];
     const token = keyToken(shape.keyIndexes.map((index) =>
       (operation.op === 'update'
@@ -231,7 +233,7 @@ export function translateOperations(connection, shapes, operations) {
       else if (operation.op === 'delete') {
         ops.push({ op: 'remove', path: pointerOf(operation.table, token) });
       }
-      return next(i + 1);
+      return null;
     }
 
     const buildDocument = (values) => chain(
@@ -253,12 +255,12 @@ export function translateOperations(connection, shapes, operations) {
     if (operation.op === 'insert') {
       return chain(buildDocument(record), (doc) => {
         ops.push({ op: 'add', path: pointerOf(operation.table, token), value: doc });
-        return next(i + 1);
+        return null;
       });
     }
     if (operation.op === 'delete') {
       ops.push({ op: 'remove', path: pointerOf(operation.table, token) });
-      return next(i + 1);
+      return null;
     }
     // update: property-level ops from the CHANGED columns; the doc
     // column diffs old against new for a minimal nested patch
@@ -285,7 +287,7 @@ export function translateOperations(connection, shapes, operations) {
     const newDocBlob = operation.newValues[shape.docIndex];
     if (newDocBlob === undefined) {
       columnOps();
-      return next(i + 1);
+      return null;
     }
     return chain(jsonOf(operation.oldValues[shape.docIndex]), (oldDoc) =>
       chain(jsonOf(newDocBlob), (newDoc) => {
@@ -295,10 +297,19 @@ export function translateOperations(connection, shapes, operations) {
           ops.push({ ...op, path: `${prefix}${op.path}`,
             ...(op.from !== undefined ? { from: `${prefix}${op.from}` } : {}) });
         }
-        return next(i + 1);
+        return null;
       }));
   };
-  return next(0);
+  let index = 0;
+  const drive = () => {
+    while (index < operations.length) {
+      const outcome = translateOne(operations[index]);
+      index += 1;
+      if (outcome instanceof Promise) return outcome.then(drive);
+    }
+    return ops;
+  };
+  return drive();
 }
 
 //#endregion

@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/db",
   "private": false,
-  "version": "0.27.0",
+  "version": "0.27.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -26,6 +26,10 @@
     "./typed": {
       "types": "./types/typed.d.ts",
       "default": "./src/typed.js"
+    },
+    "./app": {
+      "types": "./types/app.d.ts",
+      "default": "./src/app.js"
     },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
@@ -67,9 +71,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.27.0",
-    "@jarenjs/json": "^0.27.0",
-    "@jarenjs/validate": "^0.27.0"
+    "@jarenjs/core": "^0.27.1",
+    "@jarenjs/json": "^0.27.1",
+    "@jarenjs/validate": "^0.27.1"
   },
   "bin": {
     "jaren-db": "./src/cli.js"

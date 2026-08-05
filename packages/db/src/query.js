@@ -507,7 +507,7 @@ export function createQueryEngine(context) {
       })));
   };
 
-  return { execute, query, explain };
+  return { execute, query, explain, shape };
 }
 
 // ————— The entity query surface (the second document kind) —————

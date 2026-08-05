@@ -877,7 +877,7 @@ function collectBindingSlots(node, byName, slots) {
 }
 
 /** The entity names a document's root paths reference (`$.Name[*]`). */
-function collectEntityRoots(document, entities) {
+export function collectEntityRoots(document, entities) {
   const found = new Set();
   const walk = (node) => {
     if (typeof node === 'string') {

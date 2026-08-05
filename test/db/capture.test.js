@@ -104,6 +104,22 @@ describe('session capture', () => {
     await store.close();
   });
 
+  it('a 10k-row transaction translates iteratively (no stack overflow)', async () => {
+    const store = await open();
+    const seen = [];
+    store.observe((record) => seen.push(record));
+    const notes = store.collection('notes');
+    await store.transaction(async () => {
+      for (let i = 0; i < 10_000; i++) {
+        await notes.insert({ id: `n${i}`, body: 'x' });
+      }
+    });
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].patch.length, 10_000,
+      'the recursive translation walk overflowed here before the iterative driver');
+    await store.close();
+  });
+
   it('a rolled-back transaction emits NOTHING', async () => {
     const store = await open();
     const seen = [];

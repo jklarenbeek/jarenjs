@@ -255,6 +255,9 @@ error.
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
 | `JD0040` | the save spans a relation cycle |
+| `JD0050` | live queries require change capture |
+| `JD0051` | the demanded live mode is unavailable |
+| `JD0052` | the live-query bound was reached |
 | `JD2001` | insert found the key already present |
 | `JD2002` | a usable key could not be resolved for the write |
 | `JD2003` | the write failed schema validation |
@@ -265,6 +268,8 @@ error.
 | `JD2040` | the row changed under an optimistic update |
 | `JD2050` | a changeset could not be decoded |
 | `JD2051` | the change log is not enabled |
+| `JD2060` | the maintained live state exceeded its bound |
+| `JD2061` | another context owns the database |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.

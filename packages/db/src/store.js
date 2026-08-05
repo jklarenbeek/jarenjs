@@ -33,6 +33,8 @@ import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
 import { createTracker } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
+import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
+import { collectEntityRoots } from './plan.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -416,6 +418,8 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
 
   const core = {
     stats: () => ({ ...stats }),
+    model: collection,
+    queryShape: engine.shape,
     // the D2 provider: value-or-promise, deliberately NOT lifted — a
     // synchronous driver answers a linq chain synchronously
     execute: (document, options) => engine.execute(document, options),
@@ -521,9 +525,11 @@ function lift(fn) {
 /**
  * The asynchronous collection surface over a core.
  * @param {any} core
+ * @param {Function | null} live - the store-level live registration
+ *   for this collection (null when the store has no capture)
  * @returns {any}
  */
-function asyncCollection(core) {
+function asyncCollection(core, live) {
   return Object.freeze({
     stats: () => core.stats(),
     get: lift(core.get),
@@ -536,6 +542,13 @@ function asyncCollection(core) {
     execute: (document, options) => core.execute(document, options),
     query: (document, options) => core.query(document, options),
     explain: lift(core.explain),
+    live: lift((document, liveOptions) => {
+      if (live === null) {
+        throw new DbCompileError('JD0050',
+          'live queries require change capture — open the store with { capture: true }');
+      }
+      return live(core, document, liveOptions);
+    }),
   });
 }
 
@@ -725,6 +738,36 @@ export function openStore(model, options) {
             retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
           });
           const guard = capture === null ? (fn) => fn() : capture.wrap;
+          // the live registry rides the capture stream; its dispatcher
+          // registers FIRST so maintenance sees every record before any
+          // user observer can commit a further write (LIVE-FORMAT §8)
+          const liveRegistry = capture === null ? null : createLiveRegistry({
+            maxQueries: options.live?.maxQueries ?? LIVE_DEFAULTS.maxQueries,
+            maxMaintained: options.live?.maxMaintained ?? LIVE_DEFAULTS.maxMaintained,
+          });
+          if (capture !== null) {
+            capture.observe((record) => /** @type {any} */ (liveRegistry).deliver(record));
+          }
+          /** Register a collection live query (LIVE-FORMAT §7). */
+          const registerCollectionLive = (core, document, liveOptions) => {
+            const externals = liveOptions?.externals ?? {};
+            const keyed = core.model.keySegments !== null;
+            const classification = liveOptions?.mode === 'rerun'
+              ? { strategy: 'rerun', reason: 'rerun was requested' }
+              : classifyLiveQuery(document, core.queryShape, keyed);
+            return /** @type {any} */ (liveRegistry).register({
+              name: core.model.name,
+              tables: new Set([core.model.name]),
+              document,
+              externals,
+              demanded: liveOptions?.mode,
+              classification,
+              execute: (doc, executeOptions) => core.execute(doc, executeOptions),
+              readRow: (token) => core.get(token),
+              keyOf: (doc) => String(extractKey(doc, core.model.keySegments,
+                core.model.key, core.model.name, core.model.docPath)),
+            });
+          };
           /** Strip relation members before journal diffs — sessions
            * never see them (they are not stored), so the two modes
            * stay identical. */
@@ -845,6 +888,7 @@ export function openStore(model, options) {
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true
                 || (captureRequested.log !== undefined && captureRequested.log !== false)),
+            live: captureMode !== 'none',
           });
 
           const queryState = createQueryState(options.statementCacheBound);
@@ -947,12 +991,14 @@ export function openStore(model, options) {
               statementCache: { ...queryState.counters },
               udfRegistrations: queryState.registered.size,
               tracker: tracker === null ? null : tracker.counts(),
+              liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
             }),
             dialect,
             collection(name) {
               let handle = asyncHandles.get(name);
               if (handle === undefined) {
-                handle = asyncCollection(coreFor(name));
+                handle = asyncCollection(coreFor(name),
+                  liveRegistry === null ? null : registerCollectionLive);
                 asyncHandles.set(name, handle);
               }
               return handle;
@@ -989,6 +1035,35 @@ export function openStore(model, options) {
               : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
+            // entity live queries re-run on invalidation — declared,
+            // not attempted (LIVE-FORMAT §7)
+            live: entityEngine === null ? undefined
+              : lift((document, liveOptions) => {
+                if (liveRegistry === null) {
+                  throw new DbCompileError('JD0050',
+                    'live queries require change capture — open the store with { capture: true }');
+                }
+                const roots = collectEntityRoots(document, entities);
+                if (roots.size === 0) {
+                  throw new TypeError(
+                    'store.live takes an entity-root document — for a collection, '
+                    + 'use store.collection(name).live');
+                }
+                return liveRegistry.register({
+                  name: [...roots].join('+'),
+                  tables: roots,
+                  document,
+                  externals: liveOptions?.externals ?? {},
+                  demanded: liveOptions?.mode,
+                  classification: {
+                    strategy: 'rerun',
+                    reason: 'entity queries re-run in this version',
+                  },
+                  execute: (doc, executeOptions) => entityEngine.execute(doc, executeOptions),
+                  readRow: null,
+                  keyOf: null,
+                });
+              }),
             transaction: lift((fn) => (capture === null
               ? connection.transaction(() => fn(store))
               : capture.nest(() => connection.transaction(() => fn(store))))),
@@ -1004,7 +1079,10 @@ export function openStore(model, options) {
             dataVersion: lift(() => chain(
               connection.prepare(dialect.introspect.dataVersion()),
               (statement) => chain(statement.get([]), (row) => Number(row.v)))),
-            close: lift(() => connection.close()),
+            close: lift(() => {
+              if (liveRegistry !== null) liveRegistry.closeAll();
+              return connection.close();
+            }),
           };
 
           if (connection.synchronous) {

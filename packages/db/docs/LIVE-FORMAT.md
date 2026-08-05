@@ -137,3 +137,212 @@ Non-claims, in one place: no replication, no conflict resolution, no
 capture of writes made by other connections, no capture on stores
 opened without `capture`, and no statement-level ordering within a
 commit (§2).
+
+## 7. Live queries: the maintenance table
+
+A live query is a registered query document whose result is
+**maintained** as committed writes arrive, emitting RFC 6902 patches
+against its own result document (§9). Registration:
+
+```js
+const live = await store.collection('users').live(document, {
+  externals: {},          // fixed at registration (§8)
+  mode: 'auto',           // 'auto' | 'incremental' | 'rerun'
+});
+live.result;              // the maintained result document
+live.mode;                // { strategy, mode: 'incremental'|'rerun', reason }
+const stop = live.subscribe(({ patch, seq, error }) => { /* … */ });
+live.close();
+```
+
+`store.live(document, options)` registers an entity-root document (the
+multi-entity shape of MODEL-FORMAT §10) the same way. Live queries
+REQUIRE change capture — the patch stream is the invalidation source —
+and registering on a store opened without `capture` is `JD0050`.
+
+**This table is normative.** Every row is implemented and tested;
+nothing outside it is attempted. Classification reads the compiled
+PLAN (never the raw document), so "extractable" below means exactly
+what the pushdown planner already means by it.
+
+| Construct (as planned) | Strategy | Maintained state |
+|---|---|---|
+| `where` whose predicates translate (the plan's filter), no order, no aggregate | **incremental rows**: per-row re-evaluation; insert / remove / replace in the result | the result rows |
+| the same with a per-row `select` projection (row-mode plan) | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
+| `orderBy` over extractable paths, optional `limit`, offset 0 | **maintained window**: a sorted structure; ties broken by the collection key, appended as the final sort term; an insert sorting beyond a full window is a no-op | the window rows and their sort keys |
+| whole-query `count` / `sum` / `avg` / `min` / `max` (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost | one contribution per matching row |
+| single-level `groupBy` with aggregate returns, in the canonical form below | **per-group deltas**: the accumulator machinery, one instance per group; groups appear in first-appearance order, exactly the engine's order | per-group, per-row contributions |
+| joins, multi-entity roots, graph loads, every entity query | **re-run on invalidation — declared, not attempted** in this version | the previous result, for diffing |
+| anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
+
+Re-run is a first-class, documented outcome, not a failure. What is
+forbidden is *silently* re-running while the reader believes the query
+is incremental: `live.mode` reports `'incremental'` or `'rerun'`, the
+strategy, and — for re-run — the reason. `mode: 'incremental'` in the
+options DEMANDS incrementality: a query that classifies as re-run then
+refuses at registration (`JD0051`), the same shape as capture's
+demanded session — an application that needs the property can refuse
+to start.
+
+The **canonical group form** the classifier recognises (and the only
+one — the linq chain's nested emission re-runs, stated plainly):
+
+```json
+{ "$for": { "it": "$[*]" },
+  "$where": { "…optional, translatable…": [] },
+  "$groupby": { "g": "$it.dept" },
+  "$return": { "key": { "$default": ["$g", null] },
+               "n": { "$count": "$it" }, "total": { "$sum": "$it.pay" } } }
+```
+
+After `$groupby`, `$it` is the group's item sequence and `$g` its key;
+return members are the group key or an aggregate over `$it` (a path
+below it selects the aggregated member). Anything else in the return
+is not canonical and re-runs.
+
+## 8. Invalidation
+
+Each live query derives its dependencies from the plan at
+registration:
+
+- the collection (or, for entity documents, every entity the plan
+  binds), matched first against a record's `collections` — a
+  non-matching record costs ONE array scan;
+- for accumulator and group strategies, the top-level members the
+  plan actually reads (filter refs, the aggregated path, the group
+  key): an update record touching only other members is skipped;
+- row and window strategies depend on their WHOLE collection — the
+  result carries the row documents, so any member change changes an
+  emitted row.
+
+Matching is by table plus pointer prefix — cheap, sound, and
+**over-approximate in exactly one direction**: an unnecessary
+re-evaluation is a performance bug; a missed one would be a
+correctness bug, so the approximation always leans toward
+re-evaluating. Row inserts arrive with their full document in the
+patch; row UPDATES are minimal (§3), so maintenance issues a
+point-read of the touched row (one indexed lookup per touched key per
+record) to re-evaluate; deletes are answered entirely from maintained
+state. `externals` are fixed at registration — a query whose inputs
+change is a new registration.
+
+Maintenance runs synchronously inside patch delivery, in commit
+order, on the store's own connection. Writes from ANOTHER connection
+are invisible to capture (§6) and therefore to live queries; the
+coarse `dataVersion()` signal and the §11 topology are the honest
+answers, and re-registering re-reads.
+
+## 9. The emitted patch contract
+
+The result document is `{ "rows": [...] }` — always. Row and window
+strategies fill `rows` with result items; group strategies with one
+row per group; a whole-query aggregate is a ZERO-OR-ONE row result
+(`rows: [42]`; an empty `min()` is `rows: []`, the engine's
+undefined-as-absent mapping made visible). Consumers hold the result
+document and apply patches to it; ops are `add`, `remove` and
+`replace` only.
+
+- **One record, one emission.** A committed transaction touching any
+  number of rows produces at most ONE `{ patch, seq }` event per live
+  query — the record's changes coalesce into one patch array, and a
+  record that ends up changing nothing emits nothing.
+- **Structural sharing is the contract, not an optimisation.** After
+  an emission, every unaffected row in `live.result` is
+  REFERENCE-IDENTICAL to before; the `rows` array and the result
+  object are fresh per emission (a held previous result is never
+  mutated). Applying the emitted patch with `applyJSONPatch`'s
+  copy-on-write preserves the same sharing on the consumer's side —
+  which is what keeps the O(k) renderer's fast paths alive end to
+  end.
+- **Order.** An ordered (window) query's row order is the engine's,
+  with ties broken by the collection key — the key is appended to the
+  declared terms at registration, so the order is total and stable by
+  construction. An UNORDERED query's initial order is the engine's;
+  maintenance then appends newly matching rows and splices removed
+  ones, which is deterministic given the write history but is NOT
+  re-derived rowid order — a consumer that needs a specific order
+  declares an `orderBy`. Group rows keep first-appearance order.
+- `seq` is the capture record's `seq`; re-run emissions carry it too.
+
+## 10. The app binding
+
+A live query reaches an app as a SUBSCRIPTION (APP-FORMAT §5.3) whose
+handler dispatches a patch-carrying action — generated documents, no
+import in either direction (the `fsmToApp` precedent):
+
+```js
+import { liveAppBinding, createLiveSubscription } from '@jarenjs/db/app';
+
+const { subscription, actions } = liveAppBinding({
+  run: 'db/live', action: 'db/liveChanged', statePath: '/live/users' });
+// subscription → { run: 'db/live', with: { …, statePath, action } }
+// actions      → { 'db/liveChanged': { patch: '$payload' } }
+
+createApp({ …doc, subs: [subscription], actions: { …doc.actions, ...actions } },
+  { subs: { 'db/live': createLiveSubscription(store) } });
+```
+
+The handler registers the live query, dispatches ONE initializing
+patch (`replace` of the whole `statePath` slot with the initial
+result), then forwards each emission with every op's path prefixed by
+`statePath` — the prefixing happens in the handler, so the action
+document stays the two-line literal above and the app loop needs
+nothing new: `@jarenjs/app` already applies patches copy-on-write and
+derives changed paths, which is the payoff of one diff format end to
+end. Closing is the subscription's cleanup; a handler props change
+restarts it through the app's own key rule.
+
+## 11. Cross-tab: the owner topology
+
+Decided by a platform fact: OPFS synchronous access handles are
+**exclusive** — a second tab cannot open the same database files at
+all, so "one connection per tab" is not available and never will be.
+Therefore:
+
+- ONE owning context holds the sole connection — a `SharedWorker`
+  where available, else a leader tab elected via `navigator.locks` —
+  and every other tab is a client;
+- queries, writes and the patch stream travel between clients and the
+  owner over `BroadcastChannel` / `MessagePort`; a client's live query
+  is a remote registration whose emissions arrive as messages;
+- a second context attempting to OPEN the database is refused with
+  `JD2061` — a coded refusal, never a mysterious storage failure;
+- conflict handling stays out of scope: there is one writer by
+  construction.
+
+Node and Bun present the same API with no channel at all — the store
+is its own owner, and application code is identical everywhere. The
+in-browser proof of this topology (delivery across real tabs, the
+refusal, reload survival) belongs to the browser-driver order and its
+Playwright suite; this section is the decided contract it implements.
+
+## 12. Lifecycle, bounds, and non-goals
+
+A live query holds resources: dependency registrations, its
+maintained state, possibly a sorted window. `close()` releases all of
+them and is MANDATORY; closing the store closes every live query
+first; after close, `subscribe` and re-registration refuse, `result`
+stays readable (the last value), and a leak test asserts the live set
+after a forced GC.
+
+Bounds, both configurable at `openStore({ live: { … } })`, both
+ERRORING rather than degrading (the D14 rule — the bound is printed):
+
+- `maxQueries` (default 64): registrations beyond it are `JD0052`;
+- `maxMaintained` (default 10 000): the per-query ceiling on
+  maintained ENTRIES — result rows, window rows, accumulator and
+  per-group contributions all count, because the state is the cost.
+  Crossing it mid-maintenance is `JD2060`: the live query delivers the
+  error to its subscribers and CLOSES — degraded silence is the one
+  outcome this format forbids. An unbounded live query over a growing
+  table is the classic memory leak of this category; the accumulator
+  strategies trade exactly one contribution entry per matching row for
+  delete-correctness, and a count over a table larger than the bound
+  is a conscious `maxMaintained` raise, not a silent one.
+
+Non-claims, in one place: no incremental joins (re-run is the declared
+strategy), no cross-connection invalidation (§6's `data_version` is
+the signal), no maintenance over asynchronous connections in this
+version (every current driver is synchronous; the browser driver's
+order owns that story), no replication, and no ordering guarantee for
+unordered queries beyond §9's determinism.

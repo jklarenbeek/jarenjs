@@ -30,6 +30,9 @@ export const DB_CODES = Object.freeze({
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
   JD0040: 'the save spans a relation cycle',
+  JD0050: 'live queries require change capture',
+  JD0051: 'the demanded live mode is unavailable',
+  JD0052: 'the live-query bound was reached',
   JD0020: "the migration's from-shape does not match the database",
   JD0021: 'the migration is missing a required data transform',
   JD0022: 'an applied migration disagrees with the history record',
@@ -44,6 +47,8 @@ export const DB_CODES = Object.freeze({
   JD2040: 'the row changed under an optimistic update',
   JD2050: 'a changeset could not be decoded',
   JD2051: 'the change log is not enabled',
+  JD2060: 'the maintained live state exceeded its bound',
+  JD2061: 'another context owns the database',
 });
 
 /**
@@ -79,6 +84,12 @@ export const DB_CODES = Object.freeze({
  *  - `JD0040` — `saveChanges()` cannot order its statements: the
  *    entities being inserted or deleted form a foreign-key cycle
  *    (self-references included); break the save in two
+ *  - `JD0050` — a live query was registered on a store opened without
+ *    `capture`; the patch stream is the invalidation source
+ *  - `JD0051` — `mode: 'incremental'` was demanded but the document
+ *    classifies as re-run; the reason names the forcing construct
+ *  - `JD0052` — registering would exceed the store's `live.maxQueries`
+ *    bound; the bound is printed, never silent
  *  - `JD0020` — a migration's `from` hash does not match the
  *    database's recorded shape; running it would corrupt
  *  - `JD0021` — a draft transform was not filled in, or a document no
@@ -128,6 +139,12 @@ export class DbCompileError extends CodedError {
  *    not recognise (a future SQLite format change would land here)
  *  - `JD2051` — `changesSince` was called on a store whose capture
  *    has no persisted log
+ *  - `JD2060` — maintenance crossed the live query's `maxMaintained`
+ *    bound; the query delivered this error and closed rather than
+ *    degrade
+ *  - `JD2061` — a second context tried to open a database whose
+ *    storage grants one context exclusive access (the owner topology
+ *    of LIVE-FORMAT §11); connect to the owner instead
  */
 export class DbRuntimeError extends CodedError {
   /**
