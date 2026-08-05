@@ -364,13 +364,14 @@ export function planEntity(name, entityMapping, entities, dialect) {
     expectedIndexes.push({ name: indexName, unique: index.unique, columns: [index.property] });
   }
   for (const fk of entityMapping.foreignKeys) {
-    if (fk.unique) {
-      const indexName = `${name}_${fk.column}`;
-      createSql.push(dialect.ddl.createIndex({
-        name: indexName, table: name, columns: [fk.column], unique: true,
-      }));
-      expectedIndexes.push({ name: indexName, unique: true, columns: [fk.column] });
-    }
+    // every foreign key gets an index: unique for a strict one-to-one,
+    // plain otherwise — the correlated graph-load subqueries probe the
+    // child's via column once per parent
+    const indexName = `${name}_${fk.column}`;
+    createSql.push(dialect.ddl.createIndex({
+      name: indexName, table: name, columns: [fk.column], unique: fk.unique,
+    }));
+    expectedIndexes.push({ name: indexName, unique: fk.unique, columns: [fk.column] });
   }
 
   return {

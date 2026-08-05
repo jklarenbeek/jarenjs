@@ -27,7 +27,7 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, toPromise } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
-import { createQueryEngine, createQueryState } from './query.js';
+import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
 import { normalizeProfile } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
@@ -655,6 +655,25 @@ export function openStore(model, options) {
           });
 
           const queryState = createQueryState(options.statementCacheBound);
+          const entityEngine = entities.size > 0
+            ? createEntityQueryEngine({ connection, entities, mapping, state: queryState })
+            : null;
+          /** @type {Map<string, any>} */
+          const loadEngines = new Map();
+          const loadEngineFor = (name) => {
+            let engine = loadEngines.get(name);
+            if (engine === undefined) {
+              if (!entities.has(name)) {
+                throw new DbRuntimeError('JD2004',
+                  `the model declares no entity '${name}'`,
+                  { docPath: '/entities', collection: name });
+              }
+              engine = createLoadEngine(
+                { connection, entities, mapping, state: queryState }, name);
+              loadEngines.set(name, engine);
+            }
+            return engine;
+          };
           /** @type {Map<string, any>} */
           const entityCores = new Map();
           const entityCoreFor = (name) => {
@@ -699,16 +718,24 @@ export function openStore(model, options) {
               let handle = asyncEntityHandles.get(name);
               if (handle === undefined) {
                 const core = entityCoreFor(name);
+                const loads = loadEngineFor(name);
                 handle = Object.freeze({
                   create: lift((doc) => core.create(doc)),
                   get: lift((key) => core.get(key)),
                   update: lift((key, changes) => core.update(key, changes)),
                   delete: lift((key) => core.delete(key)),
+                  load: lift((spec) => loads.load(spec)),
+                  explainLoad: (spec) => loads.explainLoad(spec),
                 });
                 asyncEntityHandles.set(name, handle);
               }
               return handle;
             },
+            // entity DOCUMENTS query the multi-entity root at the store
+            execute: entityEngine === null ? undefined
+              : (document, queryOptions) => entityEngine.execute(document, queryOptions),
+            explain: entityEngine === null ? undefined
+              : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
             transaction: lift((fn) => connection.transaction(() => fn(store))),
             close: lift(() => connection.close()),
           };
@@ -738,13 +765,18 @@ export function openStore(model, options) {
               transaction: (fn) => connection.transaction(() => fn(store)),
               entity(name) {
                 const core = entityCoreFor(name);
+                const loads = loadEngineFor(name);
                 return Object.freeze({
                   create: (doc) => core.create(doc),
                   get: (key) => core.get(key),
                   update: (key, changes) => core.update(key, changes),
                   delete: (key) => core.delete(key),
+                  load: (spec) => loads.load(spec),
+                  explainLoad: (spec) => loads.explainLoad(spec),
                 });
               },
+              execute: entityEngine === null ? undefined
+                : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             });
           }
           return Object.freeze(store);

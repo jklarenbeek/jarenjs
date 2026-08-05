@@ -1,0 +1,91 @@
+{
+  "group": "12 joins",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "User": {
+        "schema": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "x-entity": { "key": true } },
+            "name": { "type": "string" },
+            "age": { "type": "integer" },
+            "joined": { "type": "string", "format": "date-time", "x-entity": { "column": "integer", "index": true } },
+            "profile": { "type": "object", "properties": { "bio": { "type": "string" } } },
+            "posts": { "x-entity": { "relation": { "to": "Post", "many": true, "via": "authorId", "onDelete": "cascade" } } }
+          }
+        }
+      },
+      "Post": {
+        "schema": {
+          "type": "object",
+          "required": ["pid", "authorId"],
+          "properties": {
+            "pid": { "type": "integer", "x-entity": { "key": true } },
+            "title": { "type": "string" },
+            "stars": { "type": "integer" },
+            "authorId": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "documents": {
+    "User": [
+      { "id": "u1", "name": "ada", "age": 36, "joined": "2026-01-05T10:00:00Z", "profile": { "bio": "engineer" } },
+      { "id": "u2", "name": "lin", "age": 64, "joined": "2026-03-01T08:00:00Z" },
+      { "id": "u3", "name": "kid", "age": 8, "joined": "2025-11-11T11:00:00Z" },
+      { "id": "u4", "name": "mo" }
+    ],
+    "Post": [
+      { "pid": 1, "title": "alpha", "stars": 5, "authorId": "u1" },
+      { "pid": 2, "title": "beta", "stars": 1, "authorId": "u1" },
+      { "pid": 3, "title": "gamma", "stars": 4, "authorId": "u2" },
+      { "pid": 4, "title": "delta", "stars": 3, "authorId": "u1" },
+      { "pid": 5, "title": "epsilon", "authorId": "u2" },
+      { "pid": 6, "title": "ada", "stars": 2, "authorId": "u4" }
+    ]
+  },
+  "cases": [
+    { "name": "equijoin returning the child, filtered on the child",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$ge": ["$p.stars", 3] }] }, "$orderby": ["$p.pid"], "$return": "$p.title" } },
+    { "name": "equijoin filtered on both sides",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$gt": ["$u.age", 21] }, { "$lt": ["$p.stars", 5] }] }, "$orderby": ["$p.title"], "$return": "$p.pid" } },
+    { "name": "join count",
+      "query": { "$count": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$return": "$p" } } },
+    { "name": "join count with a filter",
+      "query": { "$count": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$ge": ["$p.stars", 3] }] }, "$return": "$p" } } },
+    { "name": "join window",
+      "query": { "$subsequence": [{ "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$orderby": ["$p.pid"], "$return": "$p.title" }, 1, 2] } },
+    { "name": "instant filter on the parent side of a join",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$ge": ["$u.joined", "2026-01-01T00:00:00Z"] }] }, "$orderby": ["$p.pid"], "$return": "$p.pid" } },
+    { "name": "the parent duplicates once per matching child",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$orderby": ["$p.pid"], "$return": "$u.id" } },
+    { "name": "self-join over the key",
+      "query": { "$for": { "a": "$.User[*]", "b": "$.User[*]" }, "$where": { "$eq": ["$a.id", "$b.id"] }, "$orderby": ["$a.id"], "$return": "$a.name" } },
+    { "name": "join on non-key columns",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.title", "$u.name"] }, "$return": "$p.pid" } },
+    { "name": "a non-equality join is residual",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$gt": ["$p.stars", "$u.age"] }, "$orderby": ["$p.pid"], "$return": "$p.pid" } },
+    { "name": "a disjunction across bindings is residual",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$or": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$eq": ["$u.name", "mo"] }] }, "$orderby": ["$p.pid"], "$return": "$p.pid" } },
+    { "name": "three bindings are residual",
+      "query": { "$count": { "$for": { "u": "$.User[*]", "p": "$.Post[*]", "q": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$eq": ["$q.authorId", "$u.id"] }] }, "$return": "$u" } } },
+    { "name": "an external inside a join",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$ge": ["$p.stars", "$min"] }] }, "$orderby": ["$p.pid"], "$return": "$p.title" },
+      "externals": { "min": 3 } },
+    { "name": "join ordered by the parent's instant",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$orderby": ["$u.joined", "$p.pid"], "$return": "$p.pid" } },
+    { "name": "a document-path filter beside the join",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$eq": ["$u.profile.bio", "engineer"] }] }, "$orderby": ["$p.pid"], "$return": "$p.title" } },
+    { "name": "a projection over a join is residual",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$orderby": ["$p.pid"], "$return": { "who": "$u.name", "what": "$p.title" } } },
+    { "name": "grouping a join counts related rows per parent",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$groupby": { "who": "$u.id" }, "$return": { "who": "$who", "n": { "$count": "$p" } } } },
+    { "name": "aggregates over the grouped join",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$groupby": { "who": "$u.id" }, "$return": { "who": "$who", "top": { "$max": "$p.stars" }, "avg": { "$avg": "$p.stars" } } } },
+    { "name": "a whole-set sum over one binding",
+      "query": { "$sum": { "$for": { "p": "$.Post[*]" }, "$return": "$p.stars" } } }
+  ]
+}

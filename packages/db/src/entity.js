@@ -55,10 +55,22 @@ export function entityCore(connection, entity, entityMapping, validate) {
 
   const epochOf = (property, value) => {
     if (typeof value !== 'string') return null;
-    const epoch = property?.format === 'date'
+    // the mapped-instant contract (§10.3): a present string on an
+    // integer date column must parse in the property's own family and
+    // be Z-normalized — an offset form would let the derived epoch
+    // order hours away from the document string the engine compares
+    const dateOnly = property?.format === 'date';
+    const epoch = dateOnly
       ? getEpochOfDateOnlyRFC3339(value)
       : getEpochOfDateTimeRFC3339(value);
-    return typeof epoch === 'number' && Number.isFinite(epoch) ? epoch : null;
+    if ((dateOnly || value.endsWith('Z'))
+      && typeof epoch === 'number' && Number.isFinite(epoch)) return epoch;
+    throw new DbRuntimeError('JD2003',
+      `entity '${entity.name}' maps '${property.name}' to an integer date column: `
+      + `the value must be ${dateOnly
+        ? "a 'YYYY-MM-DD' date" : 'a Z-normalized RFC 3339 date-time'}`
+      + ` (got ${JSON.stringify(value)})`,
+      { docPath, collection: entity.name });
   };
 
   /** Split a completed document into bound column values + the rest. */

@@ -253,6 +253,7 @@ error.
 | `JD0011` | the profile refused the document |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other |
+| `JD0032` | the include specification is invalid |
 | `JD2001` | insert found the key already present |
 | `JD2002` | a usable key could not be resolved for the write |
 | `JD2003` | the write failed schema validation |
@@ -475,7 +476,144 @@ database-refused writes including foreign-key violations).
 
 ## 10. Relational translation
 
-Reserved.
+Phase B's planner extension: entity query documents translate to
+selections and joins over the hybrid tables, and graph loading is one
+statement. The residual rule is unchanged — anything not proven
+translatable runs the set residual over the fetched entity root,
+`explain()` says so, and `strict: true` refuses it (`JD0010`).
+
+### 10.1 Entity query documents
+
+`store.execute(document)` queries the **multi-entity root**: the
+engine-side value is `{ <EntityName>: [documents…], … }` and bindings
+range over `$.<Entity>[*]`. This is the shape the differential oracle
+can actually prove — the in-memory engine sees exactly the documents
+the entity sets return (`test/db/oracle/relations/`). Relation-NAME
+navigation (`$.author.name`) is deliberately not query-document sugar:
+the engine has no embedded `author` member to walk, so no oracle could
+vouch for it. Name-based navigation lives on the `load` surface
+(§10.4), where results and statement counts are the proof.
+
+Per binding, predicates resolve through three reference flavors:
+
+- **entity-column** — a mapped scalar column. Total forms, no
+  `json_type` guard: a column-mapped property has no present-`null`
+  (§9.3), so presence IS `IS NOT NULL`. Cross-type literals decide at
+  plan time (`false`, or presence for `$ne`).
+- **entity-epoch** — a derived instant column (§10.3).
+- **entity-doc** — any other path rides the JSONB document with the
+  phase-A guarded truth table, aliased per binding.
+
+Externals bind against entity columns (with the phase-A `valueTypeOf`
+guard); a boolean, `null` or missing external diverts to the residual
+at bind time, exactly as phase A does. Externals against document
+paths stay residual.
+
+### 10.2 Joins
+
+Two bindings joined by one equality between their column references
+become an INNER equijoin — exactly the engine's
+cross-product-plus-filter semantics. Result order is deterministic:
+any `$orderby` keys first, then BOTH bindings' row identities in
+binding order, which is the engine's nested-loop order. `explain()`
+reports the join (`{ left, right }`) and the `EXPLAIN QUERY PLAN`
+narrative; the paired foreign key carries an index (every foreign key
+does — unique for a strict one-to-one, plain otherwise), so the probe
+side of the join is a `SEARCH`, never a second scan.
+
+On the `load` surface the join KIND is derived from the schema
+(§10.4): a `oneToOne` include reports `inner (fk required)` when the
+`via` property is in `required`, `left (fk optional)` otherwise —
+one of the quiet advantages of models being JSON Schema.
+
+### 10.3 Instants (the epoch column)
+
+A `column: "integer"` date property stores the RFC 3339 string in the
+document and a derived epoch-milliseconds column beside it (§9.3).
+Two rules keep that column honest:
+
+- **The write contract.** A present string value must parse in the
+  property's own family and be Z-normalized (`date` properties:
+  `YYYY-MM-DD`; `date-time` properties: any precision, `Z` suffix).
+  Anything else — an offset form, junk — is refused (`JD2003`): an
+  offset would let the epoch order sit hours away from the codepoint
+  order of the document string, which is the order the engine
+  compares.
+- **The comparison form.** An ordering comparison against a literal of
+  the column's family compiles to a ±1 s epoch RANGE on the column —
+  Z-normalized strings sharing a second prefix sit within one second,
+  so the range is a superset — plus the exact document-string
+  comparison that decides. The index narrows
+  (`EXPLAIN QUERY PLAN … USING INDEX`), the text answers, and mixed
+  stored precisions cannot diverge from the engine. `$ne`, string
+  operators, presence tests and non-family literals simply ride the
+  guarded document forms. `$orderby` over an instant path sorts the
+  document string, never the integer column, for the same reason.
+
+### 10.4 One-statement graph loading
+
+`store.entity(name).load(spec)` compiles an include tree to correlated
+subqueries projected as JSON — `json_group_array(json_object(…))` for
+to-many, a scalar `json_object` for to-one, a correlated `COUNT(*)`
+for `count: true` — and executes **one statement regardless of depth
+or parent count**, asserted by a counting driver
+(`test/db/statement-count.test.js`); N+1 is a test, not a promise.
+
+```js
+store.entity('User').load({
+  where:   { $gt: ['$it.age', 10] },       // over the root entity
+  orderBy: '$it.name',
+  take: 20, after: cursor,                 // §10.5
+  include: {
+    posts: {
+      where:   { $ge: ['$it.stars', 3] },  // INSIDE the subquery
+      orderBy: { $key: '$it.stars', $dir: 'desc' },
+      take: 2,
+      include: { comments: true },         // nesting
+    },
+    followers: { count: true },            // the count, not the rows
+  },
+})
+```
+
+Per-relation `where`/`orderBy`/`take` apply INSIDE the subquery — the
+point where naive loaders fall back to N+1. Clauses compile against
+the child's own reference flavors; an untranslatable clause is a
+refusal (`JD0032`) naming the include path, never a silent residual.
+Include depth is bounded (default 3, override with `maxDepth`);
+exceeding it is `JD0032` with the bound printed. A cyclic include
+specification is rejected. Unknown relation names are `JD0032` too.
+
+### 10.5 Pagination
+
+`$orderby` + `$subsequence` translate to `ORDER BY` + `LIMIT/OFFSET`
+on the query surface. On the `load` surface, `after` (a cursor) with a
+single ascending or descending ordering over a UNIQUE column — the
+key, or any `unique: true` column — compiles to **keyset pagination**
+(`WHERE col > ?` / `< ?`) instead of a growing `OFFSET`; `skip`
+compiles to offset. `explainLoad()` reports which strategy ran
+(`keyset` / `offset` / `none`) — offset degrading quietly on large
+tables is a well-known footgun, and naming it is cheap. A cursor over
+a non-unique column, a document path, or a multi-key ordering is
+refused (`JD0032`).
+
+### 10.6 What remains residual
+
+Reported by `explain()` with reasons, refused under `strict`, and —
+because joins make residuals more expensive — accompanied by the
+`EXPLAIN QUERY PLAN` narrative (SQLite exposes no row estimates;
+a number appears only where `capabilities.rowEstimates` is filled):
+
+- three or more bindings;
+- non-equality join predicates, and disjunctions spanning bindings;
+- `$groupby` (the engine's post-group cardinality rebinding deserves
+  its own order; the count-of-related-rows case ORMs are bad at is
+  already native via `count: true` includes);
+- projections (`$return` objects) — over one binding or across a join;
+- externals against document paths; booleans and `null` at bind time;
+- everything phase A already listed (§8 of `QUERY-FORMAT.md`
+  notwithstanding, the truth table is the contract).
+
 
 ## 11. The unit of work
 

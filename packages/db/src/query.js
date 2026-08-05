@@ -20,12 +20,14 @@
 
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { contentKey } from '@jarenjs/core/object';
-import { compileJsonQuery } from '@jarenjs/json/query';
+import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
-import { planQuery } from './plan.js';
-import { emitPlan } from './emit.js';
+import {
+  planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
+} from './plan.js';
+import { emitPlan, emitEntityPlan, createEntityPredicateEmitters } from './emit.js';
 import { selectPlan } from './algebra.js';
 import { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
 import { deterministicFragment, registerFragment } from './udf.js';
@@ -507,3 +509,475 @@ export function createQueryEngine(context) {
 
   return { execute, query, explain };
 }
+
+// ————— The entity query surface (the second document kind) —————
+
+import { mergeEntityRow, parseGraphRow } from './graph.js';
+
+/** The default include depth bound (D14: printed, never silent). */
+export const INCLUDE_DEPTH_DEFAULT = 3;
+
+/**
+ * The store-level entity query engine: documents over the
+ * multi-entity root (`$.<Entity>[*]` bindings), planned to guarded
+ * selections and INNER equijoins, with the set residual running the
+ * whole document over the fetched root — the same honesty contract as
+ * phase A.
+ * @param {{ connection: any, entities: Map<string, any>, mapping: any,
+ *   state: any }} context
+ * @returns {any}
+ */
+export function createEntityQueryEngine(context) {
+  const { connection, entities, mapping, state } = context;
+  const dialect = connection.dialect;
+  const q = dialect.quoteIdentifier;
+  const physicalOf = (name) => ({ table: mapping.entities[name].table });
+
+  const entryFor = (document, pushdown) => {
+    const key = `E|${contentKey(document)}|${dialect.name}|${pushdown ? 1 : 0}`;
+    const cached = state.cache.get(key);
+    if (cached !== undefined) {
+      state.counters.hits++;
+      return cached;
+    }
+    state.counters.misses++;
+    let planned = planEntityQuery(document, entities, mapping);
+    if (!pushdown) {
+      planned = { ...planned, mode: 'set', plan: null,
+        reasons: [{ construct: 'pushdown', reason: 'disabled by the harness switch' }] };
+    }
+    const entry = {
+      planned,
+      sql: null,
+      slots: null,
+      statement: null,
+      setResidual: null,
+      fetchers: null,
+    };
+    if (planned.mode === 'native') {
+      const emitted = emitEntityPlan(planned.plan, dialect, physicalOf);
+      entry.sql = emitted.sql;
+      entry.slots = emitted.slots;
+    }
+    const sizeBefore = state.cache.size();
+    state.cache.set(key, entry);
+    if (state.cache.size() === sizeBefore) state.counters.evictions++;
+    return entry;
+  };
+
+  /** Fetch every referenced entity's rows and build the in-memory root. */
+  const fetchRoot = (entry) => {
+    if (entry.fetchers === null) {
+      entry.fetchers = [...(entry.planned.referenced.length === 0
+        ? entities.keys() : entry.planned.referenced)].map((name) => ({
+        name,
+        sql: `SELECT ${q('t')}.*, ${dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')} `
+          + `FROM ${q(mapping.entities[name].table)} AS ${q('t')} ORDER BY ${q('t')}.${dialect.rowIdentity()}`,
+        statement: null,
+      }));
+    }
+    /** @type {any} */
+    const root = {};
+    const next = (i) => {
+      if (i >= entry.fetchers.length) return root;
+      const fetcher = entry.fetchers[i];
+      if (fetcher.statement === null) fetcher.statement = connection.prepare(fetcher.sql);
+      return chain(fetcher.statement, (statement) =>
+        chain(statement.all([]), (rows) => {
+          root[fetcher.name] = rows.map((row) =>
+            mergeEntityRow(mapping.entities[fetcher.name], row, '__doc'));
+          return next(i + 1);
+        }));
+    };
+    return next(0);
+  };
+
+  const runResidual = (entry, document, externals) => {
+    if (entry.setResidual === null)
+      entry.setResidual = compileSetResidual(document);
+    return chain(fetchRoot(entry), (root) => entry.setResidual(root, externals));
+  };
+
+  const execute = (document, options = undefined) => {
+    const externals = options?.externals ?? {};
+    const pushdown = options?.pushdown !== false;
+    const entry = entryFor(document, pushdown);
+    if (entry.planned.mode !== 'native') {
+      if (options?.strict === true) {
+        const forcing = entry.planned.reasons[0];
+        throw new DbCompileError('JD0010',
+          `strict mode refused a residual: '${forcing.construct}' — ${forcing.reason}`);
+      }
+      return runResidual(entry, document, externals);
+    }
+    // bind-time diversion, exactly phase A's: a missing external must
+    // raise the ENGINE's error, a boolean or null cannot bind natively
+    for (const slot of entry.slots) {
+      if ('external' in slot && !bindable(externals[slot.external]))
+        return runResidual(entry, document, externals);
+    }
+    if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+    const params = entry.slots.map((slot) =>
+      ('literal' in slot ? slot.literal : externals[slot.external]));
+    return chain(entry.statement, (statement) => {
+      if (entry.planned.plan.aggregate === 'count')
+        return chain(statement.get(params), (row) => row?.value ?? 0);
+      return chain(statement.all(params), (rows) => {
+        const retEntity = entry.planned.plan.bindings
+          .find((binding) => binding.name === entry.planned.plan.ret).entity;
+        return sequenceResult(rows.map((row) =>
+          mergeEntityRow(mapping.entities[retEntity], row, '__doc')));
+      });
+    });
+  };
+
+  const explain = (document, options = undefined) => {
+    const pushdown = options?.pushdown !== false;
+    const entry = entryFor(document, pushdown);
+    const base = {
+      mode: entry.planned.mode,
+      referenced: [...entry.planned.referenced],
+      reasons: entry.planned.reasons,
+      sql: entry.sql,
+      residual: entry.planned.mode === 'native'
+        ? null
+        : { mode: 'set', reasons: entry.planned.reasons },
+    };
+    if (entry.planned.mode !== 'native') return base;
+    return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
+      chain(statement.all(entry.slots.map((slot) =>
+        ('literal' in slot ? slot.literal : null))), (rows) => ({
+        ...base,
+        join: entry.planned.plan.joinOn,
+        scanNarrative: rows.map((row) => String(row.detail)).join('; '),
+      })));
+  };
+
+  return { execute, explain };
+}
+
+/**
+ * The one-statement graph loader: `entity.load(spec)` compiles an
+ * include tree to correlated subqueries projected as JSON — one
+ * statement regardless of depth (asserted by a counting driver in the
+ * tests, because N+1 is a test, not a promise). Per-relation `where`,
+ * `orderBy` and `take` are applied INSIDE the subquery; depth is
+ * bounded with the default printed in the refusal; cycles in the
+ * specification are rejected; and keyset pagination is chosen over a
+ * growing OFFSET whenever the top-level ordering is a single unique
+ * column, with the choice reported by `explainLoad`.
+ * @param {{ connection: any, entities: Map<string, any>, mapping: any,
+ *   state: any }} context
+ * @param {string} entityName
+ * @returns {any}
+ */
+export function createLoadEngine(context, entityName) {
+  const { connection, entities, mapping, state } = context;
+  const dialect = connection.dialect;
+  const q = dialect.quoteIdentifier;
+
+  const refuse = (reason, path) => new DbCompileError('JD0032',
+    `${reason} (include path: ${path.join('.') || '<root>'})`,
+    entities.get(entityName)?.docPath);
+
+  /** Compile a where EXPRESSION over `$it` against one entity. */
+  const compileWhere = (expression, entity, path) => {
+    const wrapper = { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
+    let analysis;
+    try {
+      analysis = analyzeQuery(wrapper);
+    }
+    catch (cause) {
+      throw new DbCompileError('JD0032',
+        `the where expression does not compile (include path: ${path.join('.')})`,
+        entity.docPath, /** @type {Error} */ (cause));
+    }
+    const flwor = analysis.root;
+    const slot = flwor.forBindings[0].slot;
+    const shape = entityShape(entity, mapping.entities[entity.name]);
+    const conjuncts = flwor.where.kind === 'op' && flwor.where.name === '$and'
+      ? flwor.where.args : [flwor.where];
+    let filter = null;
+    for (const conjunct of conjuncts) {
+      const outcome = planEntityPredicate(conjunct, slot, shape);
+      if ('refusal' in outcome) {
+        throw refuse(`the where expression is not translatable: ${outcome.refusal.reason}`, path);
+      }
+      filter = filter === null ? outcome.pred
+        : filter.p === 'and'
+          ? { p: 'and', items: [...filter.items, outcome.pred] }
+          : { p: 'and', items: [filter, outcome.pred] };
+    }
+    return filter;
+  };
+
+  const compileOrder = (orderBy, entity, path) => {
+    const specs = Array.isArray(orderBy) ? orderBy : [orderBy];
+    const wrapper = { $for: { it: '$[*]' }, $orderby: specs, $return: '$it' };
+    let analysis;
+    try {
+      analysis = analyzeQuery(wrapper);
+    }
+    catch (cause) {
+      throw new DbCompileError('JD0032',
+        `the orderBy does not compile (include path: ${path.join('.')})`,
+        entity.docPath, /** @type {Error} */ (cause));
+    }
+    const flwor = analysis.root;
+    const slot = flwor.forBindings[0].slot;
+    const shape = entityShape(entity, mapping.entities[entity.name]);
+    const terms = [];
+    for (const spec of flwor.orderby.specs) {
+      const ref = entityPathRef(spec.key, slot, shape);
+      if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown'))
+        throw refuse('orderBy must address typed entity paths', path);
+      terms.push({ ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
+    }
+    return terms;
+  };
+
+  /** Build the include tree, validating names, depth and cycles. */
+  const buildTree = (name, spec, depth, maxDepth, path, seen) => {
+    const entity = entities.get(name);
+    if (depth > maxDepth) {
+      throw refuse(`the include graph exceeds its depth bound of ${maxDepth} `
+        + '(raise it explicitly with maxDepth)', path);
+    }
+    const node = {
+      entity,
+      entityMapping: mapping.entities[name],
+      where: spec?.where !== undefined ? compileWhere(spec.where, entity, path) : null,
+      order: spec?.orderBy !== undefined ? compileOrder(spec.orderBy, entity, path) : null,
+      take: spec?.take,
+      includes: [],
+    };
+    const includeSpec = spec?.include;
+    if (includeSpec === undefined) return node;
+    if (seen.has(includeSpec))
+      throw refuse('the include specification cycles', path);
+    seen.add(includeSpec);
+    for (const relationName of Object.keys(includeSpec)) {
+      const property = entity.properties.get(relationName);
+      const relation = property?.relation;
+      if (relation === undefined) {
+        throw refuse(`'${name}' declares no relation '${relationName}'`,
+          [...path, relationName]);
+      }
+      const childSpec = includeSpec[relationName] === true ? {} : includeSpec[relationName];
+      const childName = relation.to;
+      const include = {
+        name: relationName,
+        field: `__${relationName}`,
+        relation,
+        many: relation.kind !== 'oneToOne',
+        count: childSpec.count === true,
+        // the join kind is derivable from the schema: a required
+        // foreign key means the parent always exists
+        kind: relation.kind === 'oneToOne'
+          ? ((entity.schema.required ?? []).includes(relation.via)
+            ? 'inner (fk required)' : 'left (fk optional)')
+          : relation.kind,
+        child: childSpec.count === true
+          ? null
+          : buildTree(childName, childSpec, depth + 1, maxDepth,
+            [...path, relationName], seen),
+      };
+      node.includes.push(include);
+    }
+    return node;
+  };
+
+  /** Render one node's subquery-projection SQL. */
+  const render = (node, alias, param, emitters) => {
+    const aliasSql = q(alias);
+    const docSql = `${aliasSql}.${q('doc')}`;
+    const projection = () => {
+      const parts = [];
+      const named = new Set();
+      for (const column of node.entityMapping.columns) {
+        named.add(column.name);
+        parts.push(`${slText(column.name)}, ${aliasSql}.${q(column.name)}`);
+      }
+      for (const fk of node.entityMapping.foreignKeys) {
+        if (named.has(fk.column)) continue; // a declared via property
+        parts.push(`${slText(fk.column)}, ${aliasSql}.${q(fk.column)}`);
+      }
+      parts.push(`${slText('__doc')}, ${dialect.jsonText(docSql)}`);
+      for (const include of node.includes)
+        parts.push(`${slText(include.field)}, ${renderInclude(node, include, alias, param, emitters)}`);
+      return parts.join(', ');
+    };
+    return { aliasSql, docSql, projection };
+  };
+  const slText = (s) => dialect.stringLiteral(s);
+
+  const renderInclude = (parentNode, include, parentAlias, param, emitters) => {
+    const relation = include.relation;
+    const childAlias = `${parentAlias}_${include.name}`;
+    const parentKey = parentNode.entityMapping.keys[0];
+    if (include.count === true) {
+      const childTable = mapping.entities[relation.to].table;
+      return `(SELECT COUNT(*) FROM ${q(childTable)} AS ${q(childAlias)} `
+        + `WHERE ${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)})`;
+    }
+    const child = include.child;
+    const childTable = child.entityMapping.table;
+    const childKey = child.entityMapping.keys[0];
+    const rendered = render(child, childAlias, param, emitters);
+    const conditions = [];
+    if (relation.kind === 'oneToMany') {
+      conditions.push(`${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)}`);
+    }
+    else if (relation.kind === 'oneToOne') {
+      conditions.push(`${q(childAlias)}.${q(childKey)} = ${q(parentAlias)}.${q(relation.via)}`);
+    }
+    if (child.where !== null)
+      conditions.push(emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where));
+    const orderSql = (child.order ?? []).map((term) => {
+      // epoch paths order by the document string (codepoint = the
+      // engine's order); only plain mapped columns order natively
+      const value = term.ref.flavor === 'entity-column'
+        ? `${rendered.aliasSql}.${q(term.ref.column)}`
+        : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments));
+      const nullsFirst = term.emptyGreatest === term.desc;
+      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+    });
+    orderSql.push(`${rendered.aliasSql}.${dialect.rowIdentity()}`);
+    const inner = relation.kind === 'manyToMany'
+      ? `SELECT ${rendered.aliasSql}.* FROM ${q(childTable)} AS ${q(childAlias)} `
+        + `JOIN ${q(relation.joinTable)} AS ${q(`${childAlias}_j`)} `
+        + `ON ${q(`${childAlias}_j`)}.${q(`${relation.to}_key`)} = ${q(childAlias)}.${q(childKey)} `
+        + `WHERE ${q(`${childAlias}_j`)}.${q(`${parentNode.entity.name}_key`)} = ${q(parentAlias)}.${q(parentKey)}`
+        + (child.where !== null
+          ? ` AND ${emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where)}` : '')
+        + ` ORDER BY ${orderSql.join(', ')}`
+        + (child.take !== undefined ? ` ${dialect.limitClause(child.take, undefined)}` : '')
+      : `SELECT ${rendered.aliasSql}.* FROM ${q(childTable)} AS ${q(childAlias)} `
+        + `WHERE ${conditions.join(' AND ')} ORDER BY ${orderSql.join(', ')}`
+        + (child.take !== undefined ? ` ${dialect.limitClause(child.take, undefined)}` : '');
+    if (relation.kind === 'oneToOne') {
+      return `(SELECT json_object(${rendered.projection()}) FROM `
+        + `(${inner} ${dialect.limitClause(1, undefined)}) AS ${q(childAlias)})`;
+    }
+    return `(SELECT ${dialect.jsonAgg(`json_object(${rendered.projection()})`)} `
+      + `FROM (${inner}) AS ${q(childAlias)})`;
+  };
+
+  const buildLoad = (spec) => {
+    /** @type {string | null} */
+    let key;
+    try {
+      key = `L|${entityName}|${contentKey(spec ?? {})}|${dialect.name}`;
+    }
+    catch {
+      // contentKey is memo-grade and has no cycle guard; a cyclic
+      // specification skips the cache so buildTree can NAME the cycle
+      key = null;
+    }
+    if (key !== null) {
+      const cached = state.cache.get(key);
+      if (cached !== undefined) {
+        state.counters.hits++;
+        return cached;
+      }
+      state.counters.misses++;
+    }
+    /** @type {ParamCollector} */
+    const slots = [];
+    const param = (slot) => {
+      slots.push(slot);
+      return dialect.parameterRef(slots.length, 'v');
+    };
+    const emitters = createEntityPredicateEmitters(dialect, param);
+    const maxDepth = spec?.maxDepth ?? INCLUDE_DEPTH_DEFAULT;
+    const tree = buildTree(entityName, spec ?? {}, 0, maxDepth, [], new Set());
+    const rendered = render(tree, 'r', param, emitters);
+
+    // anonymous placeholders bind by position, so slots must be
+    // collected in SQL text order: the SELECT-list include subqueries
+    // come before the root WHERE
+    const includeSql = tree.includes.map((include) =>
+      `, ${renderInclude(tree, include, 'r', param, emitters)} AS ${q(include.field)}`).join('');
+
+    const conditions = [];
+    if (tree.where !== null)
+      conditions.push(emitters.emitPred(rendered.aliasSql, rendered.docSql, tree.where));
+
+    // pagination: keyset over a single unique ordering column beats a
+    // growing OFFSET; the choice is reported, never silent
+    let pagination = 'none';
+    const order = tree.order ?? [];
+    const uniqueColumns = new Set([
+      tree.entityMapping.keys.length === 1 ? tree.entityMapping.keys[0] : null,
+      ...tree.entityMapping.indexes.filter((index) => index.unique)
+        .map((index) => index.property),
+    ]);
+    if (spec?.after !== undefined) {
+      const term = order.length === 1 ? order[0] : null;
+      if (term === null || term.ref.flavor === 'entity-doc'
+        || !uniqueColumns.has(term.ref.column)) {
+        throw refuse("'after' (keyset pagination) needs a single orderBy over a unique column", []);
+      }
+      pagination = 'keyset';
+      conditions.push(`${rendered.aliasSql}.${q(term.ref.column)} `
+        + `${term.desc ? '<' : '>'} ${param({ literal: spec.after })}`);
+    }
+    else if (spec?.skip !== undefined && spec.skip > 0) {
+      pagination = 'offset';
+    }
+
+    let sql = `SELECT ${rendered.aliasSql}.*, ${dialect.jsonText(rendered.docSql)} AS ${q('__doc')}`
+      + includeSql
+      + ` FROM ${q(tree.entityMapping.table)} AS ${rendered.aliasSql}`;
+    if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
+    const orderSql = order.map((term) => {
+      const value = term.ref.flavor === 'entity-column'
+        ? `${rendered.aliasSql}.${q(term.ref.column)}`
+        : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments));
+      const nullsFirst = term.emptyGreatest === term.desc;
+      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+    });
+    orderSql.push(`${rendered.aliasSql}.${dialect.rowIdentity()}`);
+    sql += ` ORDER BY ${orderSql.join(', ')}`;
+    if (spec?.take !== undefined || pagination === 'offset') {
+      sql += ` ${dialect.limitClause(spec?.take ?? null,
+        pagination === 'offset' ? spec.skip : undefined)}`;
+    }
+
+    const entry = { sql, slots, tree, pagination, statement: null };
+    if (key !== null) {
+      const sizeBefore = state.cache.size();
+      state.cache.set(key, entry);
+      if (state.cache.size() === sizeBefore) state.counters.evictions++;
+    }
+    return entry;
+  };
+
+  return {
+    load(spec) {
+      const entry = buildLoad(spec);
+      if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+      const params = entry.slots.map((slot) => slot.literal);
+      return chain(entry.statement, (statement) =>
+        chain(statement.all(params), (rows) =>
+          rows.map((row) => parseGraphRow(entry.tree, row, '__doc'))));
+    },
+    explainLoad(spec) {
+      const entry = buildLoad(spec);
+      const describe = (node, path) => node.includes.flatMap((include) => [
+        { path: [...path, include.name].join('.'), kind: include.kind,
+          count: include.count === true },
+        ...(include.child === null ? [] : describe(include.child, [...path, include.name])),
+      ]);
+      return {
+        sql: entry.sql,
+        pagination: entry.pagination,
+        includes: describe(entry.tree, []),
+      };
+    },
+  };
+}
+
+/**
+ * @typedef {{ literal?: any, external?: string }[]} ParamCollector
+ */

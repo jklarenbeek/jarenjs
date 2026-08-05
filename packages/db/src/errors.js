@@ -28,6 +28,7 @@ export const DB_CODES = Object.freeze({
   JD0011: 'the profile refused the document',
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other',
+  JD0032: 'the include specification is invalid',
   JD0020: "the migration's from-shape does not match the database",
   JD0021: 'the migration is missing a required data transform',
   JD0022: 'an applied migration disagrees with the history record',
@@ -68,6 +69,9 @@ export const DB_CODES = Object.freeze({
  *    silently ignored mapping directive is a data-loss bug waiting
  *  - `JD0031` — two relation declarations whose inverses contradict
  *    (different `via`, impossible `many` pairings)
+ *  - `JD0032` — a graph-load include specification is invalid: an
+ *    unknown relation, a cycle, an untranslatable filter, or the
+ *    depth bound exceeded (the bound is printed, never silent)
  *  - `JD0020` — a migration's `from` hash does not match the
  *    database's recorded shape; running it would corrupt
  *  - `JD0021` — a draft transform was not filled in, or a document no

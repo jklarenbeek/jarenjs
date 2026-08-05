@@ -174,3 +174,220 @@ export function emitPlan(plan, dialect, physical) {
   }
   return { sql, slots };
 }
+
+// ————— The entity document kind (one emitter layer, two kinds) —————
+
+/**
+ * The entity predicate emitters, shared by the entity plan emitter
+ * and the graph-load builder: given an alias and its document column,
+ * emit one predicate with the flavor-correct forms.
+ * @param {any} dialect
+ * @param {(slot: ParamSlot) => string} param
+ * @returns {{ emitPred: (aliasSql: string, docSql: string, pred: any) => string }}
+ */
+export function createEntityPredicateEmitters(dialect, param) {
+  const q = dialect.quoteIdentifier;
+  const sl = dialect.stringLiteral;
+  const NUMERIC = () => `(${sl('integer')}, ${sl('real')})`;
+  const pathTextOf = (ref) => {
+    const text = dialect.jsonPathText(ref.segments);
+    if (text === null)
+      throw new Error('emit: a promoted entity path is not representable');
+    return text;
+  };
+
+  const emitDocPred = (docSql, pred) => {
+    const jt = dialect.jsonTypeOf(docSql, pathTextOf(pred.ref));
+    const value = dialect.jsonExtract(docSql, pathTextOf(pred.ref));
+    if (pred.p === 'typeIs') {
+      if (pred.types.length === 0)
+        return pred.positive ? `${jt} IS NOT NULL` : `${jt} IS NULL`;
+      const list = pred.types.map(sl).join(', ');
+      return pred.positive
+        ? `(${jt} IS NOT NULL AND ${pred.types.length === 1
+          ? `${jt} = ${sl(pred.types[0])}` : `${jt} IN (${list})`})`
+        : `(${jt} IS NOT NULL AND ${jt} NOT IN (${list}))`;
+    }
+    if (pred.p === 'strop') {
+      const bind = () => param({ literal: pred.operand.lit });
+      const form = pred.kind === 'starts'
+        ? dialect.strStartsWith(value, bind(), bind())
+        : pred.kind === 'ends'
+          ? dialect.strEndsWith(value, bind(), bind(), bind())
+          : dialect.strContains(value, bind());
+      return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
+    }
+    const lit = pred.operand.lit;
+    const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+    const kind = typeof lit === 'number' ? 'number' : 'string';
+    if (pred.op === 'ne') {
+      const notType = kind === 'number'
+        ? `${jt} NOT IN ${NUMERIC()}` : `${jt} <> ${sl('text')}`;
+      return `(${jt} IS NOT NULL AND (${notType} OR ${value} <> ${param({ literal: lit })}))`;
+    }
+    const typeGuard = kind === 'number'
+      ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
+    return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} ${param({ literal: lit })})`;
+  };
+
+  const emitColumnPred = (aliasSql, pred) => {
+    const column = `${aliasSql}.${q(pred.ref.column)}`;
+    if (pred.p === 'typeIs') {
+      if (pred.types.length === 0)
+        return pred.positive ? `${column} IS NOT NULL` : `${column} IS NULL`;
+      if (pred.types[0] === 'null')
+        return pred.positive ? dialect.booleanLiteral(false) : `${column} IS NOT NULL`;
+      const wanted = pred.types[0] === 'true' ? 1 : 0;
+      return pred.positive
+        ? `(${column} IS NOT NULL AND ${column} = ${param({ literal: wanted })})`
+        : `(${column} IS NOT NULL AND ${column} <> ${param({ literal: wanted })})`;
+    }
+    if (pred.p === 'strop') {
+      const bind = () => param({ literal: pred.operand.lit });
+      const form = pred.kind === 'starts'
+        ? dialect.strStartsWith(column, bind(), bind())
+        : pred.kind === 'ends'
+          ? dialect.strEndsWith(column, bind(), bind(), bind())
+          : dialect.strContains(column, bind());
+      return `(${column} IS NOT NULL AND ${form})`;
+    }
+    const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+    if ('ext' in pred.operand) {
+      const guard = pred.ref.storage === 'string'
+        ? `${dialect.valueTypeOf(param({ external: pred.operand.ext }))} = ${sl('text')}`
+        : `${dialect.valueTypeOf(param({ external: pred.operand.ext }))} IN ${NUMERIC()}`;
+      return `(${column} IS NOT NULL AND ${guard} AND ${column} ${pred.op === 'ne' ? '<>' : symbol} ${param({ external: pred.operand.ext })})`;
+    }
+    const lit = pred.operand.lit;
+    const litKind = typeof lit === 'number' ? 'number' : typeof lit === 'string' ? 'string' : 'other';
+    const storageKind = pred.ref.storage === 'string' ? 'string'
+      : pred.ref.storage === 'boolean' ? 'boolean' : 'number';
+    if (storageKind === 'boolean' || litKind === 'other' || storageKind !== litKind)
+      return pred.op === 'ne' ? `${column} IS NOT NULL` : dialect.booleanLiteral(false);
+    return `(${column} IS NOT NULL AND ${column} ${symbol} ${param({ literal: lit })})`;
+  };
+
+  // an epoch comparison: the derived integer column narrows through
+  // its index with ±1s slack (Z-normalized strings sharing a second
+  // prefix sit within one second, so the range is a superset of the
+  // codepoint comparison), and the document string decides exactly —
+  // the engine's lexicographic semantics, whatever precision the
+  // stored values carry
+  const emitEpochPred = (aliasSql, docSql, pred) => {
+    const column = `${aliasSql}.${q(pred.ref.column)}`;
+    const value = dialect.jsonExtract(docSql, pathTextOf(pred.ref));
+    const symbol = { eq: '=', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+    const range = pred.op === 'gt' || pred.op === 'ge'
+      ? `${column} >= ${param({ literal: pred.epoch - 1000 })}`
+      : pred.op === 'lt' || pred.op === 'le'
+        ? `${column} <= ${param({ literal: pred.epoch + 1000 })}`
+        : `${column} >= ${param({ literal: pred.epoch - 1000 })} AND ${column} <= ${param({ literal: pred.epoch + 1000 })}`;
+    return `(${column} IS NOT NULL AND ${range} AND ${value} ${symbol} ${param({ literal: pred.operand.lit })})`;
+  };
+
+  const emitPred = (aliasSql, docSql, pred) => {
+    if (pred.p === 'and')
+      return `(${pred.items.map((item) => emitPred(aliasSql, docSql, item)).join(' AND ')})`;
+    if (pred.p === 'or')
+      return `(${pred.items.map((item) => emitPred(aliasSql, docSql, item)).join(' OR ')})`;
+    if (pred.p === 'not') return `NOT ${emitPred(aliasSql, docSql, pred.item)}`;
+    if (pred.p === 'const')
+      return pred.value ? dialect.booleanLiteral(true) : dialect.booleanLiteral(false);
+    if (pred.ref?.flavor === 'entity-column')
+      return emitColumnPred(aliasSql, pred);
+    if (pred.ref?.flavor === 'entity-epoch') {
+      // only an instant comparison uses the column; presence, type
+      // tests, string operators and non-instant literals ride the
+      // guarded document forms, which stay sound for any stored value
+      if (pred.p === 'cmp' && 'epoch' in pred)
+        return emitEpochPred(aliasSql, docSql, pred);
+      return emitDocPred(docSql, pred);
+    }
+    return emitDocPred(docSql, pred);
+  };
+  return { emitPred };
+}
+
+/**
+ * Emit an entity plan (`entity-select` or `entity-join`) as SQL plus
+ * ordered parameter slots. Entity-COLUMN refs compare real typed
+ * columns with TOTAL forms and no `json_type` guard — a column-mapped
+ * property has no present-`null` (§9.3), so presence IS `IS NOT
+ * NULL`; entity-EPOCH refs compare the derived integer column against
+ * a plan-time epoch translation; entity-DOC refs ride the phase-A
+ * guarded truth table over the entity's JSONB column. Join emission
+ * appends BOTH bindings' row identities in binding order, which is
+ * exactly the engine's nested-loop order — determinism the oracle
+ * depends on.
+ * @param {any} plan - from `planEntityQuery`
+ * @param {any} dialect
+ * @param {(entity: string) => { table: string }} physicalOf
+ * @returns {{ sql: string, slots: ParamSlot[] }}
+ */
+export function emitEntityPlan(plan, dialect, physicalOf) {
+  const q = dialect.quoteIdentifier;
+  /** @type {ParamSlot[]} */
+  const slots = [];
+  const param = (slot) => {
+    slots.push(slot);
+    return dialect.parameterRef(slots.length, 'external' in slot ? slot.external : 'value');
+  };
+
+  const aliases = new Map(plan.bindings.map((binding, i) => [
+    binding.name, { alias: q(`t${i}`), entity: binding.entity },
+  ]));
+  const aliasOf = (bindingName) => aliases.get(bindingName).alias;
+  const docOf = (bindingName) => `${aliasOf(bindingName)}.${q('doc')}`;
+
+  const pathTextOf = (ref) => {
+    const text = dialect.jsonPathText(ref.segments);
+    if (text === null)
+      throw new Error('emit: a promoted entity path is not representable');
+    return text;
+  };
+
+  const emitters = createEntityPredicateEmitters(dialect, param);
+  const emitPred = (bindingName, pred) =>
+    emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
+
+  const ret = plan.ret;
+  // every returned column plus the document rendered to text; the
+  // caller merges them back into the entity shape
+  const selection = plan.aggregate === 'count'
+    ? `COUNT(*) AS ${q('value')}`
+    : `${aliasOf(ret)}.*, ${dialect.jsonText(docOf(ret))} AS ${q('__doc')}`;
+
+  let sql = `SELECT ${selection} FROM `;
+  sql += plan.bindings
+    .map((binding) => `${q(physicalOf(binding.entity).table)} AS ${aliasOf(binding.name)}`)
+    .join(' JOIN ');
+  if (plan.joinOn !== null) {
+    sql += ` ON ${aliasOf(plan.joinOn.left.binding)}.${q(plan.joinOn.left.column)}`
+      + ` = ${aliasOf(plan.joinOn.right.binding)}.${q(plan.joinOn.right.column)}`;
+  }
+  const filterSql = plan.filters
+    .filter((entry) => entry.filter !== null)
+    .map((entry) => emitPred(entry.binding, entry.filter));
+  if (filterSql.length > 0) sql += ` WHERE ${filterSql.join(' AND ')}`;
+
+  if (plan.aggregate === null) {
+    const terms = (plan.order ?? []).map((term) => {
+      // only a plain mapped column orders by its column; an epoch
+      // path orders by the document string — codepoint order, exactly
+      // the engine's — because mixed stored precisions would let the
+      // integer column sort differently
+      const value = term.ref.flavor === 'entity-column'
+        ? `${aliasOf(term.binding)}.${q(term.ref.column)}`
+        : dialect.jsonExtract(docOf(term.binding), pathTextOf(term.ref));
+      const nullsFirst = term.emptyGreatest === term.desc;
+      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+    });
+    // the engine's nested-loop order: binding-order row identities
+    for (const binding of plan.bindings)
+      terms.push(`${aliasOf(binding.name)}.${dialect.rowIdentity()}`);
+    sql += ` ORDER BY ${terms.join(', ')}`;
+    if (plan.window !== null)
+      sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
+  }
+  return { sql, slots };
+}

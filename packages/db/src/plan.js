@@ -25,7 +25,11 @@
 
 import { analyzeQuery, AST_VERSION, NODE_KINDS } from '@jarenjs/json/query';
 
-import { selectPlan, conjoin } from './algebra.js';
+import {
+  getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
+} from '@jarenjs/core/dates/rfc3339';
+
+import { selectPlan, conjoin, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
 
 /** Comparison operator names → plan ops. */
@@ -529,4 +533,366 @@ export function planQuery(document, shape, options = undefined) {
   plan.window = null;
   return { analysis, plan, mode: 'set', reasons: flwor.reasons, rowReturn: null,
     udfs: flwor.udfs };
+}
+
+// ————— The entity document kind (one planner, two document kinds) —————
+
+/**
+ * Build the planner shape for one entity: canonical top-level paths
+ * map to REAL columns (flavor `entity-column`), epoch date columns to
+ * their derived integer twins (flavor `entity-epoch`), and everything
+ * else stays a document path over the entity's JSONB column (the
+ * phase-A guarded forms).
+ * @param {any} entity - normalized entity (model.js)
+ * @param {any} entityMapping - explainMapping(...).entities[name]
+ * @returns {any}
+ */
+export function entityShape(entity, entityMapping) {
+  /** @type {Map<string, any>} */
+  const flavors = new Map();
+  for (const column of entityMapping.columns) {
+    const epoch = column.source === 'epoch(document)';
+    flavors.set(`.${column.name}`, {
+      column: column.name,
+      flavor: epoch ? 'entity-epoch' : 'entity-column',
+      storage: column.storage,
+      format: epoch ? entity.properties.get(column.name)?.format : undefined,
+    });
+  }
+  for (const fk of entityMapping.foreignKeys) {
+    if (!flavors.has(`.${fk.column}`))
+      flavors.set(`.${fk.column}`, { column: fk.column, flavor: 'entity-column', storage: 'string' });
+  }
+  return {
+    collection: entity.name,
+    schema: entity.schema,
+    columnByCanonical: new Map(),
+    entityFlavors: flavors,
+  };
+}
+
+/**
+ * Resolve a singular member path on an entity binding to a flavored
+ * PlanRef.
+ * @param {any} node - a path AST node
+ * @param {number} slot
+ * @param {any} shape - from {@link entityShape}
+ * @returns {any | null}
+ */
+export function entityPathRef(node, slot, shape) {
+  const ref = pathRef(node, slot, shape);
+  if (ref === null) return null;
+  const canonical = ref.segments
+    .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`)).join('');
+  const flavored = shape.entityFlavors.get(canonical);
+  if (flavored !== undefined) {
+    return {
+      ...ref,
+      column: flavored.column,
+      flavor: flavored.flavor,
+      storage: flavored.storage,
+      format: flavored.format,
+    };
+  }
+  // a nested path rides the JSONB document with the phase-A guards;
+  // strip nothing — jsonb_extract addresses the doc column directly
+  return { ...ref, flavor: 'entity-doc' };
+}
+
+/**
+ * Plan one predicate over an entity binding: the same operator
+ * grammar as phase A, with entity-flavored refs. Reuses
+ * {@link planPredicate} for the recognition, then re-resolves refs
+ * through the flavor table.
+ * @param {any} node
+ * @param {number} slot
+ * @param {any} shape
+ * @returns {{ pred: any } | { refusal: { construct: string, reason: string } }}
+ */
+export function planEntityPredicate(node, slot, shape) {
+  const outcome = planPredicate(node, slot, shape);
+  if ('refusal' in outcome) return outcome;
+  /** @type {{ construct: string, reason: string } | null} */
+  let blocked = null;
+  const reflavor = (pred) => {
+    if (pred.p === 'and' || pred.p === 'or')
+      return { ...pred, items: pred.items.map(reflavor) };
+    if (pred.p === 'not') return { ...pred, item: reflavor(pred.item) };
+    if (!('ref' in pred) || pred.ref === null) return pred;
+    const canonical = pred.ref.segments
+      .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`)).join('');
+    const flavored = shape.entityFlavors.get(canonical);
+    if (flavored === undefined) {
+      // externals against DOC paths are not translated here (the
+      // phase-A external forms assume the collection layout)
+      if (pred.p === 'cmp' && 'ext' in pred.operand) {
+        blocked = { construct: '$eq',
+          reason: 'externals compare only against entity columns in this version' };
+      }
+      return { ...pred, ref: { ...pred.ref, flavor: 'entity-doc' } };
+    }
+    const ref = { ...pred.ref, column: flavored.column,
+      flavor: flavored.flavor, storage: flavored.storage, format: flavored.format };
+    if (flavored.flavor === 'entity-epoch' && pred.p === 'cmp') {
+      if ('ext' in pred.operand) {
+        blocked = { construct: pred.op,
+          reason: 'externals compare only against entity columns in this version' };
+        return { ...pred, ref };
+      }
+      // the plan-time instant translation: an ordering comparison
+      // against a literal of the column's own family (Z-normalized
+      // date-time, or a plain date on a date column) gains the ±1s
+      // epoch range the emitter narrows the index with; anything else
+      // simply keeps the guarded document forms — sound, unassisted
+      if (pred.op !== 'ne' && typeof pred.operand.lit === 'string') {
+        const lit = pred.operand.lit;
+        const epoch = flavored.format === 'date'
+          ? (/^\d{4}-\d{2}-\d{2}$/.test(lit) ? getEpochOfDateOnlyRFC3339(lit) : NaN)
+          : (lit.includes('T') && lit.endsWith('Z') ? getEpochOfDateTimeRFC3339(lit) : NaN);
+        if (typeof epoch === 'number' && Number.isFinite(epoch))
+          return { ...pred, ref, epoch };
+      }
+    }
+    return { ...pred, ref };
+  };
+  const pred = reflavor(outcome.pred);
+  if (blocked !== null) return { refusal: blocked };
+  return { pred };
+}
+
+/**
+ * Plan an ENTITY query document: a FLWOR whose bindings range over
+ * `$.<Entity>[*]` arrays of the multi-entity root. One binding is a
+ * guarded selection; two bindings joined by a key equality become an
+ * INNER equijoin (exactly the engine's cross-product-plus-filter
+ * semantics, which is what keeps the oracle honest). Everything else
+ * is the set residual over the fetched root.
+ * @param {any} document
+ * @param {Map<string, any>} entities - normalized entities
+ * @param {any} mapping - explainMapping result
+ * @returns {any}
+ */
+export function planEntityQuery(document, entities, mapping) {
+  const analysis = analyzeQuery(document);
+  let root = analysis.root;
+  assertDecidedKind(root);
+
+  const referenced = [...collectEntityRoots(document, entities)];
+  const residual = (construct, reason) => ({
+    analysis, mode: 'set', plan: null, referenced,
+    reasons: [{ construct, reason }],
+  });
+
+  // peel literal windows exactly as the collection planner does
+  const windows = [];
+  while (root.kind === 'op' && root.name === '$subsequence') {
+    const [inner, start, length] = root.args;
+    if (start?.kind !== 'literal' || typeof start.value !== 'number'
+      || (length !== undefined && (length.kind !== 'literal' || typeof length.value !== 'number')))
+      return residual('$subsequence', 'window bounds must be literal numbers to push');
+    windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
+    root = inner;
+    assertDecidedKind(root);
+  }
+  let aggregate = null;
+  if (root.kind === 'op' && root.name === '$count' && windows.length === 0) {
+    aggregate = 'count';
+    root = root.args[0];
+    assertDecidedKind(root);
+  }
+  if (root.kind !== 'flwor')
+    return residual(root.kind, 'only a FLWOR over entity arrays is translated');
+  if (root.fold !== null || root.letBindings.length > 0 || root.asChecks !== null
+    || root.groupby !== null || root.count !== null)
+    return residual('$let', 'no equivalence proof exists yet; residual by default');
+
+  // bindings must each range over one entity's array
+  const bindings = [];
+  for (const binding of root.forBindings) {
+    const source = binding.expr;
+    const sourceEntity = source?.kind === 'path' && source.name === '$'
+      && source.external !== true && source.segments.length === 2
+      && source.segments[0].descendant !== true
+      && source.segments[0].selectors.length === 1
+      && source.segments[0].selectors[0].kind === 'name'
+      && source.segments[1].selectors?.length === 1
+      && source.segments[1].selectors[0].kind === 'wildcard'
+      ? source.segments[0].selectors[0].name
+      : null;
+    if (sourceEntity === null || !entities.has(sourceEntity)
+      || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty !== false)
+      return residual('$for', 'bindings must each range over one declared entity array ($.Entity[*])');
+    bindings.push({
+      name: binding.name,
+      slot: binding.slot,
+      entity: sourceEntity,
+      shape: entityShape(entities.get(sourceEntity), mapping.entities[sourceEntity]),
+    });
+  }
+  if (bindings.length > 2)
+    return residual('$for', 'at most two bindings are translated (one join per statement)');
+
+  const byName = new Map(bindings.map((binding) => [binding.slot, binding]));
+  const conjuncts = root.where === null
+    ? []
+    : root.where.kind === 'op' && root.where.name === '$and'
+      ? root.where.args
+      : [root.where];
+
+  let joinOn = null;
+  const filters = new Map(bindings.map((binding) => [binding.slot, null]));
+  const reasons = [];
+  let whereFullyPushed = true;
+  for (const conjunct of conjuncts) {
+    // a key equality between the two bindings is the join condition
+    if (bindings.length === 2 && joinOn === null
+      && conjunct.kind === 'op' && conjunct.name === '$eq') {
+      const [left, right] = conjunct.args;
+      const leftBinding = left.kind === 'path' ? byName.get(left.rootSlot) : undefined;
+      const rightBinding = right.kind === 'path' ? byName.get(right.rootSlot) : undefined;
+      if (leftBinding !== undefined && rightBinding !== undefined
+        && leftBinding !== rightBinding) {
+        const leftRef = entityPathRef(left, left.rootSlot, leftBinding.shape);
+        const rightRef = entityPathRef(right, right.rootSlot, rightBinding.shape);
+        if (leftRef?.flavor === 'entity-column' && rightRef?.flavor === 'entity-column') {
+          joinOn = {
+            left: { binding: leftBinding, ref: leftRef },
+            right: { binding: rightBinding, ref: rightRef },
+          };
+          continue;
+        }
+      }
+    }
+    // otherwise the conjunct must belong wholly to ONE binding
+    const slots = new Set();
+    collectBindingSlots(conjunct, byName, slots);
+    if (slots.size !== 1) {
+      reasons.push({ construct: '$where',
+        reason: 'a conjunct must belong to one binding (or be the single join equality)' });
+      whereFullyPushed = false;
+      continue;
+    }
+    const slot = [...slots][0];
+    const binding = byName.get(slot);
+    const outcome = planEntityPredicate(conjunct, slot, binding.shape);
+    if ('refusal' in outcome) {
+      reasons.push(outcome.refusal);
+      whereFullyPushed = false;
+      continue;
+    }
+    filters.set(slot, conjoin(filters.get(slot), outcome.pred));
+  }
+  if (bindings.length === 2 && joinOn === null)
+    return residual('$for', 'two bindings need a key equality between them (the join condition)');
+
+  // the return must be one bare binding
+  const retBinding = root.ret.kind === 'var' && root.ret.external !== true
+    ? byName.get(root.ret.slot) : undefined;
+  if (retBinding === undefined) {
+    reasons.push({ construct: '$return',
+      reason: 'entity queries return one bare binding natively; projections run in the engine' });
+  }
+
+  // ordering over flavored refs of either binding
+  let order = null;
+  let orderPushed = true;
+  if (root.orderby !== null) {
+    const terms = [];
+    for (const spec of root.orderby.specs) {
+      const slot = spec.key.kind === 'path' ? spec.key.rootSlot : -1;
+      const binding = byName.get(slot);
+      const ref = binding === undefined
+        ? null : entityPathRef(spec.key, slot, binding.shape);
+      if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown')
+        || spec.collation !== null || spec.collationName !== null) {
+        orderPushed = false;
+        reasons.push({ construct: '$orderby',
+          reason: 'ordering translates only over typed entity paths' });
+        break;
+      }
+      terms.push({ binding, ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
+    }
+    if (orderPushed) order = terms;
+  }
+
+  const fullyPushed = whereFullyPushed && orderPushed && retBinding !== undefined
+    && (aggregate === null || retBinding !== undefined);
+  if (!fullyPushed) {
+    return { analysis, mode: 'set', plan: null, referenced, reasons };
+  }
+
+  let window = null;
+  if (windows.length > 0) {
+    let offset = 0;
+    let limit = null;
+    for (let i = windows.length - 1; i >= 0; i--) {
+      const w = windows[i];
+      offset += w.offset;
+      if (w.limit !== null) limit = limit === null ? w.limit : Math.min(Math.max(limit - w.offset, 0), w.limit);
+      else if (limit !== null) limit = Math.max(limit - w.offset, 0);
+    }
+    window = { offset, limit };
+  }
+
+  return {
+    analysis,
+    mode: 'native',
+    referenced,
+    reasons: [],
+    plan: {
+      planVersion: PLAN_VERSION,
+      alg: bindings.length === 2 ? 'entity-join' : 'entity-select',
+      bindings: bindings.map((binding) => ({ name: binding.name, entity: binding.entity })),
+      joinOn: joinOn === null ? null : {
+        left: { binding: joinOn.left.binding.name, column: joinOn.left.ref.column },
+        right: { binding: joinOn.right.binding.name, column: joinOn.right.ref.column },
+      },
+      filters: bindings.map((binding) => ({
+        binding: binding.name,
+        filter: filters.get(binding.slot),
+      })),
+      order: order === null ? null : order.map((term) => ({
+        binding: term.binding.name, ref: term.ref,
+        desc: term.desc, emptyGreatest: term.emptyGreatest,
+      })),
+      window,
+      aggregate,
+      ret: retBinding.name,
+    },
+  };
+}
+
+/** Which binding slots a subtree references (via path roots). */
+function collectBindingSlots(node, byName, slots) {
+  if (node === null || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectBindingSlots(item, byName, slots);
+    return;
+  }
+  if (node.kind === 'path' && byName.has(node.rootSlot)) slots.add(node.rootSlot);
+  for (const key of Object.keys(node)) {
+    if (key === 'docPath') continue;
+    collectBindingSlots(node[key], byName, slots);
+  }
+}
+
+/** The entity names a document's root paths reference (`$.Name[*]`). */
+function collectEntityRoots(document, entities) {
+  const found = new Set();
+  const walk = (node) => {
+    if (typeof node === 'string') {
+      const match = /^\$\.([A-Za-z_][A-Za-z0-9_]*)\[\*\]/.exec(node);
+      if (match !== null && entities.has(match[1])) found.add(match[1]);
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (node !== null && typeof node === 'object') {
+      for (const key of Object.keys(node)) walk(node[key]);
+    }
+  };
+  walk(document);
+  return found;
 }

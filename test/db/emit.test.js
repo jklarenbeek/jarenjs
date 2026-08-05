@@ -12,7 +12,7 @@ import * as assert from 'node:assert';
 
 import {
   planQuery, emitPlan, normalizeModel, planCollection,
-  sqliteDialect, createDialect,
+  sqliteDialect, createDialect, createEntityPredicateEmitters,
 } from '@jarenjs/db';
 import { fullDoubleDialect } from './helpers.js';
 
@@ -162,5 +162,95 @@ describe('injection is structurally impossible', () => {
       'no operand value flows into a string literal');
     assert.strictEqual(/\$\{lit\}/.test(source), false,
       'no literal value is templated into SQL text');
+  });
+});
+
+describe('the entity predicate emitters (direct)', () => {
+  const emittersFor = (dialect) => {
+    /** @type {any[]} */
+    const slots = [];
+    const emitters = createEntityPredicateEmitters(dialect,
+      (slot) => {
+        slots.push(slot);
+        return dialect.parameterRef(slots.length, 'v');
+      });
+    return { emitters, slots };
+  };
+  const ref = (segments, extra) => ({ segments, ...extra });
+  const docRef = ref([{ name: 'profile' }, { name: 'score' }], { flavor: 'entity-doc' });
+
+  it('document forms: guarded numeric compare, ne, type list, string operator', () => {
+    const { emitters, slots } = emittersFor(sqliteDialect);
+    const alias = '"t"';
+    const doc = '"t"."doc"';
+    assert.strictEqual(
+      emitters.emitPred(alias, doc,
+        { p: 'cmp', op: 'ge', ref: docRef, operand: { lit: 5 } }),
+      '(json_type("t"."doc", \'$."profile"."score"\') IS NOT NULL'
+      + ' AND json_type("t"."doc", \'$."profile"."score"\') IN (\'integer\', \'real\')'
+      + ' AND jsonb_extract("t"."doc", \'$."profile"."score"\') >= ?)');
+    assert.match(
+      emitters.emitPred(alias, doc,
+        { p: 'cmp', op: 'ne', ref: docRef, operand: { lit: 'x' } }),
+      /<> 'text' OR jsonb_extract/, 'ne stays total: other type OR differing value');
+    assert.match(
+      emitters.emitPred(alias, doc,
+        { p: 'typeIs', positive: true, types: ['integer', 'real'], ref: docRef }),
+      /IN \('integer', 'real'\)\)$/);
+    assert.match(
+      emitters.emitPred(alias, doc,
+        { p: 'strop', kind: 'contains', ref: docRef, operand: { lit: 'ab' } }),
+      /= 'text' AND instr\(/, 'document string operators keep the text guard');
+    assert.deepStrictEqual(slots.map((slot) => slot.literal),
+      [5, 'x', 'ab'], 'every operand rides a parameter slot');
+  });
+
+  it('column and epoch forms: strop binds, the ±1s range plus the text recheck', () => {
+    const { emitters, slots } = emittersFor(sqliteDialect);
+    const nameRef = ref([{ name: 'name' }],
+      { flavor: 'entity-column', column: 'name', storage: 'string' });
+    assert.strictEqual(
+      emitters.emitPred('"t"', '"t"."doc"',
+        { p: 'strop', kind: 'contains', ref: nameRef, operand: { lit: 'i' } }),
+      '("t"."name" IS NOT NULL AND instr("t"."name", ?) > 0)');
+    const epochRef = ref([{ name: 'joined' }],
+      { flavor: 'entity-epoch', column: 'joined', storage: 'integer', format: 'date-time' });
+    assert.strictEqual(
+      emitters.emitPred('"t"', '"t"."doc"',
+        { p: 'cmp', op: 'ge', ref: epochRef, epoch: 5000,
+          operand: { lit: '1970-01-01T00:00:05Z' } }),
+      '("t"."joined" IS NOT NULL AND "t"."joined" >= ?'
+      + ' AND jsonb_extract("t"."doc", \'$."joined"\') >= ?)');
+    assert.deepStrictEqual(slots.map((slot) => slot.literal),
+      ['i', 4000, '1970-01-01T00:00:05Z'],
+      'the range slot carries the slack; the recheck carries the text');
+    // a string operator over an instant path rides the guarded
+    // document forms — the integer column cannot answer it
+    assert.match(
+      emitters.emitPred('"t"', '"t"."doc"',
+        { p: 'strop', kind: 'starts', ref: { ...epochRef, flavor: 'entity-epoch' },
+          operand: { lit: '2026' } }),
+      /json_type/, 'epoch strops are document forms');
+  });
+
+  it('the double dialect spells every entity form differently (D21)', () => {
+    const doubled = fullDoubleDialect(createDialect);
+    const forms = [
+      { p: 'cmp', op: 'ge', ref: docRef, operand: { lit: 5 } },
+      { p: 'strop', kind: 'contains',
+        ref: ref([{ name: 'name' }], { flavor: 'entity-column', column: 'name', storage: 'string' }),
+        operand: { lit: 'i' } },
+      { p: 'cmp', op: 'lt', epoch: 5000,
+        ref: ref([{ name: 'joined' }], { flavor: 'entity-epoch', column: 'joined', storage: 'integer' }),
+        operand: { lit: '1970-01-01T00:00:05Z' } },
+    ];
+    for (const form of forms) {
+      const viaSqlite = emittersFor(sqliteDialect).emitters
+        .emitPred('"t"', '"t"."doc"', structuredClone(form));
+      const viaDouble = emittersFor(doubled).emitters
+        .emitPred('[t]', '[t].[doc]', structuredClone(form));
+      assert.notStrictEqual(viaDouble, viaSqlite);
+      assert.match(viaDouble, /\[t\]/);
+    }
   });
 });

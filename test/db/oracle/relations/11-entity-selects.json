@@ -1,0 +1,118 @@
+{
+  "group": "11 entity selects",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "User": {
+        "schema": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "x-entity": { "key": true } },
+            "name": { "type": "string" },
+            "age": { "type": "integer" },
+            "active": { "type": "boolean" },
+            "joined": { "type": "string", "format": "date-time", "x-entity": { "column": "integer", "index": true } },
+            "profile": { "type": "object", "properties": { "bio": { "type": "string" } } },
+            "posts": { "x-entity": { "relation": { "to": "Post", "many": true, "via": "authorId", "onDelete": "cascade" } } }
+          }
+        }
+      },
+      "Post": {
+        "schema": {
+          "type": "object",
+          "required": ["pid", "authorId"],
+          "properties": {
+            "pid": { "type": "integer", "x-entity": { "key": true } },
+            "title": { "type": "string" },
+            "stars": { "type": "integer" },
+            "authorId": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "documents": {
+    "User": [
+      { "id": "u1", "name": "ada", "age": 36, "active": true, "joined": "2026-01-05T10:00:00Z", "profile": { "bio": "engineer" } },
+      { "id": "u2", "name": "lin", "age": 64, "active": false, "joined": "2026-03-01T08:00:00.250Z" },
+      { "id": "u3", "name": "kid", "age": 8, "joined": "2025-11-11T11:00:00Z", "profile": { "bio": "" } },
+      { "id": "u4", "name": "mo" }
+    ],
+    "Post": [
+      { "pid": 1, "title": "alpha", "stars": 5, "authorId": "u1" },
+      { "pid": 2, "title": "beta", "stars": 1, "authorId": "u1" },
+      { "pid": 3, "title": "gamma", "stars": 4, "authorId": "u2" },
+      { "pid": 4, "title": "delta", "stars": 3, "authorId": "u1" },
+      { "pid": 5, "title": "epsilon", "authorId": "u2" }
+    ]
+  },
+  "cases": [
+    { "name": "eq string column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.name", "ada"] }, "$return": "$u.id" } },
+    { "name": "ne integer column skips the absent",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ne": ["$u.age", 36] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "range conjunction ordered by name",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$and": [{ "$ge": ["$u.age", 8] }, { "$lt": ["$u.age", 64] }] }, "$orderby": ["$u.name"], "$return": "$u.id" } },
+    { "name": "gt ordered desc with a window",
+      "query": { "$subsequence": [{ "$for": { "u": "$.User[*]" }, "$where": { "$gt": ["$u.age", 0] }, "$orderby": [{ "$key": "$u.age", "$dir": "desc" }], "$return": "$u.id" }, 1, 2] } },
+    { "name": "boolean true literal",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.active", true] }, "$return": "$u.id" } },
+    { "name": "boolean false literal",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.active", false] }, "$return": "$u.id" } },
+    { "name": "null literal never matches a mapped column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.age", null] }, "$return": "$u.id" } },
+    { "name": "cross-type literal on an integer column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.age", "x"] }, "$return": "$u.id" } },
+    { "name": "cross-type ordering on a string column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$gt": ["$u.name", 5] }, "$return": "$u.id" } },
+    { "name": "document path equality",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.profile.bio", "engineer"] }, "$return": "$u.id" } },
+    { "name": "document path exists includes the empty string",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$exists": "$u.profile.bio" }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "empty is the absent set",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$empty": "$u.age" }, "$return": "$u.id" } },
+    { "name": "exists over the instant column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$exists": "$u.joined" }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "instant range over a second-precision literal",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ge": ["$u.joined", "2026-01-01T00:00:00Z"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "instant le hits the fractional value exactly",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$le": ["$u.joined", "2026-03-01T08:00:00.250Z"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "instant eq on the fractional text",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.joined", "2026-03-01T08:00:00.250Z"] }, "$return": "$u.id" } },
+    { "name": "same instant, different text is not equal",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.joined", "2026-01-05T10:00:00.000Z"] }, "$return": "$u.id" } },
+    { "name": "order by the instant path across precisions",
+      "query": { "$for": { "u": "$.User[*]" }, "$orderby": ["$u.joined"], "$return": "$u.id" } },
+    { "name": "instant desc window",
+      "query": { "$subsequence": [{ "$for": { "u": "$.User[*]" }, "$where": { "$exists": "$u.joined" }, "$orderby": [{ "$key": "$u.joined", "$dir": "desc" }], "$return": "$u.id" }, 0, 2] } },
+    { "name": "offset literal compares as text, not as an instant",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ge": ["$u.joined", "2026-01-05T12:00:00+02:00"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "date-shaped literal on a date-time column compares as text",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ge": ["$u.joined", "2026-01-01"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "starts-with over the instant path",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$starts-with": ["$u.joined", "2026"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "string operators on a mapped column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$contains": ["$u.name", "i"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "full match on a mapped column",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$match": ["$u.name", "a.a"] }, "$return": "$u.id" } },
+    { "name": "string external",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.name", "$who"] }, "$return": "$u.id" },
+      "externals": { "who": "lin" } },
+    { "name": "numeric external",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ge": ["$u.age", "$min"] }, "$orderby": ["$u.id"], "$return": "$u.id" },
+      "externals": { "min": 30 } },
+    { "name": "boolean external diverts at bind",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.name", "$flag"] }, "$return": "$u.id" },
+      "externals": { "flag": true } },
+    { "name": "cross-type external stays native",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ge": ["$u.age", "$min"] }, "$return": "$u.id" },
+      "externals": { "min": "high" } },
+    { "name": "missing external raises the engine's error",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.name", "$who"] }, "$return": "$u.id" } },
+    { "name": "object projection is residual",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$gt": ["$u.age", 21] }, "$orderby": ["$u.id"], "$return": { "n": "$u.name" } } },
+    { "name": "bare return with no filter",
+      "query": { "$for": { "u": "$.User[*]" }, "$orderby": ["$u.id"], "$return": "$u" } }
+  ]
+}

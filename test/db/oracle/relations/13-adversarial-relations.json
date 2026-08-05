@@ -1,0 +1,92 @@
+{
+  "group": "13 adversarial relations",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "User": {
+        "schema": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "x-entity": { "key": true } },
+            "name": { "type": "string" },
+            "age": { "type": "integer" },
+            "joined": { "type": "string", "format": "date-time", "x-entity": { "column": "integer", "index": true } },
+            "profile": { "type": "object", "properties": { "bio": { "type": "string" } } },
+            "posts": { "x-entity": { "relation": { "to": "Post", "many": true, "via": "authorId", "onDelete": "cascade" } } }
+          }
+        }
+      },
+      "Post": {
+        "schema": {
+          "type": "object",
+          "required": ["pid", "authorId"],
+          "properties": {
+            "pid": { "type": "integer", "x-entity": { "key": true } },
+            "title": { "type": "string" },
+            "stars": { "type": "integer" },
+            "authorId": { "type": "string" }
+          }
+        }
+      },
+      "Tag": {
+        "schema": {
+          "type": "object",
+          "required": ["tid"],
+          "properties": {
+            "tid": { "type": "string", "x-entity": { "key": true } },
+            "label": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "documents": {
+    "User": [
+      { "id": "u1", "name": "ada", "age": 36, "joined": "2026-01-05T10:00:00Z", "profile": { "bio": "engineer" } },
+      { "id": "u2", "name": "lin", "age": 64, "joined": "2026-03-01T08:00:00.250Z" },
+      { "id": "u3", "name": "kid", "age": 8 },
+      { "id": "u4", "name": "mo" }
+    ],
+    "Post": [
+      { "pid": 1, "title": "alpha", "stars": 5, "authorId": "u1" },
+      { "pid": 2, "title": "beta", "stars": 1, "authorId": "u1" },
+      { "pid": 3, "title": "gamma", "stars": 4, "authorId": "u2" },
+      { "pid": 4, "title": "aria", "stars": 3, "authorId": "u1" },
+      { "pid": 5, "title": "epsilon", "authorId": "u2" }
+    ],
+    "Tag": []
+  },
+  "cases": [
+    { "name": "gt skips rows with the operand absent",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$gt": ["$u.age", 0] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "ge skips children with the operand absent",
+      "query": { "$for": { "p": "$.Post[*]" }, "$where": { "$ge": ["$p.stars", 0] }, "$orderby": ["$p.pid"], "$return": "$p.pid" } },
+    { "name": "a column-to-column comparison inside one binding is residual",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$eq": ["$u.name", "$u.id"] }, "$return": "$u.id" } },
+    { "name": "a join against an empty entity is empty",
+      "query": { "$for": { "t": "$.Tag[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$t.tid", "$p.authorId"] }, "$return": "$t.tid" } },
+    { "name": "counting a join against an empty entity",
+      "query": { "$count": { "$for": { "t": "$.Tag[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$t.tid", "$p.authorId"] }, "$return": "$t" } } },
+    { "name": "an unsatisfied join is empty, not an error",
+      "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$and": [{ "$eq": ["$p.authorId", "$u.id"] }, { "$gt": ["$p.stars", 100] }] }, "$return": "$p.pid" } },
+    { "name": "a window past the end is empty",
+      "query": { "$subsequence": [{ "$for": { "u": "$.User[*]" }, "$orderby": ["$u.id"], "$return": "$u.id" }, 10, 5] } },
+    { "name": "a document path under users lacking the object",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$exists": "$u.profile.bio" }, "$return": "$u.id" } },
+    { "name": "an instant bound below every value",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$le": ["$u.joined", "2020-01-01T00:00:00Z"] }, "$return": "$u.id" } },
+    { "name": "an instant bound above every value",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ge": ["$u.joined", "9999-12-31T23:59:59Z"] }, "$return": "$u.id" } },
+    { "name": "ne over the instant path rides the document",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$ne": ["$u.joined", "2026-01-05T10:00:00Z"] }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "negation stays total over mapped columns",
+      "query": { "$for": { "u": "$.User[*]" }, "$where": { "$not": { "$and": [{ "$ge": ["$u.age", 30] }, { "$eq": ["$u.name", "ada"] }] } }, "$orderby": ["$u.id"], "$return": "$u.id" } },
+    { "name": "full match against the child title",
+      "query": { "$for": { "p": "$.Post[*]" }, "$where": { "$match": ["$p.title", "a.*a"] }, "$orderby": ["$p.pid"], "$return": "$p.title" } },
+    { "name": "two ordering keys with mixed directions",
+      "query": { "$for": { "u": "$.User[*]" }, "$orderby": [{ "$key": "$u.age", "$dir": "desc" }, "$u.id"], "$return": "$u.id" } },
+    { "name": "empties order greatest when asked",
+      "query": { "$for": { "u": "$.User[*]" }, "$orderby": [{ "$key": "$u.joined", "$empty": "greatest" }, "$u.id"], "$return": "$u.id" } }
+  ]
+}

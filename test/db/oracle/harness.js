@@ -82,6 +82,87 @@ export async function storeForGroup(group) {
 }
 
 /**
+ * The entity variant: load every relations corpus group. Each group
+ * carries its own `model` (entities with explicit keys, so the JSON
+ * documents ARE the stored documents) and `documents` as the
+ * multi-entity root object the engine side queries directly.
+ * @returns {{ group: string, model: any,
+ *   documents: Record<string, any[]>, cases: { name: string,
+ *   query: any, externals?: any }[] }[]}
+ */
+export function loadRelationGroups() {
+  const dir = path.join(__dirname, 'relations');
+  return fs.readdirSync(dir)
+    .filter((file) => file.endsWith('.json'))
+    .sort()
+    .map((file) => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')));
+}
+
+/**
+ * Open a fresh store for a relations group and create every entity
+ * document, parents before children (the corpus lists entities in
+ * dependency order — real foreign keys refuse orphans).
+ * @param {any} group
+ * @returns {Promise<{ store: any }>}
+ */
+export async function storeForEntityGroup(group) {
+  const store = await openStore(group.model, { driver: nodeDriver() });
+  for (const name of Object.keys(group.documents)) {
+    const set = store.entity(name);
+    for (const document of group.documents[name]) await set.create(document);
+  }
+  return { store };
+}
+
+/**
+ * Run one entity case through both sides: the in-memory engine over
+ * the multi-entity root object, the store's entity translator over the
+ * same documents created through the entity sets.
+ * @param {any} store - the seeded store
+ * @param {Record<string, any[]>} documents - the multi-entity root
+ * @param {{ query: any, externals?: any }} kase
+ * @param {'native' | 'residual'} mode
+ * @returns {Promise<null | { expected: any, actual: any, sql?: string }>}
+ */
+export async function runEntityCase(store, documents, kase, mode) {
+  let expected;
+  let expectedCode = null;
+  try {
+    expected = compileJsonQuery(kase.query)(structuredClone(documents), kase.externals);
+  }
+  catch (error) {
+    expectedCode = /** @type {any} */ (error).code ?? String(error);
+  }
+
+  let actual;
+  let actualCode = null;
+  const options = {
+    externals: kase.externals,
+    pushdown: mode === 'residual' ? false : undefined,
+  };
+  try {
+    actual = await Promise.resolve(store.execute(kase.query, options));
+  }
+  catch (error) {
+    actualCode = /** @type {any} */ (error).code ?? String(error);
+  }
+
+  if (expectedCode !== null || actualCode !== null) {
+    if (expectedCode === actualCode) return null;
+    return { expected: `throws ${expectedCode}`, actual: `throws ${actualCode}` };
+  }
+  if (deepEquals(actual, expected)) return null;
+  let sql;
+  try {
+    sql = (await store.explain(kase.query, options)).sql;
+  }
+  catch {
+    sql = '<explain failed>';
+  }
+  return { expected, actual, sql };
+}
+
+/**
  * Run one case through both sides and assert agreement. Returns the
  * divergence report instead of throwing, so the caller can attach the
  * case name and mode.

@@ -394,18 +394,37 @@ export function explainMapping(model) {
       else if (property.index) indexes.push({ property: property.name, unique: false });
     }
     const foreignKeys = [];
+    /** @type {Map<string, any>} */
+    const fkByColumn = new Map();
     for (const other of entities.values()) {
       for (const declaring of other.relations) {
         const relation = declaring.relation;
         if (relation.kind === 'manyToMany') continue;
         if (relation.fkEntity !== entity.name) continue;
-        foreignKeys.push({
+        const existing = fkByColumn.get(relation.via);
+        if (existing !== undefined) {
+          // the validated inverse pair (one many, one one) shares ONE
+          // physical key; a many side means children share the parent,
+          // so the key cannot be unique
+          if (existing.references !== relation.fkTargets
+            || existing.onDelete !== relation.onDelete) {
+            throw new DbCompileError('JD0031',
+              `two relations claim foreign key '${relation.via}' on `
+              + `'${entity.name}' with different targets or on-delete`,
+              declaring.docPath);
+          }
+          existing.unique = existing.unique && relation.kind === 'oneToOne';
+          continue;
+        }
+        const fk = {
           column: relation.via,
           references: relation.fkTargets,
           referencesKey: entities.get(relation.fkTargets).keys[0],
           onDelete: relation.onDelete,
           unique: relation.kind === 'oneToOne',
-        });
+        };
+        fkByColumn.set(relation.via, fk);
+        foreignKeys.push(fk);
       }
     }
     mapping.entities[entity.name] = {
