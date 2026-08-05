@@ -4,7 +4,11 @@
   "title": "Jaren dataflow graph 0.1",
   "description": "Structural grammar of an executable jaren-dag document (see packages/flow/docs/FLOW-FORMAT.md sections 6-7): named nodes from a closed kind vocabulary (input, output, const, query, jslt, task) wired by edges that carry data, with embedded Jaren JSON Query and JSLT documents composed by reference - register those published grammars alongside this artifact. This schema is structural validation only: the compiler remains authoritative for the wiring rules it cannot express - unknown node references, port completeness and uniqueness, acyclicity, the exactly-one-output rule and task-registry resolution are compile-time checks (JF0xxx), and unknown members are ignored for forward compatibility.",
   "type": "object",
-  "required": ["$dag", "nodes", "edges"],
+  "required": [
+    "$dag",
+    "nodes",
+    "edges"
+  ],
   "properties": {
     "$dag": {
       "description": "The dag format version; required.",
@@ -13,12 +17,16 @@
     "nodes": {
       "description": "Node declarations, id to declaration. The id is what edges reference.",
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/node" }
+      "additionalProperties": {
+        "$ref": "#/$defs/node"
+      }
     },
     "edges": {
       "description": "The wiring: data flows from a node's result to a consumer's input scope, in document order for port-object assembly.",
       "type": "array",
-      "items": { "$ref": "#/$defs/edge" }
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
     }
   },
   "$defs": {
@@ -27,53 +35,112 @@
         {
           "description": "Yields the run's input value (null when absent). Accepts no inbound edge.",
           "type": "object",
-          "properties": { "kind": { "const": "input" } },
-          "required": ["kind"]
+          "properties": {
+            "kind": {
+              "const": "input"
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind"
+          ]
         },
         {
           "description": "The run's result is this node's input scope value. Exactly one per document; no outbound edge.",
           "type": "object",
-          "properties": { "kind": { "const": "output" } },
-          "required": ["kind"]
+          "properties": {
+            "kind": {
+              "const": "output"
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind"
+          ]
         },
         {
           "description": "Yields its literal value. Accepts no inbound edge.",
           "type": "object",
           "properties": {
-            "kind": { "const": "const" },
-            "value": { "description": "Any JSON value, delivered by reference." }
+            "kind": {
+              "const": "const"
+            },
+            "value": {
+              "description": "Any JSON value, delivered by reference."
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
           },
-          "required": ["kind", "value"]
+          "required": [
+            "kind",
+            "value"
+          ]
         },
         {
           "description": "A Jaren JSON Query evaluated with $ bound to the node's input scope; an empty result yields null.",
           "type": "object",
           "properties": {
-            "kind": { "const": "query" },
+            "kind": {
+              "const": "query"
+            },
             "query": {
               "description": "The query document.",
-              "allOf": [{ "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }]
+              "allOf": [
+                {
+                  "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+                }
+              ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
-          "required": ["kind", "query"]
+          "required": [
+            "kind",
+            "query"
+          ]
         },
         {
           "description": "A JSLT stylesheet transforming the node's input scope; an empty result yields null.",
           "type": "object",
           "properties": {
-            "kind": { "const": "jslt" },
+            "kind": {
+              "const": "jslt"
+            },
             "stylesheet": {
               "description": "The stylesheet document (bare rule array or envelope form).",
-              "allOf": [{ "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1" }]
+              "allOf": [
+                {
+                  "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1"
+                }
+              ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
-          "required": ["kind", "stylesheet"]
+          "required": [
+            "kind",
+            "stylesheet"
+          ]
         },
         {
           "description": "A registered async handler, called as handler({ with, input }, signal); the handler must honor the run's shared AbortSignal.",
           "type": "object",
           "properties": {
-            "kind": { "const": "task" },
+            "kind": {
+              "const": "task"
+            },
             "run": {
               "description": "The compile-time registry handler name.",
               "type": "string",
@@ -81,10 +148,21 @@
             },
             "with": {
               "description": "Handler props: a query resolved against the node's input scope (null when absent or empty).",
-              "allOf": [{ "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }]
+              "allOf": [
+                {
+                  "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+                }
+              ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
-          "required": ["kind", "run"]
+          "required": [
+            "kind",
+            "run"
+          ]
         }
       ]
     },
@@ -106,10 +184,17 @@
         },
         "select": {
           "description": "A query applied to the source value before delivery; an empty result delivers null.",
-          "allOf": [{ "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }]
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+            }
+          ]
         }
       },
-      "required": ["from", "to"]
+      "required": [
+        "from",
+        "to"
+      ]
     }
   }
 }

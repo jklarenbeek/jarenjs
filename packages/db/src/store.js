@@ -34,6 +34,7 @@ import { entityCore } from './entity.js';
 import { createTracker } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
+import { createJobEngine } from './jobs.js';
 import { collectEntityRoots } from './plan.js';
 
 /** The model format version this store implements. */
@@ -748,6 +749,15 @@ export function openStore(model, options) {
           if (capture !== null) {
             capture.observe((record) => /** @type {any} */ (liveRegistry).deliver(record));
           }
+          // the durable job queue (JOBS-FORMAT), opt-in per store
+          const jobsRequested = options.jobs === true
+            || (options.jobs !== undefined && options.jobs !== false);
+          const jobsEngine = !jobsRequested ? null : createJobEngine({
+            connection,
+            now: typeof options.jobs === 'object' ? options.jobs.now : undefined,
+            random: typeof options.jobs === 'object' ? options.jobs.random : undefined,
+            defaults: typeof options.jobs === 'object' ? options.jobs : undefined,
+          });
           /** Register a collection live query (LIVE-FORMAT §7). */
           const registerCollectionLive = (core, document, liveOptions) => {
             const externals = liveOptions?.externals ?? {};
@@ -889,6 +899,8 @@ export function openStore(model, options) {
               && (captureRequested.log === true
                 || (captureRequested.log !== undefined && captureRequested.log !== false)),
             live: captureMode !== 'none',
+            jobs: options.jobs === true
+              || (options.jobs !== undefined && options.jobs !== false),
           });
 
           const queryState = createQueryState(options.statementCacheBound);
@@ -1079,9 +1091,21 @@ export function openStore(model, options) {
             dataVersion: lift(() => chain(
               connection.prepare(dialect.introspect.dataVersion()),
               (statement) => chain(statement.get([]), (row) => Number(row.v)))),
+            jobs: jobsEngine === null ? undefined : Object.freeze({
+              enqueue: lift(jobsEngine.enqueue),
+              get: lift(jobsEngine.get),
+              counts: lift(jobsEngine.counts),
+              claim: lift(jobsEngine.claim),
+              complete: lift(jobsEngine.complete),
+              fail: lift(jobsEngine.fail),
+              checkpointsFor: jobsEngine.checkpointsFor,
+              createWorker: jobsEngine.createWorker,
+            }),
             close: lift(() => {
               if (liveRegistry !== null) liveRegistry.closeAll();
-              return connection.close();
+              return chain(
+                jobsEngine === null ? null : jobsEngine.stopAll(),
+                () => connection.close());
             }),
           };
 
@@ -1137,7 +1161,8 @@ export function openStore(model, options) {
             });
           }
           return chain(capture === null ? null : capture.ready,
-            () => Object.freeze(store));
+            () => chain(jobsEngine === null ? null : jobsEngine.ready,
+              () => Object.freeze(store)));
         })));
     }));
 }

@@ -112,6 +112,7 @@ export interface StoreCapabilities {
   readonly capture: 'session' | 'journal' | 'none';
   readonly captureLog: boolean;
   readonly live: boolean;
+  readonly jobs: boolean;
   readonly [capability: string]: unknown;
 }
 
@@ -221,6 +222,8 @@ export interface Store {
    * strategy in this version); present only with entities. */
   live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
   close(): Promise<void>;
+  /** The queue surface; present when opened with `jobs` (JOBS-FORMAT). */
+  readonly jobs?: JobsApi;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
 }
@@ -305,6 +308,8 @@ export interface OpenStoreOptions {
   capture?: boolean | CaptureOptions;
   /** Live-query bounds (LIVE-FORMAT §12). */
   live?: LiveBounds;
+  /** The durable job queue (JOBS-FORMAT); off unless requested. */
+  jobs?: boolean | JobsOptions;
   /** The injected validation hook (D10); absent means unvalidated,
    * declared through `capabilities.validated`. */
   compileSchema?: (schema: unknown) => (doc: unknown) => unknown;
@@ -486,3 +491,101 @@ export declare function createSortedWindow(
 export declare function compareCodepoint(a: string, b: string): number;
 export declare function collectEntityRoots(
   document: unknown, entities: ReadonlyMap<string, unknown>): Set<string>;
+
+// ————— the job queue (JOBS-FORMAT) —————
+
+export interface JobRecord {
+  readonly id: string;
+  readonly kind: string;
+  readonly payload: unknown;
+  readonly state: 'pending' | 'leased' | 'done' | 'failed' | 'dead';
+  readonly runAt: number;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly leaseUntil: number | null;
+  readonly leaseOwner: string | null;
+  readonly lastError: string | null;
+  readonly result: unknown;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface JobCounts {
+  pending: number;
+  leased: number;
+  done: number;
+  failed: number;
+  dead: number;
+  /** Pending/failed totals per kind — how a handler-less kind REPORTS. */
+  pendingKinds: Record<string, number>;
+}
+
+export interface JobWorker {
+  start(): JobWorker;
+  /** Resolves after in-flight handlers settle. */
+  stop(): Promise<void>;
+  stats(): { claims: number; completions: number; failures: number;
+    polls: number; wakes: number };
+}
+
+export interface JobWorkerOptions {
+  handlers: Record<string,
+    (payload: unknown, context: { job: JobRecord, checkpointsFor: Function }) => unknown>;
+  concurrency?: number;
+  pollInterval?: number;
+  leaseMs?: number;
+  owner?: string;
+  backoffBase?: number;
+  backoffCap?: number;
+}
+
+export interface JobsApi {
+  enqueue(kind: string, payload?: unknown,
+    options?: { id?: string; runAt?: number; maxAttempts?: number }): Promise<string>;
+  get(id: string): Promise<JobRecord | undefined>;
+  counts(): Promise<JobCounts>;
+  /** The low-level guarded claim the worker itself uses (§3). */
+  claim(options: { kinds: string[]; owner: string; leaseMs?: number }):
+    Promise<JobRecord | undefined>;
+  complete(id: string, owner: string, result?: unknown): Promise<boolean>;
+  fail(id: string, owner: string, error: unknown): Promise<boolean>;
+  /** The per-job flow checkpoint store binding (§7). */
+  checkpointsFor(job: JobRecord): {
+    load(runId: string): unknown;
+    save(runId: string, nodeId: string, value: unknown): unknown;
+    complete(runId: string, result: unknown): unknown;
+  };
+  createWorker(options: JobWorkerOptions): JobWorker;
+}
+
+export interface JobsOptions {
+  maxAttempts?: number;
+  leaseMs?: number;
+  pollInterval?: number;
+  backoffBase?: number;
+  backoffCap?: number;
+  /** Injectable clock and randomness — every test injects both. */
+  now?: () => number;
+  random?: () => number;
+}
+
+export declare function createDagJobRunner(store: Store, options: {
+  compileDag: Function;
+  documents: Record<string, unknown>;
+  tasks?: Record<string, Function>;
+  concurrency?: number;
+  pollInterval?: number;
+  leaseMs?: number;
+  owner?: string;
+  backoffBase?: number;
+  backoffCap?: number;
+}): JobWorker;
+
+export declare function createJobEngine(options: {
+  connection: unknown; now?: () => number; random?: () => number;
+  defaults?: JobsOptions }): unknown;
+export declare const JOBS_TABLE: string;
+export declare const JOB_CHECKPOINTS_TABLE: string;
+export declare const JOB_DEFAULTS: Readonly<{
+  maxAttempts: number; leaseMs: number; pollInterval: number;
+  backoffBase: number; backoffCap: number }>;

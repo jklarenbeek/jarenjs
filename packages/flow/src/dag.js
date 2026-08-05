@@ -16,6 +16,7 @@
 
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { FlowCompileError, FlowRuntimeError } from './errors.js';
 
 /**
@@ -60,8 +61,21 @@ function compileEmbedded(compile, embedded, docPath) {
 }
 
 /**
- * A settlement record handed to `onNode` (§7.4).
- * @typedef {{ id: string, status: 'ok'|'error'|'aborted', ms: number }} DagNodeRecord
+ * A settlement record handed to `onNode` (§7.4). `restored` fires at
+ * the start of a RESUMED run for every node whose checkpointed value
+ * was seeded instead of evaluated (§7.6).
+ * @typedef {{ id: string, status: 'ok'|'error'|'aborted'|'restored', ms: number }} DagNodeRecord
+ */
+
+/**
+ * The opt-in checkpoint store (§7.6): `load` answers a prior run's
+ * recorded values (or null), `save` records one declared node's
+ * value, `complete` records the run's result. Any member may return a
+ * promise; a throwing store fails the run (JF2009), never silently.
+ * @typedef {Object} DagCheckpointStore
+ * @property {(runId: string) => any} load
+ * @property {(runId: string, nodeId: string, value: any) => any} save
+ * @property {(runId: string, result: any) => any} complete
  */
 
 /**
@@ -69,7 +83,7 @@ function compileEmbedded(compile, embedded, docPath) {
  * @typedef {Object} CompiledDag
  * @property {readonly string[]} nodes - Declared node ids, document order.
  * @property {string} output - The output node's id.
- * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void }) => Promise<any>} run -
+ * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void, runId?: string }) => Promise<any>} run -
  *   Execute the graph for one input (`undefined` reads as `null`).
  */
 
@@ -80,16 +94,25 @@ function compileEmbedded(compile, embedded, docPath) {
  * registry resolution — `run` only executes closures.
  *
  * @param {any} doc - the jaren-dag document
- * @param {{ tasks?: Record<string, (props: { with: any, input: any }, signal: AbortSignal) => any> }} [options]
+ * @param {{ tasks?: Record<string, (props: { with: any, input: any }, signal: AbortSignal) => any>,
+ *   checkpoint?: DagCheckpointStore }} [options]
  * @returns {CompiledDag}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
  * @throws {TypeError} when the options are malformed (a registry that is
- *   not an object, or a registered handler that is not a function)
+ *   not an object, a registered handler that is not a function, or a
+ *   checkpoint store missing one of load/save/complete)
  */
 export function compileDag(doc, options) {
   const tasks = options?.tasks ?? {};
   if (!isJsonObject(tasks)) {
     throw new TypeError('compileDag: "tasks" must be an object of handler functions');
+  }
+  const checkpoint = options?.checkpoint;
+  if (checkpoint !== undefined && (typeof checkpoint?.load !== 'function'
+    || typeof checkpoint.save !== 'function'
+    || typeof checkpoint.complete !== 'function')) {
+    throw new TypeError(
+      'compileDag: "checkpoint" must provide load, save and complete functions');
   }
 
   if (!isJsonObject(doc)) {
@@ -116,8 +139,16 @@ export function compileDag(doc, options) {
         `node '${id}' must be an object with a kind from ${KINDS.join('|')}`,
         isJsonObject(decl) ? `${base}/kind` : base);
     }
+    if (decl.checkpoint !== undefined && typeof decl.checkpoint !== 'boolean') {
+      throw new FlowCompileError('JF0011',
+        `node '${id}' has a "checkpoint" member that is not a boolean`,
+        `${base}/checkpoint`);
+    }
     /** @type {any} */
-    const node = { id, kind: decl.kind, docPath: base, inbound: [] };
+    const node = {
+      id, kind: decl.kind, docPath: base, inbound: [],
+      checkpoint: decl.checkpoint === true,
+    };
     switch (decl.kind) {
       case 'const':
         if (!Object.hasOwn(decl, 'value')) {
@@ -306,15 +337,25 @@ export function compileDag(doc, options) {
     if (onNode !== undefined && typeof onNode !== 'function') {
       throw new TypeError('run: "onNode" must be a function');
     }
-    return execute(input === undefined ? null : input, signal, onNode);
+    const runId = opts?.runId;
+    if (runId !== undefined && checkpoint === undefined) {
+      throw new TypeError('run: "runId" needs a checkpoint store on compileDag');
+    }
+    if (checkpoint !== undefined
+      && (typeof runId !== 'string' || runId === '')) {
+      throw new TypeError(
+        'run: a checkpointed dag needs a non-empty string "runId" to persist under');
+    }
+    return execute(input === undefined ? null : input, signal, onNode, runId);
   }
 
   /**
    * @param {any} runInput
    * @param {AbortSignal|undefined} signal
    * @param {((record: DagNodeRecord) => void)|undefined} onNode
+   * @param {string|undefined} runId
    */
-  async function execute(runInput, signal, onNode) {
+  async function execute(runInput, signal, onNode, runId) {
     const controller = new AbortController();
     /** @type {FlowRuntimeError|null} */
     let failure = null;
@@ -356,6 +397,30 @@ export function compileDag(doc, options) {
 
     /** @type {Map<string, Promise<any>>} */
     const promises = new Map();
+
+    // a resumed run SEEDS the memo from the store (§7.6): recorded
+    // values for declared-checkpoint nodes skip evaluation entirely —
+    // the execution model is untouched, only where the memo comes from
+    if (checkpoint !== undefined && runId !== undefined) {
+      let loaded;
+      try {
+        loaded = await checkpoint.load(runId);
+      }
+      catch (err) {
+        const cause = asError(err);
+        throw new FlowRuntimeError('JF2009',
+          `the checkpoint store failed to load run '${runId}': ${cause.message}`,
+          '', cause);
+      }
+      if (loaded !== null && loaded !== undefined && isJsonObject(loaded.values)) {
+        for (const id of Object.keys(loaded.values)) {
+          const node = nodes.get(id);
+          if (node === undefined || node.checkpoint !== true) continue;
+          promises.set(id, Promise.resolve(loaded.values[id]));
+          record({ id, status: 'restored', ms: 0 });
+        }
+      }
+    }
 
     /** @param {string} id @returns {Promise<any>} */
     const valueOf = (id) => {
@@ -424,6 +489,29 @@ export function compileDag(doc, options) {
           }
           default: value = null; break;
         }
+        if (node.checkpoint && checkpoint !== undefined && runId !== undefined) {
+          // the explicit serialization contract (§7.6): the node
+          // DECLARED its output JSON; a value that is not fails the
+          // run at save time, never a silent skip
+          try {
+            canonicalizeJson(value);
+          }
+          catch (err) {
+            const cause = asError(err);
+            throw new FlowRuntimeError('JF2008',
+              `node '${node.id}' declared checkpoint but produced a value that is `
+              + `not JSON-serializable: ${cause.message}`, node.docPath, cause);
+          }
+          try {
+            await checkpoint.save(runId, node.id, value);
+          }
+          catch (err) {
+            const cause = asError(err);
+            throw new FlowRuntimeError('JF2009',
+              `the checkpoint store failed to save node '${node.id}': ${cause.message}`,
+              node.docPath, cause);
+          }
+        }
         settle('ok');
         return value;
       }
@@ -465,7 +553,19 @@ export function compileDag(doc, options) {
       }
     }
     if (failure !== null) throw failure;
-    return promises.get(outputId);
+    const result = await promises.get(outputId);
+    if (checkpoint !== undefined && runId !== undefined) {
+      try {
+        await checkpoint.complete(runId, result);
+      }
+      catch (err) {
+        const cause = asError(err);
+        throw new FlowRuntimeError('JF2009',
+          `the checkpoint store failed to complete run '${runId}': ${cause.message}`,
+          '', cause);
+      }
+    }
+    return result;
   }
 
   return Object.freeze({

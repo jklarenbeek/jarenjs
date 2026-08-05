@@ -54,3 +54,7 @@ export {
 export { DbCompileError, DbRuntimeError, DB_CODES } from './errors.js';
 export { classifyLiveQuery, createLiveRegistry, diffRows, LIVE_DEFAULTS } from './live.js';
 export { createSortedWindow, compareCodepoint } from './window.js';
+export {
+  createJobEngine, JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_DEFAULTS,
+} from './jobs.js';
+export { createDagJobRunner } from './dag-job.js';

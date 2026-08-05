@@ -43,6 +43,8 @@ export const FLOW_CODES = Object.freeze({
   JF2005: 'a session was created with no start state',
   JF2006: 'a dag node failed while evaluating; the run rejects',
   JF2007: 'the caller signal aborted the run',
+  JF2008: 'a declared checkpoint value is not JSON-serializable',
+  JF2009: 'the checkpoint store failed',
 });
 
 /**

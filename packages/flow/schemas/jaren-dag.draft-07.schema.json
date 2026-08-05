@@ -38,6 +38,10 @@
           "properties": {
             "kind": {
               "const": "input"
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
           "required": [
@@ -50,6 +54,10 @@
           "properties": {
             "kind": {
               "const": "output"
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
           "required": [
@@ -65,6 +73,10 @@
             },
             "value": {
               "description": "Any JSON value, delivered by reference."
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
           "required": [
@@ -86,6 +98,10 @@
                   "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
                 }
               ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
           "required": [
@@ -107,6 +123,10 @@
                   "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07"
                 }
               ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
           "required": [
@@ -133,6 +153,10 @@
                   "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
                 }
               ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
             }
           },
           "required": [

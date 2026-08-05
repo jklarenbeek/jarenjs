@@ -234,6 +234,8 @@ exactly the kind of partial result D7 forbids:
 |---|---|
 | JF2006 | a node failed while evaluating (own `nodeId` property beside `docPath` and `cause`) |
 | JF2007 | the caller's signal aborted the run |
+| JF2008 | a node declared `checkpoint: true` but produced a value that is not JSON-serializable; the run rejects at save time |
+| JF2009 | the checkpoint store threw while loading, saving or completing; the run rejects |
 
 ## §6 The jaren-dag document
 
@@ -350,8 +352,11 @@ staleness answer when a dag runs as an app effect
 
 `onNode` receives one bounded JSON record per node **that started
 evaluating**, at settlement: `{ id, status, ms }` with `status` one of
-`ok` | `error` | `aborted` and `ms` the node's own evaluation time
-(waiting for inputs excluded). The first failure records `error`;
+`ok` | `error` | `aborted` | `restored` and `ms` the node's own
+evaluation time (waiting for inputs excluded). `restored` is the one
+exception to "started evaluating": a RESUMED run (§7.6) fires it
+first, `ms: 0`, for every node whose checkpointed value was seeded
+instead of evaluated. The first failure records `error`;
 concurrent losers and abort victims record `aborted`; nodes whose
 inputs never arrived produce no record. Records for stragglers MAY
 arrive after the run promise already rejected. A throwing observer is
@@ -365,8 +370,72 @@ isolated and ignored — observation MUST NOT change a run.
   — so it is not bolted on here.
 - **Retries.** A failed run is rerun by its caller; retry policy
   belongs to the host (or the app's task convention), not the graph.
-- **Persistence / resume.** A run holds no durable state; checkpoints
-  would make every node contract a serialization contract.
+- **Persistence / resume — amended.** A run STILL holds no durable
+  state by default, because checkpoints would make every node contract
+  a serialization contract. §7.6 makes that contract EXPLICIT and
+  opt-in instead of universal: nothing changes for any document or
+  caller that does not ask.
 - **Cross-run caching.** Same-input memoization is a host concern;
   the engine promising it would outlaw impure task handlers the
   format explicitly allows.
+
+### §7.6 Checkpointing — the explicit serialization contract
+
+Durable runs are OPT-IN twice: the caller provides a store, and each
+node that wants its value persisted declares it.
+
+```js
+const dag = compileDag(doc, { tasks, checkpoint: {
+  load(runId) {},               // → { values: { [nodeId]: value } } | null
+  save(runId, nodeId, value) {}, // record one declared node's value
+  complete(runId, result) {},    // record the run's result
+} });
+await dag.run(input, { runId: 'run-42' });
+```
+
+- A node declares `"checkpoint": true` to assert its output is JSON.
+  A declared node whose value fails RFC 8785 canonicalization is
+  **`JF2008` at save time, never a silent skip** — the node's author
+  claimed a serialization contract and broke it. Undeclared nodes are
+  simply RECOMPUTED on resume, which preserves the exact 0.1 contract
+  for every document written before this section existed.
+- A resumed run (`run(input, { runId })` with recorded values) SEEDS
+  the per-run memo from `load` and restarts the rest — the execution
+  model is untouched; only where the memo comes from changed. Seeded
+  nodes fire `restored` records (§7.4).
+- `save` runs after the node's value exists and before its `ok`
+  record: a crash between the two re-runs the node on resume —
+  at-least-once, stated plainly. A store member MAY return a promise;
+  a THROWING store fails the run with `JF2009`.
+- `complete(runId, result)` runs after the output settles; a queue
+  backing the store can mark its job done in the same transaction —
+  which is the entire point of the shape.
+- **Idempotency is the caller's.** A task node with side effects that
+  runs twice after a crash is the caller's bug, bluntly. The
+  mitigation is an idempotency key threaded through the node's
+  `with` props and honoured by the effectful system itself.
+- Resuming under a DIFFERENT document than the one that saved is
+  undefined behaviour — keep the document stable with the run (the
+  `@jarenjs/db` queue stores it on the job row for exactly this
+  reason). Values recorded for node ids the current document does not
+  declare (or no longer declares `checkpoint`) are ignored.
+
+### §7.7 FSM persistence
+
+Needs nothing new: `step` is pure and a session's whole durable state
+IS its current state string. `@jarenjs/flow` ships three thin helpers
+— `snapshotFsm(session)` → `{ state }`, `resumeFsmSession(fsm,
+snapshot)` (an undeclared state refuses with the session's own
+JF2001), and `createDurableFsmSession(fsm, { load, save })`, which
+persists through a SYNCHRONOUS store on every state CHANGE, before
+the step result returns; a throwing `save` fails the send rather than
+lose a transition. A worked example over a `@jarenjs/db` collection:
+
+```js
+const machine = compileFsm(doc);
+const orders = store.sync.collection('fsm');
+const session = createDurableFsmSession(machine, {
+  load: () => orders.get('order-7')?.state ?? null,
+  save: (state) => orders.put({ id: 'order-7', state }, 'order-7'),
+});
+```
