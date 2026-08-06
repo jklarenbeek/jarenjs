@@ -13,6 +13,8 @@ import {
   compileJSONPatch, compileJsonQuery,
 } from '@jarenjs/json';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
+import { parseXQuery } from '@jarenjs/json/xquery';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -130,6 +132,45 @@ export const ENGINE_LIST = [
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
       return ok(fmt(out), t1 - t0, t2 - t1);
+    },
+  },
+  {
+    id: 'jtlt', label: 'JTLT', lead: 'JSLT\'s text front-end — render JSON as Markdown, XML or code.',
+    sourcePanes: [{ key: 'template', label: 'Template', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data' }],
+    run(source, data, options) {
+      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const t = parseJson(source.template, 'template'); if (t.error) return fail(t.error);
+      let render; const t0 = now();
+      try { render = compileJtltStylesheet(t.value, compileOptions(options)); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t1 = now();
+      let out;
+      try { out = render(d.value); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t2 = now();
+      // JTLT emits TEXT (markdown / xml / source) — show it verbatim, not fmt'd
+      return ok(out === '' ? '(empty)' : out, t1 - t0, t2 - t1);
+    },
+  },
+  {
+    id: 'xquery', label: 'XQuery', lead: 'The XQuery 3.1 text subset — parsed to a query document and run over $doc.',
+    sourcePanes: [{ key: 'text', label: 'XQuery', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data' }],
+    run(source, data, options) {
+      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      let fn; const t0 = now();
+      try { fn = compileJsonQuery(parseXQuery(source.text ?? ''), compileOptions(options)); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t1 = now();
+      let out;
+      try {
+        const externals = fn.externals.includes('doc') ? { doc: d.value } : {};
+        out = fn(d.value, externals);
+      }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t2 = now();
+      return ok(out === undefined ? '(empty sequence)' : fmt(out), t1 - t0, t2 - t1);
     },
   },
 ];

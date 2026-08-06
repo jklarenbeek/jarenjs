@@ -88,4 +88,45 @@ export const EXAMPLE_LIST = [
       { label: 'Ada', data: { data: j({ name: 'Ada Lovelace' }) } },
       { label: 'Alan', data: { data: j({ name: 'Alan Turing' }) } },
     ] },
+
+  // ——— JTLT (JSLT's text front-end) ———
+  { id: 'jtlt-md', label: 'Render a Markdown book list', engine: 'jtlt',
+    source: { template: j([
+      { match: '$', body: ['# Books\n\n', { $apply: '$.store.book[*]' }] },
+      { match: '$.store.book[*]', body: ['- **', '$.title', '** — ', '$.price', '\n'] },
+    ]) },
+    datasets: [bookstore] },
+  { id: 'jtlt-modes', label: 'Two modes: a TOC and the body', engine: 'jtlt',
+    source: { template: j({ $jtlt: '0.1', rules: [
+      { match: '$', body: ['TOC\n', { $apply: ['$.sections[*]', 'toc'] }, '\n', { $apply: '$.sections[*]' }] },
+      { mode: 'toc', match: '$.sections[*]', body: ['- ', '$.heading', '\n'] },
+      { match: '$.sections[*]', body: ['== ', '$.heading', ' ==\n', '$.text', '\n\n'] },
+    ] }) },
+    datasets: [{ label: 'doc', data: { data: j({ sections: [
+      { heading: 'Introduction', text: 'Start here.' },
+      { heading: 'Usage', text: 'Then this.' },
+    ] }) } }] },
+  { id: 'jtlt-xml', label: 'XML: escaping vs $raw', engine: 'jtlt',
+    source: { template: j({ $jtlt: '0.1', output: 'xml', rules: [
+      { match: '$', body: ['<notes>\n', { $apply: '$.notes[*]' }, '</notes>'] },
+      { match: '$.notes[*]', body: ['  <note title="', '$.title', '">', { $raw: '$.markup' }, '</note>\n'] },
+    ] }) },
+    datasets: [{ label: 'notes', data: { data: j({ notes: [
+      { title: 'Q&A', markup: '<b>escaped attribute, raw body</b>' },
+      { title: "Rock 'n' roll", markup: '<i>quotes too</i>' },
+    ] }) } }] },
+  { id: 'jtlt-codegen', label: 'Codegen with $json', engine: 'jtlt',
+    source: { template: j([{ match: '$', body: ['export const config = ', { $json: '$' }, ';\n'] }]) },
+    datasets: [{ label: 'config', data: { data: j({ threshold: 10, labels: ['alpha', 'beta'] }) } }] },
+
+  // ——— XQuery (the text subset → a query document, run over $doc) ———
+  { id: 'xquery-flwor', label: 'FLWOR: cheap books', engine: 'xquery',
+    source: { text: 'for $b in $doc?store?book?*\nwhere $b?price < 10\norder by $b?price\nreturn map { "title": $b?title, "price": $b?price }' },
+    datasets: [bookstore] },
+  { id: 'xquery-join', label: 'Join books and ratings on isbn', engine: 'xquery',
+    source: { text: 'for $b in $doc?store?book?*, $r in $doc?ratings?*\nwhere $b?isbn = $r?isbn\norder by $b?price\nreturn map { "title": $b?title, "stars": $r?stars }' },
+    datasets: [bookstore] },
+  { id: 'xquery-group', label: 'Group by category', engine: 'xquery',
+    source: { text: 'for $b in $doc?store?book?*\ngroup by $genre := $b?category\nreturn map { "genre": $genre, "count": count($b), "avg": avg($b?price) }' },
+    datasets: [bookstore] },
 ];

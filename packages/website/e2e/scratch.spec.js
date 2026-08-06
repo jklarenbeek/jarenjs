@@ -58,6 +58,14 @@ test('the dataset switcher swaps the data against the same source', async ({ pag
   await expect(result).toContainText('Ada');
 });
 
+test('a JTLT example renders its text output verbatim', async ({ page }) => {
+  await page.goto('/#/scratch');
+  await page.locator('.jscratch-ex', { hasText: 'Render a Markdown book list' }).click();
+  await expect(page.locator('.jscratch-engine')).toHaveText('JTLT');
+  // JTLT emits text (markdown), shown as-is on the stage — not JSON-quoted
+  await expect(page.locator('.jscratch-result')).toContainText('# Books');
+});
+
 test('a broken selector docks an error instead of crashing the page', async ({ page }) => {
   await page.goto('/#/scratch');
   await expect(page.locator('.jscratch-result')).toBeVisible();

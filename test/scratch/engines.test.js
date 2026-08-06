@@ -48,6 +48,23 @@ describe('@jarenjs/scratch — the engines run', () => {
     assert.match(r.output, /"hi": "Ada"/);
   });
 
+  it('jtlt renders its data as TEXT (shown verbatim, not JSON-quoted)', () => {
+    const r = runExample('jtlt',
+      { template: '[{"match":"$","body":["# ","$.title","\\n"]}]' },
+      { data: '{"title":"Hello"}' });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.output, '# Hello\n', 'the markdown string is the output, unquoted');
+  });
+
+  it('xquery parses the text subset and runs it over $doc', () => {
+    const r = runExample('xquery',
+      { text: 'for $b in $doc?book?* where $b?price < 10 return $b?title' },
+      { data: '{"book":[{"title":"A","price":5},{"title":"B","price":20}]}' });
+    assert.strictEqual(r.ok, true);
+    assert.match(r.output, /"A"/);
+    assert.doesNotMatch(r.output, /"B"/, 'the where clause filtered the expensive book out');
+  });
+
   it('a compile error is a Result, never a throw', () => {
     const r = runExample('path', { selector: '$[' }, { data: '{}' });
     assert.strictEqual(r.ok, false);
