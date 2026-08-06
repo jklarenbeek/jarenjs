@@ -14,9 +14,16 @@ import { describe, assembleArtifacts } from '../assemble.js';
 import { KIND_BADGE } from './editor.js';
 
 /** The stage the active file drives. */
-function deriveStage(project, activeMeta, results, revision) {
+function deriveStage(project, activeMeta, results, revision, committed) {
   if (activeMeta === null) return { kind: 'empty', note: 'Add a file to begin.' };
   if (activeMeta.kind === 'app') {
+    // A host that runs the app live commits the LAST-GOOD assembled
+    // document (with its own reboot revision). That wins over the current
+    // text: a parse error in the editor must never blank the stage — the
+    // last good frame stays until the next VALID commit replaces it.
+    if (committed !== null && committed.doc) {
+      return { kind: 'app', mount: { doc: committed.doc, revision: committed.revision } };
+    }
     const artifact = assembleArtifacts(project).artifacts.find((a) => a.name === activeMeta.name);
     if (artifact === undefined || !activeMeta.valid) {
       return { kind: 'boot-failed', note: `${activeMeta.name} does not boot yet — fix the file (the last good render stays).` };
@@ -77,6 +84,12 @@ export function projectViewModel(state, options = {}) {
     }
   }
 
+  // the host's last-good committed app mount ({ name, doc, revision }),
+  // used only while it is the active file — a reference-stable document
+  // the stage widget reboots (revision change) or hot-updates (same
+  // revision, new state) against
+  const committed = (slice.mount && slice.mount.name === activeName) ? slice.mount : null;
+
   const editorValue = activeFile ? activeFile.text : '';
   return {
     name: slice.name ?? 'Untitled project',
@@ -91,7 +104,7 @@ export function projectViewModel(state, options = {}) {
     fileCount: project.files.length,
     problems,
     problemCount: problems.length,
-    stage: deriveStage(project, activeMeta, results, revision),
+    stage: deriveStage(project, activeMeta, results, revision, committed),
     saveState: slice.dirty === true ? 'Unsaved ●' : 'Saved',
   };
 }

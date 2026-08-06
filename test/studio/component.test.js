@@ -80,6 +80,8 @@ describe('the JSLT shell renders headlessly', () => {
     assert.match(out, /stats\.query/);        // a rail row
     assert.match(out, /JQ0002/);              // the bad file's coded error in the strip
     assert.match(out, /studio-stage/);        // the app stage widget mount point
+    assert.match(out, /project\/layout-mode/); // the layout switcher dispatches the mode
+    assert.match(out, /Stack/);               // the third layout segment
   });
 });
 

@@ -1271,6 +1271,34 @@ export function createApp(appDoc, options = {}) {
     dispatch,
     /** The current state (treat as immutable). */
     getState: () => state,
+    /**
+     * Replace the whole state from OUTSIDE the action loop and re-render.
+     * Unlike `dispatch`, this runs no reducer and no effects — it is the
+     * host-driven override for external state sync: SSR hydration, or a
+     * studio hot-swapping an edited `state` block into a running nested
+     * app without a reboot (the diff re-render keeps the DOM, so focus,
+     * scroll and uncontrolled inputs survive). Listeners are notified with
+     * `null` changed-paths (treat everything as changed); `when`-gated
+     * subscriptions refresh; a render is scheduled. A no-op when the state
+     * is reference-identical or the loop has been stopped.
+     * @param {any} next - the replacement state
+     */
+    setState(next) {
+      if (!running || next === state) return;
+      state = next;
+      for (const listener of stateListeners) {
+        try {
+          listener(state, null);
+        }
+        catch (err) {
+          const cause = toError(err);
+          safeError(new AppRuntimeError('JA2011',
+            `a state listener threw: ${safeErrorMessage(cause)}`, { cause }));
+        }
+      }
+      refreshSubs();
+      scheduleRender();
+    },
     /** The current view output — for SSR or custom renderers. */
     getVnode: vnode,
     render,

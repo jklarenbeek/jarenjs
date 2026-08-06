@@ -26,6 +26,8 @@ import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
+import { createProjectStageWidget, commitProject } from '../boundaries/project.js';
+import { projectTemplate } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
@@ -247,6 +249,24 @@ export function createSiteApp(env) {
       const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
       dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
     },
+
+    // the Project IDE: the editor commits the ACTIVE file's text (rewriting
+    // it by name — an array index a patch path cannot compute); explicit
+    // Run force-restarts the app stage; a template card opens a project.
+    'project-edit': (props, dispatch) => {
+      const p = app.getState().project;
+      const files = p.files.map((f) => (f.name === p.active ? { ...f, text: props.text } : f));
+      dispatch('project/files-set', { files });
+    },
+    'project-run': (props, dispatch) => {
+      const commit = commitProject(app.getState().project);
+      const mount = commit.mount === null ? null : { ...commit.mount, revision: commit.mount.revision + 1 };
+      dispatch('project/committed', { mount, revision: mount === null ? commit.revision : mount.revision });
+    },
+    'project-template': (props, dispatch) => {
+      const template = projectTemplate(props.id);
+      if (template !== undefined) dispatch('project/open', template);
+    },
     'open-example': (props, dispatch) => {
       if (props.validate === true) {
         env.navigate?.('#/playground?engine=validate');
@@ -356,6 +376,9 @@ export function createSiteApp(env) {
       ...DOCUMENT_WIDGETS,
       'studio-doc': createStudioHostWidget({ schedule: env.schedule }),
       'flow-doc': flowRuntime.widget,
+      // the Project IDE's live stage: boots the active app file, then
+      // reboots (revision change) or hot-updates (app.setState) per commit
+      'studio-stage': createProjectStageWidget({ schedule: env.schedule }),
     },
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),
@@ -402,6 +425,13 @@ function wireBoundaries(app, debounceMs) {
   const syncAll = () => {
     for (const engine of Object.keys(ENGINE_DEFS)) syncEng(engine);
   };
+  // the Project IDE's commit: validate + assemble the active app file and
+  // fold in the last-good stage mount (an invalid edit keeps the previous)
+  const runProjectCommit = () => {
+    const state = app.getState();
+    if (state.project === undefined) return;
+    app.dispatch('project/committed', commitProject(state.project));
+  };
   /** @type {Map<string, any>} */
   const timers = new Map();
   const debounced = (key, run) => {
@@ -422,6 +452,7 @@ function wireBoundaries(app, debounceMs) {
     const engines = new Set();
     let validate = false;
     let routed = false;
+    let project = false;
     for (const path of changes) {
       if (path === '/pg/schemaText' || path === '/pg/data' || path.startsWith('/pg/data/')) {
         validate = true;
@@ -429,11 +460,15 @@ function wireBoundaries(app, debounceMs) {
       else if (path.startsWith('/eng/')) {
         engines.add(path.split('/')[2]);
       }
+      else if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
+        project = true;
+      }
       else if (path === '/route') {
         routed = true;
       }
     }
     if (validate) debounced('validate', runValidate);
+    if (project) debounced('project', runProjectCommit);
     for (const engine of engines) {
       debounced(`eng:${engine}`, () => {
         runEng(engine);
@@ -447,6 +482,8 @@ function wireBoundaries(app, debounceMs) {
         && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
         runEng(engine);
       }
+      // arriving at the Project IDE with no live stage yet → boot it once
+      if (s.route.page === 'project' && s.project.mount === null) runProjectCommit();
       syncAll();
       binancePageSync(s.route.page === 'charts');
       applyShareToken(s);
@@ -487,5 +524,8 @@ function wireBoundaries(app, debounceMs) {
   }
 
   runValidate(); // the initial document validates immediately
+  // entering directly at #/project boots the live stage (the initial
+  // route/set fired before this subscriber attached, so seed it here)
+  if (app.getState().route.page === 'project') runProjectCommit();
   applyShareToken(app.getState()); // a share link may be the entry URL
 }

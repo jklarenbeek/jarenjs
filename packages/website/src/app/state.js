@@ -31,6 +31,7 @@ export const DEFAULT_DATA = {
 import { initialEngineInputs } from '../boundaries/engines.js';
 import { calcInitialState } from '@jarenjs/calc/component';
 import { START_LOCATION } from '../content/gameContent.js';
+import { STARTER_PROJECT } from '../content/projectTemplates.js';
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',  // 'openrouter' | 'ollama' | 'lmstudio' | 'custom'
@@ -74,6 +75,24 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // validation report ({ list, total }); `error` a boot/runtime
     // failure from the nested app's own error sink.
     studio: { doc: null, errors: null, error: null, revision: 0 },
+
+    // the Project IDE (boundaries/project.js): a jaren-project — a small
+    // tree of typed files (app / jslt / query / data / …) edited as ONE
+    // document. Each file validates against its own grammar; the active
+    // `app` file boots live in an isolated nested app whose
+    // reboot-vs-hot-update is driven by classifyChange. `mount` is the
+    // last-good assembled app ({ name, doc, revision }); `revision` bumps
+    // only on a STRUCTURAL change, so a state-only edit hot-dispatches
+    // (app.setState) with no reboot, and an INVALID edit keeps `mount`
+    // (the last good frame never blanks). Seeded from the starter template.
+    project: {
+      ...STARTER_PROJECT,
+      mount: null,       // last-good { name, doc, revision } for the active app
+      revision: 0,       // reboot key — bumps only on a structural change
+      dirty: false,      // the editor has uncommitted text
+      results: {},       // file name -> a run result (query/jslt: later order)
+      stageError: null,  // the nested app's own boot/runtime failure, if any
+    },
 
     // the Flow studio (boundaries/flowstudio.js): a jaren-fsm or
     // jaren-dag document edited three ways that cannot disagree —

@@ -23,6 +23,13 @@ export const PROJECT_BASE = '$.ui.project';
 /** The modes the host merges into the site stylesheet. */
 export const projectModes = Object.freeze({ [PROJECT_MODE]: { unmatched: 'error' } });
 
+/** One segment of the layout switcher — active when it is the live mode. */
+const layoutButton = (mode, label, title) => ['button', {
+  type: 'button', title,
+  class: { $if: [{ $eq: ['$.layout.mode', mode] }, 'seg-btn active', 'seg-btn'] },
+  on: { click: { action: 'project/layout-mode', with: mode } },
+}, label];
+
 /** The shell (matches the whole slice). */
 const shell = {
   match: PROJECT_BASE, mode: PROJECT_MODE,
@@ -33,6 +40,13 @@ const shell = {
       ['span', { class: 'js-savestate' }, '$.saveState'],
       ['span', { class: 'js-spacer' }],
       ['span', { class: 'js-filecount muted' }, ['text', '$.fileCount'], ' files'],
+      // the layout switcher: the three grid modes (the drag splitter is a
+      // later patch; this rides the same `layout.mode` → `data-mode` attr)
+      ['div', { class: 'js-layout seg', role: 'group', 'aria-label': 'layout' },
+        layoutButton('classic', 'Side', 'Editor beside the stage'),
+        layoutButton('right', 'Swap', 'Stage beside the editor'),
+        layoutButton('top', 'Stack', 'Editor over the stage'),
+      ],
       ['button', { class: 'btn small', type: 'button', on: { click: 'project/run' } }, 'Run'],
     ],
     // ——— file rail ———

@@ -79,7 +79,23 @@ split real; it extends `sourceFiles` without changing the contract.
   amber constants — no purple/pink).
 - `schemas/` — the `jaren-project` grammar + draft-07 twin.
 
-The live nested-app stage host (with the hot-update policy applied), the
-drag splitter, the reducer `project/*` actions, and the site mount are
-the wiring layer — the only browser-verified parts; everything above
-renders and is tested without a DOM.
+## The live wiring (at the host)
+
+The component is a factory, not a self-mounting widget: the host composes
+its `rules`/`modes`/`viewModel` into the site document and registers the
+DOM-touching widgets. As of v0.28.2 the website mounts it live at
+`#/project`:
+
+- the **stage host** boots the active `app` file's assembled document as
+  an isolated nested app, and applies the reboot-vs-hot-update policy —
+  a structural change reboots, a state-only change hot-dispatches the new
+  state with `app.setState` (a diff re-render, so the running app keeps
+  scroll, focus and uncontrolled inputs — no reboot);
+- the **edit loop** commits the last-good app mount, so an invalid edit
+  keeps the previous frame on the stage;
+- the **layout switcher** (pen bar) drives the three grid modes.
+
+The drag **splitter** (a pointer-capture widget committing `layout.ratio`)
+is the one remaining wiring piece. Everything above — the view, the
+derivation, the two policies — renders and is tested without a DOM; the
+live stage and the layout modes are browser-verified (`e2e/project.spec.js`).

@@ -217,6 +217,53 @@ export const ACTIONS = {
   'studio/template': { effects: [{ run: 'studio-template', with: { name: '$payload' } }] },
   'studio/download': { effects: [{ run: 'studio-download' }] },
 
+  // the Project IDE (#/project, boundaries/project.js): a jaren-project
+  // edited as one document. The editor commits the ACTIVE file's text
+  // through the `project-edit` effect (it rewrites the file by name, in
+  // JS — an array index a patch path cannot compute); the changed
+  // `/project/files` feed then drives the debounced commit
+  // (`project/committed`) that folds in the last-good app stage.
+  'project/file-text': { effects: [{ run: 'project-edit', with: { text: '$event.value' } }] },
+  'project/files-set': {
+    patch: [
+      { op: 'replace', path: '/project/files', value: '$payload.files' },
+      { op: 'replace', path: '/project/dirty', value: true },
+    ],
+  },
+  'project/active': { patch: [{ op: 'replace', path: '/project/active', value: '$payload' }] },
+  // the debounced boundary reports the last-good app mount + reboot
+  // revision (an invalid edit keeps the previous — the stage never blanks)
+  'project/committed': {
+    patch: [
+      { op: 'replace', path: '/project/mount', value: '$payload.mount' },
+      { op: 'replace', path: '/project/revision', value: '$payload.revision' },
+      { op: 'replace', path: '/project/dirty', value: false },
+    ],
+  },
+  // explicit Run: force-commit + restart the app stage
+  'project/run': { effects: [{ run: 'project-run' }] },
+  // the nested app's own boot/runtime failure (the stage widget emits it)
+  'project/stage-error': { patch: [{ op: 'replace', path: '/project/stageError', value: '$payload' }] },
+  // open a whole project (a template card, an inbound share — later order)
+  'project/open': {
+    patch: [
+      { op: 'replace', path: '/project/project', value: { $default: ['$payload.project', '0.1'] } },
+      { op: 'replace', path: '/project/name', value: '$payload.name' },
+      { op: 'replace', path: '/project/files', value: '$payload.files' },
+      { op: 'replace', path: '/project/active', value: '$payload.active' },
+      { op: 'replace', path: '/project/layout', value: '$payload.layout' },
+      { op: 'replace', path: '/project/mount', value: null },
+      { op: 'replace', path: '/project/revision', value: 0 },
+      { op: 'replace', path: '/project/dirty', value: false },
+      { op: 'replace', path: '/project/results', value: {} },
+      { op: 'replace', path: '/project/stageError', value: null },
+    ],
+  },
+  'project/template': { effects: [{ run: 'project-template', with: { id: '$payload' } }] },
+  // the layout switcher + the splitter (the splitter lands a later patch)
+  'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },
+  'project/layout-ratio': { patch: [{ op: 'replace', path: '/project/layout/ratio', value: '$payload' }] },
+
   // the data studio (boundaries/data.js): boot the owner worker, edit
   // the model/query panes, run + explain, insert, live-event, migrate.
   // A patch-only action carries its changed paths to the O(k) renderer.

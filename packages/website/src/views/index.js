@@ -13,6 +13,7 @@ import { BENCH_RULES } from './benchmarks.js';
 import { CHARTSPAGE_RULES } from './chartspage.js';
 import { PLAYGROUND_RULES } from './playground.js';
 import { STUDIO_RULES } from './studio.js';
+import { projectRules, projectModes } from '@jarenjs/studio/component';
 import { FLOW_RULES } from './flowstudio.js';
 import { GAME_RULES } from './game.js';
 import { DATA_RULES } from './data.js';
@@ -30,6 +31,7 @@ export const STYLESHEET = {
     home: { unmatched: 'error' },
     playground: { unmatched: 'error' },
     studio: { unmatched: 'error' },
+    ...projectModes,
     flow: { unmatched: 'error' },
     game: { unmatched: 'error' },
     data: { unmatched: 'error' },
@@ -50,6 +52,7 @@ export const STYLESHEET = {
     ...CHARTSPAGE_RULES,
     ...PLAYGROUND_RULES,
     ...STUDIO_RULES,
+    ...projectRules,
     ...FLOW_RULES,
     ...GAME_RULES,
     ...DATA_RULES,
