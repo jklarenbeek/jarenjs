@@ -70,6 +70,14 @@ describe('scratchViewModel', () => {
     const vm = scratchViewModel(state({ engine: 'josl', source: { text: '' }, data: {}, config: {} }));
     assert.strictEqual(vm.optionPanes[0].choices.find((c) => c.selected).value, 'josl', 'the default');
   });
+
+  it('marks a visual result as hasView (a vnode) with no text', () => {
+    const vm = scratchViewModel(state({
+      result: { ok: true, output: '', view: ['svg', {}, 'x'], timing: { compileMs: 0.1, runMs: 0 }, error: null },
+    }));
+    assert.strictEqual(vm.result.hasView, true);
+    assert.strictEqual(vm.result.hasText, false);
+  });
 });
 
 describe('the scratch JSLT view renders headlessly', () => {
@@ -81,6 +89,16 @@ describe('the scratch JSLT view renders headlessly', () => {
     assert.match(out, /scratch\/data/);      // the data editor
     assert.match(out, /scratch\/dataset/);   // the switcher (path-shapes has 3 datasets)
     assert.match(out, /Ada/);                // the run result on the stage
+  });
+
+  it('splices a rendered vnode for a visual engine, with no code block', () => {
+    const out = JSON.stringify(renderScratch(scratchViewModel(state({
+      engine: 'markdown', exampleId: 'md-tour', source: { source: '# Hi' }, data: {},
+      result: { ok: true, output: '', view: ['div', { class: 'md-preview' }, 'Hi'], timing: { compileMs: 0.1, runMs: 0 }, error: null },
+    }))));
+    assert.match(out, /jscratch-view/, 'the rendered-view container');
+    assert.match(out, /md-preview/, 'the host vnode was spliced in verbatim');
+    assert.doesNotMatch(out, /code-block/, 'no code block for a visual result');
   });
 
   it('renders an option select for a source-only engine (josl)', () => {

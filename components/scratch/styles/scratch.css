@@ -51,6 +51,9 @@
 /* ——— the stage ——— */
 .jscratch-stage-head { font-family: var(--mono, monospace); font-size: 0.75rem; padding-bottom: var(--space-2, 0.5rem); }
 .jscratch-result { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+/* a rendered visual result (markdown HTML, mermaid/charts SVG) */
+.jscratch-view { min-width: 0; }
+.jscratch-view svg { max-width: 100%; height: auto; }
 .jscratch-timing { font-size: 0.75rem; margin: 0 0 var(--space-2, 0.5rem); }
 .jscratch-hint { padding: var(--space-3, 0.75rem); }
 

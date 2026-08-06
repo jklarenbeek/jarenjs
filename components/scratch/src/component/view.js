@@ -41,7 +41,9 @@ const shell = {
         { $if: ['$.result.ok',
           ['div', { class: 'jscratch-result' },
             { $if: ['$.result.timing', ['p', { class: 'muted jscratch-timing' }, '$.result.timing'], ''] },
-            ['pre', { class: 'code-block' }, ['code', {}, '$.result.output']],
+            // a visual engine splices its rendered vnode; a text engine shows a code block
+            { $if: ['$.result.hasView', ['div', { class: 'jscratch-view' }, '$.result.view'], ''] },
+            { $if: ['$.result.hasText', ['pre', { class: 'code-block' }, ['code', {}, '$.result.output']], ''] },
           ],
           ['p', { class: 'error-line' }, ['strong', {}, '$.result.error.code'], ' ', '$.result.error.message']] },
         ['p', { class: 'muted jscratch-hint' }, 'Pick an example, or edit the source or data — it runs live.']] },

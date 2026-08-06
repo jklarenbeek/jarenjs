@@ -115,6 +115,24 @@ describe('website — the Scratch playground (#/scratch)', () => {
     assert.strictEqual(app.getState().scratch.result.ok, false, 'strict TOML rejects the null extension');
   });
 
+  it('a visual engine (mermaid) renders an SVG vnode on the stage via the host renderer', () => {
+    const { app, container } = mountSite();
+    fire(byText(scratchRoot(container), 'button', 'Flowchart'), 'click', {});
+    const s = app.getState().scratch;
+    assert.strictEqual(s.engine, 'mermaid');
+    assert.ok(s.result.ok === true && Array.isArray(s.result.view), 'the host renderer produced a vnode');
+    const html = serialize(scratchRoot(container));
+    assert.match(html, /jscratch-view/, 'the rendered-view container');
+    assert.match(html, /<svg/, 'the SVG diagram rendered on the stage');
+  });
+
+  it('a visual engine (markdown) renders HTML via the host renderer', () => {
+    const { app, container } = mountSite();
+    fire(byText(scratchRoot(container), 'button', 'GFM tour'), 'click', {});
+    assert.ok(app.getState().scratch.result.ok === true);
+    assert.match(serialize(scratchRoot(container)), /Markdown, as JSON/, 'the rendered markdown heading');
+  });
+
   it('a broken source lands as an error result — the site never crashes', () => {
     const { app, container } = mountSite();
     fire(sourceInput(container), 'input', { target: { value: '$.[[[bogus' } });

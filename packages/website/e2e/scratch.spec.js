@@ -76,6 +76,27 @@ test('a source-only engine (JOSL) toggles its dialect live via the option select
   await expect(page.locator('.error-line')).toBeVisible();
 });
 
+test('a visual engine (mermaid) renders an SVG diagram on the stage', async ({ page }) => {
+  await page.goto('/#/scratch');
+  await page.locator('.jscratch-ex', { hasText: 'Flowchart' }).click();
+  await expect(page.locator('.jscratch-engine')).toHaveText('Mermaid');
+  await expect(page.locator('.jscratch-view svg')).toBeVisible(); // the host renderer's SVG
+});
+
+test('a visual engine (charts) renders an SVG chart on the stage', async ({ page }) => {
+  await page.goto('/#/scratch');
+  await page.locator('.jscratch-ex', { hasText: 'Heatmap (log)' }).click();
+  await expect(page.locator('.jscratch-engine')).toHaveText('Charts');
+  await expect(page.locator('.jscratch-view svg')).toBeVisible();
+});
+
+test('a visual engine (markdown) renders HTML on the stage', async ({ page }) => {
+  await page.goto('/#/scratch');
+  await page.locator('.jscratch-ex', { hasText: 'GFM tour' }).click();
+  await expect(page.locator('.jscratch-engine')).toHaveText('Markdown');
+  await expect(page.locator('.jscratch-view')).toContainText('Markdown, as JSON');
+});
+
 test('a broken selector docks an error instead of crashing the page', async ({ page }) => {
   await page.goto('/#/scratch');
   await expect(page.locator('.jscratch-result')).toBeVisible();

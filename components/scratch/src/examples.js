@@ -200,4 +200,91 @@ Den Haag;548320;1248-01-01
 A-1,19.95,01234,123456789012345678901234567890,true,2026-07-27
 A-2,4.5,00042,7,false,2026-07-27T08:30:00Z
 ` } },
+
+  // ——— Markdown (visual: rendered by a host renderer, source-only) ———
+  { id: 'md-tour', label: 'GFM tour', engine: 'markdown', datasets: [],
+    source: { source: `---
+title: The inverse of JTLT
+tags: [markdown, jaren]
+---
+# Markdown, as JSON
+
+Parse **CommonMark** with *GFM* extensions into a plain JSON AST —
+then query it, transform it with JSLT, and render it as vnodes.
+
+- [x] tables, strikethrough, task lists
+- [ ] your ~~regex~~ hand-rolled parser
+
+| engine | output |
+| :----- | -----: |
+| JTLT | Markdown |
+| @jarenjs/md | JSON |
+
+\`\`\`js
+const doc = parseMarkdown(source);
+doc.ast[0].type; // 'heading'
+\`\`\`
+
+> One suite, one philosophy: parse once, run a specialized closure.
+` } },
+  { id: 'md-roundtrip', label: 'Round trip is a fixed point', engine: 'markdown', datasets: [],
+    source: { source: `# Canonical form
+
+Re-parsing \`toMarkdown(doc)\` yields a **deep-equal** AST: printing
+is a fixed point.
+
+1. parse
+2. print
+3. parse again
+` } },
+
+  // ——— Mermaid (visual: geometry-free AST → pure-vnode SVG) ———
+  { id: 'mermaid-flow', label: 'Flowchart', engine: 'mermaid', datasets: [],
+    source: { source: `flowchart TD
+  A[Start] --> B{Is it working?}
+  B -->|Yes| C[Ship it]
+  B -->|No| D[Debug]
+  D --> B
+  C --> E((Done))` } },
+  { id: 'mermaid-seq', label: 'Sequence', engine: 'mermaid', datasets: [],
+    source: { source: `sequenceDiagram
+  participant A as Alice
+  participant B as Bob
+  A->>+B: Authenticate
+  B-->>-A: Token
+  note over A,B: handshake complete` } },
+  { id: 'mermaid-state', label: 'State diagram', engine: 'mermaid', datasets: [],
+    source: { source: `stateDiagram-v2
+  [*] --> Idle
+  Idle --> Running : start
+  Running --> Idle : stop
+  Running --> [*]` } },
+  { id: 'mermaid-pie', label: 'Pie', engine: 'mermaid', datasets: [],
+    source: { source: `pie showData
+  title Time spent
+  "Parsing" : 20
+  "Layout" : 35
+  "Rendering" : 45` } },
+
+  // ——— Charts (visual: JSON/JSONX/JOSL definition → SVG; static only) ———
+  { id: 'charts-pie', label: 'Pie', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'pie', title: 'Suite time by package', slices: [
+      { label: 'validate', value: 42 }, { label: 'json', value: 25 }, { label: 'view', value: 18 }, { label: 'md', value: 15 },
+    ] }) } },
+  { id: 'charts-bar', label: 'Grouped bars', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'bar', title: 'Parse profile — ms per document', valLabel: 'ms/op',
+      categories: ['~2 kB', '~40 kB', '~90 kB'],
+      series: [{ name: 'jaren', values: [0.11, 2.3, 10.7] }, { name: 'rival', values: [0.43, 6.1, 38.4] }],
+    }) } },
+  { id: 'charts-heatmap', label: 'Heatmap (log)', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'heatmap', title: 'Speed ratio by scenario × scale (log)', log: true,
+      xLabels: ['4 books', '100 books', '1000 books'], yLabels: ['singular', 'filter', 'join'],
+      values: [[220, 80, 12], [90, 30, 6], [15, 4, 1.2]],
+    }) } },
+  { id: 'charts-sankey', label: 'Sankey', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'sankey', title: 'Where visits go', links: [
+      { source: 'search', target: 'home', value: 40 }, { source: 'social', target: 'home', value: 15 },
+      { source: 'home', target: 'docs', value: 30 }, { source: 'home', target: 'playground', value: 20 },
+      { source: 'docs', target: 'github', value: 8 },
+    ] }) } },
 ];

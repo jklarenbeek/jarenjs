@@ -7,9 +7,25 @@
  */
 import { createScratchComponent } from '@jarenjs/scratch/component';
 import { operatorRegistry } from './engines.js';
+import { md } from './markdown.js';
+import { mermaid } from './mermaid.js';
+import { chartRenderer } from './charts.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
 export const scratchComponent = createScratchComponent({ operators: operatorRegistry });
+
+/**
+ * Host-injected vnode renderers for the scratchpad's VISUAL engines (the
+ * hybrid seam): @jarenjs/scratch owns the markdown/mermaid/charts descriptors
+ * + examples, but stays free of those component deps — the rendering happens
+ * here, reusing the site's own memoized md/mermaid components and the charts
+ * static path. `md.view` / `mermaid.view` are memoized per source string.
+ */
+const renderers = {
+  markdown: (source) => md.view(source),
+  mermaid: (source) => mermaid.view(source),
+  charts: (source, config) => chartRenderer(source, config),
+};
 
 /** The initial slice: the first example, loaded and ready to run. */
 const first = scratchComponent.examples[0];
@@ -24,10 +40,10 @@ export const SCRATCH_START = Object.freeze({
   result: null,
 });
 
-/** Run the active engine over the current source + data (operators + option-pane config). */
+/** Run the active engine over the current source + data (operators, option config, visual renderers). */
 export function runScratch(slice) {
   return scratchComponent.runExample(slice.engine, slice.source, slice.data,
-    { operators: operatorRegistry, config: slice.config });
+    { operators: operatorRegistry, config: slice.config, renderers });
 }
 
 /** Load an example's source + first dataset (+ option config) into a slice-ready payload. */

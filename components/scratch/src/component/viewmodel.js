@@ -55,7 +55,12 @@ export function scratchViewModel(state) {
   const result = r === null ? { ran: false } : {
     ran: true,
     ok: r.ok === true,
+    // a visual engine (markdown/mermaid/charts) yields a `view` vnode and no
+    // text; a text engine yields `output` and no view — guard each with a bool
     output: r.output ?? '',
+    hasText: (r.output ?? '') !== '',
+    view: r.view ?? null,
+    hasView: r.view != null,
     error: r.error ? { code: r.error.code ?? '', message: r.error.message ?? '' } : null,
     timing: r.timing ? `compiled ${formatMs(r.timing.compileMs)} · ran ${formatMs(r.timing.runMs)}` : null,
   };

@@ -84,6 +84,27 @@ describe('@jarenjs/scratch — the engines run', () => {
     assert.match(repaired.output, /repairs/, 'and reports the fixes it made');
   });
 
+  it('a visual engine delegates to a host renderer and returns its vnode', () => {
+    const render = (s) => ['div', { class: 'md' }, String(s)];
+    const r = runExample('markdown', { source: '# Hi' }, {}, { renderers: { markdown: render } });
+    assert.strictEqual(r.ok, true);
+    assert.ok(Array.isArray(r.view), 'the rendered vnode is carried on .view');
+    assert.strictEqual(r.output, '', 'a visual engine has no text output');
+  });
+
+  it('a visual engine without a renderer is an honest Result, not a throw', () => {
+    const bare = runExample('mermaid', { source: 'flowchart TD\n A-->B' }, {});
+    assert.strictEqual(bare.ok, false);
+    assert.strictEqual(bare.error.code, 'SCRATCH_NO_RENDERER');
+  });
+
+  it('a visual engine surfaces a renderer throw as an error Result', () => {
+    const boom = () => { throw new Error('bad definition'); };
+    const r = runExample('charts', { source: '{}' }, {}, { renderers: { charts: boom } });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error.message, /bad definition/);
+  });
+
   it('a compile error is a Result, never a throw', () => {
     const r = runExample('path', { selector: '$[' }, { data: '{}' });
     assert.strictEqual(r.ok, false);

@@ -37,7 +37,10 @@ import { EXAMPLE_LIST } from './examples.js';
 /**
  * @typedef {Object} ScratchResult
  * @property {boolean} ok
- * @property {string} output - the formatted result (empty on error)
+ * @property {string} output - the formatted TEXT result (empty on error, or
+ *   for a visual engine whose result is a rendered vnode)
+ * @property {any} [view] - a rendered vnode (markdown/mermaid/charts), spliced
+ *   into the result pane; produced by a host-injected renderer
  * @property {{ compileMs: number, runMs: number } | null} timing
  * @property {{ message: string, code?: string, path?: string } | null} error
  */
@@ -50,7 +53,17 @@ import { EXAMPLE_LIST } from './examples.js';
  * @property {EnginePane[]} sourcePanes - the engine INPUT pane(s)
  * @property {EnginePane[]} dataPanes - the JSON it runs against (may be [])
  * @property {OptionPane[]} [optionPanes] - live mode selects (may be absent)
- * @property {(source: Record<string, string>, data: Record<string, string>, options?: { operators?: any, config?: Record<string, string> }) => ScratchResult} run
+ * @property {(source: Record<string, string>, data: Record<string, string>, options?: RunOptions) => ScratchResult} run
+ */
+
+/**
+ * @typedef {Object} RunOptions
+ * @property {any} [operators] - a host operator registry ({ toOptions() }) for query/jslt/jtlt
+ * @property {Record<string, string>} [config] - the current option-pane values
+ * @property {Record<string, (source: string, config?: any) => any>} [renderers]
+ *   host-injected vnode renderers keyed by engine id — the visual engines
+ *   (markdown/mermaid/charts) delegate their rendering here (the hybrid seam),
+ *   so the package owns the descriptors + examples but stays dependency-light
  */
 
 /**
@@ -100,8 +113,8 @@ function withConfig(engine, options) {
  * @param {string} engineId
  * @param {Record<string, string>} source
  * @param {Record<string, string>} data
- * @param {{ operators?: any, config?: Record<string, string> }} [options] - a
- *   host operator registry (query/jslt) and the current option-pane values
+ * @param {RunOptions} [options] - operators (query/jslt), the option-pane
+ *   config, and host renderers (markdown/mermaid/charts)
  * @returns {ScratchResult}
  */
 export function runExample(engineId, source, data, options = {}) {

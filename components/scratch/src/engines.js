@@ -33,7 +33,36 @@ function parseJson(text, label) {
 }
 
 /** @returns {import('./index.js').ScratchResult} */
-const ok = (output, compileMs, runMs) => ({ ok: true, output, timing: { compileMs, runMs }, error: null });
+const ok = (output, compileMs, runMs, view) => ({ ok: true, output, timing: { compileMs, runMs }, error: null, view: view ?? null });
+
+/**
+ * A VISUAL engine (markdown/mermaid/charts): the descriptor + examples live
+ * here (canonical), but the vnode rendering is delegated to a host-injected
+ * `options.renderers[id]` — the hybrid seam that keeps this package free of the
+ * @jarenjs/md, /mermaid and /charts dependencies. No renderer → an honest
+ * Result, never a throw.
+ * @returns {import('./index.js').EngineDescriptor}
+ */
+function visual(id, label, lead, opts = {}) {
+  return {
+    id, label, lead,
+    sourcePanes: [{ key: 'source', label: opts.sourceLabel ?? 'Source', control: 'code' }],
+    dataPanes: [],
+    ...(opts.optionPanes ? { optionPanes: opts.optionPanes } : {}),
+    run(source, data, options) {
+      const render = options?.renderers?.[id];
+      if (typeof render !== 'function') {
+        return fail(`the ${label} engine renders in the host — inject options.renderers.${id}`, 'SCRATCH_NO_RENDERER');
+      }
+      const t0 = now();
+      let view;
+      try { view = render(source.source ?? '', options?.config); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t1 = now();
+      return ok('', t1 - t0, 0, view);
+    },
+  };
+}
 /** @returns {import('./index.js').ScratchResult} */
 const fail = (message, c, path) => ({ ok: false, output: '', timing: null, error: { message, code: c, path } });
 
@@ -229,4 +258,14 @@ export const ENGINE_LIST = [
       return ok(stringifyJsonx(body, { indent: 2 }), t1 - t0, t2 - t1);
     },
   },
+  // ——— the visual engines: descriptor + examples here, rendering delegated ———
+  visual('markdown', 'Markdown', 'CommonMark + GFM + frontmatter → a JSON AST, rendered live.', { sourceLabel: 'Markdown' }),
+  visual('mermaid', 'Mermaid', 'Diagrams-as-code → a geometry-free AST → pure-vnode SVG.', { sourceLabel: 'Mermaid' }),
+  visual('charts', 'Charts', 'A JSON / JSONX / JOSL chart definition → schema-validated → pure-vnode SVG.', {
+    sourceLabel: 'Chart definition',
+    optionPanes: [{
+      key: 'format', label: 'Format', default: 'json',
+      choices: [{ value: 'json', label: 'JSON' }, { value: 'jsonx', label: 'JSONX' }, { value: 'josl', label: 'JOSL' }],
+    }],
+  }),
 ];

@@ -12,6 +12,11 @@ import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/j
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 
+// the visual engines delegate rendering to host renderers; a stub proves the
+// package's delegation without pulling @jarenjs/md, /mermaid or /charts here
+const stub = (s) => ['pre', {}, String(s)];
+const renderers = { markdown: stub, mermaid: stub, charts: stub };
+
 describe('@jarenjs/scratch — the example library', () => {
   it('is numerous, and every example targets a registered engine with a source + datasets', () => {
     assert.ok(EXAMPLES.length >= 15, `only ${EXAMPLES.length} examples`);
@@ -32,9 +37,11 @@ describe('@jarenjs/scratch — the example library', () => {
       // a source-only example runs once against no data
       const runs = ex.datasets.length > 0 ? ex.datasets : [{ label: '—', data: {} }];
       for (const ds of runs) {
-        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config });
+        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config, renderers });
         assert.strictEqual(r.ok, true, `${ex.id} / ${ds.label}: ${r.error?.message}`);
-        assert.ok(r.output.length > 0);
+        // a visual engine yields a rendered vnode; a text engine yields text
+        if (ENGINES[ex.engine].dataPanes.length === 0 && r.view != null) assert.ok(Array.isArray(r.view));
+        else assert.ok(r.output.length > 0);
       }
     }
   });
