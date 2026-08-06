@@ -14,6 +14,8 @@
  * renders.
  */
 
+import { ENGINE_LIST } from './engines.js';
+
 /**
  * @typedef {Object} EnginePane
  * @property {string} key - the pane's id (e.g. 'selector', 'data')
@@ -36,7 +38,7 @@
  * @property {string} [lead] - one line describing the engine
  * @property {EnginePane[]} sourcePanes - the engine INPUT pane(s)
  * @property {EnginePane[]} dataPanes - the JSON it runs against (may be [])
- * @property {(source: Record<string, string>, data: Record<string, string>) => ScratchResult} run
+ * @property {(source: Record<string, string>, data: Record<string, string>, options?: { operators?: any }) => ScratchResult} run
  */
 
 /**
@@ -48,12 +50,13 @@
  * @property {Array<{ label: string, data: Record<string, string> }>} datasets
  */
 
-/** The registered engines, by id. Filled by `src/engines/*` (next order). */
-export const ENGINES = Object.freeze(/** @type {Record<string, EngineDescriptor>} */ ({}));
+/** The registered engines, by id. */
+export const ENGINES = Object.freeze(/** @type {Record<string, EngineDescriptor>} */ (
+  Object.fromEntries(ENGINE_LIST.map((e) => [e.id, e]))));
 
 /** The ids of the registered engines, in registration order. */
 export function engineIds() {
-  return Object.keys(ENGINES);
+  return ENGINE_LIST.map((e) => e.id);
 }
 
 /** The curated example library. Filled by `src/examples/*` (next order). */
@@ -65,15 +68,16 @@ export const EXAMPLES = Object.freeze(/** @type {ScratchExample[]} */ ([]));
  * @param {string} engineId
  * @param {Record<string, string>} source
  * @param {Record<string, string>} data
+ * @param {{ operators?: any }} [options] - a host operator registry for query/jslt
  * @returns {ScratchResult}
  */
-export function runExample(engineId, source, data) {
+export function runExample(engineId, source, data, options = {}) {
   const engine = ENGINES[engineId];
   if (engine === undefined) {
     return { ok: false, output: '', timing: null, error: { message: `unknown engine: ${engineId}` } };
   }
   try {
-    return engine.run(source ?? {}, data ?? {});
+    return engine.run(source ?? {}, data ?? {}, options);
   }
   catch (err) {
     return { ok: false, output: '', timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) } };

@@ -12,10 +12,11 @@ import { ENGINES, EXAMPLES, engineIds, runExample } from '@jarenjs/scratch';
 import { createScratchComponent } from '@jarenjs/scratch/component';
 
 describe('@jarenjs/scratch — scaffold', () => {
-  it('exports the engine surface (empty until the engines land)', () => {
-    assert.deepStrictEqual(engineIds(), []);
+  it('registers the first engine set (the example library lands next order)', () => {
+    const ids = engineIds();
+    for (const id of ['path', 'pointer', 'patch', 'query', 'jslt']) assert.ok(ids.includes(id), id);
+    assert.strictEqual(typeof ENGINES.path.run, 'function');
     assert.deepStrictEqual([...EXAMPLES], []);
-    assert.deepStrictEqual(ENGINES, {});
   });
 
   it('runExample returns an error Result for an unknown engine — never throws', () => {
@@ -28,7 +29,7 @@ describe('@jarenjs/scratch — scaffold', () => {
 
   it('the component factory hands back the engine surface', () => {
     const c = createScratchComponent();
-    assert.deepStrictEqual(c.engineIds(), []);
+    assert.ok(c.engineIds().includes('path'));
     assert.strictEqual(typeof c.runExample, 'function');
   });
 });
