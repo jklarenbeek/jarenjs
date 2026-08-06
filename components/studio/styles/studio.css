@@ -1,0 +1,122 @@
+/* @jarenjs/studio — the IDE shell stylesheet.
+ *
+ * DESIGN.md-conformant: minmax(0,1fr) tracks with min-width:0 on every
+ * scrollable child, the established 1024/760 breakpoints and scroll-strip
+ * mobile pattern, the --space-*/--radius-* scales and theme tokens. The
+ * ONLY raw-hex family is the kind-badge palette — concrete constants
+ * (like the chart palettes), never aliased status tokens, and strictly
+ * blue / cyan / slate / green / amber (no purple, no pink). Colours are
+ * duplicated for .dark; a theme.js constants↔CSS-fallback sync pair is a
+ * later concern.
+ */
+
+.jstudio {
+  display: grid;
+  gap: var(--space-3, 0.75rem);
+  grid-template-columns: 11rem minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "penbar penbar penbar"
+    "rail   editor stage";
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+  min-height: 24rem;
+  --js-ratio: 0.5;
+}
+.jstudio[data-mode="right"] { grid-template-areas: "penbar penbar penbar" "rail stage editor"; }
+.jstudio[data-mode="top"] {
+  grid-template-columns: 11rem minmax(0, 1fr);
+  grid-template-areas: "penbar penbar" "rail editor" "rail stage";
+}
+
+.js-penbar {
+  grid-area: penbar; display: flex; align-items: center; gap: var(--space-2, 0.5rem);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px);
+  background: var(--surface, #fff);
+}
+.js-penname { color: var(--fg, #0f172a); }
+.js-savestate { color: var(--muted, #64748b); font-size: 0.8rem; }
+.js-spacer { flex: 1; }
+.js-filecount { font-size: 0.8rem; }
+
+.js-rail { grid-area: rail; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.js-editor { grid-area: editor; min-width: 0; display: flex; flex-direction: column; }
+.js-stage  { grid-area: stage;  min-width: 0; display: flex; flex-direction: column; }
+
+/* ——— file rail ——— */
+.js-file {
+  display: flex; align-items: center; gap: var(--space-2, 0.5rem);
+  width: 100%; border: none; background: transparent; cursor: pointer;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border-radius: var(--radius-sm, 6px); border-left: 2px solid transparent;
+  color: var(--muted, #64748b); font-size: 0.9rem; text-align: left;
+}
+.js-file.active { color: var(--fg, #0f172a); background: var(--accent-soft, #eff6ff); border-left-color: var(--accent, #2563eb); }
+.js-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.js-file-warn { color: var(--warn, #b45309); margin-left: auto; }
+
+.js-badge {
+  flex: 0 0 auto; font-size: 0.65rem; font-family: var(--mono, monospace);
+  padding: 1px 5px; border-radius: 999px; line-height: 1.4;
+}
+.js-badge[data-badge="view"]  { background: #e6efff; color: #1e40af; }
+.js-badge[data-badge="query"] { background: #e0f2fe; color: #0e7490; }
+.js-badge[data-badge="json"]  { background: #f1f5f9; color: #475569; }
+.js-badge[data-badge="model"] { background: #dcfce7; color: #15803d; }
+.js-badge[data-badge="flow"]  { background: #fef3c7; color: #b45309; }
+.dark .js-badge[data-badge="view"]  { background: #1e293b; color: #93c5fd; }
+.dark .js-badge[data-badge="query"] { background: #0c2a33; color: #67e8f9; }
+.dark .js-badge[data-badge="json"]  { background: #1e293b; color: #cbd5e1; }
+.dark .js-badge[data-badge="model"] { background: #0f2a1a; color: #86efac; }
+.dark .js-badge[data-badge="flow"]  { background: #2a2011; color: #fcd34d; }
+
+/* ——— editor ——— */
+.js-editor-head {
+  display: flex; align-items: center; gap: var(--space-2, 0.5rem);
+  border: 1px solid var(--border, #e2e8f0); border-bottom: none;
+  border-radius: var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0;
+  background: var(--surface, #fff); padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem);
+  font-family: var(--mono, monospace); font-size: 0.75rem; color: var(--muted, #64748b);
+}
+.js-editor-input {
+  flex: 1; min-height: 0; resize: none;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 0 0 var(--radius-sm, 6px) var(--radius-sm, 6px);
+  font-family: var(--mono, monospace); font-size: 0.85rem;
+  padding: var(--space-2, 0.5rem); color: var(--fg, #0f172a); background: var(--surface, #fff);
+}
+.js-errorstrip {
+  display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2, 0.5rem);
+}
+.js-errorline {
+  border: 1px solid var(--fail, #dc2626); border-left-width: 4px;
+  border-radius: var(--radius-sm, 6px); background: var(--fail-soft, #fef2f2); color: var(--fail, #dc2626);
+  font-family: var(--mono, monospace); font-size: 0.8rem;
+  padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem); text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+}
+
+/* ——— stage ——— */
+.js-stage-head { font-family: var(--mono, monospace); font-size: 0.75rem; color: var(--muted, #64748b); padding-bottom: var(--space-2, 0.5rem); }
+.js-stage-mount { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px); padding: var(--space-3, 0.75rem); }
+.js-stage-fail { border-color: var(--fail, #dc2626); color: var(--fail, #dc2626); }
+
+/* ——— the splitter (its drag is a widget; this is the visual line) ——— */
+.js-split {
+  border: none; padding: 0; cursor: col-resize; inline-size: 4px; margin-inline: -6px;
+  background: var(--border, #e2e8f0); border-radius: 2px; z-index: 1;
+}
+.js-split:hover { background: var(--accent, #2563eb); }
+
+/* ——— responsive: collapse to one column, rail → scroll strip ——— */
+@media (max-width: 1024px) {
+  .jstudio, .jstudio[data-mode="right"], .jstudio[data-mode="top"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "penbar" "rail" "editor" "stage";
+  }
+}
+@media (max-width: 760px) {
+  .js-rail { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .js-file { flex: 0 0 auto; min-height: 2.2rem; }
+}

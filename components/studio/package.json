@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/studio",
   "private": false,
-  "version": "0.28.0",
+  "version": "0.28.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -16,13 +16,15 @@
       "default": "./src/component/index.js"
     },
     "./schemas/*": "./schemas/*",
+    "./styles/studio.css": "./styles/studio.css",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/types/",
     "src/",
     "docs/",
-    "schemas/"
+    "schemas/",
+    "styles/"
   ],
   "description": "The jaren project IDE: a multi-file project (schema, view, actions, model, queries, flow) is one document; each file is validated against its own grammar, assembled into runnable artifacts, and edited/hosted by the studio widget. The engine is headless; the component layer is the IDE.",
   "author": "joham",
@@ -57,11 +59,11 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.28.0",
-    "@jarenjs/validate": "^0.28.0",
-    "@jarenjs/json": "^0.28.0",
-    "@jarenjs/app": "^0.28.0",
-    "@jarenjs/flow": "^0.28.0",
-    "@jarenjs/db": "^0.28.0"
+    "@jarenjs/core": "^0.28.1",
+    "@jarenjs/validate": "^0.28.1",
+    "@jarenjs/json": "^0.28.1",
+    "@jarenjs/app": "^0.28.1",
+    "@jarenjs/flow": "^0.28.1",
+    "@jarenjs/db": "^0.28.1"
   }
 }

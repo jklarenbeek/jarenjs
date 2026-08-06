@@ -57,7 +57,29 @@ split real; it extends `sourceFiles` without changing the contract.
 - `src/assemble.js` — `assembleArtifacts`, `classifyChange`, `describe`.
 - `src/errors.js` — `StudioError` on `@jarenjs/core`'s coded base;
   `STUDIO_CODES` (JS0001/JS0002).
-- `src/component/index.js` — `createStudioComponent` (the IDE widget lands
-  in the next order; today it exposes the engine surface a host binds at
-  mount).
+- `src/component/index.js` — `createStudioComponent`: composes the JSLT
+  view + derivation + policies + engine surface into the shape a host
+  mounts (`mode`, `rules`, `modes`, `viewModel`, `hostPolicy`,
+  `reconcileBuffer`).
+- `src/component/view.js` — the IDE as a JSLT view (one `project` mode,
+  rules matched by absolute slice path `$.ui.project`): pen bar, file
+  rail, editor + docked coded-error strip, run stage. The layout mode
+  rides `data-mode`; a kind rides `data-badge`.
+- `src/component/viewmodel.js` — `projectViewModel(state)`: the pure
+  derivation from the engine (`describe`/`assemble`) — the rail, the
+  active editor, the error strip, the stage (an app mount, a run result,
+  or an inert note).
+- `src/component/host.js` — the two hard-problem policies, pure:
+  `hostPolicy` (reboot vs. hot-update, from `classifyChange`) and
+  `reconcileBuffer` (editor buffer ↔ document).
+- `src/component/editor.js` — the baseline editor/rail vnode primitives +
+  the concrete kind-badge map (colours in `styles/studio.css`).
+- `styles/studio.css` — the three-mode grid, rail, editor, error strip,
+  splitter, and the kind-badge palette (concrete blue/cyan/slate/green/
+  amber constants — no purple/pink).
 - `schemas/` — the `jaren-project` grammar + draft-07 twin.
+
+The live nested-app stage host (with the hot-update policy applied), the
+drag splitter, the reducer `project/*` actions, and the site mount are
+the wiring layer — the only browser-verified parts; everything above
+renders and is tested without a DOM.

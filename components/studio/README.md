@@ -15,9 +15,13 @@ This package ships in two layers, the suite's convention:
   document, validate each file against its kind, assemble the runnable
   artifacts, and classify a change as structural vs. state-only. Knows the
   grammars, nothing of the DOM.
-- **the component** (`@jarenjs/studio/component`) — the IDE widget you
-  embed in your own app (like `@jarenjs/calc` / `@jarenjs/md`). *In
-  progress* — this release lands the engine; the widget is the next step.
+- **the component** (`@jarenjs/studio/component`) — the IDE itself, a
+  `createStudioComponent()` factory (like `@jarenjs/calc`): the shell is a
+  **JSLT view** (file rail, editor, docked coded-error strip, run stage)
+  over a pure `projectViewModel`, plus the two hard-problem policies
+  (`hostPolicy` reboot-vs-hot-update, `reconcileBuffer`). The chrome and
+  its derivation render headlessly and are tested as such; the live DOM
+  stage/splitter widgets and the site mount are the current work.
 
 ## The project document
 
