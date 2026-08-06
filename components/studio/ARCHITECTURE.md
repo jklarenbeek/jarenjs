@@ -93,9 +93,12 @@ DOM-touching widgets. As of v0.28.2 the website mounts it live at
   scroll, focus and uncontrolled inputs — no reboot);
 - the **edit loop** commits the last-good app mount, so an invalid edit
   keeps the previous frame on the stage;
-- the **layout switcher** (pen bar) drives the three grid modes.
+- the **layout switcher** (pen bar) drives the three grid modes, and the
+  drag **splitter** (a pointer-capture widget) drives the grid's
+  `--js-ratio` live and commits `layout.ratio` on pointer-up — also an
+  ARIA `separator`, arrow-key resizable.
 
-The drag **splitter** (a pointer-capture widget committing `layout.ratio`)
-is the one remaining wiring piece. Everything above — the view, the
-derivation, the two policies — renders and is tested without a DOM; the
-live stage and the layout modes are browser-verified (`e2e/project.spec.js`).
+Everything above — the view, the derivation, the two policies — renders
+and is tested without a DOM; the live stage, the layout modes and the
+splitter's drag are browser-verified (`e2e/project.spec.js`). Still to
+fold in: `#/playground` (engine runners as file kinds) and `#/studio`.

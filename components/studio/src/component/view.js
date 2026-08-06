@@ -63,6 +63,15 @@ const shell = {
         ['div', { class: 'js-errorstrip', role: 'status' }, [{ $apply: '$.problems[*]' }]],
         ''] },
     ],
+    // ——— splitter (a pointer-capture widget; its host IS the grab bar) ———
+    ['jaren-widget', {
+      name: 'studio-splitter', class: 'js-split',
+      role: 'separator', 'aria-orientation': 'vertical',
+      'aria-label': 'Resize the editor and stage',
+      'aria-valuemin': '10', 'aria-valuemax': '90', 'aria-valuenow': '$.ratioPct',
+      tabindex: '0',
+      props: { ratio: '$.layout.ratio', mode: '$.layout.mode' },
+    }],
     // ——— stage ———
     ['div', { class: 'js-stage' },
       ['div', { class: 'js-stage-head' }, 'Stage'],

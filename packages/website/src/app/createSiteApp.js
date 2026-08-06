@@ -26,7 +26,7 @@ import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
-import { createProjectStageWidget, commitProject } from '../boundaries/project.js';
+import { createProjectStageWidget, createProjectSplitterWidget, commitProject } from '../boundaries/project.js';
 import { projectTemplate } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
@@ -379,6 +379,8 @@ export function createSiteApp(env) {
       // the Project IDE's live stage: boots the active app file, then
       // reboots (revision change) or hot-updates (app.setState) per commit
       'studio-stage': createProjectStageWidget({ schedule: env.schedule }),
+      // the drag splitter: drives --js-ratio live, commits on pointer-up
+      'studio-splitter': createProjectSplitterWidget(),
     },
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),

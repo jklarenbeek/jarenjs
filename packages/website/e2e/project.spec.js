@@ -82,6 +82,30 @@ test('an invalid edit keeps the last good frame and docks the coded error', asyn
   await expect(mount.locator('h1')).toHaveText('Hello from the studio');
 });
 
+test('the splitter drags to commit a new ratio and keyboard-resizes as a separator', async ({ page }) => {
+  await page.goto('/#/project');
+  const splitter = page.locator('.js-split');
+  await expect(splitter).toHaveAttribute('role', 'separator');
+  await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+
+  // drag it rightward: the left (editor) pane grows → the ratio goes up,
+  // and it commits on pointer-up (the widget reflects it in aria-valuenow)
+  const box = await splitter.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 180, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.up();
+  const afterDrag = Number(await splitter.getAttribute('aria-valuenow'));
+  expect(afterDrag, 'the drag committed a larger left-pane ratio').toBeGreaterThan(50);
+
+  // keyboard: focus the separator and nudge it 5% narrower
+  await splitter.focus();
+  const before = Number(await splitter.getAttribute('aria-valuenow'));
+  await splitter.press('ArrowLeft');
+  expect(Number(await splitter.getAttribute('aria-valuenow')),
+    'ArrowLeft shrinks the left pane by 5%').toBe(before - 5);
+});
+
 test('the three layout modes render without widening the viewport, light and dark', async ({ page }) => {
   await page.goto('/#/project');
   const shell = page.locator('.jstudio');

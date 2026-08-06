@@ -2,7 +2,7 @@
  *
  * DESIGN.md-conformant: minmax(0,1fr) tracks with min-width:0 on every
  * scrollable child, the established 1024/760 breakpoints and scroll-strip
- * mobile pattern, the --space-*/--radius-* scales and theme tokens. The
+ * mobile pattern, the --space-N and --radius-N scales and theme tokens. The
  * ONLY raw-hex family is the kind-badge palette — concrete constants
  * (like the chart palettes), never aliased status tokens, and strictly
  * blue / cyan / slate / green / amber (no purple, no pink). Colours are
@@ -13,19 +13,23 @@
 .jstudio {
   display: grid;
   gap: var(--space-3, 0.75rem);
-  grid-template-columns: 11rem minmax(0, 1fr) minmax(0, 1fr);
+  --js-ratio: 0.5;
+  /* rail | editor (the ratio share) | splitter | stage (the rest) — the
+     splitter widget drives --js-ratio live; the stage's 1fr absorbs the
+     gap/rounding so the panes stay proportional */
+  grid-template-columns: 11rem minmax(0, calc((100% - 12rem) * var(--js-ratio))) auto minmax(0, 1fr);
   grid-template-areas:
-    "penbar penbar penbar"
-    "rail   editor stage";
+    "penbar penbar penbar penbar"
+    "rail   editor split  stage";
   grid-template-rows: auto minmax(0, 1fr);
   align-items: stretch;
   min-height: 24rem;
-  --js-ratio: 0.5;
 }
-.jstudio[data-mode="right"] { grid-template-areas: "penbar penbar penbar" "rail stage editor"; }
+.jstudio[data-mode="right"] { grid-template-areas: "penbar penbar penbar penbar" "rail stage split editor"; }
 .jstudio[data-mode="top"] {
   grid-template-columns: 11rem minmax(0, 1fr);
   grid-template-areas: "penbar penbar" "rail editor" "rail stage";
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .js-penbar {
@@ -102,12 +106,20 @@
   border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px); padding: var(--space-3, 0.75rem); }
 .js-stage-fail { border-color: var(--fail, #dc2626); color: var(--fail, #dc2626); }
 
-/* ——— the splitter (its drag is a widget; this is the visual line) ——— */
+/* ——— the splitter (a pointer-capture widget; this is the grab bar) ——— */
 .js-split {
-  border: none; padding: 0; cursor: col-resize; inline-size: 4px; margin-inline: -6px;
-  background: var(--border, #e2e8f0); border-radius: 2px; z-index: 1;
+  grid-area: split; align-self: stretch; justify-self: center;
+  inline-size: 10px; padding: 0; border: none; background: transparent;
+  cursor: col-resize; touch-action: none; z-index: 1;
 }
-.js-split:hover { background: var(--accent, #2563eb); }
+.js-split::before {
+  content: ""; display: block; inline-size: 4px; block-size: 100%;
+  margin-inline: auto; background: var(--border, #e2e8f0); border-radius: 2px;
+}
+.js-split:hover::before, .js-split:focus-visible::before { background: var(--accent, #2563eb); }
+.js-split:focus-visible { outline: none; }
+/* the stacked layout splits by rows; the horizontal handle is hidden there */
+.jstudio[data-mode="top"] .js-split { display: none; }
 
 /* ——— responsive: collapse to one column, rail → scroll strip ——— */
 @media (max-width: 1024px) {

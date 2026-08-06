@@ -33,7 +33,7 @@ function mountSite({ hash = '#/project' } = {}) {
     storage: { read: () => null, write: () => {} },
     onError: (err) => { throw err; },
   });
-  return { app, container, go: (h) => routeCb(parseHash(h)) };
+  return { app, container, document, go: (h) => routeCb(parseHash(h)) };
 }
 
 function find(node, pred) {
@@ -126,6 +126,48 @@ describe('website — the Project IDE (#/project)', () => {
     fire(btn, 'click', {});
     assert.notStrictEqual(app.getState().project.stageError, null,
       'the nested runtime error was captured as a stage error, isolated from the site');
+  });
+});
+
+describe('the drag splitter (headless — the pointer drag itself is browser-verified)', () => {
+  const splitterOf = (container) => find(container, (n) => n.__jarenWidget?.name === 'studio-splitter');
+
+  it('renders as an ARIA separator with a live aria-valuenow', () => {
+    const { container } = mountSite();
+    const s = splitterOf(container);
+    assert.ok(s, 'the splitter widget mounted');
+    assert.strictEqual(s.getAttribute('role'), 'separator');
+    assert.strictEqual(s.getAttribute('aria-valuenow'), '50', 'the committed ratio drives aria-valuenow');
+  });
+
+  it('keyboard resizes and commits: ArrowRight +5%, Shift +1%, End clamps to the max', () => {
+    const { app, container } = mountSite();
+    const s = splitterOf(container);
+    fire(s, 'keydown', { key: 'ArrowRight' });
+    assert.strictEqual(app.getState().project.layout.ratio, 0.55, 'ArrowRight is a 5% nudge');
+    fire(s, 'keydown', { key: 'ArrowLeft', shiftKey: true });
+    assert.ok(Math.abs(app.getState().project.layout.ratio - 0.54) < 1e-9, 'Shift is a 1% nudge');
+    fire(s, 'keydown', { key: 'End' });
+    assert.strictEqual(app.getState().project.layout.ratio, 0.9, 'End clamps to the max');
+  });
+
+  it('a pointer drag (down on the handle, move/up on the document) commits on pointer-up', () => {
+    const { app, container, document } = mountSite();
+    const s = splitterOf(container);
+    fire(s, 'pointerdown', { button: 0, pointerId: 1 });   // arms the drag + arms the doc listeners
+    fire(document, 'pointermove', { clientX: 20 });          // moves ride the document
+    fire(document, 'pointerup', {});                         // commit
+    assert.strictEqual(typeof app.getState().project.layout.ratio, 'number', 'pointer-up committed a ratio');
+  });
+
+  it('reflects an external ratio change, then unmounts cleanly on route leave', () => {
+    const { app, container, go } = mountSite();
+    app.dispatch('project/layout-ratio', 0.7);
+    assert.strictEqual(app.getState().project.layout.ratio, 0.7);
+    assert.strictEqual(splitterOf(container).getAttribute('aria-valuenow'), '70',
+      'the widget reflected an external write (share / undo / AI)');
+    go('#/');
+    assert.strictEqual(splitterOf(container), undefined, 'leaving #/project unmounts the splitter');
   });
 });
 

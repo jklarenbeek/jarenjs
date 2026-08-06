@@ -94,6 +94,9 @@ export function projectViewModel(state, options = {}) {
   return {
     name: slice.name ?? 'Untitled project',
     layout: project.layout,
+    // the splitter's committed handle position, as an integer percent for
+    // aria-valuenow (the widget updates it live during a drag)
+    ratioPct: Math.round((project.layout.ratio ?? 0.5) * 100),
     active: activeName,
     activeKind: activeMeta?.kind ?? null,
     activeValid: activeMeta?.valid ?? true,

@@ -186,6 +186,27 @@ export class StubDocument {
   constructor() {
     /** @type {StubElement | null} The last focused element. */
     this.activeElement = null;
+    /** @type {Map<string, Set<Function>>} document-level listeners (e.g.
+     * a drag widget's window-of-drag pointermove/up) — `fire()`-able. */
+    this.listeners = new Map();
+  }
+
+  /**
+   * @param {string} type
+   * @param {Function} listener
+   */
+  addEventListener(type, listener) {
+    let set = this.listeners.get(type);
+    if (set === undefined) this.listeners.set(type, set = new Set());
+    set.add(listener);
+  }
+
+  /**
+   * @param {string} type
+   * @param {Function} listener
+   */
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
   }
 
   /** @param {string} tag */

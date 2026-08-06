@@ -135,3 +135,94 @@ export function createProjectStageWidget(env = {}) {
     },
   };
 }
+
+/**
+ * The drag splitter (`studio-splitter`): a pointer-capture handle over the
+ * editor|stage boundary. It drives the grid's `--js-ratio` LIVE during a
+ * drag (no dispatch — per-mousemove commits would flood the transaction
+ * log and undo), and commits `project/layout-ratio` on pointer-UP only.
+ * Keyboard-resizable as an ARIA separator (arrows ±5 %, Shift ±1 %,
+ * Home/End). Every DOM call is guarded so the widget mounts harmlessly
+ * over the headless stub too (there it is inert — the live drag is
+ * browser-verified).
+ */
+export function createProjectSplitterWidget() {
+  const clamp = (r) => Math.min(0.9, Math.max(0.1, r));
+  return {
+    mount(host, props, emit) {
+      // pointermove/up ride the OWNER DOCUMENT for the span of a drag —
+      // the robust splitter pattern: the pointer leaves the 10px handle
+      // immediately, so listening on the handle alone (even with pointer
+      // capture) drops the drag. Document listeners catch the move
+      // everywhere and are torn off on pointer-up.
+      const doc = host.ownerDocument ?? null;
+      const gridOf = () => (typeof host.closest === 'function' ? host.closest('.jstudio') : null);
+      const applyRatio = (r) => {
+        gridOf()?.style?.setProperty?.('--js-ratio', String(r));
+        host.setAttribute?.('aria-valuenow', String(Math.round(r * 100)));
+      };
+      // pointer x → the left content pane's share of the editor+stage span
+      const ratioAt = (clientX) => {
+        const g = gridOf();
+        if (g === null) return handle.ratio;
+        const rail = typeof g.querySelector === 'function' ? g.querySelector('.js-rail') : null;
+        const box = g.getBoundingClientRect();
+        const left = rail !== null ? rail.getBoundingClientRect().right : box.left;
+        if (!(box.right > left)) return handle.ratio;
+        return clamp((clientX - left) / (box.right - left));
+      };
+      const onMove = (e) => {
+        if (!handle.dragging) return;
+        e.preventDefault?.();
+        handle.ratio = ratioAt(e.clientX);
+        applyRatio(handle.ratio); // live only — the commit is on pointer-up
+      };
+      const onUp = () => {
+        if (!handle.dragging) return;
+        handle.dragging = false;
+        doc?.removeEventListener?.('pointermove', onMove);
+        doc?.removeEventListener?.('pointerup', onUp);
+        emit({ action: 'project/layout-ratio', with: handle.ratio });
+      };
+      const onDown = (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        handle.dragging = true;
+        e.preventDefault?.();
+        doc?.addEventListener?.('pointermove', onMove);
+        doc?.addEventListener?.('pointerup', onUp);
+      };
+      const onKey = (e) => {
+        const step = e.shiftKey ? 0.01 : 0.05;
+        let next = null;
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = clamp(handle.ratio - step);
+        else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = clamp(handle.ratio + step);
+        else if (e.key === 'Home') next = 0.1;
+        else if (e.key === 'End') next = 0.9;
+        if (next === null) return;
+        e.preventDefault?.();
+        handle.ratio = next;
+        applyRatio(next);
+        emit({ action: 'project/layout-ratio', with: next });
+      };
+
+      const handle = { host, doc, ratio: clamp(Number(props?.ratio ?? 0.5)), dragging: false, applyRatio, onMove, onUp };
+      applyRatio(handle.ratio);
+      host.addEventListener?.('pointerdown', onDown);
+      host.addEventListener?.('keydown', onKey);
+      handle.hostListeners = [['pointerdown', onDown], ['keydown', onKey]];
+      return handle;
+    },
+    update(handle, props) {
+      const r = clamp(Number(props?.ratio ?? 0.5));
+      if (r !== handle.ratio && !handle.dragging) {
+        handle.ratio = r;
+        handle.applyRatio(r);
+      }
+    },
+    unmount(handle) {
+      for (const [type, fn] of handle.hostListeners) handle.host.removeEventListener?.(type, fn);
+      handle.doc?.removeEventListener?.('pointermove', handle.onMove);
+      handle.doc?.removeEventListener?.('pointerup', handle.onUp);
+    },
+  };
+}
