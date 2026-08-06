@@ -16,6 +16,7 @@ const packageFiles = [
   'components/calc/package.json',
   'components/charts/package.json',
   'components/studio/package.json',
+  'components/scratch/package.json',
   'packages/josl/package.json',
   'packages/ai/package.json',
   'packages/flow/package.json',

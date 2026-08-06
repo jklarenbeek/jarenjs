@@ -1,0 +1,12 @@
+/* @jarenjs/scratch — the scratchpad stylesheet.
+ *
+ * DESIGN.md-conformant (filled out with the component in the next order):
+ * a rail | source | stage grid, minmax(0,1fr) tracks with min-width:0 on
+ * every scrollable child, the established breakpoints and theme tokens. No
+ * new hue family — the scratchpad reuses the suite's result-node styles.
+ */
+
+.jscratch {
+  display: grid;
+  gap: var(--space-3, 0.75rem);
+}

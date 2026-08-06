@@ -1,5 +1,5 @@
 {
-  "name": "@jarenjs/forms",
+  "name": "@jarenjs/scratch",
   "private": false,
   "version": "0.28.7",
   "type": "module",
@@ -11,18 +11,25 @@
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
+    "./component": {
+      "types": "./dist/types/component/index.d.ts",
+      "default": "./src/component/index.js"
+    },
+    "./styles/scratch.css": "./styles/scratch.css",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/types/",
-    "src/"
+    "src/",
+    "docs/",
+    "styles/"
   ],
-  "description": "Framework-agnostic form model generator for JSON Schema with preemptive per-field validation powered by @jarenjs/core",
+  "description": "The jaren engine scratchpad: pick a JSON engine (JSONPath, JSON Pointer, JSON Patch, query, JSLT, markdown, mermaid, …), feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the studio. The engine is headless; the component is the scratchpad UI.",
   "author": "joham",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jklarenbeek/jarenjs.git",
-    "directory": "packages/forms"
+    "directory": "components/scratch"
   },
   "license": "MIT",
   "engines": {
@@ -35,11 +42,13 @@
   "keywords": [
     "jaren",
     "json",
-    "schema",
-    "form",
-    "forms",
-    "generator",
-    "validation"
+    "scratchpad",
+    "playground",
+    "examples",
+    "jsonpath",
+    "jslt",
+    "jsonquery",
+    "headless"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -48,8 +57,6 @@
   },
   "dependencies": {
     "@jarenjs/core": "^0.28.7",
-    "@jarenjs/formats": "^0.28.7",
-    "@jarenjs/json": "^0.28.7",
-    "@jarenjs/validate": "^0.28.7"
+    "@jarenjs/json": "^0.28.7"
   }
 }
