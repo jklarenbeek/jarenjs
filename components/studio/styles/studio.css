@@ -105,6 +105,7 @@
 .js-stage-mount { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain;
   border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px); padding: var(--space-3, 0.75rem); }
 .js-stage-fail { border-color: var(--fail, #dc2626); color: var(--fail, #dc2626); }
+.js-stage-result { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 
 /* ——— the splitter (a pointer-capture widget; this is the grab bar) ——— */
 .js-split {

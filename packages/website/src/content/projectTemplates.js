@@ -32,7 +32,7 @@ const NPV_DATA = JSON.stringify({ rate: 0.1, cashflows: [-1000, 300, 400, 500] }
 
 const UPPER_JSLT = JSON.stringify({
   $jslt: '0.1',
-  rules: [{ match: '$', body: { greeting: { $concat: ['Hi, ', '$.name'] }, tags: '$.tags[*]' } }],
+  rules: [{ match: '$', body: { greeting: { $concat: ['Hi, ', '$.name'] }, tags: '$.tags' } }],
 }, null, 2);
 const UPPER_DATA = JSON.stringify({ name: 'Ada', tags: ['compiler', 'json'] }, null, 2);
 
@@ -45,10 +45,14 @@ const UPPER_DATA = JSON.stringify({ name: 'Ada', tags: ['compiler', 'json'] }, n
 export const PROJECT_TEMPLATES = Object.freeze([
   {
     id: 'starter',
-    title: 'Live app',
-    lead: 'One application file, running live — edit the view or the state and watch the stage.',
+    title: 'Welcome',
+    lead: 'A project is many files: a live app, plus a query that runs against a data file. Click a file to edit it — the stage follows.',
     active: 'app.json',
-    files: [{ name: 'app.json', kind: 'app', text: STARTER_APP }],
+    files: [
+      { name: 'app.json', kind: 'app', text: STARTER_APP },
+      { name: 'stats.query', kind: 'query', text: JSON.stringify({ mean: { $mean: '$.values[*]' } }, null, 2) },
+      { name: 'stats.data', kind: 'data', text: JSON.stringify({ values: [3, 1, 4, 1, 5, 9, 2, 6] }, null, 2) },
+    ],
   },
   {
     id: 'finance',

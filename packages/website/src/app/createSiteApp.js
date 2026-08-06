@@ -26,7 +26,7 @@ import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
-import { createProjectStageWidget, createProjectSplitterWidget, commitProject } from '../boundaries/project.js';
+import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
 import { projectTemplate } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
@@ -259,7 +259,14 @@ export function createSiteApp(env) {
       dispatch('project/files-set', { files });
     },
     'project-run': (props, dispatch) => {
-      const commit = commitProject(app.getState().project);
+      const state = app.getState().project;
+      const active = state.files.find((f) => f.name === state.active);
+      // a transform file re-runs; an app file force-restarts its stage
+      if (active !== undefined && (active.kind === 'query' || active.kind === 'jslt')) {
+        dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
+        return;
+      }
+      const commit = commitProject(state);
       const mount = commit.mount === null ? null : { ...commit.mount, revision: commit.mount.revision + 1 };
       dispatch('project/committed', { mount, revision: mount === null ? commit.revision : mount.revision });
     },
@@ -434,6 +441,17 @@ function wireBoundaries(app, debounceMs) {
     if (state.project === undefined) return;
     app.dispatch('project/committed', commitProject(state.project));
   };
+  // run the active transform file (jslt/query) live, like the playground —
+  // paired with the project's data file, registered operators included
+  const runProjectActive = () => {
+    const state = app.getState();
+    if (state.project === undefined) return;
+    const active = state.project.active;
+    const file = state.project.files.find((f) => f.name === active);
+    if (file !== undefined && (file.kind === 'query' || file.kind === 'jslt')) {
+      app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
+    }
+  };
   /** @type {Map<string, any>} */
   const timers = new Map();
   const debounced = (key, run) => {
@@ -470,7 +488,7 @@ function wireBoundaries(app, debounceMs) {
       }
     }
     if (validate) debounced('validate', runValidate);
-    if (project) debounced('project', runProjectCommit);
+    if (project) debounced('project', () => { runProjectCommit(); runProjectActive(); });
     for (const engine of engines) {
       debounced(`eng:${engine}`, () => {
         runEng(engine);
@@ -484,8 +502,12 @@ function wireBoundaries(app, debounceMs) {
         && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
         runEng(engine);
       }
-      // arriving at the Project IDE with no live stage yet → boot it once
-      if (s.route.page === 'project' && s.project.mount === null) runProjectCommit();
+      // arriving at the Project IDE: boot the stage once, run the active
+      // transform if that is what is showing
+      if (s.route.page === 'project') {
+        if (s.project.mount === null) runProjectCommit();
+        runProjectActive();
+      }
       syncAll();
       binancePageSync(s.route.page === 'charts');
       applyShareToken(s);
@@ -528,6 +550,6 @@ function wireBoundaries(app, debounceMs) {
   runValidate(); // the initial document validates immediately
   // entering directly at #/project boots the live stage (the initial
   // route/set fired before this subscriber attached, so seed it here)
-  if (app.getState().route.page === 'project') runProjectCommit();
+  if (app.getState().route.page === 'project') { runProjectCommit(); runProjectActive(); }
   applyShareToken(app.getState()); // a share link may be the entry URL
 }

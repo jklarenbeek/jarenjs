@@ -25,7 +25,7 @@ import { contentKey } from '@jarenjs/core/object';
 import { createStudioComponent } from '@jarenjs/studio/component';
 
 import { loadStudioDocument } from './studio.js';
-import { operatorRegistry } from './engines.js';
+import { operatorRegistry, runEngine } from './engines.js';
 import { errorMessage } from '../lib/nodes.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
@@ -78,6 +78,30 @@ export function commitProject(slice) {
   if (policy === 'skip' && mount && mount.name === active) return { mount, revision };
   const nextRevision = policy === 'reboot' ? revision + 1 : revision;
   return { mount: { name: active, doc, revision: nextRevision }, revision: nextRevision };
+}
+
+/**
+ * Run a transform file (`jslt` / `query`) exactly as the playground does:
+ * pair it with the project's input (the first `data` file, else a `state`
+ * file) and hand it to the same `runEngine` — so registered operators
+ * ($npv, $sqrt, …) work and the result nodes are identical to the
+ * playground's. Returns `{ nodes }` (render nodes for the `ui` mode), or
+ * null for a kind that is not a runnable transform. `runEngine` catches
+ * its own errors into error nodes, so this never throws.
+ * @param {any} slice - the `state.project` slice
+ * @param {string} name - the file to run
+ * @returns {{ nodes: any[] } | null}
+ */
+export function runProjectFile(slice, name) {
+  const project = projectOf(slice);
+  const file = project.files.find((f) => f.name === name);
+  if (file === undefined) return null;
+  const input = project.files.find((f) => f.kind === 'data')
+    ?? project.files.find((f) => f.kind === 'state');
+  const dataText = input ? input.text : 'null';
+  if (file.kind === 'query') return { nodes: runEngine('query', { query: file.text, data: dataText, externals: '' }) };
+  if (file.kind === 'jslt') return { nodes: runEngine('jslt', { stylesheet: file.text, data: dataText }) };
+  return null;
 }
 
 /**

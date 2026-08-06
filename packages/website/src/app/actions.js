@@ -240,8 +240,13 @@ export const ACTIONS = {
       { op: 'replace', path: '/project/dirty', value: false },
     ],
   },
-  // explicit Run: force-commit + restart the app stage
+  // explicit Run: force-commit + restart the app stage (or re-run a
+  // transform file)
   'project/run': { effects: [{ run: 'project-run' }] },
+  // a transform file's run result (render nodes) — keyed by file name
+  'project/result': {
+    patch: [{ op: 'add', path: { $concat: ['/project/results/', '$payload.name'] }, value: '$payload.result' }],
+  },
   // the nested app's own boot/runtime failure (the stage widget emits it)
   'project/stage-error': { patch: [{ op: 'replace', path: '/project/stageError', value: '$payload' }] },
   // open a whole project (a template card, an inbound share — later order)

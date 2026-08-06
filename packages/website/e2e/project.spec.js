@@ -82,6 +82,16 @@ test('an invalid edit keeps the last good frame and docks the coded error', asyn
   await expect(mount.locator('h1')).toHaveText('Hello from the studio');
 });
 
+test('a query file runs live against its data file — the playground engines, folded in', async ({ page }) => {
+  await page.goto('/#/project');
+  // the starter is a multi-file project: switch to the query in the rail
+  await page.locator('.js-file', { hasText: 'stats.query' }).click();
+  const result = page.locator('.js-stage-result');
+  await expect(result).toBeVisible();
+  await expect(result).toContainText('Result');
+  await expect(result).toContainText('3.875'); // $mean of the data — a registered operator, run live
+});
+
 test('the splitter drags to commit a new ratio and keyboard-resizes as a separator', async ({ page }) => {
   await page.goto('/#/project');
   const splitter = page.locator('.js-split');

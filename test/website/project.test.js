@@ -129,6 +129,33 @@ describe('website — the Project IDE (#/project)', () => {
   });
 });
 
+describe('transform file kinds run live on the stage (the playground fold)', () => {
+  it('a query file runs against its data file — registered $npv included — and renders result nodes', () => {
+    const { app, container } = mountSite();
+    app.dispatch('project/template', 'finance');
+    const result = app.getState().project.results['npv.query'];
+    assert.ok(result && Array.isArray(result.nodes), 'the query ran and stored render nodes');
+    assert.match(serialize(container), /Result/, 'the result renders on the stage');
+  });
+
+  it('a jslt file transforms its data file live', () => {
+    const { app, container } = mountSite();
+    app.dispatch('project/template', 'transform');
+    assert.ok(app.getState().project.results['shape.jslt'], 'the jslt ran');
+    assert.match(serialize(container), /greeting|Output/, 'the transform output renders on the stage');
+  });
+
+  it('editing a transform re-runs it, and Run re-runs on demand', () => {
+    const { app, container } = mountSite();
+    app.dispatch('project/template', 'finance');
+    const editor = find(container, (n) => n.tagName === 'textarea');
+    fire(editor, 'change', { target: { value: '{"echo":"$.rate"}' } });
+    assert.ok(app.getState().project.results['npv.query'], 'the edited query re-ran');
+    app.dispatch('project/run');
+    assert.ok(app.getState().project.results['npv.query'], 'Run re-ran the active transform');
+  });
+});
+
 describe('the drag splitter (headless — the pointer drag itself is browser-verified)', () => {
   const splitterOf = (container) => find(container, (n) => n.__jarenWidget?.name === 'studio-splitter');
 
