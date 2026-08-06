@@ -27,7 +27,9 @@ test('the app boots with landmark semantics intact', async ({ page }) => {
   await expect(page.locator('nav#site-nav')).toBeVisible();
   await expect(page.locator('main.main')).toBeVisible();
   await expect(page.locator('h1').first()).toBeVisible();
+  // Home + the three dropdown groups' 10 links = 11 nav-links, behind 3 triggers
   await expect(page.locator('#site-nav .nav-link')).toHaveCount(11);
+  await expect(page.locator('#site-nav .nav-trigger')).toHaveCount(3);
 
   const toggle = page.locator('button[aria-controls="site-nav"]');
   await expect(toggle).toHaveAttribute('aria-label', 'Toggle navigation');
@@ -41,10 +43,19 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
   // a marker that survives only when navigation stays client-side
   await page.evaluate(() => { window.__jarenE2eMarker = 42; });
 
-  for (const label of ['Playground', 'Studio', 'Flow', 'Game', 'Benchmarks', 'Charts', 'Docs', 'Scratchpad', 'Calculator', 'Home']) {
+  // each destination lives behind its dropdown group (Home stands alone);
+  // open the group, click the link, and the group's trigger reflects the route
+  const NAV = [
+    ['Playground', 'Engines'], ['Scratchpad', 'Engines'], ['Charts', 'Engines'],
+    ['Studio', 'Studios'], ['Flow', 'Studios'], ['Game', 'Studios'], ['Calculator', 'Studios'],
+    ['Docs', 'Learn'], ['Benchmarks', 'Learn'], ['Home', null],
+  ];
+  for (const [label, group] of NAV) {
+    if (group) await page.locator('.nav-trigger', { hasText: group }).click();
     await page.locator('#site-nav .nav-link', { hasText: label }).first().click();
     await expect(page.locator('main.main')).toBeVisible();
-    await expect(page.locator('#site-nav .nav-link.active')).toHaveText(label);
+    if (group) await expect(page.locator('#site-nav .nav-trigger.active')).toContainText(group);
+    else await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Home');
   }
 
   expect(await page.evaluate(() => window.__jarenE2eMarker)).toBe(42);
@@ -55,14 +66,39 @@ test('keyboard activation drives the router: focused link + Enter navigates', as
   const errors = trackPageErrors(page);
   await page.goto('/');
 
+  await page.locator('.nav-trigger', { hasText: 'Engines' }).click(); // open the group first
   const playground = page.locator('#site-nav .nav-link', { hasText: 'Playground' }).first();
   await playground.focus();
   await expect(playground).toBeFocused();
   await page.keyboard.press('Enter');
 
   await expect(page).toHaveURL(/#\/playground$/);
-  await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Playground');
+  await expect(page.locator('#site-nav .nav-trigger.active')).toContainText('Engines');
   expect(errors).toEqual([]);
+});
+
+test('the nav dropdown groups open, navigate, and close on Escape or an outside click', async ({ page }) => {
+  await page.goto('/');
+  const studios = page.locator('.nav-trigger', { hasText: 'Studios' });
+  const menu = page.locator('.nav-menu', { hasText: 'Calculator' }); // the Studios panel
+  await expect(menu).toBeHidden();
+
+  await studios.click();
+  await expect(menu).toBeVisible();
+  await expect(studios).toHaveAttribute('aria-expanded', 'true');
+
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+
+  await studios.click();
+  await expect(menu).toBeVisible();
+  await page.locator('h1').first().click(); // an outside click closes it
+  await expect(menu).toBeHidden();
+
+  await studios.click();
+  await page.locator('#site-nav .nav-link', { hasText: 'Flow' }).click(); // navigating closes it
+  await expect(page).toHaveURL(/#\/flow$/);
+  await expect(menu).toBeHidden();
 });
 
 test('rapid route churn exercises repeated widget/view teardown cleanly', async ({ page }) => {
@@ -84,10 +120,12 @@ test('rapid route churn exercises repeated widget/view teardown cleanly', async 
 test('the browser back button restores the previous view', async ({ page }) => {
   const errors = trackPageErrors(page);
   await page.goto('/');
+  await page.locator('.nav-trigger', { hasText: 'Learn' }).click(); // open the group holding Docs
   await page.locator('#site-nav .nav-link', { hasText: 'Docs' }).first().click();
-  await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Docs');
+  await expect(page).toHaveURL(/#\/docs$/);
 
   await page.goBack();
+  await expect(page).toHaveURL(/(\/|#\/)$/);
   await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Home');
   expect(errors).toEqual([]);
 });

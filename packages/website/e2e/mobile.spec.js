@@ -64,8 +64,10 @@ test('mobile touch targets meet the 44px class', async ({ page }) => {
 
   await toggle.tap();
   await expect(page.locator('#site-nav')).toBeVisible();
+  // Docs lives in the Learn dropdown — tap the trigger to expand it, then the link
+  await page.locator('#site-nav .nav-trigger', { hasText: 'Learn' }).tap();
   await page.locator('#site-nav .nav-link', { hasText: 'Docs' }).first().tap();
-  await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Docs');
+  await expect(page).toHaveURL(/#\/docs$/);
 
   const link = page.locator('.docs-sections .docs-link').first();
   await expect(link).toBeVisible();

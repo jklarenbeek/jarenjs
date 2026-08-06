@@ -14,7 +14,10 @@ const header =
         ['img', { src: `${BASE}jaren.svg`, alt: '', class: 'brand-logo' }],
         ['span', { class: 'brand-name' }, 'Jaren'],
       ],
-      ['nav', { id: 'site-nav', class: { $if: ['$.menu', 'nav open', 'nav'] } }, [{ $apply: '$.ui.nav[*]' }]],
+      ['nav', { id: 'site-nav', class: { $if: ['$.menu', 'nav open', 'nav'] } },
+        { $apply: '$.ui.nav.home' },
+        [{ $apply: '$.ui.nav.groups[*]' }],
+      ],
       ['button', {
         class: 'theme-toggle',
         type: 'button',
@@ -72,10 +75,36 @@ export const SHELL_RULES = [
       { $apply: ['$.ui.assistant', 'assistant'] },
     ],
   },
+  // the standalone Home link (before the dropdown groups)
   {
-    match: '$.ui.nav[*]',
+    match: '$.ui.nav.home',
     body: ['a', {
       href: '$.href',
+      class: { $if: ['$.active', 'nav-link active', 'nav-link'] },
+    }, '$.label'],
+  },
+  // one dropdown group: a trigger button (aria-expanded) + its menu panel.
+  // The panel's links live in the DOM always; CSS shows them when `.open`.
+  {
+    match: '$.ui.nav.groups[*]',
+    body: ['div', { class: { $if: ['$.open', 'nav-group open', 'nav-group'] } },
+      ['button', {
+        type: 'button',
+        class: { $if: ['$.active', 'nav-trigger active', 'nav-trigger'] },
+        'aria-haspopup': 'true',
+        'aria-expanded': { $if: ['$.open', 'true', 'false'] },
+        on: { click: { action: 'nav/toggle', with: '$.key' } },
+      }, '$.label', ['span', { class: 'nav-caret', 'aria-hidden': 'true' }, '▾']],
+      ['div', { class: 'nav-menu', role: 'menu' }, [{ $apply: '$.items[*]' }]],
+    ],
+  },
+  // one link inside a dropdown group (closing the menu is handled globally:
+  // route/set on navigation, or Escape / an outside click from main.js)
+  {
+    match: '$.ui.nav.groups[*].items[*]',
+    body: ['a', {
+      href: '$.href',
+      role: 'menuitem',
       class: { $if: ['$.active', 'nav-link active', 'nav-link'] },
     }, '$.label'],
   },

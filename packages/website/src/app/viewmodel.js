@@ -30,18 +30,27 @@ import { callout, error } from '../lib/nodes.js';
 import { formatJson, formatMs, formatRatio, memo1 } from '../lib/format.js';
 import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
 
-const NAV = [
-  { page: 'home', label: 'Home', href: '#/' },
-  { page: 'playground', label: 'Playground', href: '#/playground' },
-  { page: 'studio', label: 'Studio', href: '#/studio' },
-  { page: 'flow', label: 'Flow', href: '#/flow' },
-  { page: 'game', label: 'Game', href: '#/game' },
-  { page: 'data', label: 'Data', href: '#/data' },
-  { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
-  { page: 'charts', label: 'Charts', href: '#/charts' },
-  { page: 'docs', label: 'Docs', href: '#/docs' },
-  { page: 'scratch', label: 'Scratchpad', href: '#/scratch' },
-  { page: 'calculator', label: 'Calculator', href: '#/calculator' },
+// the nav is grouped into three dropdown menus by what each surface IS:
+// stateless ENGINES you tinker with, stateful STUDIOS you compose in, and
+// LEARN (the read/measure pages). Home stands alone before the groups.
+const HOME_LINK = { page: 'home', label: 'Home', href: '#/' };
+const NAV_GROUPS = [
+  { key: 'engines', label: 'Engines', pages: [
+    { page: 'playground', label: 'Playground', href: '#/playground' },
+    { page: 'scratch', label: 'Scratchpad', href: '#/scratch' },
+    { page: 'charts', label: 'Charts', href: '#/charts' },
+  ] },
+  { key: 'studios', label: 'Studios', pages: [
+    { page: 'studio', label: 'Studio', href: '#/studio' },
+    { page: 'flow', label: 'Flow', href: '#/flow' },
+    { page: 'data', label: 'Data', href: '#/data' },
+    { page: 'game', label: 'Game', href: '#/game' },
+    { page: 'calculator', label: 'Calculator', href: '#/calculator' },
+  ] },
+  { key: 'learn', label: 'Learn', pages: [
+    { page: 'docs', label: 'Docs', href: '#/docs' },
+    { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
+  ] },
 ];
 
 const PG_ENGINES = [
@@ -113,7 +122,7 @@ function homeContent(state) {
 export function viewModel(state) {
   const page = state.route.page;
   /** @type {any} */
-  const ui = { nav: deriveNav(page) };
+  const ui = { nav: deriveNav(page, state.navOpen) };
 
   if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
@@ -198,8 +207,22 @@ const readmeOverlay = memo1((readme) => ({
     : null,
 }));
 
-const deriveNav = memo1((page) =>
-  NAV.map((item) => ({ ...item, active: item.page === page })));
+/** The nav model: a standalone Home link + three dropdown groups, each with
+ * an `open` flag (from state.navOpen) and an `active` flag (the current page
+ * lives in it). Cheap, so not memoized — it must recompute when navOpen
+ * changes, which a page-only memo key would miss. */
+function deriveNav(page, navOpen) {
+  return {
+    home: { ...HOME_LINK, active: page === 'home' },
+    groups: NAV_GROUPS.map((g) => ({
+      key: g.key,
+      label: g.label,
+      open: navOpen === g.key,
+      active: g.pages.some((p) => p.page === page),
+      items: g.pages.map((p) => ({ ...p, active: p.page === page })),
+    })),
+  };
+}
 
 const benchTabs = memo1((suite) => SUITES.map((s) => ({
   ...s,

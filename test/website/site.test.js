@@ -92,6 +92,36 @@ describe('website — the site as one app document', function () {
     assert.match(serialize(container), /JSON all the way down/, 'unknown routes fall back home');
   });
 
+  it('nav: three dropdown groups; a trigger opens one, navigation and nav/close shut it', function () {
+    const { app, container, go } = mountSite();
+    const html = () => serialize(container);
+    // the three group triggers + the standalone Home link render
+    for (const g of ['Engines', 'Studios', 'Learn']) assert.match(html(), new RegExp(`nav-trigger[^>]*>${g}`));
+    assert.match(html(), /nav-link[^>]*>Home/);
+
+    // opening a group is state, not a re-mount: the group gets `.open`
+    assert.strictEqual(app.getState().navOpen, null);
+    app.dispatch('nav/toggle', 'engines');
+    assert.strictEqual(app.getState().navOpen, 'engines');
+    assert.match(html(), /nav-group open/);
+    // toggling the same group closes it; a different group replaces it
+    app.dispatch('nav/toggle', 'engines');
+    assert.strictEqual(app.getState().navOpen, null);
+    app.dispatch('nav/toggle', 'studios');
+    app.dispatch('nav/toggle', 'learn');
+    assert.strictEqual(app.getState().navOpen, 'learn', 'only one open at a time');
+
+    // navigating (route/set) closes any open group; the destination's group reads active
+    go('#/data');
+    assert.strictEqual(app.getState().navOpen, null, 'navigation closes the dropdown');
+    assert.match(html(), /nav-trigger active[^>]*>Studios/, 'the Studios trigger is active on #/data');
+
+    // nav/close is the explicit closer (Escape / outside-click dispatch it)
+    app.dispatch('nav/toggle', 'learn');
+    app.dispatch('nav/close');
+    assert.strictEqual(app.getState().navOpen, null);
+  });
+
   it('renders the Calculator page: keypad, display, plot, and an offline converter result', function () {
     const { container, go, app } = mountSite();
     go('#/calculator');

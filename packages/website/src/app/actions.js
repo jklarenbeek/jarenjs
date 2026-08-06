@@ -24,6 +24,7 @@ export const ACTIONS = {
     patch: [
       { op: 'replace', path: '/route', value: '$payload' },
       { op: 'replace', path: '/menu', value: false },
+      { op: 'replace', path: '/navOpen', value: null },
     ],
     effects: {
       $if: [
@@ -152,6 +153,15 @@ export const ACTIONS = {
   },
 
   // the mobile navigation drawer
+  // the nav dropdown groups (Engines / Studios / Learn): one open at a time,
+  // toggled by its trigger; closed on navigation (route/set), Escape or an
+  // outside click (both dispatched from main.js in the browser)
+  'nav/toggle': {
+    patch: [{ op: 'replace', path: '/navOpen', value: { $if: [{ $eq: ['$.navOpen', '$payload'] }, null, '$payload'] } }],
+  },
+  'nav/close': {
+    patch: [{ op: 'replace', path: '/navOpen', value: null }],
+  },
   'menu/toggle': {
     patch: [{ op: 'replace', path: '/menu', value: { $not: '$.menu' } }],
   },

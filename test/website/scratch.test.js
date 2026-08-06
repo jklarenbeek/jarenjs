@@ -133,6 +133,15 @@ describe('website — the Scratch playground (#/scratch)', () => {
     assert.match(serialize(scratchRoot(container)), /Markdown, as JSON/, 'the rendered markdown heading');
   });
 
+  it('a visual engine (charts) renders an SVG via the host chart renderer', () => {
+    const { app, container } = mountSite();
+    fire(byText(scratchRoot(container), 'button', 'Heatmap (log)'), 'click', {});
+    const s = app.getState().scratch;
+    assert.strictEqual(s.engine, 'charts');
+    assert.ok(s.result.ok === true && Array.isArray(s.result.view), 'the chart renderer produced a vnode');
+    assert.match(serialize(scratchRoot(container)), /<svg/, 'the chart SVG rendered on the stage');
+  });
+
   it('a broken source lands as an error result — the site never crashes', () => {
     const { app, container } = mountSite();
     fire(sourceInput(container), 'input', { target: { value: '$.[[[bogus' } });

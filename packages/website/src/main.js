@@ -54,7 +54,7 @@ const appNode = document.getElementById('app');
 const hydrateDiagrams = () => md.hydrate(appNode);
 new MutationObserver(hydrateDiagrams).observe(appNode, { childList: true, subtree: true });
 
-createSiteApp({
+const app = createSiteApp({
   node: appNode,
   document,
   initialTheme: theme,
@@ -115,6 +115,18 @@ createSiteApp({
     write: (s) => { try { localStorage.setItem(GAME_KEY, s); } catch { /* private mode */ } },
   },
   modelContext: /** @type {any} */ (navigator).modelContext,
+});
+
+// close the nav dropdown groups on Escape or a click outside the header nav
+// (the in-nav triggers own opening; route/set closes them on navigation)
+addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && app.getState().navOpen) app.dispatch('nav/close');
+});
+document.addEventListener('click', (event) => {
+  const target = /** @type {any} */ (event.target);
+  if (app.getState().navOpen && !(target?.closest && target.closest('#site-nav'))) {
+    app.dispatch('nav/close');
+  }
 });
 
 // PWA: register the service worker in production builds

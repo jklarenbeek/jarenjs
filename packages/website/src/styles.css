@@ -171,6 +171,25 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 }
 .nav-link:hover { color: var(--fg); text-decoration: none; background: var(--surface); }
 .nav-link.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+/* nav dropdown groups: Engines / Studios / Learn */
+.nav-group { position: relative; display: flex; align-items: center; }
+.nav-trigger {
+  display: inline-flex; align-items: center; gap: 3px; font-family: inherit; cursor: pointer;
+  color: var(--muted); padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm);
+  font-size: 0.92rem; background: transparent; border: none;
+}
+.nav-trigger:hover { color: var(--fg); background: var(--surface); }
+.nav-trigger.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+.nav-caret { font-size: 0.7em; transition: transform 0.15s ease; }
+.nav-group.open .nav-caret { transform: rotate(180deg); }
+.nav-menu {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+  min-width: 11rem; flex-direction: column; gap: 2px; padding: var(--space-1);
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.14);
+}
+.nav-group.open .nav-menu { display: flex; }
+.nav-menu .nav-link { white-space: nowrap; }
 .theme-toggle {
   border: 1px solid var(--border); background: transparent; color: var(--fg);
   border-radius: var(--radius-sm); width: 2.75rem; height: 2.75rem; cursor: pointer; font-size: 0.95rem;
@@ -565,6 +584,13 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   }
   .nav.open { display: flex; }
   .nav-link { padding: var(--space-3); font-size: 1rem; }
+  /* in the drawer the dropdowns become inline accordions, not floating panels */
+  .nav-group { flex-direction: column; align-items: stretch; }
+  .nav-trigger { width: 100%; justify-content: space-between; padding: var(--space-3); font-size: 1rem; }
+  .nav-menu {
+    position: static; min-width: 0; padding: 0 0 0 var(--space-4);
+    background: transparent; border: none; box-shadow: none;
+  }
   /* tab bars scroll edge-to-edge in one row instead of wrapping; the
      negative margin re-uses the page gutter so the first tab stays
      aligned with the heading above it */

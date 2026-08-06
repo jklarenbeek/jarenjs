@@ -53,6 +53,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     route: { page: 'home', params: {} },
     theme,
     menu: false,      // the mobile navigation drawer
+    navOpen: null,    // the open nav dropdown group key ('engines'|'studios'|'learn') or null
     bench: {},        // file name -> parsed benchmark JSON
     benchStatus: {},  // file name -> 'loading' | 'ready' | 'error'
     benchUi: { search: '', limit: 40 },
