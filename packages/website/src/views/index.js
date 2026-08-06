@@ -40,7 +40,6 @@ export const STYLESHEET = {
     benchmarks: { unmatched: 'error' },
     charts: { unmatched: 'error' },
     docs: { unmatched: 'error' },
-    examples: { unmatched: 'error' },
     calculator: { unmatched: 'error' },
     readme: { unmatched: 'error' },
     assistant: { unmatched: 'error' },

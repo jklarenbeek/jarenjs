@@ -40,7 +40,7 @@ const NAV = [
   { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
   { page: 'charts', label: 'Charts', href: '#/charts' },
   { page: 'docs', label: 'Docs', href: '#/docs' },
-  { page: 'examples', label: 'Examples', href: '#/examples' },
+  { page: 'scratch', label: 'Scratchpad', href: '#/scratch' },
   { page: 'calculator', label: 'Calculator', href: '#/calculator' },
 ];
 
@@ -128,7 +128,6 @@ export function viewModel(state) {
   if (page === 'game') ui.game = gamePageViewModel(state.game);
   if (page === 'data') ui.data = dataViewModel(state);
   if (page === 'docs') ui.docs = docsPage(state.route.params.s);
-  if (page === 'examples') ui.examples = examplesPage(state.route.params.engine);
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
 
   // The README dialog is a global overlay (any page can open it): it
@@ -405,39 +404,4 @@ const docsPage = memo1((param) => {
     section: { title: section.title, blocks: section.blocks },
     packages: PACKAGES,
   };
-});
-
-/** The primary input previewed on each example card, per engine. */
-const PREVIEW_FIELD = {
-  path: 'selector', pointer: 'pointer', patch: 'patch', query: 'query',
-  jslt: 'stylesheet', jtlt: 'template', xquery: 'text', josl: 'text', csv: 'text',
-  markdown: 'source', mermaid: 'source', charts: 'source',
-};
-
-const examplesPage = memo1((param) => {
-  const engine = param ?? 'validate';
-  const tabs = PG_ENGINES.map((e) => ({
-    ...e,
-    active: e.key === engine,
-    href: `#/examples?engine=${e.key}`,
-  }));
-  let items;
-  if (engine === 'validate') {
-    items = Object.values(exampleSchemas).map((example) => ({
-      label: example.name,
-      preview: formatJson(example.schema),
-      payload: { validate: true, schemaText: formatJson(example.schema), data: example.data },
-    }));
-  }
-  else {
-    const field = PREVIEW_FIELD[engine];
-    items = (ENGINE_EXAMPLES[engine] ?? []).map((example) => ({
-      label: example.label,
-      preview: example.inputs[field] !== '' && example.inputs[field] !== undefined
-        ? example.inputs[field]
-        : example.inputs.data ?? '',
-      payload: { engine, inputs: withAllFields(engine, example.inputs) },
-    }));
-  }
-  return { tabs, items };
 });

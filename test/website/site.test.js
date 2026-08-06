@@ -504,11 +504,10 @@ describe('website — the site as one app document', function () {
     assert.deepStrictEqual(parseHash('#/bogus'), { page: 'home', params: {} });
   });
 
-  it('the Examples page lists per-engine example previews', function () {
-    const { container, go } = mountSite();
+  it('the retired #/examples URL redirects to the scratchpad', function () {
+    const { app, go } = mountSite();
     go('#/examples');
-    const html = serialize(container);
-    assert.match(html, /"type"/, 'a JSON-schema example preview renders');
+    assert.strictEqual(app.getState().route.page, 'scratch', '#/examples now lands on #/scratch');
   });
 
   it('playground: committing the data pane parses JSON and surfaces malformed input', function () {

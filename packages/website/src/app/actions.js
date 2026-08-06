@@ -183,7 +183,6 @@ export const ACTIONS = {
   },
 
   // examples page: load an example into the playground and go there
-  'ex/open': { effects: [{ run: 'open-example', with: '$payload' }] },
 
   // the Studio: swapping the hosted document is ATOMIC — only an
   // already-validated document reaches 'studio/doc' (the studio-parse

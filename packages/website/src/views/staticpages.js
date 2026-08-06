@@ -1,11 +1,9 @@
 //@ts-check
 /**
  * Docs — a sectioned reference rendered from the DOCS_SECTIONS content
- * document (one section at a time, deep-linkable via ?s=). Examples —
- * every engine's example gallery with one-click "Open in playground".
+ * document (one section at a time, deep-linkable via ?s=). (The former
+ * Examples gallery now lives in the #/scratch scratchpad.)
  */
-
-import { tabRule } from './ui.js';
 
 export const STATIC_RULES = [
   // ---- docs ----
@@ -44,30 +42,4 @@ export const STATIC_RULES = [
     }, '$.name'],
   },
 
-  // ---- examples ----
-  {
-    match: '$.ui.examples', mode: 'examples',
-    body: ['div', { class: 'page container' },
-      ['h1', {}, 'Examples'],
-      ['p', { class: 'page-lead' },
-        'Copy-paste starting points for every engine. Open any of them live in the playground with one click.'],
-      ['nav', { class: 'tabs' }, [{ $apply: '$.tabs[*]' }]],
-      ['div', { class: 'example-grid' }, [{ $apply: '$.items[*]' }]],
-    ],
-  },
-  tabRule('$.ui.examples.tabs[*]', 'examples'),
-  {
-    match: '$.ui.examples.items[*]', mode: 'examples',
-    body: ['article', { class: 'card example-card' },
-      ['div', { class: 'card-head' },
-        ['h3', {}, '$.label'],
-        ['button', {
-          type: 'button',
-          class: 'btn small',
-          on: { click: { action: 'ex/open', with: '$.payload' } },
-        }, 'Open in playground'],
-      ],
-      ['pre', { class: 'code-block clamp' }, ['code', {}, '$.preview']],
-    ],
-  },
 ];

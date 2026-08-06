@@ -41,7 +41,7 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
   // a marker that survives only when navigation stays client-side
   await page.evaluate(() => { window.__jarenE2eMarker = 42; });
 
-  for (const label of ['Playground', 'Studio', 'Flow', 'Game', 'Benchmarks', 'Charts', 'Docs', 'Examples', 'Calculator', 'Home']) {
+  for (const label of ['Playground', 'Studio', 'Flow', 'Game', 'Benchmarks', 'Charts', 'Docs', 'Scratchpad', 'Calculator', 'Home']) {
     await page.locator('#site-nav .nav-link', { hasText: label }).first().click();
     await expect(page.locator('main.main')).toBeVisible();
     await expect(page.locator('#site-nav .nav-link.active')).toHaveText(label);

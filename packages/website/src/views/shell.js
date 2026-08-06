@@ -63,7 +63,6 @@ export const SHELL_RULES = [
         { $apply: ['$.ui.bench', 'benchmarks'] },
         { $apply: ['$.ui.chartsPage', 'charts'] },
         { $apply: ['$.ui.docs', 'docs'] },
-        { $apply: ['$.ui.examples', 'examples'] },
         { $apply: ['$.ui.calculator', 'calculator'] },
       ],
       footer,

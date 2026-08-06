@@ -312,16 +312,6 @@ export function createSiteApp(env) {
       const data = loadDataset(app.getState().scratch.exampleId, props.index);
       if (data !== null) dispatch('scratch/dataset-set', { index: props.index, data });
     },
-    'open-example': (props, dispatch) => {
-      if (props.validate === true) {
-        env.navigate?.('#/playground?engine=validate');
-        dispatch('pg/example', { schemaText: props.schemaText, data: props.data });
-      }
-      else {
-        env.navigate?.(`#/playground?engine=${props.engine}`);
-        dispatch('eng/load', { engine: props.engine, inputs: props.inputs });
-      }
-    },
     // a README link to a published page routes in-app after the dialog
     // closes (the action's patch already closed it)
     'readme-goto': (props) => {
@@ -435,7 +425,7 @@ export function createSiteApp(env) {
     },
   });
 
-  wireBoundaries(app, env.debounceMs ?? 250);
+  wireBoundaries(app, env.debounceMs ?? 250, env.navigate);
   registerSiteWebMcp(toolbox, { modelContext: env.modelContext, onError: report });
   return app;
 }
@@ -444,8 +434,10 @@ export function createSiteApp(env) {
  * The reactive boundary runs, driven by the changed-path feed.
  * @param {any} app
  * @param {number} debounceMs
+ * @param {((hash: string) => void)} [navigate] - set the location hash (for
+ *   the retired-page redirect: #/examples → #/scratch)
  */
-function wireBoundaries(app, debounceMs) {
+function wireBoundaries(app, debounceMs, navigate) {
   const runValidate = () => {
     const state = app.getState();
     app.dispatch('pg/result', runValidation(state.pg.schemaText, state.pg.data));
@@ -550,6 +542,8 @@ function wireBoundaries(app, debounceMs) {
     }
     if (routed) {
       const s = app.getState();
+      // the retired #/examples page redirects to its scratchpad successor
+      if (s.route.page === 'examples') { navigate?.('#/scratch'); return; }
       const engine = s.route.params.engine;
       if (s.route.page === 'playground' && engine !== undefined
         && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
@@ -603,6 +597,8 @@ function wireBoundaries(app, debounceMs) {
     }
   }
 
+  // a direct entry at the retired #/examples URL redirects to #/scratch
+  if (app.getState().route.page === 'examples') navigate?.('#/scratch');
   runValidate(); // the initial document validates immediately
   // entering directly at #/project boots the live stage (the initial
   // route/set fired before this subscriber attached, so seed it here)

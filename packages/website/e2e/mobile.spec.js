@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test';
 
 test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-const PAGES = ['#/', '#/docs', '#/examples', '#/playground', '#/studio', '#/benchmarks', '#/calculator', '#/charts'];
+const PAGES = ['#/', '#/docs', '#/scratch', '#/playground', '#/studio', '#/benchmarks', '#/calculator', '#/charts'];
 
 test('no page overflows the mobile layout viewport', async ({ page }) => {
   await page.goto('/');

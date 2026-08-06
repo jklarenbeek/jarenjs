@@ -231,16 +231,6 @@ describe('website — docs, examples, menu', function () {
     assert.match(html, /never wider/i);
   });
 
-  it('examples open into the playground with one click', function () {
-    const { app, container, go, hashes } = mountSite();
-    go('#/examples?engine=jslt');
-    assert.match(serialize(container), /Open in playground/);
-    fire(find(container, (n) => n.attributes?.get('class') === 'btn small'), 'click');
-    assert.match(hashes.at(-1), /playground\?engine=jslt/);
-    assert.match(serialize(container), /pg-grid two/, 'landed on the live engine');
-    assert.notStrictEqual(app.getState().eng.jslt.stylesheet, '');
-  });
-
   it('the mobile menu toggles and closes on navigation', function () {
     const { app, container } = mountSite({ hash: '#/' });
     fire(find(container, (n) => n.attributes?.get('class') === 'menu-toggle'), 'click');
