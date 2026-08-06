@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/calc",
   "private": false,
-  "version": "0.28.8",
+  "version": "0.28.9",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -63,9 +63,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.28.8",
-    "@jarenjs/view": "^0.28.8",
-    "@jarenjs/forms": "^0.28.8",
-    "@jarenjs/app": "^0.28.8"
+    "@jarenjs/core": "^0.28.9",
+    "@jarenjs/view": "^0.28.9",
+    "@jarenjs/forms": "^0.28.9",
+    "@jarenjs/app": "^0.28.9"
   }
 }

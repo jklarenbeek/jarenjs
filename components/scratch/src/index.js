@@ -15,6 +15,7 @@
  */
 
 import { ENGINE_LIST } from './engines.js';
+import { EXAMPLE_LIST } from './examples.js';
 
 /**
  * @typedef {Object} EnginePane
@@ -59,8 +60,9 @@ export function engineIds() {
   return ENGINE_LIST.map((e) => e.id);
 }
 
-/** The curated example library. Filled by `src/examples/*` (next order). */
-export const EXAMPLES = Object.freeze(/** @type {ScratchExample[]} */ ([]));
+/** The curated example library (the canonical home for the suite's engine
+ * examples). */
+export const EXAMPLES = Object.freeze(/** @type {ScratchExample[]} */ (EXAMPLE_LIST));
 
 /**
  * Run one engine over a source + data. An unknown engine (or a throwing

@@ -12,11 +12,11 @@ import { ENGINES, EXAMPLES, engineIds, runExample } from '@jarenjs/scratch';
 import { createScratchComponent } from '@jarenjs/scratch/component';
 
 describe('@jarenjs/scratch — scaffold', () => {
-  it('registers the first engine set (the example library lands next order)', () => {
+  it('registers the first engine set and a non-empty example library', () => {
     const ids = engineIds();
     for (const id of ['path', 'pointer', 'patch', 'query', 'jslt']) assert.ok(ids.includes(id), id);
     assert.strictEqual(typeof ENGINES.path.run, 'function');
-    assert.deepStrictEqual([...EXAMPLES], []);
+    assert.ok(EXAMPLES.length > 0);
   });
 
   it('runExample returns an error Result for an unknown engine — never throws', () => {
