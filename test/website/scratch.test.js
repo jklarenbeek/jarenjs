@@ -96,6 +96,25 @@ describe('website — the Scratch playground (#/scratch)', () => {
     assert.match(s.result.output, /Ada|Alan/, 'the SAME selector now runs over the array shape');
   });
 
+  it('a source-only engine (josl) shows an option select, no data pane, and the mode re-runs live', () => {
+    const { app, container } = mountSite();
+    fire(byText(scratchRoot(container), 'button', 'First-class citizens'), 'click', {});
+    const s = app.getState().scratch;
+    assert.strictEqual(s.engine, 'josl');
+    assert.ok(s.result.ok === true, 'josl parses in its default (JOSL) mode');
+    const html = serialize(scratchRoot(container));
+    assert.match(html, /jscratch-options/, 'the options row rendered');
+    assert.match(html, /<select/, 'a mode select is present');
+    assert.match(html, /TOML/, 'the TOML dialect is offered');
+    // exactly one editor pane — the source; a source-only engine has no data pane
+    assert.strictEqual((html.match(/class="jscratch-pane"/g) || []).length, 1, 'no data editor');
+
+    // flip the mode select to strict TOML → the JOSL `null` is now rejected
+    fire(find(scratchRoot(container), (n) => n.tagName === 'select'), 'change', { target: { value: 'toml' } });
+    assert.strictEqual(app.getState().scratch.config.mode, 'toml', 'the option config updated');
+    assert.strictEqual(app.getState().scratch.result.ok, false, 'strict TOML rejects the null extension');
+  });
+
   it('a broken source lands as an error result — the site never crashes', () => {
     const { app, container } = mountSite();
     fire(sourceInput(container), 'input', { target: { value: '$.[[[bogus' } });

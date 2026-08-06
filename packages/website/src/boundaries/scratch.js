@@ -18,22 +18,27 @@ export const SCRATCH_START = Object.freeze({
   exampleId: first.id,
   source: { ...first.source },
   datasetIndex: 0,
-  data: { ...first.datasets[0].data },
+  // source-only engines (josl/csv) carry no datasets — guard the seed
+  data: { ...(first.datasets[0]?.data ?? {}) },
+  config: { ...(first.config ?? {}) },
   result: null,
 });
 
-/** Run the active engine over the current source + data (operators included). */
+/** Run the active engine over the current source + data (operators + option-pane config). */
 export function runScratch(slice) {
-  return scratchComponent.runExample(slice.engine, slice.source, slice.data, { operators: operatorRegistry });
+  return scratchComponent.runExample(slice.engine, slice.source, slice.data,
+    { operators: operatorRegistry, config: slice.config });
 }
 
-/** Load an example's source + first dataset into a slice-ready payload. */
+/** Load an example's source + first dataset (+ option config) into a slice-ready payload. */
 export function loadExample(exampleId) {
   const ex = scratchComponent.examples.find((e) => e.id === exampleId);
   if (ex === undefined) return null;
   return {
     engine: ex.engine, exampleId: ex.id,
-    source: { ...ex.source }, datasetIndex: 0, data: { ...ex.datasets[0].data },
+    source: { ...ex.source }, datasetIndex: 0,
+    data: { ...(ex.datasets[0]?.data ?? {}) },
+    config: { ...(ex.config ?? {}) },
   };
 }
 

@@ -100,7 +100,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // `source`/`data` are the editable pane buffers (keyed by pane),
     // `datasetIndex` selects among an example's datasets, `result` is the
     // last run. Seeded with the first example loaded.
-    scratch: { ...SCRATCH_START, source: { ...SCRATCH_START.source }, data: { ...SCRATCH_START.data } },
+    scratch: { ...SCRATCH_START, source: { ...SCRATCH_START.source }, data: { ...SCRATCH_START.data }, config: { ...SCRATCH_START.config } },
 
     // the Flow studio (boundaries/flowstudio.js): a jaren-fsm or
     // jaren-dag document edited three ways that cannot disagree —

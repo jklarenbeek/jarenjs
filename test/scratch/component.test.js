@@ -53,6 +53,23 @@ describe('scratchViewModel', () => {
     const vm = scratchViewModel(state({ exampleId: 'path-authors', datasetIndex: 0 }));
     assert.strictEqual(vm.hasSwitcher, false);
   });
+
+  it('derives option panes with the selected value (a source-only engine)', () => {
+    const vm = scratchViewModel(state({
+      engine: 'josl', exampleId: 'josl-toml', source: { text: 'x = 1\n' },
+      data: {}, config: { mode: 'toml' },
+    }));
+    assert.deepStrictEqual(vm.optionPanes.map((p) => p.key), ['mode']);
+    const selected = vm.optionPanes[0].choices.find((c) => c.selected);
+    assert.strictEqual(selected.value, 'toml', 'the config override drives the selected option');
+    assert.strictEqual(vm.dataPanes.length, 0, 'a source-only engine has no data pane');
+    assert.strictEqual(vm.datasets.length, 0);
+  });
+
+  it('falls back to the pane default when config is empty', () => {
+    const vm = scratchViewModel(state({ engine: 'josl', source: { text: '' }, data: {}, config: {} }));
+    assert.strictEqual(vm.optionPanes[0].choices.find((c) => c.selected).value, 'josl', 'the default');
+  });
 });
 
 describe('the scratch JSLT view renders headlessly', () => {
@@ -64,6 +81,15 @@ describe('the scratch JSLT view renders headlessly', () => {
     assert.match(out, /scratch\/data/);      // the data editor
     assert.match(out, /scratch\/dataset/);   // the switcher (path-shapes has 3 datasets)
     assert.match(out, /Ada/);                // the run result on the stage
+  });
+
+  it('renders an option select for a source-only engine (josl)', () => {
+    const out = JSON.stringify(renderScratch(scratchViewModel(state({
+      engine: 'josl', exampleId: 'josl-toml', source: { text: 'x = 1\n' }, data: {}, config: { mode: 'toml' },
+    }))));
+    assert.match(out, /scratch\/option/);    // the mode select dispatches scratch/option
+    assert.match(out, /select/);             // it is a <select>
+    assert.doesNotMatch(out, /scratch\/data"/); // no data editor for a source-only engine
   });
 });
 

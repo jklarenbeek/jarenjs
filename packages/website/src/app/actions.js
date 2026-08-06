@@ -303,6 +303,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/scratch/source', value: '$payload.source' },
       { op: 'replace', path: '/scratch/datasetIndex', value: '$payload.datasetIndex' },
       { op: 'replace', path: '/scratch/data', value: '$payload.data' },
+      { op: 'replace', path: '/scratch/config', value: '$payload.config' },
       { op: 'replace', path: '/scratch/result', value: null },
     ],
   },
@@ -311,6 +312,10 @@ export const ACTIONS = {
   },
   'scratch/data': {
     patch: [{ op: 'add', path: { $concat: ['/scratch/data/', '$payload.key'] }, value: '$event.value' }],
+  },
+  // a live mode select (josl dialect, csv strict/repair) → the run loop re-runs
+  'scratch/option': {
+    patch: [{ op: 'add', path: { $concat: ['/scratch/config/', '$payload.key'] }, value: '$event.value' }],
   },
   'scratch/dataset': { effects: [{ run: 'scratch-dataset', with: { index: '$payload' } }] },
   'scratch/dataset-set': {

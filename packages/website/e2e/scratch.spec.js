@@ -66,6 +66,16 @@ test('a JTLT example renders its text output verbatim', async ({ page }) => {
   await expect(page.locator('.jscratch-result')).toContainText('# Books');
 });
 
+test('a source-only engine (JOSL) toggles its dialect live via the option select', async ({ page }) => {
+  await page.goto('/#/scratch');
+  await page.locator('.jscratch-ex', { hasText: 'First-class citizens' }).click();
+  await expect(page.locator('.jscratch-engine')).toHaveText('JOSL');
+  await expect(page.locator('.jscratch-result')).toContainText('kitchen sink'); // parsed in JOSL mode
+  // flip the mode select to strict TOML → the JOSL null extension is rejected
+  await page.locator('.jscratch-options select').selectOption('toml');
+  await expect(page.locator('.error-line')).toBeVisible();
+});
+
 test('a broken selector docks an error instead of crashing the page', async ({ page }) => {
   await page.goto('/#/scratch');
   await expect(page.locator('.jscratch-result')).toBeVisible();

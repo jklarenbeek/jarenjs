@@ -15,6 +15,8 @@ import {
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
+import { parseJosl, stringifyJsonx } from '@jarenjs/josl';
+import { parseCsvDocument } from '@jarenjs/josl/csv';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -171,6 +173,60 @@ export const ENGINE_LIST = [
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
       return ok(out === undefined ? '(empty sequence)' : fmt(out), t1 - t0, t2 - t1);
+    },
+  },
+  {
+    id: 'josl', label: 'JOSL', lead: 'The streaming TOML superset — JavaScript-obvious values, round-trips.',
+    sourcePanes: [{ key: 'text', label: 'Document', control: 'code' }],
+    dataPanes: [],
+    optionPanes: [{
+      key: 'mode', label: 'Dialect', default: 'josl',
+      choices: [{ value: 'josl', label: 'JOSL' }, { value: 'toml', label: 'TOML (strict 1.0)' }],
+    }],
+    run(source, data, options) {
+      const mode = options?.config?.mode ?? 'josl';
+      let parsed; const t0 = now();
+      // parse (compile) and serialize (run) are the two visible phases
+      try { parsed = parseJosl(source.text ?? '', { mode }); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t1 = now();
+      const out = stringifyJsonx(parsed, { indent: 2 });
+      const t2 = now();
+      return ok(out, t1 - t0, t2 - t1);
+    },
+  },
+  {
+    id: 'csv', label: 'CSV', lead: 'RFC 4180 strict, or repair mode that reads damaged CSV and reports every fix.',
+    sourcePanes: [{ key: 'text', label: 'CSV', control: 'code' }],
+    dataPanes: [],
+    optionPanes: [
+      { key: 'repair', label: 'Mode', default: 'strict', choices: [{ value: 'strict', label: 'strict' }, { value: 'repair', label: 'repair' }] },
+      { key: 'headers', label: 'Header row', default: 'true', choices: [{ value: 'true', label: 'yes' }, { value: 'false', label: 'no' }, { value: 'auto', label: 'auto' }] },
+      { key: 'delimiter', label: 'Delimiter', default: 'auto', choices: [{ value: 'auto', label: 'auto' }, { value: ',', label: ',' }, { value: ';', label: ';' }, { value: 'tab', label: 'tab' }, { value: '|', label: '|' }] },
+      { key: 'typed', label: 'Typed values', default: 'off', choices: [{ value: 'off', label: 'off' }, { value: 'on', label: 'on' }] },
+    ],
+    run(source, data, options) {
+      const cfg = options?.config ?? {};
+      const opts = {
+        repair: cfg.repair === 'repair',
+        headers: cfg.headers === 'auto' ? 'auto' : cfg.headers !== 'false',
+        typed: cfg.typed === 'on',
+        delimiter: !cfg.delimiter || cfg.delimiter === 'auto' ? 'auto' : (cfg.delimiter === 'tab' ? '\t' : cfg.delimiter),
+      };
+      let doc; const t0 = now();
+      // strict mode THROWS on the first RFC 4180 violation (with a code);
+      // repair mode reads anyway and lists every fix — the lesson of the tab
+      try { doc = parseCsvDocument(source.text ?? '', opts); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t1 = now();
+      const body = {
+        dialect: { delimiter: doc.dialect.delimiter === '\t' ? 'tab' : doc.dialect.delimiter, headers: doc.dialect.headers },
+        records: doc.rows.length,
+        repairs: doc.repairs.map((r) => ({ code: r.code, line: r.line, column: r.column, message: r.message })),
+        rows: doc.rows.slice(0, 50),
+      };
+      const t2 = now();
+      return ok(stringifyJsonx(body, { indent: 2 }), t1 - t0, t2 - t1);
     },
   },
 ];

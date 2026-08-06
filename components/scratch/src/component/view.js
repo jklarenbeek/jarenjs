@@ -26,6 +26,8 @@ const shell = {
         ['strong', { class: 'jscratch-engine' }, '$.engine.label'],
         ['span', { class: 'muted jscratch-lead' }, '$.engine.lead'],
       ],
+      // live mode selects (josl dialect, csv strict/repair) — empty for most
+      ['div', { class: 'jscratch-options' }, [{ $apply: '$.optionPanes[*]' }]],
       [{ $apply: '$.sourcePanes[*]' }],
       { $if: ['$.hasSwitcher',
         ['div', { class: 'jscratch-datasets seg', role: 'group', 'aria-label': 'dataset' }, [{ $apply: '$.datasets[*]' }]],
@@ -89,6 +91,22 @@ const dataPane = {
   ],
 };
 
+/** One option pane — a live mode select (its value lives in host `config`). */
+const optionPane = {
+  match: `${SCRATCH_BASE}.optionPanes[*]`, mode: SCRATCH_MODE,
+  body: ['label', { class: 'jscratch-option' },
+    ['span', { class: 'jscratch-pane-label muted' }, '$.label'],
+    ['select', { class: 'editor line', on: { change: { action: 'scratch/option', with: { key: '$.key' } } } },
+      [{ $apply: '$.choices[*]' }]],
+  ],
+};
+
+/** One choice inside an option select. */
+const optionChoice = {
+  match: `${SCRATCH_BASE}.optionPanes[*].choices[*]`, mode: SCRATCH_MODE,
+  body: ['option', { value: '$.value', selected: '$.selected' }, '$.label'],
+};
+
 /** One dataset segment in the switcher. */
 const datasetOption = {
   match: `${SCRATCH_BASE}.datasets[*]`, mode: SCRATCH_MODE,
@@ -100,4 +118,4 @@ const datasetOption = {
 };
 
 /** The scratchpad's JSLT rules — spread into the site stylesheet. */
-export const scratchRules = [shell, railGroup, railExample, sourcePane, dataPane, datasetOption];
+export const scratchRules = [shell, railGroup, railExample, optionPane, optionChoice, sourcePane, dataPane, datasetOption];

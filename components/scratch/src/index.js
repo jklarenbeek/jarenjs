@@ -25,6 +25,16 @@ import { EXAMPLE_LIST } from './examples.js';
  */
 
 /**
+ * @typedef {Object} OptionPane
+ * A live select above the editors — a mode an engine runs in (JOSL vs TOML,
+ * CSV strict vs repair). Its value lives in the host's `config` slice.
+ * @property {string} key
+ * @property {string} label
+ * @property {Array<{ value: string, label: string }>} choices
+ * @property {string} default - the value used until the user picks another
+ */
+
+/**
  * @typedef {Object} ScratchResult
  * @property {boolean} ok
  * @property {string} output - the formatted result (empty on error)
@@ -39,7 +49,8 @@ import { EXAMPLE_LIST } from './examples.js';
  * @property {string} [lead] - one line describing the engine
  * @property {EnginePane[]} sourcePanes - the engine INPUT pane(s)
  * @property {EnginePane[]} dataPanes - the JSON it runs against (may be [])
- * @property {(source: Record<string, string>, data: Record<string, string>, options?: { operators?: any }) => ScratchResult} run
+ * @property {OptionPane[]} [optionPanes] - live mode selects (may be absent)
+ * @property {(source: Record<string, string>, data: Record<string, string>, options?: { operators?: any, config?: Record<string, string> }) => ScratchResult} run
  */
 
 /**
@@ -49,6 +60,9 @@ import { EXAMPLE_LIST } from './examples.js';
  * @property {string} engine - an engine id
  * @property {Record<string, string>} source - presets the source pane(s)
  * @property {Array<{ label: string, data: Record<string, string> }>} datasets
+ *   the JSON to run against — `[]` for a source-only engine (josl/csv/md),
+ *   one for a single run, several for a switcher
+ * @property {Record<string, string>} [config] - presets option-pane values
  */
 
 /** The registered engines, by id. */
@@ -65,12 +79,29 @@ export function engineIds() {
 export const EXAMPLES = Object.freeze(/** @type {ScratchExample[]} */ (EXAMPLE_LIST));
 
 /**
+ * Fill an engine's option-pane defaults so its runner always sees a
+ * complete `config` (the host `config` slice may hold only user overrides).
+ * @param {EngineDescriptor} engine
+ * @param {{ operators?: any, config?: Record<string, string> }} options
+ */
+function withConfig(engine, options) {
+  const panes = engine.optionPanes ?? [];
+  if (panes.length === 0) return options;
+  const given = options.config ?? {};
+  /** @type {Record<string, string>} */
+  const config = {};
+  for (const p of panes) config[p.key] = given[p.key] ?? p.default;
+  return { ...options, config };
+}
+
+/**
  * Run one engine over a source + data. An unknown engine (or a throwing
  * runner) yields an error Result — this never throws.
  * @param {string} engineId
  * @param {Record<string, string>} source
  * @param {Record<string, string>} data
- * @param {{ operators?: any }} [options] - a host operator registry for query/jslt
+ * @param {{ operators?: any, config?: Record<string, string> }} [options] - a
+ *   host operator registry (query/jslt) and the current option-pane values
  * @returns {ScratchResult}
  */
 export function runExample(engineId, source, data, options = {}) {
@@ -79,7 +110,7 @@ export function runExample(engineId, source, data, options = {}) {
     return { ok: false, output: '', timing: null, error: { message: `unknown engine: ${engineId}` } };
   }
   try {
-    return engine.run(source ?? {}, data ?? {}, options);
+    return engine.run(source ?? {}, data ?? {}, withConfig(engine, options));
   }
   catch (err) {
     return { ok: false, output: '', timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) } };

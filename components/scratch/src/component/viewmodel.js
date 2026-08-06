@@ -39,6 +39,14 @@ export function scratchViewModel(state) {
     key: p.key, label: p.label, value: s.data?.[p.key] ?? '',
   }));
 
+  // option panes: live mode selects (josl dialect, csv repair/headers/…);
+  // the selected value is the host config override or the pane's default
+  const config = s.config ?? {};
+  const optionPanes = (engine?.optionPanes ?? []).map((p) => ({
+    key: p.key, label: p.label,
+    choices: p.choices.map((c) => ({ value: c.value, label: c.label, selected: (config[p.key] ?? p.default) === c.value })),
+  }));
+
   const active = EXAMPLES.find((e) => e.id === s.exampleId) ?? null;
   const datasetIndex = s.datasetIndex ?? 0;
   const datasets = (active?.datasets ?? []).map((ds, i) => ({ index: i, label: ds.label, active: i === datasetIndex }));
@@ -56,6 +64,7 @@ export function scratchViewModel(state) {
     engine: { id: engineId, label: engine?.label ?? engineId, lead: engine?.lead ?? '' },
     active: active ? { id: active.id, label: active.label } : null,
     rail,
+    optionPanes,
     sourcePanes,
     dataPanes,
     datasets,

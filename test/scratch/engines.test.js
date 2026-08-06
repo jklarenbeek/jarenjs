@@ -65,6 +65,25 @@ describe('@jarenjs/scratch — the engines run', () => {
     assert.doesNotMatch(r.output, /"B"/, 'the where clause filtered the expensive book out');
   });
 
+  it('josl parses to a JS value; the mode option gates the extensions', () => {
+    const src = { text: 'x = null\n' };
+    // JOSL admits null; strict TOML rejects it — the option-pane config decides
+    assert.strictEqual(runExample('josl', src, {}, { config: { mode: 'josl' } }).ok, true);
+    const strict = runExample('josl', src, {}, { config: { mode: 'toml' } });
+    assert.strictEqual(strict.ok, false, 'TOML mode rejects the null extension');
+    // the default (no config) is JOSL — withConfig fills the pane default
+    assert.strictEqual(runExample('josl', src, {}).ok, true, 'defaults to JOSL when config is absent');
+  });
+
+  it('csv reads RFC 4180 strict, and repair mode reads damaged input as a Result', () => {
+    const damaged = { text: 'a,b\n1,"never closed\n' };
+    const strict = runExample('csv', damaged, {}, { config: { repair: 'strict', headers: 'true', delimiter: 'auto', typed: 'off' } });
+    assert.strictEqual(strict.ok, false, 'strict rejects the unclosed quote');
+    const repaired = runExample('csv', damaged, {}, { config: { repair: 'repair', headers: 'true', delimiter: 'auto', typed: 'off' } });
+    assert.strictEqual(repaired.ok, true, 'repair reads it anyway');
+    assert.match(repaired.output, /repairs/, 'and reports the fixes it made');
+  });
+
   it('a compile error is a Result, never a throw', () => {
     const r = runExample('path', { selector: '$[' }, { data: '{}' });
     assert.strictEqual(r.ok, false);

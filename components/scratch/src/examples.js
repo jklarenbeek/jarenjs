@@ -129,4 +129,75 @@ export const EXAMPLE_LIST = [
   { id: 'xquery-group', label: 'Group by category', engine: 'xquery',
     source: { text: 'for $b in $doc?store?book?*\ngroup by $genre := $b?category\nreturn map { "genre": $genre, "count": count($b), "avg": avg($b?price) }' },
     datasets: [bookstore] },
+
+  // ——— JOSL (source-only: no data pane; the mode select is the toggle) ———
+  { id: 'josl-citizens', label: 'First-class citizens', engine: 'josl', config: { mode: 'josl' }, datasets: [],
+    source: { text: `# JOSL: TOML 1.0 + JavaScript's obvious types
+title = "kitchen sink"
+middle-name = null            # TOML has no null; JOSL does (flip to TOML → error)
+big = 9007199254740993        # promotes to bigint, losslessly
+mask = 0xffn                  # bigint literal, any radix
+match = /^ok[!.]?$/i          # a real RegExp, validated at parse time
+when = 2026-07-18T12:00:00Z   # offset date-time -> Date
+day = 2026-07-18              # local date -> LocalDate
+
+[server]
+host = "localhost"
+ports = [ 8080, 8443 ]
+` } },
+  { id: 'josl-records', label: 'Record stream [[]]', engine: 'josl', config: { mode: 'josl' }, datasets: [],
+    source: { text: `# The most common LLM output shape: a list of records.
+# Each [[]] completes the previous record -- streamable.
+[[]]
+name = "first"
+score = 0.92
+[meta]
+source = "model-a"
+
+[[]]
+name = "second"
+score = 0.87
+tags = [ "draft" ]
+` } },
+  { id: 'josl-toml', label: 'Strict TOML 1.0', engine: 'josl', config: { mode: 'toml' }, datasets: [],
+    source: { text: `# mode: toml -- the same engine, extensions rejected.
+# This dialect passes the complete official toml-test 1.0.0 suite.
+title = "TOML Example"
+
+[owner]
+name = "Tom Preston-Werner"
+dob = 1979-05-27T07:32:00-08:00
+
+[[products]]
+name = "Hammer"
+sku = 738594937
+` } },
+
+  // ——— CSV (source-only: strict vs repair is the lesson, live) ———
+  { id: 'csv-rfc', label: 'RFC 4180', engine: 'csv', config: { repair: 'strict', headers: 'true', delimiter: 'auto', typed: 'off' }, datasets: [],
+    source: { text: `id,name,note
+1,Ada,"quoted, with a comma"
+2,Grace,"a doubled "" quote"
+3,Alan,"a field that spans
+two lines"
+` } },
+  { id: 'csv-repair', label: 'Damaged → self-healing', engine: 'csv', config: { repair: 'repair', headers: 'true', delimiter: 'auto', typed: 'off' }, datasets: [],
+    source: { text: `id,name,note
+1,Ada,"never closed
+2,Grace,"ok"trailing text
+3,Alan,"he said "hi" today"
+4,Edsger
+5,Barbara,extra,column
+` } },
+  { id: 'csv-dialect', label: 'European dialect (sniffed)', engine: 'csv', config: { repair: 'strict', headers: 'auto', delimiter: 'auto', typed: 'on' }, datasets: [],
+    source: { text: `stad;inwoners;opgericht
+Amsterdam;921402;1275-10-27
+Rotterdam;651446;1340-06-07
+Den Haag;548320;1248-01-01
+` } },
+  { id: 'csv-typed', label: 'Typed values', engine: 'csv', config: { repair: 'strict', headers: 'true', delimiter: ',', typed: 'on' }, datasets: [],
+    source: { text: `sku,price,postcode,huge,active,when
+A-1,19.95,01234,123456789012345678901234567890,true,2026-07-27
+A-2,4.5,00042,7,false,2026-07-27T08:30:00Z
+` } },
 ];

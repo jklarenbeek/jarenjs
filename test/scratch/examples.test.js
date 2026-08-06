@@ -18,15 +18,21 @@ describe('@jarenjs/scratch — the example library', () => {
     for (const ex of EXAMPLES) {
       assert.ok(ENGINES[ex.engine], `${ex.id}: unknown engine ${ex.engine}`);
       assert.ok(ex.source && typeof ex.source === 'object', `${ex.id}: source`);
-      assert.ok(Array.isArray(ex.datasets) && ex.datasets.length >= 1, `${ex.id}: datasets`);
-      assert.ok(new Set(EXAMPLES.map((e) => e.id)).size === EXAMPLES.length, 'ids are unique');
+      // datasets is a LIST: [] for a source-only engine (josl/csv), ≥1 otherwise
+      assert.ok(Array.isArray(ex.datasets), `${ex.id}: datasets is a list`);
+      const engine = ENGINES[ex.engine];
+      if (engine.dataPanes.length > 0) assert.ok(ex.datasets.length >= 1, `${ex.id}: a data engine needs a dataset`);
+      else assert.strictEqual(ex.datasets.length, 0, `${ex.id}: a source-only engine carries no datasets`);
     }
+    assert.strictEqual(new Set(EXAMPLES.map((e) => e.id)).size, EXAMPLES.length, 'ids are unique');
   });
 
-  it('every example runs GREEN over each of its datasets (operators injected)', () => {
+  it('every example runs GREEN over each of its datasets (operators + its option config)', () => {
     for (const ex of EXAMPLES) {
-      for (const ds of ex.datasets) {
-        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops });
+      // a source-only example runs once against no data
+      const runs = ex.datasets.length > 0 ? ex.datasets : [{ label: '—', data: {} }];
+      for (const ds of runs) {
+        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config });
         assert.strictEqual(r.ok, true, `${ex.id} / ${ds.label}: ${r.error?.message}`);
         assert.ok(r.output.length > 0);
       }
