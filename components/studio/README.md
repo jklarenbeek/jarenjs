@@ -17,11 +17,16 @@ This package ships in two layers, the suite's convention:
   grammars, nothing of the DOM.
 - **the component** (`@jarenjs/studio/component`) — the IDE itself, a
   `createStudioComponent()` factory (like `@jarenjs/calc`): the shell is a
-  **JSLT view** (file rail, editor, docked coded-error strip, run stage)
-  over a pure `projectViewModel`, plus the two hard-problem policies
-  (`hostPolicy` reboot-vs-hot-update, `reconcileBuffer`). The chrome and
-  its derivation render headlessly and are tested as such; the live DOM
-  stage/splitter widgets and the site mount are the current work.
+  **JSLT view** (file rail with add/delete, an editable file name, a
+  template gallery, editor, docked coded-error strip, run stage, layout
+  switcher) over a pure `projectViewModel`, plus the two hard-problem
+  policies (`hostPolicy` reboot-vs-hot-update, `reconcileBuffer`). The
+  chrome and its derivation render headlessly and are tested as such; the
+  host registers the DOM-touching islands — the live nested-app stage
+  (hot-update via `app.setState`) and the drag splitter — which are
+  browser-verified. Mounted live at the website's `#/project`, where `app`
+  files boot, `jslt`/`query` files run against a data file, and files are
+  added, renamed, deleted and opened from templates.
 
 ## The project document
 

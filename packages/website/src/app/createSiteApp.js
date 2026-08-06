@@ -27,7 +27,7 @@ import {
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
-import { projectTemplate } from '../content/projectTemplates.js';
+import { projectTemplate, fileSkeleton } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
@@ -273,6 +273,32 @@ export function createSiteApp(env) {
     'project-template': (props, dispatch) => {
       const template = projectTemplate(props.id);
       if (template !== undefined) dispatch('project/open', template);
+    },
+    // file management (the files array is an array — index-by-name lives in
+    // JS here, then a patch action lands the result)
+    'project-add': (props, dispatch) => {
+      const text = fileSkeleton(props.kind);
+      if (text === null) return;
+      const p = app.getState().project;
+      let n = 1;
+      let name = `${props.kind}-${n}.${props.kind}`;
+      while (p.files.some((f) => f.name === name)) { n += 1; name = `${props.kind}-${n}.${props.kind}`; }
+      dispatch('project/added', { files: [...p.files, { name, kind: props.kind, text }], active: name });
+    },
+    'project-delete': (props, dispatch) => {
+      const p = app.getState().project;
+      if (p.files.length <= 1) return; // never delete the last file
+      const files = p.files.filter((f) => f.name !== props.name);
+      if (files.length === p.files.length) return; // no such file
+      const active = p.active === props.name ? files[0].name : p.active;
+      dispatch('project/structural', { files, active });
+    },
+    'project-rename': (props, dispatch) => {
+      const p = app.getState().project;
+      const next = String(props.name ?? '').trim();
+      if (next === '' || next === p.active || p.files.some((f) => f.name === next)) return;
+      const files = p.files.map((f) => (f.name === p.active ? { ...f, name: next } : f));
+      dispatch('project/structural', { files, active: next });
     },
     'open-example': (props, dispatch) => {
       if (props.validate === true) {

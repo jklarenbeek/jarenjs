@@ -247,6 +247,29 @@ export const ACTIONS = {
   'project/result': {
     patch: [{ op: 'add', path: { $concat: ['/project/results/', '$payload.name'] }, value: '$payload.result' }],
   },
+  // file management: add (a kind from the rail select), delete (× per row),
+  // rename (the editor-head name field). Each rewrites the files array in
+  // JS (an effect), then a patch action lands the result; a name change
+  // resets the mount/results so the stage re-establishes cleanly.
+  'project/add-file': { effects: [{ run: 'project-add', with: { kind: '$event.value' } }] },
+  'project/delete': { effects: [{ run: 'project-delete', with: { name: '$payload' } }] },
+  'project/rename': { effects: [{ run: 'project-rename', with: { name: '$event.value' } }] },
+  'project/added': {
+    patch: [
+      { op: 'replace', path: '/project/files', value: '$payload.files' },
+      { op: 'replace', path: '/project/active', value: '$payload.active' },
+      { op: 'replace', path: '/project/dirty', value: true },
+    ],
+  },
+  'project/structural': {
+    patch: [
+      { op: 'replace', path: '/project/files', value: '$payload.files' },
+      { op: 'replace', path: '/project/active', value: '$payload.active' },
+      { op: 'replace', path: '/project/mount', value: null },
+      { op: 'replace', path: '/project/results', value: {} },
+      { op: 'replace', path: '/project/dirty', value: true },
+    ],
+  },
   // the nested app's own boot/runtime failure (the stage widget emits it)
   'project/stage-error': { patch: [{ op: 'replace', path: '/project/stageError', value: '$payload' }] },
   // open a whole project (a template card, an inbound share — later order)

@@ -198,6 +198,60 @@ describe('the drag splitter (headless — the pointer drag itself is browser-ver
   });
 });
 
+describe('file management (open a template, add / delete / rename)', () => {
+  it('the template gallery renders; opening a card replaces the project', () => {
+    const { app, container } = mountSite();
+    assert.match(serialize(container), /js-template/, 'the gallery renders template cards');
+    assert.match(serialize(container), /Query \+ data/, 'a template title shows');
+    app.dispatch('project/template', 'finance');
+    assert.strictEqual(app.getState().project.active, 'npv.query', 'opening the card loaded the project');
+  });
+
+  it('add-file appends a fresh file of a kind and activates it', () => {
+    const { app, container } = mountSite();
+    const before = app.getState().project.files.length;
+    const select = find(container, (n) => n.tagName === 'select');
+    fire(select, 'change', { target: { value: 'schema' } });
+    const p = app.getState().project;
+    assert.strictEqual(p.files.length, before + 1, 'a file was added');
+    assert.strictEqual(p.active, 'schema-1.schema', 'the new file is active');
+    assert.strictEqual(p.files.find((f) => f.name === 'schema-1.schema').kind, 'schema');
+  });
+
+  it('delete removes a file (never the last) and re-picks the active', () => {
+    const { app } = mountSite();
+    app.dispatch('project/active', 'stats.query');
+    app.dispatch('project/delete', 'stats.query');
+    const p = app.getState().project;
+    assert.ok(!p.files.some((f) => f.name === 'stats.query'), 'the file is gone');
+    assert.notStrictEqual(p.active, 'stats.query', 'the active moved off the deleted file');
+
+    const solo = mountSite();
+    solo.app.dispatch('project/open', {
+      project: '0.1', name: 'solo', active: 'a.json', layout: { mode: 'classic', ratio: 0.5, autorun: true },
+      files: [{ name: 'a.json', kind: 'app', text: '{"view":[{"match":"$","body":["p",{},"x"]}]}' }],
+    });
+    solo.app.dispatch('project/delete', 'a.json');
+    assert.strictEqual(solo.app.getState().project.files.length, 1, 'the last file is never deleted');
+  });
+
+  it('rename changes the active file name and rejects a duplicate', () => {
+    const { app, container } = mountSite();
+    const nameField = () => find(container, (n) => n.tagName === 'input' && n.getAttribute?.('class') === 'js-editor-name');
+    fire(nameField(), 'change', { target: { value: 'main.json' } });
+    let p = app.getState().project;
+    assert.ok(p.files.some((f) => f.name === 'main.json'), 'app.json was renamed');
+    assert.strictEqual(p.active, 'main.json', 'the active follows the rename');
+
+    // a rename onto an existing name is rejected (no silent clobber)
+    app.dispatch('project/active', 'stats.query');
+    fire(nameField(), 'change', { target: { value: 'main.json' } });
+    p = app.getState().project;
+    assert.strictEqual(p.active, 'stats.query', 'the duplicate rename was rejected');
+    assert.strictEqual(p.files.filter((f) => f.name === 'main.json').length, 1, 'no duplicate name');
+  });
+});
+
 describe('commitProject — the edit-loop step', () => {
   const appFile = (state, body) => ({
     name: 'a.json', kind: 'app',

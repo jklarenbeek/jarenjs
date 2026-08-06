@@ -92,6 +92,29 @@ test('a query file runs live against its data file — the playground engines, f
   await expect(result).toContainText('3.875'); // $mean of the data — a registered operator, run live
 });
 
+test('file management: open a template, add a file, rename it, delete it', async ({ page }) => {
+  await page.goto('/#/project');
+
+  // open a template from the gallery — the project is replaced
+  await page.locator('.js-template', { hasText: 'JSLT + data' }).click();
+  await expect(page.locator('.js-rail')).toContainText('shape.jslt');
+
+  // add a fresh file of a kind — it becomes active
+  await page.locator('.js-addfile').selectOption('data');
+  await expect(page.locator('.js-rail')).toContainText('data-1.data');
+  const nameField = page.locator('.js-editor-name');
+  await expect(nameField).toHaveValue('data-1.data');
+
+  // rename the active file
+  await nameField.fill('extra.data');
+  await nameField.blur();
+  await expect(page.locator('.js-rail')).toContainText('extra.data');
+
+  // delete it via the row's ×
+  await page.locator('.js-file-row', { hasText: 'extra.data' }).locator('.js-file-del').click();
+  await expect(page.locator('.js-rail')).not.toContainText('extra.data');
+});
+
 test('the splitter drags to commit a new ratio and keyboard-resizes as a separator', async ({ page }) => {
   await page.goto('/#/project');
   const splitter = page.locator('.js-split');

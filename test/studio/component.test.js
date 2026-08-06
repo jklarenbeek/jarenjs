@@ -84,6 +84,9 @@ describe('the JSLT shell renders headlessly', () => {
     assert.match(out, /Stack/);               // the third layout segment
     assert.match(out, /studio-splitter/);     // the drag splitter widget mount point
     assert.match(out, /separator/);           // rendered as an ARIA separator
+    assert.match(out, /js-addfile/);          // the add-file control
+    assert.match(out, /js-editor-name/);      // the editable file name
+    assert.match(out, /js-file-del/);         // the per-row delete affordance
   });
 });
 

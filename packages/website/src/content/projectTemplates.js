@@ -79,6 +79,32 @@ export const PROJECT_TEMPLATES = Object.freeze([
 /** The default layout every seed opens with. */
 export const PROJECT_LAYOUT = Object.freeze({ mode: 'classic', ratio: 0.5, autorun: true });
 
+/** The gallery cards the pen bar shows (opening one replaces the project,
+ * CodePen "New Pen" style). */
+export const PROJECT_TEMPLATE_CARDS = PROJECT_TEMPLATES.map((t) => ({
+  id: t.id, title: t.title, lead: t.lead,
+}));
+
+/** The kinds a user may add a fresh file of, each with a minimal-VALID
+ * skeleton so a new file never opens on an error. (fsm/dag/model get their
+ * rich editors in later orders, so they are not offered here yet.) */
+export const ADDABLE_KINDS = Object.freeze(['app', 'jslt', 'query', 'state', 'data', 'schema']);
+
+const SKELETONS = {
+  app: JSON.stringify({ state: {}, view: [{ match: '$', body: ['p', {}, 'New app'] }], actions: {} }, null, 2),
+  jslt: JSON.stringify({ $jslt: '0.1', rules: [{ match: '$', body: '$' }] }, null, 2),
+  query: JSON.stringify({ value: '$' }, null, 2),
+  state: '{}',
+  data: '{}',
+  schema: JSON.stringify({ type: 'object' }, null, 2),
+};
+
+/** The starter text for a freshly added file of `kind`, or null if the
+ * kind is not addable. */
+export function fileSkeleton(kind) {
+  return Object.hasOwn(SKELETONS, kind) ? SKELETONS[kind] : null;
+}
+
 /** Materialize a template `id` into a fresh project document. */
 export function projectTemplate(id) {
   const t = PROJECT_TEMPLATES.find((x) => x.id === id);

@@ -21,6 +21,7 @@ import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
 import { flowPageViewModel } from '../boundaries/flowstudio.js';
 import { projectComponent } from '../boundaries/project.js';
+import { PROJECT_TEMPLATE_CARDS } from '../content/projectTemplates.js';
 import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
@@ -118,7 +119,9 @@ export function viewModel(state) {
   if (page === 'charts') ui.chartsPage = chartsPage(state);
   if (page === 'playground') ui.pg = playgroundPage(state);
   if (page === 'studio') ui.studio = studioPage(state);
-  if (page === 'project') ui.project = projectComponent.viewModel({ project: state.project });
+  if (page === 'project') {
+    ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
+  }
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);
   if (page === 'game') ui.game = gamePageViewModel(state.game);
   if (page === 'data') ui.data = dataViewModel(state);

@@ -59,6 +59,39 @@
 .js-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .js-file-warn { color: var(--warn, #b45309); margin-left: auto; }
 
+/* a row is the select button + a delete affordance */
+.js-file-row { display: flex; align-items: center; gap: 2px; }
+.js-file-row .js-file { flex: 1; }
+.js-file-del {
+  flex: 0 0 auto; border: none; background: transparent; cursor: pointer;
+  color: var(--muted, #64748b); font-size: 1rem; line-height: 1;
+  padding: 2px 6px; border-radius: var(--radius-sm, 6px);
+}
+.js-file-del:hover { color: var(--fail, #dc2626); background: var(--fail-soft, #fef2f2); }
+
+/* add a file (rail head) */
+.js-addfile {
+  inline-size: 100%; margin-block-end: 4px; font-size: 0.8rem;
+  border: 1px dashed var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px);
+  background: transparent; color: var(--muted, #64748b); padding: var(--space-1, 0.25rem);
+}
+
+/* the template gallery (pen bar) */
+.js-gallery { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.js-template {
+  border: 1px solid var(--border, #e2e8f0); background: var(--surface, #fff);
+  border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; color: var(--fg, #0f172a);
+}
+.js-template:hover { border-color: var(--accent, #2563eb); color: var(--accent, #2563eb); }
+
+/* the editable file name (editor head) */
+.js-editor-name {
+  border: none; background: transparent; font-family: var(--mono, monospace);
+  font-size: 0.8rem; color: var(--fg, #0f172a); padding: 2px 4px;
+  border-radius: var(--radius-sm, 6px); min-width: 0;
+}
+.js-editor-name:hover, .js-editor-name:focus-visible { background: var(--accent-soft, #eff6ff); outline: none; }
+
 .js-badge {
   flex: 0 0 auto; font-size: 0.65rem; font-family: var(--mono, monospace);
   padding: 1px 5px; border-radius: 999px; line-height: 1.4;

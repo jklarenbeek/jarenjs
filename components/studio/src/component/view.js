@@ -38,6 +38,9 @@ const shell = {
     ['div', { class: 'js-penbar' },
       ['strong', { class: 'js-penname' }, '$.name'],
       ['span', { class: 'js-savestate' }, '$.saveState'],
+      // the template gallery — opening one replaces the project (host
+      // provides `$.templates`; absent → renders nothing)
+      ['div', { class: 'js-gallery' }, ['span', { class: 'muted' }, 'New'], [{ $apply: '$.templates[*]' }]],
       ['span', { class: 'js-spacer' }],
       ['span', { class: 'js-filecount muted' }, ['text', '$.fileCount'], ' files'],
       // the layout switcher: the three grid modes (the drag splitter is a
@@ -50,11 +53,25 @@ const shell = {
       ['button', { class: 'btn small', type: 'button', on: { click: 'project/run' } }, 'Run'],
     ],
     // ——— file rail ———
-    ['nav', { class: 'js-rail', 'aria-label': 'files' }, [{ $apply: '$.rail[*]' }]],
+    ['nav', { class: 'js-rail', 'aria-label': 'files' },
+      ['select', { class: 'js-addfile', 'aria-label': 'add a file', value: '', on: { change: 'project/add-file' } },
+        ['option', { value: '' }, '+ add file…'],
+        ['option', { value: 'app' }, 'app'],
+        ['option', { value: 'jslt' }, 'jslt'],
+        ['option', { value: 'query' }, 'query'],
+        ['option', { value: 'state' }, 'state'],
+        ['option', { value: 'data' }, 'data'],
+        ['option', { value: 'schema' }, 'schema'],
+      ],
+      [{ $apply: '$.rail[*]' }]],
     // ——— editor ———
     ['div', { class: 'js-editor' },
       ['div', { class: 'js-editor-head' },
-        ['span', { class: 'js-editor-kind' }, '$.activeKind'],
+        // the active file name is editable here → project/rename
+        ['input', { class: 'js-editor-name', value: '$.active', spellcheck: 'false',
+          autocapitalize: 'off', autocomplete: 'off', 'aria-label': 'file name',
+          on: { change: 'project/rename' } }],
+        ['span', { class: 'js-editor-kind muted' }, '$.activeKind'],
         ['span', { class: 'js-spacer' }],
         ['span', { class: 'js-linecount' }, ['text', '$.lineCount'], ' lines'],
       ],
@@ -88,19 +105,35 @@ const shell = {
   ],
 };
 
-/** One file-rail row. */
+/** One file-rail row: the select button + a delete affordance. */
 const fileRow = {
   match: `${PROJECT_BASE}.rail[*]`, mode: PROJECT_MODE,
-  body: ['button', {
-    type: 'button',
-    class: { $if: ['$.active', 'js-file active', 'js-file'] },
-    title: '$.role',
-    on: { click: { action: 'project/active', with: '$.name' } },
-  },
-  ['span', { class: 'js-badge', 'data-badge': '$.badge' }, '$.kind'],
-  ['span', { class: 'js-file-name' }, '$.name'],
-  { $if: ['$.valid', '', ['span', { class: 'js-file-warn', title: 'this file has errors' }, '●']] },
+  body: ['div', { class: 'js-file-row' },
+    ['button', {
+      type: 'button',
+      class: { $if: ['$.active', 'js-file active', 'js-file'] },
+      title: '$.role',
+      on: { click: { action: 'project/active', with: '$.name' } },
+    },
+    ['span', { class: 'js-badge', 'data-badge': '$.badge' }, '$.kind'],
+    ['span', { class: 'js-file-name' }, '$.name'],
+    { $if: ['$.valid', '', ['span', { class: 'js-file-warn', title: 'this file has errors' }, '●']] },
+    ],
+    ['button', {
+      type: 'button', class: 'js-file-del', title: 'delete this file',
+      'aria-label': 'delete file',
+      on: { click: { action: 'project/delete', with: '$.name' } },
+    }, '×'],
   ],
+};
+
+/** One template-gallery card — opening it replaces the whole project. */
+const templateRow = {
+  match: `${PROJECT_BASE}.templates[*]`, mode: PROJECT_MODE,
+  body: ['button', {
+    type: 'button', class: 'js-template', title: '$.lead',
+    on: { click: { action: 'project/template', with: '$.id' } },
+  }, '$.title'],
 };
 
 /** One error-strip line — a problem prefixed by its file; click activates it. */
@@ -114,4 +147,4 @@ const errorRow = {
 };
 
 /** The studio's JSLT rules — spread into the site stylesheet. */
-export const projectRules = [shell, fileRow, errorRow];
+export const projectRules = [shell, fileRow, templateRow, errorRow];
