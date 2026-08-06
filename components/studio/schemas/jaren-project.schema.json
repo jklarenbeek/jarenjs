@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-project/0.1",
+  "title": "jaren-project",
+  "description": "A jaren studio project: a thin envelope over a list of typed files. The envelope is schema-gated; each file's `text` is validated against ITS OWN kind grammar at its boundary, never composed into one mega-schema — so a data file may use host-registered operators the closed grammars forbid.",
+  "type": "object",
+  "required": ["project", "files"],
+  "additionalProperties": false,
+  "properties": {
+    "project": { "const": "0.1" },
+    "files": {
+      "type": "array",
+      "description": "The project's files, each a named unit of one concern.",
+      "items": { "$ref": "#/$defs/file" }
+    },
+    "active": {
+      "type": "string",
+      "description": "The name of the file the editor shows (falls back to the first file)."
+    },
+    "layout": { "$ref": "#/$defs/layout" }
+  },
+  "$defs": {
+    "file": {
+      "type": "object",
+      "required": ["name", "kind", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "description": "The file's grammar/role; its `text` is validated against this kind, not the envelope.",
+          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model"]
+        },
+        "text": { "type": "string" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "description": "The IDE arrangement — frozen so it survives a share link and the eject.",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["classic", "right", "top"] },
+        "ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "autorun": { "type": "boolean" }
+      }
+    }
+  }
+}

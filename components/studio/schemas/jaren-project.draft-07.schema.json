@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-project/0.1/draft-07",
+  "title": "jaren-project (draft-07)",
+  "description": "The draft-07 twin of jaren-project, for tools pinned to draft-07. Mechanically equivalent to the 2020-12 canonical artifact.",
+  "type": "object",
+  "required": ["project", "files"],
+  "additionalProperties": false,
+  "properties": {
+    "project": { "enum": ["0.1"] },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/file" }
+    },
+    "active": { "type": "string" },
+    "layout": { "$ref": "#/definitions/layout" }
+  },
+  "definitions": {
+    "file": {
+      "type": "object",
+      "required": ["name", "kind", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model"]
+        },
+        "text": { "type": "string" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["classic", "right", "top"] },
+        "ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "autorun": { "type": "boolean" }
+      }
+    }
+  }
+}

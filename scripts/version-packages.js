@@ -15,6 +15,7 @@ const packageFiles = [
   'components/mermaid/package.json',
   'components/calc/package.json',
   'components/charts/package.json',
+  'components/studio/package.json',
   'packages/josl/package.json',
   'packages/ai/package.json',
   'packages/flow/package.json',

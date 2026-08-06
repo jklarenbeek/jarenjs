@@ -1,5 +1,5 @@
 {
-  "name": "@jarenjs/forms",
+  "name": "@jarenjs/studio",
   "private": false,
   "version": "0.28.0",
   "type": "module",
@@ -11,18 +11,25 @@
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
     },
+    "./component": {
+      "types": "./dist/types/component/index.d.ts",
+      "default": "./src/component/index.js"
+    },
+    "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/types/",
-    "src/"
+    "src/",
+    "docs/",
+    "schemas/"
   ],
-  "description": "Framework-agnostic form model generator for JSON Schema with preemptive per-field validation powered by @jarenjs/core",
+  "description": "The jaren project IDE: a multi-file project (schema, view, actions, model, queries, flow) is one document; each file is validated against its own grammar, assembled into runnable artifacts, and edited/hosted by the studio widget. The engine is headless; the component layer is the IDE.",
   "author": "joham",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jklarenbeek/jarenjs.git",
-    "directory": "packages/forms"
+    "directory": "components/studio"
   },
   "license": "MIT",
   "engines": {
@@ -35,11 +42,14 @@
   "keywords": [
     "jaren",
     "json",
-    "schema",
-    "form",
-    "forms",
-    "generator",
-    "validation"
+    "ide",
+    "studio",
+    "project",
+    "editor",
+    "codepen",
+    "playground",
+    "document",
+    "headless"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -48,8 +58,10 @@
   },
   "dependencies": {
     "@jarenjs/core": "^0.28.0",
-    "@jarenjs/formats": "^0.28.0",
+    "@jarenjs/validate": "^0.28.0",
     "@jarenjs/json": "^0.28.0",
-    "@jarenjs/validate": "^0.28.0"
+    "@jarenjs/app": "^0.28.0",
+    "@jarenjs/flow": "^0.28.0",
+    "@jarenjs/db": "^0.28.0"
   }
 }

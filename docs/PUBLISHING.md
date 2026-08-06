@@ -17,6 +17,7 @@ release publishes the nineteen public workspaces:
 - `@jarenjs/mermaid`
 - `@jarenjs/calc`
 - `@jarenjs/charts`
+- `@jarenjs/studio`
 - `@jarenjs/josl`
 - `@jarenjs/ai`
 - `@jarenjs/flow`
@@ -188,6 +189,7 @@ npm view @jarenjs/md version
 npm view @jarenjs/mermaid version
 npm view @jarenjs/calc version
 npm view @jarenjs/charts version
+npm view @jarenjs/studio version
 npm view @jarenjs/josl version
 npm view @jarenjs/ai version
 ```
