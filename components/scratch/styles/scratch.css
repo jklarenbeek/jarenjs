@@ -1,12 +1,57 @@
 /* @jarenjs/scratch — the scratchpad stylesheet.
  *
- * DESIGN.md-conformant (filled out with the component in the next order):
- * a rail | source | stage grid, minmax(0,1fr) tracks with min-width:0 on
- * every scrollable child, the established breakpoints and theme tokens. No
- * new hue family — the scratchpad reuses the suite's result-node styles.
+ * DESIGN.md-conformant: a rail | editors | stage grid, minmax(0,1fr) tracks
+ * with min-width:0 on every scrollable child, the established 1024
+ * breakpoint and theme tokens. Base controls (.editor, .seg / .seg-btn,
+ * .error-line, .code-block, .muted) are the host's shared styles — the
+ * scratchpad only adds its own .jscratch-* rules, no new hue family.
  */
 
 .jscratch {
   display: grid;
   gap: var(--space-3, 0.75rem);
+  grid-template-columns: 12rem minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "rail editors stage";
+  align-items: start;
+  min-height: 24rem;
+}
+.jscratch-rail { grid-area: rail; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.jscratch-editors { grid-area: editors; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2, 0.5rem); }
+.jscratch-stage { grid-area: stage; min-width: 0; display: flex; flex-direction: column; }
+
+/* ——— the example rail ——— */
+.jscratch-group-head {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  margin-block: var(--space-2, 0.5rem) 2px;
+}
+.jscratch-ex {
+  display: block; width: 100%; text-align: left; border: none; background: transparent;
+  cursor: pointer; padding: 3px var(--space-2, 0.5rem);
+  border-radius: var(--radius-sm, 6px); border-left: 2px solid transparent;
+  color: var(--muted, #64748b); font-size: 0.85rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jscratch-ex:hover { color: var(--fg, #0f172a); }
+.jscratch-ex.active { color: var(--fg, #0f172a); background: var(--accent-soft, #eff6ff); border-left-color: var(--accent, #2563eb); }
+
+/* ——— the editors ——— */
+.jscratch-head { display: flex; align-items: baseline; gap: var(--space-2, 0.5rem); flex-wrap: wrap; }
+.jscratch-engine { color: var(--fg, #0f172a); }
+.jscratch-lead { font-size: 0.8rem; }
+.jscratch-pane { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.jscratch-pane-label { font-size: 0.7rem; font-family: var(--mono, monospace); }
+.jscratch-datasets { align-self: flex-start; }
+
+/* ——— the stage ——— */
+.jscratch-stage-head { font-family: var(--mono, monospace); font-size: 0.75rem; padding-bottom: var(--space-2, 0.5rem); }
+.jscratch-result { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.jscratch-timing { font-size: 0.75rem; margin: 0 0 var(--space-2, 0.5rem); }
+.jscratch-hint { padding: var(--space-3, 0.75rem); }
+
+@media (max-width: 1024px) {
+  .jscratch {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "rail" "editors" "stage";
+  }
+  .jscratch-rail { flex-direction: row; flex-wrap: wrap; gap: 2px; }
 }
