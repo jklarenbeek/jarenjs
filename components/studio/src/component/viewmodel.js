@@ -32,14 +32,14 @@ function deriveStage(project, activeMeta, results, revision, committed) {
     // here it is the data: the assembled document + the reboot revision
     return { kind: 'app', mount: { doc: artifact.doc, revision } };
   }
-  if (activeMeta.kind === 'jslt' || activeMeta.kind === 'query') {
-    // the host runs the transform (paired with a data file) and stores its
-    // render nodes; the stage renders them in `ui` mode, or a hint until
-    // the first run lands
+  if (activeMeta.kind === 'jslt' || activeMeta.kind === 'query' || activeMeta.kind === 'schema') {
+    // the host runs the file (a transform, or a schema validating the data
+    // file) and stores its render nodes; the stage renders them in `ui`
+    // mode, or a hint until the first run lands
     const result = results[activeMeta.name] ?? null;
     return { kind: 'result', ran: result !== null, nodes: result?.nodes ?? [] };
   }
-  if (activeMeta.kind === 'state' || activeMeta.kind === 'data' || activeMeta.kind === 'schema') {
+  if (activeMeta.kind === 'state' || activeMeta.kind === 'data') {
     return { kind: 'inert', note: 'An input — edit it as text; it feeds the app, a query or a validation.' };
   }
   // fsm / dag / model — their rich editors arrive in Orders 03–04

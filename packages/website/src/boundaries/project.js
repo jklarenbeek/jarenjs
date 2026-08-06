@@ -26,7 +26,9 @@ import { createStudioComponent } from '@jarenjs/studio/component';
 
 import { loadStudioDocument } from './studio.js';
 import { operatorRegistry, runEngine } from './engines.js';
-import { errorMessage } from '../lib/nodes.js';
+import { runValidation } from './validator.js';
+import { errorMessage, cards, error } from '../lib/nodes.js';
+import { formatMsUnscaled } from '../lib/format.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
 export const projectComponent = createStudioComponent({ operators: operatorRegistry });
@@ -101,7 +103,33 @@ export function runProjectFile(slice, name) {
   const dataText = input ? input.text : 'null';
   if (file.kind === 'query') return { nodes: runEngine('query', { query: file.text, data: dataText, externals: '' }) };
   if (file.kind === 'jslt') return { nodes: runEngine('jslt', { stylesheet: file.text, data: dataText }) };
+  if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText) };
   return null;
+}
+
+/** Validate a data file against a schema file and render the report — the
+ * playground's "validate" tab, folded into the stage: a valid/invalid
+ * summary plus each error as its own coded node. */
+function validateNodes(schemaText, dataText) {
+  let data;
+  try { data = JSON.parse(dataText); }
+  catch (err) { return [error({ message: `data: ${errorMessage(err)}` }, 'Invalid JSON')]; }
+  const r = runValidation(schemaText, data);
+  if (r.schemaError !== null) return [error({ message: r.schemaError }, 'Schema error')];
+  const nodes = [cards([
+    { title: r.valid ? 'Valid' : 'Invalid', value: r.valid ? '✓' : `${r.errors.length} error${r.errors.length === 1 ? '' : 's'}` },
+    { title: 'Draft', value: r.draft },
+    { title: 'Compile', value: formatMsUnscaled(r.compileMs) },
+    { title: 'Validate', value: formatMsUnscaled(r.validateMs) },
+  ])];
+  for (const e of r.errors) {
+    nodes.push(error({
+      message: e.message,
+      dataPath: e.instancePath === '' ? '(root)' : e.instancePath,
+      code: e.keyword !== '' ? e.keyword : undefined,
+    }, 'Validation error'));
+  }
+  return nodes;
 }
 
 /**

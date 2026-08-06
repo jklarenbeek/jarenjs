@@ -97,7 +97,7 @@ const shell = {
         { $if: [{ $eq: ['$.stage.kind', 'result'] },
           { $if: ['$.stage.ran',
             ['div', { class: 'js-stage-result' }, [{ $apply: ['$.stage.nodes[*]', 'ui'] }]],
-            ['p', { class: 'muted js-stage-note' }, 'Edit — the transform runs live against the data file here.']] },
+            ['p', { class: 'muted js-stage-note' }, 'Edit — this file runs live against the data file here.']] },
           { $if: [{ $eq: ['$.stage.kind', 'boot-failed'] },
             ['div', { class: 'js-stage-fail card' }, '$.stage.note'],
             ['p', { class: 'muted js-stage-note' }, '$.stage.note']] }] }] },

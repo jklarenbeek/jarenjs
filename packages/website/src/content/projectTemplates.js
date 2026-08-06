@@ -74,6 +74,16 @@ export const PROJECT_TEMPLATES = Object.freeze([
       { name: 'input.data', kind: 'data', text: UPPER_DATA },
     ],
   },
+  {
+    id: 'validate',
+    title: 'Schema + data',
+    lead: 'A JSON Schema validating a data file — edit either and watch the report.',
+    active: 'user.schema',
+    files: [
+      { name: 'user.schema', kind: 'schema', text: JSON.stringify({ type: 'object', properties: { name: { type: 'string', minLength: 2 }, age: { type: 'integer', minimum: 0 } }, required: ['name'] }, null, 2) },
+      { name: 'user.data', kind: 'data', text: JSON.stringify({ name: 'Ada', age: 36 }, null, 2) },
+    ],
+  },
 ]);
 
 /** The default layout every seed opens with. */

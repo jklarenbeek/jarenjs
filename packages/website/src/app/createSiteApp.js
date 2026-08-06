@@ -261,8 +261,8 @@ export function createSiteApp(env) {
     'project-run': (props, dispatch) => {
       const state = app.getState().project;
       const active = state.files.find((f) => f.name === state.active);
-      // a transform file re-runs; an app file force-restarts its stage
-      if (active !== undefined && (active.kind === 'query' || active.kind === 'jslt')) {
+      // a transform / schema file re-runs; an app file force-restarts
+      if (active !== undefined && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema')) {
         dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
         return;
       }
@@ -474,7 +474,7 @@ function wireBoundaries(app, debounceMs) {
     if (state.project === undefined) return;
     const active = state.project.active;
     const file = state.project.files.find((f) => f.name === active);
-    if (file !== undefined && (file.kind === 'query' || file.kind === 'jslt')) {
+    if (file !== undefined && (file.kind === 'query' || file.kind === 'jslt' || file.kind === 'schema')) {
       app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
     }
   };

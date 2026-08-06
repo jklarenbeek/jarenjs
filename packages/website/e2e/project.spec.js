@@ -92,6 +92,22 @@ test('a query file runs live against its data file — the playground engines, f
   await expect(result).toContainText('3.875'); // $mean of the data — a registered operator, run live
 });
 
+test('a schema file validates its data file on the stage (the validate tab, folded in)', async ({ page }) => {
+  await page.goto('/#/project');
+  await page.locator('.js-template', { hasText: 'Schema + data' }).click();
+  const result = page.locator('.js-stage-result');
+  await expect(result).toBeVisible();
+  await expect(result).toContainText('✓'); // good data validates
+
+  // break the data file, then return to the schema → the report flips
+  await page.locator('.js-file', { hasText: 'user.data' }).click();
+  const editor = page.locator('.js-editor-input');
+  await editor.fill('{"age":-1}');
+  await editor.blur();
+  await page.locator('.js-file', { hasText: 'user.schema' }).click();
+  await expect(page.locator('.js-stage-result')).toContainText('Invalid');
+});
+
 test('file management: open a template, add a file, rename it, delete it', async ({ page }) => {
   await page.goto('/#/project');
 

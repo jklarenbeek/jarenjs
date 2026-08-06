@@ -145,6 +145,20 @@ describe('transform file kinds run live on the stage (the playground fold)', () 
     assert.match(serialize(container), /greeting|Output/, 'the transform output renders on the stage');
   });
 
+  it('a schema file validates the data file live (valid → invalid)', () => {
+    const { app, container } = mountSite();
+    app.dispatch('project/template', 'validate');
+    assert.strictEqual(app.getState().project.active, 'user.schema');
+    assert.ok(app.getState().project.results['user.schema']?.nodes, 'the schema validated its data');
+    assert.match(serialize(container), /✓/, 'good data reports valid');
+
+    // break the data file, then re-validate from the schema
+    app.dispatch('project/active', 'user.data');
+    fire(find(container, (n) => n.tagName === 'textarea'), 'change', { target: { value: '{"age":-1}' } });
+    app.dispatch('project/active', 'user.schema');
+    assert.match(serialize(container), /Invalid/, 'bad data reports invalid with errors');
+  });
+
   it('editing a transform re-runs it, and Run re-runs on demand', () => {
     const { app, container } = mountSite();
     app.dispatch('project/template', 'finance');
