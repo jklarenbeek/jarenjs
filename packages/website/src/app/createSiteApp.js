@@ -27,6 +27,7 @@ import {
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
+import { runScratch, loadExample, loadDataset } from '../boundaries/scratch.js';
 import { projectTemplate, fileSkeleton } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
@@ -300,6 +301,17 @@ export function createSiteApp(env) {
       const files = p.files.map((f) => (f.name === p.active ? { ...f, name: next } : f));
       dispatch('project/structural', { files, active: next });
     },
+    // the Scratch playground: picking an example loads its source + first
+    // dataset; the dataset switcher swaps the data pane against the SAME
+    // source (both land as a patch, then the run loop below re-runs).
+    'scratch-load': (props, dispatch) => {
+      const loaded = loadExample(props.id);
+      if (loaded !== null) dispatch('scratch/loaded', loaded);
+    },
+    'scratch-dataset': (props, dispatch) => {
+      const data = loadDataset(app.getState().scratch.exampleId, props.index);
+      if (data !== null) dispatch('scratch/dataset-set', { index: props.index, data });
+    },
     'open-example': (props, dispatch) => {
       if (props.validate === true) {
         env.navigate?.('#/playground?engine=validate');
@@ -478,6 +490,14 @@ function wireBoundaries(app, debounceMs) {
       app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
     }
   };
+  // the Scratch playground's live run: the active engine over the current
+  // source + data (registered operators threaded in the boundary). Never
+  // throws — a bad edit lands as an error result, not a crash.
+  const runScratchLive = () => {
+    const state = app.getState();
+    if (state.scratch === undefined) return;
+    app.dispatch('scratch/result', runScratch(state.scratch));
+  };
   /** @type {Map<string, any>} */
   const timers = new Map();
   const debounced = (key, run) => {
@@ -499,6 +519,7 @@ function wireBoundaries(app, debounceMs) {
     let validate = false;
     let routed = false;
     let project = false;
+    let scratch = false;
     for (const path of changes) {
       if (path === '/pg/schemaText' || path === '/pg/data' || path.startsWith('/pg/data/')) {
         validate = true;
@@ -509,12 +530,18 @@ function wireBoundaries(app, debounceMs) {
       else if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
         project = true;
       }
+      // any Scratch input (source / data / example / dataset) re-runs; the
+      // run's own output (`/scratch/result`) must NOT, or it loops forever
+      else if (path.startsWith('/scratch/') && path !== '/scratch/result') {
+        scratch = true;
+      }
       else if (path === '/route') {
         routed = true;
       }
     }
     if (validate) debounced('validate', runValidate);
     if (project) debounced('project', () => { runProjectCommit(); runProjectActive(); });
+    if (scratch) debounced('scratch', runScratchLive);
     for (const engine of engines) {
       debounced(`eng:${engine}`, () => {
         runEng(engine);
@@ -534,6 +561,9 @@ function wireBoundaries(app, debounceMs) {
         if (s.project.mount === null) runProjectCommit();
         runProjectActive();
       }
+      // arriving at the Scratch playground: run the seeded example once, so
+      // the stage is never empty (later edits re-run through the feed above)
+      if (s.route.page === 'scratch' && s.scratch.result === null) runScratchLive();
       syncAll();
       binancePageSync(s.route.page === 'charts');
       applyShareToken(s);
@@ -577,5 +607,7 @@ function wireBoundaries(app, debounceMs) {
   // entering directly at #/project boots the live stage (the initial
   // route/set fired before this subscriber attached, so seed it here)
   if (app.getState().route.page === 'project') { runProjectCommit(); runProjectActive(); }
+  // …and likewise a direct entry at #/scratch
+  if (app.getState().route.page === 'scratch' && app.getState().scratch.result === null) runScratchLive();
   applyShareToken(app.getState()); // a share link may be the entry URL
 }

@@ -30,6 +30,7 @@
     "@jarenjs/md": "file:../../components/md",
     "@jarenjs/mermaid": "file:../../components/mermaid",
     "@jarenjs/refs": "file:../refs",
+    "@jarenjs/scratch": "file:../../components/scratch",
     "@jarenjs/studio": "file:../../components/studio",
     "@jarenjs/validate": "file:../validate",
     "@jarenjs/view": "file:../view"

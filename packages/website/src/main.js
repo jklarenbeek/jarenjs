@@ -7,6 +7,7 @@ import '@jarenjs/mermaid/styles/mermaid.css';
 import '@jarenjs/calc/styles/calc.css';
 import '@jarenjs/charts/styles/charts.css';
 import '@jarenjs/studio/styles/studio.css';
+import '@jarenjs/scratch/styles/scratch.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';

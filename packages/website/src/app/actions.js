@@ -292,6 +292,35 @@ export const ACTIONS = {
   'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },
   'project/layout-ratio': { patch: [{ op: 'replace', path: '/project/layout/ratio', value: '$payload' }] },
 
+  // the Scratch engine playground (#/scratch, boundaries/scratch.js): pick
+  // an example (loads its source + first dataset), edit a source/data pane
+  // live, or switch datasets; the debounced boundary re-runs the engine.
+  'scratch/example': { effects: [{ run: 'scratch-load', with: { id: '$payload' } }] },
+  'scratch/loaded': {
+    patch: [
+      { op: 'replace', path: '/scratch/engine', value: '$payload.engine' },
+      { op: 'replace', path: '/scratch/exampleId', value: '$payload.exampleId' },
+      { op: 'replace', path: '/scratch/source', value: '$payload.source' },
+      { op: 'replace', path: '/scratch/datasetIndex', value: '$payload.datasetIndex' },
+      { op: 'replace', path: '/scratch/data', value: '$payload.data' },
+      { op: 'replace', path: '/scratch/result', value: null },
+    ],
+  },
+  'scratch/source': {
+    patch: [{ op: 'add', path: { $concat: ['/scratch/source/', '$payload.key'] }, value: '$event.value' }],
+  },
+  'scratch/data': {
+    patch: [{ op: 'add', path: { $concat: ['/scratch/data/', '$payload.key'] }, value: '$event.value' }],
+  },
+  'scratch/dataset': { effects: [{ run: 'scratch-dataset', with: { index: '$payload' } }] },
+  'scratch/dataset-set': {
+    patch: [
+      { op: 'replace', path: '/scratch/datasetIndex', value: '$payload.index' },
+      { op: 'replace', path: '/scratch/data', value: '$payload.data' },
+    ],
+  },
+  'scratch/result': { patch: [{ op: 'replace', path: '/scratch/result', value: '$payload' }] },
+
   // the data studio (boundaries/data.js): boot the owner worker, edit
   // the model/query panes, run + explain, insert, live-event, migrate.
   // A patch-only action carries its changed paths to the O(k) renderer.

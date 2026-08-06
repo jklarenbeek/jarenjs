@@ -22,6 +22,7 @@ import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
 import { flowPageViewModel } from '../boundaries/flowstudio.js';
 import { projectComponent } from '../boundaries/project.js';
 import { PROJECT_TEMPLATE_CARDS } from '../content/projectTemplates.js';
+import { scratchComponent } from '../boundaries/scratch.js';
 import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
@@ -122,6 +123,7 @@ export function viewModel(state) {
   if (page === 'project') {
     ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
   }
+  if (page === 'scratch') ui.scratch = scratchComponent.viewModel({ scratch: state.scratch });
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);
   if (page === 'game') ui.game = gamePageViewModel(state.game);
   if (page === 'data') ui.data = dataViewModel(state);
