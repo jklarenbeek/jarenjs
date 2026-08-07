@@ -82,7 +82,9 @@ import { EXAMPLE_LIST } from './examples.js';
  *   host-injected vnode renderers keyed by engine id — the visual engines
  *   (markdown/mermaid/charts) delegate their rendering here (the hybrid seam),
  *   so the package owns the descriptors + examples but stays dependency-light.
- *   A renderer returns the preview vnode, or `{ vnode, deep }` where `deep`
+ *   A renderer receives the source text plus its second argument — the
+ *   option-pane config for the visual engines, the PARSED data document for
+ *   `mdx` — and returns the preview vnode, or `{ vnode, deep }` where `deep`
  *   is extra `Panel`s (AST, canonical round-trip) the host derives — shown
  *   only behind the depth toggle
  * @property {(schemaText: string, data: any, locale: string) => { schemaError: string|null, draft: string, compileMs: number|null, validateMs: number|null, valid: boolean|null, errors: any[] }} [validate]

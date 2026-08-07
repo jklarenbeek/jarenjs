@@ -102,11 +102,13 @@ Engines whose real work is heavy or opinionated keep the package free of that
 weight by delegating to a host-injected function on `RunOptions`, the same
 shape for each:
 
-- `renderers[id]` — the visual engines (markdown / mermaid / charts) hand
-  their source to a host renderer that returns a spliced `view` vnode — or
-  `{ vnode, deep }`, where `deep` is extra panels only the host can derive
+- `renderers[id]` — the visual engines (markdown / mermaid / charts / mdx)
+  hand their source to a host renderer that returns a spliced `view` vnode —
+  or `{ vnode, deep }`, where `deep` is extra panels only the host can derive
   (the JSON AST, the canonical round-trip), shown behind the depth toggle —
-  so the package never imports `@jarenjs/md`, `/mermaid` or `/charts`.
+  so the package never imports `@jarenjs/md`, `/mermaid` or `/charts`. The
+  renderer's second argument is the option-pane config, except `mdx`, which
+  receives the PARSED data document (markdown × data is a two-input engine).
 - `validate` — the JSON Schema engine hands `(schemaText, data, locale)` to a
   host validator that returns `{ valid, errors, draft, compileMs, validateMs,
   schemaError }` (errors already localized), so the compiled validator and the

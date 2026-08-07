@@ -15,7 +15,7 @@ const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 // the visual engines delegate rendering to host renderers; a stub proves the
 // package's delegation without pulling @jarenjs/md, /mermaid or /charts here
 const stub = (s) => ['pre', {}, String(s)];
-const renderers = { markdown: stub, mermaid: stub, charts: stub };
+const renderers = { markdown: stub, mermaid: stub, charts: stub, mdx: stub };
 // the validate engine delegates to a host validator; a stub proves the
 // delegation without pulling @jarenjs/validate here (the real runner is
 // exercised end-to-end in test/website/play.test.js)

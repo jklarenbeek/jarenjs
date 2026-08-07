@@ -308,6 +308,52 @@ A-1,19.95,01234,123456789012345678901234567890,true,2026-07-27
 A-2,4.5,00042,7,false,2026-07-27T08:30:00Z
 ` } },
 
+  // ——— MDX (markdown × data: interpolation + sections over the data pane) ———
+  { id: 'mdx-invoice', label: 'An invoice from data', engine: 'mdx',
+    source: { source: `# Invoice {$.number}
+
+Billed to **{$.customer.name}** ({$.customer.email}).
+
+{#each $.lines as line}
+
+**{$line.description}** — {$line.amount}
+
+{/each}
+
+Total: **{$.total}**
+
+{#if $.paid}
+
+Paid — thank you!
+
+{/if}
+` },
+    datasets: [
+      { label: 'paid', data: { data: j({ number: 'INV-7', customer: { name: 'Ada', email: 'ada@example.com' },
+        lines: [{ description: 'Rubber duck', amount: 9.99 }, { description: 'Duck house', amount: 40.01 }],
+        total: 50, paid: true }) } },
+      { label: 'unpaid', data: { data: j({ number: 'INV-8', customer: { name: 'Alan', email: 'alan@example.com' },
+        lines: [{ description: 'Enigma manual', amount: 120 }],
+        total: 120, paid: false }) } },
+    ] },
+  { id: 'mdx-digest', label: 'Frontmatter binds as externals', engine: 'mdx',
+    source: { source: `---
+title: The weekly digest
+---
+# {$title}
+
+{#each $.stories as story}
+## {$story.headline}
+
+{$story.summary}
+
+{/each}
+` },
+    datasets: [{ label: 'stories', data: { data: j({ stories: [
+      { headline: 'Play retires the playground', summary: 'One curated surface, calm by default.' },
+      { headline: 'Markdown meets data', summary: 'The same document, rendered per reader.' },
+    ] }) } }] },
+
   // ——— Markdown (visual: rendered by a host renderer, source-only) ———
   { id: 'md-tour', label: 'GFM tour', engine: 'markdown', datasets: [],
     source: { source: `---

@@ -131,6 +131,28 @@ describe('website — the Play playground (#/play)', () => {
     assert.match(html, /<svg/, 'the SVG diagram rendered on the stage');
   });
 
+  it('the mdx engine renders markdown AGAINST the data pane via the host renderer', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'An invoice from data'), 'click', {});
+    const s = app.getState().play;
+    assert.strictEqual(s.engine, 'mdx');
+    assert.ok(s.result.ok === true, 'the invoice template resolved against the data');
+    const html = serialize(playRoot(container));
+    assert.match(html, /Invoice INV-7/, 'the {$.number} interpolation rendered');
+    assert.match(html, /Rubber duck/, 'the {#each} section repeated per line');
+    assert.match(html, /Paid — thank you!/, 'the {#if} section is on for the paid dataset');
+
+    // the dataset switcher re-renders the SAME template over new data
+    fire(byText(playRoot(container), 'button', 'unpaid'), 'click', {});
+    const after = serialize(playRoot(container));
+    assert.match(after, /Invoice INV-8/);
+    assert.doesNotMatch(after, /Paid — thank you!/, 'the unpaid dataset switches the {#if} off');
+
+    // the drill-down shows the resolved canonical markdown from the host seam
+    fire(byClass(container, 'jplay-deep-toggle'), 'click', {});
+    assert.match(serialize(playRoot(container)), /jplay-deep-tabs/, 'the host deep panels ride the toggle');
+  });
+
   it('a visual engine (markdown) renders HTML via the host renderer', () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'GFM tour'), 'click', {});

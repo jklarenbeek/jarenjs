@@ -81,16 +81,21 @@ function visual(id, label, lead, opts = {}) {
       try { view = render(source.source ?? '', options?.config); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      // a renderer may hand back `{ vnode, deep }` — the host-derived deep
-      // panels (AST, canonical round-trip) it alone can compute
-      const rich = view !== null && typeof view === 'object' && !Array.isArray(view) && 'vnode' in view;
-      const vnode = rich ? view.vnode : view;
-      const deep = rich && Array.isArray(view.deep)
-        ? view.deep.map((p) => ({ ...p, depth: 'deep' }))
-        : [];
-      return okPanels([{ id: 'preview', label: 'Preview', kind: 'view', vnode }, ...deep], t1 - t0, 0);
+      return okPanels(renderedPanels(view), t1 - t0, 0);
     },
   };
+}
+
+/** A host-rendered view (a bare vnode, or `{ vnode, deep }`) → the panel
+ * list: the preview plus any host-derived deep panels (AST, canonical
+ * round-trip), stamped `deep` so they ride behind the depth toggle. */
+function renderedPanels(view) {
+  const rich = view !== null && typeof view === 'object' && !Array.isArray(view) && 'vnode' in view;
+  const vnode = rich ? view.vnode : view;
+  const deep = rich && Array.isArray(view.deep)
+    ? view.deep.map((p) => ({ ...p, depth: 'deep' }))
+    : [];
+  return [{ id: 'preview', label: 'Preview', kind: 'view', vnode }, ...deep];
 }
 /** @returns {import('./index.js').PlayResult} */
 const fail = (message, c, path) => ({ ok: false, timing: null, error: { message, code: c, path }, panels: [] });
@@ -453,6 +458,28 @@ export const ENGINE_LIST = [
         });
       }
       return okPanels(panels, report.compileMs ?? 0, report.validateMs ?? 0);
+    },
+  },
+  {
+    // markdown × data: the mdx pass resolves `{$…}` interpolation and the
+    // `{#if}` / `{#each}` sections against the DATA pane, then renders —
+    // still a pure (source, data) → document engine, delegated to the
+    // host's mdx renderer (which owns @jarenjs/md/mdx + the query compiler)
+    id: 'mdx', label: 'MDX', lead: 'Markdown × data — {$…} interpolation, {#if} and {#each} sections, rendered live.',
+    sourcePanes: [{ key: 'source', label: 'Markdown', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data' }],
+    run(source, data, options) {
+      const render = options?.renderers?.mdx;
+      if (typeof render !== 'function') {
+        return fail('the MDX engine renders in the host — inject options.renderers.mdx', 'PLAY_NO_RENDERER');
+      }
+      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const t0 = now();
+      let view;
+      try { view = render(source.source ?? '', d.value); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t1 = now();
+      return okPanels(renderedPanels(view), t1 - t0, 0);
     },
   },
   // ——— the visual engines: descriptor + examples here, rendering delegated ———

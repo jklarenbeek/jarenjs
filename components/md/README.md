@@ -192,6 +192,39 @@ createApp(appDoc, {
   the vnodes. Frontmatter members bind as externals via
   `compiled.externals()`.
 
+### mdx — markdown × data
+
+`@jarenjs/md/mdx` renders a markdown TEMPLATE against a data document —
+still a pure `(doc, data) → doc` pass over the parsed AST, so
+`mdToVnode`, `toMarkdown` and the plugins all work unchanged on the
+result. The template vocabulary reuses the suite's own query
+expressions — no new mini-language:
+
+```js
+import { createMdx } from '@jarenjs/md/mdx';
+import { compileJsonQuery } from '@jarenjs/json';
+
+const mdx = createMdx({ compileQuery: compileJsonQuery });
+const doc = mdx.transform(parseMarkdown(source), data);
+```
+
+- `{$.path}` inline in text interpolates a query expression over the
+  data (`$` is the data document; `$name` externals come from the
+  frontmatter — the same binding JSLT gets — and from `each` loops).
+  Code spans, code blocks and raw HTML never interpolate.
+- A paragraph of exactly `{#if <expr>}` … `{/if}` keeps its section only
+  when the expression is truthy; `{#each <expr> as <name>}` … `{/each}`
+  repeats its section per item, binding `$<name>`. Sections nest, and a
+  directive must form its own paragraph (blank lines around it).
+- The expression compiler is **injected** (`compileJsonQuery` from
+  [`@jarenjs/json`](../../packages/json)), so this package's engine layer
+  keeps its core+view-only dependency contract. A bad expression renders
+  its diagnosis in place — the pass never throws.
+
+Try it live: the `MDX` engine on
+[Play](https://jklarenbeek.github.io/jarenjs/#/play) runs this pass over
+an editable data pane.
+
 ### Untrusted Markdown
 
 Two filters run when an AST becomes vnodes, on the same principle: the

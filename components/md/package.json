@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/md",
   "private": false,
-  "version": "0.30.2",
+  "version": "0.30.3",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -18,6 +18,10 @@
     "./html": {
       "types": "./dist/types/html.d.ts",
       "default": "./src/html.js"
+    },
+    "./mdx": {
+      "types": "./dist/types/mdx.d.ts",
+      "default": "./src/mdx.js"
     },
     "./component": {
       "types": "./dist/types/component/index.d.ts",
@@ -65,8 +69,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.30.2",
-    "@jarenjs/mermaid": "^0.30.2",
-    "@jarenjs/view": "^0.30.2"
+    "@jarenjs/core": "^0.30.3",
+    "@jarenjs/mermaid": "^0.30.3",
+    "@jarenjs/view": "^0.30.3"
   }
 }

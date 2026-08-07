@@ -217,6 +217,21 @@ describe('@jarenjs/play — the engines run', () => {
     assert.strictEqual(bare.error.code, 'PLAY_NO_RENDERER');
   });
 
+  it('mdx delegates to a host renderer with the PARSED data document', () => {
+    /** @type {any[]} */
+    const calls = [];
+    const render = (source, data) => { calls.push([source, data]); return ['div', {}, 'ok']; };
+    const r = runExample('mdx', { source: '# {$.title}' }, { data: '{"title":"T"}' }, { renderers: { mdx: render } });
+    assert.strictEqual(r.ok, true);
+    assert.deepStrictEqual(calls[0], ['# {$.title}', { title: 'T' }], 'the data pane parsed before the seam');
+    assert.deepStrictEqual(r.panels.map((p) => p.kind), ['view']);
+    // bad JSON in the data pane fails honestly before the renderer runs
+    const bad = runExample('mdx', { source: '#' }, { data: '{ nope' }, { renderers: { mdx: render } });
+    assert.strictEqual(bad.ok, false);
+    // and no renderer at all is the honest seam error
+    assert.strictEqual(runExample('mdx', { source: '#' }, { data: '{}' }).error.code, 'PLAY_NO_RENDERER');
+  });
+
   it('a visual engine surfaces a renderer throw as an error Result', () => {
     const boom = () => { throw new Error('bad definition'); };
     const r = runExample('charts', { source: '{}' }, {}, { renderers: { charts: boom } });

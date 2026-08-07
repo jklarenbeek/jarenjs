@@ -8,6 +8,8 @@
 import { createSplitterWidget } from '@jarenjs/app';
 import { createPlayComponent } from '@jarenjs/play/component';
 import { toMarkdown } from '@jarenjs/md';
+import { createMdx } from '@jarenjs/md/mdx';
+import { compileJsonQuery } from '@jarenjs/json';
 import { operatorRegistry } from './engines.js';
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
@@ -17,6 +19,10 @@ import { formatJson } from '../lib/format.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
 export const playComponent = createPlayComponent({ operators: operatorRegistry });
+
+/** The mdx pass (markdown × data), with the suite's own query compiler
+ * injected — the expression language IS jaren-query, no new mini-language. */
+const mdx = createMdx({ compileQuery: compileJsonQuery });
 
 /**
  * Host-injected vnode renderers for the playground's VISUAL engines (the
@@ -40,6 +46,19 @@ const renderers = {
         ...(doc.frontmatter !== null
           ? [{ id: 'frontmatter', label: 'The frontmatter', kind: 'code', text: formatJson(doc.frontmatter) }]
           : []),
+      ],
+    };
+  },
+  // mdx receives the PARSED data document as its second argument: the pass
+  // resolves the template against it, then renders through the same
+  // memoized md pipeline (the doc-keyed memo carries the transformed doc)
+  mdx: (source, dataValue) => {
+    const doc = mdx.transform(md.compile(source).doc, dataValue);
+    return {
+      vnode: md.view(doc),
+      deep: [
+        { id: 'rendered', label: 'The resolved Markdown', kind: 'code', text: toMarkdown(doc) },
+        { id: 'ast', label: 'The document, as JSON', kind: 'code', text: formatJson(doc.ast) },
       ],
     };
   },

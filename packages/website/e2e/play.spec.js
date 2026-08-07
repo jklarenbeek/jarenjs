@@ -230,6 +230,23 @@ test('a visual engine (charts) renders an SVG chart on the stage', async ({ page
   await expect(page.locator('.jplay-view svg')).toBeVisible();
 });
 
+test('the mdx engine renders markdown against the data pane, live', async ({ page }) => {
+  await page.goto('/#/play');
+  await page.locator('.jplay-ex', { hasText: 'An invoice from data' }).click();
+  await expect(page.locator('.jplay-engine')).toHaveText('MDX');
+  const view = page.locator('.jplay-view');
+  await expect(view).toContainText('Invoice INV-7'); // {$.number} interpolated
+  await expect(view).toContainText('Rubber duck');   // the {#each} section
+  await expect(view).toContainText('Paid — thank you!');
+  // the dataset switcher re-renders the SAME template over new data
+  await page.locator('.jplay-datasets .seg-btn', { hasText: 'unpaid' }).click();
+  await expect(view).toContainText('Invoice INV-8');
+  await expect(view).not.toContainText('Paid — thank you!');
+  // the drill-down shows the resolved canonical markdown
+  await page.locator('.jplay-deep-toggle').click();
+  await expect(page.locator('.jplay-deep .code-block')).toContainText('Invoice INV-8');
+});
+
 test('a visual engine (markdown) renders HTML on the stage', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'GFM tour' }).click();
