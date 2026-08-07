@@ -76,9 +76,11 @@ const SHARE_TOKEN_LIMIT = 8000;
 
 /** Play-slice paths that are IDE chrome, not engine inputs: a change to any
  * of them must NOT re-run the engine (the run's own output, the active tab,
- * the session name/list, the share status, the editor|result split ratio). */
+ * the depth toggle + its pick, the session name/list, the share status, the
+ * editor|result split ratio). */
 const PLAY_CHROME_PATHS = new Set([
-  '/play/result', '/play/panel', '/play/name', '/play/names', '/play/shared', '/play/ratio',
+  '/play/result', '/play/panel', '/play/deep', '/play/deepPick',
+  '/play/name', '/play/names', '/play/shared', '/play/ratio',
 ]);
 
 /** @param {SiteEnv} env */
@@ -89,7 +91,7 @@ export function createSiteApp(env) {
   // the saved-experiment store (localStorage in the browser): a keyed CRUD
   // over the injected storage, shared with the studio and play surfaces
   const docStore = createDocStore({ storage });
-  // the Play IDE's own saved-session store (PLAY_04): the same primitive,
+  // the Play IDE's own saved-session store: the same primitive,
   // a separate collection key, so play sessions and legacy experiments
   // never collide
   const playStore = createDocStore({ storage, key: 'play' });
@@ -321,7 +323,7 @@ export function createSiteApp(env) {
       const data = loadDataset(app.getState().play.exampleId, props.index);
       if (data !== null) dispatch('play/dataset-set', { index: props.index, data });
     },
-    // the Play IDE (PLAY_04): a play session is a saveable document, kept in
+    // the Play IDE: a play session is a saveable document, kept in
     // the play doc-store and shareable as a `#/play?s=` link
     'play-new': (props, dispatch) => {
       dispatch('play/loaded-session', { ...blankSession(app.getState().play.engine), name: '' });

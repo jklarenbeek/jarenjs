@@ -7,11 +7,13 @@
  */
 import { createSplitterWidget } from '@jarenjs/app';
 import { createPlayComponent } from '@jarenjs/play/component';
+import { toMarkdown } from '@jarenjs/md';
 import { operatorRegistry } from './engines.js';
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { chartRenderer } from './charts.js';
 import { runValidation, localizeErrors } from './validator.js';
+import { formatJson } from '../lib/format.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
 export const playComponent = createPlayComponent({ operators: operatorRegistry });
@@ -22,10 +24,37 @@ export const playComponent = createPlayComponent({ operators: operatorRegistry }
  * + examples, but stays free of those component deps — the rendering happens
  * here, reusing the site's own memoized md/mermaid components and the charts
  * static path. `md.view` / `mermaid.view` are memoized per source string.
+ *
+ * Markdown and Mermaid also hand back `deep` panels — the drill-down
+ * explainers only the host can derive (the JSON AST, the canonical
+ * round-trip): teacher-voiced, revealed behind the depth toggle.
  */
 const renderers = {
-  markdown: (source) => md.view(source),
-  mermaid: (source) => mermaid.view(source),
+  markdown: (source) => {
+    const doc = md.compile(source).doc;
+    return {
+      vnode: md.view(source),
+      deep: [
+        { id: 'ast', label: 'The document, as JSON', kind: 'code', text: formatJson(doc.ast) },
+        { id: 'roundtrip', label: 'Canonical Markdown', kind: 'code', text: toMarkdown(doc) },
+        ...(doc.frontmatter !== null
+          ? [{ id: 'frontmatter', label: 'The frontmatter', kind: 'code', text: formatJson(doc.frontmatter) }]
+          : []),
+      ],
+    };
+  },
+  mermaid: (source) => {
+    const compiled = mermaid.compile(source);
+    const doc = compiled.doc;
+    return {
+      vnode: mermaid.view(source),
+      deep: [
+        { id: 'ast', label: 'The geometry-free AST', kind: 'code',
+          text: doc ? formatJson(doc.ast) : String(compiled.parseError?.message ?? 'parse error') },
+        { id: 'roundtrip', label: 'Canonical Mermaid', kind: 'code', text: compiled.toText() },
+      ],
+    };
+  },
   charts: (source, config) => chartRenderer(source, config),
 };
 
@@ -41,12 +70,16 @@ export const PLAY_START = Object.freeze({
   config: { ...(first.config ?? {}) },
   result: null,
   panel: null, // the active result panel (tab) id; null → the first panel
-  // the IDE half (PLAY_04): a play SESSION is a saveable document
+  // the drill-deeper depth toggle: deep panels stay hidden until asked for;
+  // a fresh example/session load resets both (calm by default)
+  deep: false,     // the depth toggle — true reveals the deep panels
+  deepPick: null,  // the active DEEP panel id; null → the first deep panel
+  // the IDE half: a play SESSION is a saveable document
   name: '',        // the name the session saves under (the header input)
   names: [],       // the saved session names (seeded from the play doc-store)
   shared: null,    // the last Share status line (or null)
   ratio: 0.5,      // the editors|result split (the shared splitter widget)
-  // the generated-form half (PLAY_05b): the validate engine's data pane can
+  // the generated-form half: the validate engine's data pane can
   // toggle between the JSON textarea and a schema-generated form; `dataValue`
   // is the structured buffer the form edits, mirrored back to the data text
   dataView: 'json', // 'json' | 'form'

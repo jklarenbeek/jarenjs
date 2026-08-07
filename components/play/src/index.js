@@ -41,14 +41,17 @@ import { EXAMPLE_LIST } from './examples.js';
  * several, which the component shows behind a tab strip.
  * @property {string} id - unique within the result (the tab key)
  * @property {string} [label] - the tab label (defaults to `id`)
- * @property {'code' | 'view' | 'table' | 'note'} kind
- * @property {'simple' | 'deep'} [depth] - PLAY_06 reveals `deep` panels only
- *   when the student drills in; defaults to `simple`
+ * @property {'code' | 'view' | 'table' | 'note' | 'cards'} kind
+ * @property {'simple' | 'deep'} [depth] - `deep` panels are the engine's rich
+ *   explainers, hidden until the student drills in via the depth toggle;
+ *   defaults to `simple` (the calm default view)
  * @property {string} [text] - `code` / `note`: the text body
  * @property {any} [vnode] - `view`: a host-rendered vnode, spliced verbatim
  * @property {string[]} [columns] - `table`: the header labels
  * @property {Array<Array<any>>} [rows] - `table`: cells, row-major
  * @property {'ok' | 'warn' | 'info'} [tone] - `note`: the callout tone
+ * @property {Array<{ title: string, value: string, note?: string }>} [items]
+ *   `cards`: a row of stat cards (matches, compile/run timings, …)
  */
 
 /**
@@ -78,7 +81,10 @@ import { EXAMPLE_LIST } from './examples.js';
  * @property {Record<string, (source: string, config?: any) => any>} [renderers]
  *   host-injected vnode renderers keyed by engine id — the visual engines
  *   (markdown/mermaid/charts) delegate their rendering here (the hybrid seam),
- *   so the package owns the descriptors + examples but stays dependency-light
+ *   so the package owns the descriptors + examples but stays dependency-light.
+ *   A renderer returns the preview vnode, or `{ vnode, deep }` where `deep`
+ *   is extra `Panel`s (AST, canonical round-trip) the host derives — shown
+ *   only behind the depth toggle
  * @property {(schemaText: string, data: any, locale: string) => { schemaError: string|null, draft: string, compileMs: number|null, validateMs: number|null, valid: boolean|null, errors: any[] }} [validate]
  *   host-injected JSON Schema validator (the same seam) — the `validate`
  *   engine delegates here so @jarenjs/validate + the locale packs stay in the host

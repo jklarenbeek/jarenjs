@@ -15,8 +15,8 @@ import {
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
-import { parseJosl, stringifyJsonx } from '@jarenjs/josl';
-import { parseCsvDocument, stringifyCsv } from '@jarenjs/josl/csv';
+import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
+import { parseCsvDocument, stringifyCsv, sniffCsvDialect } from '@jarenjs/josl/csv';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -35,11 +35,19 @@ function parseJson(text, label) {
 
 /** A single-`code`-panel Result — the shape most engines return. */
 /** @returns {import('./index.js').PlayResult} */
-const ok = (text, compileMs, runMs) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }], compileMs, runMs);
+const ok = (text, compileMs, runMs, deep) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }, ...(deep ?? [])], compileMs, runMs);
 
 /** A multi-panel Result — the engine hands over its own screen list. */
 /** @returns {import('./index.js').PlayResult} */
 const okPanels = (panels, compileMs, runMs) => ({ ok: true, timing: { compileMs, runMs }, error: null, panels });
+
+/** A `deep` cards panel — the "how it ran" stat row of a drill-down. */
+/** @returns {import('./index.js').Panel} */
+const deepCards = (id, label, items) => ({ id, label, kind: 'cards', depth: 'deep', items });
+
+/** A `deep` code panel — a compiled artifact / round-trip drill-down. */
+/** @returns {import('./index.js').Panel} */
+const deepCode = (id, label, text) => ({ id, label, kind: 'code', depth: 'deep', text });
 
 /** A table cell → a display string. Primitives (incl. BigInt, from typed CSV)
  * stringify directly; objects/arrays become compact JSON. Never throws. */
@@ -73,7 +81,14 @@ function visual(id, label, lead, opts = {}) {
       try { view = render(source.source ?? '', options?.config); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      return okPanels([{ id: 'preview', label: 'Preview', kind: 'view', vnode: view }], t1 - t0, 0);
+      // a renderer may hand back `{ vnode, deep }` — the host-derived deep
+      // panels (AST, canonical round-trip) it alone can compute
+      const rich = view !== null && typeof view === 'object' && !Array.isArray(view) && 'vnode' in view;
+      const vnode = rich ? view.vnode : view;
+      const deep = rich && Array.isArray(view.deep)
+        ? view.deep.map((p) => ({ ...p, depth: 'deep' }))
+        : [];
+      return okPanels([{ id: 'preview', label: 'Preview', kind: 'view', vnode }, ...deep], t1 - t0, 0);
     },
   };
 }
@@ -103,7 +118,14 @@ export const ENGINE_LIST = [
       try { nodes = compiled.nodes(d.value); }
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
-      return ok(fmt(nodes.map((n) => n.value)), t1 - t0, t2 - t1);
+      return ok(fmt(nodes.map((n) => n.value)), t1 - t0, t2 - t1, [
+        deepCards('how', 'How it matched', [
+          { title: 'Matches', value: String(nodes.length) },
+          { title: 'Compile', value: fmtMs(t1 - t0) },
+          { title: 'Run', value: fmtMs(t2 - t1) },
+        ]),
+        deepCode('paths', 'The normalized paths', fmt(nodes.map((n) => n.path))),
+      ]);
     },
   },
   {
@@ -136,7 +158,9 @@ export const ENGINE_LIST = [
       try { run = apply(target.value); }
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
-      return ok(fmt(run.doc), t1 - t0, t2 - t1);
+      return ok(fmt(run.doc), t1 - t0, t2 - t1, [
+        deepCode('changes', 'What changed', fmt(run.changes)),
+      ]);
     },
   },
   {
@@ -158,7 +182,14 @@ export const ENGINE_LIST = [
       try { out = fn(d.value, externals); }
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
-      return ok(fmt(out), t1 - t0, t2 - t1);
+      const items = out === undefined ? 0 : Array.isArray(out) ? out.length : 1;
+      return ok(fmt(out), t1 - t0, t2 - t1, [
+        deepCards('how', 'How it ran', [
+          { title: 'Items', value: String(items) },
+          { title: 'Compile', value: fmtMs(t1 - t0) },
+          { title: 'Run', value: fmtMs(t2 - t1) },
+        ]),
+      ]);
     },
   },
   {
@@ -176,7 +207,15 @@ export const ENGINE_LIST = [
       try { out = compiled(d.value); }
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
-      return ok(fmt(out), t1 - t0, t2 - t1);
+      // the identity lesson: a rule that changes nothing hands the INPUT back
+      // (shared, copy-on-write) — worth teaching, so the deep card says which
+      return ok(fmt(out), t1 - t0, t2 - t1, [
+        deepCards('how', 'How it transformed', [
+          { title: 'Compile', value: fmtMs(t1 - t0) },
+          { title: 'Transform', value: fmtMs(t2 - t1) },
+          { title: 'Output', value: out === d.value ? '=== input' : 'a new document', note: out === d.value ? 'shared, copy-on-write' : undefined },
+        ]),
+      ]);
     },
   },
   {
@@ -195,7 +234,10 @@ export const ENGINE_LIST = [
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
       // JTLT emits TEXT (markdown / xml / source) — show it verbatim, not fmt'd
-      return ok(out === '' ? '(empty)' : out, t1 - t0, t2 - t1);
+      return ok(out === '' ? '(empty)' : out, t1 - t0, t2 - t1, [
+        // the machinery: JTLT desugars to a JSLT stylesheet — show it
+        deepCode('compiled', 'The compiled program', fmt(render.stylesheet)),
+      ]);
     },
   },
   {
@@ -204,8 +246,11 @@ export const ENGINE_LIST = [
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
       const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
-      let fn; const t0 = now();
-      try { fn = compileJsonQuery(parseXQuery(source.text ?? ''), compileOptions(options)); }
+      let doc, fn; const t0 = now();
+      try {
+        doc = parseXQuery(source.text ?? '');
+        fn = compileJsonQuery(doc, compileOptions(options));
+      }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
       let out;
@@ -215,7 +260,10 @@ export const ENGINE_LIST = [
       }
       catch (err) { return fail(msg(err), code(err)); }
       const t2 = now();
-      return ok(out === undefined ? '(empty sequence)' : fmt(out), t1 - t0, t2 - t1);
+      return ok(out === undefined ? '(empty sequence)' : fmt(out), t1 - t0, t2 - t1, [
+        // the machinery: the XQuery text parses to a runnable query DOCUMENT
+        deepCode('doc', 'The generated query document', fmt(doc)),
+      ]);
     },
   },
   {
@@ -228,14 +276,25 @@ export const ENGINE_LIST = [
     }],
     run(source, data, options) {
       const mode = options?.config?.mode ?? 'josl';
+      /** @type {any[]} */
+      const events = [];
       let parsed; const t0 = now();
-      // parse (compile) and serialize (run) are the two visible phases
-      try { parsed = parseJosl(source.text ?? '', { mode }); }
+      // parse (compile) and serialize (run) are the two visible phases; the
+      // parser streams document-order events as it reads — capture (capped)
+      // for the "how it streamed" drill-down
+      try { parsed = parseJosl(source.text ?? '', { mode, onEvent: (e) => { if (events.length < 200) events.push(e); } }); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
       const out = stringifyJsonx(parsed, { indent: 2 });
       const t2 = now();
-      return ok(out, t1 - t0, t2 - t1);
+      return ok(out, t1 - t0, t2 - t1, [
+        {
+          id: 'events', label: `How it streamed (${events.length}${events.length === 200 ? ', capped' : ''})`,
+          kind: 'table', depth: 'deep', columns: ['Type', 'Path', 'Value'],
+          rows: events.map((e) => [e.type, `/${(e.path ?? []).join('/')}`, e.type === 'pair' ? stringifyJsonx(e.value) : '']),
+        },
+        deepCode('roundtrip', 'The canonical round-trip', stringifyJosl(parsed, { mode })),
+      ]);
     },
   },
   {
@@ -262,9 +321,9 @@ export const ENGINE_LIST = [
       try { doc = parseCsvDocument(source.text ?? '', opts); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      // three SCREENS (the multi-panel proof): a summary note, the parsed
-      // records as a table, and the CSV round-trip. The table + round-trip
-      // are naturally "deep" (PLAY_06 gates them behind the drill toggle).
+      // one calm SCREEN (the summary note) plus the drill-down: the parsed
+      // records, the sniffed dialect, the repairs, and the CSV round-trip
+      // are `deep` — revealed only when the student asks how it was read
       const fields = doc.fields; // string[] (headers) | null (positional)
       const total = doc.rows.length;
       const shown = doc.rows.slice(0, 50);
@@ -280,10 +339,26 @@ export const ENGINE_LIST = [
         ...doc.repairs.map((r) => `line ${r.line}: ${r.code} — ${r.message}`),
       ].join('\n');
       const roundtrip = stringifyCsv(doc.rows, { fields: fields ?? undefined, header: doc.dialect.headers !== false });
+      const sniff = sniffCsvDialect(source.text ?? '');
       const t2 = now();
       return okPanels([
         { id: 'summary', label: 'Summary', kind: 'note', tone: doc.repairs.length ? 'warn' : 'ok', text: summary },
         { id: 'rows', label: `Rows (${total})`, kind: 'table', depth: 'deep', columns, rows },
+        {
+          id: 'dialect', label: 'How it was read', kind: 'table', depth: 'deep',
+          columns: ['Property', 'Value'],
+          rows: [
+            ['delimiter', delim],
+            ['header row', String(doc.dialect.headers)],
+            ['sniffed', `${sniff.delimiter === '\t' ? 'tab' : sniff.delimiter} · ${sniff.width} columns · confidence ${sniff.confidence.toFixed(2)} · header ${sniff.headers}`],
+            ['records', String(total)],
+          ],
+        },
+        ...(doc.repairs.length ? [{
+          id: 'repairs', label: `The repairs (${doc.repairs.length})`, kind: /** @type {'table'} */ ('table'), depth: /** @type {'deep'} */ ('deep'),
+          columns: ['Code', 'Line', 'Col', 'What was read'],
+          rows: doc.repairs.map((r) => [r.code, String(r.line), String(r.column), r.message]),
+        }] : []),
         { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: roundtrip },
       ], t1 - t0, t2 - t1);
     },

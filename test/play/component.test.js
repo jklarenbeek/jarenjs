@@ -97,30 +97,77 @@ describe('playViewModel', () => {
     assert.deepStrictEqual(vm.result.activePanel.vnode, ['svg', {}, 'x']);
   });
 
-  it('a multi-panel result is tabbed; the active panel follows state.play.panel, else the first', () => {
+  it('the SIMPLE panels drive the tab strip; the active one follows state.play.panel, else the first', () => {
     const panels = [
       { id: 'summary', label: 'Summary', kind: 'note', tone: 'warn', text: 'two repairs' },
+      { id: 'verdict', label: 'Verdict', kind: 'note', tone: 'ok', text: 'fine' },
       { id: 'rows', label: 'Rows (2)', kind: 'table', depth: 'deep', columns: ['a', 'b'], rows: [['1', '2']] },
-      { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: 'a,b\r\n1,2\r\n' },
     ];
     const result = { ok: true, panels, timing: { compileMs: 0.1, runMs: 0.1 }, error: null };
-    // default: no panel chosen → the first (the summary note) is active
+    // default: no panel chosen → the first SIMPLE panel is active; the deep
+    // table is NOT a tab in the calm strip
     const first = playViewModel(state({ result, panel: null }));
     assert.strictEqual(first.result.tabbed, true);
-    assert.deepStrictEqual(first.result.tabs.map((t) => t.id), ['summary', 'rows', 'roundtrip']);
+    assert.deepStrictEqual(first.result.tabs.map((t) => t.id), ['summary', 'verdict']);
     assert.strictEqual(first.result.activePanel.id, 'summary');
     assert.strictEqual(first.result.activePanel.isNote, true);
     assert.strictEqual(first.result.activePanel.noteClass, 'jplay-note warn');
-    // choosing the table tab makes it active, with column/cell records
-    const onTable = playViewModel(state({ result, panel: 'rows' }));
-    assert.strictEqual(onTable.result.activePanel.id, 'rows');
-    assert.strictEqual(onTable.result.activePanel.isTable, true);
-    assert.deepStrictEqual(onTable.result.activePanel.columns, [{ label: 'a' }, { label: 'b' }]);
-    assert.deepStrictEqual(onTable.result.activePanel.rows, [{ cells: [{ text: '1' }, { text: '2' }] }]);
+    // choosing the second tab makes it active
+    const second = playViewModel(state({ result, panel: 'verdict' }));
+    assert.strictEqual(second.result.activePanel.id, 'verdict');
     // a STALE panel id (the screen is gone) falls back to the first
     const stale = playViewModel(state({ result, panel: 'does-not-exist' }));
     assert.strictEqual(stale.result.activePanel.id, 'summary');
     assert.strictEqual(stale.result.tabs.find((t) => t.active).id, 'summary');
+  });
+
+  it('deep panels hide behind the depth toggle; deepPick selects among several', () => {
+    const panels = [
+      { id: 'summary', label: 'Summary', kind: 'note', tone: 'ok', text: 'clean' },
+      { id: 'rows', label: 'Rows (1)', kind: 'table', depth: 'deep', columns: ['a', 'b'], rows: [['1', '2']] },
+      { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: 'a,b\r\n1,2\r\n' },
+    ];
+    const result = { ok: true, panels, timing: { compileMs: 0.1, runMs: 0.1 }, error: null };
+    // default: calm — the deep panels exist but do not render
+    const calm = playViewModel(state({ result }));
+    assert.strictEqual(calm.result.hasDeep, true, 'the affordance is offered');
+    assert.strictEqual(calm.result.deepOn, false, 'but the drill-down is closed');
+    assert.strictEqual(calm.result.deepNext, true, 'the toggle would open it');
+    assert.strictEqual(calm.result.deepPanel, null, 'no deep panel body when closed');
+    assert.strictEqual(calm.result.tabbed, false, 'one simple panel → no calm tab strip');
+    // toggled on: the first deep panel is active, its own tab row derives
+    const open = playViewModel(state({ result, deep: true }));
+    assert.strictEqual(open.result.deepOn, true);
+    assert.strictEqual(open.result.deepNext, false, 'the toggle would close it');
+    assert.strictEqual(open.result.deepTabbed, true);
+    assert.deepStrictEqual(open.result.deepTabs.map((t) => t.id), ['rows', 'roundtrip']);
+    assert.strictEqual(open.result.deepPanel.id, 'rows');
+    assert.strictEqual(open.result.deepPanel.isTable, true);
+    assert.deepStrictEqual(open.result.deepPanel.columns, [{ label: 'a' }, { label: 'b' }]);
+    assert.deepStrictEqual(open.result.deepPanel.rows, [{ cells: [{ text: '1' }, { text: '2' }] }]);
+    // deepPick selects among several; a stale pick falls back to the first
+    const picked = playViewModel(state({ result, deep: true, deepPick: 'roundtrip' }));
+    assert.strictEqual(picked.result.deepPanel.id, 'roundtrip');
+    assert.strictEqual(picked.result.deepPanel.isCode, true);
+    const stale = playViewModel(state({ result, deep: true, deepPick: 'gone' }));
+    assert.strictEqual(stale.result.deepPanel.id, 'rows');
+  });
+
+  it('a result with no deep panels offers no affordance; a cards panel shapes its items', () => {
+    const plain = playViewModel(state());
+    assert.strictEqual(plain.result.hasDeep, false, 'a single code panel has nothing to drill into');
+    const result = {
+      ok: true, timing: { compileMs: 0.1, runMs: 0.1 }, error: null,
+      panels: [
+        { id: 'out', label: 'Output', kind: 'code', text: '[]' },
+        { id: 'how', label: 'How it matched', kind: 'cards', depth: 'deep',
+          items: [{ title: 'Matches', value: '2' }, { title: 'Run', value: '0.1 ms', note: 'per run' }] },
+      ],
+    };
+    const vm = playViewModel(state({ result, deep: true }));
+    assert.strictEqual(vm.result.deepPanel.isCards, true);
+    assert.deepStrictEqual(vm.result.deepPanel.items[0], { title: 'Matches', value: '2', note: '' });
+    assert.deepStrictEqual(vm.result.deepPanel.items[1], { title: 'Run', value: '0.1 ms', note: 'per run' });
   });
 });
 
@@ -146,22 +193,47 @@ describe('the play JSLT view renders headlessly', () => {
     assert.doesNotMatch(out, /jplay-tabs/, 'a single panel shows no tab strip');
   });
 
-  it('renders a tab strip + the active panel body for a multi-panel (CSV) result', () => {
+  it('renders the calm note + the depth toggle for a CSV result; the drill-down opens its own tab row', () => {
     const panels = [
       { id: 'summary', label: 'Summary', kind: 'note', tone: 'warn', text: 'one repair' },
       { id: 'rows', label: 'Rows (1)', kind: 'table', depth: 'deep', columns: ['a', 'b'], rows: [['1', '2']] },
       { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: 'a,b\r\n1,2\r\n' },
     ];
     const result = { ok: true, panels, timing: { compileMs: 0.1, runMs: 0.1 }, error: null };
-    const first = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, panel: null }))));
-    assert.match(first, /jplay-tabs/, 'the tab strip renders');
-    assert.match(first, /play\/panel/, 'each tab dispatches play/panel');
-    assert.match(first, /jplay-note warn/, 'the active summary note renders by kind');
-    assert.doesNotMatch(first, /jplay-table/, 'the inactive table body is not rendered');
-    // switch to the table tab: the <table> renders, the note does not
-    const onTable = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, panel: 'rows' }))));
-    assert.match(onTable, /jplay-table/, 'the table body renders when its tab is active');
-    assert.match(onTable, /<th>|"th"/, 'with header cells');
+    const calm = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, panel: null }))));
+    assert.match(calm, /jplay-note warn/, 'the summary note renders by kind');
+    assert.doesNotMatch(calm, /jplay-tabs/, 'one simple panel → no calm tab strip');
+    assert.match(calm, /jplay-deep-toggle/, 'the quiet Explain affordance renders beneath the answer');
+    assert.match(calm, /play\/deep/, 'the affordance dispatches the depth toggle');
+    assert.doesNotMatch(calm, /jplay-table/, 'the deep table body stays hidden while calm');
+    // toggled on: the deep tab row + the active deep panel render, the simple
+    // answer stays in the tree (the phone swap is CSS, not structure)
+    const open = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, deep: true }))));
+    assert.match(open, /jplay-result deep-on/, 'the open drill-down marks the result container');
+    assert.match(open, /jplay-deep-tabs/, 'several deep panels → their own tab row');
+    assert.match(open, /play\/deep-pick/, 'each deep tab dispatches the pick');
+    assert.match(open, /jplay-deep-back/, 'the ← back affordance for the phone swap');
+    assert.match(open, /jplay-table/, 'the first deep panel (the table) renders');
+    assert.match(open, /jplay-note warn/, 'the simple answer is still in the tree beside it');
+    // picking the round-trip: the code panel renders instead of the table
+    const picked = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, deep: true, deepPick: 'roundtrip' }))));
+    assert.match(picked, /code-block/, 'the picked deep code panel renders');
+    assert.doesNotMatch(picked, /jplay-table/, 'the unpicked deep table does not');
+  });
+
+  it('renders a cards drill-down as stat cards', () => {
+    const result = {
+      ok: true, timing: { compileMs: 0.1, runMs: 0.1 }, error: null,
+      panels: [
+        { id: 'out', label: 'Output', kind: 'code', text: '["A"]' },
+        { id: 'how', label: 'How it matched', kind: 'cards', depth: 'deep',
+          items: [{ title: 'Matches', value: '1' }, { title: 'Compile', value: '0.1 ms' }] },
+      ],
+    };
+    const open = JSON.stringify(renderPlay(playViewModel(state({ result, deep: true }))));
+    assert.match(open, /jplay-cards/, 'the cards row renders');
+    assert.match(open, /jplay-card-title/, 'each card has its title');
+    assert.match(open, /Matches/, 'with the stat name');
   });
 
   it('renders an option select for a source-only engine (josl)', () => {

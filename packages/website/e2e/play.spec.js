@@ -4,9 +4,10 @@
  * JSONPath example runs LIVE on the stage, editing the selector re-runs,
  * picking an example loads its source + data (the `$mean` one proves the
  * registered stats pack is threaded in), the dataset switcher swaps the
- * data against the SAME source, a CSV example shows its multi-panel result
- * behind a tab strip, and a broken selector docks an error instead of
- * crashing. Plus the surface fits the viewport, light and dark.
+ * data against the SAME source, the Explain depth toggle reveals the deep
+ * drill-down (beside the answer on desktop, a full-pane swap with ← back
+ * on a phone), and a broken selector docks an error instead of crashing.
+ * Plus the surface fits the viewport, light and dark.
  */
 import { test, expect } from '@playwright/test';
 
@@ -104,31 +105,93 @@ test('a source-only engine (JOSL) toggles its dialect live via the option select
   await expect(page.locator('.error-line')).toBeVisible();
 });
 
-test('a CSV example shows a multi-panel result behind a tab strip', async ({ page }) => {
+test('a CSV example opens CALM; the Explain toggle reveals the deep screens beside the answer (desktop)', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'RFC 4180' }).click();
   await expect(page.locator('.jplay-engine')).toHaveText('CSV');
-  // more than one screen → a tab strip; the summary note is active first
-  const tabs = page.locator('.jplay-tabs');
-  await expect(tabs).toBeVisible();
+  // calm by default: the summary note, no tab strip, no table — just the
+  // quiet Explain affordance beneath the answer
   await expect(page.locator('.jplay-note')).toBeVisible();
-  // the parsed-table tab → a real <table>, and the note is gone
-  await tabs.locator('.seg-btn', { hasText: 'Rows' }).click();
-  await expect(page.locator('.jplay-table')).toBeVisible();
-  await expect(page.locator('.jplay-note')).toHaveCount(0);
-  // the round-trip tab → a code block (the re-emitted CSV)
-  await tabs.locator('.seg-btn', { hasText: 'CSV round-trip' }).click();
+  await expect(page.locator('.jplay-tabs')).toHaveCount(0);
+  await expect(page.locator('.jplay-table')).toHaveCount(0);
+  const toggle = page.locator('.jplay-deep-toggle');
+  await expect(toggle).toBeVisible();
+  // the drill-down: its own tab row opens UNDER the still-visible answer
+  await toggle.click();
+  await expect(page.locator('.jplay-deep-tabs')).toBeVisible();
+  await expect(page.locator('.jplay-table')).toBeVisible(); // the parsed rows
+  await expect(page.locator('.jplay-note')).toBeVisible();  // the answer stays (desktop)
+  // the round-trip deep tab → a code block (the re-emitted CSV)
+  await page.locator('.jplay-deep-tabs .seg-btn', { hasText: 'CSV round-trip' }).click();
   await expect(page.locator('.jplay-result .code-block')).toBeVisible();
-  await noOverflow(page, 'the CSV multi-panel result');
+  await noOverflow(page, 'the CSV drill-down');
+  // toggling again folds the machinery away
+  await toggle.click();
+  await expect(page.locator('.jplay-deep-tabs')).toHaveCount(0);
 });
 
-test('the JSON Schema engine validates on the stage (verdict note + errors table)', async ({ page }) => {
+test('a JSONPath drill-down teaches with stat cards and the normalized paths', async ({ page }) => {
+  await page.goto('/#/play');
+  await expect(page.locator('.jplay-result')).toContainText('Nigel Rees');
+  await page.locator('.jplay-deep-toggle').click();
+  // the "How it matched" stat cards are the first deep panel
+  await expect(page.locator('.jplay-cards')).toBeVisible();
+  await expect(page.locator('.jplay-card').first()).toContainText('Matches');
+  // the normalized paths are the second (the deep pane's own code block —
+  // the simple answer keeps its code block beside it on desktop)
+  await page.locator('.jplay-deep-tabs .seg-btn', { hasText: 'normalized paths' }).click();
+  await expect(page.locator('.jplay-deep .code-block')).toContainText("$['store']");
+});
+
+test('a mermaid drill-down shows the geometry-free AST from the host seam', async ({ page }) => {
+  await page.goto('/#/play');
+  await page.locator('.jplay-ex', { hasText: 'Flowchart' }).click();
+  await expect(page.locator('.jplay-view svg')).toBeVisible();
+  await page.locator('.jplay-deep-toggle').click();
+  await expect(page.locator('.jplay-deep-tabs')).toBeVisible();
+  await expect(page.locator('.jplay-result .code-block')).toContainText('"nodes"'); // the AST
+  // the canonical round-trip re-emits mermaid text
+  await page.locator('.jplay-deep-tabs .seg-btn', { hasText: 'Canonical Mermaid' }).click();
+  await expect(page.locator('.jplay-result .code-block')).toContainText('flowchart');
+});
+
+test('on a phone the drill-down swaps the pane and backs out', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#/play');
+  await page.locator('.jplay-ex', { hasText: 'RFC 4180' }).click();
+  await expect(page.locator('.jplay-note')).toBeVisible();
+  const toggle = page.locator('.jplay-deep-toggle');
+  // ≥44px touch target for the affordance
+  const box = await toggle.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await toggle.click();
+  // the swap: the simple answer is hidden, the deep pane + ← back show
+  await expect(page.locator('.jplay-simple')).toBeHidden();
+  await expect(page.locator('.jplay-table')).toBeVisible();
+  const back = page.locator('.jplay-deep-back');
+  await expect(back).toBeVisible();
+  const backBox = await back.boundingBox();
+  expect(backBox.height).toBeGreaterThanOrEqual(44);
+  await noOverflow(page, 'the mobile drill-down');
+  // ← back returns to the calm answer
+  await back.click();
+  await expect(page.locator('.jplay-simple')).toBeVisible();
+  await expect(page.locator('.jplay-note')).toBeVisible();
+  await expect(page.locator('.jplay-table')).toHaveCount(0);
+  // dark mode holds the swap layout together too
+  await toggle.click();
+  await page.locator('.theme-toggle').click();
+  await expect(page.locator('.jplay-table')).toBeVisible();
+  await noOverflow(page, 'the mobile drill-down · dark');
+});
+
+test('the JSON Schema engine validates on the stage (verdict note + deep errors table)', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'Invalid data' }).click();
   await expect(page.locator('.jplay-engine')).toHaveText('JSON Schema');
   await expect(page.locator('.jplay-note')).toContainText('error'); // the verdict
-  // the localized errors are a deep table behind a tab
-  await page.locator('.jplay-tabs .seg-btn', { hasText: 'Errors' }).click();
+  // the localized errors are a deep table behind the Explain toggle
+  await page.locator('.jplay-deep-toggle').click();
   await expect(page.locator('.jplay-table')).toBeVisible();
   // the Messages (locale) option is offered
   await expect(page.locator('.jplay-options select')).toBeVisible();

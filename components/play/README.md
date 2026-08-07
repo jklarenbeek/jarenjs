@@ -12,12 +12,18 @@ Two layers, the suite's convention:
 
 - **the engine** (`@jarenjs/play`) — headless: an engine registry, a
   curated example library, and a pure `runExample(engineId, source, data)
-  → { ok, output, timing, error }`. Wraps the real shipped compilers; knows
+  → { ok, panels, timing, error }`. Wraps the real shipped compilers; knows
   nothing of the DOM.
 - **the component** (`@jarenjs/play/component`) — the playground UI, a
   `createPlayComponent()` factory (like `@jarenjs/calc`): a JSLT view
   (example rail, source editors, a dataset switcher, the run stage) the
   host composes.
+
+Play is a **student tool**: it opens calm — one clean result per run — and
+drills deeper on demand. An engine's rich explainers (match cards, the
+compiled program, a geometry-free AST, a canonical round-trip) are `deep`
+result panels behind a quiet **"Explain ▸"** depth toggle: revealed beside
+the answer on desktop, as a full-pane swap with a ← back on a phone.
 
 ## The model
 

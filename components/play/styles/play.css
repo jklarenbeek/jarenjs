@@ -103,6 +103,31 @@
 }
 .jplay-table th { position: sticky; top: 0; background: var(--surface, #f8fafc); color: var(--fg, #0f172a); }
 
+/* ——— the drill-deeper depth toggle: calm by default, deep on demand ———
+ * Desktop: the simple answer stays visible and the deep panels open BENEATH
+ * it as an additional tab row — the learner sees the answer and the
+ * machinery side by side. Mobile swaps panes instead (see the breakpoint). */
+.jplay-deep { margin-top: var(--space-3, 0.75rem); border-top: 1px dashed var(--border, #e2e8f0); padding-top: var(--space-2, 0.5rem); }
+.jplay-deep-toggle {
+  border: none; background: transparent; cursor: pointer; padding: var(--space-1, 0.25rem) 0;
+  color: var(--accent, #2563eb); font-size: 0.8rem; font-family: var(--mono, monospace);
+}
+.jplay-deep-toggle:hover { text-decoration: underline; }
+.jplay-deep-body { display: flex; flex-direction: column; gap: var(--space-2, 0.5rem); margin-top: var(--space-1, 0.25rem); }
+.jplay-deep-tabs { align-self: flex-start; flex-wrap: wrap; }
+/* the ← back affordance exists for the mobile full-pane swap only */
+.jplay-deep-back { display: none; }
+/* a `cards` panel — a row of stat cards (matches, timings, identity) */
+.jplay-cards { display: flex; flex-wrap: wrap; gap: var(--space-2, 0.5rem); }
+.jplay-card {
+  display: flex; flex-direction: column; gap: 2px; min-width: 7rem;
+  border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 6px);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem); background: var(--surface, #f8fafc);
+}
+.jplay-card-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.jplay-card-value { color: var(--fg, #0f172a); font-size: 1.1rem; }
+.jplay-card-note { font-size: 0.7rem; }
+
 @media (max-width: 1024px) {
   .jplay {
     grid-template-columns: minmax(0, 1fr);
@@ -110,6 +135,20 @@
     grid-template-rows: auto;
   }
   .jplay-rail { flex-direction: row; flex-wrap: wrap; gap: 2px; }
-  /* no thin drag handle on touch — PLAY_07 brings the segmented switcher */
+  /* no thin drag handle on touch — the phone layout stacks the panes */
   .jplay-split { display: none; }
+  /* the drill-down is a full-pane SWAP on a phone: there is no room to
+   * stack the machinery under the answer (and never under the keyboard),
+   * so the open deep view replaces the simple result, one deep panel at a
+   * time, with a ← back to the answer */
+  .jplay-result.deep-on .jplay-simple { display: none; }
+  .jplay-result.deep-on .jplay-deep { margin-top: 0; border-top: none; padding-top: 0; }
+  .jplay-result.deep-on .jplay-deep-toggle { display: none; }
+  .jplay-deep-back {
+    display: inline-flex; align-items: center; align-self: flex-start;
+    border: none; background: transparent; cursor: pointer;
+    color: var(--accent, #2563eb); font-size: 0.85rem; padding: 0;
+  }
+  /* touch targets: the deep affordances are finger-sized on a phone */
+  .jplay-deep-toggle, .jplay-deep-back, .jplay-deep-tabs .seg-btn { min-height: 44px; }
 }

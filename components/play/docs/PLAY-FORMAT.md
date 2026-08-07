@@ -41,24 +41,30 @@ PlayResult = {
 Panel = {
   id:     string,                                  // unique in the result (the tab key)
   label?: string,                                  // the tab label (defaults to id)
-  kind:   'code' | 'view' | 'table' | 'note',
-  depth?: 'simple' | 'deep',                       // 'deep' → revealed on drill-in (PLAY_06)
+  kind:   'code' | 'view' | 'table' | 'note' | 'cards',
+  depth?: 'simple' | 'deep',                       // 'deep' → hidden behind the depth toggle
   // per kind:
   text?:    string,                                // code / note body
   vnode?:   any,                                   // view: a host-rendered vnode, spliced verbatim
   columns?: string[],  rows?: any[][],             // table
   tone?:    'ok' | 'warn' | 'info',                // note callout tone
+  items?:   Array<{ title, value, note? }>,        // cards: a row of stat cards
 }
 ```
 
 Every ok run yields **at least one** panel — most engines a single `code`
-panel (today's behaviour, unchanged). Richer engines yield several: **CSV**
-returns a `note` (dialect + record count + repairs), a `table` (the parsed
-records) and a `code` (the CSV round-trip). The component shows one panel
+panel. The `simple` panels are the calm default: the component shows one
 inline, or — for more than one — a tab strip above the active panel body.
-The playground owns this small render vocabulary (code block, spliced
-vnode, table, callout, stat line, coded error line), so it never depends on
-a host's node helpers.
+The `deep` panels are the engine's rich explainers (match cards, a
+geometry-free AST, a compiled program, a canonical round-trip): they stay
+hidden until the learner opens the **depth toggle** ("Explain ▸"), which
+reveals them as their own tab row beside the answer on desktop and as a
+full-pane swap (with a ← back) on a phone. **CSV** is the richest example:
+a `note` summary is the calm answer; the parsed `table`, the dialect and
+repairs tables and the round-trip `code` ride behind the toggle. The
+playground owns this small render vocabulary (code block, spliced vnode,
+table, callout, stat cards, coded error line), so it never depends on a
+host's node helpers.
 
 ## §3 The example, and the dataset problem
 
@@ -97,8 +103,10 @@ weight by delegating to a host-injected function on `RunOptions`, the same
 shape for each:
 
 - `renderers[id]` — the visual engines (markdown / mermaid / charts) hand
-  their source to a host renderer that returns a spliced `view` vnode, so the
-  package never imports `@jarenjs/md`, `/mermaid` or `/charts`.
+  their source to a host renderer that returns a spliced `view` vnode — or
+  `{ vnode, deep }`, where `deep` is extra panels only the host can derive
+  (the JSON AST, the canonical round-trip), shown behind the depth toggle —
+  so the package never imports `@jarenjs/md`, `/mermaid` or `/charts`.
 - `validate` — the JSON Schema engine hands `(schemaText, data, locale)` to a
   host validator that returns `{ valid, errors, draft, compileMs, validateMs,
   schemaError }` (errors already localized), so the compiled validator and the

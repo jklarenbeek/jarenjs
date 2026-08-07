@@ -314,8 +314,11 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/data', value: '$payload.data' },
       { op: 'replace', path: '/play/config', value: '$payload.config' },
       { op: 'replace', path: '/play/result', value: null },
-      // a new engine's result has different screens; drop any stale tab
+      // a new engine's result has different screens; drop any stale tab,
+      // and a fresh example opens CALM — the depth toggle resets off
       { op: 'replace', path: '/play/panel', value: null },
+      { op: 'replace', path: '/play/deep', value: false },
+      { op: 'replace', path: '/play/deepPick', value: null },
     ],
   },
   'play/source': {
@@ -339,7 +342,13 @@ export const ACTIONS = {
   // select a result screen — a pure view switch; the run loop ignores it
   'play/panel': { patch: [{ op: 'replace', path: '/play/panel', value: '$payload' }] },
 
-  // the Play IDE (PLAY_04): a play session is a saveable/shareable document.
+  // the drill-deeper depth toggle: reveal/hide the deep panels (the view
+  // hands the next boolean), and pick among several — both pure view
+  // switches the run loop ignores
+  'play/deep': { patch: [{ op: 'replace', path: '/play/deep', value: '$payload' }] },
+  'play/deep-pick': { patch: [{ op: 'replace', path: '/play/deepPick', value: '$payload' }] },
+
+  // the Play IDE: a play session is a saveable/shareable document.
   // New / Save / Save As / Open / Delete / Share are thin wrappers over the
   // play doc-store effects; name / names / shared / ratio are pure chrome
   // (the run loop excludes them, so typing a name never re-runs the engine).
@@ -365,13 +374,15 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/datasetIndex', value: 0 },
       { op: 'replace', path: '/play/result', value: null },
       { op: 'replace', path: '/play/panel', value: null },
+      { op: 'replace', path: '/play/deep', value: false },
+      { op: 'replace', path: '/play/deepPick', value: null },
       { op: 'replace', path: '/play/shared', value: null },
       { op: 'replace', path: '/play/dataView', value: 'json' },
       { op: 'replace', path: '/play/dataValue', value: null },
     ],
   },
 
-  // PLAY_05b — the validate engine's data pane toggles JSON ↔ a generated form.
+  // the validate engine's data pane toggles JSON ↔ a generated form.
   // Switching to the form parses the current text into the structured buffer
   // (a host effect); a form edit mirrors the buffer back to the text, which
   // re-validates. The buffer + toggle are excluded from the re-run trigger.

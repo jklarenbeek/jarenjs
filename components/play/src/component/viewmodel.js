@@ -18,7 +18,8 @@ function shapePanel(p) {
   const kind = p.kind;
   const base = {
     id: p.id, label: p.label ?? p.id, kind,
-    isCode: kind === 'code', isView: kind === 'view', isTable: kind === 'table', isNote: kind === 'note',
+    isCode: kind === 'code', isView: kind === 'view', isTable: kind === 'table',
+    isNote: kind === 'note', isCards: kind === 'cards',
   };
   if (kind === 'view') return { ...base, vnode: p.vnode ?? null };
   if (kind === 'note') return { ...base, text: p.text ?? '', noteClass: `jplay-note ${p.tone ?? 'info'}` };
@@ -27,20 +28,33 @@ function shapePanel(p) {
     columns: (p.columns ?? []).map((label) => ({ label: String(label) })),
     rows: (p.rows ?? []).map((cells) => ({ cells: (cells ?? []).map((text) => ({ text: String(text) })) })),
   };
+  if (kind === 'cards') return {
+    ...base,
+    items: (p.items ?? []).map((i) => ({ title: String(i.title), value: String(i.value), note: i.note ?? '' })),
+  };
   return { ...base, text: p.text ?? '' }; // code
 }
 
 /**
- * Derive the run result for the stage. `panels` becomes a tab strip (when
- * >1) plus the single ACTIVE panel body. The active panel is the one the
- * host asked for (`state.play.panel`) when it still exists in this result,
+ * Derive the run result for the stage. The `simple` panels are the calm
+ * default: they become a tab strip (when >1) plus the single ACTIVE panel
+ * body. The `deep` panels — the engine's rich explainers — stay hidden
+ * until the student toggles the drill-down (`state.play.deep`); then they
+ * form their OWN tab row (`deepPick` selects among several). Each active
+ * panel is the one the host asked for when it still exists in this result,
  * else the first — so a fresh result with different screens never strands
  * the view on a tab that is gone.
  */
-function deriveResult(r, wantedId) {
-  const panels = Array.isArray(r.panels) ? r.panels : [];
+function deriveResult(r, wantedId, deepWanted, deepPick) {
+  const all = Array.isArray(r.panels) ? r.panels : [];
+  const panels = all.filter((p) => p.depth !== 'deep');
+  const deep = all.filter((p) => p.depth === 'deep');
   const activeId = panels.some((p) => p.id === wantedId) ? wantedId : (panels[0]?.id ?? null);
   const active = panels.find((p) => p.id === activeId) ?? null;
+  const hasDeep = deep.length > 0;
+  const deepOn = hasDeep && deepWanted === true;
+  const deepId = deep.some((p) => p.id === deepPick) ? deepPick : (deep[0]?.id ?? null);
+  const activeDeep = deep.find((p) => p.id === deepId) ?? null;
   return {
     ran: true,
     ok: r.ok === true,
@@ -49,6 +63,14 @@ function deriveResult(r, wantedId) {
     tabbed: panels.length > 1,
     tabs: panels.map((p) => ({ id: p.id, label: p.label ?? p.id, active: p.id === activeId })),
     activePanel: active ? shapePanel(active) : null,
+    // the drill-deeper half: the affordance, its state, and the deep screens
+    hasDeep,
+    deepOn,
+    deepNext: !deepOn,
+    deepLabel: deepOn ? 'Explain ▾' : 'Explain ▸',
+    deepTabbed: deep.length > 1,
+    deepTabs: deep.map((p) => ({ id: p.id, label: p.label ?? p.id, active: p.id === deepId })),
+    deepPanel: deepOn && activeDeep ? shapePanel(activeDeep) : null,
   };
 }
 
@@ -94,13 +116,13 @@ export function playViewModel(state) {
   const datasets = (active?.datasets ?? []).map((ds, i) => ({ index: i, label: ds.label, active: i === datasetIndex }));
 
   const r = s.result ?? null;
-  const result = r === null ? { ran: false } : deriveResult(r, s.panel);
+  const result = r === null ? { ran: false } : deriveResult(r, s.panel, s.deep, s.deepPick);
 
-  // the IDE half (PLAY_04): the saveable-session chrome
+  // the IDE half: the saveable-session chrome
   const names = Array.isArray(s.names) ? s.names : [];
   const ratio = typeof s.ratio === 'number' ? s.ratio : 0.5;
 
-  // the generated-form half (PLAY_05b): the validate engine's data pane can
+  // the generated-form half: the validate engine's data pane can
   // swap the JSON textarea for a schema-generated form. The form tree itself
   // (`dataForm`) is host-supplied (it needs @jarenjs/forms) — the package only
   // decides WHEN to show it.

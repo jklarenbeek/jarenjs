@@ -20,7 +20,7 @@ const shell = {
   body: ['div', { class: 'jplay' },
     // ——— the IDE bar: engine title, session name, New/Save/Save As/Share,
     // the Load dropdown, and the last share status (a play session is a
-    // saveable document — PLAY_04) ———
+    // saveable document) ———
     ['div', { class: 'jplay-bar' },
       ['strong', { class: 'jplay-title' }, '$.engine.label'],
       ['input', {
@@ -90,14 +90,37 @@ const shell = {
       ['div', { class: 'jplay-stage-head muted' }, 'Result'],
       { $if: ['$.result.ran',
         { $if: ['$.result.ok',
-          ['div', { class: 'jplay-result' },
-            { $if: ['$.result.timing', ['p', { class: 'muted jplay-timing' }, '$.result.timing'], ''] },
-            // >1 screen → a tab strip selecting the active one; 1 → no tabs
-            { $if: ['$.result.tabbed',
-              ['div', { class: 'jplay-tabs seg', role: 'tablist' }, [{ $apply: '$.result.tabs[*]' }]], ''] },
-            // the active panel body, rendered by its kind (a single object →
-            // the explicit [path, mode] apply form)
-            { $apply: [`$.result.activePanel`, PLAY_MODE] },
+          ['div', { class: { $if: ['$.result.deepOn', 'jplay-result deep-on', 'jplay-result'] } },
+            // the SIMPLE half — the calm answer (on a phone, the open
+            // drill-down swaps this half out entirely; see play.css)
+            ['div', { class: 'jplay-simple' },
+              { $if: ['$.result.timing', ['p', { class: 'muted jplay-timing' }, '$.result.timing'], ''] },
+              // >1 screen → a tab strip selecting the active one; 1 → no tabs
+              { $if: ['$.result.tabbed',
+                ['div', { class: 'jplay-tabs seg', role: 'tablist' }, [{ $apply: '$.result.tabs[*]' }]], ''] },
+              // the active panel body, rendered by its kind (a single object →
+              // the explicit [path, mode] apply form)
+              { $apply: [`$.result.activePanel`, PLAY_MODE] },
+            ],
+            // the DRILL-DOWN half — the engine's rich explainers, opt-in:
+            // a quiet affordance beneath the simple answer reveals the deep
+            // panels as an additional tab row (desktop) or a full-pane
+            // sub-view with a ← back (mobile)
+            { $if: ['$.result.hasDeep',
+              ['div', { class: 'jplay-deep' },
+                ['button', {
+                  type: 'button', class: 'jplay-deep-toggle',
+                  'aria-expanded': { $if: ['$.result.deepOn', 'true', 'false'] },
+                  on: { click: { action: 'play/deep', with: '$.result.deepNext' } },
+                }, '$.result.deepLabel'],
+                { $if: ['$.result.deepOn',
+                  ['div', { class: 'jplay-deep-body' },
+                    ['button', { type: 'button', class: 'jplay-deep-back', on: { click: { action: 'play/deep', with: '$.result.deepNext' } } }, '← Back to the result'],
+                    { $if: ['$.result.deepTabbed',
+                      ['div', { class: 'jplay-deep-tabs seg', role: 'tablist' }, [{ $apply: '$.result.deepTabs[*]' }]], ''] },
+                    { $apply: [`$.result.deepPanel`, PLAY_MODE] },
+                  ], ''] },
+              ], ''] },
           ],
           ['p', { class: 'error-line' }, ['strong', {}, '$.result.error.code'], ' ', '$.result.error.message']] },
         ['p', { class: 'muted jplay-hint' }, 'Pick an example, or edit the source or data — it runs live.']] },
@@ -190,37 +213,56 @@ const resultTab = {
   }, '$.label'],
 };
 
-/** The active result panel, rendered by its kind (code | view | table | note). */
-const activePanel = {
-  match: `${PLAY_BASE}.result.activePanel`, mode: PLAY_MODE,
-  body: { $if: ['$.isView', ['div', { class: 'jplay-view' }, '$.vnode'],
-    { $if: ['$.isTable',
-      ['div', { class: 'jplay-table-wrap' },
-        ['table', { class: 'jplay-table' },
-          ['thead', {}, ['tr', {}, [{ $apply: '$.columns[*]' }]]],
-          ['tbody', {}, [{ $apply: '$.rows[*]' }]]]],
-      { $if: ['$.isNote', ['p', { class: '$.noteClass' }, '$.text'],
-        ['pre', { class: 'code-block' }, ['code', {}, '$.text']]] }] }] },
+/** One tab in the drill-down's own row (revealed by the depth toggle). */
+const deepTab = {
+  match: `${PLAY_BASE}.result.deepTabs[*]`, mode: PLAY_MODE,
+  body: ['button', {
+    type: 'button', role: 'tab',
+    class: { $if: ['$.active', 'seg-btn active', 'seg-btn'] },
+    'aria-selected': { $if: ['$.active', 'true', 'false'] },
+    on: { click: { action: 'play/deep-pick', with: '$.id' } },
+  }, '$.label'],
 };
 
-/** A table header cell. */
-const tableColumn = {
-  match: `${PLAY_BASE}.result.activePanel.columns[*]`, mode: PLAY_MODE,
-  body: ['th', {}, '$.label'],
-};
-/** A table body row. */
-const tableRow = {
-  match: `${PLAY_BASE}.result.activePanel.rows[*]`, mode: PLAY_MODE,
-  body: ['tr', {}, [{ $apply: '$.cells[*]' }]],
-};
-/** A table body cell. */
-const tableCell = {
-  match: `${PLAY_BASE}.result.activePanel.rows[*].cells[*]`, mode: PLAY_MODE,
-  body: ['td', {}, '$.text'],
-};
+/** A result panel, rendered by its kind (code | view | table | note | cards) —
+ * one body, matched at both the simple and the deep panel slot. */
+const panelBody = { $if: ['$.isView', ['div', { class: 'jplay-view' }, '$.vnode'],
+  { $if: ['$.isTable',
+    ['div', { class: 'jplay-table-wrap' },
+      ['table', { class: 'jplay-table' },
+        ['thead', {}, ['tr', {}, [{ $apply: '$.columns[*]' }]]],
+        ['tbody', {}, [{ $apply: '$.rows[*]' }]]]],
+    { $if: ['$.isNote', ['p', { class: '$.noteClass' }, '$.text'],
+      { $if: ['$.isCards',
+        ['div', { class: 'jplay-cards' }, [{ $apply: '$.items[*]' }]],
+        ['pre', { class: 'code-block' }, ['code', {}, '$.text']]] }] }] }] };
+
+const activePanel = { match: `${PLAY_BASE}.result.activePanel`, mode: PLAY_MODE, body: panelBody };
+const deepPanel = { match: `${PLAY_BASE}.result.deepPanel`, mode: PLAY_MODE, body: panelBody };
+
+/** One stat card in a `cards` panel. */
+const cardBody = ['div', { class: 'jplay-card' },
+  ['span', { class: 'jplay-card-title muted' }, '$.title'],
+  ['strong', { class: 'jplay-card-value' }, '$.value'],
+  { $if: ['$.note', ['span', { class: 'jplay-card-note muted' }, '$.note'], ''] },
+];
+const activeCard = { match: `${PLAY_BASE}.result.activePanel.items[*]`, mode: PLAY_MODE, body: cardBody };
+const deepCard = { match: `${PLAY_BASE}.result.deepPanel.items[*]`, mode: PLAY_MODE, body: cardBody };
+
+/** A table header cell / body row / body cell — again at both slots. */
+const columnBody = ['th', {}, '$.label'];
+const rowBody = ['tr', {}, [{ $apply: '$.cells[*]' }]];
+const cellBody = ['td', {}, '$.text'];
+const tableColumn = { match: `${PLAY_BASE}.result.activePanel.columns[*]`, mode: PLAY_MODE, body: columnBody };
+const tableRow = { match: `${PLAY_BASE}.result.activePanel.rows[*]`, mode: PLAY_MODE, body: rowBody };
+const tableCell = { match: `${PLAY_BASE}.result.activePanel.rows[*].cells[*]`, mode: PLAY_MODE, body: cellBody };
+const deepTableColumn = { match: `${PLAY_BASE}.result.deepPanel.columns[*]`, mode: PLAY_MODE, body: columnBody };
+const deepTableRow = { match: `${PLAY_BASE}.result.deepPanel.rows[*]`, mode: PLAY_MODE, body: rowBody };
+const deepTableCell = { match: `${PLAY_BASE}.result.deepPanel.rows[*].cells[*]`, mode: PLAY_MODE, body: cellBody };
 
 /** The playground's JSLT rules — spread into the site stylesheet. */
 export const playRules = [
   shell, railGroup, railExample, optionPane, optionChoice, sourcePane, dataPane, datasetOption,
-  savedOption, resultTab, activePanel, tableColumn, tableRow, tableCell,
+  savedOption, resultTab, deepTab, activePanel, deepPanel, activeCard, deepCard,
+  tableColumn, tableRow, tableCell, deepTableColumn, deepTableRow, deepTableCell,
 ];

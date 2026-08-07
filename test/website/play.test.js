@@ -43,6 +43,7 @@ function find(node, pred) {
   return undefined;
 }
 const playRoot = (c) => find(c, (n) => n.getAttribute?.('class') === 'jplay');
+const byClass = (c, cls) => find(playRoot(c), (n) => (n.getAttribute?.('class') ?? '').split(' ').includes(cls));
 const sourceInput = (c) => find(playRoot(c), (n) => n.tagName === 'input' && n.getAttribute?.('class') === 'editor line');
 const byText = (root, tag, text) => find(root, (n) => n.tagName === tag && n.childNodes?.[0]?.nodeValue === text);
 /** Concat every text-bearing panel of a result (the old scalar `output`). */
@@ -210,33 +211,51 @@ describe('website — the Play playground (#/play)', () => {
     assert.match(serialize(container), /jplay/, 'the playground is still on screen');
   });
 
-  it('a multi-panel result (CSV) shows a tab strip; switching a tab is a pure view change (no re-run)', () => {
+  it('a CSV result opens CALM (one note + the Explain affordance); the drill-down reveals the deep screens', () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'RFC 4180'), 'click', {});
     const s = app.getState().play;
     assert.strictEqual(s.engine, 'csv');
     assert.ok(s.result.panels.length > 1, 'CSV yields several screens');
-    assert.match(serialize(playRoot(container)), /jplay-tabs/, 'the tab strip renders');
-    assert.match(serialize(playRoot(container)), /jplay-note/, 'the summary note is active first');
+    const calm = serialize(playRoot(container));
+    assert.match(calm, /jplay-note/, 'the summary note is the calm answer');
+    assert.doesNotMatch(calm, /jplay-tabs/, 'the deep screens are NOT a calm tab strip');
+    assert.doesNotMatch(calm, /jplay-table/, 'the parsed table waits behind the toggle');
+    assert.match(calm, /jplay-deep-toggle/, 'the quiet Explain affordance renders beneath the answer');
 
-    const before = app.getState().play.result; // the result reference before the tab switch
+    // the toggle reveals the drill-down — a pure view change, no re-run
+    const before = app.getState().play.result;
+    fire(byClass(container, 'jplay-deep-toggle'), 'click', {});
+    assert.strictEqual(app.getState().play.deep, true, 'the depth toggle switched on');
+    assert.strictEqual(app.getState().play.result, before, 'the engine did NOT re-run');
+    const open = serialize(playRoot(container));
+    assert.match(open, /jplay-deep-tabs/, 'the deep panels get their own tab row');
+    assert.match(open, /jplay-table/, 'the first deep panel (the parsed rows) renders');
+
+    // picking another deep panel is also a pure view change
     fire(byText(playRoot(container), 'button', 'CSV round-trip'), 'click', {});
     const after = app.getState().play;
-    assert.strictEqual(after.panel, 'roundtrip', 'the active panel id switched');
-    assert.strictEqual(after.result, before, 'the engine did NOT re-run — the result object is untouched');
+    assert.strictEqual(after.deepPick, 'roundtrip', 'the deep pick switched');
+    assert.strictEqual(after.result, before, 'still no re-run');
     assert.match(serialize(playRoot(container)), /code-block/, 'the round-trip code panel now shows');
   });
 
-  it('switching engines clears the active panel (a new engine has different screens)', () => {
+  it('loading a fresh example resets the drill-down — play opens calm again', () => {
     const { app, container } = mountSite();
-    fire(byText(playRoot(container), 'button', 'RFC 4180'), 'click', {});        // csv → multi-panel
-    fire(byText(playRoot(container), 'button', 'CSV round-trip'), 'click', {});  // pick a non-first tab
-    assert.strictEqual(app.getState().play.panel, 'roundtrip');
-    fire(byText(playRoot(container), 'button', 'All authors'), 'click', {});     // back to JSONPath (single panel)
+    fire(byText(playRoot(container), 'button', 'RFC 4180'), 'click', {});        // csv → has deep screens
+    fire(byClass(container, 'jplay-deep-toggle'), 'click', {});                  // open the drill-down
+    fire(byText(playRoot(container), 'button', 'CSV round-trip'), 'click', {});  // pick a non-first deep panel
+    assert.strictEqual(app.getState().play.deep, true);
+    assert.strictEqual(app.getState().play.deepPick, 'roundtrip');
+    fire(byText(playRoot(container), 'button', 'All authors'), 'click', {});     // back to JSONPath
     const s = app.getState().play;
     assert.strictEqual(s.engine, 'path');
     assert.strictEqual(s.panel, null, 'the stale tab was cleared on the engine switch');
-    assert.doesNotMatch(serialize(playRoot(container)), /jplay-tabs/, 'a single-panel engine shows no tabs');
+    assert.strictEqual(s.deep, false, 'the depth toggle reset off');
+    assert.strictEqual(s.deepPick, null, 'the deep pick reset');
+    const html = serialize(playRoot(container));
+    assert.doesNotMatch(html, /jplay-deep-tabs/, 'the drill-down is closed again');
+    assert.match(html, /jplay-deep-toggle/, 'JSONPath offers its own Explain affordance');
   });
 
   it('leaving #/play tears the surface down; the seeded run persists on return', () => {
