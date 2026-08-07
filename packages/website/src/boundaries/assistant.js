@@ -2,9 +2,9 @@
 /**
  * The site assistant boundary — browser-side AI, dogfooded.
  *
- * One @jarenjs/ai toolbox exposes the playground engines as
- * schema-guarded tools (Jaren validates the model's own tool calls
- * before they run); two surfaces consume it:
+ * One @jarenjs/ai toolbox exposes the play engines as schema-guarded
+ * tools (Jaren validates the model's own tool calls before they run);
+ * two surfaces consume it:
  *
  *  - the embedded chat panel drives it through a bounded agent loop
  *    against a bring-your-own-key OpenAI-compatible endpoint
@@ -13,8 +13,8 @@
  *    (`navigator.modelContext`) — see `registerSiteWebMcp`.
  *
  * Tools don't just answer: they navigate the site and load inputs, so
- * the human watches the playground fill in as the model works. The key
- * never leaves the page — no server, no proxy.
+ * the human watches the play surface fill in as the model works. The
+ * key never leaves the page — no server, no proxy.
  */
 
 import {
@@ -32,11 +32,11 @@ import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { t
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 
 import { runValidation } from './validator.js';
-import { runEngine, ENGINE_DEFS, ENGINE_EXAMPLES, operatorRegistry } from './engines.js';
+import { operatorRegistry } from './engines.js';
+import { playComponent, runPlay, legacyExperimentToSession } from './play.js';
 import { validateAppDocument, auditDocumentRender } from './studio.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
 import { FLOW_TEMPLATES, flowTemplate } from '../content/flowTemplates.js';
-import { exampleSchemas } from '../content/schemas.js';
 
 // The flow authoring gate: schema-validate, THEN compile — one injected
 // check per kind, built from the shipped `composeChecks` and the
@@ -110,32 +110,21 @@ function parseJsonText(text) {
   }
 }
 
-/** Fill an engine's absent fields so `eng/load` replaces cleanly. */
-function withDefaults(engine, inputs) {
-  const out = { ...inputs };
-  for (const field of ENGINE_DEFS[engine].inputs) {
-    if (out[field.key] === undefined) {
-      out[field.key] = field.control === 'select' ? (field.options?.[0] ?? '') : '';
-    }
-  }
-  return out;
-}
-
-/** The engine catalogue the model sees (validate + every descriptor). */
+/** The engine catalogue the model sees (every play descriptor). */
 function engineCatalogue() {
   /** @type {any} */
-  const out = {
-    validate: {
-      label: 'JSON Schema',
-      lead: 'Validate a JSON document against a JSON Schema.',
-      inputs: [{ key: 'schema', control: 'json' }, { key: 'data', control: 'json' }],
-    },
-  };
-  for (const [key, def] of Object.entries(ENGINE_DEFS)) {
+  const out = {};
+  for (const [key, engine] of Object.entries(playComponent.engines)) {
     out[key] = {
-      label: def.label,
-      lead: def.lead,
-      inputs: def.inputs.map((f) => ({ key: f.key, control: f.control, options: f.options ?? null })),
+      label: engine.label,
+      lead: engine.lead ?? '',
+      inputs: [
+        ...engine.sourcePanes.map((p) => ({ key: p.key, kind: 'source', control: p.control ?? 'code' })),
+        ...engine.dataPanes.map((p) => ({ key: p.key, kind: 'data', control: 'json' })),
+        ...(engine.optionPanes ?? []).map((p) => ({
+          key: p.key, kind: 'option', options: p.choices.map((c) => c.value), default: p.default,
+        })),
+      ],
     };
     // the jslt/query/jtlt engines mount the operator packs here, so the
     // model sees the exact registered vocabulary it may use (host opt-in)
@@ -148,40 +137,45 @@ function engineCatalogue() {
 
 /**
  * Build the site toolbox: engine tools that both drive the visible
- * playground and return the results the model needs. Shared by the
+ * play surface and return the results the model needs. Shared by the
  * chat panel and the WebMCP bridge.
  * @param {{ getApp: () => any, navigate?: (hash: string) => void,
- *   share?: (hash: string) => string | undefined, docStore: any }} env
+ *   share?: (hash: string) => string | undefined, docStore: any,
+ *   playStore?: any }} env
  */
 export function createSiteToolbox(env) {
   const toolbox = createToolbox();
-  const engineKeys = Object.keys(ENGINE_DEFS);
+  const engineKeys = playComponent.engineIds().filter((k) => k !== 'validate');
   const go = (hash) => env.navigate?.(hash);
+
+  /** Load a play session into the visible surface (the human watches). */
+  const playLoad = (session) => {
+    const app = env.getApp();
+    if (app === null) return;
+    go('#/play');
+    app.dispatch('play/loaded-session', { ...session, name: '' });
+  };
 
   toolbox.add({
     name: 'jaren_validate',
-    description: 'Validate a JSON document against a JSON Schema with the Jaren validating compiler, loading both into the playground so the user sees the result. Pass `schema` as a real JSON object (not JSON text). Returns { valid, errors, draft, compileMs, validateMs }.',
+    description: 'Validate a JSON document against a JSON Schema with the Jaren validating compiler, loading both into #/play so the user sees the result. Pass `schema` as a real JSON object (not JSON text). Returns { valid, errors, draft, compileMs, validateMs }.',
     inputSchema: {
       type: 'object',
       properties: { schema: { type: ['object', 'boolean'] }, data: {} },
       required: ['schema'],
     },
     execute: (input) => {
-      const app = env.getApp();
       const schemaText = JSON.stringify(input.schema, null, 2);
       // models often hand the document over as JSON text — accept it
       const data = typeof input.data === 'string' ? parseJsonText(input.data) : (input.data ?? null);
-      if (app !== null) {
-        go('#/playground?engine=validate');
-        app.dispatch('pg/example', { schemaText, data });
-      }
+      playLoad(legacyExperimentToSession('validate', { schemaText, data }));
       return runValidation(schemaText, data);
     },
   });
 
   toolbox.add({
     name: 'jaren_run_engine',
-    description: `Run one of the Jaren playground engines (${engineKeys.join(', ')}) with text inputs (JSON values as JSON text), loading them into the playground so the user watches it run. JSON Schema validation is NOT an engine here — use jaren_validate for that. Returns the render nodes the site itself shows, including errors with stable codes and docPaths.`,
+    description: `Run one of the Jaren play engines (${engineKeys.join(', ')}) with flat text inputs (JSON values as JSON text; each key is one of the engine's panes from jaren_list_engines), loading them into #/play so the user watches it run. JSON Schema validation is NOT an engine here — use jaren_validate for that. Returns the result panels the play stage itself shows ({ ok, panels, timing, error } — errors carry stable codes).`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -191,48 +185,44 @@ export function createSiteToolbox(env) {
       required: ['engine', 'inputs'],
     },
     execute: (input) => {
-      const app = env.getApp();
-      const inputs = withDefaults(input.engine, input.inputs);
-      if (app !== null) {
-        go(`#/playground?engine=${input.engine}`);
-        app.dispatch('eng/load', { engine: input.engine, inputs });
-      }
-      return runEngine(input.engine, inputs);
+      const session = legacyExperimentToSession(input.engine, input.inputs);
+      if (session === null) return { error: `unknown engine: ${input.engine}` };
+      playLoad(session);
+      return runPlay(session);
     },
   });
 
   toolbox.add({
     name: 'jaren_list_engines',
-    description: 'List the available playground engines with their input fields.',
+    description: 'List the available play engines with their input panes (source / data / option).',
     inputSchema: { type: 'object', properties: {} },
     execute: () => engineCatalogue(),
   });
 
   toolbox.add({
     name: 'jaren_get_state',
-    description: 'Read what is currently on screen: the active page, the selected playground engine and its current text inputs. Call this before editing so you build on what the user already has.',
+    description: 'Read what is currently on screen: the active page and — on #/play — the selected engine and its current pane texts. Call this before editing so you build on what the user already has.',
     inputSchema: { type: 'object', properties: {} },
     execute: () => {
       const app = env.getApp();
       if (app === null) return { page: 'unknown' };
       const state = app.getState();
-      const engine = state.route.page === 'playground'
-        ? (state.route.params.engine ?? 'validate')
-        : null;
-      const inputs = engine === 'validate'
-        ? { schema: state.pg.schemaText, data: JSON.stringify(state.pg.data) }
-        : engine !== null ? (state.eng[engine] ?? {}) : null;
-      return { page: state.route.page, engine, inputs };
+      if (state.route.page !== 'play') return { page: state.route.page, engine: null, inputs: null };
+      return {
+        page: 'play',
+        engine: state.play.engine,
+        inputs: { ...state.play.source, ...state.play.data, ...state.play.config },
+      };
     },
   });
 
   toolbox.add({
     name: 'jaren_navigate',
-    description: 'Navigate the site to a page, optionally with params (e.g. { page: "playground", params: { engine: "jslt" } }).',
+    description: 'Navigate the site to a page, optionally with params (e.g. { page: "docs", params: { s: "query" } }).',
     inputSchema: {
       type: 'object',
       properties: {
-        page: { enum: ['home', 'playground', 'studio', 'play', 'flow', 'benchmarks', 'charts', 'docs', 'calculator'] },
+        page: { enum: ['home', 'studio', 'play', 'flow', 'benchmarks', 'charts', 'docs', 'calculator'] },
         params: { type: 'object', additionalProperties: { type: 'string' } },
       },
       required: ['page'],
@@ -246,16 +236,21 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_get_examples',
-    description: 'Get the site\'s working examples for one engine — each is { label, inputs } and runs as-is through jaren_run_engine (for engine \'validate\': { label, schema, data } for jaren_validate). Before writing a program for an engine you have not used this conversation, fetch its examples and adapt one instead of guessing syntax. Pass `label` to get a single example.',
+    description: 'Get the site\'s working examples for one engine — play\'s canonical library. Each is { label, inputs } and runs as-is through jaren_run_engine (engine \'validate\': pass the schema/data to jaren_validate instead). Before writing a program for an engine you have not used this conversation, fetch its examples and adapt one instead of guessing syntax. Pass `label` to get a single example.',
     inputSchema: {
       type: 'object',
-      properties: { engine: { enum: [...engineKeys, 'validate'] }, label: { type: 'string' } },
+      properties: { engine: { enum: playComponent.engineIds() }, label: { type: 'string' } },
       required: ['engine'],
     },
     execute: (input) => {
-      const all = input.engine === 'validate'
-        ? Object.values(exampleSchemas).map((e) => ({ label: e.name, schema: e.schema, data: e.data }))
-        : (ENGINE_EXAMPLES[input.engine] ?? []);
+      const all = playComponent.examples
+        .filter((e) => e.engine === input.engine)
+        .map((e) => ({
+          label: e.label,
+          // flatten to the jaren_run_engine input shape: source panes +
+          // the first dataset's data pane(s) + the option config
+          inputs: { ...e.source, ...(e.datasets[0]?.data ?? {}), ...(e.config ?? {}) },
+        }));
       if (input.label === undefined) return all;
       const hit = all.find((e) => e.label === input.label);
       return hit ?? { error: `no example labelled '${input.label}'`, labels: all.map((e) => e.label) };
@@ -480,7 +475,7 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_save_experiment',
-    description: 'Save what is on screen as a named experiment (the localStorage IDE store) so the user keeps what you built together: the current playground engine and inputs, or — on #/studio — the current studio document. Returns the updated experiment names.',
+    description: 'Save what is on screen under a name so the user keeps what you built together: on #/studio the current studio document (the IDE store); anywhere else the current play session (the play store). Returns the updated saved names.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', minLength: 1 } },
@@ -488,25 +483,33 @@ export function createSiteToolbox(env) {
     },
     execute: (input) => {
       const app = env.getApp();
-      if (app === null) return { error: 'the playground is not running here' };
-      app.dispatch('ide/name', null, { target: { value: input.name } });
-      app.dispatch('ide/save');
-      return { ok: true, names: app.getState().ide.names };
+      if (app === null) return { error: 'the site is not running here' };
+      if (app.getState().route.page === 'studio') {
+        app.dispatch('ide/name', null, { target: { value: input.name } });
+        app.dispatch('ide/save');
+        return { ok: true, names: app.getState().ide.names };
+      }
+      app.dispatch('play/name', null, { target: { value: input.name } });
+      app.dispatch('play/save');
+      return { ok: true, names: app.getState().play.names };
     },
   });
 
   toolbox.add({
     name: 'jaren_list_experiments',
-    description: 'List the saved playground experiments (the localStorage IDE store).',
+    description: 'List the saved work: the IDE store\'s experiments (studio documents, plus any legacy engine experiments) and the saved play sessions.',
     inputSchema: { type: 'object', properties: {} },
-    execute: () => Object.entries(env.docStore.all()).map(([name, e]) => ({
-      name, engine: /** @type {any} */ (e).engine, savedAt: /** @type {any} */ (e).savedAt,
-    })),
+    execute: () => ({
+      experiments: Object.entries(env.docStore.all()).map(([name, e]) => ({
+        name, engine: /** @type {any} */ (e).engine, savedAt: /** @type {any} */ (e).savedAt,
+      })),
+      playSessions: env.playStore ? env.playStore.names() : [],
+    }),
   });
 
   toolbox.add({
     name: 'jaren_load_experiment',
-    description: 'Load a saved experiment into the playground by name.',
+    description: 'Load a saved experiment by name: a studio document opens in #/studio; a legacy engine experiment opens as the equivalent play session.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -524,12 +527,12 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_share_link',
-    description: 'Build a share link that restores the current playground engine and inputs, and copy it to the clipboard. Returns { url }.',
+    description: 'Build a share link that restores what is on screen (the studio document on #/studio, the play session otherwise), and copy it to the clipboard.',
     inputSchema: { type: 'object', properties: {} },
     execute: () => {
       const app = env.getApp();
       if (app === null || env.share === undefined) return { error: 'sharing is unavailable here' };
-      app.dispatch('ide/share');
+      app.dispatch(app.getState().route.page === 'studio' ? 'ide/share' : 'play/share');
       return { ok: true, note: 'A share link was copied to the clipboard.' };
     },
   });
@@ -539,18 +542,19 @@ export function createSiteToolbox(env) {
 
 /**
  * The system prompt: what the assistant is and how it drives the site.
- * The engine list is generated from ENGINE_DEFS, so the prompt can
- * never drift from the playground it steers.
+ * The engine list is generated from the play engine registry, so the
+ * prompt can never drift from the surface it steers.
  */
 export const SYSTEM_PROMPT = [
-  'You are the Jaren playground assistant, embedded in the jarenjs website. Jaren is a',
+  'You are the Jaren play assistant, embedded in the jarenjs website. Jaren is a',
   'browser-native JSON toolkit: every engine below runs right here with the real shipped',
   'compilers — no server, no proxy — and Jaren\'s own JSON Schema validator checks each of',
   'your tool calls before it runs.',
   '',
   'The engines (JSON values are passed as JSON text):',
   '- validate — JSON Schema: validate a document against a schema (use jaren_validate).',
-  ...Object.entries(ENGINE_DEFS).map(([key, def]) => `- ${key} — ${def.label}: ${def.lead}`),
+  ...Object.values(playComponent.engines).filter((e) => e.id !== 'validate')
+    .map((e) => `- ${e.id} — ${e.label}: ${e.lead ?? ''}`),
   '',
   'Vocabulary → engine (pick the DELIVERABLE the user named, then use the others inside it):',
   '- "stylesheet" or "template" → the jslt engine. This is a transform that COMPUTES —',
@@ -566,8 +570,8 @@ export const SYSTEM_PROMPT = [
   'How to work:',
   '0. Tool arguments are JSON: pass objects and arrays as REAL JSON values, never as',
   '   JSON-encoded strings (write {"doc": {…}}, not {"doc": "{…}"}).',
-  '1. You help by DRIVING the playground with your tools, not by pasting long answers — every',
-  '   tool call loads its inputs into the live playground, so the user watches it happen.',
+  '1. You help by DRIVING the play surface (#/play) with your tools, not by pasting long',
+  '   answers — every tool call loads its inputs into the live surface, so the user watches.',
   '2. Call jaren_get_state before editing, and build on what is already on screen. Use',
   '   jaren_list_engines when you are unsure of an engine\'s input fields.',
   '3. Writing a program for an engine you have not used in this conversation? Call',
@@ -580,7 +584,7 @@ export const SYSTEM_PROMPT = [
   '   A JSLT stylesheet is { "$jslt": "0.1", "rules": [ { "match": "$…", "body": <expr> } ] }',
   '   where <expr> is a jaren-query expression: JSONPath ($.a, $.items[?(@.x>1)]), operators',
   '   ($min $max $sum $count $head $sub $mul $if $default), and $for/$where/$return phrases.',
-  '4a. This playground also MOUNTS the math / finance / statistics operator packs, so these',
+  '4a. This site also MOUNTS the math / finance / statistics operator packs, so these',
   '   REGISTERED operators run in the jslt, query and jtlt engines here: math ($sqrt $pow $abs',
   '   $hypot $log $exp and the trig family), finance ($npv $irr $sma $ema $fv $pv $pmt), and',
   '   statistics ($mean $median $variance $stddev $percentile). Use them directly, e.g.',
@@ -654,7 +658,7 @@ export function createAssistantEffects(deps) {
           apiKey: s.apiKey,
           model: s.model,
           fetch: deps.aiFetch,
-          headers: { 'HTTP-Referer': 'https://jklarenbeek.github.io/jarenjs/', 'X-Title': 'Jaren playground' },
+          headers: { 'HTTP-Referer': 'https://jklarenbeek.github.io/jarenjs/', 'X-Title': 'Jaren play' },
         });
       }
       catch (err) {

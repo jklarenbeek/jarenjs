@@ -12,12 +12,21 @@ import { test, expect } from '@playwright/test';
 
 test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-/** Render a mermaid fence through the markdown playground. */
-async function renderDiagram(page) {
+/** Load play's markdown engine and fill the source with `text` — the
+ * phone flow: Examples → GFM tour, Editor → fill, Result → the preview. */
+async function fillMarkdown(page, text) {
   await page.goto('/');
-  await page.evaluate(() => { window.location.hash = '#/playground?engine=markdown'; });
-  await page.locator('textarea').first().fill(
-    '# t\n\n```mermaid\nflowchart LR\n  A["a"] --> B["b"]\n```\n');
+  await page.evaluate(() => { window.location.hash = '#/play'; });
+  await page.locator('.jplay-mobilebar .seg-btn', { hasText: 'Examples' }).tap();
+  await page.locator('.jplay-ex', { hasText: 'GFM tour' }).tap();
+  await page.locator('.jplay-mobilebar .seg-btn', { hasText: 'Editor' }).tap();
+  await page.locator('.jplay-editors textarea').first().fill(text);
+  await page.locator('.jplay-mobilebar .seg-btn', { hasText: 'Result' }).tap();
+}
+
+/** Render a mermaid fence through play's markdown engine. */
+async function renderDiagram(page) {
+  await fillMarkdown(page, '# t\n\n```mermaid\nflowchart LR\n  A["a"] --> B["b"]\n```\n');
   await page.waitForSelector('.md-mermaid svg');
   await expect(page.locator('.md-mermaid.mm-interactive')).toHaveCount(1);
 }
@@ -86,9 +95,7 @@ test('a wide diagram scrolls at full size instead of shrinking its text', async 
   // the SVG is capped at `max-width: 100%` it scales to fit and the scroll
   // never engages — so the label font shrinks with everything else. On a
   // phone that took a 14px label to roughly 11px.
-  await page.goto('/');
-  await page.evaluate(() => { window.location.hash = '#/playground?engine=markdown'; });
-  await page.locator('textarea').first().fill(
+  await fillMarkdown(page,
     '```mermaid\nflowchart LR\n  A["aaaaaaaaaaaaaaaa"] --> B["bbbbbbbbbbbbbbbb"] --> C["cccccccccccccccc"]\n```\n');
   await page.waitForSelector('.md-mermaid svg');
 
@@ -114,9 +121,7 @@ test('a wide diagram scrolls at full size instead of shrinking its text', async 
 });
 
 test('a wide diagram still does not widen the page', async ({ page }) => {
-  await page.goto('/');
-  await page.evaluate(() => { window.location.hash = '#/playground?engine=markdown'; });
-  await page.locator('textarea').first().fill(
+  await fillMarkdown(page,
     '```mermaid\nflowchart LR\n  A["aaaaaaaaaaaaaaaa"] --> B["bbbbbbbbbbbbbbbb"] --> C["cccccccccccccccc"]\n```\n');
   await page.waitForSelector('.md-mermaid svg');
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({
@@ -129,9 +134,7 @@ test('a wide diagram still does not widen the page', async ({ page }) => {
 test('a state diagram is a laid-out, zoomable graph', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto('/');
-  await page.evaluate(() => { window.location.hash = '#/playground?engine=markdown'; });
-  await page.locator('textarea').first().fill(
+  await fillMarkdown(page,
     '# t\n\n```mermaid\nstateDiagram-v2\n  [*] --> draft\n  draft --> review : submit\n  review --> [*]\n```\n');
   await page.waitForSelector('.md-mermaid svg.mm-state');
 

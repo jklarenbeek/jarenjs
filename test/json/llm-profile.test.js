@@ -21,7 +21,15 @@ import queryProfile from '@jarenjs/json/schemas/jaren-query.llm-profile.schema.j
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 import jsltProfile from '@jarenjs/json/schemas/jaren-jslt.llm-profile.schema.json' with { type: 'json' };
 
-import { queryExamples, jsltExamples } from '../../packages/website/src/content/engineExamples.js';
+import { EXAMPLES as PLAY_EXAMPLES } from '../../components/play/src/index.js';
+
+/** Play's canonical library, parsed back to documents. The `$mean`
+ * example uses a host-REGISTERED operator that is deliberately outside
+ * the published closed grammar (the site mounts a registry to run it),
+ * so it is not canonical-valid and stays out of this corpus. */
+const playDocs = (engine, paneKey, skipIds) => PLAY_EXAMPLES
+  .filter((e) => e.engine === engine && !skipIds.includes(e.id))
+  .map((e) => JSON.parse(e.source[paneKey]));
 
 /** Representative valid query documents beyond the site examples. */
 const QUERY_CORPUS = [
@@ -89,11 +97,7 @@ describe('json — the LLM-profile schema twins', function () {
   });
 
   it('every canonical-valid query document is profile-valid (pure relaxation)', function () {
-    // `registry` examples use host-registered operators ($mean, $sqrt, …)
-    // that are deliberately OUTSIDE the published closed grammar, so they
-    // are not canonical-valid — the site mounts a registry to run them
-    const docs = [...QUERY_CORPUS,
-      ...queryExamples.filter((e) => e.registry !== true).map((e) => e.query)];
+    const docs = [...QUERY_CORPUS, ...playDocs('query', 'query', ['query-mean'])];
     for (const doc of docs) {
       assert.strictEqual(checks.query(doc), true,
         `corpus doc is canonical-valid: ${JSON.stringify(doc).slice(0, 60)}`);
@@ -103,8 +107,7 @@ describe('json — the LLM-profile schema twins', function () {
   });
 
   it('every canonical-valid JSLT stylesheet is profile-valid (pure relaxation)', function () {
-    const docs = [...JSLT_CORPUS,
-      ...jsltExamples.filter((e) => e.registry !== true).map((e) => e.stylesheet)];
+    const docs = [...JSLT_CORPUS, ...playDocs('jslt', 'stylesheet', [])];
     for (const doc of docs) {
       assert.strictEqual(checks.jslt(doc), true,
         `corpus stylesheet is canonical-valid: ${JSON.stringify(doc).slice(0, 60)}`);

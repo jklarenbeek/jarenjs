@@ -86,8 +86,8 @@ describe('website — the site as one app document', function () {
     const { container, go } = mountSite();
     go('#/docs');
     assert.match(serialize(container), /Installation/);
-    go('#/playground');
-    assert.match(serialize(container), /Playground/);
+    go('#/play');
+    assert.match(serialize(container), /jplay/);
     go('#/nonsense');
     assert.match(serialize(container), /JSON all the way down/, 'unknown routes fall back home');
   });
@@ -177,55 +177,12 @@ describe('website — the site as one app document', function () {
     assert.match(serialize(container), /Data unavailable/);
   });
 
-  it('playground: the initial document validates on boot', function () {
-    const { app, container } = mountSite({ hash: '#/playground' });
-    assert.strictEqual(app.getState().pg.result.valid, true);
-    assert.match(serialize(container), /class="badge ok"/);
-  });
-
-  it('playground: the generated form renders and writes through form actions', function () {
-    const { app, container } = mountSite({ hash: '#/playground' });
-    const nameField = find(container, (n) => n.attributes?.get('data-pointer') === '/name');
-    assert.notStrictEqual(nameField, undefined, 'standard forms stylesheet rendered the schema');
-    const input = find(nameField, (n) => n.tagName === 'input');
-    fire(input, 'input', { target: { value: 'Grace' } });
-    assert.strictEqual(app.getState().pg.data.name, 'Grace');
-    assert.strictEqual(app.getState().pg.result.valid, true, 'revalidated after the form write');
-  });
-
-  it('playground: schema edits recompile and errors localize EN/NL', function () {
-    const { app, container } = mountSite({ hash: '#/playground' });
-    const editor = find(container, (n) =>
-      n.tagName === 'textarea' && n.attributes?.get('class') === 'editor');
-    fire(editor, 'input', { target: { value: '{ "type": "object", "required": ["missing"] }' } });
-    assert.strictEqual(app.getState().pg.result.valid, false);
-    let html = serialize(container);
-    assert.match(html, /class="badge fail"/);
-    assert.match(html, /required/i);
-
-    const nlButton = find(container, (n) =>
-      n.tagName === 'button' && n.childNodes?.[0]?.nodeValue === 'NL');
-    fire(nlButton, 'click');
-    html = serialize(container);
-    assert.match(html, /verplicht/, 'Dutch text renders at report time');
-  });
-
-  it('playground: invalid schema JSON reports, valid schema recovers', function () {
-    const { app, container } = mountSite({ hash: '#/playground' });
-    const editor = find(container, (n) =>
-      n.tagName === 'textarea' && n.attributes?.get('class') === 'editor');
-    fire(editor, 'input', { target: { value: '{ not json' } });
-    assert.match(serialize(container), /Invalid JSON/);
-    fire(editor, 'input', { target: { value: '{ "type": "object" }' } });
-    assert.strictEqual(app.getState().pg.result.valid, true);
-  });
-
   it('SSR: any route renders to an HTML string headless', function () {
     const { app, go } = mountSite();
-    go('#/playground');
+    go('#/play');
     const html = renderToString(app.getVnode());
-    assert.match(html, /<h1>Playground<\/h1>/);
-    assert.match(html, /class="jaren-form/);
+    assert.match(html, /class="jplay/);
+    assert.match(html, /Result/);
   });
 
   it('deep-dive suites render from the real generated data', async function () {
@@ -540,15 +497,8 @@ describe('website — the site as one app document', function () {
     assert.strictEqual(app.getState().route.page, 'play', '#/examples now lands on #/play');
     go('#/scratch');
     assert.strictEqual(app.getState().route.page, 'play', '#/scratch now lands on #/play');
-  });
-
-  it('playground: committing the data pane parses JSON and surfaces malformed input', function () {
-    const { app } = mountSite({ hash: '#/playground' });
-    app.dispatch('pg/data-text', null, { target: { value: '{ "custom": 123 }' } });
-    assert.deepStrictEqual(app.getState().pg.data, { custom: 123 });
-    assert.strictEqual(app.getState().pg.dataError, null);
-    app.dispatch('pg/data-text', null, { target: { value: '{ not json' } });
-    assert.match(app.getState().pg.dataError, /./, 'a parse error is surfaced, not thrown');
+    go('#/playground');
+    assert.strictEqual(app.getState().route.page, 'play', '#/playground now lands on #/play');
   });
 
   it('boots with built-in storage/error defaults when the env omits them', function () {
@@ -561,48 +511,17 @@ describe('website — the site as one app document', function () {
       document,
       schedule: (f) => f(),
       fetchJson: () => Promise.reject(new Error('404')),
-      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/playground')); },
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/play')); },
       navigate: (h) => routeCb(parseHash(h)),
     });
-    assert.ok(app.getState().pg, 'the default (empty) store still boots the playground');
-    // an IDE save writes through the default no-op storage without throwing
-    app.dispatch('ide/name', null, { target: { value: 'exp1' } });
-    app.dispatch('ide/save');
-    assert.ok(app.getState().ide.names.includes('exp1'), 'saved via the default storage');
+    assert.ok(app.getState().play, 'the default (empty) store still boots play');
+    // a play save writes through the default no-op storage without throwing
+    app.dispatch('play/name', null, { target: { value: 'exp1' } });
+    app.dispatch('play/save');
+    assert.ok(app.getState().play.names.includes('exp1'), 'saved via the default storage');
     // an unhandled app error routes to the default no-op error handler
     app.dispatch('no-such-action');
-    assert.ok(app.getState().pg, 'the app survives an unknown-action error via the default handler');
-  });
-});
-
-describe('website — the Binance live toggle wiring', function () {
-  it("dispatching 'binance/toggle' runs the effect (stub socket)", async function () {
-    const sockets = [];
-    class StubWebSocket {
-      constructor(url) {
-        this.url = url;
-        this.closed = false;
-        sockets.push(this);
-      }
-
-      close() { this.closed = true; }
-    }
-    globalThis.WebSocket = /** @type {any} */ (StubWebSocket);
-    try {
-      const { app, go } = mountSite({ hash: '#/playground?engine=charts' });
-      await tick();
-      app.dispatch('binance/toggle');
-      await tick();
-      assert.equal(sockets.length, 1, 'the effect opened the market-data socket');
-      assert.match(sockets[0].url, /data-stream\.binance\.vision/);
-      sockets[0].onerror?.(new Error('transient')); // reported via onclose only
-      go('#/'); // navigating away must close the socket (the sync hook)
-      await tick();
-      assert.equal(sockets[0].closed, true, 'navigation closed the socket');
-    }
-    finally {
-      delete globalThis.WebSocket;
-    }
+    assert.ok(app.getState().play, 'the app survives an unknown-action error via the default handler');
   });
 });
 
@@ -640,6 +559,7 @@ describe('website — the /charts page', function () {
       assert.strictEqual(sockets.length, 1, 'the page toggle opened the socket');
       const html = serialize(container);
       assert.match(html, /Binance feed/, 'live status card renders on the page');
+      sockets[0].onerror?.(new Error('transient')); // reported via onclose only
       go('#/');
       await tick();
       assert.strictEqual(sockets[0].closed, true, 'leaving /charts closed the socket');

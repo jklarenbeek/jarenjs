@@ -14,7 +14,7 @@ import { renderToString } from '@jarenjs/view';
 
 import {
   createBinanceFeed, binanceNodes, binanceInvitation,
-  binanceToggle, binanceSync, binanceLiveActive, stopBinance,
+  binanceToggle, binancePageSync, binanceLiveActive, stopBinance,
 } from '../../packages/website/src/boundaries/binance.js';
 
 // Vendored payloads in the documented combined-stream shape
@@ -122,7 +122,7 @@ describe('binance feed (offline, vendored payloads)', function () {
   it('the invitation never connects by itself', function () {
     const nodes = binanceInvitation();
     assert.match(JSON.stringify(nodes), /sends your IP address to Binance/);
-    assert.ok(nodes.some((n) => n.kind === 'more' && n.action === 'binance/toggle'));
+    assert.ok(nodes.some((n) => n.kind === 'more' && n.action === 'charts-live/toggle'));
     assert.strictEqual(binanceLiveActive(), false);
   });
 
@@ -162,7 +162,7 @@ describe('binance connection lifecycle (stub socket)', function () {
     delete globalThis.WebSocket;
   });
 
-  it('toggle opens the market-data socket; sync(inactive) closes it', function () {
+  it('toggle opens the market-data socket; leaving the page closes it', function () {
     install();
     const dispatched = [];
     const dispatch = (action, payload) => dispatched.push([action, payload]);
@@ -174,8 +174,8 @@ describe('binance connection lifecycle (stub socket)', function () {
     assert.match(sockets[0].url, /btcusdt@kline_1m/);
     sockets[0].onopen();
     sockets[0].onmessage({ data: MINITICKER('BTCUSDT', 1000, 64000) });
-    // navigating away (or leaving live mode) closes the socket
-    binanceSync({ stream: 'off' }, dispatch, true);
+    // navigating away from #/charts closes the socket
+    binancePageSync(false);
     assert.strictEqual(binanceLiveActive(), false);
     assert.strictEqual(sockets[0].closed, true);
   });

@@ -6,11 +6,11 @@
  *
  * Reactivity is one subscriber on the transition changed-path feed (the
  * patch engine's `changes` option surfaced by @jarenjs/app):
- *  - `/pg/schemaText` or `/pg/data/*` changed → revalidate the schema
- *    playground (debounced);
- *  - `/eng/<engine>/*` changed → re-run that engine's boundary
- *    (debounced);
- *  - `/route` changed → run the routed engine once if it has no result.
+ *  - a `/play/*` engine input changed → re-run the play engine (debounced);
+ *  - `/project/files*` or `/project/active` changed → re-commit the
+ *    Project IDE (debounced);
+ *  - `/route` changed → seed the arriving surface once, redirect the
+ *    retired URLs, and apply an inbound share token.
  */
 
 import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
@@ -19,15 +19,16 @@ import { ACTIONS, SUBS } from './actions.js';
 import { createInitialState } from './state.js';
 import { viewModel } from './viewmodel.js';
 import { STYLESHEET } from '../views/index.js';
-import { runValidation } from '../boundaries/validator.js';
-import { runEngine, ENGINE_DEFS } from '../boundaries/engines.js';
 import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
 import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
-import { runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession, createPlaySplitterWidget } from '../boundaries/play.js';
+import {
+  runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession,
+  legacyExperimentToSession, createPlaySplitterWidget,
+} from '../boundaries/play.js';
 import { projectTemplate, fileSkeleton } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
@@ -115,24 +116,7 @@ export function createSiteApp(env) {
 
   const ideNames = () => docStore.names();
 
-  /** Which experiment kind the current route saves/shares. */
-  const engineFor = (state) => (state.route.page === 'studio'
-    ? 'studio'
-    : state.route.page === 'playground'
-      ? (state.route.params.engine ?? 'validate')
-      : 'validate');
-
-  /** Engine → the inputs snapshot the IDE store keeps for it. */
-  const ideInputsFor = (state, engine) => {
-    if (engine === 'studio') {
-      return state.studio.doc === null ? null : { doc: state.studio.doc };
-    }
-    return engine === 'validate'
-      ? { schemaText: state.pg.schemaText, data: state.pg.data }
-      : state.eng[engine];
-  };
-
-  // the AI assistant toolbox: the playground engines as schema-guarded
+  // the AI assistant toolbox: the play engines as schema-guarded
   // @jarenjs/ai tools, shared by the chat panel and the WebMCP bridge.
   // `getApp` is lazy because the app is created further down.
   const toolbox = createSiteToolbox({
@@ -140,6 +124,7 @@ export function createSiteApp(env) {
     navigate: env.navigate,
     share: env.share,
     docStore,
+    playStore,
   });
   const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
   const aiChat = env.aiChat ?? { read: () => null, write: () => {} };
@@ -166,24 +151,15 @@ export function createSiteApp(env) {
     // hosts simply omit the capability
     'lock-scroll': (props) => env.lockScroll?.(props.on === true),
     'binance-toggle': (props, dispatch) =>
-      binanceToggle((action, payload) => dispatch(action, payload),
-        props.target === 'page' ? 'page' : 'playground'),
-    'parse-data': (props, dispatch) => {
-      try {
-        dispatch('pg/data-set', JSON.parse(props.text));
-      }
-      catch (err) {
-        dispatch('pg/data-error', /** @type {Error} */ (err).message);
-      }
-    },
+      binanceToggle((action, payload) => dispatch(action, payload)),
+    // the IDE store (the Studio's Save/Load/Share bar). Legacy experiments
+    // from the retired engine playground may still be in a user's storage:
+    // loading one translates it into a play session, so nothing saved rots.
     'ide-save': (props, dispatch) => {
       const state = app.getState();
       const name = state.ide.name.trim();
-      if (name === '') return;
-      const engine = engineFor(state);
-      const inputs = ideInputsFor(state, engine);
-      if (inputs === null) return; // an empty studio has nothing to save
-      docStore.save(name, { engine, inputs, savedAt: new Date().toISOString() });
+      if (name === '' || state.studio.doc === null) return; // an empty studio has nothing to save
+      docStore.save(name, { engine: 'studio', inputs: { doc: state.studio.doc }, savedAt: new Date().toISOString() });
       dispatch('ide/names', ideNames());
     },
     'ide-load': (props, dispatch) => {
@@ -194,16 +170,11 @@ export function createSiteApp(env) {
         dispatch('studio/doc', { doc: experiment.inputs.doc });
         return;
       }
-      env.navigate?.(`#/playground?engine=${experiment.engine}`);
-      if (experiment.engine === 'validate') {
-        dispatch('pg/example', {
-          schemaText: experiment.inputs.schemaText,
-          data: experiment.inputs.data,
-        });
-      }
-      else {
-        dispatch('eng/load', { engine: experiment.engine, inputs: experiment.inputs });
-      }
+      // a legacy playground experiment → the equivalent play session
+      const session = legacyExperimentToSession(experiment.engine, experiment.inputs);
+      if (session === null) return;
+      env.navigate?.('#/play');
+      dispatch('play/loaded-session', { ...session, name: '' });
     },
     'ide-delete': (props, dispatch) => {
       docStore.remove(props.name);
@@ -211,10 +182,8 @@ export function createSiteApp(env) {
     },
     'ide-share': (props, dispatch) => {
       const state = app.getState();
-      const engine = engineFor(state);
-      const inputs = ideInputsFor(state, engine);
-      if (inputs === null) return; // an empty studio has nothing to share
-      const token = encodeShare({ e: engine, i: inputs });
+      if (state.studio.doc === null) return; // an empty studio has nothing to share
+      const token = encodeShare({ e: 'studio', i: { doc: state.studio.doc } });
       // hash-length honesty: a very long studio document makes a token
       // browsers and chat clients mangle — say so instead of truncating
       if (token.length > SHARE_TOKEN_LIMIT) {
@@ -222,10 +191,7 @@ export function createSiteApp(env) {
           `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars) — use Download instead`);
         return;
       }
-      const hash = engine === 'studio'
-        ? `#/studio?s=${token}`
-        : `#/playground?engine=${engine}&s=${token}`;
-      const url = env.share?.(hash);
+      const url = env.share?.(`#/studio?s=${token}`);
       dispatch('ide/shared', url === undefined ? 'link ready' : 'link copied');
     },
 
@@ -493,32 +459,6 @@ export function createSiteApp(env) {
  *   the retired-page redirect: #/examples → #/play)
  */
 function wireBoundaries(app, debounceMs, navigate) {
-  const runValidate = () => {
-    const state = app.getState();
-    app.dispatch('pg/result', runValidation(state.pg.schemaText, state.pg.data));
-  };
-  const runEng = (engine) => {
-    const state = app.getState();
-    if (state.eng[engine] === undefined) return;
-    app.dispatch('eng/result', { engine, result: runEngine(engine, state.eng[engine]) });
-  };
-  // Engines may carry a `sync(inputs, dispatch, active)` lifecycle hook
-  // (the charts replay timer): called after that engine's boundary run
-  // and on every route change, with `active` false whenever the
-  // playground no longer shows the engine — the hook must stop its
-  // side channel then.
-  const syncEng = (engine) => {
-    const def = ENGINE_DEFS[engine];
-    if (def === undefined || def.sync === undefined) return;
-    const state = app.getState();
-    const active = state.route.page === 'playground'
-      && (state.route.params.engine ?? 'validate') === engine;
-    def.sync(state.eng[engine] ?? {},
-      (action, payload) => app.dispatch(action, payload), active);
-  };
-  const syncAll = () => {
-    for (const engine of Object.keys(ENGINE_DEFS)) syncEng(engine);
-  };
   // the Project IDE's commit: validate + assemble the active app file and
   // fold in the last-good stage mount (an invalid edit keeps the previous)
   const runProjectCommit = () => {
@@ -557,26 +497,14 @@ function wireBoundaries(app, debounceMs, navigate) {
   };
 
   app.subscribe((state, changes) => {
-    if (changes === null) {
-      debounced('validate', runValidate);
-      return;
-    }
-    /** @type {Set<string>} */
-    const engines = new Set();
-    let validate = false;
+    if (changes === null) return;
     let routed = false;
     let project = false;
     let play = false;
     let playFormEdit = false; // a /play/dataValue* edit (from the generated form)
     let playToggle = false;   // the /play/dataView toggle (json ↔ form)
     for (const path of changes) {
-      if (path === '/pg/schemaText' || path === '/pg/data' || path.startsWith('/pg/data/')) {
-        validate = true;
-      }
-      else if (path.startsWith('/eng/')) {
-        engines.add(path.split('/')[2]);
-      }
-      else if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
+      if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
         project = true;
       }
       // any Play ENGINE input (source / data / example / dataset / config)
@@ -595,7 +523,6 @@ function wireBoundaries(app, debounceMs, navigate) {
         routed = true;
       }
     }
-    if (validate) debounced('validate', runValidate);
     if (project) debounced('project', () => { runProjectCommit(); runProjectActive(); });
     if (play) debounced('play', runPlayLive);
     // a generated-form edit (not the toggle, which sets the buffer from the
@@ -605,21 +532,12 @@ function wireBoundaries(app, debounceMs, navigate) {
       const value = app.getState().play.dataValue;
       app.dispatch('play/data-mirror', value === null ? '' : JSON.stringify(value, null, 2));
     }
-    for (const engine of engines) {
-      debounced(`eng:${engine}`, () => {
-        runEng(engine);
-        syncEng(engine);
-      });
-    }
     if (routed) {
       const s = app.getState();
-      // the retired #/examples and #/scratch URLs redirect to #/play
+      // the retired #/examples, #/scratch and #/playground URLs redirect
+      // to #/play (an old playground share token translates on the way)
       if (s.route.page === 'examples' || s.route.page === 'scratch') { navigate?.('#/play'); return; }
-      const engine = s.route.params.engine;
-      if (s.route.page === 'playground' && engine !== undefined
-        && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
-        runEng(engine);
-      }
+      if (s.route.page === 'playground') { navigate?.(playgroundRedirect(s.route.params)); return; }
       // arriving at the Project IDE: boot the stage once, run the active
       // transform if that is what is showing
       if (s.route.page === 'project') {
@@ -629,18 +547,32 @@ function wireBoundaries(app, debounceMs, navigate) {
       // arriving at the Play playground: run the seeded example once, so
       // the stage is never empty (later edits re-run through the feed above)
       if (s.route.page === 'play' && s.play.result === null) runPlayLive();
-      syncAll();
       binancePageSync(s.route.page === 'charts');
       applyShareToken(s);
     }
   });
+
+  /** The retired #/playground URL → #/play. A legacy share token
+   * (`{ e, i }`) or engine param translates into a play session token, so
+   * old links restore what they always restored — just on #/play. */
+  function playgroundRedirect(params) {
+    const token = params.s;
+    if (token !== undefined) {
+      const snapshot = decodeShare(token);
+      if (snapshot !== null && typeof snapshot.e === 'string' && snapshot.i !== undefined) {
+        const session = legacyExperimentToSession(snapshot.e, snapshot.i);
+        if (session !== null) return `#/play?s=${encodeShare(session)}`;
+      }
+    }
+    return '#/play';
+  }
 
   /** Inbound share links: `?s=<token>` loads the shared snapshot once. */
   let appliedToken = null;
   function applyShareToken(state) {
     const token = state.route.params.s;
     const page = state.route.page;
-    if ((page !== 'playground' && page !== 'studio' && page !== 'play') || token === undefined
+    if ((page !== 'studio' && page !== 'play') || token === undefined
       || token === appliedToken) {
       return;
     }
@@ -654,33 +586,25 @@ function wireBoundaries(app, debounceMs, navigate) {
       app.dispatch('play/loaded-session', { ...sessionToLoaded(snapshot), name: '' });
       return;
     }
-    if (typeof snapshot.e !== 'string' || snapshot.i === undefined)
-      return;
-    if (page === 'studio') {
-      // a shared studio document passes the same meta-schema gate as
-      // every other entry path; a failing one reports instead of booting
-      if (snapshot.e !== 'studio' || snapshot.i.doc === null
-        || typeof snapshot.i.doc !== 'object') {
-        return;
-      }
-      const report = validateAppDocument(snapshot.i.doc);
-      if (report.valid) app.dispatch('studio/doc', { doc: snapshot.i.doc });
-      else app.dispatch('studio/errors', { list: report.errors, total: report.total });
+    // a shared studio document passes the same meta-schema gate as
+    // every other entry path; a failing one reports instead of booting
+    if (snapshot.e !== 'studio' || snapshot.i === undefined
+      || snapshot.i.doc === null || typeof snapshot.i.doc !== 'object') {
       return;
     }
-    if (snapshot.e === 'validate') {
-      app.dispatch('pg/example', { schemaText: snapshot.i.schemaText, data: snapshot.i.data });
-    }
-    else if (ENGINE_DEFS[snapshot.e] !== undefined) {
-      app.dispatch('eng/load', { engine: snapshot.e, inputs: snapshot.i });
-    }
+    const report = validateAppDocument(snapshot.i.doc);
+    if (report.valid) app.dispatch('studio/doc', { doc: snapshot.i.doc });
+    else app.dispatch('studio/errors', { list: report.errors, total: report.total });
   }
 
-  // a direct entry at the retired #/examples or #/scratch URL redirects to #/play
-  if (app.getState().route.page === 'examples' || app.getState().route.page === 'scratch') navigate?.('#/play');
-  runValidate(); // the initial document validates immediately
-  // entering directly at #/project boots the live stage (the initial
-  // route/set fired before this subscriber attached, so seed it here)
+  // a direct entry at a retired URL redirects to #/play (the initial
+  // route/set fired before this subscriber attached, so handle it here)
+  {
+    const entry = app.getState().route;
+    if (entry.page === 'examples' || entry.page === 'scratch') navigate?.('#/play');
+    if (entry.page === 'playground') navigate?.(playgroundRedirect(entry.params));
+  }
+  // entering directly at #/project boots the live stage
   if (app.getState().route.page === 'project') { runProjectCommit(); runProjectActive(); }
   // …and likewise a direct entry at #/play
   if (app.getState().route.page === 'play' && app.getState().play.result === null) runPlayLive();

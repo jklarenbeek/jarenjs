@@ -26,7 +26,7 @@ import { createSplitterWidget } from '@jarenjs/app';
 import { createStudioComponent } from '@jarenjs/studio/component';
 
 import { loadStudioDocument } from './studio.js';
-import { operatorRegistry, runEngine } from './engines.js';
+import { operatorRegistry, runQuery, runJslt } from './engines.js';
 import { runValidation } from './validator.js';
 import { errorMessage, cards, error } from '../lib/nodes.js';
 import { formatMsUnscaled } from '../lib/format.js';
@@ -84,13 +84,13 @@ export function commitProject(slice) {
 }
 
 /**
- * Run a transform file (`jslt` / `query`) exactly as the playground does:
- * pair it with the project's input (the first `data` file, else a `state`
- * file) and hand it to the same `runEngine` — so registered operators
- * ($npv, $sqrt, …) work and the result nodes are identical to the
- * playground's. Returns `{ nodes }` (render nodes for the `ui` mode), or
- * null for a kind that is not a runnable transform. `runEngine` catches
- * its own errors into error nodes, so this never throws.
+ * Run a transform file (`jslt` / `query`): pair it with the project's
+ * input (the first `data` file, else a `state` file) and hand it to the
+ * shared transform runners — so registered operators ($npv, $sqrt, …)
+ * work here exactly as in play. Returns `{ nodes }` (render nodes for
+ * the `ui` mode), or null for a kind that is not a runnable transform.
+ * The runners catch their own errors into error nodes, so this never
+ * throws.
  * @param {any} slice - the `state.project` slice
  * @param {string} name - the file to run
  * @returns {{ nodes: any[] } | null}
@@ -102,15 +102,15 @@ export function runProjectFile(slice, name) {
   const input = project.files.find((f) => f.kind === 'data')
     ?? project.files.find((f) => f.kind === 'state');
   const dataText = input ? input.text : 'null';
-  if (file.kind === 'query') return { nodes: runEngine('query', { query: file.text, data: dataText, externals: '' }) };
-  if (file.kind === 'jslt') return { nodes: runEngine('jslt', { stylesheet: file.text, data: dataText }) };
+  if (file.kind === 'query') return { nodes: runQuery({ query: file.text, data: dataText, externals: '' }) };
+  if (file.kind === 'jslt') return { nodes: runJslt({ stylesheet: file.text, data: dataText }) };
   if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText) };
   return null;
 }
 
-/** Validate a data file against a schema file and render the report — the
- * playground's "validate" tab, folded into the stage: a valid/invalid
- * summary plus each error as its own coded node. */
+/** Validate a data file against a schema file and render the report on
+ * the stage: a valid/invalid summary plus each error as its own coded
+ * node. */
 function validateNodes(schemaText, dataText) {
   let data;
   try { data = JSON.parse(dataText); }

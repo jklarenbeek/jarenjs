@@ -237,7 +237,7 @@ const DEMOS = [
       series: [
         { name: 'home', values: Array.from({ length: 24 }, (_, i) => 20 + Math.round(15 * Math.sin(i / 3) * 10) / 10) },
         { name: 'docs', values: Array.from({ length: 24 }, (_, i) => 12 + Math.round(9 * Math.cos(i / 4) * 10) / 10) },
-        { name: 'playground', values: Array.from({ length: 24 }, (_, i) => 8 + Math.round(7 * Math.sin(i / 2 + 1) * 10) / 10) },
+        { name: 'play', values: Array.from({ length: 24 }, (_, i) => 8 + Math.round(7 * Math.sin(i / 2 + 1) * 10) / 10) },
       ],
     },
   },
@@ -251,10 +251,10 @@ const DEMOS = [
         { source: 'search', target: 'home', value: 40 },
         { source: 'social', target: 'home', value: 15 },
         { source: 'home', target: 'docs', value: 30 },
-        { source: 'home', target: 'playground', value: 20 },
-        { source: 'docs', target: 'playground', value: 12 },
+        { source: 'home', target: 'play', value: 20 },
+        { source: 'docs', target: 'play', value: 12 },
         { source: 'docs', target: 'github', value: 8 },
-        { source: 'playground', target: 'github', value: 10 },
+        { source: 'play', target: 'github', value: 10 },
       ],
     },
   },
@@ -297,6 +297,6 @@ export function chartsPageDemos() {
 /** The streaming pointer under the demos. */
 export function chartsPageStreamingCallout() {
   return callout('Streaming is the point',
-    'Every chart re-renders from a stream adapter fed by the incremental JOSL/JSONX readers — records join a chart the moment their fields complete. The playground Charts engine replays a document chunk by chunk to show it.',
-    '#/playground?engine=charts', 'Open the Charts playground');
+    'Every chart re-renders from a stream adapter fed by the incremental JOSL/JSONX readers — records join a chart the moment their fields complete. The live feed below streams real market data through the same path.',
+    '#/play', 'Try the Charts engine in Play');
 }

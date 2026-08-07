@@ -8,12 +8,10 @@
  */
 
 import { deriveSuite, SUITES } from '../boundaries/bench.js';
-import { formViewFor, localizeErrors } from '../boundaries/validator.js';
-import { ENGINE_DEFS, ENGINE_EXAMPLES } from '../boundaries/engines.js';
+import { formViewFor } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
 import { PACKAGES } from '../content/packages.js';
-import { exampleSchemas } from '../content/schemas.js';
 import { md, rewriteReadmeLinks } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
@@ -27,8 +25,7 @@ import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
 import { callout, error } from '../lib/nodes.js';
-import { formatJson, formatMs, formatRatio, memo1 } from '../lib/format.js';
-import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
+import { formatJson, formatRatio, memo1 } from '../lib/format.js';
 
 // the nav is grouped into three dropdown menus by what each surface IS:
 // stateless ENGINES you tinker with, stateful STUDIOS you compose in, and
@@ -36,7 +33,6 @@ import { DEFAULT_SCHEMA_TEXT, DEFAULT_DATA } from './state.js';
 const HOME_LINK = { page: 'home', label: 'Home', href: '#/' };
 const NAV_GROUPS = [
   { key: 'engines', label: 'Engines', pages: [
-    { page: 'playground', label: 'Playground', href: '#/playground' },
     { page: 'play', label: 'Play', href: '#/play' },
     { page: 'charts', label: 'Charts', href: '#/charts' },
   ] },
@@ -51,30 +47,6 @@ const NAV_GROUPS = [
     { page: 'docs', label: 'Docs', href: '#/docs' },
     { page: 'benchmarks', label: 'Benchmarks', href: '#/benchmarks' },
   ] },
-];
-
-const PG_ENGINES = [
-  { key: 'validate', label: 'JSON Schema' },
-  ...Object.entries(ENGINE_DEFS).map(([key, def]) => ({ key, label: def.label })),
-];
-
-const PG_EXAMPLES = [
-  { label: 'User', schemaText: DEFAULT_SCHEMA_TEXT, data: DEFAULT_DATA },
-  {
-    label: 'Conditional',
-    schemaText: formatJson(exampleSchemas.conditional.schema),
-    data: exampleSchemas.conditional.data,
-  },
-  {
-    label: 'Cross-field ($query)',
-    schemaText: formatJson(exampleSchemas.queryKeyword.schema),
-    data: exampleSchemas.queryKeyword.data,
-  },
-  {
-    label: 'Invalid data',
-    schemaText: DEFAULT_SCHEMA_TEXT,
-    data: { name: 'A', email: 'not-an-email', age: 7 },
-  },
 ];
 
 /** Home engine card → the benchmark headline that measures it. */
@@ -127,7 +99,6 @@ export function viewModel(state) {
   if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
-  if (page === 'playground') ui.pg = playgroundPage(state);
   if (page === 'studio') ui.studio = studioPage(state);
   if (page === 'project') {
     ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
@@ -245,7 +216,7 @@ const composeBench = memo1((suites, nodes) => ({ suites, nodes }));
 
 const chartsPage = (state) => composeChartsPage(state.chartsLive);
 const composeChartsPage = memo1((live) => ({
-  live: live ?? binanceInvitation('page'),
+  live: live ?? binanceInvitation(),
   demos: [...chartsPageDemos(), chartsPageStreamingCallout()],
 }));
 
@@ -257,82 +228,12 @@ function benchPage(state) {
     benchNodes(suite, state.bench[need], state.benchStatus[need], state.benchUi, state));
 }
 
-const pgTabs = memo1((engine) => PG_ENGINES.map((e) => ({
-  ...e,
-  active: e.key === engine,
-  href: `#/playground?engine=${e.key}`,
-})));
-
-const pgIde = memo1((name, names, shared) => ({
+/** The Studio's IDE-bar model (name field, share status, saved chips). */
+const ideModel = memo1((name, names, shared) => ({
   name,
   shared,
   names: names.map((n) => ({ name: n })),
 }));
-
-const validateNode = memo1((schemaText, data, dataTab, dataError, locale, result) => ({
-  examples: PG_EXAMPLES,
-  schemaText,
-  dataTab,
-  dataJson: formatJson(data),
-  dataError,
-  locale,
-  form: dataTab === 'form' ? formViewFor(schemaText, data) : null,
-  result: deriveResult(result, locale),
-}));
-
-const genericNode = memo1((engine, inputs, engineResults) => {
-  const def = ENGINE_DEFS[engine];
-  return {
-    key: engine,
-    label: def.label,
-    lead: def.lead,
-    fields: def.inputs
-      .filter((field) => matchesWhen(field.when, inputs))
-      .map((field) => ({
-        engine,
-        key: field.key,
-        title: field.title,
-        control: field.control,
-        rows: field.rows ?? 4,
-        value: inputs[field.key] ?? '',
-        options: field.options?.map((option) => ({
-          value: option,
-          selected: option === inputs[field.key],
-        })) ?? null,
-      })),
-    examples: (ENGINE_EXAMPLES[engine] ?? []).map((example) => ({
-      label: example.label,
-      engine,
-      inputs: withAllFields(engine, example.inputs),
-    })),
-    results: engineResults
-      ?? [callout('Ready', 'Edit any input to run — results appear live.')],
-  };
-});
-
-const composePg = memo1((engine, engines, ide, validate, generic) => {
-  /** @type {any} */
-  const page = { engine, engines, ide };
-  // exactly one of `validate` / `generic` is set; the other stays
-  // ABSENT so its $apply selects nothing
-  if (validate !== null) page.validate = validate;
-  if (generic !== null) page.generic = generic;
-  return page;
-});
-
-function playgroundPage(state) {
-  const engine = state.route.params.engine ?? 'validate';
-  const validate = engine === 'validate'
-    ? validateNode(state.pg.schemaText, state.pg.data, state.pg.dataTab,
-      state.pg.dataError, state.pg.locale, state.pg.result)
-    : null;
-  const generic = engine !== 'validate' && ENGINE_DEFS[engine] !== undefined
-    ? genericNode(engine, state.eng[engine] ?? {}, state.engResults[engine] ?? null)
-    : null;
-  return composePg(engine, pgTabs(engine),
-    pgIde(state.ide.name, state.ide.names, state.ide.shared),
-    validate, generic);
-}
 
 // ---- the Studio ----
 
@@ -386,40 +287,9 @@ function studioPage(state) {
   const s = state.studio;
   const live = s.doc === null ? null : composeStudioLive(
     studioEditorText(s.doc), s.revision, s.error,
-    pgIde(state.ide.name, state.ide.names, state.ide.shared),
+    ideModel(state.ide.name, state.ide.names, state.ide.shared),
     studioMount(s.doc, s.revision));
   return composeStudioPage(live, studioErrorNodes(s.errors));
-}
-
-function matchesWhen(when, inputs) {
-  if (when === undefined) return true;
-  const value = inputs[when.key];
-  return Array.isArray(when.value) ? when.value.includes(value) : when.value === value;
-}
-
-/** Example inputs must cover every field, so `eng/load` replaces cleanly. */
-function withAllFields(engine, inputs) {
-  const out = { ...inputs };
-  for (const field of ENGINE_DEFS[engine].inputs) {
-    if (out[field.key] === undefined) out[field.key] = '';
-  }
-  return out;
-}
-
-function deriveResult(r, locale) {
-  if (r === null) return { status: 'idle' };
-  if (r.schemaError !== null) {
-    return { status: 'schema-error', schemaError: r.schemaError };
-  }
-  return {
-    status: r.valid ? 'valid' : 'invalid',
-    draft: r.draft,
-    timing: `compile ${formatMs(r.compileMs)} · validate ${formatMs(r.validateMs)}`,
-    errors: localizeErrors(r.errors, locale).map((e) => ({
-      path: e.instancePath === '' ? '(root)' : e.instancePath,
-      message: e.message,
-    })),
-  };
 }
 
 const docsPage = memo1((param) => {

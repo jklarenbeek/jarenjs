@@ -40,11 +40,36 @@ describe('@jarenjs/play — the engines run', () => {
     assert.match(out(runExample('pointer', { pointer: '/nope' }, { data: '{}' })), /nothing/i);
   });
 
+  it('a pointer starting with a digit is RELATIVE — it walks from the location pane', () => {
+    const data = { data: '{"book":[{"title":"A","price":5},{"title":"B","price":9}]}' };
+    const sibling = runExample('pointer', { pointer: '1/price', location: '/book/0/title' }, data);
+    assert.strictEqual(sibling.ok, true);
+    assert.match(out(sibling), /5/, 'up one from the title, down into price');
+    const keyName = runExample('pointer', { pointer: '0#', location: '/book/0/title' }, data);
+    assert.match(out(keyName), /title/, '0# names the key at the location');
+  });
+
   it('patch applies to a target document, copy-on-write, with the change feed as a drill-down', () => {
     const r = runExample('patch', { patch: '[{"op":"add","path":"/b","value":2}]' }, { data: '{"a":1}' });
     assert.strictEqual(r.ok, true);
     assert.match(out(r), /"b": 2/);
     assert.match(deep(r)[0].text, /\/b/, 'the changed paths are the deep panel');
+  });
+
+  it('patch mode "merge" applies RFC 7396 (null deletes); mode "diff" derives both patch flavours', () => {
+    const merged = runExample('patch',
+      { patch: '{"age":31,"temp":null}' }, { data: '{"name":"Alice","age":30,"temp":"x"}' },
+      { config: { mode: 'merge' } });
+    assert.strictEqual(merged.ok, true);
+    assert.match(out(merged), /"age": 31/);
+    assert.doesNotMatch(out(merged), /"temp"/, 'a null merge member deletes');
+
+    const diffed = runExample('patch',
+      { patch: '{"a":2,"b":1}' }, { data: '{"a":1}' },
+      { config: { mode: 'diff' } });
+    assert.strictEqual(diffed.ok, true);
+    assert.match(out(diffed), /"replace"[\s\S]*\/a/, 'the RFC 6902 diff is the answer');
+    assert.match(deep(diffed)[0].text, /"b": 1/, 'the merge-patch flavour rides deep');
   });
 
   it('query runs, and registered operators thread through options', () => {

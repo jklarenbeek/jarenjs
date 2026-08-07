@@ -56,7 +56,6 @@ export const SHELL_RULES = [
       // other selectors come back empty and render nothing
       ['main', { class: 'main' },
         { $apply: ['$.ui.home', 'home'] },
-        { $apply: ['$.ui.pg', 'playground'] },
         { $apply: ['$.ui.studio', 'studio'] },
         { $apply: ['$.ui.project', 'project'] },
         { $apply: ['$.ui.play', 'play'] },

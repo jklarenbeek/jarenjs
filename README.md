@@ -165,7 +165,7 @@ Locale packs for the structured error messages of `@jarenjs/validate` and `@jare
 
 ### 📝 @jarenjs/forms — form generation
 
-Turns a JSON Schema into a framework-agnostic form model: a tree of field descriptors with labels, input-control hints, constraints and enum options. Validation happens in three layers on one stack — per-field on every keystroke (core primitives + the shared format registry), cross-field on every keystroke (`x-form` rules written as query documents: visibility, enablement, computed values, assertions), and authoritatively on submit (the compiled schema, optionally with the same rules copied into a `$query` keyword). Use it with React, Vue or vanilla DOM — the [playground](https://jklarenbeek.github.io/jarenjs/#/playground) renders its "Generated Form" tab with it. See [packages/forms](packages/forms/README.md).
+Turns a JSON Schema into a framework-agnostic form model: a tree of field descriptors with labels, input-control hints, constraints and enum options. Validation happens in three layers on one stack — per-field on every keystroke (core primitives + the shared format registry), cross-field on every keystroke (`x-form` rules written as query documents: visibility, enablement, computed values, assertions), and authoritatively on submit (the compiled schema, optionally with the same rules copied into a `$query` keyword). Use it with React, Vue or vanilla DOM — [Play](https://jklarenbeek.github.io/jarenjs/#/play) renders the JSON Schema engine's "Form" data view with it. See [packages/forms](packages/forms/README.md).
 
 ### 🖼 @jarenjs/view — user interfaces as JSON
 

@@ -109,16 +109,6 @@ export const UI_RULES = [
     ],
   },
   {
-    // The Markdown preview embeds a ready-made vnode from @jarenjs/md —
-    // the value splices in verbatim, no dispatch into it.
-    match: "$..[?@.kind == 'markdown']", mode: 'ui',
-    body: ['div', { class: 'code-card md-preview' },
-      { $if: ['$.title', ['div', { class: 'code-head' },
-        ['span', { class: 'code-title' }, '$.title']]] },
-      '$.vnode',
-    ],
-  },
-  {
     match: "$..[?@.kind == 'search']", mode: 'ui',
     body: ['input', {
       type: 'search',

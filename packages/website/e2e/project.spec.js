@@ -82,7 +82,7 @@ test('an invalid edit keeps the last good frame and docks the coded error', asyn
   await expect(mount.locator('h1')).toHaveText('Hello from the studio');
 });
 
-test('a query file runs live against its data file — the playground engines, folded in', async ({ page }) => {
+test('a query file runs live against its data file — the shared transform runners, folded in', async ({ page }) => {
   await page.goto('/#/project');
   // the starter is a multi-file project: switch to the query in the rail
   await page.locator('.js-file', { hasText: 'stats.query' }).click();

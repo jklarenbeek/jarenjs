@@ -43,15 +43,25 @@ export const EXAMPLE_LIST = [
       { label: 'array', data: { data: j({ people: [{ name: 'Ada' }, { name: 'Alan' }] }) } },
       { label: 'deep', data: { data: j({ a: { b: { c: { name: 'buried' } } } }) } },
     ] },
+  { id: 'path-slice', label: 'Slice: first two', engine: 'path',
+    source: { selector: '$.store.book[0:2].title' }, datasets: [bookstore] },
+  { id: 'path-regex', label: 'Regex filter (I-Regexp)', engine: 'path',
+    source: { selector: "$.store.book[?match(@.author, '.*Tolkien')]" }, datasets: [bookstore] },
+  { id: 'path-last', label: 'Last element', engine: 'path',
+    source: { selector: '$.store.book[-1].title' }, datasets: [bookstore] },
 
   // ——— JSON Pointer ———
   { id: 'pointer-nested', label: 'A nested member', engine: 'pointer',
-    source: { pointer: '/store/book/1/title' }, datasets: [bookstore] },
+    source: { pointer: '/store/book/1/title', location: '' }, datasets: [bookstore] },
   { id: 'pointer-escaped', label: 'Escaped keys (~0 ~1)', engine: 'pointer',
-    source: { pointer: '/a~1b/m~0n' },
+    source: { pointer: '/a~1b/m~0n', location: '' },
     datasets: [{ label: 'tricky keys', data: { data: j({ 'a/b': { 'm~n': 'you found me' }, plain: 1 }) } }] },
   { id: 'pointer-miss', label: 'A miss is NOTHING, not an error', engine: 'pointer',
-    source: { pointer: '/store/book/9/title' }, datasets: [bookstore] },
+    source: { pointer: '/store/book/9/title', location: '' }, datasets: [bookstore] },
+  { id: 'pointer-relative', label: 'Relative: sibling', engine: 'pointer',
+    source: { pointer: '1/price', location: '/store/book/0/title' }, datasets: [bookstore] },
+  { id: 'pointer-relative-key', label: 'Relative: key name (0#)', engine: 'pointer',
+    source: { pointer: '0#', location: '/store/book/0/title' }, datasets: [bookstore] },
 
   // ——— JSON Patch ———
   { id: 'patch-basics', label: 'RFC 6902 basics', engine: 'patch',
@@ -63,6 +73,20 @@ export const EXAMPLE_LIST = [
   { id: 'patch-move', label: 'Move a member', engine: 'patch',
     source: { patch: j([{ op: 'move', from: '/a', path: '/b' }]) },
     datasets: [{ label: 'doc', data: { data: j({ a: 1, keep: true }) } }] },
+  { id: 'patch-test', label: 'Guarded update (test op)', engine: 'patch',
+    source: { patch: j([
+      { op: 'test', path: '/version', value: 5 },
+      { op: 'replace', path: '/user/name', value: 'Bob' },
+      { op: 'add', path: '/user/tags/-', value: 'admin' },
+      { op: 'replace', path: '/version', value: 6 },
+    ]) },
+    datasets: [{ label: 'doc', data: { data: j({ version: 5, user: { name: 'Alice', tags: ['reader'] } }) } }] },
+  { id: 'patch-merge', label: 'Merge (RFC 7396)', engine: 'patch', config: { mode: 'merge' },
+    source: { patch: j({ age: 31, address: { zip: '10999' }, temp: null, newField: 'hello' }) },
+    datasets: [{ label: 'doc', data: { data: j({ name: 'Alice', age: 30, address: { city: 'Berlin', zip: '10115' }, temp: 'delete-me' }) } }] },
+  { id: 'patch-diff', label: 'Diff two documents', engine: 'patch', config: { mode: 'diff' },
+    source: { patch: j({ user: { name: 'Bob', tags: ['reader', 'admin'] }, version: 6 }) },
+    datasets: [{ label: 'original', data: { data: j({ user: { name: 'Alice', tags: ['reader'] }, version: 5 }) } }] },
 
   // ——— $query ———
   { id: 'query-filter', label: 'Filter + order', engine: 'query',
@@ -71,16 +95,36 @@ export const EXAMPLE_LIST = [
   { id: 'query-join', label: 'Join books and ratings on isbn', engine: 'query',
     source: { query: j({ $for: { b: '$.store.book[*]', r: '$.ratings[*]' }, $where: { $eq: ['$b.isbn', '$r.isbn'] }, $orderby: '$b.price', $return: { title: '$b.title', stars: '$r.stars' } }), externals: '' },
     datasets: [bookstore] },
+  { id: 'query-group', label: 'Group + aggregate', engine: 'query',
+    source: { query: j({ $for: { b: '$.store.book[*]' }, $groupby: { genre: '$b.category' }, $return: { genre: '$genre', count: { $count: '$b' }, avg: { $avg: '$b.price' } } }), externals: '' },
+    datasets: [bookstore] },
+  { id: 'query-fold', label: '$fold: a running total', engine: 'query',
+    source: { query: j({ $fold: { total: 0 }, $for: { b: '$.store.book[*]' }, $where: { $lt: ['$b.price', 10] }, $return: { $add: ['$total', '$b.price'] } }), externals: '' },
+    datasets: [bookstore] },
+  { id: 'query-external', label: 'External parameter', engine: 'query',
+    source: { query: j({ $for: { b: '$.store.book[*]' }, $where: { $ge: ['$b.price', '$minPrice'] }, $return: '$b.title' }), externals: j({ minPrice: 10 }) },
+    datasets: [bookstore] },
+  { id: 'query-valid', label: '$valid: schema as type test', engine: 'query',
+    source: { query: j({ $for: { b: '$.store.book[*]' }, $where: { $valid: ['$b', { type: 'object', required: ['isbn'], properties: { price: { maximum: 25 } } }] }, $return: '$b.title' }), externals: '' },
+    datasets: [bookstore] },
   { id: 'query-mean', label: 'Aggregate with the registered $mean', engine: 'query',
     source: { query: j({ average: { $mean: '$.readings[*]' } }), externals: '' },
     datasets: [{ label: 'readings', data: { data: j({ readings: [10, 12, 14, 20, 8, 6, 30] }) } }] },
 
   // ——— JSLT ———
+  { id: 'jslt-identity', label: 'Identity (proof of no change)', engine: 'jslt',
+    source: { stylesheet: j([]) }, datasets: [bookstore] },
   { id: 'jslt-vat', label: 'Surgical: VAT on every price', engine: 'jslt',
     source: { stylesheet: j([{ match: '$..price', body: { $mul: ['$', 1.21] } }]) },
     datasets: [bookstore] },
   { id: 'jslt-reshape', label: 'Reshape a document', engine: 'jslt',
     source: { stylesheet: j({ $jslt: '0.1', rules: [{ match: '$', body: { shopColour: '$.store.bicycle.color', firstTitle: '$.store.book[0].title' } }] }) },
+    datasets: [bookstore] },
+  { id: 'jslt-schema-match', label: 'Schema match: annotate books', engine: 'jslt',
+    source: { stylesheet: j({ $jslt: '0.1', unmatched: 'fresh', rules: [
+      { match: { schema: { type: 'object', required: ['title', 'author', 'price'] } },
+        body: { title: '$.title', price: '$.price', label: { $concat: ['$.title', ' by ', '$.author'] } } },
+    ] }) },
     datasets: [bookstore] },
   { id: 'jslt-inputs', label: 'One stylesheet, two inputs', engine: 'jslt',
     source: { stylesheet: j({ $jslt: '0.1', rules: [{ match: '$', body: { greeting: { $concat: ['Hello, ', '$.name'] } } }] }) },
@@ -118,6 +162,66 @@ export const EXAMPLE_LIST = [
   { id: 'jtlt-codegen', label: 'Codegen with $json', engine: 'jtlt',
     source: { template: j([{ match: '$', body: ['export const config = ', { $json: '$' }, ';\n'] }]) },
     datasets: [{ label: 'config', data: { data: j({ threshold: 10, labels: ['alpha', 'beta'] }) } }] },
+  { id: 'jtlt-sql', label: 'SQL DDL — SQLite', engine: 'jtlt',
+    source: { template: j({ $jtlt: '0.1', rules: [
+      { match: '$', body: ['-- SQLite schema: ', '$.database', '\n\n', { $apply: '$.tables[*]' }] },
+      { match: '$.tables[*]', body: ['CREATE TABLE ', '$.name', ' (\n', { $apply: '$.columns[*]' }, '  PRIMARY KEY (', '$.columns[?@.pk].name', ')\n);\n\n'] },
+      { match: '$.tables[*].columns[*]', body: ['  ', '$.name', ' ', { $apply: ['$', 'type'] },
+        { $if: [{ $eq: ['$.nullable', false] }, ' NOT NULL', ''] },
+        { $if: [{ $eq: ['$.unique', true] }, ' UNIQUE', ''] },
+        { $if: ['$.references', { $concat: [' REFERENCES ', '$.references'] }, ''] },
+        ',\n'] },
+      { mode: 'type', match: { schema: { required: ['type'], properties: { type: { const: 'int' } } } }, body: ['INTEGER'] },
+      { mode: 'type', match: { schema: { required: ['type'], properties: { type: { const: 'decimal' } } } }, body: ['NUMERIC'] },
+      { mode: 'type', body: ['TEXT'] },
+    ] }) },
+    datasets: [{ label: 'shop', data: { data: j({ database: 'shop', tables: [
+      { name: 'customers', columns: [
+        { name: 'id', type: 'int', pk: true },
+        { name: 'email', type: 'string', maxLength: 254, nullable: false, unique: true },
+        { name: 'joined_on', type: 'date', nullable: false },
+        { name: 'notes', type: 'text' },
+      ] },
+      { name: 'orders', columns: [
+        { name: 'id', type: 'int', pk: true },
+        { name: 'customer_id', type: 'int', nullable: false, references: 'customers (id)' },
+        { name: 'total', type: 'decimal', nullable: false },
+        { name: 'placed_at', type: 'datetime', nullable: false },
+      ] },
+    ] }) } }] },
+
+  { id: 'jtlt-sql-pg', label: 'SQL DDL — PostgreSQL', engine: 'jtlt',
+    source: { template: j({ $jtlt: '0.1', rules: [
+      { match: '$', body: ['-- PostgreSQL schema: ', '$.database', '\n\n', { $apply: '$.tables[*]' }] },
+      { match: '$.tables[*]', body: ['CREATE TABLE ', '$.name', ' (\n', { $apply: '$.columns[*]' }, '  PRIMARY KEY (', '$.columns[?@.pk].name', ')\n);\n\n'] },
+      { match: '$.tables[*].columns[*]', body: ['  ', '$.name', ' ', { $apply: ['$', 'type'] },
+        { $if: [{ $eq: ['$.nullable', false] }, ' NOT NULL', ''] },
+        { $if: [{ $eq: ['$.unique', true] }, ' UNIQUE', ''] },
+        { $if: ['$.references', { $concat: [' REFERENCES ', '$.references'] }, ''] },
+        ',\n'] },
+      // priority rules: the pk / maxLength overrides beat the plain types
+      { mode: 'type', priority: 1, match: { schema: { required: ['pk'], properties: { pk: { const: true } } } }, body: ['integer GENERATED ALWAYS AS IDENTITY'] },
+      { mode: 'type', priority: 1, match: { schema: { required: ['maxLength'] } }, body: [{ $concat: ['varchar(', '$.maxLength', ')'] }] },
+      { mode: 'type', match: { schema: { required: ['type'], properties: { type: { const: 'int' } } } }, body: ['integer'] },
+      { mode: 'type', match: { schema: { required: ['type'], properties: { type: { const: 'decimal' } } } }, body: ['numeric(12,2)'] },
+      { mode: 'type', match: { schema: { required: ['type'], properties: { type: { const: 'date' } } } }, body: ['date'] },
+      { mode: 'type', match: { schema: { required: ['type'], properties: { type: { const: 'datetime' } } } }, body: ['timestamptz'] },
+      { mode: 'type', body: ['text'] },
+    ] }) },
+    datasets: [{ label: 'shop', data: { data: j({ database: 'shop', tables: [
+      { name: 'customers', columns: [
+        { name: 'id', type: 'int', pk: true },
+        { name: 'email', type: 'string', maxLength: 254, nullable: false, unique: true },
+        { name: 'joined_on', type: 'date', nullable: false },
+        { name: 'notes', type: 'text' },
+      ] },
+      { name: 'orders', columns: [
+        { name: 'id', type: 'int', pk: true },
+        { name: 'customer_id', type: 'int', nullable: false, references: 'customers (id)' },
+        { name: 'total', type: 'decimal', nullable: false },
+        { name: 'placed_at', type: 'datetime', nullable: false },
+      ] },
+    ] }) } }] },
 
   // ——— XQuery (the text subset → a query document, run over $doc) ———
   { id: 'xquery-flwor', label: 'FLWOR: cheap books', engine: 'xquery',
@@ -128,6 +232,9 @@ export const EXAMPLE_LIST = [
     datasets: [bookstore] },
   { id: 'xquery-group', label: 'Group by category', engine: 'xquery',
     source: { text: 'for $b in $doc?store?book?*\ngroup by $genre := $b?category\nreturn map { "genre": $genre, "count": count($b), "avg": avg($b?price) }' },
+    datasets: [bookstore] },
+  { id: 'xquery-quantifier', label: 'Quantifier: any 5-star?', engine: 'xquery',
+    source: { text: 'some $r in $doc?ratings?* satisfies $r?stars >= 5' },
     datasets: [bookstore] },
 
   // ——— JOSL (source-only: no data pane; the mode select is the toggle) ———
@@ -227,6 +334,15 @@ doc.ast[0].type; // 'heading'
 
 > One suite, one philosophy: parse once, run a specialized closure.
 ` } },
+  { id: 'md-frontmatter', label: 'Frontmatter flavours', engine: 'markdown', datasets: [],
+    source: { source: `+++
+title = "TOML up top"
+weight = 3
++++
+The same document works with \`---\` YAML, \`---json\`, a leading
+\`{\` JSON object, or \`+++\` TOML — all normalize to plain JSON on
+\`doc.frontmatter\`, and bind as JSLT externals.
+` } },
   { id: 'md-roundtrip', label: 'Round trip is a fixed point', engine: 'markdown', datasets: [],
     source: { source: `# Canonical form
 
@@ -284,7 +400,7 @@ is a fixed point.
   { id: 'charts-sankey', label: 'Sankey', engine: 'charts', config: { format: 'json' }, datasets: [],
     source: { source: j({ type: 'sankey', title: 'Where visits go', links: [
       { source: 'search', target: 'home', value: 40 }, { source: 'social', target: 'home', value: 15 },
-      { source: 'home', target: 'docs', value: 30 }, { source: 'home', target: 'playground', value: 20 },
+      { source: 'home', target: 'docs', value: 30 }, { source: 'home', target: 'play', value: 20 },
       { source: 'docs', target: 'github', value: 8 },
     ] }) } },
 

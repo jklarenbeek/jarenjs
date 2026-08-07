@@ -168,6 +168,6 @@ export const GAME_RULES = [
       on: { click: { action: 'game/locale', with: '$.id' } } }, '$.label'],
   },
   // the @jarenjs/forms "name your pirate" field, rendered by the standard
-  // forms stylesheet through the game/f-* actions (no playground collision)
+  // forms stylesheet through the game/f-* actions (its own namespace)
   ...createFormView({ root: '$.ui.game.nameForm', actions: NAME_FORM_ACTIONS }).map((rule) => ({ ...rule, mode: 'game' })),
 ];

@@ -27,8 +27,8 @@ test('the app boots with landmark semantics intact', async ({ page }) => {
   await expect(page.locator('nav#site-nav')).toBeVisible();
   await expect(page.locator('main.main')).toBeVisible();
   await expect(page.locator('h1').first()).toBeVisible();
-  // Home + the three dropdown groups' 10 links = 11 nav-links, behind 3 triggers
-  await expect(page.locator('#site-nav .nav-link')).toHaveCount(11);
+  // Home + the three dropdown groups' 9 links = 10 nav-links, behind 3 triggers
+  await expect(page.locator('#site-nav .nav-link')).toHaveCount(10);
   await expect(page.locator('#site-nav .nav-trigger')).toHaveCount(3);
 
   const toggle = page.locator('button[aria-controls="site-nav"]');
@@ -46,7 +46,7 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
   // each destination lives behind its dropdown group (Home stands alone);
   // open the group, click the link, and the group's trigger reflects the route
   const NAV = [
-    ['Playground', 'Engines'], ['Play', 'Engines'], ['Charts', 'Engines'],
+    ['Play', 'Engines'], ['Charts', 'Engines'],
     ['Studio', 'Studios'], ['Flow', 'Studios'], ['Game', 'Studios'], ['Calculator', 'Studios'],
     ['Docs', 'Learn'], ['Benchmarks', 'Learn'], ['Home', null],
   ];
@@ -78,12 +78,12 @@ test('keyboard activation drives the router: focused link + Enter navigates', as
   await page.goto('/');
 
   await page.locator('.nav-trigger', { hasText: 'Engines' }).click(); // open the group first
-  const playground = page.locator('#site-nav .nav-link', { hasText: 'Playground' }).first();
-  await playground.focus();
-  await expect(playground).toBeFocused();
+  const playLink = page.locator('#site-nav .nav-link', { hasText: 'Play' }).first();
+  await playLink.focus();
+  await expect(playLink).toBeFocused();
   await page.keyboard.press('Enter');
 
-  await expect(page).toHaveURL(/#\/playground$/);
+  await expect(page).toHaveURL(/#\/play$/);
   await expect(page.locator('#site-nav .nav-trigger.active')).toContainText('Engines');
   expect(errors).toEqual([]);
 });
@@ -119,7 +119,7 @@ test('rapid route churn exercises repeated widget/view teardown cleanly', async 
   // charts and calculator mount real widgets; churn them repeatedly so
   // mount/update/unmount runs under genuine browser scheduling
   for (let round = 0; round < 3; round++) {
-    for (const hash of ['#/charts', '#/calculator', '#/playground', '#/']) {
+    for (const hash of ['#/charts', '#/calculator', '#/play', '#/']) {
       await page.evaluate((h) => { window.location.hash = h; }, hash);
       await expect(page.locator('main.main')).toBeVisible();
     }

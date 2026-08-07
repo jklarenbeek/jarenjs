@@ -7,7 +7,6 @@
  * `$if` — orchestration as data.
  */
 
-import { createFormActions } from '@jarenjs/app';
 import { calcActions } from '@jarenjs/calc/component';
 import { GAME_ACTIONS } from '../boundaries/game.js';
 
@@ -80,67 +79,6 @@ export const ACTIONS = {
     }],
   },
 
-  // playground: the schema editor (live per keystroke, revalidated by
-  // the wire() subscriber watching the changed-path feed)
-  'pg/schema-text': {
-    patch: [{ op: 'replace', path: '/pg/schemaText', value: '$event.value' }],
-  },
-
-  // playground: the JSON data pane commits on change (blur)
-  'pg/data-text': {
-    effects: [{ run: 'parse-data', with: { text: '$event.value' } }],
-  },
-  'pg/data-set': {
-    patch: [
-      { op: 'replace', path: '/pg/data', value: '$payload' },
-      { op: 'replace', path: '/pg/dataError', value: null },
-    ],
-  },
-  'pg/data-error': {
-    patch: [{ op: 'replace', path: '/pg/dataError', value: '$payload' }],
-  },
-
-  'pg/result': {
-    patch: [{ op: 'replace', path: '/pg/result', value: '$payload' }],
-  },
-  'pg/data-tab': {
-    patch: [{ op: 'replace', path: '/pg/dataTab', value: '$payload' }],
-  },
-  'pg/locale': {
-    patch: [{ op: 'replace', path: '/pg/locale', value: '$payload' }],
-  },
-  'pg/example': {
-    patch: [
-      { op: 'replace', path: '/pg/schemaText', value: '$payload.schemaText' },
-      { op: 'replace', path: '/pg/data', value: '$payload.data' },
-      { op: 'replace', path: '/pg/dataError', value: null },
-    ],
-  },
-
-  // the generic engine playgrounds: one input action for every field of
-  // every engine, one loader for example chips and experiments
-  'eng/input': {
-    patch: [{
-      op: 'add',
-      path: { $concat: ['/eng/', '$payload.engine', '/', '$payload.key'] },
-      value: '$event.value',
-    }],
-  },
-  'eng/load': {
-    patch: [{
-      op: 'replace',
-      path: { $concat: ['/eng/', '$payload.engine'] },
-      value: '$payload.inputs',
-    }],
-  },
-  'eng/result': {
-    patch: [{
-      op: 'add',
-      path: { $concat: ['/engResults/', '$payload.engine'] },
-      value: '$payload.result',
-    }],
-  },
-
   // benchmark deep-dive controls
   'bench/search': {
     patch: [
@@ -183,16 +121,11 @@ export const ACTIONS = {
   },
 
   // the Binance live demo: an explicit user gesture opens (or closes)
-  // the market-data socket — nothing connects on page load. Two
-  // surfaces, one controller: the playground charts engine and the
-  // /charts page each toggle their own target.
-  'binance/toggle': { effects: [{ run: 'binance-toggle', with: { target: 'playground' } }] },
+  // the market-data socket — nothing connects on page load.
   'charts-live/toggle': { effects: [{ run: 'binance-toggle', with: { target: 'page' } }] },
   'charts-live/set': {
     patch: [{ op: 'add', path: '/chartsLive', value: '$payload' }],
   },
-
-  // examples page: load an example into the playground and go there
 
   // the Studio: swapping the hosted document is ATOMIC — only an
   // already-validated document reaches 'studio/doc' (the studio-parse
@@ -399,9 +332,8 @@ export const ACTIONS = {
     { op: 'replace', path: '/play/dataValue', value: '$payload.value' },
   ] },
   'play/data-mirror': { patch: [{ op: 'add', path: '/play/data/data', value: '$payload' }] },
-  // the six standard form actions, writing into `/play/dataValue` — mirrored
-  // from @jarenjs/app's createFormActions, but with play-scoped names so they
-  // do not collide with the old playground's `form/*` set (bound to /pg/data)
+  // the six standard form actions, writing into `/play/dataValue` —
+  // mirrored from @jarenjs/app's createFormActions, with play-scoped names
   'play/f-input': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.value' }] },
   'play/f-check': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.checked' }] },
   'play/f-number': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] } }] },
@@ -554,7 +486,7 @@ export const ACTIONS = {
   },
 
   // the browser-side AI assistant (@jarenjs/ai): a slide-out chat panel
-  // that drives the playground through schema-guarded tools. The API key
+  // that drives the site through schema-guarded tools. The API key
   // lives only in the `ai` slice (never in share links or experiments).
   'ai/toggle': {
     patch: [{ op: 'replace', path: '/ai/open', value: { $not: '$.ai.open' } }],
@@ -651,9 +583,6 @@ export const ACTIONS = {
     ],
     effects: [{ run: 'ai-persist' }],
   },
-
-  // the generated form writes through the standard form actions
-  ...createFormActions({ dataPointer: '/pg/data' }),
 
   // ----------------------------------------------------------------
   // The Flow studio. Every gesture is an RFC 6902 patch against

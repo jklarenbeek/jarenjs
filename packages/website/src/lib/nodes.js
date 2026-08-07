@@ -78,10 +78,6 @@ export const details = (summary, items) => ({ kind: 'details', summary, items })
 export const chart = (title, vnode, note) =>
   ({ kind: 'chart', title: title ?? null, vnode, note: note ?? null });
 
-/** A rendered Markdown preview: `vnode` is @jarenjs/md's projection. */
-export const markdown = (title, vnode) =>
-  ({ kind: 'markdown', title: title ?? null, vnode });
-
 /** A live search input bound to the given action. */
 export const search = (action, value, placeholder) =>
   ({ kind: 'search', action, value, placeholder });

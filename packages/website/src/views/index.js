@@ -2,7 +2,8 @@
 /**
  * The complete view stylesheet: one JSLT envelope assembling the shell
  * (unnamed mode), the page modes, the generic 'ui' render-node rules,
- * and the standard forms stylesheet from @jarenjs/app in mode 'form'.
+ * and the standard forms stylesheet from @jarenjs/app, scoped into the
+ * flow and play modes for their generated forms.
  */
 
 import { createFormView } from '@jarenjs/app';
@@ -11,7 +12,6 @@ import { SHELL_RULES } from './shell.js';
 import { HOME_RULES } from './home.js';
 import { BENCH_RULES } from './benchmarks.js';
 import { CHARTSPAGE_RULES } from './chartspage.js';
-import { PLAYGROUND_RULES } from './playground.js';
 import { STUDIO_RULES } from './studio.js';
 import { projectRules, projectModes } from '@jarenjs/studio/component';
 import { playRules, playModes } from '@jarenjs/play/component';
@@ -30,7 +30,6 @@ export const STYLESHEET = {
   // a bug, not content
   modes: {
     home: { unmatched: 'error' },
-    playground: { unmatched: 'error' },
     studio: { unmatched: 'error' },
     ...projectModes,
     ...playModes,
@@ -44,14 +43,12 @@ export const STYLESHEET = {
     readme: { unmatched: 'error' },
     assistant: { unmatched: 'error' },
     ui: { unmatched: 'error' },
-    form: { unmatched: 'error' },
   },
   rules: [
     ...SHELL_RULES,
     ...HOME_RULES,
     ...BENCH_RULES,
     ...CHARTSPAGE_RULES,
-    ...PLAYGROUND_RULES,
     ...STUDIO_RULES,
     ...projectRules,
     ...playRules,
@@ -63,7 +60,6 @@ export const STYLESHEET = {
     ...ASSISTANT_RULES,
     ...UI_RULES,
     ...calcViewRules,
-    ...createFormView({ root: '$.ui.pg.validate.form' }).map((rule) => ({ ...rule, mode: 'form' })),
     // the Flow inspector: the same generated form stylesheet, scoped to
     // the selection subtree and writing through the flow/f-* actions
     // (their target prepends the selection's pointer)

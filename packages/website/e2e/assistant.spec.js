@@ -52,7 +52,7 @@ test('the transcript persists across a reload and clear wipes it', async ({ page
     localStorage.setItem('jaren-ai-chat', JSON.stringify({
       messages: [
         { role: 'user', content: 'hello there' },
-        { role: 'assistant', content: 'Hi! **Ready** to drive the playground.' },
+        { role: 'assistant', content: 'Hi! **Ready** to drive the play surface.' },
       ],
     }));
   });

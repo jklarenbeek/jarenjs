@@ -155,6 +155,13 @@ describe('CompiledMd.visit()', function () {
       'paragraph', 'text', 'emphasis', 'text', 'text',
     ]);
   });
+
+  it('walk() visits every node with one bare visitor (the count-everything path)', function () {
+    const md = compileMarkdown('# Head\n\nSome *text*.\n');
+    let nodes = 0;
+    md.walk(() => { nodes++; });
+    assert.equal(nodes, 7, 'the same seven nodes visit() dispatches');
+  });
 });
 
 // ------------------------------------------------------------------

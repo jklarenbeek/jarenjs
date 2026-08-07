@@ -127,6 +127,44 @@ export function blankSession(engineId) {
   return { engine, exampleId: null, source: {}, data: {}, config: {} };
 }
 
+/**
+ * A LEGACY playground snapshot → a play session, so links and saved
+ * experiments from the retired `#/playground` keep working. The legacy
+ * shape is `(engine, inputs)` with flat text inputs; `validate` carried
+ * `{ schemaText, data }` (the data as a VALUE). Inputs are split into
+ * play's source / data / config panes by the engine descriptor; a key
+ * with no play home (the old pointer/patch mode sub-fields) is dropped.
+ * @param {string} engine
+ * @param {any} inputs
+ * @returns {any | null} a `play/loaded-session`-shaped session, or null
+ */
+export function legacyExperimentToSession(engine, inputs) {
+  const given = inputs && typeof inputs === 'object' ? inputs : {};
+  if (engine === 'validate') {
+    return {
+      engine: 'validate', exampleId: null,
+      source: { schema: typeof given.schemaText === 'string' ? given.schemaText : '' },
+      data: { data: JSON.stringify(given.data ?? null, null, 2) },
+      config: {},
+    };
+  }
+  const descriptor = playComponent.engines[engine];
+  if (descriptor === undefined) return null;
+  /** @type {Record<string, string>} */
+  const source = {};
+  /** @type {Record<string, string>} */
+  const data = {};
+  /** @type {Record<string, string>} */
+  const config = {};
+  for (const [key, value] of Object.entries(given)) {
+    if (typeof value !== 'string') continue;
+    if (descriptor.sourcePanes.some((p) => p.key === key)) source[key] = value;
+    else if (descriptor.dataPanes.some((p) => p.key === key)) data[key] = value;
+    else if ((descriptor.optionPanes ?? []).some((p) => p.key === key)) config[key] = value;
+  }
+  return { engine, exampleId: null, source, data, config };
+}
+
 /** The Play IDE's editor|result splitter (`play-splitter`): the shared
  * `@jarenjs/app` widget bound to the play grid — drives `--jplay-ratio` live
  * during a drag and commits `play/layout-ratio` on pointer-up. */

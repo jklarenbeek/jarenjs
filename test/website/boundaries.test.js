@@ -1,105 +1,52 @@
 //@ts-check
 /**
- * The playground/benchmark boundaries — the impure edge the site drives.
+ * The site's shared boundaries — the impure edge the site drives.
  *
- * These wrap the engines, the validator and the benchmark derivations for
- * the browser app; each is a pure function of its inputs (timing aside),
- * so they run headless here. Driving them directly covers the engine and
- * suite branches the full-site walkthrough does not reach.
+ * These wrap the shared transform runners, the validator, the chart
+ * renderer and the benchmark derivations for the browser app; each is a
+ * pure function of its inputs (timing aside), so they run headless here.
+ * Driving them directly covers the branches the full-site walkthrough
+ * does not reach. (The single-engine exploration surface itself is
+ * @jarenjs/play — covered in test/play and test/website/play.test.js.)
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { runEngine, ENGINE_EXAMPLES } from '../../packages/website/src/boundaries/engines.js';
+import { runQuery, runJslt, operatorRegistry } from '../../packages/website/src/boundaries/engines.js';
 import { runValidation } from '../../packages/website/src/boundaries/validator.js';
 import { deriveSuite } from '../../packages/website/src/boundaries/bench.js';
-import { chartsSync, chartsReplayActive } from '../../packages/website/src/boundaries/charts.js';
-import { renderToString } from '@jarenjs/view';
+import { chartRenderer } from '../../packages/website/src/boundaries/charts.js';
 
 const loadBench = (name) => JSON.parse(readFileSync(
   new URL(`../../packages/website/public/benchmarks/${name}.json`, import.meta.url), 'utf8'));
 
-describe('website boundaries — engines', function () {
-  it('runs the mermaid engine: cards, rendered SVG and the AST round-trip', function () {
-    const nodes = runEngine('mermaid', { source: 'flowchart TD\n  A --> B' });
-    assert.ok(Array.isArray(nodes) && nodes.length > 0, 'returns a node list');
-    const html = JSON.stringify(nodes);
-    assert.match(html, /Diagram/, 'shows the diagram-type card');
-    assert.match(html, /flowchart/, 'reports the parsed diagram type');
-  });
-
-  it('runs the mermaid engine on a state diagram: derives the workflow projection', function () {
-    const nodes = runEngine('mermaid', { source: 'stateDiagram-v2\n  [*] --> Idle\n  Idle --> Done\n  Done --> [*]' });
-    const html = JSON.stringify(nodes);
-    assert.match(html, /Derived workflow/, 'the state → workflow JSLT projection renders');
-  });
-
-  it('every jtlt example runs to text output without an error node', function () {
-    for (const example of ENGINE_EXAMPLES.jtlt) {
-      const nodes = runEngine('jtlt', example.inputs);
-      assert.ok(!nodes.some((n) => n.kind === 'error'),
-        `'${example.label}' runs clean`);
-      assert.ok(nodes.some((n) => n.kind === 'code' && n.title === 'Output'),
-        `'${example.label}' emits an Output block`);
-    }
-  });
-
-  it('the DDL examples render dialect-correct SQL from one shared document', function () {
-    const example = (label) => ENGINE_EXAMPLES.jtlt.find((e) => e.label === label).inputs;
-
-    const sqlite = runEngine('jtlt', example('SQL DDL — SQLite'))
-      .find((n) => n.title === 'Output').text;
-    assert.match(sqlite, /CREATE TABLE customers \(/);
-    assert.match(sqlite, /^ {2}id INTEGER,$/m, 'schema-matched type rule fired');
-    assert.match(sqlite, /^ {2}email TEXT NOT NULL UNIQUE,$/m);
-    assert.match(sqlite, /^ {2}customer_id INTEGER NOT NULL REFERENCES customers \(id\),$/m);
-    assert.match(sqlite, /^ {2}PRIMARY KEY \(id\)$/m, 'the pk filter selector fired');
-
-    const pg = runEngine('jtlt', example('SQL DDL — PostgreSQL'))
-      .find((n) => n.title === 'Output').text;
-    assert.match(pg, /^ {2}id integer GENERATED ALWAYS AS IDENTITY,$/m,
-      'the priority-1 pk override beats the plain int rule');
-    assert.match(pg, /^ {2}email varchar\(254\) NOT NULL UNIQUE,$/m,
-      'maxLength dispatches to varchar(n) via $concat');
-    assert.match(pg, /^ {2}placed_at timestamptz NOT NULL,$/m);
-    assert.match(pg, /^ {2}total numeric\(12,2\) NOT NULL,$/m);
-  });
-
-  it('the xml output method escapes visibly and shows the text comparison', function () {
-    const example = ENGINE_EXAMPLES.jtlt.find((e) => e.label.startsWith('XML')).inputs;
-    const nodes = runEngine('jtlt', example);
-    const output = nodes.find((n) => n.title === 'Output');
-    assert.match(output.text, /Q&amp;A/, 'interpolated data is escaped');
-    assert.match(output.text, /<b>escaped attribute, raw body<\/b>/, '$raw passes markup through');
-    assert.match(output.badge, /output "xml"/, 'the badge names the method');
-    const comparison = nodes.find((n) => n.kind === 'details' && /escaped/.test(n.summary ?? ''));
-    assert.ok(comparison, 'the xml run shows what escaping changed');
-    assert.match(JSON.stringify(comparison), /Q&A/, 'the text rendering shows the unescaped data');
-
-    // a text-method template gets no escaping panel
-    const markdown = ENGINE_EXAMPLES.jtlt.find((e) => e.label === 'Markdown book list').inputs;
-    const textNodes = runEngine('jtlt', markdown);
-    assert.ok(!textNodes.some((n) => /escap/i.test(JSON.stringify(n))),
-      'text output carries no escaping panel');
-
-    // xml over data with nothing to escape says so instead of implying
-    // a difference that is not there
-    const clean = runEngine('jtlt', {
-      template: JSON.stringify({
-        $jtlt: '0.1', output: 'xml',
-        rules: [{ match: '$', body: ['<v>', '$.v', '</v>'] }],
-      }),
-      data: JSON.stringify({ v: 'plain' }),
+describe('website boundaries — the shared transform runners', function () {
+  it('runQuery runs a query document with the registered packs mounted', function () {
+    const nodes = runQuery({
+      query: '{"m":{"$mean":"$.v[*]"}}', data: '{"v":[2,4,6]}', externals: '',
     });
-    const note = clean.find((n) => n.kind === 'callout');
-    assert.ok(note, 'the identical-render case gets a callout');
-    assert.match(note.text, /render this document identically/);
+    assert.ok(!nodes.some((n) => n.kind === 'error'), 'the registered $mean resolves');
+    assert.match(nodes.find((n) => n.kind === 'code').text, /"m": 4/);
+    assert.ok(operatorRegistry.names().includes('$mean'), 'the registry names its vocabulary');
   });
 
-  it('an unknown engine returns a callout, not a crash', function () {
-    const nodes = runEngine('nonesuch', {});
-    assert.match(JSON.stringify(nodes), /Unknown engine/);
+  it('runQuery reports unbound externals as a callout, and bad JSON as an error node', function () {
+    const unbound = runQuery({ query: '"$x"', data: '1', externals: '' });
+    assert.match(JSON.stringify(unbound), /Unbound externals/);
+    const bad = runQuery({ query: '{ nope', data: '1', externals: '' });
+    assert.ok(bad.some((n) => n.kind === 'error'), 'invalid JSON is an error node, never a throw');
+  });
+
+  it('runJslt transforms, and proves the no-change identity on the output card', function () {
+    const nodes = runJslt({
+      stylesheet: '{"$jslt":"0.1","rules":[{"match":"$","body":{"hi":"$.name"}}]}',
+      data: '{"name":"Ada"}',
+    });
+    assert.match(nodes.find((n) => n.kind === 'code').text, /"hi": "Ada"/);
+    const identity = runJslt({ stylesheet: '[]', data: '{"a":1}' });
+    assert.match(JSON.stringify(identity), /proof of no change/,
+      'an identity transform hands the INPUT back and the card says so');
   });
 });
 
@@ -228,78 +175,24 @@ describe('website boundaries — benchmark charts', function () {
   });
 });
 
-describe('website boundaries — charts engine', function () {
-  const example = (label) => {
-    const found = ENGINE_EXAMPLES.charts.find((e) => e.label.startsWith(label));
-    assert.ok(found, `example '${label}' exists`);
-    return found.inputs;
-  };
-
-  it('runs a static pie definition: cards, svg chart, AST details', function () {
-    const nodes = runEngine('charts', example('Static pie'));
-    const chartNode = nodes.find((n) => n.kind === 'chart');
-    assert.ok(chartNode, 'emits a chart node');
-    assert.equal(chartNode.vnode[0], 'svg');
-    assert.match(JSON.stringify(nodes), /schema-valid/);
-    assert.match(JSON.stringify(nodes), /Geometry-free AST/);
+describe('website boundaries — the chart renderer (the play seam)', function () {
+  it('renders a schema-valid definition to an svg vnode', function () {
+    const vnode = chartRenderer(JSON.stringify({
+      type: 'pie', title: 'T', slices: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }],
+    }), { format: 'json' });
+    assert.ok(Array.isArray(vnode) && vnode[0] === 'svg');
   });
 
-  it('replay examples: JOSL and strict JSON produce byte-identical SVG', function () {
-    const joslNodes = runEngine('charts', example('Replay — JOSL'));
-    const jsonNodes = runEngine('charts', example('Replay — same data'));
-    const svg = (nodes) => renderToString(nodes.find((n) => n.kind === 'chart').vnode);
-    assert.equal(svg(joslNodes), svg(jsonNodes));
+  it('renders a JOSL definition through the streaming reader', function () {
+    const vnode = chartRenderer('type = "pie"\ntitle = "T"\n[[slices]]\nlabel = "a"\nvalue = 1\n', { format: 'josl' });
+    assert.ok(Array.isArray(vnode) && vnode[0] === 'svg');
   });
 
-  it('schema violations render error nodes, never throw', function () {
-    const nodes = runEngine('charts', { format: 'json', stream: 'off', source: '{"type": "sparkline"}' });
-    assert.ok(nodes.every((n) => typeof n === 'object'));
-    assert.match(JSON.stringify(nodes), /Schema validation failed/);
-  });
-
-  it('parse failures render error nodes, never throw', function () {
-    const jsonBad = runEngine('charts', { format: 'json', stream: 'off', source: '{"type": ' });
-    assert.match(JSON.stringify(jsonBad), /Parse error/);
-    const joslBad = runEngine('charts', { format: 'josl', stream: 'off', source: 'type = what' });
-    assert.match(JSON.stringify(joslBad), /Parse error/);
-  });
-
-  it('strict json mode rejects JSONX extensions in definitions', function () {
-    const nodes = runEngine('charts', { format: 'json', stream: 'off', source: '{"type": "pie", "slices": [], "n": 1n}' });
-    assert.match(JSON.stringify(nodes), /JSONX extension|Parse error/);
-  });
-
-  it('the replay controller starts and stops through the sync hook', function () {
-    const dispatched = [];
-    const dispatch = (action, payload) => dispatched.push([action, payload]);
-    const inputs = example('Replay — same data');
-    chartsSync(inputs, dispatch, true);
-    assert.equal(chartsReplayActive(), true, 'replay timer running');
-    chartsSync(inputs, dispatch, false); // navigated away
-    assert.equal(chartsReplayActive(), false, 'timer cleared on leave');
-    chartsSync({ ...inputs, stream: 'off' }, dispatch, true);
-    assert.equal(chartsReplayActive(), false, 'stream off keeps it stopped');
-  });
-
-  it('replay without a stream spec explains itself instead of ticking', function () {
-    const dispatched = [];
-    const dispatch = (action, payload) => dispatched.push([action, payload]);
-    chartsSync({ format: 'json', stream: 'replay', source: '{"type": "pie", "slices": []}' }, dispatch, true);
-    assert.equal(chartsReplayActive(), false);
-    assert.match(JSON.stringify(dispatched), /Replay needs a streaming definition/);
-  });
-
-  it('a replay tick dispatches an eng/result frame and then completes', async function () {
-    const dispatched = [];
-    const dispatch = (action, payload) => dispatched.push([action, payload]);
-    chartsSync(example('Replay — same data'), dispatch, true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    chartsSync({}, dispatch, false); // ensure stopped even on slow machines
-    assert.ok(dispatched.length > 0, 'frames were dispatched');
-    const [action, payload] = dispatched[0];
-    assert.equal(action, 'eng/result');
-    assert.equal(payload.engine, 'charts');
-    assert.ok(payload.result.some((n) => n.kind === 'chart'));
+  it('throws on a schema violation or a parse failure (play lands the honest error Result)', function () {
+    assert.throws(() => chartRenderer('{"type": "sparkline"}', { format: 'json' }), /chart definition/);
+    assert.throws(() => chartRenderer('{"type": ', { format: 'json' }));
+    // strict json mode rejects JSONX extensions in definitions
+    assert.throws(() => chartRenderer('{"type": "pie", "slices": [], "n": 1n}', { format: 'json' }));
   });
 });
 

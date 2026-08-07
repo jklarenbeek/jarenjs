@@ -56,4 +56,34 @@ describe('@jarenjs/play — the example library', () => {
     const multi = EXAMPLES.filter((e) => e.datasets.length >= 2);
     assert.ok(multi.length >= 2, 'at least two multi-dataset examples');
   });
+
+  it('the DDL examples render dialect-correct SQL from one shared document', () => {
+    const run = (id) => {
+      const ex = EXAMPLES.find((e) => e.id === id);
+      const r = runExample(ex.engine, ex.source, ex.datasets[0].data, { operators: ops });
+      return r.panels.find((p) => p.id === 'out').text;
+    };
+    const sqlite = run('jtlt-sql');
+    assert.match(sqlite, /CREATE TABLE customers \(/);
+    assert.match(sqlite, /^ {2}id INTEGER,$/m, 'schema-matched type rule fired');
+    assert.match(sqlite, /^ {2}email TEXT NOT NULL UNIQUE,$/m);
+    assert.match(sqlite, /^ {2}customer_id INTEGER NOT NULL REFERENCES customers \(id\),$/m);
+    assert.match(sqlite, /^ {2}PRIMARY KEY \(id\)$/m, 'the pk filter selector fired');
+
+    const pg = run('jtlt-sql-pg');
+    assert.match(pg, /^ {2}id integer GENERATED ALWAYS AS IDENTITY,$/m,
+      'the priority-1 pk override beats the plain int rule');
+    assert.match(pg, /^ {2}email varchar\(254\) NOT NULL UNIQUE,$/m,
+      'maxLength dispatches to varchar(n) via $concat');
+    assert.match(pg, /^ {2}placed_at timestamptz NOT NULL,$/m);
+    assert.match(pg, /^ {2}total numeric\(12,2\) NOT NULL,$/m);
+  });
+
+  it('the xml example escapes interpolated data and passes $raw markup through', () => {
+    const ex = EXAMPLES.find((e) => e.id === 'jtlt-xml');
+    const r = runExample(ex.engine, ex.source, ex.datasets[0].data, { operators: ops });
+    const output = r.panels.find((p) => p.id === 'out').text;
+    assert.match(output, /Q&amp;A/, 'interpolated data is escaped');
+    assert.match(output, /<b>escaped attribute, raw body<\/b>/, '$raw passes markup through');
+  });
 });

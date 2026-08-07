@@ -27,8 +27,8 @@ import {
 const POISE_MAX = 3;
 
 // The "name your pirate" form (@jarenjs/forms) with localized validation
-// (@jarenjs/locales). Custom action names so it never collides with the
-// playground's form/* actions (the flowstudio inspector does the same).
+// (@jarenjs/locales). Custom action names so it never collides with another
+// surface's generated-form actions (the flowstudio inspector does the same).
 const NAME_MODEL = buildFormModel({
   type: 'object',
   properties: {
@@ -75,7 +75,7 @@ export const GAME_ACTIONS = {
     ],
   },
   // the "name your pirate" form writes through custom-namespaced form actions
-  // (dataPointer /game/nameForm) so it never clashes with the playground's
+  // (dataPointer /game/nameForm) so it never clashes with another surface's
   ...createFormActions({ dataPointer: '/game/nameForm', actions: NAME_FORM_ACTIONS }),
   'game/locale': { patch: [{ op: 'replace', path: '/game/locale', value: '$payload' }] },
   'game/verb': { patch: [{ op: 'replace', path: '/game/verb', value: '$payload' }] },

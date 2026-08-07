@@ -151,7 +151,7 @@ describe('website — the AI assistant panel', function () {
     assert.deepStrictEqual(app.getState().ai.messages, [], 'nothing was sent');
   });
 
-  it('drives the playground: a tool call navigates, loads inputs and the reply renders', async function () {
+  it('drives the play surface: a tool call navigates, loads inputs and the reply renders', async function () {
     const { app, container, requests } = mountSite({
       hash: '#/',
       aiSettings: CONFIGURED,
@@ -168,10 +168,10 @@ describe('website — the AI assistant panel', function () {
     await settle(app);
 
     // the tool navigated the site and loaded the engine inputs — the
-    // human watches the playground fill in
-    assert.strictEqual(app.getState().route.page, 'playground');
-    assert.strictEqual(app.getState().route.params.engine, 'path');
-    assert.strictEqual(app.getState().eng.path.selector, '$.store.book[*].price');
+    // human watches the play surface fill in
+    assert.strictEqual(app.getState().route.page, 'play');
+    assert.strictEqual(app.getState().play.engine, 'path');
+    assert.strictEqual(app.getState().play.source.selector, '$.store.book[*].price');
 
     // the transcript holds the user turn and the final assistant reply
     const messages = app.getState().ai.messages;
@@ -277,7 +277,7 @@ describe('website — WebMCP over @jarenjs/ai', function () {
       schedule: (f) => f(),
       debounceMs: 0,
       fetchJson: () => Promise.reject(new Error('404')),
-      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/playground')); },
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/play')); },
       navigate: (h) => routeCb(parseHash(h)),
       share: (h) => { shared.push(h); return `https://x/${h}`; },
       storage: {
@@ -300,10 +300,10 @@ describe('website — WebMCP over @jarenjs/ai', function () {
     assert.strictEqual(validate.execute({ schema: { type: 'integer' }, data: 'no' }).valid, false);
 
     const run = tool('jaren_run_engine');
-    const nodes = run.execute({ engine: 'path', inputs: { selector: '$.a', data: '{"a":42}' } });
-    assert.strictEqual(nodes.some((n) => n.kind === 'error'), false);
-    assert.match(JSON.stringify(nodes), /42/);
-    assert.strictEqual(app.getState().eng.path.selector, '$.a', 'the WebMCP tool drove the playground too');
+    const result = run.execute({ engine: 'path', inputs: { selector: '$.a', data: '{"a":42}' } });
+    assert.strictEqual(result.ok, true, 'the run is a green PlayResult');
+    assert.match(JSON.stringify(result.panels), /42/);
+    assert.strictEqual(app.getState().play.source.selector, '$.a', 'the WebMCP tool drove the play surface too');
 
     // Jaren validates the model's own tool calls
     assert.match(run.execute({ engine: 'no-such', inputs: {} }).error, /invalid input/);
@@ -315,24 +315,26 @@ describe('website — WebMCP over @jarenjs/ai', function () {
 
     // get_state reflects what is on screen
     const state = tool('jaren_get_state').execute({});
-    assert.strictEqual(state.page, 'playground');
+    assert.strictEqual(state.page, 'play');
     assert.strictEqual(state.engine, 'path');
     assert.strictEqual(state.inputs.selector, '$.a');
 
-    // the experiment store tools
-    assert.deepStrictEqual(tool('jaren_list_experiments').execute({}).map((e) => e.name), ['demo']);
+    // the experiment store tools: the legacy experiment lists, and
+    // loading it translates into a play session
+    assert.deepStrictEqual(tool('jaren_list_experiments').execute({}).experiments.map((e) => e.name), ['demo']);
     assert.deepStrictEqual(tool('jaren_load_experiment').execute({ name: 'demo' }), { ok: true });
-    assert.strictEqual(app.getState().eng.path.selector, '$..price', 'the experiment loaded');
+    assert.strictEqual(app.getState().play.source.selector, '$..price', 'the legacy experiment loaded into play');
     assert.match(tool('jaren_load_experiment').execute({ name: 'nope' }).error, /no experiment/);
 
-    // the share tool builds and copies a link
+    // the share tool builds and copies a play-session link
     assert.strictEqual(tool('jaren_share_link').execute({}).ok, true);
     assert.strictEqual(shared.length, 1);
-    assert.match(shared[0], /engine=path&s=/);
+    assert.match(shared[0], /^#\/play\?s=/);
 
     const nav = tool('jaren_navigate');
-    nav.execute({ page: 'playground', params: { engine: 'jslt' } });
-    assert.strictEqual(app.getState().route.params.engine, 'jslt');
+    nav.execute({ page: 'docs', params: { s: 'jslt' } });
+    assert.strictEqual(app.getState().route.page, 'docs');
+    assert.strictEqual(app.getState().route.params.s, 'jslt');
 
     // the example library: ready-to-run inputs per engine, by list or label
     const examples = tool('jaren_get_examples');

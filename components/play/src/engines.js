@@ -9,8 +9,8 @@
  */
 
 import {
-  compileJSONPath, compileJSONPointer, JSONPOINTER_NOTHING,
-  compileJSONPatch, compileJsonQuery,
+  compileJSONPath, compileJSONPointer, compileRelativeJSONPointer, JSONPOINTER_NOTHING,
+  compileJSONPatch, applyMergePatch, createJSONPatch, createMergePatch, compileJsonQuery,
 } from '@jarenjs/json';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
@@ -129,27 +129,73 @@ export const ENGINE_LIST = [
     },
   },
   {
-    id: 'pointer', label: 'JSON Pointer', lead: 'RFC 6901 — address exactly one value.',
-    sourcePanes: [{ key: 'pointer', label: 'Pointer', control: 'text' }],
+    id: 'pointer', label: 'JSON Pointer', lead: 'RFC 6901 absolute and relative pointers — address exactly one value.',
+    sourcePanes: [
+      { key: 'pointer', label: 'Pointer', control: 'text' },
+      // a RELATIVE pointer (it starts with a digit: "1/price", "0#") walks
+      // from this location; an absolute pointer ignores it
+      { key: 'location', label: 'From location (relative pointers)', control: 'text' },
+    ],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data) {
       const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const pointer = source.pointer ?? '';
+      const relative = /^\d/.test(pointer);
       let getter; const t0 = now();
-      try { getter = compileJSONPointer(source.pointer ?? ''); }
+      try { getter = relative ? compileRelativeJSONPointer(pointer) : compileJSONPointer(pointer); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      const value = getter(d.value); const t2 = now();
+      let value;
+      try { value = relative ? getter(d.value, source.location ?? '') : getter(d.value); }
+      catch (err) { return fail(msg(err), code(err)); }
+      const t2 = now();
       if (value === JSONPOINTER_NOTHING) return ok('(nothing — the pointer addresses no value)', t1 - t0, t2 - t1);
       return ok(fmt(value), t1 - t0, t2 - t1);
     },
   },
   {
-    id: 'patch', label: 'JSON Patch', lead: 'RFC 6902 — apply a patch to a target, copy-on-write.',
+    id: 'patch', label: 'JSON Patch', lead: 'RFC 6902 and RFC 7396, copy-on-write and atomic — plus structural diff.',
     sourcePanes: [{ key: 'patch', label: 'Patch', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Target document' }],
-    run(source, data) {
+    optionPanes: [{
+      key: 'mode', label: 'Mode', default: 'patch',
+      choices: [
+        { value: 'patch', label: 'RFC 6902 apply' },
+        { value: 'merge', label: 'RFC 7396 merge' },
+        { value: 'diff', label: 'diff (patch pane = the target)' },
+      ],
+    }],
+    run(source, data, options) {
+      const mode = options?.config?.mode ?? 'patch';
       const target = parseJson(data.data, 'target'); if (target.error) return fail(target.error);
       const patch = parseJson(source.patch, 'patch'); if (patch.error) return fail(patch.error);
+      if (mode === 'merge') {
+        // RFC 7396: null members delete; an unchanged document is the INPUT
+        let out; const t0 = now();
+        try { out = applyMergePatch(target.value, patch.value); }
+        catch (err) { return fail(msg(err), code(err)); }
+        const t1 = now();
+        return ok(fmt(out), 0, t1 - t0, [
+          deepCards('how', 'How it merged', [
+            { title: 'Output', value: out === target.value ? '=== input' : 'a new document', note: out === target.value ? 'shared, copy-on-write' : undefined },
+          ]),
+        ]);
+      }
+      if (mode === 'diff') {
+        // the patch pane holds the TARGET document; both patch flavours of
+        // the structural diff are derived from data → target
+        let jsonPatch, mergePatch; const t0 = now();
+        try {
+          jsonPatch = createJSONPatch(target.value, patch.value);
+          mergePatch = createMergePatch(target.value, patch.value);
+        }
+        catch (err) { return fail(msg(err), code(err)); }
+        const t1 = now();
+        return okPanels([
+          { id: 'out', label: `JSON Patch (${jsonPatch.length} ops)`, kind: 'code', text: fmt(jsonPatch) },
+          deepCode('merge', 'The merge-patch flavour (RFC 7396)', fmt(mergePatch)),
+        ], 0, t1 - t0);
+      }
       let apply; const t0 = now();
       try { apply = compileJSONPatch(patch.value, { changes: true }); }
       catch (err) { return fail(msg(err), code(err)); }
