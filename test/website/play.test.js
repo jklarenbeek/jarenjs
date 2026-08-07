@@ -146,6 +146,34 @@ describe('website — the Play playground (#/play)', () => {
     assert.match(serialize(playRoot(container)), /<svg/, 'the chart SVG rendered on the stage');
   });
 
+  it('the JSON Schema engine validates data with the real host validator', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'User'), 'click', {});
+    const s = app.getState().play;
+    assert.strictEqual(s.engine, 'validate', 'the validate engine loaded');
+    assert.strictEqual(s.result.ok, true);
+    assert.match(outText(s.result), /valid/, 'the verdict note reports validity');
+
+    // the "Invalid data" example: the same engine, a successful run that lists errors
+    fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});
+    const s2 = app.getState().play;
+    assert.strictEqual(s2.result.ok, true, 'invalid DATA is still a successful run');
+    assert.ok(s2.result.panels.length >= 2, 'a verdict note + an errors table');
+    assert.strictEqual(s2.result.panels[1].kind, 'table', 'the errors render as a table');
+    assert.ok(s2.result.panels[1].rows.length >= 1, 'at least one error row');
+  });
+
+  it('the locale option localizes the validation messages', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});
+    const en = JSON.stringify(app.getState().play.result.panels);
+    // the validate engine's one option select is "Messages" (the locale)
+    fire(find(playRoot(container), (n) => n.tagName === 'select'), 'change', { target: { value: 'nl' } });
+    assert.strictEqual(app.getState().play.config.locale, 'nl', 'the locale config updated');
+    const nl = JSON.stringify(app.getState().play.result.panels);
+    assert.notStrictEqual(en, nl, 'the localized error messages changed with the locale');
+  });
+
   it('a broken source lands as an error result — the site never crashes', () => {
     const { app, container } = mountSite();
     fire(sourceInput(container), 'input', { target: { value: '$.[[[bogus' } });

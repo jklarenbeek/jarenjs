@@ -122,6 +122,18 @@ test('a CSV example shows a multi-panel result behind a tab strip', async ({ pag
   await noOverflow(page, 'the CSV multi-panel result');
 });
 
+test('the JSON Schema engine validates on the stage (verdict note + errors table)', async ({ page }) => {
+  await page.goto('/#/play');
+  await page.locator('.jplay-ex', { hasText: 'Invalid data' }).click();
+  await expect(page.locator('.jplay-engine')).toHaveText('JSON Schema');
+  await expect(page.locator('.jplay-note')).toContainText('error'); // the verdict
+  // the localized errors are a deep table behind a tab
+  await page.locator('.jplay-tabs .seg-btn', { hasText: 'Errors' }).click();
+  await expect(page.locator('.jplay-table')).toBeVisible();
+  // the Messages (locale) option is offered
+  await expect(page.locator('.jplay-options select')).toBeVisible();
+});
+
 test('a visual engine (mermaid) renders an SVG diagram on the stage', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'Flowchart' }).click();

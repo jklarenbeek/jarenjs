@@ -16,6 +16,10 @@ const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 // package's delegation without pulling @jarenjs/md, /mermaid or /charts here
 const stub = (s) => ['pre', {}, String(s)];
 const renderers = { markdown: stub, mermaid: stub, charts: stub };
+// the validate engine delegates to a host validator; a stub proves the
+// delegation without pulling @jarenjs/validate here (the real runner is
+// exercised end-to-end in test/website/play.test.js)
+const validate = () => ({ schemaError: null, draft: 'draft-07', compileMs: 0.1, validateMs: 0.1, valid: true, errors: [] });
 
 describe('@jarenjs/play — the example library', () => {
   it('is numerous, and every example targets a registered engine with a source + datasets', () => {
@@ -37,7 +41,7 @@ describe('@jarenjs/play — the example library', () => {
       // a source-only example runs once against no data
       const runs = ex.datasets.length > 0 ? ex.datasets : [{ label: '—', data: {} }];
       for (const ds of runs) {
-        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config, renderers });
+        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config, renderers, validate });
         assert.strictEqual(r.ok, true, `${ex.id} / ${ds.label}: ${r.error?.message}`);
         // a visual engine yields a rendered `view` vnode; every other engine
         // yields at least one non-empty text (or table) panel

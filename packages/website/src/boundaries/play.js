@@ -11,6 +11,7 @@ import { operatorRegistry } from './engines.js';
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { chartRenderer } from './charts.js';
+import { runValidation, localizeErrors } from './validator.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
 export const playComponent = createPlayComponent({ operators: operatorRegistry });
@@ -95,10 +96,18 @@ export function createPlaySplitterWidget() {
   });
 }
 
-/** Run the active engine over the current source + data (operators, option config, visual renderers). */
+/** Host-injected JSON Schema validator for the `validate` engine (the hybrid
+ * seam): reuse the site's cached `runValidation`, then localize the errors to
+ * the chosen locale — so @jarenjs/validate + the locale packs stay in the host. */
+function validateRunner(schemaText, data, locale) {
+  const report = runValidation(schemaText, data);
+  return { ...report, errors: localizeErrors(report.errors, locale) };
+}
+
+/** Run the active engine over the current source + data (operators, option config, visual renderers, the validator). */
 export function runPlay(slice) {
   return playComponent.runExample(slice.engine, slice.source, slice.data,
-    { operators: operatorRegistry, config: slice.config, renderers });
+    { operators: operatorRegistry, config: slice.config, renderers, validate: validateRunner });
 }
 
 /** Load an example's source + first dataset (+ option config) into a slice-ready payload. */

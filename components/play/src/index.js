@@ -79,6 +79,9 @@ import { EXAMPLE_LIST } from './examples.js';
  *   host-injected vnode renderers keyed by engine id — the visual engines
  *   (markdown/mermaid/charts) delegate their rendering here (the hybrid seam),
  *   so the package owns the descriptors + examples but stays dependency-light
+ * @property {(schemaText: string, data: any, locale: string) => { schemaError: string|null, draft: string, compileMs: number|null, validateMs: number|null, valid: boolean|null, errors: any[] }} [validate]
+ *   host-injected JSON Schema validator (the same seam) — the `validate`
+ *   engine delegates here so @jarenjs/validate + the locale packs stay in the host
  */
 
 /**

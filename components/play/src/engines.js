@@ -23,6 +23,7 @@ const compileTypeTest = createTypeTestCompiler();
 
 const now = () => performance.now();
 const fmt = (v) => (v === undefined ? '(no result)' : JSON.stringify(v, null, 2));
+const fmtMs = (ms) => (typeof ms !== 'number' ? '—' : ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`);
 const msg = (err) => String(/** @type {any} */ (err)?.message ?? err);
 const code = (err) => /** @type {any} */ (err)?.code;
 
@@ -285,6 +286,52 @@ export const ENGINE_LIST = [
         { id: 'rows', label: `Rows (${total})`, kind: 'table', depth: 'deep', columns, rows },
         { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: roundtrip },
       ], t1 - t0, t2 - t1);
+    },
+  },
+  {
+    id: 'validate', label: 'JSON Schema', lead: 'Compile a schema and validate data — every error, localized.',
+    sourcePanes: [{ key: 'schema', label: 'Schema', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data' }],
+    optionPanes: [{
+      key: 'locale', label: 'Messages', default: 'en',
+      // the @jarenjs/locales packs the host mounts; an unmounted code falls
+      // back to English in the host localizer, so the list is safe to declare
+      choices: [
+        { value: 'en', label: 'English' }, { value: 'nl', label: 'Nederlands' },
+        { value: 'fr', label: 'Français' }, { value: 'es', label: 'Español' },
+        { value: 'de', label: 'Deutsch' }, { value: 'pt', label: 'Português' },
+        { value: 'ja', label: '日本語' }, { value: 'ko', label: '한국어' },
+        { value: 'zh-tw', label: '繁體中文' }, { value: 'ru', label: 'Русский' },
+        { value: 'tr', label: 'Türkçe' }, { value: 'ar', label: 'العربية' },
+      ],
+    }],
+    run(source, data, options) {
+      // the validator + locale packs are heavy and already cached in the
+      // host — inject a `validate(schemaText, data, locale)` runner (the
+      // hybrid seam, like the visual engines' renderers). No runner → an
+      // honest Result, never a throw.
+      const validate = options?.validate;
+      if (typeof validate !== 'function') {
+        return fail('the JSON Schema engine validates in the host — inject options.validate', 'PLAY_NO_VALIDATOR');
+      }
+      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const locale = options?.config?.locale ?? 'en';
+      let report;
+      try { report = validate(source.schema ?? '', d.value, locale); }
+      catch (err) { return fail(msg(err), code(err)); }
+      if (report.schemaError) return fail(report.schemaError, 'SCHEMA');
+      const errs = report.errors ?? [];
+      const summary = (report.valid ? '✓ valid' : `✗ ${errs.length} error${errs.length === 1 ? '' : 's'}`)
+        + ` · ${report.draft} · compiled ${fmtMs(report.compileMs)} · validated ${fmtMs(report.validateMs)}`;
+      const panels = [{ id: 'verdict', label: 'Verdict', kind: 'note', tone: report.valid ? 'ok' : 'warn', text: summary }];
+      if (errs.length) {
+        panels.push({
+          id: 'errors', label: `Errors (${errs.length})`, kind: 'table', depth: 'deep',
+          columns: ['path', 'message'],
+          rows: errs.map((e) => [e.instancePath === '' ? '(root)' : e.instancePath, e.message]),
+        });
+      }
+      return okPanels(panels, report.compileMs ?? 0, report.validateMs ?? 0);
     },
   },
   // ——— the visual engines: descriptor + examples here, rendering delegated ———

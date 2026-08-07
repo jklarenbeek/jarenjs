@@ -105,6 +105,38 @@ describe('@jarenjs/play — the engines run', () => {
     assert.match(r.panels[0].text, /clean/);
   });
 
+  it('validate delegates to the host validator: a verdict note, plus an errors table when invalid', () => {
+    const schema = { schema: '{"type":"object","required":["name"]}' };
+    const good = runExample('validate', schema, { data: '{"name":"Ada"}' }, {
+      validate: () => ({ schemaError: null, draft: 'draft-07', compileMs: 0.2, validateMs: 0.1, valid: true, errors: [] }),
+    });
+    assert.strictEqual(good.ok, true);
+    assert.deepStrictEqual(good.panels.map((p) => p.kind), ['note'], 'valid → just the verdict note');
+    assert.strictEqual(good.panels[0].tone, 'ok');
+    assert.match(good.panels[0].text, /valid/);
+
+    const bad = runExample('validate', schema, { data: '{}' }, {
+      validate: () => ({ schemaError: null, draft: 'draft-07', compileMs: 0.2, validateMs: 0.1, valid: false,
+        errors: [{ instancePath: '', keyword: 'required', message: 'must have property name' }] }),
+    });
+    assert.strictEqual(bad.ok, true, 'invalid DATA is still a successful RUN, with error panels');
+    assert.deepStrictEqual(bad.panels.map((p) => p.kind), ['note', 'table']);
+    assert.strictEqual(bad.panels[0].tone, 'warn');
+    assert.deepStrictEqual(bad.panels[1].columns, ['path', 'message']);
+    assert.match(bad.panels[1].rows[0][0], /root/, 'an empty instancePath renders as (root)');
+  });
+
+  it('validate without a host runner is an honest Result; a schema error fails with a code', () => {
+    const bare = runExample('validate', { schema: '{}' }, { data: '{}' });
+    assert.strictEqual(bare.ok, false);
+    assert.strictEqual(bare.error.code, 'PLAY_NO_VALIDATOR');
+    const badSchema = runExample('validate', { schema: '{' }, { data: '{}' }, {
+      validate: () => ({ schemaError: 'bad schema', draft: null, compileMs: null, validateMs: null, valid: null, errors: [] }),
+    });
+    assert.strictEqual(badSchema.ok, false);
+    assert.strictEqual(badSchema.error.code, 'SCHEMA');
+  });
+
   it('a visual engine delegates to a host renderer and returns a single view panel', () => {
     const render = (s) => ['div', { class: 'md' }, String(s)];
     const r = runExample('markdown', { source: '# Hi' }, {}, { renderers: { markdown: render } });

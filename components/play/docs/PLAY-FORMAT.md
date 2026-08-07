@@ -89,3 +89,22 @@ A new engine is one `EngineDescriptor` (registered in `ENGINES`) plus its
 `PlayExample`s (added to `EXAMPLES`). No UI changes: the picker groups
 examples by engine, the panes render from `sourcePanes`/`dataPanes`, and
 the switcher appears whenever an example has ≥ 2 datasets.
+
+## §5 Host-injected seams (the dependency-light contract)
+
+Engines whose real work is heavy or opinionated keep the package free of that
+weight by delegating to a host-injected function on `RunOptions`, the same
+shape for each:
+
+- `renderers[id]` — the visual engines (markdown / mermaid / charts) hand
+  their source to a host renderer that returns a spliced `view` vnode, so the
+  package never imports `@jarenjs/md`, `/mermaid` or `/charts`.
+- `validate` — the JSON Schema engine hands `(schemaText, data, locale)` to a
+  host validator that returns `{ valid, errors, draft, compileMs, validateMs,
+  schemaError }` (errors already localized), so the compiled validator and the
+  `@jarenjs/locales` packs stay in the host.
+- `operators` — a registry threaded to the `query`/`jslt`/`jtlt` engines.
+
+A missing seam is an honest error Result (`PLAY_NO_RENDERER` /
+`PLAY_NO_VALIDATOR`), never a throw. Read-only result panels are
+self-contained; interactive panels (a generated form) are host-wired.
