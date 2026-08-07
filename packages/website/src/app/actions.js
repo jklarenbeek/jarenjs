@@ -301,39 +301,39 @@ export const ACTIONS = {
   'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },
   'project/layout-ratio': { patch: [{ op: 'replace', path: '/project/layout/ratio', value: '$payload' }] },
 
-  // the Scratch engine playground (#/scratch, boundaries/scratch.js): pick
+  // the Play engine playground (#/play, boundaries/play.js): pick
   // an example (loads its source + first dataset), edit a source/data pane
   // live, or switch datasets; the debounced boundary re-runs the engine.
-  'scratch/example': { effects: [{ run: 'scratch-load', with: { id: '$payload' } }] },
-  'scratch/loaded': {
+  'play/example': { effects: [{ run: 'play-load', with: { id: '$payload' } }] },
+  'play/loaded': {
     patch: [
-      { op: 'replace', path: '/scratch/engine', value: '$payload.engine' },
-      { op: 'replace', path: '/scratch/exampleId', value: '$payload.exampleId' },
-      { op: 'replace', path: '/scratch/source', value: '$payload.source' },
-      { op: 'replace', path: '/scratch/datasetIndex', value: '$payload.datasetIndex' },
-      { op: 'replace', path: '/scratch/data', value: '$payload.data' },
-      { op: 'replace', path: '/scratch/config', value: '$payload.config' },
-      { op: 'replace', path: '/scratch/result', value: null },
+      { op: 'replace', path: '/play/engine', value: '$payload.engine' },
+      { op: 'replace', path: '/play/exampleId', value: '$payload.exampleId' },
+      { op: 'replace', path: '/play/source', value: '$payload.source' },
+      { op: 'replace', path: '/play/datasetIndex', value: '$payload.datasetIndex' },
+      { op: 'replace', path: '/play/data', value: '$payload.data' },
+      { op: 'replace', path: '/play/config', value: '$payload.config' },
+      { op: 'replace', path: '/play/result', value: null },
     ],
   },
-  'scratch/source': {
-    patch: [{ op: 'add', path: { $concat: ['/scratch/source/', '$payload.key'] }, value: '$event.value' }],
+  'play/source': {
+    patch: [{ op: 'add', path: { $concat: ['/play/source/', '$payload.key'] }, value: '$event.value' }],
   },
-  'scratch/data': {
-    patch: [{ op: 'add', path: { $concat: ['/scratch/data/', '$payload.key'] }, value: '$event.value' }],
+  'play/data': {
+    patch: [{ op: 'add', path: { $concat: ['/play/data/', '$payload.key'] }, value: '$event.value' }],
   },
   // a live mode select (josl dialect, csv strict/repair) → the run loop re-runs
-  'scratch/option': {
-    patch: [{ op: 'add', path: { $concat: ['/scratch/config/', '$payload.key'] }, value: '$event.value' }],
+  'play/option': {
+    patch: [{ op: 'add', path: { $concat: ['/play/config/', '$payload.key'] }, value: '$event.value' }],
   },
-  'scratch/dataset': { effects: [{ run: 'scratch-dataset', with: { index: '$payload' } }] },
-  'scratch/dataset-set': {
+  'play/dataset': { effects: [{ run: 'play-dataset', with: { index: '$payload' } }] },
+  'play/dataset-set': {
     patch: [
-      { op: 'replace', path: '/scratch/datasetIndex', value: '$payload.index' },
-      { op: 'replace', path: '/scratch/data', value: '$payload.data' },
+      { op: 'replace', path: '/play/datasetIndex', value: '$payload.index' },
+      { op: 'replace', path: '/play/data', value: '$payload.data' },
     ],
   },
-  'scratch/result': { patch: [{ op: 'replace', path: '/scratch/result', value: '$payload' }] },
+  'play/result': { patch: [{ op: 'replace', path: '/play/result', value: '$payload' }] },
 
   // the data studio (boundaries/data.js): boot the owner worker, edit
   // the model/query panes, run + explain, insert, live-event, migrate.

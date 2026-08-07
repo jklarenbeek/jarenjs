@@ -1,10 +1,10 @@
 //@ts-check
 /**
- * @file `@jarenjs/scratch` — a JSON-engine scratchpad. Pick an engine, feed
+ * @file `@jarenjs/play` — a JSON-engine playground. Pick an engine, feed
  * it a source input and one or more datasets, and watch it run — a way to
  * understand an engine standalone before composing it in the studio.
  *
- * The model (SCRATCH-FORMAT.md): each engine is a DESCRIPTOR — the panes it
+ * The model (PLAY-FORMAT.md): each engine is a DESCRIPTOR — the panes it
  * consumes (`sourcePanes` = the input; `dataPanes` = the JSON it runs
  * against, possibly none) plus a pure `run`. Each EXAMPLE presets those
  * source panes plus a LIST of datasets: 0 = the engine takes no data
@@ -35,7 +35,7 @@ import { EXAMPLE_LIST } from './examples.js';
  */
 
 /**
- * @typedef {Object} ScratchResult
+ * @typedef {Object} PlayResult
  * @property {boolean} ok
  * @property {string} output - the formatted TEXT result (empty on error, or
  *   for a visual engine whose result is a rendered vnode)
@@ -53,7 +53,7 @@ import { EXAMPLE_LIST } from './examples.js';
  * @property {EnginePane[]} sourcePanes - the engine INPUT pane(s)
  * @property {EnginePane[]} dataPanes - the JSON it runs against (may be [])
  * @property {OptionPane[]} [optionPanes] - live mode selects (may be absent)
- * @property {(source: Record<string, string>, data: Record<string, string>, options?: RunOptions) => ScratchResult} run
+ * @property {(source: Record<string, string>, data: Record<string, string>, options?: RunOptions) => PlayResult} run
  */
 
 /**
@@ -67,7 +67,7 @@ import { EXAMPLE_LIST } from './examples.js';
  */
 
 /**
- * @typedef {Object} ScratchExample
+ * @typedef {Object} PlayExample
  * @property {string} id
  * @property {string} label
  * @property {string} engine - an engine id
@@ -89,7 +89,7 @@ export function engineIds() {
 
 /** The curated example library (the canonical home for the suite's engine
  * examples). */
-export const EXAMPLES = Object.freeze(/** @type {ScratchExample[]} */ (EXAMPLE_LIST));
+export const EXAMPLES = Object.freeze(/** @type {PlayExample[]} */ (EXAMPLE_LIST));
 
 /**
  * Fill an engine's option-pane defaults so its runner always sees a
@@ -115,7 +115,7 @@ function withConfig(engine, options) {
  * @param {Record<string, string>} data
  * @param {RunOptions} [options] - operators (query/jslt), the option-pane
  *   config, and host renderers (markdown/mermaid/charts)
- * @returns {ScratchResult}
+ * @returns {PlayResult}
  */
 export function runExample(engineId, source, data, options = {}) {
   const engine = ENGINES[engineId];

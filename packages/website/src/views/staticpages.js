@@ -2,7 +2,7 @@
 /**
  * Docs — a sectioned reference rendered from the DOCS_SECTIONS content
  * document (one section at a time, deep-linkable via ?s=). (The former
- * Examples gallery now lives in the #/scratch scratchpad.)
+ * Examples gallery now lives in the #/play playground.)
  */
 
 export const STATIC_RULES = [

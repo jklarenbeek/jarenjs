@@ -1,22 +1,22 @@
 //@ts-check
 /**
- * The Scratch boundary — the site's glue for `@jarenjs/scratch`. The engine
- * scratchpad: pick an engine + an example, edit the source or the data, and
+ * The Play boundary — the site's glue for `@jarenjs/play`. The engine
+ * playground: pick an engine + an example, edit the source or the data, and
  * it runs live — the registered operator packs threaded in so `$mean`/`$npv`
  * work in the query/jslt engines. Ephemeral (no document, unlike the studio).
  */
-import { createScratchComponent } from '@jarenjs/scratch/component';
+import { createPlayComponent } from '@jarenjs/play/component';
 import { operatorRegistry } from './engines.js';
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { chartRenderer } from './charts.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
-export const scratchComponent = createScratchComponent({ operators: operatorRegistry });
+export const playComponent = createPlayComponent({ operators: operatorRegistry });
 
 /**
- * Host-injected vnode renderers for the scratchpad's VISUAL engines (the
- * hybrid seam): @jarenjs/scratch owns the markdown/mermaid/charts descriptors
+ * Host-injected vnode renderers for the playground's VISUAL engines (the
+ * hybrid seam): @jarenjs/play owns the markdown/mermaid/charts descriptors
  * + examples, but stays free of those component deps — the rendering happens
  * here, reusing the site's own memoized md/mermaid components and the charts
  * static path. `md.view` / `mermaid.view` are memoized per source string.
@@ -28,8 +28,8 @@ const renderers = {
 };
 
 /** The initial slice: the first example, loaded and ready to run. */
-const first = scratchComponent.examples[0];
-export const SCRATCH_START = Object.freeze({
+const first = playComponent.examples[0];
+export const PLAY_START = Object.freeze({
   engine: first.engine,
   exampleId: first.id,
   source: { ...first.source },
@@ -41,14 +41,14 @@ export const SCRATCH_START = Object.freeze({
 });
 
 /** Run the active engine over the current source + data (operators, option config, visual renderers). */
-export function runScratch(slice) {
-  return scratchComponent.runExample(slice.engine, slice.source, slice.data,
+export function runPlay(slice) {
+  return playComponent.runExample(slice.engine, slice.source, slice.data,
     { operators: operatorRegistry, config: slice.config, renderers });
 }
 
 /** Load an example's source + first dataset (+ option config) into a slice-ready payload. */
 export function loadExample(exampleId) {
-  const ex = scratchComponent.examples.find((e) => e.id === exampleId);
+  const ex = playComponent.examples.find((e) => e.id === exampleId);
   if (ex === undefined) return null;
   return {
     engine: ex.engine, exampleId: ex.id,
@@ -60,7 +60,7 @@ export function loadExample(exampleId) {
 
 /** The data of one dataset (by index) of an example, or null. */
 export function loadDataset(exampleId, index) {
-  const ex = scratchComponent.examples.find((e) => e.id === exampleId);
+  const ex = playComponent.examples.find((e) => e.id === exampleId);
   const ds = ex?.datasets?.[index];
   return ds ? { ...ds.data } : null;
 }

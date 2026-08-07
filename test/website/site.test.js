@@ -534,10 +534,12 @@ describe('website — the site as one app document', function () {
     assert.deepStrictEqual(parseHash('#/bogus'), { page: 'home', params: {} });
   });
 
-  it('the retired #/examples URL redirects to the scratchpad', function () {
+  it('the retired #/examples and #/scratch URLs redirect to #/play', function () {
     const { app, go } = mountSite();
     go('#/examples');
-    assert.strictEqual(app.getState().route.page, 'scratch', '#/examples now lands on #/scratch');
+    assert.strictEqual(app.getState().route.page, 'play', '#/examples now lands on #/play');
+    go('#/scratch');
+    assert.strictEqual(app.getState().route.page, 'play', '#/scratch now lands on #/play');
   });
 
   it('playground: committing the data pane parses JSON and surfaces malformed input', function () {

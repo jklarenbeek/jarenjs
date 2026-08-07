@@ -27,7 +27,7 @@ import {
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
-import { runScratch, loadExample, loadDataset } from '../boundaries/scratch.js';
+import { runPlay, loadExample, loadDataset } from '../boundaries/play.js';
 import { projectTemplate, fileSkeleton } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
@@ -301,16 +301,16 @@ export function createSiteApp(env) {
       const files = p.files.map((f) => (f.name === p.active ? { ...f, name: next } : f));
       dispatch('project/structural', { files, active: next });
     },
-    // the Scratch playground: picking an example loads its source + first
+    // the Play playground: picking an example loads its source + first
     // dataset; the dataset switcher swaps the data pane against the SAME
     // source (both land as a patch, then the run loop below re-runs).
-    'scratch-load': (props, dispatch) => {
+    'play-load': (props, dispatch) => {
       const loaded = loadExample(props.id);
-      if (loaded !== null) dispatch('scratch/loaded', loaded);
+      if (loaded !== null) dispatch('play/loaded', loaded);
     },
-    'scratch-dataset': (props, dispatch) => {
-      const data = loadDataset(app.getState().scratch.exampleId, props.index);
-      if (data !== null) dispatch('scratch/dataset-set', { index: props.index, data });
+    'play-dataset': (props, dispatch) => {
+      const data = loadDataset(app.getState().play.exampleId, props.index);
+      if (data !== null) dispatch('play/dataset-set', { index: props.index, data });
     },
     // a README link to a published page routes in-app after the dialog
     // closes (the action's patch already closed it)
@@ -435,7 +435,7 @@ export function createSiteApp(env) {
  * @param {any} app
  * @param {number} debounceMs
  * @param {((hash: string) => void)} [navigate] - set the location hash (for
- *   the retired-page redirect: #/examples → #/scratch)
+ *   the retired-page redirect: #/examples → #/play)
  */
 function wireBoundaries(app, debounceMs, navigate) {
   const runValidate = () => {
@@ -482,13 +482,13 @@ function wireBoundaries(app, debounceMs, navigate) {
       app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
     }
   };
-  // the Scratch playground's live run: the active engine over the current
+  // the Play playground's live run: the active engine over the current
   // source + data (registered operators threaded in the boundary). Never
   // throws — a bad edit lands as an error result, not a crash.
-  const runScratchLive = () => {
+  const runPlayLive = () => {
     const state = app.getState();
-    if (state.scratch === undefined) return;
-    app.dispatch('scratch/result', runScratch(state.scratch));
+    if (state.play === undefined) return;
+    app.dispatch('play/result', runPlay(state.play));
   };
   /** @type {Map<string, any>} */
   const timers = new Map();
@@ -511,7 +511,7 @@ function wireBoundaries(app, debounceMs, navigate) {
     let validate = false;
     let routed = false;
     let project = false;
-    let scratch = false;
+    let play = false;
     for (const path of changes) {
       if (path === '/pg/schemaText' || path === '/pg/data' || path.startsWith('/pg/data/')) {
         validate = true;
@@ -522,10 +522,10 @@ function wireBoundaries(app, debounceMs, navigate) {
       else if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
         project = true;
       }
-      // any Scratch input (source / data / example / dataset) re-runs; the
-      // run's own output (`/scratch/result`) must NOT, or it loops forever
-      else if (path.startsWith('/scratch/') && path !== '/scratch/result') {
-        scratch = true;
+      // any Play input (source / data / example / dataset) re-runs; the
+      // run's own output (`/play/result`) must NOT, or it loops forever
+      else if (path.startsWith('/play/') && path !== '/play/result') {
+        play = true;
       }
       else if (path === '/route') {
         routed = true;
@@ -533,7 +533,7 @@ function wireBoundaries(app, debounceMs, navigate) {
     }
     if (validate) debounced('validate', runValidate);
     if (project) debounced('project', () => { runProjectCommit(); runProjectActive(); });
-    if (scratch) debounced('scratch', runScratchLive);
+    if (play) debounced('play', runPlayLive);
     for (const engine of engines) {
       debounced(`eng:${engine}`, () => {
         runEng(engine);
@@ -542,8 +542,8 @@ function wireBoundaries(app, debounceMs, navigate) {
     }
     if (routed) {
       const s = app.getState();
-      // the retired #/examples page redirects to its scratchpad successor
-      if (s.route.page === 'examples') { navigate?.('#/scratch'); return; }
+      // the retired #/examples and #/scratch URLs redirect to #/play
+      if (s.route.page === 'examples' || s.route.page === 'scratch') { navigate?.('#/play'); return; }
       const engine = s.route.params.engine;
       if (s.route.page === 'playground' && engine !== undefined
         && ENGINE_DEFS[engine] !== undefined && s.engResults[engine] === undefined) {
@@ -555,9 +555,9 @@ function wireBoundaries(app, debounceMs, navigate) {
         if (s.project.mount === null) runProjectCommit();
         runProjectActive();
       }
-      // arriving at the Scratch playground: run the seeded example once, so
+      // arriving at the Play playground: run the seeded example once, so
       // the stage is never empty (later edits re-run through the feed above)
-      if (s.route.page === 'scratch' && s.scratch.result === null) runScratchLive();
+      if (s.route.page === 'play' && s.play.result === null) runPlayLive();
       syncAll();
       binancePageSync(s.route.page === 'charts');
       applyShareToken(s);
@@ -597,13 +597,13 @@ function wireBoundaries(app, debounceMs, navigate) {
     }
   }
 
-  // a direct entry at the retired #/examples URL redirects to #/scratch
-  if (app.getState().route.page === 'examples') navigate?.('#/scratch');
+  // a direct entry at the retired #/examples or #/scratch URL redirects to #/play
+  if (app.getState().route.page === 'examples' || app.getState().route.page === 'scratch') navigate?.('#/play');
   runValidate(); // the initial document validates immediately
   // entering directly at #/project boots the live stage (the initial
   // route/set fired before this subscriber attached, so seed it here)
   if (app.getState().route.page === 'project') { runProjectCommit(); runProjectActive(); }
-  // …and likewise a direct entry at #/scratch
-  if (app.getState().route.page === 'scratch' && app.getState().scratch.result === null) runScratchLive();
+  // …and likewise a direct entry at #/play
+  if (app.getState().route.page === 'play' && app.getState().play.result === null) runPlayLive();
   applyShareToken(app.getState()); // a share link may be the entry URL
 }

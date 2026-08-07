@@ -1,7 +1,7 @@
 {
-  "name": "@jarenjs/scratch",
+  "name": "@jarenjs/play",
   "private": false,
-  "version": "0.28.17",
+  "version": "0.29.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -15,7 +15,7 @@
       "types": "./dist/types/component/index.d.ts",
       "default": "./src/component/index.js"
     },
-    "./styles/scratch.css": "./styles/scratch.css",
+    "./styles/play.css": "./styles/play.css",
     "./package.json": "./package.json"
   },
   "files": [
@@ -24,12 +24,12 @@
     "docs/",
     "styles/"
   ],
-  "description": "The jaren engine scratchpad: pick a JSON engine (JSONPath, JSON Pointer, JSON Patch, query, JSLT, markdown, mermaid, …), feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the studio. The engine is headless; the component is the scratchpad UI.",
+  "description": "The jaren engine playground: pick a JSON engine (JSONPath, JSON Pointer, JSON Patch, query, JSLT, markdown, mermaid, …), feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the studio. The engine is headless; the component is the playground UI.",
   "author": "joham",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jklarenbeek/jarenjs.git",
-    "directory": "components/scratch"
+    "directory": "components/play"
   },
   "license": "MIT",
   "engines": {
@@ -42,7 +42,7 @@
   "keywords": [
     "jaren",
     "json",
-    "scratchpad",
+    "playground",
     "playground",
     "examples",
     "jsonpath",
@@ -56,9 +56,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.28.17",
-    "@jarenjs/josl": "^0.28.17",
-    "@jarenjs/json": "^0.28.17",
-    "@jarenjs/validate": "^0.28.17"
+    "@jarenjs/core": "^0.29.0",
+    "@jarenjs/josl": "^0.29.0",
+    "@jarenjs/json": "^0.29.0",
+    "@jarenjs/validate": "^0.29.0"
   }
 }

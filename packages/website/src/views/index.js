@@ -14,7 +14,7 @@ import { CHARTSPAGE_RULES } from './chartspage.js';
 import { PLAYGROUND_RULES } from './playground.js';
 import { STUDIO_RULES } from './studio.js';
 import { projectRules, projectModes } from '@jarenjs/studio/component';
-import { scratchRules, scratchModes } from '@jarenjs/scratch/component';
+import { playRules, playModes } from '@jarenjs/play/component';
 import { FLOW_RULES } from './flowstudio.js';
 import { GAME_RULES } from './game.js';
 import { DATA_RULES } from './data.js';
@@ -33,7 +33,7 @@ export const STYLESHEET = {
     playground: { unmatched: 'error' },
     studio: { unmatched: 'error' },
     ...projectModes,
-    ...scratchModes,
+    ...playModes,
     flow: { unmatched: 'error' },
     game: { unmatched: 'error' },
     data: { unmatched: 'error' },
@@ -54,7 +54,7 @@ export const STYLESHEET = {
     ...PLAYGROUND_RULES,
     ...STUDIO_RULES,
     ...projectRules,
-    ...scratchRules,
+    ...playRules,
     ...FLOW_RULES,
     ...GAME_RULES,
     ...DATA_RULES,

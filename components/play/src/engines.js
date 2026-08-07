@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The scratchpad's engine descriptors — each wraps a real shipped
- * `@jarenjs` compiler into a pure `run(source, data, options) → ScratchResult`.
+ * @file The playground's engine descriptors — each wraps a real shipped
+ * `@jarenjs` compiler into a pure `run(source, data, options) → PlayResult`.
  * `sourcePanes` are the engine input(s); `dataPanes` are the JSON it runs
  * against (empty for source-only engines, which land in a later order).
  * Registered operators reach the `query`/`jslt` engines through
@@ -32,7 +32,7 @@ function parseJson(text, label) {
   catch (err) { return { error: `${label}: ${msg(err)}` }; }
 }
 
-/** @returns {import('./index.js').ScratchResult} */
+/** @returns {import('./index.js').PlayResult} */
 const ok = (output, compileMs, runMs, view) => ({ ok: true, output, timing: { compileMs, runMs }, error: null, view: view ?? null });
 
 /**
@@ -52,7 +52,7 @@ function visual(id, label, lead, opts = {}) {
     run(source, data, options) {
       const render = options?.renderers?.[id];
       if (typeof render !== 'function') {
-        return fail(`the ${label} engine renders in the host — inject options.renderers.${id}`, 'SCRATCH_NO_RENDERER');
+        return fail(`the ${label} engine renders in the host — inject options.renderers.${id}`, 'PLAY_NO_RENDERER');
       }
       const t0 = now();
       let view;
@@ -63,7 +63,7 @@ function visual(id, label, lead, opts = {}) {
     },
   };
 }
-/** @returns {import('./index.js').ScratchResult} */
+/** @returns {import('./index.js').PlayResult} */
 const fail = (message, c, path) => ({ ok: false, output: '', timing: null, error: { message, code: c, path } });
 
 /** The compile options the query/jslt engines run with (registry-aware). */

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file @jarenjs/scratch scaffold — the headless engine surface exists and
+ * @file @jarenjs/play scaffold — the headless engine surface exists and
  * the package is wired. The engines, the example library and the component
  * view land in the following orders; this pins the exports + the
  * never-throw contract of `runExample`.
@@ -8,10 +8,10 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { ENGINES, EXAMPLES, engineIds, runExample } from '@jarenjs/scratch';
-import { createScratchComponent } from '@jarenjs/scratch/component';
+import { ENGINES, EXAMPLES, engineIds, runExample } from '@jarenjs/play';
+import { createPlayComponent } from '@jarenjs/play/component';
 
-describe('@jarenjs/scratch — scaffold', () => {
+describe('@jarenjs/play — scaffold', () => {
   it('registers the first engine set and a non-empty example library', () => {
     const ids = engineIds();
     for (const id of ['path', 'pointer', 'patch', 'query', 'jslt']) assert.ok(ids.includes(id), id);
@@ -28,7 +28,7 @@ describe('@jarenjs/scratch — scaffold', () => {
   });
 
   it('the component factory hands back the engine surface', () => {
-    const c = createScratchComponent();
+    const c = createPlayComponent();
     assert.ok(c.engineIds().includes('path'));
     assert.strictEqual(typeof c.runExample, 'function');
   });

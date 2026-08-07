@@ -1,6 +1,6 @@
-# SCRATCH-FORMAT — the engine descriptor and example contract
+# PLAY-FORMAT — the engine descriptor and example contract
 
-`@jarenjs/scratch` models every engine the same way, so the scratchpad UI
+`@jarenjs/play` models every engine the same way, so the playground UI
 (the example picker, the source panes, the dataset switcher, the run stage)
 is engine-agnostic and adding an engine is data, not UI code.
 
@@ -13,25 +13,25 @@ EngineDescriptor = {
   lead?:       string,        // one line describing the engine
   sourcePanes: EnginePane[],  // the engine INPUT (usually one)
   dataPanes:   EnginePane[],  // the JSON it runs against (may be empty)
-  run:         (source, data) => ScratchResult,
+  run:         (source, data) => PlayResult,
 }
 EnginePane = { key: string, label: string, control?: 'code' | 'text' }
 ```
 
 - `sourcePanes` are the engine's input(s): a JSONPath `selector`, a JSLT
   `stylesheet`, a JSON `patch`, a query + its `externals`, a markdown
-  `source`. Editable in the scratchpad.
+  `source`. Editable in the playground.
 - `dataPanes` are the JSON the engine runs against: usually one `data`; a
   patch's is its `target`; markdown / mermaid / charts have **none** — the
   source is everything.
 - `run(source, data)` is PURE and NEVER throws: it wraps the real shipped
-  compiler and returns a `ScratchResult`. `source` / `data` are maps keyed
+  compiler and returns a `PlayResult`. `source` / `data` are maps keyed
   by the pane `key`s, holding the raw text.
 
 ## §2 The result
 
 ```
-ScratchResult = {
+PlayResult = {
   ok:     boolean,
   output: string,                                  // the formatted result
   timing: { compileMs, runMs } | null,
@@ -40,13 +40,13 @@ ScratchResult = {
 ```
 
 The component renders `output` in a code block, `timing` as a stat line,
-and `error` as a coded error line — the scratchpad owns this tiny render
+and `error` as a coded error line — the playground owns this tiny render
 vocabulary, so it never depends on a host's node helpers.
 
 ## §3 The example, and the dataset problem
 
 ```
-ScratchExample = {
+PlayExample = {
   id:       string,
   label:    string,
   engine:   string,                                // an engine id
@@ -69,6 +69,6 @@ The list length is the answer to "one data or many":
 ## §4 Extending
 
 A new engine is one `EngineDescriptor` (registered in `ENGINES`) plus its
-`ScratchExample`s (added to `EXAMPLES`). No UI changes: the picker groups
+`PlayExample`s (added to `EXAMPLES`). No UI changes: the picker groups
 examples by engine, the panes render from `sourcePanes`/`dataPanes`, and
 the switcher appears whenever an example has ≥ 2 datasets.

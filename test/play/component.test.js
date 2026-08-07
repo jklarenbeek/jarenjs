@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The scratch COMPONENT, headless: the pure view-model derivation
+ * @file The play COMPONENT, headless: the pure view-model derivation
  * (rail grouped by engine, source/data editors, the dataset switcher, the
  * result) and the JSLT view rendering a real vnode over it.
  */
@@ -8,12 +8,12 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import {
-  createScratchComponent, scratchViewModel, scratchRules, scratchModes,
-} from '@jarenjs/scratch/component';
+  createPlayComponent, playViewModel, playRules, playModes,
+} from '@jarenjs/play/component';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 const state = (over = {}) => ({
-  scratch: {
+  play: {
     engine: 'path', exampleId: 'path-shapes',
     source: { selector: '$..name' }, datasetIndex: 1,
     data: { data: '{"people":[{"name":"Ada"},{"name":"Alan"}]}' },
@@ -22,19 +22,19 @@ const state = (over = {}) => ({
   },
 });
 
-/** Render the scratch shell over a view model (headless — no DOM). */
-function renderScratch(vm) {
+/** Render the play shell over a view model (headless — no DOM). */
+function renderPlay(vm) {
   const sheet = {
     $jslt: '0.1',
-    modes: scratchModes,
-    rules: [{ match: '$', body: { $apply: ['$.ui.scratch', 'scratch'] } }, ...scratchRules],
+    modes: playModes,
+    rules: [{ match: '$', body: { $apply: ['$.ui.play', 'play'] } }, ...playRules],
   };
-  return compileJsltStylesheet(sheet)({ ui: { scratch: vm } });
+  return compileJsltStylesheet(sheet)({ ui: { play: vm } });
 }
 
-describe('scratchViewModel', () => {
+describe('playViewModel', () => {
   it('derives the rail grouped by engine, the editors, the switcher and the result', () => {
-    const vm = scratchViewModel(state());
+    const vm = playViewModel(state());
     const pathGroup = vm.rail.find((g) => g.engine === 'path');
     assert.ok(pathGroup && pathGroup.label === 'JSONPath', 'a JSONPath group');
     assert.ok(pathGroup.examples.some((e) => e.id === 'path-shapes' && e.active), 'the active example');
@@ -50,12 +50,12 @@ describe('scratchViewModel', () => {
   });
 
   it('a single-dataset example hides the switcher', () => {
-    const vm = scratchViewModel(state({ exampleId: 'path-authors', datasetIndex: 0 }));
+    const vm = playViewModel(state({ exampleId: 'path-authors', datasetIndex: 0 }));
     assert.strictEqual(vm.hasSwitcher, false);
   });
 
   it('derives option panes with the selected value (a source-only engine)', () => {
-    const vm = scratchViewModel(state({
+    const vm = playViewModel(state({
       engine: 'josl', exampleId: 'josl-toml', source: { text: 'x = 1\n' },
       data: {}, config: { mode: 'toml' },
     }));
@@ -67,12 +67,12 @@ describe('scratchViewModel', () => {
   });
 
   it('falls back to the pane default when config is empty', () => {
-    const vm = scratchViewModel(state({ engine: 'josl', source: { text: '' }, data: {}, config: {} }));
+    const vm = playViewModel(state({ engine: 'josl', source: { text: '' }, data: {}, config: {} }));
     assert.strictEqual(vm.optionPanes[0].choices.find((c) => c.selected).value, 'josl', 'the default');
   });
 
   it('marks a visual result as hasView (a vnode) with no text', () => {
-    const vm = scratchViewModel(state({
+    const vm = playViewModel(state({
       result: { ok: true, output: '', view: ['svg', {}, 'x'], timing: { compileMs: 0.1, runMs: 0 }, error: null },
     }));
     assert.strictEqual(vm.result.hasView, true);
@@ -80,41 +80,41 @@ describe('scratchViewModel', () => {
   });
 });
 
-describe('the scratch JSLT view renders headlessly', () => {
+describe('the play JSLT view renders headlessly', () => {
   it('produces a vnode with the rail, the editors, the switcher and the result', () => {
-    const out = JSON.stringify(renderScratch(scratchViewModel(state())));
-    assert.match(out, /jscratch/);
-    assert.match(out, /scratch\/example/);   // a rail example button
-    assert.match(out, /scratch\/source/);    // the source editor
-    assert.match(out, /scratch\/data/);      // the data editor
-    assert.match(out, /scratch\/dataset/);   // the switcher (path-shapes has 3 datasets)
+    const out = JSON.stringify(renderPlay(playViewModel(state())));
+    assert.match(out, /jplay/);
+    assert.match(out, /play\/example/);   // a rail example button
+    assert.match(out, /play\/source/);    // the source editor
+    assert.match(out, /play\/data/);      // the data editor
+    assert.match(out, /play\/dataset/);   // the switcher (path-shapes has 3 datasets)
     assert.match(out, /Ada/);                // the run result on the stage
   });
 
   it('splices a rendered vnode for a visual engine, with no code block', () => {
-    const out = JSON.stringify(renderScratch(scratchViewModel(state({
+    const out = JSON.stringify(renderPlay(playViewModel(state({
       engine: 'markdown', exampleId: 'md-tour', source: { source: '# Hi' }, data: {},
       result: { ok: true, output: '', view: ['div', { class: 'md-preview' }, 'Hi'], timing: { compileMs: 0.1, runMs: 0 }, error: null },
     }))));
-    assert.match(out, /jscratch-view/, 'the rendered-view container');
+    assert.match(out, /jplay-view/, 'the rendered-view container');
     assert.match(out, /md-preview/, 'the host vnode was spliced in verbatim');
     assert.doesNotMatch(out, /code-block/, 'no code block for a visual result');
   });
 
   it('renders an option select for a source-only engine (josl)', () => {
-    const out = JSON.stringify(renderScratch(scratchViewModel(state({
+    const out = JSON.stringify(renderPlay(playViewModel(state({
       engine: 'josl', exampleId: 'josl-toml', source: { text: 'x = 1\n' }, data: {}, config: { mode: 'toml' },
     }))));
-    assert.match(out, /scratch\/option/);    // the mode select dispatches scratch/option
+    assert.match(out, /play\/option/);    // the mode select dispatches play/option
     assert.match(out, /select/);             // it is a <select>
-    assert.doesNotMatch(out, /scratch\/data"/); // no data editor for a source-only engine
+    assert.doesNotMatch(out, /play\/data"/); // no data editor for a source-only engine
   });
 });
 
 describe('the component surface', () => {
-  it('createScratchComponent composes the view, derivation and engine surface', () => {
-    const c = createScratchComponent();
-    assert.strictEqual(c.mode, 'scratch');
+  it('createPlayComponent composes the view, derivation and engine surface', () => {
+    const c = createPlayComponent();
+    assert.strictEqual(c.mode, 'play');
     assert.ok(Array.isArray(c.rules));
     assert.ok(c.engineIds().includes('query'));
     assert.strictEqual(typeof c.runExample, 'function');

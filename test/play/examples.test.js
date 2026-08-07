@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { EXAMPLES, ENGINES, runExample } from '@jarenjs/scratch';
+import { EXAMPLES, ENGINES, runExample } from '@jarenjs/play';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
@@ -17,7 +17,7 @@ const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 const stub = (s) => ['pre', {}, String(s)];
 const renderers = { markdown: stub, mermaid: stub, charts: stub };
 
-describe('@jarenjs/scratch — the example library', () => {
+describe('@jarenjs/play — the example library', () => {
   it('is numerous, and every example targets a registered engine with a source + datasets', () => {
     assert.ok(EXAMPLES.length >= 15, `only ${EXAMPLES.length} examples`);
     for (const ex of EXAMPLES) {

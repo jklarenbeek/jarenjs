@@ -1,18 +1,18 @@
 //@ts-check
 /**
- * @file The scratchpad engines run — each descriptor wraps a real shipped
- * compiler into the `ScratchResult` shape, never throwing, and the
+ * @file The playground engines run — each descriptor wraps a real shipped
+ * compiler into the `PlayResult` shape, never throwing, and the
  * registered operators thread through `options` to query/jslt.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { runExample } from '@jarenjs/scratch';
+import { runExample } from '@jarenjs/play';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 
-describe('@jarenjs/scratch — the engines run', () => {
+describe('@jarenjs/play — the engines run', () => {
   it('path selects nodes from a document', () => {
     const r = runExample('path', { selector: '$.book[*].title' }, { data: '{"book":[{"title":"A"},{"title":"B"}]}' });
     assert.strictEqual(r.ok, true);
@@ -95,7 +95,7 @@ describe('@jarenjs/scratch — the engines run', () => {
   it('a visual engine without a renderer is an honest Result, not a throw', () => {
     const bare = runExample('mermaid', { source: 'flowchart TD\n A-->B' }, {});
     assert.strictEqual(bare.ok, false);
-    assert.strictEqual(bare.error.code, 'SCRATCH_NO_RENDERER');
+    assert.strictEqual(bare.error.code, 'PLAY_NO_RENDERER');
   });
 
   it('a visual engine surfaces a renderer throw as an error Result', () => {

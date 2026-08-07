@@ -115,11 +115,11 @@ export function runCharts(inputs) {
 }
 
 /**
- * A thin STATIC renderer for the scratchpad's `charts` engine (the hybrid
- * seam in @jarenjs/scratch): a definition string + `{ format }` in, the
+ * A thin STATIC renderer for the playground's `charts` engine (the hybrid
+ * seam in @jarenjs/play): a definition string + `{ format }` in, the
  * pure-vnode SVG out. Reuses the same parse → schema-validate → compile →
  * toVnode path as the playground; throws on a parse or schema failure so the
- * scratchpad lands an honest error Result (no streaming — static only).
+ * playground lands an honest error Result (no streaming — static only).
  * @param {string} source
  * @param {{ format?: string }} [config]
  * @returns {any} the chart's SVG vnode

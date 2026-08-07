@@ -32,7 +32,7 @@ import { initialEngineInputs } from '../boundaries/engines.js';
 import { calcInitialState } from '@jarenjs/calc/component';
 import { START_LOCATION } from '../content/gameContent.js';
 import { STARTER_PROJECT } from '../content/projectTemplates.js';
-import { SCRATCH_START } from '../boundaries/scratch.js';
+import { PLAY_START } from '../boundaries/play.js';
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',  // 'openrouter' | 'ollama' | 'lmstudio' | 'custom'
@@ -96,12 +96,12 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       stageError: null,  // the nested app's own boot/runtime failure, if any
     },
 
-    // the Scratch engine playground (boundaries/scratch.js): pick an engine
+    // the Play engine playground (boundaries/play.js): pick an engine
     // + an example, edit the source or the data, it runs live. Ephemeral —
     // `source`/`data` are the editable pane buffers (keyed by pane),
     // `datasetIndex` selects among an example's datasets, `result` is the
     // last run. Seeded with the first example loaded.
-    scratch: { ...SCRATCH_START, source: { ...SCRATCH_START.source }, data: { ...SCRATCH_START.data }, config: { ...SCRATCH_START.config } },
+    play: { ...PLAY_START, source: { ...PLAY_START.source }, data: { ...PLAY_START.data }, config: { ...PLAY_START.config } },
 
     // the Flow studio (boundaries/flowstudio.js): a jaren-fsm or
     // jaren-dag document edited three ways that cannot disagree —

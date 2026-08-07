@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The scratchpad's curated example library — the canonical home for
+ * @file The playground's curated example library — the canonical home for
  * the suite's engine examples (folded from the website + more). Each
  * example presets its engine's source pane(s) and a LIST of datasets: one
  * dataset shows a single run; several turn on a switcher, so the same
@@ -27,7 +27,7 @@ const BOOKSTORE = {
 };
 const bookstore = { label: 'bookstore', data: { data: j(BOOKSTORE) } };
 
-/** @type {import('./index.js').ScratchExample[]} */
+/** @type {import('./index.js').PlayExample[]} */
 export const EXAMPLE_LIST = [
   // ——— JSONPath ———
   { id: 'path-authors', label: 'All authors', engine: 'path',

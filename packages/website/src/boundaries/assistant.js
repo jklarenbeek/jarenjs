@@ -232,7 +232,7 @@ export function createSiteToolbox(env) {
     inputSchema: {
       type: 'object',
       properties: {
-        page: { enum: ['home', 'playground', 'studio', 'scratch', 'flow', 'benchmarks', 'charts', 'docs', 'calculator'] },
+        page: { enum: ['home', 'playground', 'studio', 'play', 'flow', 'benchmarks', 'charts', 'docs', 'calculator'] },
         params: { type: 'object', additionalProperties: { type: 'string' } },
       },
       required: ['page'],

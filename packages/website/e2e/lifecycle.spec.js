@@ -46,13 +46,24 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
   // each destination lives behind its dropdown group (Home stands alone);
   // open the group, click the link, and the group's trigger reflects the route
   const NAV = [
-    ['Playground', 'Engines'], ['Scratchpad', 'Engines'], ['Charts', 'Engines'],
+    ['Playground', 'Engines'], ['Play', 'Engines'], ['Charts', 'Engines'],
     ['Studio', 'Studios'], ['Flow', 'Studios'], ['Game', 'Studios'], ['Calculator', 'Studios'],
     ['Docs', 'Learn'], ['Benchmarks', 'Learn'], ['Home', null],
   ];
   for (const [label, group] of NAV) {
-    if (group) await page.locator('.nav-trigger', { hasText: group }).click();
-    await page.locator('#site-nav .nav-link', { hasText: label }).first().click();
+    const link = page.locator('#site-nav .nav-link', { hasText: label }).first();
+    // Reveal the owning group only when the link is not already shown. A
+    // blind trigger click would TOGGLE an already-open group shut: the async
+    // route/set that closes the menu on the previous navigation may not have
+    // landed yet, and consecutive same-group pages (Playground → Play →
+    // Charts) leave the trigger looking identical, so the end-of-iteration
+    // assertions cannot tell "closed" from "still closing". Opening only when
+    // needed mirrors what a real user does and is immune to that timing.
+    if (group && !(await link.isVisible())) {
+      await page.locator('.nav-trigger', { hasText: group }).click();
+      await expect(link).toBeVisible();
+    }
+    await link.click();
     await expect(page.locator('main.main')).toBeVisible();
     if (group) await expect(page.locator('#site-nav .nav-trigger.active')).toContainText(group);
     else await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Home');

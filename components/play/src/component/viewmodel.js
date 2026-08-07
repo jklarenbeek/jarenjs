@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file `scratchViewModel(state)` — the scratchpad's pure derivation. From
- * the `state.scratch` slice it derives the example rail (the picker, grouped
+ * @file `playViewModel(state)` — the playground's pure derivation. From
+ * the `state.play` slice it derives the example rail (the picker, grouped
  * by engine — the "file-picker of sorts"), the active engine's source
  * editors, the dataset switcher, the data editors, and the run result for
  * the stage. Pure: nothing here is stored back in state.
@@ -11,11 +11,11 @@ import { ENGINES, EXAMPLES } from '../index.js';
 const formatMs = (ms) => (typeof ms !== 'number' ? '—' : ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`);
 
 /**
- * @param {{ scratch?: any }} state
+ * @param {{ play?: any }} state
  * @returns {any}
  */
-export function scratchViewModel(state) {
-  const s = state.scratch ?? {};
+export function playViewModel(state) {
+  const s = state.play ?? {};
   const engineId = s.engine ?? EXAMPLES[0]?.engine ?? '';
   const engine = ENGINES[engineId] ?? null;
 

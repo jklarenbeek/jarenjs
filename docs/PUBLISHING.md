@@ -18,7 +18,7 @@ release publishes the nineteen public workspaces:
 - `@jarenjs/calc`
 - `@jarenjs/charts`
 - `@jarenjs/studio`
-- `@jarenjs/scratch`
+- `@jarenjs/play`
 - `@jarenjs/josl`
 - `@jarenjs/ai`
 - `@jarenjs/flow`

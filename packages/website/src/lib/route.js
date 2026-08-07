@@ -5,7 +5,9 @@
  * hash subscription (and tests) share it.
  */
 
-const PAGES = new Set(['home', 'playground', 'benchmarks', 'charts', 'docs', 'examples', 'calculator', 'studio', 'project', 'scratch', 'flow', 'game', 'data']);
+// 'scratch' and 'examples' stay ONLY as redirect sources (→ #/play), wired in
+// createSiteApp; the live single-engine playground is 'play'.
+const PAGES = new Set(['home', 'playground', 'benchmarks', 'charts', 'docs', 'examples', 'calculator', 'studio', 'project', 'play', 'scratch', 'flow', 'game', 'data']);
 
 /**
  * @param {string} hash - `location.hash` (with or without `#`).
