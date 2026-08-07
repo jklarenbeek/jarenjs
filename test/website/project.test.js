@@ -266,6 +266,70 @@ describe('file management (open a template, add / delete / rename)', () => {
   });
 });
 
+describe('the editor typing buffer (a render must never eat an edit)', () => {
+  it('a render mid-edit does NOT overwrite the box, and the edit still commits', () => {
+    const { app, container } = mountSite();
+    const box = editor(container);
+    const typed = '{"state":{"title":"TYPED"},"view":[{"match":"$","body":["h1",{},"$.title"]}]}';
+
+    // the user types (input), but has not blurred yet — the commit is
+    // blur-deferred, so the FILE still holds the old text
+    box.value = typed;
+    fire(box, 'input', { target: { value: typed } });
+    assert.notStrictEqual(app.getState().project.files[0].text, typed,
+      'the file is deliberately not committed yet');
+
+    // something else re-renders the site while the edit is in flight. The
+    // renderer reasserts every controlled value on a settled pass, so this
+    // is exactly the moment the typing used to be silently overwritten.
+    app.dispatch('theme/toggle');
+    assert.strictEqual(box.value, typed,
+      'the reassert kept the user text — it did not restore the committed text');
+
+    // and because the box was never rewritten, the blur commit lands
+    fire(box, 'change', { target: { value: box.value } });
+    assert.strictEqual(app.getState().project.files[0].text, typed, 'the edit committed');
+    assert.strictEqual(app.getState().project.buffer, null, 'the buffer cleared on commit');
+    assert.match(serialize(container), /TYPED/, 'and the stage rebooted on it');
+  });
+
+  it('an external write while the buffer is dirty raises a conflict, clobbering neither side', () => {
+    const { app, container } = mountSite();
+    const box = editor(container);
+    const mine = '{"state":{"title":"MINE"},"view":[{"match":"$","body":["h1",{},"$.title"]}]}';
+    fire(box, 'input', { target: { value: mine } });
+
+    // an AI write lands on the SAME file (the assistant's path) while the
+    // human's buffer is dirty and differs
+    const theirs = '{"state":{"title":"THEIRS"},"view":[{"match":"$","body":["h2",{},"$.title"]}]}';
+    const p = app.getState().project;
+    app.dispatch('project/files-set', {
+      files: p.files.map((f) => (f.name === p.active ? { ...f, text: theirs } : f)),
+    });
+
+    const vm = projectComponent.viewModel({ project: app.getState().project });
+    assert.strictEqual(vm.editorValue, mine, 'the human keeps the box');
+    assert.strictEqual(vm.conflict, theirs, 'the incoming version is offered, not discarded');
+    assert.match(serialize(container), /js-conflict/, 'and the notice renders');
+
+    // taking theirs drops the buffer, so the incoming text is what shows
+    app.dispatch('project/buffer-accept');
+    assert.strictEqual(
+      projectComponent.viewModel({ project: app.getState().project }).editorValue, theirs);
+  });
+
+  it('a buffer for another file is ignored, and switching files drops it', () => {
+    const { app } = mountSite();
+    app.dispatch('project/buffer-text', null, { target: { value: 'scratch' } });
+    assert.strictEqual(app.getState().project.buffer.file, 'app.json');
+    app.dispatch('project/active', 'stats.query');
+    assert.strictEqual(app.getState().project.buffer, null, 'the buffer left with the file');
+    const vm = projectComponent.viewModel({ project: app.getState().project });
+    assert.strictEqual(vm.editorValue, app.getState().project.files[1].text,
+      'the newly active file shows its own committed text');
+  });
+});
+
 describe('commitProject — the edit-loop step', () => {
   const appFile = (state, body) => ({
     name: 'a.json', kind: 'app',

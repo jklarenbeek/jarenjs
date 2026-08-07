@@ -75,7 +75,23 @@ const shell = {
         ['span', { class: 'js-spacer' }],
         ['span', { class: 'js-linecount' }, ['text', '$.lineCount'], ' lines'],
       ],
-      editorTextarea({ value: '$.editorValue', action: 'project/file-text' }),
+      // a write landed on this file while the buffer was dirty: the human's
+      // text stays in the box, the incoming version stays one click away
+      { $if: ['$.conflict',
+        ['div', { class: 'js-conflict', role: 'status' },
+          ['span', {}, 'This file changed while you were editing — your text is kept.'],
+          ['button', {
+            type: 'button', class: 'js-conflict-take',
+            title: 'Discard your edit and take the version that arrived',
+            on: { click: 'project/buffer-accept' },
+          }, 'Take theirs'],
+        ],
+        ''] },
+      editorTextarea({
+        value: '$.editorValue',
+        action: 'project/file-text',
+        inputAction: 'project/buffer-text',
+      }),
       { $if: ['$.problemCount',
         ['div', { class: 'js-errorstrip', role: 'status' }, [{ $apply: '$.problems[*]' }]],
         ''] },

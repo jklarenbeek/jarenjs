@@ -11,6 +11,7 @@
 
 import { LAYOUT_DEFAULT } from '../project.js';
 import { describe, assembleArtifacts } from '../assemble.js';
+import { reconcileBuffer } from './host.js';
 import { KIND_BADGE } from './editor.js';
 
 /** The stage the active file drives. */
@@ -93,9 +94,25 @@ export function projectViewModel(state, options = {}) {
   // revision, new state) against
   const committed = (slice.mount && slice.mount.name === activeName) ? slice.mount : null;
 
-  const editorValue = activeFile ? activeFile.text : '';
+  // The editor's value is the typing BUFFER reconciled against the file's
+  // committed text, never the committed text alone: the buffer is what the
+  // user has typed but not yet committed (the commit lands on blur), and a
+  // controlled textarea must be reasserted with THAT or the renderer
+  // overwrites the user mid-edit. A write that lands on the file while the
+  // buffer is dirty keeps the human's text and surfaces the incoming
+  // version as a recoverable conflict — never a silent clobber, never a
+  // hidden write.
+  const committedText = activeFile ? activeFile.text : '';
+  const buffer = (slice.buffer !== null && slice.buffer !== undefined
+    && slice.buffer.file === activeName)
+    ? { text: slice.buffer.text, dirty: slice.buffer.dirty === true }
+    : { text: committedText, dirty: false };
+  const reconciled = reconcileBuffer(buffer, committedText);
+  const editorValue = reconciled.text;
   return {
     name: slice.name ?? 'Untitled project',
+    // the incoming text a conflicting write carried, or null
+    conflict: reconciled.conflict === null ? null : reconciled.conflict.incoming,
     layout: project.layout,
     // the splitter's committed handle position, as an integer percent for
     // aria-valuenow (the widget updates it live during a drag)
@@ -111,6 +128,6 @@ export function projectViewModel(state, options = {}) {
     problems,
     problemCount: problems.length,
     stage: deriveStage(project, activeMeta, results, revision, committed),
-    saveState: slice.dirty === true ? 'Unsaved ●' : 'Saved',
+    saveState: (slice.dirty === true || reconciled.dirty) ? 'Unsaved ●' : 'Saved',
   };
 }

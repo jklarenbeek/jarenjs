@@ -56,22 +56,13 @@ test('the mini-site routes internally and an editor commit re-validates before s
   await noOverflow(page, 'the mini-site document');
 
   // an invalid editor commit docks the coded error and keeps the old
-  // document live — the swap is atomic.
-  //
-  // The gesture is retried because the editor is a CONTROLLED input whose
-  // commit is blur-deferred: a render landing between the keystroke and
-  // the blur reasserts the document's (still stale) text, which clears
-  // the browser's dirty-value flag so `change` never fires and the edit
-  // is silently dropped. That is a real open defect on this surface —
-  // the buffer/document reconciliation `reconcileBuffer` exists for and
-  // is not yet wired — not a quirk of this assertion. Retrying keeps the
-  // atomic-swap contract under test without pretending the window is shut.
+  // document live — the swap is atomic. No retry: each keystroke publishes
+  // to the typing buffer, so the controlled reassert matches what was typed
+  // and a render mid-edit can no longer swallow the commit.
   const editor = page.locator('.js-editor-input');
-  await expect(async () => {
-    await editor.fill('{ "$app": "0.2", "view": [] }');
-    await editor.blur();
-    await expect(page.locator('.js-errorstrip')).toBeVisible({ timeout: 2000 });
-  }).toPass({ timeout: 15_000 });
+  await editor.fill('{ "$app": "0.2", "view": [] }');
+  await editor.blur();
+  await expect(page.locator('.js-errorstrip')).toBeVisible();
   await expect(mount).toContainText('How an order flows');
   await noOverflow(page, 'the error report');
 

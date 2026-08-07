@@ -20,6 +20,7 @@
  * docPath }] }` — the shape the IDE's docked error strip reads.
  */
 
+import { createWeakCache } from '@jarenjs/core/cache';
 import { JarenValidator } from '@jarenjs/validate';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { compileJsonQuery } from '@jarenjs/json';
@@ -103,7 +104,21 @@ function auditAppView(doc) {
 }
 
 /**
- * Validate ONE file against its kind's grammar.
+ * Verdicts keyed by the FILE OBJECT: validating an `app` compiles its view
+ * and renders a first frame, so re-deriving the IDE view model on every
+ * render (a theme toggle, a keystroke elsewhere) would recompile the whole
+ * project — measured at ~110ms for a charts app. Files are immutable here
+ * (every edit lands as a fresh object through the patch engine, and an
+ * untouched file keeps its identity), so reference identity is a sound —
+ * and free — cache key. The inner map keys the registry, because the same
+ * file validates differently under a different operator vocabulary.
+ * @type {ReturnType<typeof createWeakCache<object, Map<any, any>>>}
+ */
+const verdicts = createWeakCache();
+
+/**
+ * Validate ONE file against its kind's grammar. Memoized on the file's
+ * identity; pass a fresh object to force a re-check.
  * @param {{ name?: string, kind: string, text: string }} file
  * @param {{ operators?: { toOptions: () => any } }} [options] - a host
  *   operator registry for the `jslt`/`query` kinds (defaults to the
@@ -112,6 +127,23 @@ function auditAppView(doc) {
  *   errors: Array<{ code: string | null, message: string, docPath?: string }> }}
  */
 export function validateFile(file, options = {}) {
+  if (file === null || typeof file !== 'object') return validateFileUncached(file, options);
+  const byRegistry = verdicts.getOrCreate(file, () => new Map());
+  const registryKey = options.operators ?? null;
+  let verdict = byRegistry.get(registryKey);
+  if (verdict === undefined) {
+    verdict = validateFileUncached(file, options);
+    byRegistry.set(registryKey, verdict);
+  }
+  return verdict;
+}
+
+/**
+ * The validation itself — see `validateFile`, which memoizes it.
+ * @param {{ name?: string, kind: string, text: string }} file
+ * @param {{ operators?: { toOptions: () => any } }} [options]
+ */
+function validateFileUncached(file, options = {}) {
   const kind = file.kind;
   const registryOptions = options.operators ? options.operators.toOptions() : defaultRegistryOptions;
 

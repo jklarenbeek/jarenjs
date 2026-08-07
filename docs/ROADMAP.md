@@ -183,21 +183,6 @@ delete it or fix it.
   Chromium, Firefox and WebKit, plus composition-aware authoritative writes
   (defer during a composition, settle without losing the caret). Until then
   those behaviors are documented as browser-unproven.
-- [ ] **Wire the Studio IDE's editor buffer (`reconcileBuffer`)** — the project
-  editor is a CONTROLLED textarea whose commit is blur-deferred, so between a
-  keystroke and the blur the document is legitimately stale and the renderer's
-  controlled contract ("the passed value wins over a user edit") reasserts it.
-  Reasserting `value` clears the browser's dirty-value flag, so `change` never
-  fires and the typing is silently discarded — reproduced in Firefox by typing
-  while a debounced commit lands (observed: `input`, then a reassert of the old
-  text, no `change`, no error strip). `@jarenjs/studio`'s `reconcileBuffer`
-  policy is written and unit-tested for exactly this (clean buffer adopts, dirty
-  buffer keeps the human's text and surfaces the incoming write as a recoverable
-  conflict) but is NOT wired into the site. Wiring it means holding the typing
-  buffer in the slice and deriving `editorValue` from it; the open design
-  question is cost, since the view model revalidates every file per render and a
-  per-keystroke buffer patch would pay that on each key. Until it lands, an edit
-  can be lost whenever a render interleaves the keystroke and the blur.
 - [ ] **One-pane mobile switchers for the studios** — `@jarenjs/play` shows
   one pane at a time on a phone behind a segmented Examples · Editor · Result
   bar, and the shared keyboard seam (`--kb-inset`, the un-sticking header,

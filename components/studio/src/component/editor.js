@@ -14,7 +14,18 @@
  * spell/autocap/autocorrect off so a mobile keyboard does not rewrite
  * JSON keys). Tab-to-indent and the debounce live in the shell's edit
  * loop; the value is bound to the active file.
- * @param {{ value: any, action: string, rows?: number, readonly?: boolean }} options
+ *
+ * `inputAction` is load-bearing, not a convenience: this is a CONTROLLED
+ * textarea, and the renderer reasserts a control's authoritative value
+ * after every settled render. If the document only learned about an edit
+ * on `change` (blur), any render in between would rewrite the box with
+ * the still-stale text — and writing `.value` clears the browser's
+ * dirty-value flag, so `change` would then never fire and the typing
+ * would vanish. Publishing each keystroke to the typing buffer keeps the
+ * authoritative value equal to what the user typed, so the reassert is a
+ * no-op and the caret survives.
+ * @param {{ value: any, action: string, inputAction?: string, rows?: number,
+ *   readonly?: boolean }} options
  */
 export function editorTextarea(options) {
   return ['textarea', {
@@ -26,7 +37,9 @@ export function editorTextarea(options) {
     autocomplete: 'off',
     value: options.value,
     ...(options.readonly === true ? { readonly: '' } : {}),
-    on: { change: options.action },
+    on: options.inputAction === undefined
+      ? { change: options.action }
+      : { input: options.inputAction, change: options.action },
   }];
 }
 

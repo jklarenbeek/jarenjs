@@ -50,6 +50,12 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       mount: null,       // last-good { name, doc, revision } for the active app
       revision: 0,       // reboot key — bumps only on a structural change
       dirty: false,      // the editor has uncommitted text
+      // the editor's typing buffer ({ file, text, dirty } or null): every
+      // keystroke lands here, the commit lands on blur. It is what the
+      // controlled textarea is reasserted with, so a render mid-edit cannot
+      // overwrite the user; a write arriving on the same file while it is
+      // dirty raises a conflict instead of clobbering either side.
+      buffer: null,
       results: {},       // file name -> a run result (query/jslt: later order)
       stageError: null,  // the nested app's own boot/runtime failure, if any
     },

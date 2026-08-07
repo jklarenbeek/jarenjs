@@ -133,14 +133,44 @@ export const ACTIONS = {
   // JS — an array index a patch path cannot compute); the changed
   // `/project/files` feed then drives the debounced commit
   // (`project/committed`) that folds in the last-good app stage.
-  'project/file-text': { effects: [{ run: 'project-edit', with: { text: '$event.value' } }] },
+  // every keystroke publishes to the typing buffer. This is what the
+  // CONTROLLED editor is reasserted with: without it a render between the
+  // keystroke and the blur would rewrite the box with the still-stale
+  // committed text, clearing the browser's dirty-value flag so the commit
+  // never fires and the typing is lost. Cheap by construction — it touches
+  // no file, so nothing revalidates.
+  'project/buffer-text': {
+    patch: [{
+      op: 'replace',
+      path: '/project/buffer',
+      value: { file: '$.project.active', text: '$event.value', dirty: true },
+    }],
+  },
+  // resolve a conflict the human's way round: drop the buffer, so the
+  // incoming (committed) text is what the editor shows
+  'project/buffer-accept': {
+    patch: [{ op: 'replace', path: '/project/buffer', value: null }],
+  },
+  // the commit (blur): the buffer has served its purpose, so it clears
+  // here — on the HUMAN's own commit, never on `project/files-set`, which
+  // is also how an AI write lands and must not drop a dirty buffer
+  'project/file-text': {
+    patch: [{ op: 'replace', path: '/project/buffer', value: null }],
+    effects: [{ run: 'project-edit', with: { text: '$event.value' } }],
+  },
   'project/files-set': {
     patch: [
       { op: 'replace', path: '/project/files', value: '$payload.files' },
       { op: 'replace', path: '/project/dirty', value: true },
     ],
   },
-  'project/active': { patch: [{ op: 'replace', path: '/project/active', value: '$payload' }] },
+  // switching files drops the buffer: it belongs to the file you left
+  'project/active': {
+    patch: [
+      { op: 'replace', path: '/project/active', value: '$payload' },
+      { op: 'replace', path: '/project/buffer', value: null },
+    ],
+  },
   // the debounced boundary reports the last-good app mount + reboot
   // revision (an invalid edit keeps the previous — the stage never blanks)
   'project/committed': {
@@ -169,6 +199,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/project/files', value: '$payload.files' },
       { op: 'replace', path: '/project/active', value: '$payload.active' },
       { op: 'replace', path: '/project/dirty', value: true },
+      { op: 'replace', path: '/project/buffer', value: null },
     ],
   },
   'project/structural': {
@@ -178,6 +209,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/project/mount', value: null },
       { op: 'replace', path: '/project/results', value: {} },
       { op: 'replace', path: '/project/dirty', value: true },
+      { op: 'replace', path: '/project/buffer', value: null },
     ],
   },
   // the nested app's own boot/runtime failure (the stage widget emits it)
@@ -195,6 +227,7 @@ export const ACTIONS = {
       { op: 'replace', path: '/project/dirty', value: false },
       { op: 'replace', path: '/project/results', value: {} },
       { op: 'replace', path: '/project/stageError', value: null },
+      { op: 'replace', path: '/project/buffer', value: null },
     ],
   },
   'project/template': { effects: [{ run: 'project-template', with: { id: '$payload' } }] },

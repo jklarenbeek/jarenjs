@@ -122,6 +122,21 @@
   font-family: var(--mono, monospace); font-size: 0.85rem;
   padding: var(--space-2, 0.5rem); color: var(--fg, #0f172a); background: var(--surface, #fff);
 }
+/* a write landed while the buffer was dirty — the human's text is kept and
+   the incoming version stays one click away (never a silent clobber) */
+.js-conflict {
+  display: flex; align-items: center; gap: var(--space-2, 0.5rem); flex-wrap: wrap;
+  border: 1px solid var(--warn, #b45309); border-left-width: 4px;
+  border-radius: var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0;
+  background: var(--warn-soft, #fffbeb); color: var(--warn, #b45309);
+  padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem); font-size: 0.8rem;
+}
+.js-conflict-take {
+  border: 1px solid var(--warn, #b45309); background: transparent; cursor: pointer;
+  color: var(--warn, #b45309); border-radius: var(--radius-sm, 6px);
+  padding: 1px 8px; font-size: 0.75rem;
+}
+
 .js-errorstrip {
   display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2, 0.5rem);
 }

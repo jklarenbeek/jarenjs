@@ -90,3 +90,33 @@ describe('schema / fsm / dag / model — their own grammar', () => {
     assert.match(r.errors[0].message, /unknown file kind/);
   });
 });
+
+describe('memoized on file identity', () => {
+  it('re-validating the SAME object is cached; a fresh object re-checks', () => {
+    const f = file('app', {
+      state: {}, view: [{ match: '$', body: ['p', {}, 'x'] }], actions: {},
+    });
+    const first = validateFile(f);
+    assert.strictEqual(validateFile(f), first,
+      'the same file object returns the identical verdict (no recompile)');
+
+    // an edit produces a NEW object, so the verdict must be recomputed —
+    // the cache keys identity, never content
+    const edited = { ...f, text: '{ not json' };
+    const after = validateFile(edited);
+    assert.notStrictEqual(after, first);
+    assert.strictEqual(after.valid, false, 'the edited file really was re-checked');
+  });
+
+  it('the same file under a different operator registry is checked separately', () => {
+    const f = file('query', { v: { $npv: ['$.r', '$.f[*]'] } });
+    // the default registry mounts the finance pack, so $npv resolves
+    assert.strictEqual(validateFile(f).valid, true);
+    // an EMPTY registry does not — a cache keyed on the file alone would
+    // wrongly hand back the permissive verdict
+    const bare = createJsltRegistry();
+    assert.strictEqual(validateFile(f, { operators: bare }).valid, false,
+      '$npv is unknown without the finance pack');
+    assert.strictEqual(validateFile(f).valid, true, 'and the default verdict is intact');
+  });
+});

@@ -53,7 +53,12 @@ split real; it extends `sourceFiles` without changing the contract.
   (envelope-gate + normalize), `fileOf`.
 - `src/validate.js` — `validateFile`: per-kind dispatch; the composed app
   meta-schema + a headless render audit; jslt/query compiled with the
-  operator packs.
+  operator packs. Memoized on the file's IDENTITY (a `createWeakCache`
+  from `@jarenjs/core/cache`, keyed inside by registry): validating an
+  app compiles its view and renders a frame, so re-deriving the view
+  model per render would recompile the whole project — measured at ~110ms
+  for a charts app, ~0.001ms cached. Files are immutable, so identity is
+  a sound key; pass a fresh object to force a re-check.
 - `src/assemble.js` — `assembleArtifacts`, `classifyChange`, `describe`.
 - `src/errors.js` — `StudioError` on `@jarenjs/core`'s coded base;
   `STUDIO_CODES` (JS0001/JS0002).
@@ -68,10 +73,17 @@ split real; it extends `sourceFiles` without changing the contract.
 - `src/component/viewmodel.js` — `projectViewModel(state)`: the pure
   derivation from the engine (`describe`/`assemble`) — the rail, the
   active editor, the error strip, the stage (an app mount, a run result,
-  or an inert note).
+  or an inert note). The editor's value is the typing BUFFER reconciled
+  against the committed text, never the committed text alone: the box is
+  a CONTROLLED textarea, so whatever this derives is what the renderer
+  reasserts after every settled pass, and deriving the (blur-deferred,
+  therefore stale) file text would overwrite the user mid-keystroke.
 - `src/component/host.js` — the two hard-problem policies, pure:
   `hostPolicy` (reboot vs. hot-update, from `classifyChange`) and
-  `reconcileBuffer` (editor buffer ↔ document).
+  `reconcileBuffer` (editor buffer ↔ document), both consumed live — the
+  first by the stage widget, the second by the derivation above. A write
+  arriving on a file whose buffer is dirty keeps the human's text and
+  offers the incoming version as a conflict; neither side is dropped.
 - `src/component/editor.js` — the baseline editor/rail vnode primitives +
   the concrete kind-badge map (colours in `styles/studio.css`).
 - `styles/studio.css` — the three-mode grid, rail, editor, error strip,

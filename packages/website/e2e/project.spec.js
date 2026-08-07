@@ -82,6 +82,31 @@ test('an invalid edit keeps the last good frame and docks the coded error', asyn
   await expect(mount.locator('h1')).toHaveText('Hello from the studio');
 });
 
+test('a render landing mid-edit does not swallow the keystrokes (real dirty-value flag)', async ({ page }) => {
+  await page.goto('/#/project');
+  const editor = page.locator('.js-editor-input');
+  await expect(editor).toBeVisible();
+
+  // Opening a template schedules a DEBOUNCED commit. Typing straight after
+  // it — as a user does — puts a render squarely inside the window between
+  // the keystroke and the blur. The render must not steal focus, or the
+  // blur would commit first and hide the defect, so this cannot be faked
+  // with a click on some other control.
+  await page.locator('.js-template', { hasText: 'Welcome' }).click();
+  const doc = await editorDoc(page);
+  doc.state.title = 'SURVIVES A RENDER';
+  await editor.fill(JSON.stringify(doc, null, 2));
+  await page.waitForTimeout(700); // the debounced commit lands mid-edit
+
+  // the reassert used to rewrite the box here, which also clears the
+  // browser's dirty-value flag — so the blur below fired no `change` at
+  // all and the typing vanished without a trace
+  await expect(editor).toHaveValue(/SURVIVES A RENDER/);
+
+  await editor.blur();
+  await expect(page.locator('.js-stage-mount h1')).toHaveText('SURVIVES A RENDER');
+});
+
 test('a query file runs live against its data file — the shared transform runners, folded in', async ({ page }) => {
   await page.goto('/#/project');
   // the starter is a multi-file project: switch to the query in the rail
