@@ -100,6 +100,13 @@ export function playViewModel(state) {
   const names = Array.isArray(s.names) ? s.names : [];
   const ratio = typeof s.ratio === 'number' ? s.ratio : 0.5;
 
+  // the generated-form half (PLAY_05b): the validate engine's data pane can
+  // swap the JSON textarea for a schema-generated form. The form tree itself
+  // (`dataForm`) is host-supplied (it needs @jarenjs/forms) — the package only
+  // decides WHEN to show it.
+  const hasForm = engineId === 'validate';
+  const dataView = s.dataView === 'form' ? 'form' : 'json';
+
   return {
     engine: { id: engineId, label: engine?.label ?? engineId, lead: engine?.lead ?? '' },
     active: active ? { id: active.id, label: active.label } : null,
@@ -118,5 +125,9 @@ export function playViewModel(state) {
     shared: s.shared ?? null,
     ratio,
     ratioPct: String(Math.round(ratio * 100)),
+    // the form/JSON toggle (validate only); `showForm` gates the form seam
+    hasForm,
+    dataView,
+    showForm: hasForm && dataView === 'form',
   };
 }

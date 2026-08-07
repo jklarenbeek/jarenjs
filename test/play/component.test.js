@@ -54,6 +54,15 @@ describe('playViewModel', () => {
     assert.strictEqual(vm.hasSwitcher, false);
   });
 
+  it('exposes the validate form/JSON toggle (hasForm/dataView/showForm)', () => {
+    assert.strictEqual(playViewModel(state({ engine: 'path' })).hasForm, false, 'non-validate has no toggle');
+    const json = playViewModel(state({ engine: 'validate', dataView: 'json' }));
+    assert.strictEqual(json.hasForm, true);
+    assert.strictEqual(json.showForm, false, 'JSON mode does not show the form seam');
+    const form = playViewModel(state({ engine: 'validate', dataView: 'form' }));
+    assert.strictEqual(form.showForm, true, 'form mode shows the form seam');
+  });
+
   it('derives option panes with the selected value (a source-only engine)', () => {
     const vm = playViewModel(state({
       engine: 'josl', exampleId: 'josl-toml', source: { text: 'x = 1\n' },

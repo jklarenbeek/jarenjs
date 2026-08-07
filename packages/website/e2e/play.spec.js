@@ -134,6 +134,23 @@ test('the JSON Schema engine validates on the stage (verdict note + errors table
   await expect(page.locator('.jplay-options select')).toBeVisible();
 });
 
+test('the validate data pane toggles to a generated form and edits re-validate', async ({ page }) => {
+  await page.goto('/#/play');
+  await page.locator('.jplay-ex', { hasText: 'User' }).first().click();
+  await expect(page.locator('.jplay-engine')).toHaveText('JSON Schema');
+  // toggle JSON → the schema-generated form
+  await page.locator('.jplay-dataview .seg-btn', { hasText: 'Form' }).click();
+  await expect(page.locator('.jplay-form')).toBeVisible();
+  const firstField = page.locator('.jplay-form input[type="text"]').first();
+  await expect(firstField).toBeVisible();
+  await firstField.fill('Zed'); // a form edit mirrors to the data + re-validates
+  await expect(page.locator('.jplay-note')).toContainText('valid');
+  // back to JSON: the edit is reflected in the DATA textarea's value (the last
+  // editor; the schema is the first)
+  await page.locator('.jplay-dataview .seg-btn', { hasText: 'JSON' }).click();
+  await expect(page.locator('.jplay-editors textarea').last()).toHaveValue(/Zed/);
+});
+
 test('a visual engine (mermaid) renders an SVG diagram on the stage', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'Flowchart' }).click();

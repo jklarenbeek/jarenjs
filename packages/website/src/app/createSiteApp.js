@@ -342,6 +342,18 @@ export function createSiteApp(env) {
       playStore.remove(props.name);
       dispatch('play/names', playStore.names());
     },
+    // toggle the validate data pane between JSON and the generated form;
+    // entering form mode seeds the structured buffer from the current text
+    'play-data-view': (props, dispatch) => {
+      const view = props.view === 'form' ? 'form' : 'json';
+      let value = app.getState().play.dataValue;
+      if (view === 'form') {
+        const text = app.getState().play.data?.data ?? '';
+        try { value = JSON.parse(text.trim() === '' ? 'null' : text); }
+        catch { value = null; } // an unparseable text opens an empty form
+      }
+      dispatch('play/data-view-set', { view, value });
+    },
     'play-share': (props, dispatch) => {
       const token = encodeShare(sessionOf(app.getState().play));
       if (token.length > SHARE_TOKEN_LIMIT) {
@@ -553,6 +565,8 @@ function wireBoundaries(app, debounceMs, navigate) {
     let routed = false;
     let project = false;
     let play = false;
+    let playFormEdit = false; // a /play/dataValue* edit (from the generated form)
+    let playToggle = false;   // the /play/dataView toggle (json ↔ form)
     for (const path of changes) {
       if (path === '/pg/schemaText' || path === '/pg/data' || path.startsWith('/pg/data/')) {
         validate = true;
@@ -567,8 +581,13 @@ function wireBoundaries(app, debounceMs, navigate) {
       // re-runs; the run's own output and the pure IDE chrome (the active
       // tab, the session name/list, the share status, the split ratio) must
       // NOT, or it loops / re-runs on every keystroke and drag
-      else if (path.startsWith('/play/') && !PLAY_CHROME_PATHS.has(path)) {
-        play = true;
+      else if (path.startsWith('/play/')) {
+        // the generated form writes into /play/dataValue*; that mirrors back
+        // to the data TEXT (below), which is what actually re-validates — so
+        // a form edit must not itself re-run
+        if (path === '/play/dataView') playToggle = true;
+        else if (path === '/play/dataValue' || path.startsWith('/play/dataValue/')) playFormEdit = true;
+        else if (!PLAY_CHROME_PATHS.has(path)) play = true;
       }
       else if (path === '/route') {
         routed = true;
@@ -577,6 +596,13 @@ function wireBoundaries(app, debounceMs, navigate) {
     if (validate) debounced('validate', runValidate);
     if (project) debounced('project', () => { runProjectCommit(); runProjectActive(); });
     if (play) debounced('play', runPlayLive);
+    // a generated-form edit (not the toggle, which sets the buffer from the
+    // text) serializes the structured buffer back into the data-pane text —
+    // that `/play/data/data` change then re-validates through the normal run
+    if (playFormEdit && !playToggle) {
+      const value = app.getState().play.dataValue;
+      app.dispatch('play/data-mirror', value === null ? '' : JSON.stringify(value, null, 2));
+    }
     for (const engine of engines) {
       debounced(`eng:${engine}`, () => {
         runEng(engine);

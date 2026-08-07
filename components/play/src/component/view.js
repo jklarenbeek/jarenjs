@@ -61,7 +61,19 @@ const shell = {
       { $if: ['$.hasSwitcher',
         ['div', { class: 'jplay-datasets seg', role: 'group', 'aria-label': 'dataset' }, [{ $apply: '$.datasets[*]' }]],
         ''] },
-      [{ $apply: '$.dataPanes[*]' }],
+      // the validate engine offers a JSON ↔ generated-form toggle on its data
+      { $if: ['$.hasForm',
+        ['div', { class: 'jplay-dataview seg', role: 'group', 'aria-label': 'data view' },
+          ['button', { type: 'button', class: { $if: [{ $eq: ['$.dataView', 'json'] }, 'seg-btn active', 'seg-btn'] },
+            on: { click: { action: 'play/data-view', with: 'json' } } }, 'JSON'],
+          ['button', { type: 'button', class: { $if: [{ $eq: ['$.dataView', 'form'] }, 'seg-btn active', 'seg-btn'] },
+            on: { click: { action: 'play/data-view', with: 'form' } } }, 'Form'],
+        ], ''] },
+      // form mode → the host-supplied generated form (a two-way seam); else
+      // the JSON data editor(s)
+      { $if: ['$.showForm',
+        ['div', { class: 'jplay-form' }, { $apply: ['$.dataForm', PLAY_MODE] }],
+        [{ $apply: '$.dataPanes[*]' }]] },
     ],
     // ——— the editors|result splitter (a pointer-capture widget; its host
     // IS the grab bar — drives --jplay-ratio live, commits on pointer-up) ———

@@ -46,6 +46,11 @@ export const PLAY_START = Object.freeze({
   names: [],       // the saved session names (seeded from the play doc-store)
   shared: null,    // the last Share status line (or null)
   ratio: 0.5,      // the editors|result split (the shared splitter widget)
+  // the generated-form half (PLAY_05b): the validate engine's data pane can
+  // toggle between the JSON textarea and a schema-generated form; `dataValue`
+  // is the structured buffer the form edits, mirrored back to the data text
+  dataView: 'json', // 'json' | 'form'
+  dataValue: null,  // the parsed data the form binds to (validate + form only)
 });
 
 /**

@@ -132,7 +132,15 @@ export function viewModel(state) {
   if (page === 'project') {
     ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
   }
-  if (page === 'play') ui.play = playComponent.viewModel({ play: state.play });
+  if (page === 'play') {
+    ui.play = playComponent.viewModel({ play: state.play });
+    // the validate engine's data pane can toggle to a schema-generated form;
+    // the form tree is built here (it needs @jarenjs/forms, a host dep) from
+    // the schema source + the structured buffer, and mounted at `dataForm`
+    if (state.play.engine === 'validate' && state.play.dataView === 'form') {
+      ui.play.dataForm = formViewFor(state.play.source?.schema ?? '', state.play.dataValue);
+    }
+  }
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);
   if (page === 'game') ui.game = gamePageViewModel(state.game);
   if (page === 'data') ui.data = dataViewModel(state);

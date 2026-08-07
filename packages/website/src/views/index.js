@@ -74,5 +74,15 @@ export const STYLESHEET = {
         json: 'flow/f-json', add: 'flow/f-add', remove: 'flow/f-remove',
       },
     }).map((rule) => ({ ...rule, mode: 'flow' })),
+    // the Play validate engine's generated form (PLAY_05b): the same stylesheet
+    // in the `play` mode, writing through play-scoped form actions into
+    // /play/dataValue (mirrored back to the data text, which re-validates)
+    ...createFormView({
+      root: '$.ui.play.dataForm',
+      actions: {
+        input: 'play/f-input', check: 'play/f-check', number: 'play/f-number',
+        json: 'play/f-json', add: 'play/f-add', remove: 'play/f-remove',
+      },
+    }).map((rule) => ({ ...rule, mode: 'play' })),
   ],
 };

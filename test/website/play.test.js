@@ -163,6 +163,31 @@ describe('website — the Play playground (#/play)', () => {
     assert.ok(s2.result.panels[1].rows.length >= 1, 'at least one error row');
   });
 
+  it('the validate data pane toggles to a two-way generated form: an edit mirrors to the data and re-validates', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'User'), 'click', {});
+    assert.strictEqual(app.getState().play.dataView, 'json', 'starts in JSON mode');
+
+    // toggle to the generated form; the structured buffer parses from the text
+    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+    const s = app.getState().play;
+    assert.strictEqual(s.dataView, 'form', 'switched to form mode');
+    assert.strictEqual(s.dataValue?.name, 'Ada', 'the form buffer parsed from the data text');
+
+    const formEl = find(playRoot(container), (n) => (n.getAttribute?.('class') ?? '').split(' ').includes('jplay-form'));
+    assert.ok(formEl, 'the generated form rendered in place of the JSON editor');
+    const textInput = find(formEl, (n) => n.tagName === 'input' && (n.getAttribute?.('type') ?? 'text') === 'text');
+    assert.ok(textInput, 'the form has a text field');
+
+    // editing a field writes the structured buffer, which mirrors back to the
+    // data TEXT and re-validates
+    const dataTextBefore = app.getState().play.data.data;
+    fire(textInput, 'input', { target: { value: 'Zed' } });
+    const after = app.getState().play;
+    assert.notStrictEqual(after.data.data, dataTextBefore, 'the form edit mirrored back into the data text');
+    assert.strictEqual(after.result.ok, true, 'the edit re-validated live');
+  });
+
   it('the locale option localizes the validation messages', () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});

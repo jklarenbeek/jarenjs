@@ -366,8 +366,30 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/result', value: null },
       { op: 'replace', path: '/play/panel', value: null },
       { op: 'replace', path: '/play/shared', value: null },
+      { op: 'replace', path: '/play/dataView', value: 'json' },
+      { op: 'replace', path: '/play/dataValue', value: null },
     ],
   },
+
+  // PLAY_05b — the validate engine's data pane toggles JSON ↔ a generated form.
+  // Switching to the form parses the current text into the structured buffer
+  // (a host effect); a form edit mirrors the buffer back to the text, which
+  // re-validates. The buffer + toggle are excluded from the re-run trigger.
+  'play/data-view': { effects: [{ run: 'play-data-view', with: { view: '$payload' } }] },
+  'play/data-view-set': { patch: [
+    { op: 'replace', path: '/play/dataView', value: '$payload.view' },
+    { op: 'replace', path: '/play/dataValue', value: '$payload.value' },
+  ] },
+  'play/data-mirror': { patch: [{ op: 'add', path: '/play/data/data', value: '$payload' }] },
+  // the six standard form actions, writing into `/play/dataValue` — mirrored
+  // from @jarenjs/app's createFormActions, but with play-scoped names so they
+  // do not collide with the old playground's `form/*` set (bound to /pg/data)
+  'play/f-input': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.value' }] },
+  'play/f-check': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.checked' }] },
+  'play/f-number': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] } }] },
+  'play/f-json': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.formJsonValue' }] },
+  'play/f-add': { patch: [{ op: 'add', path: { $concat: ['/play/dataValue', '$payload.pointer', '/-'] }, value: '$payload.value' }] },
+  'play/f-remove': { patch: [{ op: 'remove', path: { $concat: ['/play/dataValue', '$payload.pointer'] } }] },
 
   // the data studio (boundaries/data.js): boot the owner worker, edit
   // the model/query panes, run + explain, insert, live-event, migrate.
