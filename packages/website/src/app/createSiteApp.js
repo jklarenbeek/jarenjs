@@ -523,8 +523,9 @@ function wireBoundaries(app, debounceMs, navigate) {
         project = true;
       }
       // any Play input (source / data / example / dataset) re-runs; the
-      // run's own output (`/play/result`) must NOT, or it loops forever
-      else if (path.startsWith('/play/') && path !== '/play/result') {
+      // run's own output (`/play/result`) and a pure tab switch
+      // (`/play/panel`) must NOT, or it loops / re-runs on every click
+      else if (path.startsWith('/play/') && path !== '/play/result' && path !== '/play/panel') {
         play = true;
       }
       else if (path === '/route') {

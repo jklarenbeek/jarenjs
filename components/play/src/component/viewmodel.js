@@ -11,6 +11,48 @@ import { ENGINES, EXAMPLES } from '../index.js';
 const formatMs = (ms) => (typeof ms !== 'number' ? '—' : ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`);
 
 /**
+ * Shape one panel for the view: kind flags for the `$if` dispatch plus the
+ * per-kind content (a `table` becomes column/cell records the JSLT can walk).
+ */
+function shapePanel(p) {
+  const kind = p.kind;
+  const base = {
+    id: p.id, label: p.label ?? p.id, kind,
+    isCode: kind === 'code', isView: kind === 'view', isTable: kind === 'table', isNote: kind === 'note',
+  };
+  if (kind === 'view') return { ...base, vnode: p.vnode ?? null };
+  if (kind === 'note') return { ...base, text: p.text ?? '', noteClass: `jplay-note ${p.tone ?? 'info'}` };
+  if (kind === 'table') return {
+    ...base,
+    columns: (p.columns ?? []).map((label) => ({ label: String(label) })),
+    rows: (p.rows ?? []).map((cells) => ({ cells: (cells ?? []).map((text) => ({ text: String(text) })) })),
+  };
+  return { ...base, text: p.text ?? '' }; // code
+}
+
+/**
+ * Derive the run result for the stage. `panels` becomes a tab strip (when
+ * >1) plus the single ACTIVE panel body. The active panel is the one the
+ * host asked for (`state.play.panel`) when it still exists in this result,
+ * else the first — so a fresh result with different screens never strands
+ * the view on a tab that is gone.
+ */
+function deriveResult(r, wantedId) {
+  const panels = Array.isArray(r.panels) ? r.panels : [];
+  const activeId = panels.some((p) => p.id === wantedId) ? wantedId : (panels[0]?.id ?? null);
+  const active = panels.find((p) => p.id === activeId) ?? null;
+  return {
+    ran: true,
+    ok: r.ok === true,
+    error: r.error ? { code: r.error.code ?? '', message: r.error.message ?? '' } : null,
+    timing: r.timing ? `compiled ${formatMs(r.timing.compileMs)} · ran ${formatMs(r.timing.runMs)}` : null,
+    tabbed: panels.length > 1,
+    tabs: panels.map((p) => ({ id: p.id, label: p.label ?? p.id, active: p.id === activeId })),
+    activePanel: active ? shapePanel(active) : null,
+  };
+}
+
+/**
  * @param {{ play?: any }} state
  * @returns {any}
  */
@@ -52,18 +94,7 @@ export function playViewModel(state) {
   const datasets = (active?.datasets ?? []).map((ds, i) => ({ index: i, label: ds.label, active: i === datasetIndex }));
 
   const r = s.result ?? null;
-  const result = r === null ? { ran: false } : {
-    ran: true,
-    ok: r.ok === true,
-    // a visual engine (markdown/mermaid/charts) yields a `view` vnode and no
-    // text; a text engine yields `output` and no view — guard each with a bool
-    output: r.output ?? '',
-    hasText: (r.output ?? '') !== '',
-    view: r.view ?? null,
-    hasView: r.view != null,
-    error: r.error ? { code: r.error.code ?? '', message: r.error.message ?? '' } : null,
-    timing: r.timing ? `compiled ${formatMs(r.timing.compileMs)} · ran ${formatMs(r.timing.runMs)}` : null,
-  };
+  const result = r === null ? { ran: false } : deriveResult(r, s.panel);
 
   return {
     engine: { id: engineId, label: engine?.label ?? engineId, lead: engine?.lead ?? '' },

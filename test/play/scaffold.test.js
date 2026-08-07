@@ -22,7 +22,7 @@ describe('@jarenjs/play — scaffold', () => {
   it('runExample returns an error Result for an unknown engine — never throws', () => {
     const r = runExample('nope', { selector: '$' }, { data: '{}' });
     assert.strictEqual(r.ok, false);
-    assert.strictEqual(r.output, '');
+    assert.deepStrictEqual(r.panels, [], 'an error Result carries no panels');
     assert.strictEqual(r.timing, null);
     assert.match(r.error.message, /unknown engine/);
   });

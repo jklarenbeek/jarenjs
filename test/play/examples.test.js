@@ -39,9 +39,11 @@ describe('@jarenjs/play — the example library', () => {
       for (const ds of runs) {
         const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config, renderers });
         assert.strictEqual(r.ok, true, `${ex.id} / ${ds.label}: ${r.error?.message}`);
-        // a visual engine yields a rendered vnode; a text engine yields text
-        if (ENGINES[ex.engine].dataPanes.length === 0 && r.view != null) assert.ok(Array.isArray(r.view));
-        else assert.ok(r.output.length > 0);
+        // a visual engine yields a rendered `view` vnode; every other engine
+        // yields at least one non-empty text (or table) panel
+        const viewPanel = r.panels.find((p) => p.kind === 'view');
+        if (viewPanel) assert.ok(Array.isArray(viewPanel.vnode), `${ex.id}: a rendered vnode`);
+        else assert.ok(r.panels.some((p) => (p.text ?? '').length > 0 || (p.rows ?? []).length > 0), `${ex.id}: a non-empty panel`);
       }
     }
   });

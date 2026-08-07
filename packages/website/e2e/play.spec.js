@@ -1,11 +1,12 @@
 //@ts-check
 /**
- * @file The Scratch playground (`#/play`) in a real browser: the seeded
+ * @file The Play playground (`#/play`) in a real browser: the seeded
  * JSONPath example runs LIVE on the stage, editing the selector re-runs,
  * picking an example loads its source + data (the `$mean` one proves the
  * registered stats pack is threaded in), the dataset switcher swaps the
- * data against the SAME source, and a broken selector docks an error
- * instead of crashing. Plus the surface fits the viewport, light and dark.
+ * data against the SAME source, a CSV example shows its multi-panel result
+ * behind a tab strip, and a broken selector docks an error instead of
+ * crashing. Plus the surface fits the viewport, light and dark.
  */
 import { test, expect } from '@playwright/test';
 
@@ -74,6 +75,24 @@ test('a source-only engine (JOSL) toggles its dialect live via the option select
   // flip the mode select to strict TOML → the JOSL null extension is rejected
   await page.locator('.jplay-options select').selectOption('toml');
   await expect(page.locator('.error-line')).toBeVisible();
+});
+
+test('a CSV example shows a multi-panel result behind a tab strip', async ({ page }) => {
+  await page.goto('/#/play');
+  await page.locator('.jplay-ex', { hasText: 'RFC 4180' }).click();
+  await expect(page.locator('.jplay-engine')).toHaveText('CSV');
+  // more than one screen → a tab strip; the summary note is active first
+  const tabs = page.locator('.jplay-tabs');
+  await expect(tabs).toBeVisible();
+  await expect(page.locator('.jplay-note')).toBeVisible();
+  // the parsed-table tab → a real <table>, and the note is gone
+  await tabs.locator('.seg-btn', { hasText: 'Rows' }).click();
+  await expect(page.locator('.jplay-table')).toBeVisible();
+  await expect(page.locator('.jplay-note')).toHaveCount(0);
+  // the round-trip tab → a code block (the re-emitted CSV)
+  await tabs.locator('.seg-btn', { hasText: 'CSV round-trip' }).click();
+  await expect(page.locator('.jplay-result .code-block')).toBeVisible();
+  await noOverflow(page, 'the CSV multi-panel result');
 });
 
 test('a visual engine (mermaid) renders an SVG diagram on the stage', async ({ page }) => {

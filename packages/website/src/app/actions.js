@@ -314,6 +314,8 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/data', value: '$payload.data' },
       { op: 'replace', path: '/play/config', value: '$payload.config' },
       { op: 'replace', path: '/play/result', value: null },
+      // a new engine's result has different screens; drop any stale tab
+      { op: 'replace', path: '/play/panel', value: null },
     ],
   },
   'play/source': {
@@ -334,6 +336,8 @@ export const ACTIONS = {
     ],
   },
   'play/result': { patch: [{ op: 'replace', path: '/play/result', value: '$payload' }] },
+  // select a result screen — a pure view switch; the run loop ignores it
+  'play/panel': { patch: [{ op: 'replace', path: '/play/panel', value: '$payload' }] },
 
   // the data studio (boundaries/data.js): boot the owner worker, edit
   // the model/query panes, run + explain, insert, live-event, migrate.

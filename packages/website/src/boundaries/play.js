@@ -38,6 +38,7 @@ export const PLAY_START = Object.freeze({
   data: { ...(first.datasets[0]?.data ?? {}) },
   config: { ...(first.config ?? {}) },
   result: null,
+  panel: null, // the active result panel (tab) id; null → the first panel
 });
 
 /** Run the active engine over the current source + data (operators, option config, visual renderers). */

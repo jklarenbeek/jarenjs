@@ -57,6 +57,26 @@
 .jplay-timing { font-size: 0.75rem; margin: 0 0 var(--space-2, 0.5rem); }
 .jplay-hint { padding: var(--space-3, 0.75rem); }
 
+/* ——— multi-panel results: a tab strip (host .seg/.seg-btn) + panel bodies ——— */
+.jplay-tabs { align-self: flex-start; flex-wrap: wrap; margin-bottom: var(--space-2, 0.5rem); }
+/* a `note` panel — a callout, tone-coloured, repair lines on their own line */
+.jplay-note {
+  margin: 0; padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border-left: 3px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 8px);
+  background: var(--surface, #f8fafc); font-size: 0.85rem; white-space: pre-line;
+}
+.jplay-note.ok { border-left-color: var(--ok, #16a34a); background: var(--ok-soft, #f0fdf4); }
+.jplay-note.warn { border-left-color: var(--warn, #d97706); background: var(--warn-soft, #fffbeb); }
+.jplay-note.info { border-left-color: var(--accent, #2563eb); background: var(--accent-soft, #eff6ff); }
+/* a `table` panel — a scrollable bordered grid with a sticky header */
+.jplay-table-wrap { overflow-x: auto; }
+.jplay-table { border-collapse: collapse; font-size: 0.8rem; font-family: var(--mono, monospace); }
+.jplay-table th, .jplay-table td {
+  border: 1px solid var(--border, #e2e8f0); padding: 2px var(--space-2, 0.5rem);
+  text-align: left; white-space: nowrap;
+}
+.jplay-table th { position: sticky; top: 0; background: var(--surface, #f8fafc); color: var(--fg, #0f172a); }
+
 @media (max-width: 1024px) {
   .jplay {
     grid-template-columns: minmax(0, 1fr);

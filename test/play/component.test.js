@@ -17,7 +17,7 @@ const state = (over = {}) => ({
     engine: 'path', exampleId: 'path-shapes',
     source: { selector: '$..name' }, datasetIndex: 1,
     data: { data: '{"people":[{"name":"Ada"},{"name":"Alan"}]}' },
-    result: { ok: true, output: '["Ada","Alan"]', timing: { compileMs: 0.1, runMs: 0.2 }, error: null },
+    result: { ok: true, panels: [{ id: 'out', label: 'Output', kind: 'code', text: '["Ada","Alan"]' }], timing: { compileMs: 0.1, runMs: 0.2 }, error: null },
     ...over,
   },
 });
@@ -71,12 +71,47 @@ describe('playViewModel', () => {
     assert.strictEqual(vm.optionPanes[0].choices.find((c) => c.selected).value, 'josl', 'the default');
   });
 
-  it('marks a visual result as hasView (a vnode) with no text', () => {
+  it('a single-panel result is not tabbed; the active panel is that one panel', () => {
+    const vm = playViewModel(state());
+    assert.strictEqual(vm.result.tabbed, false, 'one panel → no tab strip');
+    assert.strictEqual(vm.result.tabs.length, 1);
+    assert.strictEqual(vm.result.activePanel.isCode, true);
+    assert.strictEqual(vm.result.activePanel.text, '["Ada","Alan"]');
+  });
+
+  it('shapes a visual result as a single view panel (a vnode, no code)', () => {
     const vm = playViewModel(state({
-      result: { ok: true, output: '', view: ['svg', {}, 'x'], timing: { compileMs: 0.1, runMs: 0 }, error: null },
+      result: { ok: true, panels: [{ id: 'preview', label: 'Preview', kind: 'view', vnode: ['svg', {}, 'x'] }], timing: { compileMs: 0.1, runMs: 0 }, error: null },
     }));
-    assert.strictEqual(vm.result.hasView, true);
-    assert.strictEqual(vm.result.hasText, false);
+    assert.strictEqual(vm.result.activePanel.isView, true);
+    assert.strictEqual(vm.result.activePanel.isCode, false);
+    assert.deepStrictEqual(vm.result.activePanel.vnode, ['svg', {}, 'x']);
+  });
+
+  it('a multi-panel result is tabbed; the active panel follows state.play.panel, else the first', () => {
+    const panels = [
+      { id: 'summary', label: 'Summary', kind: 'note', tone: 'warn', text: 'two repairs' },
+      { id: 'rows', label: 'Rows (2)', kind: 'table', depth: 'deep', columns: ['a', 'b'], rows: [['1', '2']] },
+      { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: 'a,b\r\n1,2\r\n' },
+    ];
+    const result = { ok: true, panels, timing: { compileMs: 0.1, runMs: 0.1 }, error: null };
+    // default: no panel chosen → the first (the summary note) is active
+    const first = playViewModel(state({ result, panel: null }));
+    assert.strictEqual(first.result.tabbed, true);
+    assert.deepStrictEqual(first.result.tabs.map((t) => t.id), ['summary', 'rows', 'roundtrip']);
+    assert.strictEqual(first.result.activePanel.id, 'summary');
+    assert.strictEqual(first.result.activePanel.isNote, true);
+    assert.strictEqual(first.result.activePanel.noteClass, 'jplay-note warn');
+    // choosing the table tab makes it active, with column/cell records
+    const onTable = playViewModel(state({ result, panel: 'rows' }));
+    assert.strictEqual(onTable.result.activePanel.id, 'rows');
+    assert.strictEqual(onTable.result.activePanel.isTable, true);
+    assert.deepStrictEqual(onTable.result.activePanel.columns, [{ label: 'a' }, { label: 'b' }]);
+    assert.deepStrictEqual(onTable.result.activePanel.rows, [{ cells: [{ text: '1' }, { text: '2' }] }]);
+    // a STALE panel id (the screen is gone) falls back to the first
+    const stale = playViewModel(state({ result, panel: 'does-not-exist' }));
+    assert.strictEqual(stale.result.activePanel.id, 'summary');
+    assert.strictEqual(stale.result.tabs.find((t) => t.active).id, 'summary');
   });
 });
 
@@ -91,14 +126,33 @@ describe('the play JSLT view renders headlessly', () => {
     assert.match(out, /Ada/);                // the run result on the stage
   });
 
-  it('splices a rendered vnode for a visual engine, with no code block', () => {
+  it('splices a rendered vnode for a visual engine, with no code block or tabs', () => {
     const out = JSON.stringify(renderPlay(playViewModel(state({
       engine: 'markdown', exampleId: 'md-tour', source: { source: '# Hi' }, data: {},
-      result: { ok: true, output: '', view: ['div', { class: 'md-preview' }, 'Hi'], timing: { compileMs: 0.1, runMs: 0 }, error: null },
+      result: { ok: true, panels: [{ id: 'preview', label: 'Preview', kind: 'view', vnode: ['div', { class: 'md-preview' }, 'Hi'] }], timing: { compileMs: 0.1, runMs: 0 }, error: null },
     }))));
     assert.match(out, /jplay-view/, 'the rendered-view container');
     assert.match(out, /md-preview/, 'the host vnode was spliced in verbatim');
     assert.doesNotMatch(out, /code-block/, 'no code block for a visual result');
+    assert.doesNotMatch(out, /jplay-tabs/, 'a single panel shows no tab strip');
+  });
+
+  it('renders a tab strip + the active panel body for a multi-panel (CSV) result', () => {
+    const panels = [
+      { id: 'summary', label: 'Summary', kind: 'note', tone: 'warn', text: 'one repair' },
+      { id: 'rows', label: 'Rows (1)', kind: 'table', depth: 'deep', columns: ['a', 'b'], rows: [['1', '2']] },
+      { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: 'a,b\r\n1,2\r\n' },
+    ];
+    const result = { ok: true, panels, timing: { compileMs: 0.1, runMs: 0.1 }, error: null };
+    const first = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, panel: null }))));
+    assert.match(first, /jplay-tabs/, 'the tab strip renders');
+    assert.match(first, /play\/panel/, 'each tab dispatches play/panel');
+    assert.match(first, /jplay-note warn/, 'the active summary note renders by kind');
+    assert.doesNotMatch(first, /jplay-table/, 'the inactive table body is not rendered');
+    // switch to the table tab: the <table> renders, the note does not
+    const onTable = JSON.stringify(renderPlay(playViewModel(state({ engine: 'csv', result, panel: 'rows' }))));
+    assert.match(onTable, /jplay-table/, 'the table body renders when its tab is active');
+    assert.match(onTable, /<th>|"th"/, 'with header cells');
   });
 
   it('renders an option select for a source-only engine (josl)', () => {

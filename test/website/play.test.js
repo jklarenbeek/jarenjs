@@ -45,6 +45,10 @@ function find(node, pred) {
 const playRoot = (c) => find(c, (n) => n.getAttribute?.('class') === 'jplay');
 const sourceInput = (c) => find(playRoot(c), (n) => n.tagName === 'input' && n.getAttribute?.('class') === 'editor line');
 const byText = (root, tag, text) => find(root, (n) => n.tagName === tag && n.childNodes?.[0]?.nodeValue === text);
+/** Concat every text-bearing panel of a result (the old scalar `output`). */
+const outText = (r) => r.panels.filter((p) => p.text != null).map((p) => p.text).join('\n');
+/** The vnode of the first `view` panel of a result. */
+const viewVnode = (r) => r.panels.find((p) => p.kind === 'view')?.vnode;
 
 describe('website — the Play playground (#/play)', () => {
   it('renders the playground and runs the seeded example LIVE on the stage', () => {
@@ -57,7 +61,7 @@ describe('website — the Play playground (#/play)', () => {
 
     const r = app.getState().play.result;
     assert.ok(r && r.ok === true, 'the seeded example ran green');
-    assert.match(r.output, /Nigel Rees/, 'the JSONPath selector produced the authors');
+    assert.match(outText(r), /Nigel Rees/, 'the JSONPath selector produced the authors');
     assert.match(html, /Nigel Rees/, 'the result renders on the stage');
     assert.match(html, /compiled/, 'the timing line shows');
   });
@@ -67,7 +71,7 @@ describe('website — the Play playground (#/play)', () => {
     fire(sourceInput(container), 'input', { target: { value: '$..price' } });
     const r = app.getState().play.result;
     assert.ok(r.ok === true, 'the edited selector ran green');
-    assert.match(r.output, /8\.95/, 'every price, anywhere — the new selector took effect');
+    assert.match(outText(r), /8\.95/, 'every price, anywhere — the new selector took effect');
     assert.match(serialize(container), /8\.95/, 'the re-run renders live');
   });
 
@@ -87,13 +91,13 @@ describe('website — the Play playground (#/play)', () => {
     fire(byText(playRoot(container), 'button', 'One selector, three shapes'), 'click', {});
     assert.strictEqual(app.getState().play.exampleId, 'path-shapes');
     // three datasets → a switcher renders; the seeded 'flat' shape has no array
-    assert.match(app.getState().play.result.output, /root|inner/, 'the flat shape ran first');
+    assert.match(outText(app.getState().play.result), /root|inner/, 'the flat shape ran first');
 
     // switch to the 'array' shape (index 1): the data changes, the run reflects it
     fire(byText(playRoot(container), 'button', 'array'), 'click', {});
     const s = app.getState().play;
     assert.strictEqual(s.datasetIndex, 1, 'the dataset index moved');
-    assert.match(s.result.output, /Ada|Alan/, 'the SAME selector now runs over the array shape');
+    assert.match(outText(s.result), /Ada|Alan/, 'the SAME selector now runs over the array shape');
   });
 
   it('a source-only engine (josl) shows an option select, no data pane, and the mode re-runs live', () => {
@@ -120,7 +124,7 @@ describe('website — the Play playground (#/play)', () => {
     fire(byText(playRoot(container), 'button', 'Flowchart'), 'click', {});
     const s = app.getState().play;
     assert.strictEqual(s.engine, 'mermaid');
-    assert.ok(s.result.ok === true && Array.isArray(s.result.view), 'the host renderer produced a vnode');
+    assert.ok(s.result.ok === true && Array.isArray(viewVnode(s.result)), 'the host renderer produced a vnode');
     const html = serialize(playRoot(container));
     assert.match(html, /jplay-view/, 'the rendered-view container');
     assert.match(html, /<svg/, 'the SVG diagram rendered on the stage');
@@ -138,7 +142,7 @@ describe('website — the Play playground (#/play)', () => {
     fire(byText(playRoot(container), 'button', 'Heatmap (log)'), 'click', {});
     const s = app.getState().play;
     assert.strictEqual(s.engine, 'charts');
-    assert.ok(s.result.ok === true && Array.isArray(s.result.view), 'the chart renderer produced a vnode');
+    assert.ok(s.result.ok === true && Array.isArray(viewVnode(s.result)), 'the chart renderer produced a vnode');
     assert.match(serialize(playRoot(container)), /<svg/, 'the chart SVG rendered on the stage');
   });
 
@@ -151,6 +155,35 @@ describe('website — the Play playground (#/play)', () => {
       'the error is captured with a human message (never thrown)');
     // the shell still rendered — the error is docked, not thrown
     assert.match(serialize(container), /jplay/, 'the playground is still on screen');
+  });
+
+  it('a multi-panel result (CSV) shows a tab strip; switching a tab is a pure view change (no re-run)', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'RFC 4180'), 'click', {});
+    const s = app.getState().play;
+    assert.strictEqual(s.engine, 'csv');
+    assert.ok(s.result.panels.length > 1, 'CSV yields several screens');
+    assert.match(serialize(playRoot(container)), /jplay-tabs/, 'the tab strip renders');
+    assert.match(serialize(playRoot(container)), /jplay-note/, 'the summary note is active first');
+
+    const before = app.getState().play.result; // the result reference before the tab switch
+    fire(byText(playRoot(container), 'button', 'CSV round-trip'), 'click', {});
+    const after = app.getState().play;
+    assert.strictEqual(after.panel, 'roundtrip', 'the active panel id switched');
+    assert.strictEqual(after.result, before, 'the engine did NOT re-run — the result object is untouched');
+    assert.match(serialize(playRoot(container)), /code-block/, 'the round-trip code panel now shows');
+  });
+
+  it('switching engines clears the active panel (a new engine has different screens)', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'RFC 4180'), 'click', {});        // csv → multi-panel
+    fire(byText(playRoot(container), 'button', 'CSV round-trip'), 'click', {});  // pick a non-first tab
+    assert.strictEqual(app.getState().play.panel, 'roundtrip');
+    fire(byText(playRoot(container), 'button', 'All authors'), 'click', {});     // back to JSONPath (single panel)
+    const s = app.getState().play;
+    assert.strictEqual(s.engine, 'path');
+    assert.strictEqual(s.panel, null, 'the stale tab was cleared on the engine switch');
+    assert.doesNotMatch(serialize(playRoot(container)), /jplay-tabs/, 'a single-panel engine shows no tabs');
   });
 
   it('leaving #/play tears the surface down; the seeded run persists on return', () => {

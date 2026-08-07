@@ -41,9 +41,12 @@ const shell = {
         { $if: ['$.result.ok',
           ['div', { class: 'jplay-result' },
             { $if: ['$.result.timing', ['p', { class: 'muted jplay-timing' }, '$.result.timing'], ''] },
-            // a visual engine splices its rendered vnode; a text engine shows a code block
-            { $if: ['$.result.hasView', ['div', { class: 'jplay-view' }, '$.result.view'], ''] },
-            { $if: ['$.result.hasText', ['pre', { class: 'code-block' }, ['code', {}, '$.result.output']], ''] },
+            // >1 screen → a tab strip selecting the active one; 1 → no tabs
+            { $if: ['$.result.tabbed',
+              ['div', { class: 'jplay-tabs seg', role: 'tablist' }, [{ $apply: '$.result.tabs[*]' }]], ''] },
+            // the active panel body, rendered by its kind (a single object →
+            // the explicit [path, mode] apply form)
+            { $apply: [`$.result.activePanel`, PLAY_MODE] },
           ],
           ['p', { class: 'error-line' }, ['strong', {}, '$.result.error.code'], ' ', '$.result.error.message']] },
         ['p', { class: 'muted jplay-hint' }, 'Pick an example, or edit the source or data — it runs live.']] },
@@ -119,5 +122,48 @@ const datasetOption = {
   }, '$.label'],
 };
 
+/** One tab in the result strip (only shown when a result has >1 panel). */
+const resultTab = {
+  match: `${PLAY_BASE}.result.tabs[*]`, mode: PLAY_MODE,
+  body: ['button', {
+    type: 'button', role: 'tab',
+    class: { $if: ['$.active', 'seg-btn active', 'seg-btn'] },
+    'aria-selected': { $if: ['$.active', 'true', 'false'] },
+    on: { click: { action: 'play/panel', with: '$.id' } },
+  }, '$.label'],
+};
+
+/** The active result panel, rendered by its kind (code | view | table | note). */
+const activePanel = {
+  match: `${PLAY_BASE}.result.activePanel`, mode: PLAY_MODE,
+  body: { $if: ['$.isView', ['div', { class: 'jplay-view' }, '$.vnode'],
+    { $if: ['$.isTable',
+      ['div', { class: 'jplay-table-wrap' },
+        ['table', { class: 'jplay-table' },
+          ['thead', {}, ['tr', {}, [{ $apply: '$.columns[*]' }]]],
+          ['tbody', {}, [{ $apply: '$.rows[*]' }]]]],
+      { $if: ['$.isNote', ['p', { class: '$.noteClass' }, '$.text'],
+        ['pre', { class: 'code-block' }, ['code', {}, '$.text']]] }] }] },
+};
+
+/** A table header cell. */
+const tableColumn = {
+  match: `${PLAY_BASE}.result.activePanel.columns[*]`, mode: PLAY_MODE,
+  body: ['th', {}, '$.label'],
+};
+/** A table body row. */
+const tableRow = {
+  match: `${PLAY_BASE}.result.activePanel.rows[*]`, mode: PLAY_MODE,
+  body: ['tr', {}, [{ $apply: '$.cells[*]' }]],
+};
+/** A table body cell. */
+const tableCell = {
+  match: `${PLAY_BASE}.result.activePanel.rows[*].cells[*]`, mode: PLAY_MODE,
+  body: ['td', {}, '$.text'],
+};
+
 /** The playground's JSLT rules — spread into the site stylesheet. */
-export const playRules = [shell, railGroup, railExample, optionPane, optionChoice, sourcePane, dataPane, datasetOption];
+export const playRules = [
+  shell, railGroup, railExample, optionPane, optionChoice, sourcePane, dataPane, datasetOption,
+  resultTab, activePanel, tableColumn, tableRow, tableCell,
+];

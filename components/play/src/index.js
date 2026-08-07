@@ -35,14 +35,29 @@ import { EXAMPLE_LIST } from './examples.js';
  */
 
 /**
+ * @typedef {Object} Panel
+ * A single result SCREEN. Every ok run yields at least one; a multi-screen
+ * engine (CSV: a summary note, the parsed table, the CSV round-trip) yields
+ * several, which the component shows behind a tab strip.
+ * @property {string} id - unique within the result (the tab key)
+ * @property {string} [label] - the tab label (defaults to `id`)
+ * @property {'code' | 'view' | 'table' | 'note'} kind
+ * @property {'simple' | 'deep'} [depth] - PLAY_06 reveals `deep` panels only
+ *   when the student drills in; defaults to `simple`
+ * @property {string} [text] - `code` / `note`: the text body
+ * @property {any} [vnode] - `view`: a host-rendered vnode, spliced verbatim
+ * @property {string[]} [columns] - `table`: the header labels
+ * @property {Array<Array<any>>} [rows] - `table`: cells, row-major
+ * @property {'ok' | 'warn' | 'info'} [tone] - `note`: the callout tone
+ */
+
+/**
  * @typedef {Object} PlayResult
  * @property {boolean} ok
- * @property {string} output - the formatted TEXT result (empty on error, or
- *   for a visual engine whose result is a rendered vnode)
- * @property {any} [view] - a rendered vnode (markdown/mermaid/charts), spliced
- *   into the result pane; produced by a host-injected renderer
  * @property {{ compileMs: number, runMs: number } | null} timing
  * @property {{ message: string, code?: string, path?: string } | null} error
+ * @property {Panel[]} panels - the result screens (`[]` on error); a single
+ *   `code` panel for most engines, several for the richer ones
  */
 
 /**
@@ -120,12 +135,12 @@ function withConfig(engine, options) {
 export function runExample(engineId, source, data, options = {}) {
   const engine = ENGINES[engineId];
   if (engine === undefined) {
-    return { ok: false, output: '', timing: null, error: { message: `unknown engine: ${engineId}` } };
+    return { ok: false, timing: null, error: { message: `unknown engine: ${engineId}` }, panels: [] };
   }
   try {
     return engine.run(source ?? {}, data ?? {}, withConfig(engine, options));
   }
   catch (err) {
-    return { ok: false, output: '', timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) } };
+    return { ok: false, timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) }, panels: [] };
   }
 }

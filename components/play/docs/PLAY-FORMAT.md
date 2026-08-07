@@ -33,15 +33,32 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
 ```
 PlayResult = {
   ok:     boolean,
-  output: string,                                  // the formatted result
   timing: { compileMs, runMs } | null,
   error:  { message: string, code?, path? } | null,
+  panels: Panel[],                                 // the result SCREENS ([] on error)
+}
+
+Panel = {
+  id:     string,                                  // unique in the result (the tab key)
+  label?: string,                                  // the tab label (defaults to id)
+  kind:   'code' | 'view' | 'table' | 'note',
+  depth?: 'simple' | 'deep',                       // 'deep' → revealed on drill-in (PLAY_06)
+  // per kind:
+  text?:    string,                                // code / note body
+  vnode?:   any,                                   // view: a host-rendered vnode, spliced verbatim
+  columns?: string[],  rows?: any[][],             // table
+  tone?:    'ok' | 'warn' | 'info',                // note callout tone
 }
 ```
 
-The component renders `output` in a code block, `timing` as a stat line,
-and `error` as a coded error line — the playground owns this tiny render
-vocabulary, so it never depends on a host's node helpers.
+Every ok run yields **at least one** panel — most engines a single `code`
+panel (today's behaviour, unchanged). Richer engines yield several: **CSV**
+returns a `note` (dialect + record count + repairs), a `table` (the parsed
+records) and a `code` (the CSV round-trip). The component shows one panel
+inline, or — for more than one — a tab strip above the active panel body.
+The playground owns this small render vocabulary (code block, spliced
+vnode, table, callout, stat line, coded error line), so it never depends on
+a host's node helpers.
 
 ## §3 The example, and the dataset problem
 

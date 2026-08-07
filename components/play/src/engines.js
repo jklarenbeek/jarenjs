@@ -16,7 +16,7 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJsonx } from '@jarenjs/josl';
-import { parseCsvDocument } from '@jarenjs/josl/csv';
+import { parseCsvDocument, stringifyCsv } from '@jarenjs/josl/csv';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -32,8 +32,21 @@ function parseJson(text, label) {
   catch (err) { return { error: `${label}: ${msg(err)}` }; }
 }
 
+/** A single-`code`-panel Result — the shape most engines return. */
 /** @returns {import('./index.js').PlayResult} */
-const ok = (output, compileMs, runMs, view) => ({ ok: true, output, timing: { compileMs, runMs }, error: null, view: view ?? null });
+const ok = (text, compileMs, runMs) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }], compileMs, runMs);
+
+/** A multi-panel Result — the engine hands over its own screen list. */
+/** @returns {import('./index.js').PlayResult} */
+const okPanels = (panels, compileMs, runMs) => ({ ok: true, timing: { compileMs, runMs }, error: null, panels });
+
+/** A table cell → a display string. Primitives (incl. BigInt, from typed CSV)
+ * stringify directly; objects/arrays become compact JSON. Never throws. */
+const cell = (v) => {
+  if (v == null) return '';
+  if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return String(v); } }
+  return String(v);
+};
 
 /**
  * A VISUAL engine (markdown/mermaid/charts): the descriptor + examples live
@@ -59,12 +72,12 @@ function visual(id, label, lead, opts = {}) {
       try { view = render(source.source ?? '', options?.config); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      return ok('', t1 - t0, 0, view);
+      return okPanels([{ id: 'preview', label: 'Preview', kind: 'view', vnode: view }], t1 - t0, 0);
     },
   };
 }
 /** @returns {import('./index.js').PlayResult} */
-const fail = (message, c, path) => ({ ok: false, output: '', timing: null, error: { message, code: c, path } });
+const fail = (message, c, path) => ({ ok: false, timing: null, error: { message, code: c, path }, panels: [] });
 
 /** The compile options the query/jslt engines run with (registry-aware). */
 function compileOptions(options) {
@@ -248,14 +261,30 @@ export const ENGINE_LIST = [
       try { doc = parseCsvDocument(source.text ?? '', opts); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      const body = {
-        dialect: { delimiter: doc.dialect.delimiter === '\t' ? 'tab' : doc.dialect.delimiter, headers: doc.dialect.headers },
-        records: doc.rows.length,
-        repairs: doc.repairs.map((r) => ({ code: r.code, line: r.line, column: r.column, message: r.message })),
-        rows: doc.rows.slice(0, 50),
-      };
+      // three SCREENS (the multi-panel proof): a summary note, the parsed
+      // records as a table, and the CSV round-trip. The table + round-trip
+      // are naturally "deep" (PLAY_06 gates them behind the drill toggle).
+      const fields = doc.fields; // string[] (headers) | null (positional)
+      const total = doc.rows.length;
+      const shown = doc.rows.slice(0, 50);
+      const width = shown.reduce((w, r) => Math.max(w, Array.isArray(r) ? r.length : fields ? fields.length : 0), 0);
+      const columns = fields ?? Array.from({ length: width }, (_, i) => String(i + 1));
+      const rows = shown.map((r) => columns.map((c, i) => cell(fields ? r[c] : r[i])));
+      const delim = doc.dialect.delimiter === '\t' ? 'tab' : doc.dialect.delimiter;
+      const plural = (n) => (n === 1 ? '' : 's');
+      const summary = [
+        `${delim}-delimited · ${doc.dialect.headers === false ? 'no header row' : 'header row'} · ${total} record${plural(total)}`
+          + (doc.repairs.length ? ` · ${doc.repairs.length} repair${plural(doc.repairs.length)}` : ' · clean')
+          + (total > shown.length ? ` · showing the first ${shown.length}` : ''),
+        ...doc.repairs.map((r) => `line ${r.line}: ${r.code} — ${r.message}`),
+      ].join('\n');
+      const roundtrip = stringifyCsv(doc.rows, { fields: fields ?? undefined, header: doc.dialect.headers !== false });
       const t2 = now();
-      return ok(stringifyJsonx(body, { indent: 2 }), t1 - t0, t2 - t1);
+      return okPanels([
+        { id: 'summary', label: 'Summary', kind: 'note', tone: doc.repairs.length ? 'warn' : 'ok', text: summary },
+        { id: 'rows', label: `Rows (${total})`, kind: 'table', depth: 'deep', columns, rows },
+        { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: roundtrip },
+      ], t1 - t0, t2 - t1);
     },
   },
   // ——— the visual engines: descriptor + examples here, rendering delegated ———
