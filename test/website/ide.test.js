@@ -3,7 +3,7 @@
  * @file The legacy experiment IDE surface: the retired `#/playground`
  * left saved experiments in users' storage and share links in the wild.
  * Both keep working — a legacy experiment or token translates into the
- * equivalent play session and lands on `#/play`. (The Studio's own IDE
+ * equivalent play session and lands on `#/play`. (The project IDE
  * store flows are covered in studio.test.js.) Plus the docs pages and
  * the mobile menu, which share this mount helper.
  */
@@ -14,7 +14,7 @@ import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
-function mountSite({ hash = '#/studio', stored = null, modelContext, share } = {}) {
+function mountSite({ hash = '#/project', stored = null, modelContext, share } = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
@@ -88,7 +88,7 @@ describe('website — legacy playground experiments translate into play sessions
     const { app, hashes } = mountSite({ stored });
     app.dispatch('ide/load', 'odd');
     assert.deepStrictEqual(hashes, [], 'no navigation for an untranslatable experiment');
-    assert.strictEqual(app.getState().route.page, 'studio');
+    assert.strictEqual(app.getState().route.page, 'project');
   });
 });
 

@@ -530,18 +530,9 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   color: var(--accent);
 }
 
-/* the Studio: split view — the document editor and the live mount of
-   the hosted app; .studio-app* classes style the SEED TEMPLATES'
-   chrome (a hosted document may use any classes; these keep the seeds
-   presentable inside the mount) */
-.studio-grid {
-  display: grid; gap: var(--space-4);
-  grid-template-columns: minmax(20rem, 34rem) minmax(0, 1fr);
-  align-items: start;
-}
-.studio-mount { min-width: 0; }
-.studio-errors { margin-bottom: var(--space-4); }
-.studio-editor .details-card { margin-top: 0; }
+/* the seed app documents: .studio-app* classes style the SEED TEMPLATES'
+   chrome inside the project stage mount (a hosted document may use any
+   classes; these keep the seeds presentable) */
 .studio-app h2 { margin-top: 0; }
 .studio-app-lead { color: var(--muted); }
 .studio-app-control { display: inline-flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
@@ -570,7 +561,6 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 /* tablet: two-column grids collapse before they get cramped */
 @media (max-width: 1024px) {
   .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
-  .studio-grid { grid-template-columns: minmax(0, 1fr); }
   .docs-grid { grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-6); }
 
   /* the mobile keyboard seam (main.js publishes --kb-inset from the
@@ -578,7 +568,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
      un-sticks — it must never cover the field — and the editor panes
      reserve the keyboard inset as scroll room beneath the caret */
   body.kb-editing .header { position: static; }
-  .js-editor, .studio-grid, .flow-grid, .data-grid, .pg-grid { padding-bottom: var(--kb-inset, 0px); }
+  .js-editor, .flow-grid, .data-grid, .pg-grid { padding-bottom: var(--kb-inset, 0px); }
 }
 
 /* mobile */
@@ -614,7 +604,6 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .stat-card { padding: var(--space-3) var(--space-4); }
   .pg-grid, .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
-  .studio-grid { grid-template-columns: minmax(0, 1fr); }
   .studio-app-panels { grid-template-columns: minmax(0, 1fr); }
   .docs-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .docs-nav { position: static; }

@@ -37,7 +37,7 @@ export const HOME_RULES = [
         ['div', { class: 'callout wide' },
           ['h3', {}, '$.studio.title'],
           ['p', {}, '$.studio.lead'],
-          ['a', { href: '#/studio', class: 'btn' }, 'Open the Studio'],
+          ['a', { href: '#/project', class: 'btn' }, 'Open the Studio'],
         ],
       ],
       ['section', { class: 'container section' },

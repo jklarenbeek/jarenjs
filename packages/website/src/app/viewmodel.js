@@ -23,9 +23,7 @@ import { PROJECT_TEMPLATE_CARDS } from '../content/projectTemplates.js';
 import { playComponent } from '../boundaries/play.js';
 import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
-import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
-import { callout, error } from '../lib/nodes.js';
-import { formatJson, formatRatio, memo1 } from '../lib/format.js';
+import { formatRatio, memo1 } from '../lib/format.js';
 
 // the nav is grouped into three dropdown menus by what each surface IS:
 // stateless ENGINES you tinker with, stateful STUDIOS you compose in, and
@@ -37,7 +35,7 @@ const NAV_GROUPS = [
     { page: 'charts', label: 'Charts', href: '#/charts' },
   ] },
   { key: 'studios', label: 'Studios', pages: [
-    { page: 'studio', label: 'Studio', href: '#/studio' },
+    { page: 'project', label: 'Studio', href: '#/project' },
     { page: 'flow', label: 'Flow', href: '#/flow' },
     { page: 'data', label: 'Data', href: '#/data' },
     { page: 'game', label: 'Game', href: '#/game' },
@@ -99,9 +97,10 @@ export function viewModel(state) {
   if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
-  if (page === 'studio') ui.studio = studioPage(state);
   if (page === 'project') {
     ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
+    // the site's save/share bar (the IDE store) renders above the IDE shell
+    ui.projectIde = ideModel(state.ide.name, state.ide.names, state.ide.shared);
   }
   if (page === 'play') {
     ui.play = playComponent.viewModel({ play: state.play });
@@ -228,69 +227,12 @@ function benchPage(state) {
     benchNodes(suite, state.bench[need], state.benchStatus[need], state.benchUi, state));
 }
 
-/** The Studio's IDE-bar model (name field, share status, saved chips). */
+/** The Project IDE-bar model (name field, share status, saved chips). */
 const ideModel = memo1((name, names, shared) => ({
   name,
   shared,
   names: names.map((n) => ({ name: n })),
 }));
-
-// ---- the Studio ----
-
-/** The picker cards: constant content, computed once. */
-const STUDIO_PICKER = {
-  templates: STUDIO_TEMPLATES.map((t) => ({
-    name: t.name,
-    title: t.title,
-    lead: t.lead,
-    preview: formatJson(t.doc).split('\n').slice(0, 14).join('\n') + '\n…',
-  })),
-};
-
-/** The host-widget props: reference-stable per (doc, revision). */
-const studioMount = memo1((doc, revision) => ({ doc, revision }));
-
-const studioEditorText = memo1((doc) => formatJson(doc));
-
-/** A failed validation report as the site's standard error nodes. */
-const studioErrorNodes = memo1((errors) => {
-  if (errors === null) return [];
-  const nodes = errors.list.map((e) => error({
-    message: e.message,
-    dataPath: e.instancePath,
-    code: e.keyword !== '' ? e.keyword : undefined,
-  }, 'Schema error'));
-  if (errors.total > errors.list.length) {
-    nodes.push(callout('More errors', `${errors.total - errors.list.length} further meta-schema errors were truncated — fix the ones above first.`));
-  }
-  return nodes;
-});
-
-const composeStudioLive = memo1((editorText, revision, bootError, ide, mount) => ({
-  editorText,
-  revision,
-  error: bootError,
-  ide,
-  mount,
-}));
-
-// the validation report renders at page level: a failed editor commit
-// (or an invalid inbound share) reports whether or not a document is
-// currently live — the old document stays mounted underneath
-const composeStudioPage = memo1((live, errorNodes) => ({
-  ...(live === null ? { picker: STUDIO_PICKER } : { live }),
-  errors: errorNodes,
-  hasErrors: errorNodes.length > 0,
-}));
-
-function studioPage(state) {
-  const s = state.studio;
-  const live = s.doc === null ? null : composeStudioLive(
-    studioEditorText(s.doc), s.revision, s.error,
-    ideModel(state.ide.name, state.ide.names, state.ide.shared),
-    studioMount(s.doc, s.revision));
-  return composeStudioPage(live, studioErrorNodes(s.errors));
-}
 
 const docsPage = memo1((param) => {
   const current = param ?? DOCS_SECTIONS[0].id;

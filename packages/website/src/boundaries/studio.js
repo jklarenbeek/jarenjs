@@ -13,13 +13,15 @@
  * runtime's own contract: a document that fails mid-boot throws
  * `JA0007` and leaves no half-mounted DOM.
  *
- * Hosting mechanism (decided by reading the code, recorded here): a
- * `jaren-widget` whose mount/destroy owns the nested app — the nested
- * `createApp` needs a DOM host element the renderer owns, which a
- * charts-style `sync(inputs, dispatch, active)` hook never sees; and
- * the renderer's destroy walk guarantees `unmount` exactly once when
- * the vnode leaves the tree (the 0.17.x recycle-ownership rules), so
- * leaving the route destroys the nested app for free.
+ * Hosting mechanism: a `jaren-widget` whose mount/destroy owns the
+ * nested app — the nested `createApp` needs a DOM host element the
+ * renderer owns, which a charts-style `sync(inputs, dispatch, active)`
+ * hook never sees; and the renderer's destroy walk guarantees `unmount`
+ * exactly once when the vnode leaves the tree (the 0.17.x
+ * recycle-ownership rules), so leaving the route destroys the nested
+ * app for free. The live widget is the Project IDE's stage host
+ * (`createProjectStageWidget`, boundaries/project.js), built on this
+ * boundary's `loadStudioDocument`.
  *
  * The document gets a small render-capability vocabulary as widgets —
  * `form`, `chart`, `markdown`, `mermaid` — each a pure props→vnode
@@ -42,7 +44,6 @@ import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { typ
 import { md } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
-import { createHostWidget } from './host-widget.js';
 
 /** Schema errors kept per report: enough to repair, bounded for state. */
 const MAX_ERRORS = 20;
@@ -362,41 +363,4 @@ export function loadStudioDocument(doc, env = {}) {
     // JA0007: boot rolled back atomically, the container ends empty
     return { ok: false, errors: [], total: 0, message: message(err) };
   }
-}
-
-/**
- * The site-side host widget: `['jaren-widget', { name: 'studio-doc',
- * props: { doc, revision } }]` in the studio view. Mount boots the
- * nested app into the host; a revision change destroys and reboots;
- * unmount (the destroy walk — route leave included) destroys it. Boot
- * and runtime failures surface as `studio/error` dispatches through
- * `emit`, never as throws into the site's render.
- * @param {{ schedule?: (flush: () => void) => void }} [env]
- */
-export function createStudioHostWidget(env = {}) {
-  const boot = (handle, props) => {
-    const result = loadStudioDocument(props.doc, {
-      node: handle.host,
-      document: handle.host.ownerDocument,
-      schedule: env.schedule,
-      onError: (err) => handle.emit({ action: 'studio/error', with: message(err) }),
-    });
-    if (result.ok) {
-      handle.app = result.app;
-    }
-    else {
-      handle.app = null;
-      handle.emit({ action: 'studio/error', with: result.message });
-    }
-  };
-  const destroy = (handle) => {
-    try {
-      handle.app?.destroy();
-    }
-    catch (err) {
-      handle.emit({ action: 'studio/error', with: message(err) });
-    }
-    handle.app = null;
-  };
-  return createHostWidget({ boot, destroy });
 }

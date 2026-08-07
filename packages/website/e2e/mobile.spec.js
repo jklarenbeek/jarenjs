@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test';
 
 test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-const PAGES = ['#/', '#/docs', '#/play', '#/playground', '#/studio', '#/benchmarks', '#/calculator', '#/charts'];
+const PAGES = ['#/', '#/docs', '#/play', '#/project', '#/benchmarks', '#/calculator', '#/charts'];
 
 test('no page overflows the mobile layout viewport', async ({ page }) => {
   await page.goto('/');
@@ -158,10 +158,9 @@ test.describe('the keyboard-viewport contract', () => {
     expect(released.padding).toBe('0px');
   });
 
-  test('a studio editor, focused, stays inside the visual viewport (the seam is shared)', async ({ page }) => {
-    await page.goto('/#/studio');
-    await page.locator('.example-card', { hasText: 'Dashboard' }).locator('.btn').tap();
-    const editor = page.locator('.studio-editor .editor');
+  test('the project editor, focused, stays inside the visual viewport (the seam is shared)', async ({ page }) => {
+    await page.goto('/#/project');
+    const editor = page.locator('.js-editor-input');
     await expect(editor).toBeVisible();
     await editor.focus();
     const { box, vv } = await page.evaluate(() => {

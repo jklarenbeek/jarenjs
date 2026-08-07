@@ -5,8 +5,9 @@
  * hash subscription (and tests) share it.
  */
 
-// 'scratch' and 'examples' stay ONLY as redirect sources (→ #/play), wired in
-// createSiteApp; the live single-engine playground is 'play'.
+// 'scratch', 'examples' and 'playground' stay ONLY as redirect sources
+// (→ #/play), and 'studio' as one (→ #/project) — wired in createSiteApp;
+// the live surfaces are 'play' and 'project'.
 const PAGES = new Set(['home', 'playground', 'benchmarks', 'charts', 'docs', 'examples', 'calculator', 'studio', 'project', 'play', 'scratch', 'flow', 'game', 'data']);
 
 /**

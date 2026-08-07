@@ -36,14 +36,6 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     chartsLive: null,            // /charts page live-feed render nodes
     ide: { name: '', names: ideNames, shared: null },
 
-    // the Studio: a user- or AI-authored @jarenjs/app document hosted
-    // as an isolated nested app (boundaries/studio.js). The document
-    // lives in state as data; `revision` bumps on every accepted swap
-    // so the host widget knows when to reboot; `errors` holds a failed
-    // validation report ({ list, total }); `error` a boot/runtime
-    // failure from the nested app's own error sink.
-    studio: { doc: null, errors: null, error: null, revision: 0 },
-
     // the Project IDE (boundaries/project.js): a jaren-project — a small
     // tree of typed files (app / jslt / query / data / …) edited as ONE
     // document. Each file validates against its own grammar; the active

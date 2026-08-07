@@ -45,6 +45,30 @@ function projectOf(slice) {
 }
 
 /**
+ * The live slice as a persistable `jaren-project` document — what a save
+ * or a share token carries (the IDE-only fields — mount, results, dirty —
+ * stay behind).
+ * @param {any} slice - the `state.project` slice
+ */
+export function projectSnapshot(slice) {
+  return { ...projectOf(slice), name: slice.name ?? 'Untitled project' };
+}
+
+/**
+ * The project's designated `app` file — the one the Studio contracts
+ * (the AI write/patch/read tools, the app download) operate on: the
+ * active file when it is an app, else the first app file, else null.
+ * @param {any} slice - the `state.project` slice
+ * @returns {{ name: string, kind: string, text: string } | null}
+ */
+export function projectAppFile(slice) {
+  const files = slice.files ?? [];
+  const active = files.find((f) => f.name === slice.active);
+  if (active !== undefined && active.kind === 'app') return active;
+  return files.find((f) => f.kind === 'app') ?? null;
+}
+
+/**
  * The edit loop's pure step: fold the live slice into the last-good
  * `{ mount, revision }` for the active `app` file. A valid structural
  * change bumps the revision (the widget reboots); a valid state-only
@@ -141,6 +165,12 @@ function validateNodes(schemaText, dataText) {
  */
 export function createProjectStageWidget(env = {}) {
   const stateKeyOf = (doc) => (doc && typeof doc === 'object' ? contentKey(doc.state ?? null) : null);
+  // the document minus its state — the same datum classifyChange keys on.
+  // The widget re-derives it defensively: two commits can race in at the
+  // SAME revision with different documents (a project/open interleaving
+  // with a route-arrival commit), and hot-dispatching one document's
+  // state into another document's running view renders garbage.
+  const shapeKeyOf = (doc) => (doc && typeof doc === 'object' ? contentKey({ ...doc, state: null }) : null);
 
   const boot = (handle, mount) => {
     const result = loadStudioDocument(mount.doc, {
@@ -152,6 +182,7 @@ export function createProjectStageWidget(env = {}) {
     handle.app = result.ok ? result.app : null;
     handle.revision = mount.revision;
     handle.stateKey = stateKeyOf(mount.doc);
+    handle.shapeKey = shapeKeyOf(mount.doc);
     if (!result.ok) handle.emit({ action: 'project/stage-error', with: result.message });
   };
   const destroy = (handle) => {
@@ -162,21 +193,22 @@ export function createProjectStageWidget(env = {}) {
 
   return {
     mount(host, props, emit) {
-      const handle = { host, emit, app: null, revision: null, stateKey: null };
+      const handle = { host, emit, app: null, revision: null, stateKey: null, shapeKey: null };
       boot(handle, props);
       return handle;
     },
     update(handle, props, prevProps) {
       if (props === prevProps) return;
-      // a structural change bumped the revision → destroy + reboot
-      if (props.revision !== handle.revision) {
+      // a structural change bumped the revision — or a raced-in commit
+      // swapped the document's shape at the same revision → destroy + reboot
+      if (props.revision !== handle.revision || shapeKeyOf(props.doc) !== handle.shapeKey) {
         destroy(handle);
         boot(handle, props);
         return;
       }
-      // same revision, new document → a state-only edit → hot-dispatch it
-      // into the RUNNING app (no reboot: scroll, focus and uncontrolled
-      // inputs survive the diff re-render)
+      // same revision, same shape, new document → a state-only edit →
+      // hot-dispatch it into the RUNNING app (no reboot: scroll, focus and
+      // uncontrolled inputs survive the diff re-render)
       const key = stateKeyOf(props.doc);
       if (handle.app !== null && key !== handle.stateKey) {
         handle.app.setState(props.doc.state);

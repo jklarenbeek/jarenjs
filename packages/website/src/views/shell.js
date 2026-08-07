@@ -56,7 +56,8 @@ export const SHELL_RULES = [
       // other selectors come back empty and render nothing
       ['main', { class: 'main' },
         { $apply: ['$.ui.home', 'home'] },
-        { $apply: ['$.ui.studio', 'studio'] },
+        // the Project IDE's save/share bar sits above the IDE shell
+        { $apply: ['$.ui.projectIde', 'project'] },
         { $apply: ['$.ui.project', 'project'] },
         { $apply: ['$.ui.play', 'play'] },
         { $apply: ['$.ui.flow', 'flow'] },

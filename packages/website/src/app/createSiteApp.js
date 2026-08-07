@@ -23,17 +23,21 @@ import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
 import {
   createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
 } from '../boundaries/assistant.js';
-import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
-import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
+import { STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
+import {
+  createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile,
+  projectSnapshot, projectAppFile,
+} from '../boundaries/project.js';
 import {
   runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession,
   legacyExperimentToSession, createPlaySplitterWidget,
 } from '../boundaries/play.js';
-import { projectTemplate, fileSkeleton } from '../content/projectTemplates.js';
+import {
+  projectTemplate, fileSkeleton, singleAppProject, sharedProject,
+} from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
-import { studioTemplate } from '../content/appTemplates.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
 /**
@@ -72,7 +76,7 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  */
 
 /** Share tokens beyond this length get an honest refusal, not a
- * silently mangled URL (studio documents can be long). */
+ * silently mangled URL (project documents can be long). */
 const SHARE_TOKEN_LIMIT = 8000;
 
 /** Play-slice paths that are IDE chrome, not engine inputs: a change to any
@@ -90,7 +94,7 @@ export function createSiteApp(env) {
     ?? (typeof reportError === 'function' ? reportError : () => {});
   const storage = env.storage ?? { read: () => null, write: () => {} };
   // the saved-experiment store (localStorage in the browser): a keyed CRUD
-  // over the injected storage, shared with the studio and play surfaces
+  // over the injected storage, shared with the Project IDE and play surfaces
   const docStore = createDocStore({ storage });
   // the Play IDE's own saved-session store: the same primitive,
   // a separate collection key, so play sessions and legacy experiments
@@ -152,22 +156,32 @@ export function createSiteApp(env) {
     'lock-scroll': (props) => env.lockScroll?.(props.on === true),
     'binance-toggle': (props, dispatch) =>
       binanceToggle((action, payload) => dispatch(action, payload)),
-    // the IDE store (the Studio's Save/Load/Share bar). Legacy experiments
-    // from the retired engine playground may still be in a user's storage:
-    // loading one translates it into a play session, so nothing saved rots.
+    // the IDE store (the Project IDE's Save/Load/Share bar). Two legacy
+    // kinds may still be in a user's storage: an engine experiment from the
+    // retired playground translates into a play session, and a Studio
+    // document (`engine: 'studio'`) opens as a single-app project — loading
+    // translates on the way, so nothing saved rots.
     'ide-save': (props, dispatch) => {
       const state = app.getState();
       const name = state.ide.name.trim();
-      if (name === '' || state.studio.doc === null) return; // an empty studio has nothing to save
-      docStore.save(name, { engine: 'studio', inputs: { doc: state.studio.doc }, savedAt: new Date().toISOString() });
+      if (name === '') return;
+      docStore.save(name, { engine: 'project', inputs: { project: projectSnapshot(state.project) }, savedAt: new Date().toISOString() });
       dispatch('ide/names', ideNames());
     },
     'ide-load': (props, dispatch) => {
       const experiment = docStore.load(props.name);
       if (experiment === undefined) return;
-      if (experiment.engine === 'studio') {
-        env.navigate?.('#/studio');
-        dispatch('studio/doc', { doc: experiment.inputs.doc });
+      if (experiment.engine === 'project' || experiment.engine === 'studio') {
+        const project = experiment.engine === 'project'
+          ? sharedProject({ e: 'project', i: experiment.inputs })
+          : singleAppProject(experiment.inputs.doc, props.name);
+        if (project === null) return;
+        // open + commit BEFORE navigating: the route arrival then finds the
+        // loaded project already committed instead of racing a stale commit
+        // of the previous one
+        dispatch('project/open', project);
+        dispatch('project/committed', commitProject(project));
+        env.navigate?.('#/project');
         return;
       }
       // a legacy playground experiment → the equivalent play session
@@ -182,48 +196,25 @@ export function createSiteApp(env) {
     },
     'ide-share': (props, dispatch) => {
       const state = app.getState();
-      if (state.studio.doc === null) return; // an empty studio has nothing to share
-      const token = encodeShare({ e: 'studio', i: { doc: state.studio.doc } });
-      // hash-length honesty: a very long studio document makes a token
-      // browsers and chat clients mangle — say so instead of truncating
+      const token = encodeShare({ e: 'project', i: { project: projectSnapshot(state.project) } });
+      // hash-length honesty: a long project makes a token browsers and
+      // chat clients mangle — say so instead of truncating
       if (token.length > SHARE_TOKEN_LIMIT) {
         dispatch('ide/shared',
           `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars) — use Download instead`);
         return;
       }
-      const url = env.share?.(`#/studio?s=${token}`);
+      const url = env.share?.(`#/project?s=${token}`);
       dispatch('ide/shared', url === undefined ? 'link ready' : 'link copied');
     },
-
-    // the Studio boundary runs: parse + meta-schema-validate an editor
-    // commit, load a seed template, download the current document
-    'studio-parse': (props, dispatch) => {
+    // the app-document download: the project's designated app file, under
+    // the name Studio downloads always carried
+    'project-download': (props, dispatch) => {
+      const file = projectAppFile(app.getState().project);
+      if (file === null) return;
       let doc;
-      try {
-        doc = JSON.parse(props.text);
-      }
-      catch (err) {
-        dispatch('studio/errors', {
-          list: [{ instancePath: '', keyword: '', message: `Invalid JSON: ${/** @type {Error} */ (err).message}` }],
-          total: 1,
-        });
-        return;
-      }
-      const report = validateAppDocument(doc);
-      if (!report.valid) {
-        dispatch('studio/errors', { list: report.errors, total: report.total });
-        return;
-      }
-      dispatch('studio/doc', { doc });
-    },
-    'studio-template': (props, dispatch) => {
-      const template = studioTemplate(props.name);
-      if (template === undefined) return;
-      dispatch('studio/doc', { doc: template.doc });
-    },
-    'studio-download': (props, dispatch) => {
-      const doc = app.getState().studio.doc;
-      if (doc === null) return;
+      try { doc = JSON.parse(file.text); }
+      catch { return; } // an unparseable app file has nothing to download
       const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
       dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
     },
@@ -250,7 +241,13 @@ export function createSiteApp(env) {
     },
     'project-template': (props, dispatch) => {
       const template = projectTemplate(props.id);
-      if (template !== undefined) dispatch('project/open', template);
+      if (template === undefined) return;
+      dispatch('project/open', template);
+      // commit NOW, computed from the template itself: the debounced edit
+      // loop alone leaves a race where an edit inside the debounce window
+      // supersedes the opening commit — the "last good frame" then never
+      // existed and an invalid edit blanks the stage
+      dispatch('project/committed', commitProject(template));
     },
     // file management (the files array is an array — index-by-name lives in
     // JS here, then a patch action lands the result)
@@ -422,13 +419,10 @@ export function createSiteApp(env) {
     afterRender: () => env.revealActiveTab?.(),
     onError: report,
     effects,
-    // the Studio host: a widget whose mount/destroy owns the nested,
-    // isolated app a studio document boots into (boundaries/studio.js)
     widgets: {
       // chart / mermaid / markdown / form — usable from any site-level view
       // (the adventure game embeds chart + mermaid in its own page)
       ...DOCUMENT_WIDGETS,
-      'studio-doc': createStudioHostWidget({ schedule: env.schedule }),
       'flow-doc': flowRuntime.widget,
       // the Project IDE's live stage: boots the active app file, then
       // reboots (revision change) or hot-updates (app.setState) per commit
@@ -535,9 +529,12 @@ function wireBoundaries(app, debounceMs, navigate) {
     if (routed) {
       const s = app.getState();
       // the retired #/examples, #/scratch and #/playground URLs redirect
-      // to #/play (an old playground share token translates on the way)
+      // to #/play (an old playground share token translates on the way);
+      // the retired #/studio redirects to the Project IDE, its share
+      // token riding along (the token itself opens on #/project)
       if (s.route.page === 'examples' || s.route.page === 'scratch') { navigate?.('#/play'); return; }
       if (s.route.page === 'playground') { navigate?.(playgroundRedirect(s.route.params)); return; }
+      if (s.route.page === 'studio') { navigate?.(studioRedirect(s.route.params)); return; }
       // arriving at the Project IDE: boot the stage once, run the active
       // transform if that is what is showing
       if (s.route.page === 'project') {
@@ -567,12 +564,18 @@ function wireBoundaries(app, debounceMs, navigate) {
     return '#/play';
   }
 
+  /** The retired #/studio URL → #/project, the share token riding along
+   * (applyShareToken opens a studio-document token as a one-app project). */
+  function studioRedirect(params) {
+    return params.s === undefined ? '#/project' : `#/project?s=${params.s}`;
+  }
+
   /** Inbound share links: `?s=<token>` loads the shared snapshot once. */
   let appliedToken = null;
   function applyShareToken(state) {
     const token = state.route.params.s;
     const page = state.route.page;
-    if ((page !== 'studio' && page !== 'play') || token === undefined
+    if ((page !== 'project' && page !== 'play') || token === undefined
       || token === appliedToken) {
       return;
     }
@@ -586,23 +589,26 @@ function wireBoundaries(app, debounceMs, navigate) {
       app.dispatch('play/loaded-session', { ...sessionToLoaded(snapshot), name: '' });
       return;
     }
-    // a shared studio document passes the same meta-schema gate as
-    // every other entry path; a failing one reports instead of booting
-    if (snapshot.e !== 'studio' || snapshot.i === undefined
-      || snapshot.i.doc === null || typeof snapshot.i.doc !== 'object') {
-      return;
+    // a project token — or a legacy studio-document token, which opens as
+    // a single-app project. Every file still validates on its own boundary
+    // when it lands, so a broken share reports in the error strip instead
+    // of booting; a foreign shape is ignored, never a crash. Commit in the
+    // same breath (see project-template) so the opening frame is the
+    // committed last-good one.
+    const project = sharedProject(snapshot);
+    if (project !== null) {
+      app.dispatch('project/open', project);
+      app.dispatch('project/committed', commitProject(project));
     }
-    const report = validateAppDocument(snapshot.i.doc);
-    if (report.valid) app.dispatch('studio/doc', { doc: snapshot.i.doc });
-    else app.dispatch('studio/errors', { list: report.errors, total: report.total });
   }
 
-  // a direct entry at a retired URL redirects to #/play (the initial
-  // route/set fired before this subscriber attached, so handle it here)
+  // a direct entry at a retired URL redirects (the initial route/set
+  // fired before this subscriber attached, so handle it here)
   {
     const entry = app.getState().route;
     if (entry.page === 'examples' || entry.page === 'scratch') navigate?.('#/play');
     if (entry.page === 'playground') navigate?.(playgroundRedirect(entry.params));
+    if (entry.page === 'studio') navigate?.(studioRedirect(entry.params));
   }
   // entering directly at #/project boots the live stage
   if (app.getState().route.page === 'project') { runProjectCommit(); runProjectActive(); }

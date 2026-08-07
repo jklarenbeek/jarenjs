@@ -12,7 +12,7 @@ import { SHELL_RULES } from './shell.js';
 import { HOME_RULES } from './home.js';
 import { BENCH_RULES } from './benchmarks.js';
 import { CHARTSPAGE_RULES } from './chartspage.js';
-import { STUDIO_RULES } from './studio.js';
+import { PROJECT_IDE_RULES } from './ide.js';
 import { projectRules, projectModes } from '@jarenjs/studio/component';
 import { playRules, playModes } from '@jarenjs/play/component';
 import { FLOW_RULES } from './flowstudio.js';
@@ -30,7 +30,6 @@ export const STYLESHEET = {
   // a bug, not content
   modes: {
     home: { unmatched: 'error' },
-    studio: { unmatched: 'error' },
     ...projectModes,
     ...playModes,
     flow: { unmatched: 'error' },
@@ -49,8 +48,8 @@ export const STYLESHEET = {
     ...HOME_RULES,
     ...BENCH_RULES,
     ...CHARTSPAGE_RULES,
-    ...STUDIO_RULES,
     ...projectRules,
+    ...PROJECT_IDE_RULES,
     ...playRules,
     ...FLOW_RULES,
     ...GAME_RULES,

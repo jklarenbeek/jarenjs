@@ -138,15 +138,19 @@ if (window.visualViewport) {
 // While an editor is focused: mark the body (the sticky header un-sticks
 // so it cannot cover the field) and center the field in the visual
 // viewport, clear of both the header and the keyboard.
+// the site's editors carry `.editor`; the @jarenjs/studio component's
+// carries its own `.js-editor-input` — both get the seam
+const isSeamEditor = (target) => target?.classList !== undefined
+  && (target.classList.contains('editor') || target.classList.contains('js-editor-input'));
 document.addEventListener('focusin', (event) => {
   const target = /** @type {any} */ (event.target);
-  if (!(target?.classList?.contains('editor'))) return;
+  if (!isSeamEditor(target)) return;
   document.body.classList.add('kb-editing');
   target.scrollIntoView({ block: 'center', behavior: 'instant' });
 });
 document.addEventListener('focusout', (event) => {
   const target = /** @type {any} */ (event.target);
-  if (target?.classList?.contains('editor')) document.body.classList.remove('kb-editing');
+  if (isSeamEditor(target)) document.body.classList.remove('kb-editing');
 });
 
 // close the nav dropdown groups on Escape or a click outside the header nav

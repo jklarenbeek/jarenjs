@@ -3,11 +3,15 @@
  * Seed projects for the Project IDE (`#/project`). Each is a `jaren-project`
  * — a small tree of typed files — that opens as "New Pen" would: the same
  * document the human edits and an AI authors. The starter is one live
- * `app`; the others show the multi-file split (a `query`/`jslt` transform
- * beside the `data` it runs on), including a host-registered operator
- * (`$npv`) that only validates because each file is checked on its OWN
- * boundary with the operator packs mounted.
+ * `app`; the app seeds (form / dashboard / mini-site) are the Studio's
+ * boot-tested application documents as single-`app`-file projects; the
+ * others show the multi-file split (a `query`/`jslt` transform beside the
+ * `data` it runs on), including a host-registered operator (`$npv`) that
+ * only validates because each file is checked on its OWN boundary with
+ * the operator packs mounted.
  */
+
+import { STUDIO_TEMPLATES } from './appTemplates.js';
 
 /** The live starter app: the `h1` reflects `state.title` (so editing the
  * state block hot-updates it), an UNCONTROLLED scratch input (it survives
@@ -36,6 +40,26 @@ const UPPER_JSLT = JSON.stringify({
 }, null, 2);
 const UPPER_DATA = JSON.stringify({ name: 'Ada', tags: ['compiler', 'json'] }, null, 2);
 
+/** The default layout every seed opens with. */
+export const PROJECT_LAYOUT = Object.freeze({ mode: 'classic', ratio: 0.5, autorun: true });
+
+/**
+ * One `@jarenjs/app` document as a single-`app`-file project — how a
+ * studio document (a saved experiment, an inbound share, an AI write)
+ * lands on the project machine.
+ * @param {any} doc - a jaren-app document
+ * @param {string} [name]
+ */
+export function singleAppProject(doc, name = 'Studio app') {
+  return {
+    project: '0.1',
+    name,
+    files: [{ name: 'app.json', kind: 'app', text: JSON.stringify(doc, null, 2) }],
+    active: 'app.json',
+    layout: { ...PROJECT_LAYOUT },
+  };
+}
+
 /**
  * The gallery. `files` is the seed tree; `active` names the file the IDE
  * opens on. Kept small and each independently valid.
@@ -54,6 +78,11 @@ export const PROJECT_TEMPLATES = Object.freeze([
       { name: 'stats.data', kind: 'data', text: JSON.stringify({ values: [3, 1, 4, 1, 5, 9, 2, 6] }, null, 2) },
     ],
   },
+  // the Studio's complete application documents, each a one-app project
+  ...STUDIO_TEMPLATES.map((t) => {
+    const { files, active } = singleAppProject(t.doc);
+    return { id: t.name, title: t.title, lead: t.lead, active, files };
+  }),
   {
     id: 'finance',
     title: 'Query + data',
@@ -85,9 +114,6 @@ export const PROJECT_TEMPLATES = Object.freeze([
     ],
   },
 ]);
-
-/** The default layout every seed opens with. */
-export const PROJECT_LAYOUT = Object.freeze({ mode: 'classic', ratio: 0.5, autorun: true });
 
 /** The gallery cards the pen bar shows (opening one replaces the project,
  * CodePen "New Pen" style). */
@@ -130,3 +156,34 @@ export function projectTemplate(id) {
 
 /** The seed project the IDE opens with (the starter). */
 export const STARTER_PROJECT = projectTemplate('starter');
+
+/**
+ * An inbound share snapshot → an openable project, or null for a foreign
+ * shape. Two codecs open here: `{ e: 'project', i: { project } }` (a whole
+ * project) and the Studio's `{ e: 'studio', i: { doc } }` (a single app
+ * document — it opens as a one-app project, so old links keep restoring
+ * what they always restored).
+ * @param {any} snapshot - a decoded share token
+ */
+export function sharedProject(snapshot) {
+  if (snapshot === null || typeof snapshot !== 'object') return null;
+  if (snapshot.e === 'studio') {
+    const doc = snapshot.i?.doc;
+    return doc !== null && typeof doc === 'object' ? singleAppProject(doc, 'Shared app') : null;
+  }
+  if (snapshot.e !== 'project') return null;
+  const p = snapshot.i?.project;
+  if (p === null || typeof p !== 'object' || !Array.isArray(p.files)) return null;
+  const files = p.files
+    .filter((f) => f !== null && typeof f === 'object')
+    .map((f) => ({ name: String(f.name ?? ''), kind: String(f.kind ?? 'data'), text: String(f.text ?? '') }))
+    .filter((f) => f.name !== '');
+  if (files.length === 0) return null;
+  return {
+    project: typeof p.project === 'string' ? p.project : '0.1',
+    name: typeof p.name === 'string' ? p.name : 'Shared project',
+    files,
+    active: files.some((f) => f.name === p.active) ? p.active : files[0].name,
+    layout: { ...PROJECT_LAYOUT, ...(p.layout !== null && typeof p.layout === 'object' ? p.layout : {}) },
+  };
+}

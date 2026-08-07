@@ -100,5 +100,8 @@ DOM-touching widgets. As of v0.28.2 the website mounts it live at
 
 Everything above — the view, the derivation, the two policies — renders
 and is tested without a DOM; the live stage, the layout modes and the
-splitter's drag are browser-verified (`e2e/project.spec.js`). Still to
-fold in: `#/playground` (engine runners as file kinds) and `#/studio`.
+splitter's drag are browser-verified (`e2e/project.spec.js`). Both old
+website surfaces are folded in: the playground's engine runners live on
+as file kinds, and the app-authoring Studio is the `app` file kind — its
+seed applications ship as single-`app`-file project templates and the
+retired `#/studio` URL redirects to the project IDE.

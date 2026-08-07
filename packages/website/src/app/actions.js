@@ -127,38 +127,6 @@ export const ACTIONS = {
     patch: [{ op: 'add', path: '/chartsLive', value: '$payload' }],
   },
 
-  // the Studio: swapping the hosted document is ATOMIC — only an
-  // already-validated document reaches 'studio/doc' (the studio-parse
-  // effect and the assistant tools validate first); a failed validation
-  // lands in 'studio/errors' and the old document stays live
-  'studio/doc': {
-    patch: [
-      { op: 'replace', path: '/studio/doc', value: '$payload.doc' },
-      { op: 'replace', path: '/studio/errors', value: null },
-      { op: 'replace', path: '/studio/error', value: null },
-      { op: 'replace', path: '/studio/revision', value: { $add: ['$.studio.revision', 1] } },
-    ],
-  },
-  'studio/errors': {
-    patch: [{ op: 'replace', path: '/studio/errors', value: '$payload' }],
-  },
-  // boot/runtime failures from the nested app's own error sink (the
-  // host widget emits these — they never throw into the site's render)
-  'studio/error': {
-    patch: [{ op: 'replace', path: '/studio/error', value: '$payload' }],
-  },
-  'studio/clear': {
-    patch: [
-      { op: 'replace', path: '/studio/doc', value: null },
-      { op: 'replace', path: '/studio/errors', value: null },
-      { op: 'replace', path: '/studio/error', value: null },
-    ],
-  },
-  // the JSON editor commits on change (blur), like the data pane
-  'studio/text': { effects: [{ run: 'studio-parse', with: { text: '$event.value' } }] },
-  'studio/template': { effects: [{ run: 'studio-template', with: { name: '$payload' } }] },
-  'studio/download': { effects: [{ run: 'studio-download' }] },
-
   // the Project IDE (#/project, boundaries/project.js): a jaren-project
   // edited as one document. The editor commits the ACTIVE file's text
   // through the `project-edit` effect (it rewrites the file by name, in
@@ -230,6 +198,8 @@ export const ACTIONS = {
     ],
   },
   'project/template': { effects: [{ run: 'project-template', with: { id: '$payload' } }] },
+  // download the designated app file's document (the Studio's takeaway)
+  'project/download': { effects: [{ run: 'project-download' }] },
   // the layout switcher + the splitter (the splitter lands a later patch)
   'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },
   'project/layout-ratio': { patch: [{ op: 'replace', path: '/project/layout/ratio', value: '$payload' }] },

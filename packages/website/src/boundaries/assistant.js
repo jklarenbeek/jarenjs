@@ -35,6 +35,7 @@ import { runValidation } from './validator.js';
 import { operatorRegistry } from './engines.js';
 import { playComponent, runPlay, legacyExperimentToSession } from './play.js';
 import { validateAppDocument, auditDocumentRender } from './studio.js';
+import { commitProject, projectAppFile } from './project.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
 import { FLOW_TEMPLATES, flowTemplate } from '../content/flowTemplates.js';
 
@@ -222,7 +223,7 @@ export function createSiteToolbox(env) {
     inputSchema: {
       type: 'object',
       properties: {
-        page: { enum: ['home', 'studio', 'play', 'flow', 'benchmarks', 'charts', 'docs', 'calculator'] },
+        page: { enum: ['home', 'studio', 'project', 'play', 'flow', 'benchmarks', 'charts', 'docs', 'calculator'] },
         params: { type: 'object', additionalProperties: { type: 'string' } },
       },
       required: ['page'],
@@ -257,12 +258,20 @@ export function createSiteToolbox(env) {
     },
   });
 
-  // ---- the Studio: authoring a complete app document ----
+  // ---- the Studio: authoring the project's app document ----
 
-  /** The current studio document, or null. */
-  const studioDoc = () => env.getApp()?.getState().studio.doc ?? null;
+  /** The project's designated app file's document, or null (no app file,
+   * or its text does not parse — either way there is nothing to patch). */
+  const studioDoc = () => {
+    const project = env.getApp()?.getState().project;
+    const file = project === undefined ? null : projectAppFile(project);
+    if (file === null) return null;
+    try { return JSON.parse(file.text); }
+    catch { return null; }
+  };
 
-  /** Validate + swap a document in, navigating so the human watches it boot. */
+  /** Validate + write a document into the project's app file, navigating
+   * so the human watches it boot on the stage. */
   const studioSwap = (doc) => {
     const report = validateAppDocument(doc);
     if (!report.valid) {
@@ -275,15 +284,33 @@ export function createSiteToolbox(env) {
     }
     const app = env.getApp();
     if (app === null) return { error: 'the studio is not running here' };
-    go('#/studio');
-    app.dispatch('studio/doc', { doc });
+    go('#/project');
+    // write the designated app file (or add one), activate it, and commit
+    // synchronously so the stage boots now and the revision is real — the
+    // debounced edit loop that follows is idempotent on this commit
+    const text = JSON.stringify(doc, null, 2);
+    const project = app.getState().project;
+    const target = projectAppFile(project);
+    if (target === null) {
+      app.dispatch('project/added', {
+        files: [...project.files, { name: 'app.json', kind: 'app', text }],
+        active: 'app.json',
+      });
+    }
+    else {
+      app.dispatch('project/files-set', {
+        files: project.files.map((f) => (f.name === target.name ? { ...f, text } : f)),
+      });
+      if (project.active !== target.name) app.dispatch('project/active', target.name);
+    }
+    app.dispatch('project/committed', commitProject(app.getState().project));
     // "it validates" is not "it renders": audit the first frame so a
     // model that mangled a vnode or a widget's props hears about it
     // now instead of reporting success over a broken mount
     const audit = auditDocumentRender(doc);
     return {
       ok: true,
-      revision: app.getState().studio.revision,
+      revision: app.getState().project.revision,
       widgets: audit.widgets,
       ...(audit.problems.length === 0 ? {} : {
         renderProblems: audit.problems,
@@ -297,7 +324,7 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_studio_write',
-    description: 'Load a COMPLETE @jarenjs/app document (state + JSLT view + actions as one JSON value) into the Studio (#/studio), where it boots as a live app the user watches. The document is validated against the jaren-app meta-schema first; on failure you get the errors (with instancePaths) to repair. Start from jaren_get_templates and iterate with jaren_studio_patch instead of resending whole documents.',
+    description: 'Load a COMPLETE @jarenjs/app document (state + JSLT view + actions as one JSON value) into the project IDE (#/project), where it becomes the project\'s app file and boots as a live app the user watches. The document is validated against the jaren-app meta-schema first; on failure you get the errors (with instancePaths) to repair. Start from jaren_get_templates and iterate with jaren_studio_patch instead of resending whole documents.',
     inputSchema: {
       type: 'object',
       properties: { doc: { type: 'object' } },
@@ -341,7 +368,7 @@ export function createSiteToolbox(env) {
       const doc = studioDoc();
       if (doc === null) return { error: 'no studio document is loaded' };
       if (input.pointer === undefined || input.pointer === '') {
-        return { doc, revision: env.getApp().getState().studio.revision };
+        return { doc, revision: env.getApp().getState().project.revision };
       }
       let value;
       try {
@@ -475,7 +502,7 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_save_experiment',
-    description: 'Save what is on screen under a name so the user keeps what you built together: on #/studio the current studio document (the IDE store); anywhere else the current play session (the play store). Returns the updated saved names.',
+    description: 'Save what is on screen under a name so the user keeps what you built together: on #/project the current project (the IDE store); anywhere else the current play session (the play store). Returns the updated saved names.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', minLength: 1 } },
@@ -484,7 +511,7 @@ export function createSiteToolbox(env) {
     execute: (input) => {
       const app = env.getApp();
       if (app === null) return { error: 'the site is not running here' };
-      if (app.getState().route.page === 'studio') {
+      if (app.getState().route.page === 'project') {
         app.dispatch('ide/name', null, { target: { value: input.name } });
         app.dispatch('ide/save');
         return { ok: true, names: app.getState().ide.names };
@@ -497,7 +524,7 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_list_experiments',
-    description: 'List the saved work: the IDE store\'s experiments (studio documents, plus any legacy engine experiments) and the saved play sessions.',
+    description: 'List the saved work: the IDE store\'s experiments (projects, plus any legacy studio or engine experiments) and the saved play sessions.',
     inputSchema: { type: 'object', properties: {} },
     execute: () => ({
       experiments: Object.entries(env.docStore.all()).map(([name, e]) => ({
@@ -509,7 +536,7 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_load_experiment',
-    description: 'Load a saved experiment by name: a studio document opens in #/studio; a legacy engine experiment opens as the equivalent play session.',
+    description: 'Load a saved experiment by name: a project (or a legacy studio document) opens in #/project; a legacy engine experiment opens as the equivalent play session.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -527,12 +554,12 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_share_link',
-    description: 'Build a share link that restores what is on screen (the studio document on #/studio, the play session otherwise), and copy it to the clipboard.',
+    description: 'Build a share link that restores what is on screen (the project on #/project, the play session otherwise), and copy it to the clipboard.',
     inputSchema: { type: 'object', properties: {} },
     execute: () => {
       const app = env.getApp();
       if (app === null || env.share === undefined) return { error: 'sharing is unavailable here' };
-      app.dispatch(app.getState().route.page === 'studio' ? 'ide/share' : 'play/share');
+      app.dispatch(app.getState().route.page === 'project' ? 'ide/share' : 'play/share');
       return { ok: true, note: 'A share link was copied to the clipboard.' };
     },
   });
@@ -601,11 +628,12 @@ export const SYSTEM_PROMPT = [
   '   switch to them and deliver it. Never stop at a partial result to ask "should I…" or',
   '   "want me to switch to…"; just do the obvious next step, then summarise what is on screen.',
   '',
-  'The Studio (#/studio) — where you author a whole application:',
+  'The Studio (#/project) — where you author a whole application:',
   'A studio document is a COMPLETE @jarenjs/app app — initial state, a JSLT view stylesheet',
   'and named actions as one JSON value — validated by the jaren-app meta-schema and booted',
-  'live by the real app runtime. Its view may use the widgets form ({ schema, data }),',
-  'chart ({ config }), markdown ({ source }) and mermaid ({ source }).',
+  'live by the real app runtime, as the app file of the project IDE. Its view may use the',
+  'widgets form ({ schema, data }), chart ({ config }), markdown ({ source }) and',
+  'mermaid ({ source }).',
   '7. Author via template + patch, never from scratch: jaren_get_templates for a seed,',
   '   jaren_studio_write to load it, jaren_studio_read to inspect (use a pointer for one',
   '   subtree), then small RFC 6902 patches with jaren_studio_patch.',

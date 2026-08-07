@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The browser PROOF (TODO_21): the same data layer runs in a
- * real browser. This drives the deployed `#/data` studio on the built
+ * @file The browser PROOF: the same data layer runs in a real
+ * browser. This drives the deployed `#/data` studio on the built
  * site — the SQLite wasm build loads in a dedicated worker over the
  * header-free OPFS SAH-pool VFS, a live query maintains as rows are
  * inserted, `explain()` shows the pushdown, a migration plans and
