@@ -30,6 +30,33 @@ test('the seeded example runs live on the stage', async ({ page }) => {
   await noOverflow(page, 'the playground');
 });
 
+test('the IDE bar saves a session that survives a reload, then loads it back', async ({ page }) => {
+  await page.goto('/#/play');
+  await expect(page.locator('.jplay-bar')).toBeVisible();
+  await page.locator('.jplay-name').fill('e2e-run');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  // the Load dropdown now offers it
+  await expect(page.locator('.jplay-load')).toContainText('e2e-run');
+  // a real reload: the saved session persists in localStorage and re-lists
+  await page.reload();
+  await expect(page.locator('.jplay-load')).toContainText('e2e-run');
+  await page.locator('.jplay-load').selectOption('e2e-run');
+  await expect(page.locator('.jplay-name')).toHaveValue('e2e-run');
+});
+
+test('Share reports a status; the editor|result splitter is a keyboard separator', async ({ page }) => {
+  await page.goto('/#/play');
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(page.locator('.jplay-shared')).toBeVisible(); // "link copied" / "link ready"
+  // the splitter is present as an ARIA separator and keyboard-resizes
+  const split = page.locator('.jplay-split');
+  await expect(split).toHaveAttribute('role', 'separator');
+  const before = await split.getAttribute('aria-valuenow');
+  await split.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(split).not.toHaveAttribute('aria-valuenow', before ?? '');
+});
+
 test('editing the source pane re-runs against the same data', async ({ page }) => {
   await page.goto('/#/play');
   await expect(page.locator('.jplay-result')).toContainText('Nigel Rees');

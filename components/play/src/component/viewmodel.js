@@ -96,6 +96,10 @@ export function playViewModel(state) {
   const r = s.result ?? null;
   const result = r === null ? { ran: false } : deriveResult(r, s.panel);
 
+  // the IDE half (PLAY_04): the saveable-session chrome
+  const names = Array.isArray(s.names) ? s.names : [];
+  const ratio = typeof s.ratio === 'number' ? s.ratio : 0.5;
+
   return {
     engine: { id: engineId, label: engine?.label ?? engineId, lead: engine?.lead ?? '' },
     active: active ? { id: active.id, label: active.label } : null,
@@ -106,5 +110,13 @@ export function playViewModel(state) {
     datasets,
     hasSwitcher: datasets.length >= 2,
     result,
+    // IDE chrome: the session name, the saved list, the last share status,
+    // and the editor|result split (the shared splitter reads `ratio`)
+    name: s.name ?? '',
+    names: names.map((n) => ({ name: n, active: n === s.name })),
+    hasSaved: names.length > 0,
+    shared: s.shared ?? null,
+    ratio,
+    ratioPct: String(Math.round(ratio * 100)),
   };
 }

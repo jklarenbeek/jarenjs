@@ -27,7 +27,7 @@ import {
 } from '../boundaries/assistant.js';
 import { validateAppDocument, createStudioHostWidget, STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import { createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile } from '../boundaries/project.js';
-import { runPlay, loadExample, loadDataset } from '../boundaries/play.js';
+import { runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession, createPlaySplitterWidget } from '../boundaries/play.js';
 import { projectTemplate, fileSkeleton } from '../content/projectTemplates.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
@@ -74,6 +74,13 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * silently mangled URL (studio documents can be long). */
 const SHARE_TOKEN_LIMIT = 8000;
 
+/** Play-slice paths that are IDE chrome, not engine inputs: a change to any
+ * of them must NOT re-run the engine (the run's own output, the active tab,
+ * the session name/list, the share status, the editor|result split ratio). */
+const PLAY_CHROME_PATHS = new Set([
+  '/play/result', '/play/panel', '/play/name', '/play/names', '/play/shared', '/play/ratio',
+]);
+
 /** @param {SiteEnv} env */
 export function createSiteApp(env) {
   const report = env.onError
@@ -82,6 +89,10 @@ export function createSiteApp(env) {
   // the saved-experiment store (localStorage in the browser): a keyed CRUD
   // over the injected storage, shared with the studio and play surfaces
   const docStore = createDocStore({ storage });
+  // the Play IDE's own saved-session store (PLAY_04): the same primitive,
+  // a separate collection key, so play sessions and legacy experiments
+  // never collide
+  const playStore = createDocStore({ storage, key: 'play' });
 
   /** effect-handler dedupe: each benchmark file is fetched once */
   const requested = new Set();
@@ -310,6 +321,36 @@ export function createSiteApp(env) {
       const data = loadDataset(app.getState().play.exampleId, props.index);
       if (data !== null) dispatch('play/dataset-set', { index: props.index, data });
     },
+    // the Play IDE (PLAY_04): a play session is a saveable document, kept in
+    // the play doc-store and shareable as a `#/play?s=` link
+    'play-new': (props, dispatch) => {
+      dispatch('play/loaded-session', { ...blankSession(app.getState().play.engine), name: '' });
+    },
+    'play-save': (props, dispatch) => {
+      const slice = app.getState().play;
+      const name = (slice.name ?? '').trim();
+      if (name === '') return; // no name → nothing to save (the header nudges)
+      playStore.save(name, { ...sessionOf(slice), savedAt: new Date().toISOString() });
+      dispatch('play/names', playStore.names());
+    },
+    'play-open': (props, dispatch) => {
+      const session = playStore.load(props.name);
+      if (session === undefined) return;
+      dispatch('play/loaded-session', { ...sessionToLoaded(session), name: props.name });
+    },
+    'play-delete': (props, dispatch) => {
+      playStore.remove(props.name);
+      dispatch('play/names', playStore.names());
+    },
+    'play-share': (props, dispatch) => {
+      const token = encodeShare(sessionOf(app.getState().play));
+      if (token.length > SHARE_TOKEN_LIMIT) {
+        dispatch('play/shared', `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars)`);
+        return;
+      }
+      const url = env.share?.(`#/play?s=${token}`);
+      dispatch('play/shared', url === undefined ? 'link ready' : 'link copied');
+    },
     // a README link to a published page routes in-app after the dialog
     // closes (the action's patch already closed it)
     'readme-goto': (props) => {
@@ -384,7 +425,7 @@ export function createSiteApp(env) {
 
   app = createApp({
     $app: '0.1',
-    state: createInitialState(env.initialTheme ?? 'light', ideNames(), aiStorage.read(), aiChat.read()),
+    state: createInitialState(env.initialTheme ?? 'light', ideNames(), aiStorage.read(), aiChat.read(), playStore.names()),
     view: STYLESHEET,
     actions: ACTIONS,
     subs: [...SUBS, rates.subEntry],
@@ -414,6 +455,8 @@ export function createSiteApp(env) {
       'studio-stage': createProjectStageWidget({ schedule: env.schedule }),
       // the drag splitter: drives --js-ratio live, commits on pointer-up
       'studio-splitter': createProjectSplitterWidget(),
+      // the Play IDE's editor|result splitter (same widget, --jplay-ratio)
+      'play-splitter': createPlaySplitterWidget(),
     },
     subs: {
       hash: (props, dispatch) => env.listenHash?.((route) => dispatch('route/set', route)),
@@ -520,10 +563,11 @@ function wireBoundaries(app, debounceMs, navigate) {
       else if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
         project = true;
       }
-      // any Play input (source / data / example / dataset) re-runs; the
-      // run's own output (`/play/result`) and a pure tab switch
-      // (`/play/panel`) must NOT, or it loops / re-runs on every click
-      else if (path.startsWith('/play/') && path !== '/play/result' && path !== '/play/panel') {
+      // any Play ENGINE input (source / data / example / dataset / config)
+      // re-runs; the run's own output and the pure IDE chrome (the active
+      // tab, the session name/list, the share status, the split ratio) must
+      // NOT, or it loops / re-runs on every keystroke and drag
+      else if (path.startsWith('/play/') && !PLAY_CHROME_PATHS.has(path)) {
         play = true;
       }
       else if (path === '/route') {
@@ -568,13 +612,21 @@ function wireBoundaries(app, debounceMs, navigate) {
   function applyShareToken(state) {
     const token = state.route.params.s;
     const page = state.route.page;
-    if ((page !== 'playground' && page !== 'studio') || token === undefined
+    if ((page !== 'playground' && page !== 'studio' && page !== 'play') || token === undefined
       || token === appliedToken) {
       return;
     }
     appliedToken = token;
     const snapshot = decodeShare(token);
-    if (snapshot === null || typeof snapshot.e !== 'string' || snapshot.i === undefined)
+    if (snapshot === null) return;
+    if (page === 'play') {
+      // a play SESSION token ({ engine, source, data, config, exampleId });
+      // a foreign shape is coerced to safe defaults, never a crash
+      if (typeof snapshot.engine !== 'string') return;
+      app.dispatch('play/loaded-session', { ...sessionToLoaded(snapshot), name: '' });
+      return;
+    }
+    if (typeof snapshot.e !== 'string' || snapshot.i === undefined)
       return;
     if (page === 'studio') {
       // a shared studio document passes the same meta-schema gate as

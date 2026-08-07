@@ -5,6 +5,7 @@
  * it runs live — the registered operator packs threaded in so `$mean`/`$npv`
  * work in the query/jslt engines. Ephemeral (no document, unlike the studio).
  */
+import { createSplitterWidget } from '@jarenjs/app';
 import { createPlayComponent } from '@jarenjs/play/component';
 import { operatorRegistry } from './engines.js';
 import { md } from './markdown.js';
@@ -39,7 +40,60 @@ export const PLAY_START = Object.freeze({
   config: { ...(first.config ?? {}) },
   result: null,
   panel: null, // the active result panel (tab) id; null → the first panel
+  // the IDE half (PLAY_04): a play SESSION is a saveable document
+  name: '',        // the name the session saves under (the header input)
+  names: [],       // the saved session names (seeded from the play doc-store)
+  shared: null,    // the last Share status line (or null)
+  ratio: 0.5,      // the editors|result split (the shared splitter widget)
 });
+
+/**
+ * A play SESSION as a saveable/shareable document: the engine, its source and
+ * data panes, the option config, and the originating example id. This is what
+ * `createDocStore` persists and `encodeShare` turns into a `#/play?s=` link.
+ * @param {any} slice - the `state.play` slice
+ */
+export function sessionOf(slice) {
+  return {
+    engine: slice.engine,
+    exampleId: slice.exampleId ?? null,
+    source: { ...(slice.source ?? {}) },
+    data: { ...(slice.data ?? {}) },
+    config: { ...(slice.config ?? {}) },
+  };
+}
+
+/**
+ * A session document → the `play/loaded-session` payload (a fresh run seeds
+ * from it). A blank/foreign session is coerced to safe defaults so a bad
+ * share token never crashes the surface.
+ * @param {any} session
+ */
+export function sessionToLoaded(session) {
+  const s = session && typeof session === 'object' ? session : {};
+  return {
+    engine: typeof s.engine === 'string' ? s.engine : PLAY_START.engine,
+    exampleId: typeof s.exampleId === 'string' ? s.exampleId : null,
+    source: s.source && typeof s.source === 'object' ? s.source : {},
+    data: s.data && typeof s.data === 'object' ? s.data : {},
+    config: s.config && typeof s.config === 'object' ? s.config : {},
+  };
+}
+
+/** A blank session of the given engine (New): empty panes, default config. */
+export function blankSession(engineId) {
+  const engine = playComponent.engineIds().includes(engineId) ? engineId : PLAY_START.engine;
+  return { engine, exampleId: null, source: {}, data: {}, config: {} };
+}
+
+/** The Play IDE's editor|result splitter (`play-splitter`): the shared
+ * `@jarenjs/app` widget bound to the play grid — drives `--jplay-ratio` live
+ * during a drag and commits `play/layout-ratio` on pointer-up. */
+export function createPlaySplitterWidget() {
+  return createSplitterWidget({
+    grid: '.jplay', rail: '.jplay-rail', cssVar: '--jplay-ratio', action: 'play/layout-ratio',
+  });
+}
 
 /** Run the active engine over the current source + data (operators, option config, visual renderers). */
 export function runPlay(slice) {

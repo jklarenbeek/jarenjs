@@ -14,10 +14,39 @@ export const PLAY_BASE = '$.ui.play';
 /** The modes the host merges into the site stylesheet. */
 export const playModes = Object.freeze({ [PLAY_MODE]: { unmatched: 'error' } });
 
-/** The shell (matches the whole slice): rail | editors | stage. */
+/** The shell (matches the whole slice): bar / rail | editors | split | stage. */
 const shell = {
   match: PLAY_BASE, mode: PLAY_MODE,
   body: ['div', { class: 'jplay' },
+    // ——— the IDE bar: engine title, session name, New/Save/Save As/Share,
+    // the Load dropdown, and the last share status (a play session is a
+    // saveable document — PLAY_04) ———
+    ['div', { class: 'jplay-bar' },
+      ['strong', { class: 'jplay-title' }, '$.engine.label'],
+      ['input', {
+        class: 'jplay-name editor line', value: '$.name', spellcheck: 'false',
+        autocapitalize: 'off', autocomplete: 'off', placeholder: 'name this session…',
+        'aria-label': 'session name', on: { input: 'play/name' },
+      }],
+      ['div', { class: 'jplay-actions' },
+        ['button', { class: 'btn small', type: 'button', on: { click: 'play/new' } }, 'New'],
+        ['button', { class: 'btn small', type: 'button', on: { click: 'play/save' } }, 'Save'],
+        ['button', { class: 'btn small', type: 'button', on: { click: 'play/save-as' } }, 'Save As'],
+        ['button', { class: 'btn small', type: 'button', on: { click: 'play/share' } }, 'Share'],
+        // Delete the current named session (only meaningful once named+saved)
+        { $if: ['$.name',
+          ['button', { class: 'btn small', type: 'button', title: 'delete this saved session',
+            on: { click: { action: 'play/delete-session', with: '$.name' } } }, 'Delete'],
+          ''] },
+        // the Load dropdown appears once there is something saved
+        { $if: ['$.hasSaved',
+          ['select', { class: 'jplay-load editor line', 'aria-label': 'load a saved session', value: '', on: { change: 'play/open' } },
+            ['option', { value: '' }, 'Load…'],
+            [{ $apply: '$.names[*]' }]],
+          ''] },
+      ],
+      { $if: ['$.shared', ['span', { class: 'jplay-shared muted', role: 'status' }, '$.shared'], ''] },
+    ],
     // ——— the example picker (a "file tree" grouped by engine) ———
     ['nav', { class: 'jplay-rail', 'aria-label': 'examples' }, [{ $apply: '$.rail[*]' }]],
     // ——— the source + data editors ———
@@ -34,6 +63,16 @@ const shell = {
         ''] },
       [{ $apply: '$.dataPanes[*]' }],
     ],
+    // ——— the editors|result splitter (a pointer-capture widget; its host
+    // IS the grab bar — drives --jplay-ratio live, commits on pointer-up) ———
+    ['jaren-widget', {
+      name: 'play-splitter', class: 'jplay-split',
+      role: 'separator', 'aria-orientation': 'vertical',
+      'aria-label': 'Resize the editors and result',
+      'aria-valuemin': '10', 'aria-valuemax': '90', 'aria-valuenow': '$.ratioPct',
+      tabindex: '0',
+      props: { ratio: '$.ratio' },
+    }],
     // ——— the run stage ———
     ['div', { class: 'jplay-stage' },
       ['div', { class: 'jplay-stage-head muted' }, 'Result'],
@@ -122,6 +161,12 @@ const datasetOption = {
   }, '$.label'],
 };
 
+/** One saved session in the Load dropdown. */
+const savedOption = {
+  match: `${PLAY_BASE}.names[*]`, mode: PLAY_MODE,
+  body: ['option', { value: '$.name' }, '$.name'],
+};
+
 /** One tab in the result strip (only shown when a result has >1 panel). */
 const resultTab = {
   match: `${PLAY_BASE}.result.tabs[*]`, mode: PLAY_MODE,
@@ -165,5 +210,5 @@ const tableCell = {
 /** The playground's JSLT rules — spread into the site stylesheet. */
 export const playRules = [
   shell, railGroup, railExample, optionPane, optionChoice, sourcePane, dataPane, datasetOption,
-  resultTab, activePanel, tableColumn, tableRow, tableCell,
+  savedOption, resultTab, activePanel, tableColumn, tableRow, tableCell,
 ];

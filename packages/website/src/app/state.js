@@ -48,7 +48,7 @@ export const DEFAULT_AI_SETTINGS = {
  * @param {any} [aiChat] - persisted assistant transcript, if any
  * @returns {any} a fresh initial state
  */
-export function createInitialState(theme = 'light', ideNames = [], aiSettings = null, aiChat = null) {
+export function createInitialState(theme = 'light', ideNames = [], aiSettings = null, aiChat = null, playNames = []) {
   return {
     route: { page: 'home', params: {} },
     theme,
@@ -101,7 +101,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // `source`/`data` are the editable pane buffers (keyed by pane),
     // `datasetIndex` selects among an example's datasets, `result` is the
     // last run. Seeded with the first example loaded.
-    play: { ...PLAY_START, source: { ...PLAY_START.source }, data: { ...PLAY_START.data }, config: { ...PLAY_START.config } },
+    play: { ...PLAY_START, source: { ...PLAY_START.source }, data: { ...PLAY_START.data }, config: { ...PLAY_START.config }, names: playNames },
 
     // the Flow studio (boundaries/flowstudio.js): a jaren-fsm or
     // jaren-dag document edited three ways that cannot disagree —

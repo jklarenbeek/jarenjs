@@ -9,12 +9,35 @@
 
 .jplay {
   display: grid;
+  --jplay-ratio: 0.5;
   gap: var(--space-3, 0.75rem);
-  grid-template-columns: 12rem minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-areas: "rail editors stage";
-  align-items: start;
+  /* rail | editors (ratio-driven) | split | result (1fr absorbs the rest);
+     the play-splitter widget drives --jplay-ratio live during a drag */
+  grid-template-columns: 12rem minmax(0, calc((100% - 12rem) * var(--jplay-ratio))) auto minmax(0, 1fr);
+  grid-template-areas:
+    "bar bar bar bar"
+    "rail editors split stage";
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 24rem;
 }
+/* ——— the IDE bar (New/Save/Load/Share + the session name) ——— */
+.jplay-bar {
+  grid-area: bar; display: flex; align-items: center; gap: var(--space-2, 0.5rem);
+  flex-wrap: wrap; padding-bottom: var(--space-2, 0.5rem); border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.jplay-title { color: var(--fg, #0f172a); }
+.jplay-name { max-width: 12rem; }
+.jplay-actions { display: flex; gap: var(--space-1, 0.25rem); flex-wrap: wrap; align-items: center; }
+.jplay-load { max-width: 9rem; }
+.jplay-shared { margin-left: auto; }
+/* ——— the editors|result drag splitter (host = the grab bar) ——— */
+.jplay-split {
+  grid-area: split; cursor: col-resize; width: 10px; align-self: stretch; touch-action: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.jplay-split::before { content: ''; width: 2px; height: 100%; background: var(--border, #e2e8f0); border-radius: 1px; }
+.jplay-split:hover::before, .jplay-split:focus-visible::before { background: var(--accent, #2563eb); }
+.jplay-split:focus-visible { outline: none; }
 .jplay-rail { grid-area: rail; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .jplay-editors { grid-area: editors; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2, 0.5rem); }
 .jplay-stage { grid-area: stage; min-width: 0; display: flex; flex-direction: column; }
@@ -80,7 +103,10 @@
 @media (max-width: 1024px) {
   .jplay {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "rail" "editors" "stage";
+    grid-template-areas: "bar" "rail" "editors" "stage";
+    grid-template-rows: auto;
   }
   .jplay-rail { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+  /* no thin drag handle on touch — PLAY_07 brings the segmented switcher */
+  .jplay-split { display: none; }
 }

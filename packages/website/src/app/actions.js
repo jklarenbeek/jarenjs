@@ -339,6 +339,36 @@ export const ACTIONS = {
   // select a result screen — a pure view switch; the run loop ignores it
   'play/panel': { patch: [{ op: 'replace', path: '/play/panel', value: '$payload' }] },
 
+  // the Play IDE (PLAY_04): a play session is a saveable/shareable document.
+  // New / Save / Save As / Open / Delete / Share are thin wrappers over the
+  // play doc-store effects; name / names / shared / ratio are pure chrome
+  // (the run loop excludes them, so typing a name never re-runs the engine).
+  'play/new': { effects: [{ run: 'play-new' }] },
+  'play/save': { effects: [{ run: 'play-save' }] },
+  'play/save-as': { effects: [{ run: 'play-save' }] }, // the name field is the target
+  'play/open': { effects: [{ run: 'play-open', with: { name: '$event.value' } }] },
+  'play/delete-session': { effects: [{ run: 'play-delete', with: { name: '$payload' } }] },
+  'play/share': { effects: [{ run: 'play-share' }] },
+  'play/name': { patch: [{ op: 'replace', path: '/play/name', value: '$event.value' }] },
+  'play/names': { patch: [{ op: 'replace', path: '/play/names', value: '$payload' }] },
+  'play/shared': { patch: [{ op: 'replace', path: '/play/shared', value: '$payload' }] },
+  'play/layout-ratio': { patch: [{ op: 'replace', path: '/play/ratio', value: '$payload' }] },
+  // seed engine+source+data+config from a saved/shared/blank session, then run
+  'play/loaded-session': {
+    patch: [
+      { op: 'replace', path: '/play/engine', value: '$payload.engine' },
+      { op: 'replace', path: '/play/exampleId', value: '$payload.exampleId' },
+      { op: 'replace', path: '/play/source', value: '$payload.source' },
+      { op: 'replace', path: '/play/data', value: '$payload.data' },
+      { op: 'replace', path: '/play/config', value: '$payload.config' },
+      { op: 'replace', path: '/play/name', value: '$payload.name' },
+      { op: 'replace', path: '/play/datasetIndex', value: 0 },
+      { op: 'replace', path: '/play/result', value: null },
+      { op: 'replace', path: '/play/panel', value: null },
+      { op: 'replace', path: '/play/shared', value: null },
+    ],
+  },
+
   // the data studio (boundaries/data.js): boot the owner worker, edit
   // the model/query panes, run + explain, insert, live-event, migrate.
   // A patch-only action carries its changed paths to the O(k) renderer.
