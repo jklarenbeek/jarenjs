@@ -179,7 +179,7 @@ describe('website — the experiment IDE', function () {
 
 describe('website — share links', function () {
   it('round-trips an engine experiment through a share URL', async function () {
-    const { encodeShare, decodeShare } = await import('../../packages/website/src/lib/share.js');
+    const { encodeShare, decodeShare } = await import('@jarenjs/app');
     // outbound: the Share button builds a token of the current engine state
     const sharedHashes = [];
     const site1 = mountSite({ share: (h) => { sharedHashes.push(h); return 'https://x/' + h; } });

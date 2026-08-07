@@ -151,7 +151,7 @@ function engineCatalogue() {
  * playground and return the results the model needs. Shared by the
  * chat panel and the WebMCP bridge.
  * @param {{ getApp: () => any, navigate?: (hash: string) => void,
- *   share?: (hash: string) => string | undefined, store: any }} env
+ *   share?: (hash: string) => string | undefined, docStore: any }} env
  */
 export function createSiteToolbox(env) {
   const toolbox = createToolbox();
@@ -499,7 +499,7 @@ export function createSiteToolbox(env) {
     name: 'jaren_list_experiments',
     description: 'List the saved playground experiments (the localStorage IDE store).',
     inputSchema: { type: 'object', properties: {} },
-    execute: () => Object.entries(env.store.experiments).map(([name, e]) => ({
+    execute: () => Object.entries(env.docStore.all()).map(([name, e]) => ({
       name, engine: /** @type {any} */ (e).engine, savedAt: /** @type {any} */ (e).savedAt,
     })),
   });
@@ -514,7 +514,7 @@ export function createSiteToolbox(env) {
     },
     execute: (input) => {
       const app = env.getApp();
-      if (env.store.experiments[input.name] === undefined) {
+      if (env.docStore.load(input.name) === undefined) {
         return { error: `no experiment named '${input.name}'` };
       }
       app?.dispatch('ide/load', input.name);

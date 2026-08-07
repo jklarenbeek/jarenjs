@@ -11,4 +11,6 @@ export { createFormView, createFormActions, formEventFields } from './forms.js';
 export { createTaskEffect } from './tasks.js';
 export { createFocusEffect } from './focus.js';
 export { createTransactionLog } from './diagnostics.js';
+export { createSplitterWidget } from './splitter.js';
+export { createDocStore, encodeShare, decodeShare } from './docstore.js';
 export { AppCompileError, AppRuntimeError, HostValueError, toError, APP_CODES } from './errors.js';

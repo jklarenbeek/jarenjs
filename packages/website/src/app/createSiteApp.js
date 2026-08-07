@@ -13,7 +13,7 @@
  *  - `/route` changed → run the routed engine once if it has no result.
  */
 
-import { createApp, formEventFields } from '@jarenjs/app';
+import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
 
 import { ACTIONS, SUBS } from './actions.js';
 import { createInitialState } from './state.js';
@@ -33,7 +33,6 @@ import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
 import { studioTemplate } from '../content/appTemplates.js';
-import { encodeShare, decodeShare } from '../lib/share.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
 /**
@@ -80,8 +79,9 @@ export function createSiteApp(env) {
   const report = env.onError
     ?? (typeof reportError === 'function' ? reportError : () => {});
   const storage = env.storage ?? { read: () => null, write: () => {} };
-  const store = storage.read() ?? { experiments: {} };
-  if (store.experiments === undefined) store.experiments = {};
+  // the saved-experiment store (localStorage in the browser): a keyed CRUD
+  // over the injected storage, shared with the studio and play surfaces
+  const docStore = createDocStore({ storage });
 
   /** effect-handler dedupe: each benchmark file is fetched once */
   const requested = new Set();
@@ -100,7 +100,7 @@ export function createSiteApp(env) {
     fetch: env.ratesFetch,
   });
 
-  const ideNames = () => Object.keys(store.experiments).sort();
+  const ideNames = () => docStore.names();
 
   /** Which experiment kind the current route saves/shares. */
   const engineFor = (state) => (state.route.page === 'studio'
@@ -126,7 +126,7 @@ export function createSiteApp(env) {
     getApp: () => app,
     navigate: env.navigate,
     share: env.share,
-    store,
+    docStore,
   });
   const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
   const aiChat = env.aiChat ?? { read: () => null, write: () => {} };
@@ -170,12 +170,11 @@ export function createSiteApp(env) {
       const engine = engineFor(state);
       const inputs = ideInputsFor(state, engine);
       if (inputs === null) return; // an empty studio has nothing to save
-      store.experiments[name] = { engine, inputs, savedAt: new Date().toISOString() };
-      storage.write(store);
+      docStore.save(name, { engine, inputs, savedAt: new Date().toISOString() });
       dispatch('ide/names', ideNames());
     },
     'ide-load': (props, dispatch) => {
-      const experiment = store.experiments[props.name];
+      const experiment = docStore.load(props.name);
       if (experiment === undefined) return;
       if (experiment.engine === 'studio') {
         env.navigate?.('#/studio');
@@ -194,8 +193,7 @@ export function createSiteApp(env) {
       }
     },
     'ide-delete': (props, dispatch) => {
-      delete store.experiments[props.name];
-      storage.write(store);
+      docStore.remove(props.name);
       dispatch('ide/names', ideNames());
     },
     'ide-share': (props, dispatch) => {

@@ -122,6 +122,13 @@ createApp({
 
 Jaren owns state and orchestration; the widget owns its DOM. Its `props` come from the view stylesheet and are compared **by reference** — the JSLT memo means a transition that doesn't touch the widget's state slice never calls into the widget at all. The widget dispatches by composing runtime data into the binding its props carry and handing it to `emit`, which flows through the ordinary binding path — `with` payloads and `event` extraction included — and it is unmounted deterministically when it leaves the tree.
 
+### A ready-made splitter, and a document store
+
+Two IDE-shaped primitives ship ready to bind, so a two-pane surface (the studio, the play playground) doesn't re-implement them:
+
+- **`createSplitterWidget({ action, grid, rail, cssVar, min, max, step })`** — a drag handle over a pane boundary. It drives a CSS ratio variable *live* during a drag (no per-move dispatch — that would flood the transaction log and undo) and commits the ratio through `action` on pointer-up only, plus keyboard resize as an ARIA separator. Register it like any widget; parameterize the grid/rail selectors, the CSS variable and the commit action so each surface binds its own.
+- **`createDocStore({ storage, key })`** — a keyed `save`/`load`/`remove`/`names`/`all` CRUD over an injected `storage` (`localStorage` in the browser, an in-memory object in tests), so the package never touches `localStorage` itself. Paired with **`encodeShare(snapshot)`** / **`decodeShare(token)`**, a Unicode-safe base64url share-link codec (a corrupt token decodes to `null`, never a throw), it is the new/save/load/delete/share pattern behind the studio and play surfaces.
+
 ## Invariants the model can't cheat
 
 ```javascript
@@ -180,6 +187,8 @@ renderToString(createApp(doc).getVnode());
 ## API
 
 `createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), observe(observer), stop(), destroy() }`
+
+Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormActions`, `formEventFields`, `createTaskEffect`, `createFocusEffect`, `createTransactionLog`, `createSplitterWidget`, `createDocStore`, `encodeShare`, `decodeShare`, and the error classes (`AppCompileError`, `AppRuntimeError`, `HostValueError`, `toError`, `APP_CODES`).
 
 Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
 
