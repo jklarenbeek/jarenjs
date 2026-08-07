@@ -20,6 +20,8 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 24rem;
 }
+/* the phone pane switcher exists only below the breakpoint */
+.jplay-mobilebar { display: none; }
 /* ——— the IDE bar (New/Save/Load/Share + the session name) ——— */
 .jplay-bar {
   grid-area: bar; display: flex; align-items: center; gap: var(--space-2, 0.5rem);
@@ -129,14 +131,29 @@
 .jplay-card-note { font-size: 0.7rem; }
 
 @media (max-width: 1024px) {
+  /* ONE pane at a time behind the segmented switcher — a phone screen
+     never stacks rail + editors + result into a tall scroll */
   .jplay {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "bar" "rail" "editors" "stage";
+    grid-template-areas: "bar" "switch" "rail" "editors" "stage";
     grid-template-rows: auto;
   }
-  .jplay-rail { flex-direction: row; flex-wrap: wrap; gap: 2px; }
-  /* no thin drag handle on touch — the phone layout stacks the panes */
+  .jplay-mobilebar { display: flex; grid-area: switch; align-self: start; }
+  .jplay-mobilebar .seg-btn { flex: 1; }
+  .jplay[data-pane='examples'] .jplay-editors,
+  .jplay[data-pane='examples'] .jplay-stage,
+  .jplay[data-pane='editor'] .jplay-rail,
+  .jplay[data-pane='editor'] .jplay-stage,
+  .jplay[data-pane='result'] .jplay-rail,
+  .jplay[data-pane='result'] .jplay-editors { display: none; }
+  /* no thin drag handle on touch — the switcher owns the pane choice */
   .jplay-split { display: none; }
+  /* the keyboard seam: the editor pane reserves the published inset as
+     scroll room, so the caret clears the on-screen keyboard */
+  .jplay-editors { padding-bottom: var(--kb-inset, 0px); }
+  /* touch targets: rows, tabs, segments and bar buttons are finger-sized */
+  .jplay-ex, .jplay .seg-btn, .jplay-bar .btn { min-height: 44px; }
+  .jplay-ex { display: flex; align-items: center; }
   /* the drill-down is a full-pane SWAP on a phone: there is no room to
    * stack the machinery under the answer (and never under the keyboard),
    * so the open deep view replaces the simple result, one deep panel at a

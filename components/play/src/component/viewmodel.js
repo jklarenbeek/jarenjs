@@ -151,5 +151,8 @@ export function playViewModel(state) {
     hasForm,
     dataView,
     showForm: hasForm && dataView === 'form',
+    // the phone layout: one pane at a time behind a segmented switcher
+    // (Examples · Editor · Result); desktop ignores it (CSS)
+    mobilePane: s.mobilePane === 'examples' || s.mobilePane === 'result' ? s.mobilePane : 'editor',
   };
 }

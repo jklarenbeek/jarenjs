@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/play",
   "private": false,
-  "version": "0.30.0",
+  "version": "0.30.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -56,9 +56,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.30.0",
-    "@jarenjs/josl": "^0.30.0",
-    "@jarenjs/json": "^0.30.0",
-    "@jarenjs/validate": "^0.30.0"
+    "@jarenjs/core": "^0.30.1",
+    "@jarenjs/josl": "^0.30.1",
+    "@jarenjs/json": "^0.30.1",
+    "@jarenjs/validate": "^0.30.1"
   }
 }

@@ -130,7 +130,12 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
   html { scroll-behavior: smooth; }
 }
 
+/* full-height shell: the DYNAMIC/SMALL viewport units, never 100vh —
+   100vh is the large viewport and ignores the mobile keyboard, which is
+   how "the input scrolls out of view" happens */
 .site { min-height: 100vh; display: flex; flex-direction: column; }
+@supports (height: 100dvh) { .site { min-height: 100dvh; } }
+@supports (height: 100svh) { .site { min-height: 100svh; } }
 .main { flex: 1; }
 .container {
   max-width: 72rem; margin: 0 auto;
@@ -567,6 +572,13 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
   .studio-grid { grid-template-columns: minmax(0, 1fr); }
   .docs-grid { grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-6); }
+
+  /* the mobile keyboard seam (main.js publishes --kb-inset from the
+     visualViewport): while an editor is focused the sticky header
+     un-sticks — it must never cover the field — and the editor panes
+     reserve the keyboard inset as scroll room beneath the caret */
+  body.kb-editing .header { position: static; }
+  .js-editor, .studio-grid, .flow-grid, .data-grid, .pg-grid { padding-bottom: var(--kb-inset, 0px); }
 }
 
 /* mobile */

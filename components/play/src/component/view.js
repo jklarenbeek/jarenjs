@@ -17,7 +17,7 @@ export const playModes = Object.freeze({ [PLAY_MODE]: { unmatched: 'error' } });
 /** The shell (matches the whole slice): bar / rail | editors | split | stage. */
 const shell = {
   match: PLAY_BASE, mode: PLAY_MODE,
-  body: ['div', { class: 'jplay' },
+  body: ['div', { class: 'jplay', 'data-pane': '$.mobilePane' },
     // ——— the IDE bar: engine title, session name, New/Save/Save As/Share,
     // the Load dropdown, and the last share status (a play session is a
     // saveable document) ———
@@ -46,6 +46,17 @@ const shell = {
           ''] },
       ],
       { $if: ['$.shared', ['span', { class: 'jplay-shared muted', role: 'status' }, '$.shared'], ''] },
+    ],
+    // ——— the phone pane switcher: below the breakpoint the rail | editors
+    // | result grid is ONE column, one pane at a time — a segmented bar
+    // instead of a tall stack (desktop hides this bar entirely) ———
+    ['div', { class: 'jplay-mobilebar seg', role: 'group', 'aria-label': 'pane' },
+      ['button', { type: 'button', class: { $if: [{ $eq: ['$.mobilePane', 'examples'] }, 'seg-btn active', 'seg-btn'] },
+        on: { click: { action: 'play/mobile-pane', with: 'examples' } } }, 'Examples'],
+      ['button', { type: 'button', class: { $if: [{ $eq: ['$.mobilePane', 'editor'] }, 'seg-btn active', 'seg-btn'] },
+        on: { click: { action: 'play/mobile-pane', with: 'editor' } } }, 'Editor'],
+      ['button', { type: 'button', class: { $if: [{ $eq: ['$.mobilePane', 'result'] }, 'seg-btn active', 'seg-btn'] },
+        on: { click: { action: 'play/mobile-pane', with: 'result' } } }, 'Result'],
     ],
     // ——— the example picker (a "file tree" grouped by engine) ———
     ['nav', { class: 'jplay-rail', 'aria-label': 'examples' }, [{ $apply: '$.rail[*]' }]],

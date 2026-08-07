@@ -258,6 +258,21 @@ describe('website — the Play playground (#/play)', () => {
     assert.match(html, /jplay-deep-toggle/, 'JSONPath offers its own Explain affordance');
   });
 
+  it('the phone pane switcher is pure chrome: it patches the pane and does not re-run', () => {
+    const { app, container } = mountSite();
+    assert.strictEqual(app.getState().play.mobilePane, 'editor', 'the editor pane is the default');
+    const before = app.getState().play.result;
+    fire(byText(playRoot(container), 'button', 'Result'), 'click', {});
+    assert.strictEqual(app.getState().play.mobilePane, 'result', 'the pane switched');
+    assert.strictEqual(app.getState().play.result, before, 'switching panes never re-runs the engine');
+    assert.match(serialize(playRoot(container)), /"data-pane">result|data-pane="result"/, 'the root reflects the pane');
+    // picking an example answers immediately on a phone: the pane → result
+    fire(byText(playRoot(container), 'button', 'Examples'), 'click', {});
+    assert.strictEqual(app.getState().play.mobilePane, 'examples');
+    fire(byText(playRoot(container), 'button', 'RFC 4180'), 'click', {});
+    assert.strictEqual(app.getState().play.mobilePane, 'result', 'the example pick lands on its result');
+  });
+
   it('leaving #/play tears the surface down; the seeded run persists on return', () => {
     const { app, container, go } = mountSite();
     assert.ok(playRoot(container), 'the playground mounted');

@@ -74,6 +74,8 @@ export const PLAY_START = Object.freeze({
   // a fresh example/session load resets both (calm by default)
   deep: false,     // the depth toggle — true reveals the deep panels
   deepPick: null,  // the active DEEP panel id; null → the first deep panel
+  // the phone layout: which single pane shows (examples | editor | result)
+  mobilePane: 'editor',
   // the IDE half: a play SESSION is a saveable document
   name: '',        // the name the session saves under (the header input)
   names: [],       // the saved session names (seeded from the play doc-store)

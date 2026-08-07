@@ -117,6 +117,38 @@ const app = createSiteApp({
   modelContext: /** @type {any} */ (navigator).modelContext,
 });
 
+// ——— the mobile keyboard seam (browser-only; headless hosts never load
+// this bootstrap, so they no-op by construction) ———
+// When the on-screen keyboard opens, the LAYOUT viewport keeps its height
+// but the VISUAL viewport shrinks — a focused editor near the bottom ends
+// up behind the keys. Publish the difference as a CSS var (`--kb-inset`);
+// the active editor pane reserves it as bottom padding, so the caret
+// always has scroll room above the keyboard line.
+const publishKeyboardInset = () => {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const inset = Math.max(0, document.documentElement.clientHeight - vv.height);
+  document.documentElement.style.setProperty('--kb-inset', `${inset}px`);
+};
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', publishKeyboardInset);
+  window.visualViewport.addEventListener('scroll', publishKeyboardInset);
+  publishKeyboardInset();
+}
+// While an editor is focused: mark the body (the sticky header un-sticks
+// so it cannot cover the field) and center the field in the visual
+// viewport, clear of both the header and the keyboard.
+document.addEventListener('focusin', (event) => {
+  const target = /** @type {any} */ (event.target);
+  if (!(target?.classList?.contains('editor'))) return;
+  document.body.classList.add('kb-editing');
+  target.scrollIntoView({ block: 'center', behavior: 'instant' });
+});
+document.addEventListener('focusout', (event) => {
+  const target = /** @type {any} */ (event.target);
+  if (target?.classList?.contains('editor')) document.body.classList.remove('kb-editing');
+});
+
 // close the nav dropdown groups on Escape or a click outside the header nav
 // (the in-nav triggers own opening; route/set closes them on navigation)
 addEventListener('keydown', (event) => {

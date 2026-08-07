@@ -183,6 +183,13 @@ delete it or fix it.
   Chromium, Firefox and WebKit, plus composition-aware authoritative writes
   (defer during a composition, settle without losing the caret). Until then
   those behaviors are documented as browser-unproven.
+- [ ] **One-pane mobile switchers for the studios** — `@jarenjs/play` shows
+  one pane at a time on a phone behind a segmented Examples · Editor · Result
+  bar, and the shared keyboard seam (`--kb-inset`, the un-sticking header,
+  dvh-sized shells) already serves every surface. The studios (`#/studio`,
+  `#/flow`, `#/data`) still *stack* their panes into a tall scroll below the
+  breakpoint; each needs its own pane-switcher state (their slices differ), so
+  adopting the play pattern there is scoped per-studio work.
 - [ ] **`safe`/`onUnsafe` forwarding through `@jarenjs/app`** — the renderer
   takes a safe profile, but `createApp` does not thread it, and an app document
   additionally names host actions, effects and subscriptions. Forwarding the

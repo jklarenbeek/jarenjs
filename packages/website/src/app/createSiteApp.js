@@ -79,7 +79,7 @@ const SHARE_TOKEN_LIMIT = 8000;
  * the depth toggle + its pick, the session name/list, the share status, the
  * editor|result split ratio). */
 const PLAY_CHROME_PATHS = new Set([
-  '/play/result', '/play/panel', '/play/deep', '/play/deepPick',
+  '/play/result', '/play/panel', '/play/deep', '/play/deepPick', '/play/mobilePane',
   '/play/name', '/play/names', '/play/shared', '/play/ratio',
 ]);
 

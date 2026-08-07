@@ -54,6 +54,13 @@ describe('playViewModel', () => {
     assert.strictEqual(vm.hasSwitcher, false);
   });
 
+  it('derives the phone pane (editor by default; only known values pass)', () => {
+    assert.strictEqual(playViewModel(state()).mobilePane, 'editor');
+    assert.strictEqual(playViewModel(state({ mobilePane: 'result' })).mobilePane, 'result');
+    assert.strictEqual(playViewModel(state({ mobilePane: 'examples' })).mobilePane, 'examples');
+    assert.strictEqual(playViewModel(state({ mobilePane: 'bogus' })).mobilePane, 'editor');
+  });
+
   it('exposes the validate form/JSON toggle (hasForm/dataView/showForm)', () => {
     assert.strictEqual(playViewModel(state({ engine: 'path' })).hasForm, false, 'non-validate has no toggle');
     const json = playViewModel(state({ engine: 'validate', dataView: 'json' }));
@@ -180,6 +187,10 @@ describe('the play JSLT view renders headlessly', () => {
     assert.match(out, /play\/data/);      // the data editor
     assert.match(out, /play\/dataset/);   // the switcher (path-shapes has 3 datasets)
     assert.match(out, /Ada/);                // the run result on the stage
+    // the phone pane switcher renders (CSS shows it below the breakpoint)
+    assert.match(out, /jplay-mobilebar/);
+    assert.match(out, /play\/mobile-pane/);
+    assert.match(out, /"data-pane":"editor"/, 'the root carries the active pane for the CSS');
   });
 
   it('splices a rendered vnode for a visual engine, with no code block or tabs', () => {

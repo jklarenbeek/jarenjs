@@ -319,6 +319,9 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/panel', value: null },
       { op: 'replace', path: '/play/deep', value: false },
       { op: 'replace', path: '/play/deepPick', value: null },
+      // on a phone, picking an example answers immediately: show its result
+      // (desktop shows every pane, so this is invisible there)
+      { op: 'replace', path: '/play/mobilePane', value: 'result' },
     ],
   },
   'play/source': {
@@ -347,6 +350,10 @@ export const ACTIONS = {
   // switches the run loop ignores
   'play/deep': { patch: [{ op: 'replace', path: '/play/deep', value: '$payload' }] },
   'play/deep-pick': { patch: [{ op: 'replace', path: '/play/deepPick', value: '$payload' }] },
+
+  // the phone pane switcher (Examples · Editor · Result) — pure chrome,
+  // persisted for the session so the choice survives edits and runs
+  'play/mobile-pane': { patch: [{ op: 'replace', path: '/play/mobilePane', value: '$payload' }] },
 
   // the Play IDE: a play session is a saveable/shareable document.
   // New / Save / Save As / Open / Delete / Share are thin wrappers over the

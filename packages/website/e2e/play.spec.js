@@ -158,6 +158,8 @@ test('a mermaid drill-down shows the geometry-free AST from the host seam', asyn
 test('on a phone the drill-down swaps the pane and backs out', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/play');
+  // the phone flow: Examples pane → pick → play lands on the Result pane
+  await page.locator('.jplay-mobilebar .seg-btn', { hasText: 'Examples' }).click();
   await page.locator('.jplay-ex', { hasText: 'RFC 4180' }).click();
   await expect(page.locator('.jplay-note')).toBeVisible();
   const toggle = page.locator('.jplay-deep-toggle');
