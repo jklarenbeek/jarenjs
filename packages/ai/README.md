@@ -67,6 +67,18 @@ The agent attaches `reasoning` to the **returned** message only: the transcript 
 accumulates never carries it, so a host that persists `messages` and sends them back next
 turn keeps a clean wire history.
 
+**Thinking can be turned off** — `reasoning` is forwarded verbatim, as a client-level
+default or per request: `createChatClient({ …, reasoning: { effort: 'none' } })`, and
+`{ enabled: false }` does the same. (`{ exclude: true }` only HIDES the thinking; the
+model still thinks and you still pay for it.) On a short, non-agentic call this is a large
+win — measured on a hybrid Qwen model, a one-line answer went from 140 completion tokens
+and 28.8s to 2 tokens and 0.5s. **Do not reach for it in an agent loop.** The same models,
+asked to author a document through tools with thinking off, roughly doubled their tool
+calls and stopped converging (2/3 then 0/3 runs reaching a green result, several hitting
+the round limit): they plan the document in the reasoning channel, so removing it removes
+the planning. Turn it off for classification, extraction and rewriting; leave it on for
+tool use.
+
 **Probe before the first turn.** `probeProvider({ provider, baseUrl, apiKey })` GETs the
 provider's `/models` listing with exactly the auth a chat call would use and never throws:
 `{ ok: true, models }` or `{ ok: false, status?, error }` — the contract a settings UI

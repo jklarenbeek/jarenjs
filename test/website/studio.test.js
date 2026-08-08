@@ -558,6 +558,93 @@ describe('website — the Studio assistant tools (WebMCP)', function () {
     assert.match(tool('jaren_studio_read').execute({}).error, /no studio document/);
   });
 
+  it('the project tools see the WHOLE file tree — a project is not just its app document', function () {
+    /** @type {any[]} */
+    let registered = [];
+    const { app } = mountSite({
+      modelContext: { provideContext: ({ tools }) => { registered = tools; } },
+    });
+    const tool = (name) => registered.find((t) => t.name === name);
+
+    // the regression this exists for: asked about "my project", a model
+    // holding only jaren_studio_read sees ONE app document and answers
+    // that there are no other files — confidently, and wrongly
+    const listed = tool('jaren_project_files').execute({});
+    assert.deepStrictEqual(listed.files.map((f) => f.name),
+      ['app.json', 'stats.query', 'stats.data'], 'every file is listed, not just the app');
+    assert.strictEqual(listed.active, 'app.json');
+    assert.ok(listed.files.every((f) => f.valid), 'each file reports its own validity');
+
+    // one file by name carries its text
+    const one = tool('jaren_project_files').execute({ name: 'stats.query' });
+    assert.match(one.text, /\$mean/);
+    assert.strictEqual(one.kind, 'query');
+    assert.match(tool('jaren_project_files').execute({ name: 'nope' }).error, /no file named/);
+
+    // and it RUNS, so the model reports the real number instead of guessing
+    const ran = tool('jaren_project_run').execute({ name: 'stats.query' });
+    assert.strictEqual(ran.ok, true);
+    assert.match(ran.ran, /3\.875/, 'the run result comes back as readable text');
+
+    // a data file is an input, not something that runs — say so plainly
+    assert.match(tool('jaren_project_run').execute({ name: 'stats.data' }).error,
+      /is an input, not something that runs/);
+  });
+
+  it('jaren_project_write creates, validates and runs a file; an invalid one is refused', function () {
+    /** @type {any[]} */
+    let registered = [];
+    const { app, container } = mountSite({
+      hash: '#/',
+      modelContext: { provideContext: ({ tools }) => { registered = tools; } },
+    });
+    const tool = (name) => registered.find((t) => t.name === name);
+
+    const written = tool('jaren_project_write').execute({
+      name: 'top.query', kind: 'query', text: JSON.stringify({ top: { $max: '$.values[*]' } }),
+    });
+    assert.strictEqual(written.ok, true);
+    assert.strictEqual(app.getState().route.page, 'project', 'the write navigated so the user watches');
+    assert.match(written.ran, /9/, 'a runnable file is run against the data file');
+    assert.strictEqual(app.getState().project.active, 'top.query', 'and opened');
+    assert.match(serialize(container), /top\.query/, 'the rail shows it');
+
+    // an invalid file is REFUSED and the project is left untouched
+    const before = app.getState().project.files.length;
+    const bad = tool('jaren_project_write').execute({
+      name: 'broken.query', kind: 'query', text: '{ "x": { "$nope": 1 } }',
+    });
+    assert.strictEqual(bad.ok, false);
+    assert.ok(bad.errors.length > 0, 'the coded errors come back to repair');
+    assert.strictEqual(app.getState().project.files.length, before, 'nothing was written');
+
+    // a new file needs a kind; replacing an existing one does not
+    assert.match(tool('jaren_project_write').execute({ name: 'fresh.data', text: '{}' }).error,
+      /needs a kind/);
+    assert.strictEqual(tool('jaren_project_write').execute({
+      name: 'top.query', text: JSON.stringify({ top: { $min: '$.values[*]' } }),
+    }).ok, true, 'replacing keeps the existing kind');
+  });
+
+  it('jaren_get_state answers with the project files when the project is on screen', function () {
+    /** @type {any[]} */
+    let registered = [];
+    const { app } = mountSite({
+      modelContext: { provideContext: ({ tools }) => { registered = tools; } },
+    });
+    const tool = (name) => registered.find((t) => t.name === name);
+    const onProject = tool('jaren_get_state').execute({});
+    assert.strictEqual(onProject.page, 'project');
+    assert.deepStrictEqual(onProject.files.map((f) => f.name),
+      ['app.json', 'stats.query', 'stats.data'], 'the surface reports what it holds');
+
+    // …and still answers with the engine panes on play
+    app.dispatch('route/set', { page: 'play', params: {} });
+    const onPlay = tool('jaren_get_state').execute({});
+    assert.strictEqual(onPlay.page, 'play');
+    assert.strictEqual(typeof onPlay.engine, 'string');
+  });
+
   it('a write into a project WITHOUT an app file adds one (and activates it)', function () {
     /** @type {any[]} */
     let registered = [];

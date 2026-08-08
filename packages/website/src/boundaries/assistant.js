@@ -35,7 +35,7 @@ import { runValidation } from './validator.js';
 import { operatorRegistry } from './engines.js';
 import { playComponent, runPlay, legacyExperimentToSession } from './play.js';
 import { validateAppDocument, auditDocumentRender } from './studio.js';
-import { commitProject, projectAppFile } from './project.js';
+import { commitProject, projectAppFile, projectComponent, runProjectFile } from './project.js';
 import { STUDIO_TEMPLATES, studioTemplate } from '../content/appTemplates.js';
 import { FLOW_TEMPLATES, flowTemplate } from '../content/flowTemplates.js';
 
@@ -202,18 +202,24 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_get_state',
-    description: 'Read what is currently on screen: the active page and — on #/play — the selected engine and its current pane texts. Call this before editing so you build on what the user already has.',
+    description: 'Read what is currently on screen: the active page, and the working surface it carries — on #/play the selected engine and its pane texts, on #/project the project\'s files (with which one is open and which have errors). Call this before editing so you build on what the user already has.',
     inputSchema: { type: 'object', properties: {} },
     execute: () => {
       const app = env.getApp();
       if (app === null) return { page: 'unknown' };
       const state = app.getState();
-      if (state.route.page !== 'play') return { page: state.route.page, engine: null, inputs: null };
-      return {
-        page: 'play',
-        engine: state.play.engine,
-        inputs: { ...state.play.source, ...state.play.data, ...state.play.config },
-      };
+      if (state.route.page === 'play') {
+        return {
+          page: 'play',
+          engine: state.play.engine,
+          inputs: { ...state.play.source, ...state.play.data, ...state.play.config },
+        };
+      }
+      // the project surface answers with its FILES: a project is a file
+      // tree, so "what is on screen" that omitted them would invite the
+      // model to describe a project it cannot see
+      if (state.route.page === 'project') return { page: 'project', ...projectSummary(state.project) };
+      return { page: state.route.page, engine: null, inputs: null };
     },
   });
 
@@ -255,6 +261,147 @@ export function createSiteToolbox(env) {
       if (input.label === undefined) return all;
       const hit = all.find((e) => e.label === input.label);
       return hit ?? { error: `no example labelled '${input.label}'`, labels: all.map((e) => e.label) };
+    },
+  });
+
+  // ---- the Studio (#/project): the project as a FILE TREE ----
+
+  /**
+   * A run's render nodes as text the model can act on. The stage speaks
+   * in render nodes; a tool result has to say what the human is looking
+   * at — above all the CODED errors, which are the repair instructions.
+   * @param {any[]} nodes
+   */
+  const renderedText = (nodes) => (nodes ?? []).map((n) => {
+    if (n === null || typeof n !== 'object') return String(n);
+    if (n.kind === 'error') {
+      return `ERROR ${n.title}: ${n.message}${n.detail === null ? '' : ` (${n.detail})`}`;
+    }
+    if (n.kind === 'code') return `${n.title ?? 'output'}: ${n.text}`;
+    if (n.kind === 'cards') return n.items.map((i) => `${i.title}: ${i.value}`).join(' · ');
+    if (n.kind === 'p' || n.kind === 'callout') return n.text;
+    return null;
+  }).filter((line) => line !== null).join('\n');
+
+  /** Every file with its kind and validity — the project seen as a
+   * codebase, which is what the surface actually is. */
+  const projectSummary = (slice) => {
+    const d = projectComponent.describe({
+      project: slice.project ?? '0.1',
+      files: slice.files ?? [],
+      active: slice.active ?? null,
+      layout: slice.layout,
+    });
+    return {
+      name: slice.name ?? 'Untitled project',
+      active: d.active,
+      files: d.files.map((f) => ({
+        name: f.name, kind: f.kind, role: f.role, size: f.size,
+        valid: f.valid, errors: f.errors,
+      })),
+    };
+  };
+
+  /** The project slice, or null when the site is not running. */
+  const projectSlice = () => env.getApp()?.getState().project ?? null;
+
+  toolbox.add({
+    name: 'jaren_project_files',
+    description: 'The Studio project (#/project) is a TREE OF FILES — an app document beside the jslt/query/schema transforms and the state/data they run on. Without a name you get every file (kind, role, size, whether it validates, and its coded errors) plus which one is open. With a name you also get that file\'s full text. ALWAYS call this before answering anything about "the project", "my files" or "the studio" — the app document is only ONE of the files.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+    },
+    execute: (input) => {
+      const slice = projectSlice();
+      if (slice === null) return { error: 'the site is not running here' };
+      const summary = projectSummary(slice);
+      if (input.name === undefined) return summary;
+      const file = (slice.files ?? []).find((f) => f.name === input.name);
+      if (file === undefined) {
+        return { error: `no file named '${input.name}'`, names: summary.files.map((f) => f.name) };
+      }
+      const meta = summary.files.find((f) => f.name === input.name);
+      return { ...meta, text: file.text };
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_project_write',
+    description: 'Create or replace ONE file in the Studio project and open it, so the user watches it land. `kind` is required for a new file (app / jslt / query / schema / state / data) and optional when replacing. The file is validated against its OWN kind\'s grammar first — an invalid write is rejected and the current file is left alone, with the coded errors returned to repair. A runnable file (jslt / query / schema) is also RUN against the project\'s data file and its result comes back. Use this for every non-app file; use jaren_studio_write for a whole app document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        kind: { enum: ['app', 'jslt', 'query', 'schema', 'state', 'data'] },
+        text: { type: 'string' },
+      },
+      required: ['name', 'text'],
+    },
+    execute: (input) => {
+      const app = env.getApp();
+      const slice = projectSlice();
+      if (app === null || slice === null) return { error: 'the site is not running here' };
+      const existing = (slice.files ?? []).find((f) => f.name === input.name);
+      const kind = input.kind ?? existing?.kind;
+      if (kind === undefined) {
+        return { error: `'${input.name}' is a new file, so it needs a kind (app / jslt / query / schema / state / data)` };
+      }
+      const candidate = { name: input.name, kind, text: input.text };
+      const verdict = projectComponent.validateFile(candidate);
+      if (!verdict.valid) {
+        return {
+          ok: false,
+          errors: verdict.errors,
+          total: verdict.total,
+          hint: `The ${kind} file does not validate, so it was NOT written — the project is untouched. Each error carries a code and a docPath into your document; repair those and write again.`,
+        };
+      }
+      go('#/project');
+      const files = existing === undefined
+        ? [...slice.files, candidate]
+        : slice.files.map((f) => (f.name === input.name ? candidate : f));
+      // a new file changes the tree (structural); a replacement is a text
+      // edit — both land through the actions the human's own edits use
+      app.dispatch(existing === undefined ? 'project/added' : 'project/files-set', { files, active: input.name });
+      if (existing !== undefined) app.dispatch('project/active', input.name);
+      app.dispatch('project/committed', commitProject(app.getState().project));
+      const result = runProjectFile(app.getState().project, input.name);
+      if (result !== null) app.dispatch('project/result', { name: input.name, result });
+      return {
+        ok: true,
+        file: input.name,
+        kind,
+        ...(kind === 'app' ? { widgets: auditDocumentRender(JSON.parse(input.text)).widgets } : {}),
+        ...(result === null ? {} : { ran: renderedText(result.nodes) }),
+      };
+    },
+  });
+
+  toolbox.add({
+    name: 'jaren_project_run',
+    description: 'Run one file of the Studio project against the project\'s data file and return what the stage shows (a query/jslt transform output, or a schema validation report). Without a name the OPEN file runs. Use it to check a file you did not just write, or to re-run after editing the data.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+    },
+    execute: (input) => {
+      const app = env.getApp();
+      const slice = projectSlice();
+      if (app === null || slice === null) return { error: 'the site is not running here' };
+      const name = input.name ?? slice.active;
+      const file = (slice.files ?? []).find((f) => f.name === name);
+      if (file === undefined) {
+        return { error: `no file named '${name}'`, names: (slice.files ?? []).map((f) => f.name) };
+      }
+      const result = runProjectFile(slice, name);
+      if (result === null) {
+        return { error: `'${name}' is a ${file.kind} file — it is an input, not something that runs. Run a jslt, query or schema file instead.` };
+      }
+      go('#/project');
+      app.dispatch('project/active', name);
+      app.dispatch('project/result', { name, result });
+      return { ok: true, file: name, kind: file.kind, ran: renderedText(result.nodes) };
     },
   });
 
@@ -628,22 +775,34 @@ export const SYSTEM_PROMPT = [
   '   switch to them and deliver it. Never stop at a partial result to ask "should I…" or',
   '   "want me to switch to…"; just do the obvious next step, then summarise what is on screen.',
   '',
-  'The Studio (#/project) — where you author a whole application:',
+  'The Studio (#/project) — a PROJECT of files, not a single document:',
+  'The studio holds a small tree of typed files: an `app` document, plus the `jslt`/`query`',
+  'transforms, `schema` validations and the `state`/`data` they run on. Each file is checked',
+  'against its OWN grammar, so a query may use the registered operators above.',
+  '7. NEVER describe the project from the app document alone — jaren_studio_read returns ONLY',
+  '   the app file. Call jaren_project_files FIRST for anything about "my project", "my',
+  '   files" or "the studio"; pass a name for one file\'s text. Saying a project has no other',
+  '   files because you did not look is a wrong answer, not a shortcut.',
+  '8. Write a non-app file with jaren_project_write (it validates, opens and RUNS it), and',
+  '   run one you did not write with jaren_project_run. Both report the coded errors and the',
+  '   stage output — read them and repair in place, exactly as with the engines.',
+  '',
+  'Authoring the app document itself:',
   'A studio document is a COMPLETE @jarenjs/app app — initial state, a JSLT view stylesheet',
   'and named actions as one JSON value — validated by the jaren-app meta-schema and booted',
-  'live by the real app runtime, as the app file of the project IDE. Its view may use the',
+  'live by the real app runtime, as the app file of the project. Its view may use the',
   'widgets form ({ schema, data }), chart ({ config }), markdown ({ source }) and',
   'mermaid ({ source }).',
-  '7. Author via template + patch, never from scratch: jaren_get_templates for a seed,',
+  '9. Author via template + patch, never from scratch: jaren_get_templates for a seed,',
   '   jaren_studio_write to load it, jaren_studio_read to inspect (use a pointer for one',
   '   subtree), then small RFC 6902 patches with jaren_studio_patch.',
-  '8. Validation errors are instructions, not failures: each carries an instancePath into',
+  '10. Validation errors are instructions, not failures: each carries an instancePath into',
   '   your document — repair exactly those paths and patch again.',
-  '9. A schema-driven form lives in state: the form template already renders /state/schema',
+  '11. A schema-driven form lives in state: the form template already renders /state/schema',
   '   through its ONE form widget, so shape your form by replacing /state/schema and',
   '   /state/data — never add a second form widget for the same schema, and keep the',
   '   template\'s heading in step with your form\'s title.',
-  '10. End every turn with a short, finished summary of what is now on screen — never with',
+  '12. End every turn with a short, finished summary of what is now on screen — never with',
   '   an announcement of work you have not done.',
 ].join('\n');
 

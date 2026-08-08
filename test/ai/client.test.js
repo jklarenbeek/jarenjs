@@ -196,6 +196,43 @@ describe('ai — the chat client', function () {
     assert.strictEqual(sent.temperature, 0.2);
     assert.strictEqual(sent.tool_choice, 'none');
   });
+
+  it('forwards the reasoning control, per request over the client default', async function () {
+    /** @type {any[]} */
+    const sent = [];
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      reasoning: { effort: 'none' },
+      fetch: (url, init) => {
+        sent.push(JSON.parse(/** @type {string} */ (init.body)));
+        return Promise.resolve(new Response(
+          JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 }));
+      },
+    });
+    // the client-level default rides every request — a hybrid thinking
+    // model answers directly only if this actually reaches the wire
+    await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.deepStrictEqual(sent[0].reasoning, { effort: 'none' });
+
+    // and one request may override it
+    await client.complete({
+      messages: [{ role: 'user', content: 'x' }], stream: false,
+      reasoning: { effort: 'high' },
+    });
+    assert.deepStrictEqual(sent[1].reasoning, { effort: 'high' });
+
+    // absent everywhere, the key is absent — never sent as undefined
+    const plain = createChatClient({
+      provider: 'ollama', model: 'm',
+      fetch: (url, init) => {
+        sent.push(JSON.parse(/** @type {string} */ (init.body)));
+        return Promise.resolve(new Response(
+          JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 }));
+      },
+    });
+    await plain.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.ok(!('reasoning' in sent[2]), 'no reasoning key when none was configured');
+  });
 });
 
 describe('ai — reasoning streams', function () {

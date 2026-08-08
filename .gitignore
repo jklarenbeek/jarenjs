@@ -102,6 +102,9 @@ TODO*.md
 PROGRESS*.md
 NEXT_SESSION.md
 
+# live-model probe scripts (need a real API key; not part of the suite)
+harness/
+
 # playwright artifacts
 test-results/
 playwright-report/

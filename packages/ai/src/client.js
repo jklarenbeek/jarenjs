@@ -225,6 +225,14 @@ function normalizeRetry(retry) {
  *   - structured output: `{ name, schema, strict? }` emits the OpenAI
  *   `response_format: { type: "json_schema", … }` wire shape (strict
  *   defaults to true); `{ type: 'json' }` emits `json_object` mode
+ * @property {{ effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high',
+ *   enabled?: boolean, exclude?: boolean, max_tokens?: number }} [reasoning]
+ *   - the provider-normalized thinking control, forwarded verbatim.
+ *   `{ effort: 'none' }` (or `{ enabled: false }`) turns a hybrid
+ *   thinking model OFF: it answers directly, which on a short task is
+ *   dramatically cheaper and faster. `{ exclude: true }` only HIDES the
+ *   thinking — the model still thinks and you still pay for it.
+ *   Overrides the client-level default.
  * @property {AbortSignal} [signal]
  * @property {(text: string) => void} [onDelta] - streamed text callback
  * @property {(text: string) => void} [onReasoning] - streamed reasoning
@@ -235,9 +243,13 @@ function normalizeRetry(retry) {
  * @param {{ provider?: string, baseUrl?: string, apiKey?: string,
  *   model?: string, headers?: Record<string, string>,
  *   fetch?: typeof fetch,
+ *   reasoning?: { effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high',
+ *     enabled?: boolean, exclude?: boolean, max_tokens?: number },
  *   retry?: { attempts?: number, baseMs?: number, maxMs?: number,
  *     random?: () => number,
  *     sleep?: (ms: number, signal?: AbortSignal) => Promise<void> } }} [options]
+ *   - `reasoning` is the default thinking control for every request (see
+ *     `ChatRequest.reasoning`); a per-request value overrides it.
  *   - `retry.attempts` is the TOTAL number of tries (default 3; 1
  *     disables retrying); backoff is exponential with full jitter,
  *     capped at `maxMs`, and a provider `Retry-After` wins over the
@@ -268,6 +280,11 @@ export function createChatClient(options = {}) {
     if (Array.isArray(tools) && tools.length > 0) body.tools = tools;
     if (toolChoice !== undefined) body.tool_choice = toolChoice;
     if (typeof request.temperature === 'number') body.temperature = request.temperature;
+    // the thinking control rides through untouched — a hybrid model needs
+    // it to answer WITHOUT reasoning first, and a body that silently drops
+    // it is indistinguishable from a provider that ignores it
+    const reasoning = request.reasoning ?? options.reasoning;
+    if (reasoning !== undefined) body.reasoning = reasoning;
     const format = request.responseFormat;
     if (format !== undefined) {
       body.response_format = format.type === 'json'
