@@ -11,7 +11,8 @@ import { test, expect } from '@playwright/test';
 
 test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-const PAGES = ['#/', '#/docs', '#/play', '#/project', '#/benchmarks', '#/calculator', '#/charts'];
+const PAGES = ['#/', '#/docs', '#/play', '#/project', '#/flow', '#/data',
+  '#/benchmarks', '#/calculator', '#/charts'];
 
 test('no page overflows the mobile layout viewport', async ({ page }) => {
   await page.goto('/');
@@ -172,6 +173,110 @@ test.describe('the keyboard-viewport contract', () => {
     });
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.bottom).toBeLessThanOrEqual(vv.height + 1);
+  });
+});
+
+// ——— the one-pane studios (the §MOBILE oracle, extended) ———
+// `@jarenjs/play` proved the pattern; `#/project`, `#/flow` and `#/data`
+// adopted it. Each owns its pane names and its stylesheet, so what is
+// asserted here is the shared contract: below the breakpoint the
+// segmented bar shows, EXACTLY ONE pane is visible at a time, the
+// segments are finger-sized, and nothing widens the layout viewport.
+// The state half (data-pane, aria-pressed, panes staying mounted) is
+// pinned headlessly in test/website/panes.test.js.
+test.describe('the one-pane studios', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  /** `[hash, barSelector, [[label, paneSelector], …]]`, in bar order. */
+  const STUDIOS = [
+    ['#/project', '.js-panebar', [
+      ['Files', '.js-rail'], ['Editor', '.js-editor'], ['Stage', '.js-stage'],
+    ]],
+    ['#/flow', '.flow-panebar', [
+      ['Diagram', '.flow-canvas-card'], ['Inspector', '.flow-inspector'], ['Run', '.flow-run'],
+    ]],
+    ['#/data', '.data-panebar', [
+      ['Store', '.data-status'], ['Query', '.data-query'], ['Live', '.data-live'],
+    ]],
+  ];
+
+  for (const [hash, barSelector, panes] of STUDIOS) {
+    test(`${hash} shows exactly one pane behind its segmented switcher`, async ({ page }) => {
+      await page.goto(`/${hash}`);
+      // the Flow studio shows its template picker until a document loads
+      if (hash === '#/flow') {
+        await page.locator('.example-card button', { hasText: 'Load' }).first().tap();
+      }
+      const bar = page.locator(barSelector);
+      await expect(bar).toBeVisible();
+
+      for (const [label, paneSelector] of panes) {
+        const segment = bar.locator('.seg-btn', { hasText: label });
+        const box = await segment.boundingBox();
+        expect(box.height, `${hash} ${label} segment ≥ 44px`).toBeGreaterThanOrEqual(44);
+
+        await segment.tap();
+        await expect(segment).toHaveAttribute('aria-pressed', 'true');
+
+        // exactly one pane visible: this one, and no other
+        const shown = await page.evaluate((selectors) => selectors.filter((selector) => {
+          const el = document.querySelector(selector);
+          return el !== null && getComputedStyle(el).display !== 'none' && el.offsetParent !== null;
+        }), panes.map(([, selector]) => selector));
+        expect(shown, `${hash} shows only ${paneSelector} on '${label}'`).toEqual([paneSelector]);
+
+        const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth,
+        }));
+        expect(scrollWidth, `${hash} '${label}' must not overflow horizontally`)
+          .toBeLessThanOrEqual(innerWidth + 1);
+      }
+    });
+  }
+
+  // The other half of the same statement, and worth pinning because it
+  // rests on CSS source order rather than specificity: every switcher
+  // declares `display: none` at (0,1,0), and so does the shared `.seg`
+  // control class it also carries — whichever is written LAST wins. The
+  // component stylesheets are imported after the site's, and each bar's
+  // base rule sits immediately above the media block that turns it on.
+  test.describe('above the breakpoint the switchers do not exist', () => {
+    test.use({ viewport: { width: 1280, height: 900 } });
+
+    test('every studio shows all its panes and no pane bar', async ({ page }) => {
+      for (const [hash, bar, pane] of [
+        ['#/play', '.jplay-mobilebar', '.jplay-rail'],
+        ['#/project', '.js-panebar', '.js-rail'],
+        ['#/data', '.data-panebar', '.data-status'],
+      ]) {
+        await page.goto(`/${hash}`);
+        await expect(page.locator(pane)).toBeVisible();
+        await expect(page.locator(bar)).toBeHidden();
+      }
+      await page.goto('/#/flow');
+      await page.locator('.example-card button', { hasText: 'Load' }).first().click();
+      await expect(page.locator('.flow-canvas-card')).toBeVisible();
+      await expect(page.locator('.flow-inspector')).toBeVisible();
+      await expect(page.locator('.flow-panebar')).toBeHidden();
+    });
+  });
+
+  test('#/project hides the splitter and the layout switcher — both divide two panes', async ({ page }) => {
+    await page.goto('/#/project');
+    await expect(page.locator('.js-panebar')).toBeVisible();
+    await expect(page.locator('.js-split')).toBeHidden();
+    await expect(page.locator('.js-layout')).toBeHidden();
+  });
+
+  test('#/project reserves the keyboard inset on the editor pane (the seam is the component\'s)', async ({ page }) => {
+    await page.goto('/#/project');
+    await page.locator('.js-editor-input').focus();
+    const padded = await page.evaluate(() => {
+      Object.defineProperty(window.visualViewport, 'height', { value: 500, configurable: true });
+      window.visualViewport.dispatchEvent(new Event('resize'));
+      return getComputedStyle(document.querySelector('.js-editor')).paddingBottom;
+    });
+    expect(padded, 'the editor pane reserves the inset').toBe('344px'); // 844 layout − 500 visual
   });
 });
 

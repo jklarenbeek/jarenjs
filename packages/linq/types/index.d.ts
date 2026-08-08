@@ -1,8 +1,8 @@
 /**
  * Hand-authored declarations for @jarenjs/linq — the deliberate type
- * surface (strategy 1 of the typed-surface order, recorded in
- * TODO_05's execution notes): the implementation stays plain JSDoc'd
- * JavaScript, and this file is the public type contract. The anti-drift
+ * surface (hand-authored declarations chosen over emitting them from
+ * JSDoc): the implementation stays plain JSDoc'd JavaScript, and this
+ * file is the public type contract. The anti-drift
  * rule: every claim here has a runtime twin in `test/linq/types.test.js`
  * and a compile-level pin in `test/consumer/types.ts`.
  *

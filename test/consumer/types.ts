@@ -812,7 +812,7 @@ void dbRuntimeErr.code;
 void SQLITE_FLOOR.length;
 
 // ---------------------------------------------------------------------------
-// @jarenjs/db — generated entity types (TODO_15): the model document is the
+// @jarenjs/db — generated entity types: the model document is the
 // `T`. `db-generated.ts` is produced by scripts/generate-db-fixture.js from
 // test/db/emit-model-fixture.js; test/db/emit-model.test.js fails if it
 // drifts. The negative cases here are the deliverable: each @ts-expect-error

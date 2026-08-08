@@ -8,8 +8,9 @@
  * change every unaffected row is reference-identical. The seeded
  * oracle at the end holds the maintained result equal to a fresh
  * re-query after EVERY mutation, with a consumer mirror maintained
- * solely by `applyJSONPatch` — the TODO_09 discipline applied to
- * maintenance.
+ * solely by `applyJSONPatch` — the capture layer's discipline (a
+ * consumer rebuilds from the emitted patches alone, never from a
+ * re-read) applied to maintenance.
  */
 
 import { describe, it } from 'node:test';

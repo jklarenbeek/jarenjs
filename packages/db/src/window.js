@@ -9,7 +9,7 @@
  * always ascending — the total order LIVE-FORMAT §9 promises.
  *
  * String comparison is CODEPOINT order (SQLite BINARY over UTF-8 —
- * the probed TODO_08 fact), which `<` on JS strings gets wrong for
+ * probed, never assumed), which `<` on JS strings gets wrong for
  * astral-vs-BMP pairs; `compareCodepoint` walks code points.
  */
 

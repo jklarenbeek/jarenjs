@@ -14,7 +14,7 @@
  * registered the identical function — that schema-dependency hazard is
  * why the model format declares no UDF-expression indexes.
  *
- * Ring 3 (TODO_OPS) extends the hatch to registry `pushable:'scalar'`
+ * Ring 3 extends the hatch to registry `pushable:'scalar'`
  * operators: a predicate fragment that uses a registered scalar operator
  * (`$sqrt`, `$pow`, …) compiles WITH the store's `{ functions,
  * extensions }` and pushes as the same deterministic UDF — SQLite drives

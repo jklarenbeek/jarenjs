@@ -333,8 +333,8 @@ documents as the store writes them. Both net ONE op per row — insert+
 update coalesces, insert+delete vanishes, an update back to the
 original emits nothing — so the two modes agree as SETS (a differential
 test pins it). The journal's netting was added when the wasm parity
-suite ran a same-row multi-op transaction the original TODO_18 script
-never wrote. Op order within a record is UNSPECIFIED; every op targets
+suite ran a same-row multi-op transaction the original differential
+script never wrote. Op order within a record is UNSPECIFIED; every op targets
 a distinct pointer. The persisted `_jaren_changes` log rides the same
 transaction as the writes it describes; a caught inner-savepoint
 rollback truncates the journal buffer to its checkpoint. Overhead is

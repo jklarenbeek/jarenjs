@@ -7,6 +7,12 @@
  * before swapping (the last good frame stays), the retired `#/studio`
  * URL redirects here, and no state of the page widens the layout
  * viewport (the `minmax(0, 1fr)` grid discipline).
+ *
+ * This viewport is BELOW the breakpoint, so the IDE shows one pane at a
+ * time behind its segmented switcher: opening a template lands on the
+ * stage (opening a project is a request to see it), and reaching the
+ * editor is an explicit tap. That switching is the subject of
+ * `mobile.spec.js`; here it is just how a phone user gets around.
  */
 import { test, expect } from '@playwright/test';
 
@@ -59,6 +65,7 @@ test('the mini-site routes internally and an editor commit re-validates before s
   // document live — the swap is atomic. No retry: each keystroke publishes
   // to the typing buffer, so the controlled reassert matches what was typed
   // and a render mid-edit can no longer swallow the commit.
+  await page.locator('.js-panebar .seg-btn', { hasText: 'Editor' }).tap();
   const editor = page.locator('.js-editor-input');
   await editor.fill('{ "$app": "0.2", "view": [] }');
   await editor.blur();

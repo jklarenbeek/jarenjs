@@ -10,7 +10,8 @@
  * The stage's live nested app and the drag splitter are the only
  * imperative islands — `jaren-widget`s the host registers. The layout
  * mode rides a `data-mode` attribute so the grid switches in CSS with no
- * computed class; a kind badge rides `data-badge`.
+ * computed class; the phone pane rides `data-pane` the same way, and a
+ * kind badge rides `data-badge`.
  */
 
 import { editorTextarea } from './editor.js';
@@ -30,10 +31,33 @@ const layoutButton = (mode, label, title) => ['button', {
   on: { click: { action: 'project/layout-mode', with: mode } },
 }, label];
 
+/**
+ * One segment of the phone pane switcher. Below the breakpoint the rail
+ * | editor | stage grid shows ONE pane at a time and this bar picks it;
+ * above the breakpoint the bar does not exist (CSS) and the layout
+ * switcher beside it is what the user reaches for instead.
+ *
+ * A pane is a grid area, not a `tabpanel`, so these are toggle buttons
+ * in a group with `aria-pressed` — not a `tablist` with `aria-selected`.
+ */
+const paneButton = (pane, label) => ['button', {
+  type: 'button',
+  class: { $if: [{ $eq: ['$.mobilePane', pane] }, 'seg-btn active', 'seg-btn'] },
+  'aria-pressed': { $if: [{ $eq: ['$.mobilePane', pane] }, 'true', 'false'] },
+  on: { click: { action: 'project/pane', with: pane } },
+}, label];
+
 /** The shell (matches the whole slice). */
 const shell = {
   match: PROJECT_BASE, mode: PROJECT_MODE,
-  body: ['div', { class: 'jstudio', 'data-mode': '$.layout.mode' },
+  body: ['div', { class: 'jstudio', 'data-mode': '$.layout.mode', 'data-pane': '$.mobilePane' },
+    // ——— the phone pane switcher (its own grid row; display:none above
+    // the breakpoint, so on a desktop it costs one hidden element) ———
+    ['div', { class: 'js-panebar seg', role: 'group', 'aria-label': 'pane' },
+      paneButton('files', 'Files'),
+      paneButton('editor', 'Editor'),
+      paneButton('stage', 'Stage'),
+    ],
     // ——— pen bar ———
     ['div', { class: 'js-penbar' },
       ['strong', { class: 'js-penname' }, '$.name'],

@@ -97,7 +97,9 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 - Breakpoints: **1024 px** (two-column grids collapse or narrow before they cramp),
   **760 px** (mobile), and one recorded exception, **360 px** (very narrow phones: the
   docs README buttons drop from 2-up to full rows so they stay tappable). New
-  intermediate breakpoints need a reason recorded here.
+  intermediate breakpoints need a reason recorded here. The Flow studio's
+  unrecorded **900 px** is gone: the one-pane block below owns that collapse
+  now, at 1024 like everything else.
 - **Grid tracks that hold arbitrary content are `minmax(0, 1fr)`, never bare `1fr`.**
   `1fr` means `minmax(auto, 1fr)`: the track can never shrink below its largest item's
   min-content width, so a single nowrap scroll strip inside it widens the whole page
@@ -105,6 +107,31 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   `min-width: 0`. Belt-and-braces guard: `html, body { overflow-x: clip; }` (`clip`,
   not `hidden` — no scroll container, `position: sticky` keeps working).
 - Mobile patterns (reuse these, don't invent siblings):
+  - **One pane at a time** — the rule for every multi-pane studio
+    (`#/play`, `#/project`, `#/flow`, `#/data`). Below 1024 px a studio never
+    stacks its panes into a tall scroll: the grid becomes one column with a
+    switcher row, a segmented bar picks the live pane, and the others are
+    hidden in CSS. The protocol is three parts and all four surfaces
+    implement all three:
+    1. the pane container publishes the live pane as `data-pane`;
+    2. a `…-panebar` bar of `.seg` / `.seg-btn` toggles sets it — `role="group"`
+       with `aria-pressed`, **not** a `tablist` (a pane is a grid area, not a
+       `tabpanel`; a real tab strip, like Play's result screens, does use
+       `tablist`/`aria-selected`);
+    3. the studio's stylesheet hides the unselected panes with
+       `[data-pane='x'] .other-pane { display: none }`, and declares the bar's
+       desktop `display: none` **immediately above** that media block —
+       equal specificity means source order decides, so a `display: none`
+       written further down silently beats the query.
+    Two consequences worth keeping: the panes stay **mounted**, so a hidden
+    editor keeps its caret, its scroll and its undo stack and a switch costs
+    one attribute write rather than a re-render; and controls that divide a
+    *two-pane* screen (drag splitters, the IDE's three-way layout switcher)
+    are hidden here, because below the breakpoint they have nothing to do.
+    Where a gesture's answer lives in another pane — picking an example, a
+    file or a diagram node, pressing Run — the action carries the user
+    across, which is invisible on desktop. The pane is host chrome and never
+    a document member: it must not travel with a saved or shared document.
   - **Scroll strip**: tab bars and the docs section list become a single
     non-wrapping horizontally scrollable row, bled edge-to-edge with
     `margin-inline: calc(-1 * var(--space-5)); padding-inline: var(--space-5)` so the

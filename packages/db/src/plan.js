@@ -84,8 +84,8 @@ export function assertDecidedKind(node) {
   }
 }
 
-// the exhaustiveness pact with TODO_02's gate: if the engine adds a
-// kind, this module fails to load until the planner decides it
+// the exhaustiveness pact: if the engine adds a kind, this module
+// fails to load until the planner decides it
 for (const kind of NODE_KINDS) {
   if (!DECIDED_KINDS.has(kind)) {
     throw new Error(
@@ -104,7 +104,7 @@ function refusal(construct, reason) {
   return { construct, reason };
 }
 
-// ————— Registered operators (Ring 2 — TODO_OPS) —————
+// ————— Registered operators (Ring 2) —————
 //
 // A store may open with a registry (createJsltRegistry()) whose
 // operators become engine vocabulary. Ring 2 treats every registered

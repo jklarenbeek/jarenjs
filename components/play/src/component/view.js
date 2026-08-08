@@ -14,6 +14,14 @@ export const PLAY_BASE = '$.ui.play';
 /** The modes the host merges into the site stylesheet. */
 export const playModes = Object.freeze({ [PLAY_MODE]: { unmatched: 'error' } });
 
+/** One segment of the phone pane switcher — active when it is the live pane. */
+const paneButton = (pane, label) => ['button', {
+  type: 'button',
+  class: { $if: [{ $eq: ['$.mobilePane', pane] }, 'seg-btn active', 'seg-btn'] },
+  'aria-pressed': { $if: [{ $eq: ['$.mobilePane', pane] }, 'true', 'false'] },
+  on: { click: { action: 'play/mobile-pane', with: pane } },
+}, label];
+
 /** The shell (matches the whole slice): bar / rail | editors | split | stage. */
 const shell = {
   match: PLAY_BASE, mode: PLAY_MODE,
@@ -49,14 +57,14 @@ const shell = {
     ],
     // ——— the phone pane switcher: below the breakpoint the rail | editors
     // | result grid is ONE column, one pane at a time — a segmented bar
-    // instead of a tall stack (desktop hides this bar entirely) ———
+    // instead of a tall stack (desktop hides this bar entirely). A pane
+    // is a grid area, not a `tabpanel`, so these are toggle buttons in a
+    // group with `aria-pressed`, not a `tablist` with `aria-selected`
+    // (the RESULT strip below is a real tablist and says so) ———
     ['div', { class: 'jplay-mobilebar seg', role: 'group', 'aria-label': 'pane' },
-      ['button', { type: 'button', class: { $if: [{ $eq: ['$.mobilePane', 'examples'] }, 'seg-btn active', 'seg-btn'] },
-        on: { click: { action: 'play/mobile-pane', with: 'examples' } } }, 'Examples'],
-      ['button', { type: 'button', class: { $if: [{ $eq: ['$.mobilePane', 'editor'] }, 'seg-btn active', 'seg-btn'] },
-        on: { click: { action: 'play/mobile-pane', with: 'editor' } } }, 'Editor'],
-      ['button', { type: 'button', class: { $if: [{ $eq: ['$.mobilePane', 'result'] }, 'seg-btn active', 'seg-btn'] },
-        on: { click: { action: 'play/mobile-pane', with: 'result' } } }, 'Result'],
+      paneButton('examples', 'Examples'),
+      paneButton('editor', 'Editor'),
+      paneButton('result', 'Result'),
     ],
     // ——— the example picker (a "file tree" grouped by engine) ———
     ['nav', { class: 'jplay-rail', 'aria-label': 'examples' }, [{ $apply: '$.rail[*]' }]],

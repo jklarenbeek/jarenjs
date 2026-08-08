@@ -3,8 +3,8 @@
  * @file Exactly-once under contention (JOBS-FORMAT §3): several
  * workers on SEPARATE CONNECTIONS to the same database file — a
  * single synchronous connection cannot contend — hammer one queue
- * under the TODO_07 busy policy (WAL + busy_timeout are the store's
- * file defaults), and every job is executed exactly once: no loss, no
+ * under the store's busy policy (WAL + busy_timeout are its file
+ * defaults), and every job is executed exactly once: no loss, no
  * double-claim. Repeated, because a race that shows up one run in
  * three is still a race.
  */

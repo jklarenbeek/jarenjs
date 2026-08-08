@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The JSLT operator/aggregator registry (TODO_OPS Ring 1): the
+ * @file The JSLT operator/aggregator registry (Ring 1): the
  * `@jarenjs/formats` + `JarenValidator.addFormats` experience for the
  * query/JSLT vocabulary. A caller composes packs of pure functions
  * (`@jarenjs/core` math, finance, statistics) into a registry and gets
@@ -15,7 +15,7 @@
  * immutable-by-copy builder — so a pack never imports the operator ABI,
  * exactly the decoupling `@jarenjs/formats` has from `@jarenjs/validate`.
  *
- * Entry kinds (TODO_OPS): `op` (scalar `$`-operator over scalar
+ * Entry kinds: `op` (scalar `$`-operator over scalar
  * operands), `agg` (an operator whose declared `seq` operands are folded
  * to arrays before the call — the generalization of core `$sum`'s fold),
  * and `fn` (a bare `$call` function, the low-level escape). The published

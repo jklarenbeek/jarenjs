@@ -975,7 +975,7 @@ async function main() {
     let n = 0;
     rows.push({ name: 'jaren — unit of work (get, put, saveChanges)',
       results: [await timeAsync(() => jaren.updateUow('u1', `n${n++}`), 300)],
-      note: 'minimal diffed statement; the TODO_14 mixed workload measured a 10% whole-row fallback rate' });
+      note: 'minimal diffed statement; a mixed read/write workload measured a 10% whole-row fallback rate' });
     rows.push({ name: 'jaren — explicit update()',
       results: [await timeAsync(() => jaren.updateExplicit('u1', `n${n++}`), 300)] });
     for (const engine of engines.slice(1)) {

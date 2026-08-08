@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Ring 3 (TODO_OPS) — SQL pushdown of the pushable-scalar registry
+ * @file Ring 3 — SQL pushdown of the pushable-scalar registry
  * subset. A `pushable:'scalar'` registered operator (`$sqrt`, `$pow`, …)
  * used in a WHERE predicate registers as a SQLite deterministic UDF and
  * the plan emits the call, so SQLite drives the row iteration and the

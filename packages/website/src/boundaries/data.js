@@ -321,5 +321,9 @@ export function dataViewModel(state) {
       : `applied: ${data.migration.applied.length}`
         + (data.migration.note ? ` — ${data.migration.note}` : ''),
     error: data.error,
+    // the phone pane (Store · Query · Live); whitelisted, so a junk
+    // value cannot blank the studio — it falls back to the query
+    mobilePane: data.mobilePane === 'store' || data.mobilePane === 'live'
+      ? data.mobilePane : 'query',
   };
 }

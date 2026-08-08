@@ -170,14 +170,43 @@
 /* the stacked layout splits by rows; the horizontal handle is hidden there */
 .jstudio[data-mode="top"] .js-split { display: none; }
 
-/* ——— responsive: collapse to one column, rail → scroll strip ——— */
+/* the phone pane switcher exists only below the breakpoint */
+.js-panebar { display: none; }
+
+/* ——— responsive: ONE pane at a time behind the segmented switcher ———
+ * A phone never stacks rail + editor + stage into a tall scroll: the
+ * grid becomes one column with a switcher row, and the two unselected
+ * panes are hidden by attribute-scoped rules. The panes stay MOUNTED,
+ * so a hidden editor keeps its caret, its scroll and its undo stack,
+ * and switching costs one attribute write on `.jstudio`.
+ */
 @media (max-width: 1024px) {
   .jstudio, .jstudio[data-mode="right"], .jstudio[data-mode="top"] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "penbar" "rail" "editor" "stage";
+    grid-template-areas: "penbar" "panes" "rail" "editor" "stage";
   }
+  .js-panebar { display: flex; grid-area: panes; align-self: start; }
+  .js-panebar .seg-btn { flex: 1; }
+  .jstudio[data-pane="files"]  .js-editor,
+  .jstudio[data-pane="files"]  .js-stage,
+  .jstudio[data-pane="editor"] .js-rail,
+  .jstudio[data-pane="editor"] .js-stage,
+  .jstudio[data-pane="stage"]  .js-rail,
+  .jstudio[data-pane="stage"]  .js-editor { display: none; }
+  /* the drag splitter and the three-way layout switcher both divide a
+     screen showing TWO panes; neither has meaning here, and the
+     splitter's `grid-area: split` no longer exists in this template */
+  .js-split, .js-layout { display: none; }
+  /* the keyboard seam: the editor pane reserves the published inset as
+     scroll room, so the caret clears the on-screen keyboard */
+  .js-editor { padding-bottom: var(--kb-inset, 0px); }
+  /* touch targets: rows, segments and pen-bar buttons are finger-sized */
+  .js-file, .js-file-del, .js-addfile,
+  .jstudio .seg-btn, .js-penbar .btn { min-height: 44px; }
 }
 @media (max-width: 760px) {
-  .js-rail { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .js-file { flex: 0 0 auto; min-height: 2.2rem; }
+  /* the rail was a horizontal scroll strip while it sat stacked ABOVE
+     the editor and had to stay compact. As its own full pane it is a
+     plain vertical list again — the whole screen is the file list */
+  .js-file-name { white-space: normal; overflow-wrap: anywhere; }
 }

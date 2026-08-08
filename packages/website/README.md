@@ -52,6 +52,16 @@ and mobile layout — every test also asserting **zero page errors** under
 real engine scheduling. The `browser` CI job runs all three engines on
 every push.
 
+`e2e/mobile.spec.js` is where the phone contract is pinned, because CSS
+is the only thing that can prove it: at 390 × 844 every studio
+(`#/play`, `#/project`, `#/flow`, `#/data`) must show **exactly one pane**
+behind its segmented switcher, with finger-sized segments and no
+horizontal overflow, and the `visualViewport` keyboard seam must reserve
+`--kb-inset` under the focused editor. The state half of that protocol —
+`data-pane`, `aria-pressed`, and the panes staying mounted while hidden —
+is cheaper to assert headlessly and lives in `test/website/panes.test.js`;
+the shape itself is written down once in [DESIGN.md](../../docs/DESIGN.md) §5.
+
 > **Local runs on a host without Playwright's shared libraries** (common on
 > Fedora-family and other non-Debian distributions) fail at browser launch,
 > not in the test. Run the suite inside an Ubuntu container instead — e.g.

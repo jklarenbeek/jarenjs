@@ -8,8 +8,12 @@
  * Middle: the query document with results and `explain()` — the
  * pushdown made visible. Right: a live query maintaining as rows are
  * inserted, and the worked migration with its shadow verification.
+ *
+ * Below the breakpoint those three become one pane at a time behind the
+ * shared segmented switcher (Store · Query · Live), defaulting to the
+ * query — the pane a reader of this page came for.
  */
-import { editorTextarea, errorLine } from './studio-kit.js';
+import { editorTextarea, errorLine, paneSwitcher } from './studio-kit.js';
 
 const statusCard =
   ['div', { class: 'card pg-card data-status' },
@@ -94,14 +98,20 @@ const liveCard =
 export const DATA_RULES = [
   {
     match: '$.ui.data', mode: 'data',
-    body: ['section', { class: 'page data-page' },
+    // `container` for the gutters the other studios have: without it this
+    // page ran edge-to-edge, into the notch, at every width
+    body: ['section', { class: 'page container data-page' },
       ['h1', {}, 'Data'],
       ['p', { class: 'lead' },
         'The same store, the same queries, the same live updates as Node and Bun — running here, in your browser, on the official SQLite wasm build. One tab owns the connection; more tabs become clients.'],
       { $if: ['$.error', errorLine('$.error')] },
       { $if: [{ $eq: ['$.status', 'boot'] },
         ['p', { class: 'muted data-booting' }, 'Loading the SQLite wasm build…']] },
-      ['div', { class: 'data-grid' },
+      ['div', { class: 'data-grid', 'data-pane': '$.mobilePane' },
+        paneSwitcher({
+          class: 'data-panebar', pane: '$.mobilePane', action: 'data/pane',
+          panes: [['store', 'Store'], ['query', 'Query'], ['live', 'Live']],
+        }),
         statusCard,
         queryCard,
         liveCard,

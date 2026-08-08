@@ -558,6 +558,15 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .example-card { display: flex; flex-direction: column; }
 .example-card .code-block { flex: 1; font-size: 0.75rem; }
 
+/* The two site studios' phone pane switchers exist only below the
+   breakpoint. Declared HERE, immediately above the block that turns them
+   on, and not down in each studio's own section: these rules and that
+   block have equal specificity, so source order is what decides which
+   wins — a later `display: none` would silently beat the media query.
+   (`@jarenjs/play` and `@jarenjs/studio` keep the same pairing inside
+   their own stylesheets, for the same reason.) */
+.flow-panebar, .data-panebar { display: none; }
+
 /* tablet: two-column grids collapse before they get cramped */
 @media (max-width: 1024px) {
   .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
@@ -566,9 +575,41 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   /* the mobile keyboard seam (main.js publishes --kb-inset from the
      visualViewport): while an editor is focused the sticky header
      un-sticks — it must never cover the field — and the editor panes
-     reserve the keyboard inset as scroll room beneath the caret */
+     reserve the keyboard inset as scroll room beneath the caret.
+     `.js-editor` is absent on purpose: the @jarenjs/studio and
+     @jarenjs/play stylesheets reserve the inset on their OWN editor
+     panes, so those components carry the seam wherever they are
+     mounted rather than only inside this site */
   body.kb-editing .header { position: static; }
-  .js-editor, .flow-grid, .data-grid, .pg-grid { padding-bottom: var(--kb-inset, 0px); }
+  .flow-grid, .data-grid, .pg-grid { padding-bottom: var(--kb-inset, 0px); }
+
+  /* ——— the studios show ONE pane at a time behind a segmented switcher
+     (the pattern @jarenjs/play established): the grid becomes a single
+     column with a switcher row, and the unselected panes are hidden by
+     attribute-scoped rules on the pane container. The panes stay
+     MOUNTED — a hidden editor keeps its caret, its scroll and its undo
+     stack — so switching costs one attribute write, not a re-render. */
+  .flow-panebar, .data-panebar { display: flex; }
+  .flow-panebar .seg-btn, .data-panebar .seg-btn { flex: 1; }
+  .flow-panebar, .data-panebar,
+  .flow-grid > .card, .data-grid > .card, .flow-side { grid-column: 1 / -1; }
+
+  .flow-grid[data-pane='diagram']   .flow-side,
+  .flow-grid[data-pane='inspector'] .flow-canvas-card,
+  .flow-grid[data-pane='inspector'] .flow-run,
+  .flow-grid[data-pane='run']       .flow-canvas-card,
+  .flow-grid[data-pane='run']       .flow-inspector { display: none; }
+
+  .data-grid[data-pane='store'] .data-query,
+  .data-grid[data-pane='store'] .data-live,
+  .data-grid[data-pane='query'] .data-status,
+  .data-grid[data-pane='query'] .data-live,
+  .data-grid[data-pane='live']  .data-status,
+  .data-grid[data-pane='live']  .data-query { display: none; }
+
+  /* touch targets: the studios' controls are finger-sized (WCAG 2.5.8) */
+  .flow-grid .btn, .flow-grid .seg-btn,
+  .data-grid .btn, .data-grid .seg-btn { min-height: 44px; }
 }
 
 /* mobile */
@@ -836,9 +877,10 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   align-items: start;
 }
 .flow-side { display: grid; gap: var(--space-4); }
-@media (max-width: 900px) {
-  .flow-grid { grid-template-columns: minmax(0, 1fr); }
-}
+/* This studio used to collapse to one column at its own 900px, which was
+   the only breakpoint in the suite that was neither 1024 nor 760. The
+   one-pane block now owns the collapse — at the suite's 1024 — by
+   spanning every child across both tracks, so the odd one is gone. */
 .flow-palette { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .flow-tabs { display: flex; gap: var(--space-2); margin-block: var(--space-2); }
 .flow-canvas { overflow: auto; }
@@ -912,6 +954,20 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .mm-fired .mm-edge-line,
   .mm-run-error .mm-node-shape { animation: none; }
   .mm-active .mm-node-shape { filter: drop-shadow(0 0 6px var(--accent)); }
+}
+
+/* ---------------------------------------------------------------- */
+/* The Data studio                                                   */
+/* ---------------------------------------------------------------- */
+
+/* Store | Query | Live. This grid was declared in the markup and never
+   written, so the three cards stacked full-width at EVERY size — the
+   auto-fit track is what the sibling studios always had. */
+.data-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
 }
 
 /* ---- The adventure game (#/game) ------------------------------------ */

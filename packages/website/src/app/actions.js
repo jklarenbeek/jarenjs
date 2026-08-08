@@ -169,6 +169,10 @@ export const ACTIONS = {
     patch: [
       { op: 'replace', path: '/project/active', value: '$payload' },
       { op: 'replace', path: '/project/buffer', value: null },
+      // picking a file in the rail — or an error line in the strip — is a
+      // request to EDIT it, and on a phone the rail is a different pane
+      // from the editor. Carry the user across (invisible on desktop).
+      { op: 'replace', path: '/project/mobilePane', value: 'editor' },
     ],
   },
   // the debounced boundary reports the last-good app mount + reboot
@@ -181,8 +185,12 @@ export const ACTIONS = {
     ],
   },
   // explicit Run: force-commit + restart the app stage (or re-run a
-  // transform file)
-  'project/run': { effects: [{ run: 'project-run' }] },
+  // transform file). Pressing Run is a request to watch it happen, so on
+  // a phone the stage comes forward with it.
+  'project/run': {
+    patch: [{ op: 'replace', path: '/project/mobilePane', value: 'stage' }],
+    effects: [{ run: 'project-run' }],
+  },
   // a transform file's run result (render nodes) — keyed by file name
   'project/result': {
     patch: [{ op: 'add', path: { $concat: ['/project/results/', '$payload.name'] }, value: '$payload.result' }],
@@ -228,6 +236,11 @@ export const ACTIONS = {
       { op: 'replace', path: '/project/results', value: {} },
       { op: 'replace', path: '/project/stageError', value: null },
       { op: 'replace', path: '/project/buffer', value: null },
+      // opening a project is a request to SEE it — on a phone that means
+      // the stage, not the editor it happens to have activated (the same
+      // move `play/loaded` makes when an example is picked). Desktop
+      // shows every pane, so this patch is invisible there.
+      { op: 'replace', path: '/project/mobilePane', value: 'stage' },
     ],
   },
   'project/template': { effects: [{ run: 'project-template', with: { id: '$payload' } }] },
@@ -236,6 +249,11 @@ export const ACTIONS = {
   // the layout switcher + the splitter (the splitter lands a later patch)
   'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },
   'project/layout-ratio': { patch: [{ op: 'replace', path: '/project/layout/ratio', value: '$payload' }] },
+  // the phone pane switcher (Files · Editor · Stage) — pure chrome, and
+  // deliberately NOT part of `layout`: `layout` is a jaren-project member
+  // that saves, shares and downloads with the document, and which pane a
+  // phone happened to be showing is not a property of the project
+  'project/pane': { patch: [{ op: 'replace', path: '/project/mobilePane', value: '$payload' }] },
 
   // the Play engine playground (#/play, boundaries/play.js): pick
   // an example (loads its source + first dataset), edit a source/data pane
@@ -354,6 +372,9 @@ export const ACTIONS = {
       { op: 'replace', path: '/data/queryText', value: '$payload.queryText' },
     ],
   },
+  // the phone pane switcher (Store · Query · Live) — pure chrome; the
+  // store, its live query and its worker are untouched by it
+  'data/pane': { patch: [{ op: 'replace', path: '/data/mobilePane', value: '$payload' }] },
   'data/model-text': { patch: [{ op: 'replace', path: '/data/modelText', value: '$event.value' }] },
   'data/query-text': { patch: [{ op: 'replace', path: '/data/queryText', value: '$event.value' }] },
   'data/open': { effects: [{ run: 'data-open', with: { text: '$.data.modelText' } }] },
@@ -625,6 +646,9 @@ export const ACTIONS = {
   },
 
   'flow/tab': { patch: [{ op: 'replace', path: '/flow/tab', value: '$payload' }] },
+  // the phone pane switcher (Diagram · Inspector · Run) — pure chrome;
+  // `tab` (Diagram ↔ Text) is a different axis and stays independent
+  'flow/pane': { patch: [{ op: 'replace', path: '/flow/mobilePane', value: '$payload' }] },
 
   // A diagram click: plain pick — unless a connect source is armed and
   // a node was clicked, in which case this IS the connect commit.
@@ -664,6 +688,11 @@ export const ACTIONS = {
       { patch: [
         { op: 'replace', path: '/flow/connect', value: null },
         { op: 'replace', path: '/flow/selection', value: '$payload' },
+        // a plain pick IS "show me this one" — on a phone the inspector
+        // is a different pane, so the gesture carries the user to it.
+        // The connect-commit branches above deliberately do not: mid-
+        // connect the diagram is where the next click has to land.
+        { op: 'replace', path: '/flow/mobilePane', value: 'inspector' },
       ] },
     ],
   },
@@ -799,6 +828,9 @@ export const ACTIONS = {
     patch: [
       { op: 'replace', path: '/flow/run', value: { current: '$.flow.doc.initial', prev: null, log: [] } },
       { op: 'replace', path: '/flow/revision', value: { $add: ['$.flow.revision', 1] } },
+      // booting is a request to WATCH it run (phone only; desktop shows
+      // every pane, so this patch is invisible there)
+      { op: 'replace', path: '/flow/mobilePane', value: 'run' },
     ],
   },
   'flow/stop': { patch: [{ op: 'replace', path: '/flow/run', value: null }] },
@@ -823,6 +855,7 @@ export const ACTIONS = {
     patch: [
       { op: 'replace', path: '/flow/run',
         value: { running: true, nodes: {}, output: null, error: null, log: [] } },
+      { op: 'replace', path: '/flow/mobilePane', value: 'run' },
     ],
     effects: [{ run: 'flow-dag-run', with: { doc: '$.flow.doc', inputText: '$.flow.dagInput' } }],
   },

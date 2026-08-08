@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The relations differential oracle (TODO_13): every corpus
+ * @file The relations differential oracle: every corpus
  * group's cases run through the in-memory engine over the multi-entity
  * root AND through the store's entity translator — native and
  * forced-residual — and must agree, values and error codes alike.

@@ -1044,7 +1044,7 @@ function replayOnShadow(driver, shadowPath, baseline, migrations, model, options
   return chain(driver.open(shadowPath, {}), (shadow) => {
     const finish = (result) => chain(shadow.close(), () => result);
     // a UDF-expression index is invisible to a connection that has not
-    // registered the function (probed, TODO_08's rule): the shadow
+    // registered the function (probed, never assumed): the shadow
     // re-registers every declared function BEFORE any DDL runs
     const registered = options.registerFunctions !== undefined
       ? options.registerFunctions(shadow)

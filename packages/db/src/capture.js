@@ -387,7 +387,7 @@ export function createCaptureEngine(options) {
     // free: fold every entry for one (table, key) into first-before /
     // last-after, so insert+update coalesces, insert+delete vanishes,
     // and an update back to the original emits nothing. Found by the
-    // wasm parity suite — the TODO_18 differential script never wrote
+    // wasm parity suite — the original differential script never wrote
     // the same row twice in one transaction.
     /** @type {Map<string, any>} */
     const netted = new Map();

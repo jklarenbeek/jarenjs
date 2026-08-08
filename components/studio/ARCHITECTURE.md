@@ -110,9 +110,41 @@ DOM-touching widgets. As of v0.28.2 the website mounts it live at
   `--js-ratio` live and commits `layout.ratio` on pointer-up — also an
   ARIA `separator`, arrow-key resizable.
 
+## One pane at a time on a phone
+
+Below 1024 px the rail | editor | stage grid is one column showing a
+single pane, picked by the `js-panebar` segmented bar — the suite's
+one-pane protocol (DESIGN.md §5), which `@jarenjs/play` established and
+all four studios now share. The live pane rides `data-pane` on `.jstudio`,
+exactly as the layout mode rides `data-mode`, so the switch is one
+attribute write and the stylesheet does the rest.
+
+Three consequences are deliberate:
+
+- **the panes stay mounted.** CSS hides them; the renderer never unmounts
+  them. A hidden editor keeps its caret, its scroll and its typing buffer,
+  and the nested app on a hidden stage keeps running rather than
+  rebooting when the user comes back;
+- **the splitter and the layout switcher are hidden there.** Both divide a
+  screen showing two panes, and all three grid modes collapse to the same
+  single column below the breakpoint, so neither has anything to do;
+- **the pane is host chrome, not a project member.** It lives in the host's
+  slice next to `buffer` and `dirty`, never in `layout` — `layout` is a
+  `jaren-project` member that saves, shares and downloads with the
+  document, and which pane a phone was showing is not a property of the
+  project. The view model whitelists the value (`files` | `editor` |
+  `stage`, anything else → `editor`), so a stale slice cannot blank the IDE.
+
+Gestures whose answer lives in another pane carry the user across:
+opening a project or template, and pressing Run, come forward to the
+stage; picking a file in the rail or an error line in the strip goes to
+the editor. On a desktop every pane is visible, so those patches are
+invisible.
+
 Everything above — the view, the derivation, the two policies — renders
-and is tested without a DOM; the live stage, the layout modes and the
-splitter's drag are browser-verified (`e2e/project.spec.js`). Both old
+and is tested without a DOM; the live stage, the layout modes, the
+splitter's drag and the one-pane switching are browser-verified
+(`e2e/project.spec.js`, `e2e/studio.spec.js`, `e2e/mobile.spec.js`). Both old
 website surfaces are folded in: the playground's engine runners live on
 as file kinds, and the app-authoring Studio is the `app` file kind — its
 seed applications ship as single-`app`-file project templates and the

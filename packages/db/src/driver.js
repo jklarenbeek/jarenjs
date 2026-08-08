@@ -175,7 +175,7 @@ export function openConnection(raw, options) {
               && typeof raw.registerFunction === 'function',
             // aggregate UDFs (`db.aggregate` step/final) — node has them,
             // bun does not; a registry's `pushable:'aggregate'` subset is
-            // gated on this (TODO_OPS Ring 3). The binding must expose the
+            // gated on this (Ring 3). The binding must expose the
             // method AND declare it.
             aggregateFunctions: declared.aggregateFunctions === true
               && typeof raw.registerAggregate === 'function',

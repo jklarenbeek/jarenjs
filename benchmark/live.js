@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * JarenJS live-layer benchmark — phase C (TODO_21). What this program
+ * JarenJS live-layer benchmark — phase C. What this program
  * is actually proud of, measured, with the losses printed beside the
  * wins:
  *
@@ -9,7 +9,7 @@
  *     the D14 honesty measurement: how much does incremental actually
  *     buy, at a few table sizes?
  *  2. Capture overhead: write cost with capture off / journal / session
- *     (the figure promised in TODO_18, re-measured here in one place).
+ *     (the capture-overhead claim, re-measured here in one place).
  *  3. Live-query update latency versus the local-first reactive stores:
  *     RxDB (an IndexedDB/memory reactive database) and TinyBase (a
  *     tiny, extremely fast in-memory store with a reactive queries
@@ -19,7 +19,7 @@
  *  4. The end-to-end path: write → capture patch → live maintenance →
  *     one emitted patch set, measured as a whole, because that
  *     composition is the claim.
- *  5. Job throughput (TODO_20): jobs/second at a stated concurrency.
+ *  5. Job throughput: jobs/second at a stated concurrency.
  *
  * LiveStore, the third rival named in the plan, is OMITTED: its
  * @livestore/livestore → electric-sql peer pins React and refuses to

@@ -297,7 +297,7 @@ export class Sequence {
   }
 
   /** The compiled view of the chain: the document, its externals and
-   * its dependency sets. Providers extend this shape (TODO_08). */
+   * its dependency sets. Providers extend this shape. */
   explain() {
     const document = this.toDocument();
     const compiled = compileDocument(document, {

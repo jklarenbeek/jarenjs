@@ -58,6 +58,10 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       buffer: null,
       results: {},       // file name -> a run result (query/jslt: later order)
       stageError: null,  // the nested app's own boot/runtime failure, if any
+      // the phone layout: which single pane shows (files | editor | stage).
+      // Pure chrome — the panes stay mounted, CSS picks one, and the
+      // project/* re-run feed ignores this path by construction.
+      mobilePane: 'editor',
     },
 
     // the Play engine playground (boundaries/play.js): pick an engine
@@ -87,6 +91,11 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       runContext: null,  // the machine sandbox's data state (from the template)
       dagInput: '',      // the dag run pane's JSON input text
       revision: 0,
+      // the phone layout: which single card shows (diagram | inspector |
+      // run). A diagram pick jumps to the inspector and a run jumps to
+      // the run pane, so the gesture and its answer are never split
+      // across two panes on a screen that shows one.
+      mobilePane: 'diagram',
     },
 
     // the browser-side AI assistant (@jarenjs/ai): a bring-your-own-key
@@ -157,6 +166,9 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       migration: null,         // the last planned/applied migration report
       booted: false,           // the boot effect fires exactly once
       error: null,
+      // the phone layout: which single card shows (store | query | live).
+      // Query is the default — it is what a reader of this page came for.
+      mobilePane: 'query',
     },
 
     // the package-README dialog: a fetched Markdown source rendered by

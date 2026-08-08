@@ -1,7 +1,8 @@
 /**
  * Hand-authored declarations for @jarenjs/db — the deliberate public
- * type surface (strategy 1, the same decision TODO_05 recorded for
- * linq): the implementation stays plain JSDoc'd JavaScript, and this
+ * type surface (hand-authored declarations rather than emitted ones —
+ * the same decision linq made): the implementation stays plain JSDoc'd
+ * JavaScript, and this
  * file is the contract. Anti-drift: the adopter surface is exercised
  * value-position in `test/consumer/types.ts`, and the generated-types
  * pipeline has its own committed oracle (`db-generated.ts`).

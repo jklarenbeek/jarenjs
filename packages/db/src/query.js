@@ -65,7 +65,7 @@ function bindable(value) {
  * The query engine for one collection.
  * @param {{ connection: any, state: any, collection: any,
  *   physicalPlan: any, profile?: any }} context - `collection` is the
- *   normalized collection; `physicalPlan` is TODO_07's DDL plan
+ *   normalized collection; `physicalPlan` is the DDL plan
  *   (columns, indexes); `profile` is the store-level normalized
  *   profile, if one was opened with
  * @returns {{ execute: Function, query: Function, explain: Function }}
@@ -376,8 +376,8 @@ export function createQueryEngine(context) {
   };
 
   /**
-   * A streaming cursor over the document's result ITEMS (the TODO_06
-   * cursor shape: `next()`/`return()` plus `Symbol.asyncIterator`).
+   * A streaming cursor over the document's result ITEMS (`next()` /
+   * `return()` plus `Symbol.asyncIterator`).
    * Native and row modes stream row by row; a set residual
    * materializes first (it is a barrier and `explain()` says so).
    * @param {any} document

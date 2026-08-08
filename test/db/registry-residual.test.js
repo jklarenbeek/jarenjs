@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Ring 2 (TODO_OPS) — registered operators run in the db RESIDUAL.
+ * @file Ring 2 — registered operators run in the db RESIDUAL.
  * A store opened with a registry accepts query and entity documents that
  * use registered operators, and they run CORRECTLY (JS over the fetched
  * rows), never silently wrong. The proofs:

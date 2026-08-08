@@ -10,7 +10,14 @@
  * The stylesheet renders derived projections only; the document itself
  * lives at `state.flow.doc` and every mutation goes through the
  * actions' patches — no pane owns private truth.
+ *
+ * Below the breakpoint the three cards become one pane at a time behind
+ * the shared segmented switcher (Diagram · Inspector · Run); selecting
+ * a node jumps to the inspector and running jumps to the run pane, so a
+ * phone never leaves the user looking at the pane they just left.
  */
+
+import { paneSwitcher } from './studio-kit.js';
 
 const paletteBtn = (label, action, opts = {}) =>
   ['button', {
@@ -194,7 +201,11 @@ export const FLOW_RULES = [
   },
   {
     match: '$.ui.flow.live', mode: 'flow',
-    body: ['div', { key: 'flow-live', class: 'flow-grid' },
+    body: ['div', { key: 'flow-live', class: 'flow-grid', 'data-pane': '$.mobilePane' },
+      paneSwitcher({
+        class: 'flow-panebar', pane: '$.mobilePane', action: 'flow/pane',
+        panes: [['diagram', 'Diagram'], ['inspector', 'Inspector'], ['run', 'Run']],
+      }),
       canvasCard,
       ['div', { key: 'flow-side', class: 'flow-side' }, inspectorCard, runCard],
     ],

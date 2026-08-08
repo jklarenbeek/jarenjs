@@ -561,7 +561,8 @@ describe('website — the Studio assistant tools (WebMCP)', function () {
   it('the project tools see the WHOLE file tree — a project is not just its app document', function () {
     /** @type {any[]} */
     let registered = [];
-    const { app } = mountSite({
+    // mounting is what registers the tools; this test drives them, not the app
+    mountSite({
       modelContext: { provideContext: ({ tools }) => { registered = tools; } },
     });
     const tool = (name) => registered.find((t) => t.name === name);

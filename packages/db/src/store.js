@@ -554,7 +554,7 @@ function asyncCollection(core, live) {
 }
 
 /**
- * Resolve the store's operator seam (Ring 2 — TODO_OPS) to a single
+ * Resolve the store's operator seam (Ring 2) to a single
  * `{ functions, extensions }` or `null`. Accepts `options.operators` (a
  * registry from `@jarenjs/json/jslt`'s `createJsltRegistry()`) and/or
  * raw `options.functions` / `options.extensions`. A registered operator

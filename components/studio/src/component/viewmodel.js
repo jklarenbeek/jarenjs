@@ -129,5 +129,11 @@ export function projectViewModel(state, options = {}) {
     problemCount: problems.length,
     stage: deriveStage(project, activeMeta, results, revision, committed),
     saveState: (slice.dirty === true || reconciled.dirty) ? 'Unsaved ●' : 'Saved',
+    // the phone pane (Files · Editor · Stage); whitelisted, so a junk
+    // value cannot blank the IDE — it falls back to the editor. This is
+    // host chrome, not a project member: `layout` travels with the saved
+    // document, which pane a phone was showing does not.
+    mobilePane: slice.mobilePane === 'files' || slice.mobilePane === 'stage'
+      ? slice.mobilePane : 'editor',
   };
 }

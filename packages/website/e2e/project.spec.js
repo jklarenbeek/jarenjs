@@ -180,23 +180,33 @@ test('the splitter drags to commit a new ratio and keyboard-resizes as a separat
     'ArrowLeft shrinks the left pane by 5%').toBe(before - 5);
 });
 
-test('the three layout modes render without widening the viewport, light and dark', async ({ page }) => {
+// Below the breakpoint the IDE shows ONE pane at a time, so the three
+// grid modes all reduce to the same single column and their switcher is
+// hidden with the splitter. The equivalent mobile sweep is therefore the
+// three PANES, not the three modes — same question (does any state of
+// this shell widen the layout viewport?), asked of what actually varies.
+test('every layout mode and every pane renders without widening the viewport, light and dark', async ({ page }) => {
   await page.goto('/#/project');
   const shell = page.locator('.jstudio');
 
-  for (const [size, label] of [[{ width: 390, height: 844 }, 'mobile'], [{ width: 1280, height: 900 }, 'desktop']]) {
-    await page.setViewportSize(size);
-    for (const mode of [['Side', 'classic'], ['Swap', 'right'], ['Stack', 'top']]) {
-      await page.locator('.js-layout button', { hasText: mode[0] }).click();
-      await expect(shell).toHaveAttribute('data-mode', mode[1]);
-      await noOverflow(page, `${label} · ${mode[1]} · light`);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  for (const theme of ['light', 'dark']) {
+    for (const [label, mode] of [['Side', 'classic'], ['Swap', 'right'], ['Stack', 'top']]) {
+      await page.locator('.js-layout button', { hasText: label }).click();
+      await expect(shell).toHaveAttribute('data-mode', mode);
+      await noOverflow(page, `desktop · ${mode} · ${theme}`);
     }
-    // dark theme, same sweep
+    await page.locator('.theme-toggle').click();   // two sweeps, back to light
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.js-layout')).toBeHidden();
+  for (const theme of ['light', 'dark']) {
+    for (const pane of ['Files', 'Editor', 'Stage']) {
+      await page.locator('.js-panebar .seg-btn', { hasText: pane }).click();
+      await expect(shell).toHaveAttribute('data-pane', pane.toLowerCase());
+      await noOverflow(page, `mobile · ${pane} · ${theme}`);
+    }
     await page.locator('.theme-toggle').click();
-    for (const mode of [['Side', 'classic'], ['Stack', 'top']]) {
-      await page.locator('.js-layout button', { hasText: mode[0] }).click();
-      await noOverflow(page, `${label} · ${mode[1]} · dark`);
-    }
-    await page.locator('.theme-toggle').click(); // back to light for the next size
   }
 });

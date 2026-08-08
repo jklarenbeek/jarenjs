@@ -297,6 +297,11 @@ export function flowPageViewModel(flow) {
       },
       events: kind === 'fsm' ? fsmEvents(flow.doc) : [],
       dagInput: flow.dagInput,
+      // the phone pane (Diagram · Inspector · Run); whitelisted, so a
+      // junk value from a share link or a stale slice cannot blank the
+      // studio — it falls back to the diagram
+      mobilePane: flow.mobilePane === 'inspector' || flow.mobilePane === 'run'
+        ? flow.mobilePane : 'diagram',
       mount: run !== null && kind === 'fsm'
         ? runMount(flow.doc, flow.revision, flow.runContext)
         : null,

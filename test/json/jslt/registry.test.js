@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The JSLT operator/aggregator registry (TODO_OPS Ring 1): the
+ * @file The JSLT operator/aggregator registry (Ring 1): the
  * builder's immutability and collision rule, the three entry kinds
  * (op scalar, agg sequence-fold, fn via $call), the fold contract, the
  * closed-vocabulary opt-in (a pack operator is unknown without the
