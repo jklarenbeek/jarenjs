@@ -33,7 +33,11 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
 ```
 PlayResult = {
   ok:     boolean,
-  timing: { compileMs, runMs } | null,
+  // EITHER half may be null: an engine with no compile step (patch merge
+  // and diff) and a phase the host did not report are both "no number",
+  // and the stage omits that clause rather than printing `0 ms` — which
+  // read as "it was free". Only measured phases are ever shown.
+  timing: { compileMs: number | null, runMs: number | null } | null,
   error:  { message: string, code?, path? } | null,
   panels: Panel[],                                 // the result SCREENS ([] on error)
 }
@@ -104,11 +108,15 @@ shape for each:
 
 - `renderers[id]` — the visual engines (markdown / mermaid / charts / mdx)
   hand their source to a host renderer that returns a spliced `view` vnode —
-  or `{ vnode, deep }`, where `deep` is extra panels only the host can derive
-  (the JSON AST, the canonical round-trip), shown behind the depth toggle —
-  so the package never imports `@jarenjs/md`, `/mermaid` or `/charts`. The
-  renderer's second argument is the option-pane config, except `mdx`, which
-  receives the PARSED data document (markdown × data is a two-input engine).
+  or `{ vnode, deep, compileMs?, runMs? }`, where `deep` is extra panels only
+  the host can derive (the JSON AST, the canonical round-trip), shown behind
+  the depth toggle — so the package never imports `@jarenjs/md`, `/mermaid`
+  or `/charts`. The renderer's second argument is the option-pane config,
+  except `mdx`, which receives the PARSED data document (markdown × data is
+  a two-input engine). A renderer that reports `compileMs`/`runMs` is
+  believed; one that does not leaves the package holding a single
+  wall-clock number for the whole call, which it attributes to the RUN and
+  leaves the compile `null` — it never invents a figure it did not measure.
 - `validate` — the JSON Schema engine hands `(schemaText, data, locale)` to a
   host validator that returns `{ valid, errors, draft, compileMs, validateMs,
   schemaError }` (errors already localized), so the compiled validator and the
@@ -118,3 +126,31 @@ shape for each:
 A missing seam is an honest error Result (`PLAY_NO_RENDERER` /
 `PLAY_NO_VALIDATOR`), never a throw. Read-only result panels are
 self-contained; interactive panels (a generated form) are host-wired.
+
+## §6 The session file
+
+A session is saveable, shareable and — because a share link has a length
+ceiling — **downloadable**. The file is a small self-describing envelope:
+
+```
+PlaySessionFile = {
+  $play:   '0.1',
+  name:    string,                                 // the session title
+  session: { engine, exampleId, source, data, config },
+}
+```
+
+Two rules make the round trip safe. Reading is **liberal**: a bare
+`session` object loads too, because that is what a share token decodes to
+and what a hand-written file is likely to be. Reading is also
+**untrusting**: every field goes through the same coercion a share token
+does, so a foreign or hostile document lands as safe defaults rather than
+reaching an engine, and a document naming no engine is refused outright —
+the session in progress survives a bad file instead of being replaced by
+it.
+
+The host supplies the two capabilities (a download and a file picker); a
+host that has neither still runs the surface, and the affordances say so
+rather than failing silently. This is the path that makes the oversized-
+share refusal honest: the link is declined, and the same session is
+offered as a file the import side can read back.

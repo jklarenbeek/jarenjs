@@ -176,16 +176,21 @@ describe('website boundaries — benchmark charts', function () {
 });
 
 describe('website boundaries — the chart renderer (the play seam)', function () {
-  it('renders a schema-valid definition to an svg vnode', function () {
-    const vnode = chartRenderer(JSON.stringify({
+  it('renders a schema-valid definition to an svg vnode, and reports both phases', function () {
+    const out = chartRenderer(JSON.stringify({
       type: 'pie', title: 'T', slices: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }],
     }), { format: 'json' });
-    assert.ok(Array.isArray(vnode) && vnode[0] === 'svg');
+    assert.ok(Array.isArray(out.vnode) && out.vnode[0] === 'svg');
+    // the seam reports its own compile/run split; play prints those two
+    // numbers instead of inventing a zero for the half it cannot see
+    assert.strictEqual(typeof out.compileMs, 'number');
+    assert.strictEqual(typeof out.runMs, 'number');
+    assert.ok(out.compileMs >= 0 && out.runMs >= 0);
   });
 
   it('renders a JOSL definition through the streaming reader', function () {
-    const vnode = chartRenderer('type = "pie"\ntitle = "T"\n[[slices]]\nlabel = "a"\nvalue = 1\n', { format: 'josl' });
-    assert.ok(Array.isArray(vnode) && vnode[0] === 'svg');
+    const out = chartRenderer('type = "pie"\ntitle = "T"\n[[slices]]\nlabel = "a"\nvalue = 1\n', { format: 'josl' });
+    assert.ok(Array.isArray(out.vnode) && out.vnode[0] === 'svg');
   });
 
   it('throws on a schema violation or a parse failure (play lands the honest error Result)', function () {

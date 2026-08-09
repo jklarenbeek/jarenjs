@@ -14,10 +14,24 @@ import { playRules, playModes, PLAY_MODE, PLAY_BASE } from './view.js';
 
 /**
  * Build the playground component.
- * @param {{ operators?: { toOptions: () => any } }} [options] - a host
- *   operator registry threaded to the query/jslt engines
+ *
+ * The three host seams are configured ONCE here and become defaults for
+ * every `runExample` call the returned component makes; a per-call option
+ * of the same name still wins, so a caller can vary one run. Configuring
+ * them at the factory and having them silently ignored is the trap this
+ * shape exists to close — a host that registered its operator packs here
+ * would otherwise watch `$mean` and `$npv` go missing at run time.
+ *
+ * @param {{ operators?: { toOptions: () => any },
+ *   renderers?: Record<string, Function>, validate?: Function }} [options]
+ *   `operators` reaches the query/jslt engines, `renderers` the visual
+ *   engines (markdown/mermaid/charts/mdx), `validate` the JSON Schema one
  */
 export function createPlayComponent(options = {}) {
+  const seams = {};
+  if (options.operators !== undefined) seams.operators = options.operators;
+  if (options.renderers !== undefined) seams.renderers = options.renderers;
+  if (options.validate !== undefined) seams.validate = options.validate;
   return {
     mode: PLAY_MODE,
     rules: playRules,
@@ -27,7 +41,8 @@ export function createPlayComponent(options = {}) {
     engines: ENGINES,
     examples: EXAMPLES,
     engineIds,
-    runExample,
+    runExample: (engineId, source, data, perCall = {}) =>
+      runExample(engineId, source, data, { ...seams, ...perCall }),
     operators: options.operators,
   };
 }

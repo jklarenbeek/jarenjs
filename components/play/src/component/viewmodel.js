@@ -11,6 +11,20 @@ import { ENGINES, EXAMPLES } from '../index.js';
 const formatMs = (ms) => (typeof ms !== 'number' ? '—' : ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`);
 
 /**
+ * The timing line, built only from the phases that were actually measured.
+ * A `null` half means "no such phase" (patch merge has nothing to compile)
+ * or "the host did not report it" — either way it is omitted rather than
+ * printed as `0 ms`, which read as "rendering was free".
+ */
+function formatTiming(timing) {
+  if (!timing) return null;
+  const parts = [];
+  if (typeof timing.compileMs === 'number') parts.push(`compiled ${formatMs(timing.compileMs)}`);
+  if (typeof timing.runMs === 'number') parts.push(`ran ${formatMs(timing.runMs)}`);
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
+/**
  * Shape one panel for the view: kind flags for the `$if` dispatch plus the
  * per-kind content (a `table` becomes column/cell records the JSLT can walk).
  */
@@ -59,7 +73,7 @@ function deriveResult(r, wantedId, deepWanted, deepPick) {
     ran: true,
     ok: r.ok === true,
     error: r.error ? { code: r.error.code ?? '', message: r.error.message ?? '' } : null,
-    timing: r.timing ? `compiled ${formatMs(r.timing.compileMs)} · ran ${formatMs(r.timing.runMs)}` : null,
+    timing: formatTiming(r.timing),
     tabbed: panels.length > 1,
     tabs: panels.map((p) => ({ id: p.id, label: p.label ?? p.id, active: p.id === activeId })),
     activePanel: active ? shapePanel(active) : null,
@@ -144,6 +158,12 @@ export function playViewModel(state) {
     name: s.name ?? '',
     names: names.map((n) => ({ name: n, active: n === s.name })),
     hasSaved: names.length > 0,
+    // the record this session is bound to, and whether the title has been
+    // edited away from it. Without this the two save buttons look
+    // identical: the hint is what tells the reader that Save lands on the
+    // record they opened and Save As lands on the name they just typed.
+    savedName: s.savedName ?? null,
+    renamed: s.savedName != null && (s.name ?? '') !== s.savedName,
     shared: s.shared ?? null,
     ratio,
     ratioPct: String(Math.round(ratio * 100)),

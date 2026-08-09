@@ -38,8 +38,30 @@ const shell = {
       }],
       ['div', { class: 'jplay-actions' },
         ['button', { class: 'btn small', type: 'button', on: { click: 'play/new' } }, 'New'],
-        ['button', { class: 'btn small', type: 'button', on: { click: 'play/save' } }, 'Save'],
-        ['button', { class: 'btn small', type: 'button', on: { click: 'play/save-as' } }, 'Save As'],
+        ['button', {
+          class: 'btn small', type: 'button',
+          title: { $if: ['$.savedName',
+            { $concat: ['Overwrite “', '$.savedName', '”'] },
+            'Save this session under the name above'] },
+          on: { click: 'play/save' },
+        }, 'Save'],
+        ['button', {
+          class: 'btn small', type: 'button',
+          title: 'Save the name above as a SEPARATE session, keeping the original',
+          on: { click: 'play/save-as' },
+        }, 'Save As'],
+        // the way out of the browser, and back in: a session too large for
+        // a share link still has a file
+        ['button', {
+          class: 'btn small', type: 'button',
+          title: 'Download this session as a file',
+          on: { click: 'play/download' },
+        }, 'Download'],
+        ['button', {
+          class: 'btn small', type: 'button',
+          title: 'Open a downloaded session file',
+          on: { click: 'play/import' },
+        }, 'Import'],
         ['button', { class: 'btn small', type: 'button', on: { click: 'play/share' } }, 'Share'],
         // Delete the current named session (only meaningful once named+saved)
         { $if: ['$.name',
@@ -53,6 +75,13 @@ const shell = {
             [{ $apply: '$.names[*]' }]],
           ''] },
       ],
+      // the title has been edited away from the bound record: say which
+      // button does what, rather than letting Save silently overwrite the
+      // session the user opened under a name they have already changed
+      { $if: ['$.renamed',
+        ['span', { class: 'jplay-bound muted', role: 'status' },
+          'Save overwrites “', ['text', '$.savedName'], '” · Save As keeps both'],
+        ''] },
       { $if: ['$.shared', ['span', { class: 'jplay-shared muted', role: 'status' }, '$.shared'], ''] },
     ],
     // ——— the phone pane switcher: below the breakpoint the rail | editors

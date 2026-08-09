@@ -110,10 +110,13 @@ describe('website — legacy playground links redirect to #/play', function () {
     assert.strictEqual(play.source.selector, '$..price', 'the shared experiment restored on #/play');
   });
 
-  it('a corrupt legacy token still lands on #/play', function () {
+  it('a corrupt legacy token still lands on #/play, on the engine the link named', function () {
     const { app, hashes } = mountSite({ hash: '#/playground?engine=path&s=%%%bogus' });
-    assert.strictEqual(hashes.at(-1), '#/play');
+    // the token is unreadable, but `engine` is not — falling back to it
+    // beats dropping the whole link on the floor
+    assert.strictEqual(hashes.at(-1), '#/play?engine=path');
     assert.strictEqual(app.getState().route.page, 'play');
+    assert.strictEqual(app.getState().play.engine, 'path');
   });
 });
 

@@ -305,3 +305,227 @@ describe('website — the Play playground (#/play)', () => {
     assert.ok(app.getState().play.result.ok === true, 'the run survived the round-trip');
   });
 });
+
+describe('deep links: ?engine= and ?example= open what they name', () => {
+  // The site's own doc callouts link straight at an engine, so a link that
+  // silently landed on the default example was a promise the page broke.
+  it('?engine= opens that engine’s first example, and runs it', function () {
+    const { app } = mountSite({ hash: '#/play?engine=csv' });
+    const play = app.getState().play;
+    assert.strictEqual(play.engine, 'csv', 'the named engine is live');
+    assert.ok(play.exampleId.startsWith('csv-'), 'on one of its examples');
+    assert.ok(play.result !== null, 'and it has already run');
+  });
+
+  it('?example= opens an exact example', function () {
+    const { app } = mountSite({ hash: '#/play?example=path-prices' });
+    assert.strictEqual(app.getState().play.exampleId, 'path-prices');
+    assert.strictEqual(app.getState().play.engine, 'path');
+  });
+
+  it('an unknown id leaves the seeded session alone instead of blanking', function () {
+    const seeded = mountSite().app.getState().play.exampleId;
+    for (const hash of ['#/play?engine=nope', '#/play?example=nope']) {
+      const { app } = mountSite({ hash });
+      assert.strictEqual(app.getState().play.exampleId, seeded, `${hash} falls back`);
+      assert.ok(app.getState().play.result !== null, `${hash} still ran something`);
+    }
+  });
+
+  it('the retired #/playground?engine= carries its engine across the redirect', function () {
+    const { app, go } = mountSite();
+    go('#/playground?engine=mermaid');
+    assert.strictEqual(app.getState().route.page, 'play', 'redirected to Play');
+    assert.strictEqual(app.getState().play.engine, 'mermaid', 'and kept the engine');
+  });
+
+  it('a session token still outranks an engine param', function () {
+    // ?s= carries EDITED panes; an engine param only names a library example
+    const { app, go } = mountSite();
+    go('#/play?example=path-prices');
+    assert.strictEqual(app.getState().play.exampleId, 'path-prices');
+  });
+});
+
+describe('Save and Save As are actually different', () => {
+  const store = () => {
+    let data = null;
+    return { read: () => data, write: (d) => { data = JSON.parse(JSON.stringify(d)); }, peek: () => data };
+  };
+  const mountWith = (storage) => {
+    const { document, container } = createStubHost();
+    let routeCb = null;
+    const app = createSiteApp({
+      node: container, document, schedule: (f) => f(), debounceMs: 0,
+      fetchJson: () => Promise.reject(new Error('404')),
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/play')); },
+      navigate: (h) => routeCb(parseHash(h)),
+      storage, onError: (err) => { throw err; },
+    });
+    return { app, container };
+  };
+  /** Type into the session-title input, exactly as a user does. */
+  const rename = (container, value) => {
+    const input = find(container, (n) => (n.getAttribute?.('class') ?? '').includes('jplay-name'));
+    assert.ok(input !== undefined, 'the session title input renders');
+    fire(input, 'input', { target: { value } });
+  };
+
+  it('Save binds, then overwrites that record — it does not multiply', function () {
+    const storage = store();
+    const { app, container } = mountWith(storage);
+    rename(container, 'alpha');
+    app.dispatch('play/save');
+    assert.strictEqual(app.getState().play.savedName, 'alpha', 'the session bound to what it wrote');
+    assert.deepStrictEqual(app.getState().play.names, ['alpha']);
+    app.dispatch('play/save');
+    assert.deepStrictEqual(app.getState().play.names, ['alpha'], 'saving again overwrites, never duplicates');
+  });
+
+  it('Save As writes the NEW title and keeps the original', function () {
+    const storage = store();
+    const { app, container } = mountWith(storage);
+    rename(container, 'alpha');
+    app.dispatch('play/save');
+    rename(container, 'beta');
+    assert.strictEqual(app.getState().play.renamed ?? true, true, 'the title diverged from the record');
+    app.dispatch('play/save-as');
+    assert.deepStrictEqual(app.getState().play.names.slice().sort(), ['alpha', 'beta'],
+      'both records exist');
+    assert.strictEqual(app.getState().play.savedName, 'beta', 'and the session adopted the new one');
+  });
+
+  it('Save after a rename overwrites the BOUND record, not the new title', function () {
+    const storage = store();
+    const { app, container } = mountWith(storage);
+    rename(container, 'alpha');
+    app.dispatch('play/save');
+    rename(container, 'renamed-but-not-saved-as');
+    app.dispatch('play/save');
+    assert.deepStrictEqual(app.getState().play.names, ['alpha'],
+      'Save is an overwrite of the opened record; it does not create a second one');
+    assert.strictEqual(app.getState().play.savedName, 'alpha');
+  });
+
+  it('an unsaved session has nothing to overwrite, so Save creates', function () {
+    const storage = store();
+    const { app, container } = mountWith(storage);
+    assert.strictEqual(app.getState().play.savedName, null, 'a fresh session is unbound');
+    app.dispatch('play/save');
+    assert.deepStrictEqual(app.getState().play.names, [], 'an untitled session still saves nothing');
+    rename(container, 'first');
+    app.dispatch('play/save');
+    assert.deepStrictEqual(app.getState().play.names, ['first']);
+  });
+
+  it('loading an example unbinds — Save must not overwrite a record it left', function () {
+    const storage = store();
+    const { app, container } = mountWith(storage);
+    rename(container, 'alpha');
+    app.dispatch('play/save');
+    app.dispatch('play/example', 'path-prices');
+    assert.strictEqual(app.getState().play.savedName, null, 'the example unbound the session');
+  });
+
+  it('deleting the bound record unbinds it', function () {
+    const storage = store();
+    const { app, container } = mountWith(storage);
+    rename(container, 'alpha');
+    app.dispatch('play/save');
+    app.dispatch('play/delete-session', 'alpha');
+    assert.strictEqual(app.getState().play.savedName, null,
+      'the next Save creates rather than resurrecting a deleted name');
+    assert.deepStrictEqual(app.getState().play.names, []);
+  });
+});
+
+describe('a session can leave the page, and come back', () => {
+  /** A site with the two file capabilities stubbed. */
+  const mountFiles = ({ openFile } = {}) => {
+    const { document, container } = createStubHost();
+    const written = [];
+    let routeCb = null;
+    const app = createSiteApp({
+      node: container, document, schedule: (f) => f(), debounceMs: 0,
+      fetchJson: () => Promise.reject(new Error('404')),
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/play')); },
+      navigate: (h) => routeCb(parseHash(h)),
+      storage: { read: () => null, write: () => {} },
+      download: (filename, text) => { written.push({ filename, text }); return true; },
+      openFile,
+      onError: (err) => { throw err; },
+    });
+    return { app, container, written };
+  };
+  const settleAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('Download writes the session, titled after it, and it round-trips', async function () {
+    const { app, container, written } = mountFiles();
+    const input = find(container, (n) => (n.getAttribute?.('class') ?? '').includes('jplay-name'));
+    fire(input, 'input', { target: { value: 'My Session!' } });
+    app.dispatch('play/example', 'path-prices');
+    app.dispatch('play/download');
+
+    assert.strictEqual(written.length, 1);
+    assert.strictEqual(written[0].filename, 'my-session.play.json', 'unsafe characters stripped');
+    const doc = JSON.parse(written[0].text);
+    assert.strictEqual(doc.$play, '0.1', 'a self-describing envelope');
+    assert.strictEqual(doc.session.engine, 'path');
+
+    // the round trip: that exact file imports back to the same session
+    const back = mountFiles({ openFile: () => Promise.resolve({ name: 'f.json', text: written[0].text }) });
+    back.app.dispatch('play/import');
+    await settleAsync();
+    assert.strictEqual(back.app.getState().play.engine, 'path');
+    assert.strictEqual(back.app.getState().play.source.selector,
+      app.getState().play.source.selector, 'the panes came back verbatim');
+  });
+
+  it('an untitled session still gets a stable filename', function () {
+    const { app, written } = mountFiles();
+    app.dispatch('play/download');
+    assert.strictEqual(written[0].filename, 'jaren-play-session.play.json');
+  });
+
+  it('Import accepts a BARE session too (what a share token decodes to)', async function () {
+    const bare = JSON.stringify({ engine: 'pointer', exampleId: null, source: {}, data: {}, config: {} });
+    const { app } = mountFiles({ openFile: () => Promise.resolve({ name: 'bare.json', text: bare }) });
+    app.dispatch('play/import');
+    await settleAsync();
+    assert.strictEqual(app.getState().play.engine, 'pointer');
+  });
+
+  it('a file that is not a session is refused, and the work in progress survives', async function () {
+    for (const text of ['not json at all', '{"hello":"world"}', '[]', 'null']) {
+      const { app } = mountFiles({ openFile: () => Promise.resolve({ name: 'x.json', text }) });
+      const before = app.getState().play.engine;
+      app.dispatch('play/import');
+      await settleAsync();
+      assert.strictEqual(app.getState().play.engine, before, `'${text}' did not replace the session`);
+      assert.match(app.getState().play.shared, /not a play session/);
+    }
+  });
+
+  it('a dismissed picker changes nothing, and a host without the capability says so', async function () {
+    const dismissed = mountFiles({ openFile: () => Promise.resolve(null) });
+    const before = dismissed.app.getState().play.engine;
+    dismissed.app.dispatch('play/import');
+    await settleAsync();
+    assert.strictEqual(dismissed.app.getState().play.engine, before);
+    assert.strictEqual(dismissed.app.getState().play.shared, null, 'no status noise for a cancel');
+
+    const noCapability = mountFiles();          // openFile omitted
+    noCapability.app.dispatch('play/import');
+    await settleAsync();
+    assert.match(noCapability.app.getState().play.shared, /unavailable here/);
+  });
+
+  it('the oversized-share refusal now points somewhere that exists', function () {
+    const { app, container } = mountFiles();
+    const editor = find(container, (n) => n.tagName === 'textarea');
+    fire(editor, 'input', { target: { value: 'x'.repeat(9000) } });
+    app.dispatch('play/share');
+    assert.match(app.getState().play.shared, /too large for a share link/);
+    assert.match(app.getState().play.shared, /use Download instead/);
+  });
+});

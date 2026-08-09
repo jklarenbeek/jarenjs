@@ -5,7 +5,7 @@
  * the file rail (from the engine's `describe`), the active file's editor
  * value and its coded errors, the docked error strip across every file,
  * and the stage — an assembled app document to mount, a run result to
- * show, or an inert note for a kind whose rich editor is a later order.
+ * show, or an inert note for a kind that has no editor of its own yet.
  * Pure: nothing here is stored back in state.
  */
 
@@ -43,8 +43,10 @@ function deriveStage(project, activeMeta, results, revision, committed) {
   if (activeMeta.kind === 'state' || activeMeta.kind === 'data') {
     return { kind: 'inert', note: 'An input — edit it as text; it feeds the app, a query or a validation.' };
   }
-  // fsm / dag / model — their rich editors arrive in Orders 03–04
-  return { kind: 'inert', note: `The ${activeMeta.role} editor arrives in a later order; edit it as text meanwhile.` };
+  // fsm / dag / model validate and assemble, but have no editor and no
+  // runner here yet — the flow canvas and the worker-backed store still
+  // live on their own website surfaces (both are tracked in ROADMAP.md)
+  return { kind: 'inert', note: `The ${activeMeta.role} editor is not built yet; edit it as text meanwhile.` };
 }
 
 /**

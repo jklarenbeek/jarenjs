@@ -15,6 +15,7 @@ import * as assert from 'node:assert';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { commitProject, projectComponent } from '../../packages/website/src/boundaries/project.js';
+import { ADDABLE_KINDS, fileSkeleton } from '../../packages/website/src/content/projectTemplates.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
 /** A headless site over the stub DOM, entered at the Project IDE. */
@@ -368,5 +369,38 @@ describe('commitProject — the edit-loop step', () => {
     const c = commitProject({ files: [{ name: 'q.query', kind: 'query', text: '{"a":"$.x"}' }], active: 'q.query' });
     assert.strictEqual(c.mount, null);
     assert.strictEqual(c.revision, 0);
+  });
+});
+
+describe('the add-file menu and its skeletons cannot drift apart', () => {
+  // Three copies of "which kinds can a user add" exist by necessity: the
+  // skeleton table (the real gate — no skeleton makes `project-add` bail
+  // silently), the ADDABLE_KINDS export derived from it, and the studio
+  // component's own `<select>`, which lives in a published package and so
+  // cannot import either. This pins the third against the first two; a
+  // kind added to the menu with no skeleton would otherwise ship as a
+  // menu entry that does nothing at all.
+  it('every option the studio offers has a skeleton, and every skeleton is offered', function () {
+    const { container } = mountSite();
+    const select = find(container, (n) => n.getAttribute?.('class') === 'js-addfile');
+    assert.ok(select !== undefined, 'the add-file select renders');
+
+    const offered = (select.childNodes ?? [])
+      .map((option) => option.getAttribute?.('value'))
+      .filter((value) => value !== undefined && value !== '');
+    assert.deepStrictEqual(offered, [...ADDABLE_KINDS],
+      'the studio <select> and ADDABLE_KINDS list the same kinds, in the same order');
+
+    for (const kind of offered) {
+      assert.strictEqual(typeof fileSkeleton(kind), 'string',
+        `the offered kind '${kind}' has a starter skeleton`);
+    }
+  });
+
+  it('a kind with no skeleton is not offered — adding one would do nothing', function () {
+    for (const kind of ['fsm', 'dag', 'model']) {
+      assert.strictEqual(fileSkeleton(kind), null, `${kind} has no skeleton`);
+      assert.ok(!ADDABLE_KINDS.includes(kind), `${kind} is not offered in the menu`);
+    }
   });
 });

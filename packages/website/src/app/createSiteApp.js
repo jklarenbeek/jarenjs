@@ -30,7 +30,8 @@ import {
 } from '../boundaries/project.js';
 import {
   runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession,
-  legacyExperimentToSession, createPlaySplitterWidget,
+  legacyExperimentToSession, createPlaySplitterWidget, deepLinkExample,
+  sessionDocument, sessionFromDocument, sessionFilename,
 } from '../boundaries/play.js';
 import {
   projectTemplate, fileSkeleton, singleAppProject, sharedProject,
@@ -61,6 +62,10 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * @property {(filename: string, text: string) => boolean | void} [download]
  *   Save a text file on the user's machine (a Blob + anchor click in
  *   the browser); omit for no-download hosts. Return true on success.
+ * @property {(accept?: string) => Promise<{ name: string, text: string } | null>}
+ *   [openFile] - `download`'s twin: open a file picker and resolve what
+ *   was chosen, or null if nothing was. Omit for hosts that cannot read
+ *   a local file; the surface then says so rather than failing silently.
  * @property {any} [modelContext] - A WebMCP `navigator.modelContext`
  *   implementation; when present, the site registers its tools on it.
  * @property {typeof fetch} [aiFetch] - fetch for the AI assistant's
@@ -85,7 +90,7 @@ const SHARE_TOKEN_LIMIT = 8000;
  * editor|result split ratio). */
 const PLAY_CHROME_PATHS = new Set([
   '/play/result', '/play/panel', '/play/deep', '/play/deepPick', '/play/mobilePane',
-  '/play/name', '/play/names', '/play/shared', '/play/ratio',
+  '/play/name', '/play/savedName', '/play/names', '/play/shared', '/play/ratio',
 ]);
 
 /** @param {SiteEnv} env */
@@ -291,21 +296,58 @@ export function createSiteApp(env) {
     'play-new': (props, dispatch) => {
       dispatch('play/loaded-session', { ...blankSession(app.getState().play.engine), name: '' });
     },
+    // Save overwrites the record this session is BOUND to; Save As (and a
+    // session that has never been saved) writes the title as a new record.
+    // Either way the session then binds to what it just wrote, so the next
+    // Save overwrites that — the ordinary editor contract.
     'play-save': (props, dispatch) => {
       const slice = app.getState().play;
-      const name = (slice.name ?? '').trim();
-      if (name === '') return; // no name → nothing to save (the header nudges)
-      playStore.save(name, { ...sessionOf(slice), savedAt: new Date().toISOString() });
-      dispatch('play/names', playStore.names());
+      const title = (slice.name ?? '').trim();
+      const target = props?.as === true ? title : (slice.savedName ?? title);
+      if (target === '') return; // nothing to save under (the header nudges)
+      playStore.save(target, { ...sessionOf(slice), savedAt: new Date().toISOString() });
+      dispatch('play/saved', { name: target, names: playStore.names() });
+    },
+    // a session leaves as a file, and comes back as one. Download names
+    // the file after the session title; Import accepts the envelope it
+    // writes AND a bare session, and reports an unreadable file instead
+    // of silently replacing what the user was working on.
+    'play-download': (props, dispatch) => {
+      const slice = app.getState().play;
+      const saved = env.download?.(sessionFilename(slice),
+        JSON.stringify(sessionDocument(slice), null, 2));
+      dispatch('play/shared', saved === true ? 'session downloaded' : 'download unavailable here');
+    },
+    'play-import': (props, dispatch) => {
+      if (env.openFile === undefined) {
+        dispatch('play/shared', 'opening a file is unavailable here');
+        return;
+      }
+      Promise.resolve(env.openFile()).then((file) => {
+        if (file === null || file === undefined) return; // the picker was dismissed
+        const doc = sessionFromDocument(file.text);
+        if (doc === null) {
+          dispatch('play/shared', `${file.name ?? 'that file'} is not a play session`);
+          return;
+        }
+        dispatch('play/loaded-session', { ...doc.session, name: doc.name });
+        dispatch('play/shared', `imported ${file.name ?? 'a session'}`);
+      }).catch(() => dispatch('play/shared', 'that file could not be read'));
     },
     'play-open': (props, dispatch) => {
       const session = playStore.load(props.name);
       if (session === undefined) return;
-      dispatch('play/loaded-session', { ...sessionToLoaded(session), name: props.name });
+      dispatch('play/loaded-session',
+        { ...sessionToLoaded(session), name: props.name, savedName: props.name });
     },
     'play-delete': (props, dispatch) => {
       playStore.remove(props.name);
-      dispatch('play/names', playStore.names());
+      // the record this session was bound to is gone: unbind, so the next
+      // Save creates rather than silently resurrecting a deleted name
+      if (app.getState().play.savedName === props.name) {
+        dispatch('play/saved', { name: null, names: playStore.names() });
+      }
+      else dispatch('play/names', playStore.names());
     },
     // toggle the validate data pane between JSON and the generated form;
     // entering form mode seeds the structured buffer from the current text
@@ -322,7 +364,10 @@ export function createSiteApp(env) {
     'play-share': (props, dispatch) => {
       const token = encodeShare(sessionOf(app.getState().play));
       if (token.length > SHARE_TOKEN_LIMIT) {
-        dispatch('play/shared', `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars)`);
+        // refuse the link, but never leave the session with no way out —
+        // Download writes the same session as a file Import can read back
+        dispatch('play/shared',
+          `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars) — use Download instead`);
         return;
       }
       const url = env.share?.(`#/play?s=${token}`);
@@ -526,32 +571,40 @@ function wireBoundaries(app, debounceMs, navigate) {
       const value = app.getState().play.dataValue;
       app.dispatch('play/data-mirror', value === null ? '' : JSON.stringify(value, null, 2));
     }
-    if (routed) {
-      const s = app.getState();
-      // the retired #/examples, #/scratch and #/playground URLs redirect
-      // to #/play (an old playground share token translates on the way);
-      // the retired #/studio redirects to the Project IDE, its share
-      // token riding along (the token itself opens on #/project)
-      if (s.route.page === 'examples' || s.route.page === 'scratch') { navigate?.('#/play'); return; }
-      if (s.route.page === 'playground') { navigate?.(playgroundRedirect(s.route.params)); return; }
-      if (s.route.page === 'studio') { navigate?.(studioRedirect(s.route.params)); return; }
-      // arriving at the Project IDE: boot the stage once, run the active
-      // transform if that is what is showing
-      if (s.route.page === 'project') {
-        if (s.project.mount === null) runProjectCommit();
-        runProjectActive();
-      }
-      // arriving at the Play playground: run the seeded example once, so
-      // the stage is never empty (later edits re-run through the feed above)
-      if (s.route.page === 'play' && s.play.result === null) runPlayLive();
-      binancePageSync(s.route.page === 'charts');
-      applyShareToken(s);
-    }
+    if (routed) onRouteArrival();
   });
 
+  /** Everything that must happen because the route just became what it is. */
+  function onRouteArrival() {
+    const s = app.getState();
+    // the retired #/examples, #/scratch and #/playground URLs redirect
+    // to #/play (an old playground share token translates on the way);
+    // the retired #/studio redirects to the Project IDE, its share
+    // token riding along (the token itself opens on #/project)
+    if (s.route.page === 'examples' || s.route.page === 'scratch') { navigate?.('#/play'); return; }
+    if (s.route.page === 'playground') { navigate?.(playgroundRedirect(s.route.params)); return; }
+    if (s.route.page === 'studio') { navigate?.(studioRedirect(s.route.params)); return; }
+    // arriving at the Project IDE: boot the stage once, run the active
+    // transform if that is what is showing
+    if (s.route.page === 'project') {
+      if (s.project.mount === null) runProjectCommit();
+      runProjectActive();
+    }
+    // arriving at Play: honour a deep link first, then run whatever is
+    // loaded once, so the stage is never empty (later edits re-run
+    // through the feed above)
+    if (s.route.page === 'play') {
+      applyPlayDeepLink(s);
+      if (app.getState().play.result === null) runPlayLive();
+    }
+    binancePageSync(s.route.page === 'charts');
+    applyShareToken(s);
+  }
+
   /** The retired #/playground URL → #/play. A legacy share token
-   * (`{ e, i }`) or engine param translates into a play session token, so
-   * old links restore what they always restored — just on #/play. */
+   * (`{ e, i }`) translates into a play session token and an `engine`
+   * param rides across unchanged, so old links restore what they always
+   * restored — just on #/play. */
   function playgroundRedirect(params) {
     const token = params.s;
     if (token !== undefined) {
@@ -561,13 +614,33 @@ function wireBoundaries(app, debounceMs, navigate) {
         if (session !== null) return `#/play?s=${encodeShare(session)}`;
       }
     }
-    return '#/play';
+    return params.engine === undefined
+      ? '#/play' : `#/play?engine=${encodeURIComponent(params.engine)}`;
   }
 
   /** The retired #/studio URL → #/project, the share token riding along
    * (applyShareToken opens a studio-document token as a one-app project). */
   function studioRedirect(params) {
     return params.s === undefined ? '#/project' : `#/project?s=${params.s}`;
+  }
+
+  /** Inbound deep links on #/play: `?engine=<id>` opens that engine's first
+   * example, `?example=<id>` an exact one. A `?s=` session token outranks
+   * both — it carries edited panes, which a library example does not — and
+   * an id the library does not hold leaves the seeded session alone rather
+   * than blanking the page. Applied once per distinct link. */
+  let appliedDeepLink = null;
+  function applyPlayDeepLink(state) {
+    const { page, params } = state.route;
+    if (page !== 'play' || params.s !== undefined) return;
+    if (params.engine === undefined && params.example === undefined) return;
+    const key = `${params.engine ?? ''}|${params.example ?? ''}`;
+    if (key === appliedDeepLink) return;
+    appliedDeepLink = key;
+    const id = deepLinkExample(params);
+    if (id === null) return;
+    const loaded = loadExample(id);
+    if (loaded !== null) app.dispatch('play/loaded', loaded);
   }
 
   /** Inbound share links: `?s=<token>` loads the shared snapshot once. */
@@ -602,17 +675,12 @@ function wireBoundaries(app, debounceMs, navigate) {
     }
   }
 
-  // a direct entry at a retired URL redirects (the initial route/set
-  // fired before this subscriber attached, so handle it here)
-  {
-    const entry = app.getState().route;
-    if (entry.page === 'examples' || entry.page === 'scratch') navigate?.('#/play');
-    if (entry.page === 'playground') navigate?.(playgroundRedirect(entry.params));
-    if (entry.page === 'studio') navigate?.(studioRedirect(entry.params));
-  }
-  // entering directly at #/project boots the live stage
-  if (app.getState().route.page === 'project') { runProjectCommit(); runProjectActive(); }
-  // …and likewise a direct entry at #/play
-  if (app.getState().route.page === 'play' && app.getState().play.result === null) runPlayLive();
-  applyShareToken(app.getState()); // a share link may be the entry URL
+  // The hash subscription delivers the FIRST route while the app is being
+  // created — before this module's subscriber attaches — so a direct entry
+  // (a retired URL to redirect, a project or play page to boot, a share
+  // link or a deep link in the URL) would otherwise be seen by nobody.
+  // Running the same arrival path once here is what makes an entry URL and
+  // an in-page navigation behave identically; every step it takes is
+  // guarded or idempotent.
+  onRouteArrival();
 }

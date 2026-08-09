@@ -53,6 +53,6 @@ export const HOME_CONTENT = {
   },
   meta: {
     title: 'This site is the demo',
-    lead: 'You are looking at an application whose state, view and actions are one JSON document: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, and the playground form is rendered by the standard forms stylesheet. No framework, no eval — the suite, all the way down.',
+    lead: 'You are looking at an application whose state, view and actions are one JSON document: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, and Play’s generated form is rendered by the standard forms stylesheet. No framework, no eval — the suite, all the way down.',
   },
 };

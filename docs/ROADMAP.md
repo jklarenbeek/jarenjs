@@ -209,11 +209,15 @@ delete it or fix it.
   0.1 (geometry never enters the document). A `meta.layout` side-table
   would let a user override the auto-layout without polluting the AST —
   the honest place to add it if a consumer asks.
-- [ ] **Editor: extract to a component package** — the studio ships as a
-  website mode, not a package. Extraction into a reusable
-  `@jarenjs/flow` component (the `@jarenjs/md`/`@jarenjs/mermaid`
-  two-layer shape) is gated on a second consumer; the engine is the
-  product, the editor is the proof.
+- [ ] **Editor: it still ships as a website mode** — the `#/flow` studio is
+  not a package, and the second consumer this was once gated on has
+  arrived: `@jarenjs/studio` has `fsm` and `dag` file kinds that
+  validate and assemble but have no editor. So the open question is no
+  longer *whether* to extract but *where to*, and the answer the project
+  IDE implies is that the canvas becomes a per-kind editor inside
+  `@jarenjs/studio` rather than a third two-layer component. That work
+  and its constraints are stated once, under `@jarenjs/studio` above;
+  the engine remains the product either way.
 
 ## @jarenjs/md
 
@@ -262,6 +266,136 @@ delete it or fix it.
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
 - [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number` (values beyond 2^53 lose precision on read-back); the four-base display already stays exact via `word.js` BigInt. A BigInt-valued evaluation path would close the gap.
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
+
+## @jarenjs/play
+
+The engine playground behind `#/play`: pick an engine and an example, edit the
+source or the data, it runs live. Membership is a rule rather than a list — an
+engine belongs here iff it is a **pure function of `(source, data)`**:
+stateless, no worker, no live subscription, no side channel. That is why flow
+and the document store are studio file kinds instead, and why adding an engine
+costs a descriptor plus examples and no UI code at all.
+
+- [ ] **Engines the rule admits and the registry lacks** — fourteen ship.
+  `@jarenjs/linq` (a fluent chain compiles to a query document), `@jarenjs/emit`
+  (a schema compiles to TypeScript), JSONX as an *input* dialect rather than
+  only an output, and the `@jarenjs/core` kernels the query operators already
+  expose (geo, dates, math, text) all satisfy the rule and have no descriptor.
+  The streaming readers are the interesting refusal: the JOSL and CSV stream
+  parsers are pure, but they consume a stream rather than a string, so a
+  descriptor for them first needs a source pane that means "feed this in
+  chunks" — a question the `(source, data)` shape does not answer.
+- [ ] **`error.path` is declared and never produced** — PLAY-FORMAT gives a run
+  result an `error: { message, code?, path? }`, but every `fail(...)` site
+  passes at most a message and a code, and the view model drops the field
+  entirely. For a teaching tool the location *is* the lesson: which token of
+  the selector, which pointer in the patch, which rule of the stylesheet. The
+  compilers already carry it in their coded errors, so this is threading rather
+  than new capability — through roughly thirty call sites, and it needs a place
+  in the result view to land.
+- [ ] **JSLT, JTLT and XQuery cannot be given externals** — all three compiled
+  functions accept an externals object and play passes none, so `$query` is the
+  only engine with an externals pane. XQuery is the sharp case: it binds
+  exactly `$doc` and silently drops every other declared external, so a query
+  with a second variable cannot run here at all.
+- [ ] **The `validate` engine is single-schema** — one schema pane and no
+  `addSchema`, so a schema that `$ref`s another by `$id` cannot be demonstrated
+  even though the docs teach exactly that. The other surfaces that compile
+  schemas register theirs; this one does not.
+- [ ] **The example library under-covers the engines it already has** — charts
+  ship four of thirteen types, mermaid four of seven laid-out diagrams, and the
+  validate engine offers twelve locales while every example pins `en`. Examples
+  are data, so each is cheap; what makes the gap worth listing is that it is
+  invisible from the page — a reader who sees four chart examples concludes
+  there are four charts.
+- [ ] **The package documents its view but not its host contract** — play is the
+  only component without an `ARCHITECTURE.md`, and the reducer actions, the
+  debounced run loop, the session document store and the share codec all live at
+  the host, described nowhere. The `play-splitter` widget and the `$.dataForm`
+  mount point are host seams the format doc's seam list omits, so a second
+  consumer finds them by reading the website's source.
+
+## @jarenjs/studio
+
+The multi-file project IDE behind `#/project`. A `jaren-project` is a thin
+envelope over typed files (`app`, `jslt`, `query`, `schema`, `state`, `data`,
+`fsm`, `dag`, `model`), each validated against its own grammar rather than one
+composed mega-schema. Two of those kinds still have no editor beyond a
+textarea, which is what the first two entries are about.
+
+- [ ] **`fsm`/`dag`/`model` are validate-only kinds** — `KINDS` lists all nine
+  and `validateFile` checks all nine, but these three have no editor, no runner
+  and no way in. `deriveStage` returns an inert "edit it as text meanwhile"
+  note; `runProjectFile` whitelists `query`/`jslt`/`schema` only; and four
+  independent gates refuse to create one — the add-file `<select>`,
+  `ADDABLE_KINDS`, the `SKELETONS` table (a missing skeleton makes
+  `project-add` bail silently) and the assistant tool's `kind` enum. Today such
+  a file can only enter a project through a hand-written envelope or a share
+  token. This is the substance of the next two entries.
+- [ ] **The flow editor is not in the studio** — `#/flow` has the palette,
+  click-source-then-target connect, the generated inspector form and the live
+  run; an `fsm`/`dag` file in a project has a textarea. Moving that editor in
+  as a per-kind enhancement is what makes `#/flow` "the studio with a flow file
+  active". The constraint is the isolation boundary a hosted file boots
+  under — widgets and `compileTypeTest` but **no effects and no
+  subscriptions** — so the run pane has to work inside that sandbox rather than
+  the website's own runtime.
+- [ ] **The `model` kind has no store behind it** — a model file should open a
+  live in-browser SQLite store on the worker, with the project's `query` files
+  running against it, `explain()` showing the pushdown and a live query
+  maintaining as rows commit, exactly as `#/data` does. This is the kind that
+  earns per-file validation its keep: a data file is compiled by the WORKER so
+  registered operators (`$sqrt`, `$npv`) keep resolving, which means it can
+  never be gated by the project's closed grammar. A single whole-project gate
+  is therefore not merely unbuilt but undesirable — and the worker is the one
+  sanctioned side-effecting host inside an otherwise effect-free sandbox.
+- [ ] **Fragment assembly — a file is always a whole document** — `app`, `fsm`,
+  `dag` and `model` files each hold one complete document, which is what made
+  the migration a move rather than a rewrite. Splitting an app into separate
+  view / actions / state files — the real HTML/CSS/JS split, and the reason the
+  envelope is deliberately thin — is the assembly model's headline capability
+  and has not been built.
+- [ ] **The assistant authors files unconstrained** — it can already list, read,
+  write and run project files, but a written file arrives as free-form tool
+  arguments; `createStructuredOutput` ships and is not wired to this path.
+  Doing it honestly means handing the provider exactly ONE file's grammar and
+  never the whole project schema, and only `query` and `jslt` have the
+  `.llm-profile` relaxations that make a schema decodable
+  (`packages/json/schemas/jaren-{query,jslt}.llm-profile.schema.json`).
+  `app`/`fsm`/`dag`/`model` would each need a profile derived, or would have to
+  accept the canonical schema with its unresolved-`$ref` limitation stated.
+- [ ] **There is no whole-project takeaway** — `project/download` emits the
+  designated `app` file's document as one JSON file, so every query, jslt,
+  schema and data sibling is dropped, and a project with no `app` file at all
+  (three of the shipped templates) downloads nothing and says nothing. That
+  gap has a second edge: a project whose share token exceeds the 8000-character
+  limit is honestly refused a link and told to "use Download instead" — advice
+  Download cannot currently fulfil. The intended answer is a `.zip` eject: the
+  project as a folder that runs offline, every file under a sane name plus a
+  small host page and a README. The one real decision it needs is how the
+  ejected host reaches `@jarenjs/*` — bundled, or a pinned CDN — which has to
+  be chosen and written down rather than defaulted into.
+- [ ] **The stage swallows a nested app's own failures** — `project/stage-error`
+  is dispatched from three places in the stage widget, reduced into
+  `project.stageError`, and never read by any view, so an app that throws at
+  boot or at runtime shows the user nothing. A real console is out of the
+  question by construction: nested documents get widgets but no effects and no
+  subscriptions, and capturing `console.*` would breach exactly that isolation.
+  The substitute the design calls for is a boot-log / last-error panel fed by
+  the state that is already being collected.
+- [ ] **Two `layout` knobs the IDE does not honour** — `autorun` is in the
+  schema, in PROJECT-FORMAT and in `LAYOUT_DEFAULT`, and no code reads it:
+  there is no toggle and the debounced commit loop always runs, so the format
+  promises a switch the document cannot actually throw. Either honour it or
+  drop it. Separately, the drag splitter is horizontal, so `data-mode="top"`
+  hides it and the stacked layout cannot be resized at all.
+- [ ] **No syntax highlighting** — the editor is a plain `<textarea>` here and
+  in `@jarenjs/play`. The two ways to add it — a `contenteditable` surface, or
+  a mirrored `<pre>` behind a transparent textarea — both fight the
+  controlled-input contract the typing buffer exists to protect (a render
+  landing mid-edit must not move the caret or eat a keystroke), and neither may
+  reintroduce `innerHTML`. That trade is the reason this is not simply a
+  styling job.
 
 ## @jarenjs/josl
 

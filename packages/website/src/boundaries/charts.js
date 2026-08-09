@@ -60,10 +60,17 @@ function normalFormat(value) {
  */
 export function chartRenderer(source, config) {
   const format = normalFormat(config?.format);
+  // parse + schema-check + compile is the COMPILE phase; turning the
+  // geometry-free AST into SVG vnodes is the RUN. Play reports whichever
+  // halves a renderer measures, so measure both rather than hand it one
+  // wall-clock number it would have to attribute by guessing.
+  const t0 = performance.now();
   const definition = parseWithEvents(format, String(source ?? ''), []);
   const outcome = validateDefinition(definition);
   const valid = typeof outcome === 'object' && outcome !== null ? outcome.valid : outcome === true;
   if (!valid) throw new Error('not a valid chart definition (schemas/chart-definition.schema.json)');
   const compiled = compileChart(definition, dataFor(definition, []), { theme: 'host' });
-  return compiled.toVnode();
+  const t1 = performance.now();
+  const vnode = compiled.toVnode();
+  return { vnode, compileMs: t1 - t0, runMs: performance.now() - t1 };
 }

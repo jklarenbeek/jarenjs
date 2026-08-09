@@ -34,12 +34,29 @@ const mdx = createMdx({ compileQuery: compileJsonQuery });
  * Markdown and Mermaid also hand back `deep` panels — the drill-down
  * explainers only the host can derive (the JSON AST, the canonical
  * round-trip): teacher-voiced, revealed behind the depth toggle.
+ *
+ * Each renderer also reports its own `compileMs` / `runMs`. Play cannot
+ * split a host render from the outside — it would only have one wall-clock
+ * number for both phases — and these renderers genuinely have two: the
+ * source compiles to a document, then the document builds a vnode. Report
+ * them and the stage prints two real numbers; omit them and it honestly
+ * prints one.
  */
+const timed = (fn) => {
+  const t0 = performance.now();
+  const value = fn();
+  return { value, ms: performance.now() - t0 };
+};
+
 const renderers = {
   markdown: (source) => {
-    const doc = md.compile(source).doc;
+    const compiled = timed(() => md.compile(source).doc);
+    const doc = compiled.value;
+    const rendered = timed(() => md.view(source));
     return {
-      vnode: md.view(source),
+      compileMs: compiled.ms,
+      runMs: rendered.ms,
+      vnode: rendered.value,
       deep: [
         { id: 'ast', label: 'The document, as JSON', kind: 'code', text: formatJson(doc.ast) },
         { id: 'roundtrip', label: 'Canonical Markdown', kind: 'code', text: toMarkdown(doc) },
@@ -53,9 +70,13 @@ const renderers = {
   // resolves the template against it, then renders through the same
   // memoized md pipeline (the doc-keyed memo carries the transformed doc)
   mdx: (source, dataValue) => {
-    const doc = mdx.transform(md.compile(source).doc, dataValue);
+    const compiled = timed(() => mdx.transform(md.compile(source).doc, dataValue));
+    const doc = compiled.value;
+    const rendered = timed(() => md.view(doc));
     return {
-      vnode: md.view(doc),
+      compileMs: compiled.ms,
+      runMs: rendered.ms,
+      vnode: rendered.value,
       deep: [
         { id: 'rendered', label: 'The resolved Markdown', kind: 'code', text: toMarkdown(doc) },
         { id: 'ast', label: 'The document, as JSON', kind: 'code', text: formatJson(doc.ast) },
@@ -63,10 +84,14 @@ const renderers = {
     };
   },
   mermaid: (source) => {
-    const compiled = mermaid.compile(source);
+    const step = timed(() => mermaid.compile(source));
+    const compiled = step.value;
     const doc = compiled.doc;
+    const rendered = timed(() => mermaid.view(source));
     return {
-      vnode: mermaid.view(source),
+      compileMs: step.ms,
+      runMs: rendered.ms,
+      vnode: rendered.value,
       deep: [
         { id: 'ast', label: 'The geometry-free AST', kind: 'code',
           text: doc ? formatJson(doc.ast) : String(compiled.parseError?.message ?? 'parse error') },
@@ -96,7 +121,11 @@ export const PLAY_START = Object.freeze({
   // the phone layout: which single pane shows (examples | editor | result)
   mobilePane: 'editor',
   // the IDE half: a play SESSION is a saveable document
-  name: '',        // the name the session saves under (the header input)
+  name: '',        // the session TITLE (the header input, freely edited)
+  // the store record this session is bound to, or null when it has never
+  // been saved. Save overwrites THIS; Save As writes the title as a new
+  // record and rebinds — which is the whole difference between them.
+  savedName: null,
   names: [],       // the saved session names (seeded from the play doc-store)
   shared: null,    // the last Share status line (or null)
   ratio: 0.5,      // the editors|result split (the shared splitter widget)
@@ -138,6 +167,51 @@ export function sessionToLoaded(session) {
     data: s.data && typeof s.data === 'object' ? s.data : {},
     config: s.config && typeof s.config === 'object' ? s.config : {},
   };
+}
+
+/** The version of the exported session envelope. */
+const PLAY_DOC = '0.1';
+
+/**
+ * A session as a FILE: the saveable document plus its title, in a small
+ * self-describing envelope. This is the way a session leaves the browser
+ * when it is too big for a share link — the case the share refusal points
+ * at — so it has to be something the import side can read back.
+ * @param {any} slice - the `state.play` slice
+ */
+export function sessionDocument(slice) {
+  return { $play: PLAY_DOC, name: (slice.name ?? '').trim(), session: sessionOf(slice) };
+}
+
+/**
+ * A file's text → `{ name, session }`, or null when it is not a play
+ * document at all. Liberal on purpose: the envelope is what Download
+ * writes, but a BARE session (what a share token decodes to, and what a
+ * hand-written file is likely to be) loads too. Every field still goes
+ * through `sessionToLoaded`, so a foreign or malicious shape lands as
+ * safe defaults rather than reaching the engines.
+ * @param {string} text
+ * @returns {{ name: string, session: any } | null}
+ */
+export function sessionFromDocument(text) {
+  let parsed;
+  try { parsed = JSON.parse(String(text ?? '')); }
+  catch { return null; }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const wrapped = parsed.session && typeof parsed.session === 'object';
+  const session = wrapped ? parsed.session : parsed;
+  // a document that names no engine is not a session — refuse it rather
+  // than silently opening the default one under the file's name
+  if (typeof session.engine !== 'string') return null;
+  const name = wrapped && typeof parsed.name === 'string' ? parsed.name : '';
+  return { name, session: sessionToLoaded(session) };
+}
+
+/** A filename for an exported session: its title, or a stable fallback. */
+export function sessionFilename(slice) {
+  const title = (slice.name ?? '').trim()
+    .replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-').toLowerCase();
+  return `${title === '' ? 'jaren-play-session' : title}.play.json`;
 }
 
 /** A blank session of the given engine (New): empty panes, default config. */
@@ -217,6 +291,22 @@ export function loadExample(exampleId) {
     data: { ...(ex.datasets[0]?.data ?? {}) },
     config: { ...(ex.config ?? {}) },
   };
+}
+
+/**
+ * The example a deep link asks for: an exact `example` id wins, otherwise
+ * the first example of `engine`. Returns the example id, or null when
+ * neither names anything the library holds — a stale or hand-typed link
+ * then leaves the seeded session alone instead of blanking it.
+ * @param {{ engine?: string, example?: string }} params
+ * @returns {string | null}
+ */
+export function deepLinkExample(params) {
+  const examples = playComponent.examples;
+  if (params.example !== undefined
+    && examples.some((e) => e.id === params.example)) return params.example;
+  if (params.engine === undefined) return null;
+  return examples.find((e) => e.engine === params.engine)?.id ?? null;
 }
 
 /** The data of one dataset (by index) of an example, or null. */

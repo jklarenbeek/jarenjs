@@ -222,7 +222,7 @@ export const ACTIONS = {
   },
   // the nested app's own boot/runtime failure (the stage widget emits it)
   'project/stage-error': { patch: [{ op: 'replace', path: '/project/stageError', value: '$payload' }] },
-  // open a whole project (a template card, an inbound share — later order)
+  // open a whole project (a template card, or an inbound share token)
   'project/open': {
     patch: [
       { op: 'replace', path: '/project/project', value: { $default: ['$payload.project', '0.1'] } },
@@ -246,7 +246,8 @@ export const ACTIONS = {
   'project/template': { effects: [{ run: 'project-template', with: { id: '$payload' } }] },
   // download the designated app file's document (the Studio's takeaway)
   'project/download': { effects: [{ run: 'project-download' }] },
-  // the layout switcher + the splitter (the splitter lands a later patch)
+  // the layout switcher (which grid mode) + the splitter (where the handle
+  // sits within that mode); the splitter widget commits on pointer-up
   'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },
   'project/layout-ratio': { patch: [{ op: 'replace', path: '/project/layout/ratio', value: '$payload' }] },
   // the phone pane switcher (Files · Editor · Stage) — pure chrome, and
@@ -268,6 +269,10 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/data', value: '$payload.data' },
       { op: 'replace', path: '/play/config', value: '$payload.config' },
       { op: 'replace', path: '/play/result', value: null },
+      // an example REPLACES the session's content, so it can no longer be
+      // the saved record: unbind, or the next Save would overwrite that
+      // record with something the user never saved there
+      { op: 'replace', path: '/play/savedName', value: null },
       // a new engine's result has different screens; drop any stale tab,
       // and a fresh example opens CALM — the depth toggle resets off
       { op: 'replace', path: '/play/panel', value: null },
@@ -314,13 +319,28 @@ export const ACTIONS = {
   // play doc-store effects; name / names / shared / ratio are pure chrome
   // (the run loop excludes them, so typing a name never re-runs the engine).
   'play/new': { effects: [{ run: 'play-new' }] },
+  // Save writes the record this session is BOUND to (`savedName`); Save As
+  // writes the title as a NEW record and rebinds. An unsaved session has
+  // nothing to overwrite, so its Save is a Save As by construction.
   'play/save': { effects: [{ run: 'play-save' }] },
-  'play/save-as': { effects: [{ run: 'play-save' }] }, // the name field is the target
+  'play/save-as': { effects: [{ run: 'play-save', with: { as: true } }] },
   'play/open': { effects: [{ run: 'play-open', with: { name: '$event.value' } }] },
   'play/delete-session': { effects: [{ run: 'play-delete', with: { name: '$payload' } }] },
   'play/share': { effects: [{ run: 'play-share' }] },
+  // the way out of the browser when a session is too big for a link (and
+  // the way back in): the session as a file, and a file as a session
+  'play/download': { effects: [{ run: 'play-download' }] },
+  'play/import': { effects: [{ run: 'play-import' }] },
   'play/name': { patch: [{ op: 'replace', path: '/play/name', value: '$event.value' }] },
   'play/names': { patch: [{ op: 'replace', path: '/play/names', value: '$payload' }] },
+  // a save landed: adopt the record it wrote, so Save now overwrites it
+  'play/saved': {
+    patch: [
+      { op: 'replace', path: '/play/savedName', value: '$payload.name' },
+      { op: 'replace', path: '/play/name', value: '$payload.name' },
+      { op: 'replace', path: '/play/names', value: '$payload.names' },
+    ],
+  },
   'play/shared': { patch: [{ op: 'replace', path: '/play/shared', value: '$payload' }] },
   'play/layout-ratio': { patch: [{ op: 'replace', path: '/play/ratio', value: '$payload' }] },
   // seed engine+source+data+config from a saved/shared/blank session, then run
@@ -332,6 +352,9 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/data', value: '$payload.data' },
       { op: 'replace', path: '/play/config', value: '$payload.config' },
       { op: 'replace', path: '/play/name', value: '$payload.name' },
+      // a loaded record binds; a blank or SHARED session does not (a share
+      // link is not a local record, so its first Save must ask for a name)
+      { op: 'replace', path: '/play/savedName', value: { $default: ['$payload.savedName', null] } },
       { op: 'replace', path: '/play/datasetIndex', value: 0 },
       { op: 'replace', path: '/play/result', value: null },
       { op: 'replace', path: '/play/panel', value: null },

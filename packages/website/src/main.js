@@ -103,6 +103,22 @@ const app = createSiteApp({
     URL.revokeObjectURL(url);
     return true;
   },
+  // `download`'s twin: open the file picker and hand back what was chosen.
+  // Resolves null when the user dismisses it — there is no cancel event, so
+  // the input is discarded either way and a dismissed picker simply never
+  // resolves a file. A host without this capability omits it and the
+  // surface says so, exactly as it does for a missing `download`.
+  openFile: (accept = '.json,application/json') => new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file === undefined) { resolve(null); return; }
+      file.text().then((text) => resolve({ name: file.name, text }), () => resolve(null));
+    }, { once: true });
+    input.click();
+  }),
   // the AI assistant: real fetch to the user-chosen provider; settings
   // (including the bring-your-own key) and the conversation transcript
   // persisted locally and nowhere else

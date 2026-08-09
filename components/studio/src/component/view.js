@@ -67,8 +67,9 @@ const shell = {
       ['div', { class: 'js-gallery' }, ['span', { class: 'muted' }, 'New'], [{ $apply: '$.templates[*]' }]],
       ['span', { class: 'js-spacer' }],
       ['span', { class: 'js-filecount muted' }, ['text', '$.fileCount'], ' files'],
-      // the layout switcher: the three grid modes (the drag splitter is a
-      // later patch; this rides the same `layout.mode` → `data-mode` attr)
+      // the layout switcher: the three grid modes, riding `layout.mode` →
+      // the `data-mode` attribute the grid switches on (the drag splitter
+      // below drives `layout.ratio` within the chosen mode)
       ['div', { class: 'js-layout seg', role: 'group', 'aria-label': 'layout' },
         layoutButton('classic', 'Side', 'Editor beside the stage'),
         layoutButton('right', 'Swap', 'Stage beside the editor'),

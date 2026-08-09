@@ -8,9 +8,9 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import {
-  createPlayComponent, playViewModel, playRules, playModes,
+  createPlayComponent, playViewModel, playRules, playModes, runExample,
 } from '@jarenjs/play/component';
-import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { compileJsltStylesheet, createJsltRegistry, mathPack } from '@jarenjs/json/jslt';
 
 const state = (over = {}) => ({
   play: {
@@ -265,5 +265,78 @@ describe('the component surface', () => {
     assert.ok(c.engineIds().includes('query'));
     assert.strictEqual(typeof c.runExample, 'function');
     assert.strictEqual(c.viewModel(state()).engine.label, 'JSONPath');
+  });
+});
+
+describe('the factory seams are defaults, not decoration', () => {
+  // Configuring a seam at the factory and having it ignored at run time is
+  // the trap this pins: a host that registers its operator packs here must
+  // not watch $mean go missing when the engine runs.
+  // the real registry, so the test proves the actual seam contract
+  // (`.toOptions()` → `{ extensions, functions }`) rather than a guess
+  const OPERATORS = createJsltRegistry().use(mathPack);
+
+  it('a factory renderer reaches a visual engine with no per-call options', function () {
+    const bare = createPlayComponent();
+    const withSeam = createPlayComponent({
+      renderers: { markdown: () => ({ vnode: ['p', {}, 'rendered'] }) },
+    });
+    assert.strictEqual(bare.runExample('markdown', { source: '# hi' }, {}).error?.code,
+      'PLAY_NO_RENDERER', 'without the seam the engine refuses honestly');
+    assert.strictEqual(withSeam.runExample('markdown', { source: '# hi' }, {}).ok, true,
+      'the factory renderer is used with no per-call options');
+  });
+
+  it('a per-call option still wins over the factory default', function () {
+    const component = createPlayComponent({
+      renderers: { markdown: () => ({ vnode: ['p', {}, 'factory'] }) },
+    });
+    const result = component.runExample('markdown', { source: '# hi' }, {}, {
+      renderers: { markdown: () => ({ vnode: ['p', {}, 'per-call'] }) },
+    });
+    assert.strictEqual(result.ok, true);
+    assert.match(JSON.stringify(result.panels), /per-call/, 'the call-site renderer won');
+  });
+
+  it('factory operators reach the query engine', function () {
+    const component = createPlayComponent({ operators: OPERATORS });
+    const result = component.runExample('query',
+      { query: '{"n":{"$sqrt":"$.n"}}', externals: '' }, { data: '{"n":49}' });
+    assert.strictEqual(result.ok, true, 'the registered operator compiled');
+    assert.match(JSON.stringify(result.panels), /7/, 'and ran');
+  });
+});
+
+describe('timings are measured, never fabricated', () => {
+  // The stage used to print "ran 0ms" for every visual engine, which told
+  // the reader rendering was free. A phase that was not measured, or does
+  // not exist, must now say nothing at all.
+  it('a renderer reporting its phases gets both printed', function () {
+    const component = createPlayComponent({
+      renderers: { markdown: () => ({ vnode: ['p', {}, 'x'], compileMs: 1.5, runMs: 2.5 }) },
+    });
+    const result = component.runExample('markdown', { source: '# hi' }, {});
+    assert.deepStrictEqual(result.timing, { compileMs: 1.5, runMs: 2.5 });
+    const vm = playViewModel({ play: { engine: 'markdown', result } });
+    assert.match(vm.result.timing, /compiled .* · ran /);
+  });
+
+  it('a renderer reporting nothing attributes the wall clock to the RUN, not a compile', function () {
+    const component = createPlayComponent({
+      renderers: { markdown: () => ['p', {}, 'x'] },
+    });
+    const { timing } = component.runExample('markdown', { source: '# hi' }, {});
+    assert.strictEqual(timing.compileMs, null, 'no compile figure is invented');
+    assert.strictEqual(typeof timing.runMs, 'number', 'the measured total is the run');
+  });
+
+  it('an engine with no compile step reports null, and the line omits it', function () {
+    const { timing } = runExample('patch',
+      { patch: '{"b":2}' }, { data: '{"a":1}' }, { config: { mode: 'merge' } });
+    assert.strictEqual(timing.compileMs, null, 'a merge patch compiles nothing');
+    assert.strictEqual(typeof timing.runMs, 'number');
+    const vm = playViewModel({ play: { engine: 'patch', result: { ok: true, timing, panels: [], error: null } } });
+    assert.ok(!vm.result.timing.includes('compiled'), 'no compile clause');
+    assert.match(vm.result.timing, /^ran /);
   });
 });

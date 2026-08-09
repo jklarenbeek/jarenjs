@@ -37,8 +37,14 @@ function parseJson(text, label) {
 /** @returns {import('./index.js').PlayResult} */
 const ok = (text, compileMs, runMs, deep) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }, ...(deep ?? [])], compileMs, runMs);
 
-/** A multi-panel Result — the engine hands over its own screen list. */
-/** @returns {import('./index.js').PlayResult} */
+/**
+ * A multi-panel Result — the engine hands over its own screen list.
+ * Either half of the timing may be `null`, and that is load-bearing: an
+ * engine with no compile step (patch merge/diff) and a phase the host
+ * measured for us or not at all are all honestly "no number", never a
+ * fabricated `0` the stage would print as "ran 0 ms".
+ * @returns {import('./index.js').PlayResult}
+ */
 const okPanels = (panels, compileMs, runMs) => ({ ok: true, timing: { compileMs, runMs }, error: null, panels });
 
 /** A `deep` cards panel — the "how it ran" stat row of a drill-down. */
@@ -81,9 +87,24 @@ function visual(id, label, lead, opts = {}) {
       try { view = render(source.source ?? '', options?.config); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      return okPanels(renderedPanels(view), t1 - t0, 0);
+      return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
     },
   };
+}
+
+/**
+ * Split a host render's cost into `[compileMs, runMs]`. A renderer that
+ * reports its own phases (it compiles the source, then builds the vnode)
+ * is believed; one that does not leaves us holding a single wall-clock
+ * number for both, which we attribute to the RUN and leave the compile
+ * `null` — claiming a compile figure we never measured is the bug this
+ * replaces.
+ */
+function renderTiming(view, totalMs) {
+  const compileMs = typeof view?.compileMs === 'number' ? view.compileMs : null;
+  const runMs = typeof view?.runMs === 'number' ? view.runMs : null;
+  if (compileMs === null && runMs === null) return [null, totalMs];
+  return [compileMs, runMs];
 }
 
 /** A host-rendered view (a bare vnode, or `{ vnode, deep }`) → the panel
@@ -180,7 +201,7 @@ export const ENGINE_LIST = [
         try { out = applyMergePatch(target.value, patch.value); }
         catch (err) { return fail(msg(err), code(err)); }
         const t1 = now();
-        return ok(fmt(out), 0, t1 - t0, [
+        return ok(fmt(out), null, t1 - t0, [
           deepCards('how', 'How it merged', [
             { title: 'Output', value: out === target.value ? '=== input' : 'a new document', note: out === target.value ? 'shared, copy-on-write' : undefined },
           ]),
@@ -199,7 +220,7 @@ export const ENGINE_LIST = [
         return okPanels([
           { id: 'out', label: `JSON Patch (${jsonPatch.length} ops)`, kind: 'code', text: fmt(jsonPatch) },
           deepCode('merge', 'The merge-patch flavour (RFC 7396)', fmt(mergePatch)),
-        ], 0, t1 - t0);
+        ], null, t1 - t0);
       }
       let apply; const t0 = now();
       try { apply = compileJSONPatch(patch.value, { changes: true }); }
@@ -457,7 +478,7 @@ export const ENGINE_LIST = [
           rows: errs.map((e) => [e.instancePath === '' ? '(root)' : e.instancePath, e.message]),
         });
       }
-      return okPanels(panels, report.compileMs ?? 0, report.validateMs ?? 0);
+      return okPanels(panels, report.compileMs ?? null, report.validateMs ?? null);
     },
   },
   {
@@ -479,7 +500,7 @@ export const ENGINE_LIST = [
       try { view = render(source.source ?? '', d.value); }
       catch (err) { return fail(msg(err), code(err)); }
       const t1 = now();
-      return okPanels(renderedPanels(view), t1 - t0, 0);
+      return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
     },
   },
   // ——— the visual engines: descriptor + examples here, rendering delegated ———

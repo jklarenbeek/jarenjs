@@ -10,6 +10,7 @@
  * Plus the surface fits the viewport, light and dark.
  */
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 const noOverflow = async (page, label) => {
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({
@@ -272,4 +273,70 @@ test('the playground fits the viewport, light and dark, mobile and desktop', asy
     await noOverflow(page, `${label} · dark`);
     await page.locator('.theme-toggle').click(); // back to light for the next size
   }
+});
+
+// The docs callouts link straight at an engine. They used to point at the
+// retired #/playground?engine=…, whose redirect dropped the parameter, so
+// a link promising Markdown delivered JSONPath. Clicking one is the only
+// way to prove the whole chain — href, redirect, param, seeded run.
+test('a docs callout lands on the engine it promises', async ({ page }) => {
+  await page.goto('/#/docs?s=markdown');
+  const link = page.locator('.callout a', { hasText: 'Open Play' }).first();
+  await expect(link).toHaveAttribute('href', '#/play?engine=markdown');
+  await link.click();
+  await expect(page).toHaveURL(/#\/play\?engine=markdown/);
+  // the engine label is the claim under test; the run itself is debounced
+  // and covered elsewhere, so asserting it here only adds load-sensitivity
+  await expect(page.locator('.jplay-engine')).toContainText('Markdown');
+});
+
+test('the retired #/playground?engine= still arrives on the right engine', async ({ page }) => {
+  await page.goto('/#/playground?engine=mermaid');
+  await expect(page).toHaveURL(/#\/play/);
+  await expect(page.locator('.jplay-engine')).toContainText('Mermaid');
+});
+
+// The stage used to print "ran 0 ms" for every visual engine, which told
+// the reader that rendering was free. The host renderers now report their
+// real compile/render split, and a phase that does not exist says nothing.
+test('the timing line reports measured phases only', async ({ page }) => {
+  await page.goto('/#/play?engine=mermaid');
+  const timing = page.locator('.jplay-timing');
+  await expect(timing).toBeVisible();
+  const both = await timing.textContent();
+  expect(both, 'a visual engine names both phases').toMatch(/compiled .* · ran /);
+  expect(both, 'and neither is a fabricated zero').not.toMatch(/ran 0\.00 ms/);
+
+  // a merge patch compiles nothing, so the clause is absent rather than 0
+  await page.goto('/#/play?engine=patch');
+  await page.locator('.jplay-option select').first().selectOption('merge');
+  await expect.poll(() => page.locator('.jplay-timing').textContent()).toMatch(/^ran /);
+  expect(await page.locator('.jplay-timing').textContent()).not.toMatch(/compiled/);
+});
+
+// A session too large for a share link used to have no way out of the
+// browser at all. Only a real browser can prove the whole path: a real
+// download, a real file picker, and the same session on the other side.
+test('a session leaves as a file and comes back through the picker', async ({ page }) => {
+  await page.goto('/#/play?engine=path');
+  await page.locator('.jplay-name').fill('browser trip');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('.jplay-actions button', { hasText: 'Download' }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('browser-trip.play.json');
+  const path = await download.path();
+  const doc = JSON.parse(await readFile(path, 'utf8'));
+  expect(doc.$play).toBe('0.1');
+  expect(doc.name).toBe('browser trip');
+  expect(doc.session.engine).toBe('path');
+
+  await page.goto('/#/play?engine=mermaid');
+  await expect(page.locator('.jplay-engine')).toContainText('Mermaid');
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('.jplay-actions button', { hasText: 'Import' }).click();
+  await (await chooser).setFiles(path);
+  await expect(page.locator('.jplay-engine')).toContainText('JSONPath');
+  await expect(page.locator('.jplay-name')).toHaveValue('browser trip');
 });

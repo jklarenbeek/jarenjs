@@ -94,7 +94,19 @@ problem is reported by `validateFile`, never thrown.
 
 ## Status
 
-v0.1 is the headless **engine**: parse, per-file validate, assemble,
-classify. The IDE **component** — the file rail, the debounced editor,
-the run stage, the AI author/operate surface, and the `.zip` eject — is
-the next order. Syntax highlighting is a later concern.
+v0.1 is the headless **engine** — parse, per-file validate, assemble,
+classify — plus the IDE **component** that mounts it: the file rail, the
+debounced editor with its typing buffer, the run stage, the three layout
+modes with a drag splitter, the phone pane switcher, save/load/share, and
+an assistant that can list, read, write and run a project's files.
+
+Still open, and tracked with their constraints in
+[ROADMAP.md](../../../docs/ROADMAP.md): the `fsm`/`dag`/`model` kinds
+validate but have no editor or runner, so they cannot be added from the
+IDE; fragment assembly (one artifact from several files) is unbuilt;
+the assistant authors files as free-form tool arguments rather than under
+constrained decoding; there is no whole-project export (`.zip` eject);
+`layout.autorun` is declared and never read; and the stage collects a
+nested app's failures without showing them. Syntax highlighting stays a
+non-goal — the editor is a plain `<textarea>` so the whole IDE remains a
+JSLT document with no imperative chrome.

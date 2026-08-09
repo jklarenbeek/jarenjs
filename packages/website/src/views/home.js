@@ -15,7 +15,7 @@ export const HOME_RULES = [
           ['pre', { class: 'hero-install' }, ['code', {}, '$.hero.install']],
           ['ul', { class: 'hero-points' }, [{ $apply: '$.hero.points[*]' }]],
           ['div', { class: 'hero-actions' },
-            ['a', { href: '#/playground', class: 'btn primary' }, 'Open the playground'],
+            ['a', { href: '#/play', class: 'btn primary' }, 'Open Play'],
             ['a', { href: '#/benchmarks', class: 'btn' }, 'See the benchmarks'],
           ],
         ],

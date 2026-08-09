@@ -121,11 +121,10 @@ export const PROJECT_TEMPLATE_CARDS = PROJECT_TEMPLATES.map((t) => ({
   id: t.id, title: t.title, lead: t.lead,
 }));
 
-/** The kinds a user may add a fresh file of, each with a minimal-VALID
- * skeleton so a new file never opens on an error. (fsm/dag/model get their
- * rich editors in later orders, so they are not offered here yet.) */
-export const ADDABLE_KINDS = Object.freeze(['app', 'jslt', 'query', 'state', 'data', 'schema']);
-
+/** The starter text for each addable kind — minimal but VALID, so a new
+ * file never opens on an error. `fsm`/`dag`/`model` are absent because
+ * they have no editor or runner in the IDE yet: offering one would create
+ * a file nothing can open (tracked in ROADMAP.md). */
 const SKELETONS = {
   app: JSON.stringify({ state: {}, view: [{ match: '$', body: ['p', {}, 'New app'] }], actions: {} }, null, 2),
   jslt: JSON.stringify({ $jslt: '0.1', rules: [{ match: '$', body: '$' }] }, null, 2),
@@ -134,6 +133,14 @@ const SKELETONS = {
   data: '{}',
   schema: JSON.stringify({ type: 'object' }, null, 2),
 };
+
+/** The kinds a user may add a fresh file of. DERIVED from the skeleton
+ * table rather than written twice: a kind with no skeleton makes
+ * `project-add` bail silently, so a hand-maintained second list drifts
+ * into a menu entry that does nothing. The studio component's own
+ * `<select>` is the third copy and cannot import this one (it is a
+ * published package); `test/website/project.test.js` pins them equal. */
+export const ADDABLE_KINDS = Object.freeze(Object.keys(SKELETONS));
 
 /** The starter text for a freshly added file of `kind`, or null if the
  * kind is not addable. */
