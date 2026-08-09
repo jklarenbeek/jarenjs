@@ -14,7 +14,12 @@
  * convention for new pages).
  */
 
+import { pickAllowed } from '@jarenjs/core/array';
+
 const CHANNEL = 'jaren-data-studio';
+
+/** The phone panes, in switcher order. */
+const DATA_PANES = ['store', 'query', 'live'];
 
 /** The seed model the page boots with (editable in the left pane). */
 export const DATA_MODEL = {
@@ -321,9 +326,7 @@ export function dataViewModel(state) {
       : `applied: ${data.migration.applied.length}`
         + (data.migration.note ? ` — ${data.migration.note}` : ''),
     error: data.error,
-    // the phone pane (Store · Query · Live); whitelisted, so a junk
-    // value cannot blank the studio — it falls back to the query
-    mobilePane: data.mobilePane === 'store' || data.mobilePane === 'live'
-      ? data.mobilePane : 'query',
+    // the phone pane (Store · Query · Live)
+    mobilePane: pickAllowed(data.mobilePane, DATA_PANES, 'query'),
   };
 }

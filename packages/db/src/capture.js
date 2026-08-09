@@ -30,6 +30,7 @@
  */
 
 import { createJSONPatch } from '@jarenjs/json/patch';
+import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
 import { DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
@@ -158,10 +159,6 @@ export function parseChangeset(bytes) {
 
 //#region the pointer contract
 
-/** RFC 6901 token escaping. */
-const escapePointer = (token) =>
-  String(token).replace(/~/g, '~0').replace(/\//g, '~1');
-
 /**
  * The key token (LIVE-FORMAT §2): a single key is its scalar text;
  * a composite key is the JSON text of its parts array.
@@ -173,7 +170,7 @@ export function keyToken(parts) {
 }
 
 const pointerOf = (table, token, path = '') =>
-  `/${escapePointer(table)}/${escapePointer(token)}${path}`;
+  `/${encodeJSONPointerSegment(table)}/${encodeJSONPointerSegment(token)}${path}`;
 
 //#endregion
 
@@ -272,7 +269,7 @@ export function translateOperations(connection, shapes, operations) {
         if (column.role === 'epoch') continue; // derived; the doc string decides
         if (shape.kind === 'collection' && column.role === 'key') continue;
         const oldValue = operation.oldValues[c];
-        const path = pointerOf(operation.table, token, `/${escapePointer(column.name)}`);
+        const path = pointerOf(operation.table, token, `/${encodeJSONPointerSegment(column.name)}`);
         if (newValue === null) {
           if (oldValue !== null) ops.push({ op: 'remove', path });
         }
@@ -502,8 +499,7 @@ export function createCaptureEngine(options) {
                 at,
                 source: mode,
                 collections: [...new Set(patch.map(
-                  (op) => op.path.split('/')[1]
-                    .replace(/~1/g, '/').replace(/~0/g, '~'))),
+                  (op) => decodeJSONPointerSegment(op.path.split('/')[1]))),
                 ],
                 patch,
               },

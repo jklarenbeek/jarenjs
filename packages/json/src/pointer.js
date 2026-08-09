@@ -179,6 +179,8 @@ export function parseRelativeJSONPointer(pointer) {
 
 const RE_TILDE = /~/g;
 const RE_SLASH = /\//g;
+const RE_ESCAPED_SLASH = /~1/g;
+const RE_ESCAPED_TILDE = /~0/g;
 
 /**
  * Encode a single reference token for use inside an RFC 6901 JSON
@@ -195,6 +197,23 @@ export function encodeJSONPointerSegment(segment) {
   return (s.indexOf('~') < 0 && s.indexOf('/') < 0)
     ? s
     : s.replace(RE_TILDE, '~0').replace(RE_SLASH, '~1');
+}
+
+/**
+ * Decode one RFC 6901 reference token: `~1` becomes `/` and `~0` becomes
+ * `~`. The order is normative (RFC 6901 section 4) and not an accident of
+ * implementation — decoding `~0` first would turn `~01` into `~1` and then
+ * into `/`, so a member literally named `~1` would come back as `/`.
+ * The escape-free common case returns the input unchanged.
+ * @param {string} token - One encoded reference token (no `/` separators)
+ * @returns {string} The decoded member name
+ * @example
+ * decodeJSONPointerSegment('a~1b'); // 'a/b'
+ */
+export function decodeJSONPointerSegment(token) {
+  return token.indexOf('~') < 0
+    ? token
+    : token.replace(RE_ESCAPED_SLASH, '/').replace(RE_ESCAPED_TILDE, '~');
 }
 
 /**

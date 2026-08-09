@@ -9,10 +9,14 @@
  * Pure: nothing here is stored back in state.
  */
 
+import { pickAllowed } from '@jarenjs/core/array';
 import { LAYOUT_DEFAULT } from '../project.js';
 import { describe, assembleArtifacts } from '../assemble.js';
 import { reconcileBuffer } from './host.js';
 import { KIND_BADGE } from './editor.js';
+
+/** The phone panes, in switcher order. */
+const MOBILE_PANES = ['files', 'editor', 'stage'];
 
 /** The stage the active file drives. */
 function deriveStage(project, activeMeta, results, revision, committed) {
@@ -131,11 +135,9 @@ export function projectViewModel(state, options = {}) {
     problemCount: problems.length,
     stage: deriveStage(project, activeMeta, results, revision, committed),
     saveState: (slice.dirty === true || reconciled.dirty) ? 'Unsaved ●' : 'Saved',
-    // the phone pane (Files · Editor · Stage); whitelisted, so a junk
-    // value cannot blank the IDE — it falls back to the editor. This is
-    // host chrome, not a project member: `layout` travels with the saved
-    // document, which pane a phone was showing does not.
-    mobilePane: slice.mobilePane === 'files' || slice.mobilePane === 'stage'
-      ? slice.mobilePane : 'editor',
+    // the phone pane (Files · Editor · Stage). This is host chrome, not a
+    // project member: `layout` travels with the saved document, which pane
+    // a phone was showing does not.
+    mobilePane: pickAllowed(slice.mobilePane, MOBILE_PANES, 'editor'),
   };
 }

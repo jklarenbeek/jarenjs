@@ -15,6 +15,8 @@
 import { compileFsm, compileDag, fsmToApp } from '@jarenjs/flow';
 import { parseMermaid, toMermaid, diagramDocument, compileMermaid } from '@jarenjs/mermaid';
 import { transformJson } from '@jarenjs/json/jslt';
+import { pickAllowed } from '@jarenjs/core/array';
+import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { createApp } from '@jarenjs/app';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 import { JarenValidator } from '@jarenjs/validate';
@@ -33,19 +35,19 @@ import { memo1 } from '../lib/format.js';
 import { errorMessage } from '../lib/nodes.js';
 import { createHostWidget } from './host-widget.js';
 
+/** The phone panes, in switcher order. */
+const FLOW_PANES = ['diagram', 'inspector', 'run'];
+
 // ------------------------------------------------------------------
 // The projection chain: document → mermaid text → decorated vnode
 // ------------------------------------------------------------------
-
-/** RFC 6901 segment escaping for dag node ids used in pointers. */
-const escapeSegment = (id) => id.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /** Read a JSON Pointer from a document (the inspector's selection). */
 export function memberAt(doc, pointer) {
   if (pointer === '') return doc;
   let value = doc;
   for (const raw of pointer.split('/').slice(1)) {
-    const seg = raw.replaceAll('~1', '/').replaceAll('~0', '~');
+    const seg = decodeJSONPointerSegment(raw);
     if (value === null || typeof value !== 'object') return undefined;
     value = Array.isArray(value) ? value[Number(seg)] : value[seg];
   }
@@ -91,7 +93,7 @@ const selectables = memo1((kind, doc) => {
   }
   else {
     for (const id of Object.keys(doc.nodes)) {
-      nodes[id] = { type: 'node', id, path: `/nodes/${escapeSegment(id)}` };
+      nodes[id] = { type: 'node', id, path: `/nodes/${encodeJSONPointerSegment(id)}` };
     }
     doc.edges.forEach((_e, i) => {
       edges[i] = { type: 'edge', index: i, path: `/edges/${i}` };
@@ -297,11 +299,8 @@ export function flowPageViewModel(flow) {
       },
       events: kind === 'fsm' ? fsmEvents(flow.doc) : [],
       dagInput: flow.dagInput,
-      // the phone pane (Diagram · Inspector · Run); whitelisted, so a
-      // junk value from a share link or a stale slice cannot blank the
-      // studio — it falls back to the diagram
-      mobilePane: flow.mobilePane === 'inspector' || flow.mobilePane === 'run'
-        ? flow.mobilePane : 'diagram',
+      // the phone pane (Diagram · Inspector · Run)
+      mobilePane: pickAllowed(flow.mobilePane, FLOW_PANES, 'diagram'),
       mount: run !== null && kind === 'fsm'
         ? runMount(flow.doc, flow.revision, flow.runContext)
         : null,

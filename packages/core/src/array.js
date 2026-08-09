@@ -55,3 +55,19 @@ export function isUniqueArray(arr) {
 export function includesAll(arr, values) {
   return values.every(v => arr.includes(v));
 }
+
+/**
+ * The value when it is one of `allowed`, otherwise `fallback`. The point
+ * is untrusted input: a value restored from storage, a share link or a
+ * stale state slice can be anything, and a UI that switches on it directly
+ * renders nothing at all for a name it does not know. Narrowing to a known
+ * set turns that blank into the fallback.
+ * @template T
+ * @param {unknown} value - The candidate, from anywhere.
+ * @param {readonly T[]} allowed - The values that may pass through.
+ * @param {T} fallback - Used when `value` is not one of `allowed`.
+ * @returns {T}
+ */
+export function pickAllowed(value, allowed, fallback) {
+  return allowed.includes(/** @type {T} */ (value)) ? /** @type {T} */ (value) : fallback;
+}

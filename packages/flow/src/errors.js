@@ -153,3 +153,17 @@ export class FlowRuntimeError extends CodedError {
       cause !== undefined ? { cause } : undefined);
   }
 }
+
+/**
+ * Normalize a thrown value to an `Error`. A dag run rejects with whatever
+ * a registered task threw, and a task is host code free to throw a
+ * non-Error, so the rejection contract needs one: a bare value becomes an
+ * `Error` naming the type it arrived as. In the fsm engine the only throw
+ * sources are the query engine's own error classes, so there it is
+ * belt-and-braces rather than hostile-input hardening.
+ * @param {unknown} v
+ * @returns {Error}
+ */
+export function asError(v) {
+  return v instanceof Error ? v : new Error(`non-Error thrown (${typeof v})`);
+}

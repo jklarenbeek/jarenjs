@@ -6,9 +6,12 @@
  * editors, the dataset switcher, the data editors, and the run result for
  * the stage. Pure: nothing here is stored back in state.
  */
+import { pickAllowed } from '@jarenjs/core/array';
 import { ENGINES, EXAMPLES } from '../index.js';
+import { formatMs } from '../format.js';
 
-const formatMs = (ms) => (typeof ms !== 'number' ? '—' : ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`);
+/** The phone panes, in switcher order. */
+const MOBILE_PANES = ['examples', 'editor', 'result'];
 
 /**
  * The timing line, built only from the phases that were actually measured.
@@ -173,6 +176,6 @@ export function playViewModel(state) {
     showForm: hasForm && dataView === 'form',
     // the phone layout: one pane at a time behind a segmented switcher
     // (Examples · Editor · Result); desktop ignores it (CSS)
-    mobilePane: s.mobilePane === 'examples' || s.mobilePane === 'result' ? s.mobilePane : 'editor',
+    mobilePane: pickAllowed(s.mobilePane, MOBILE_PANES, 'editor'),
   };
 }

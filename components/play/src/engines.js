@@ -18,12 +18,12 @@ import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
 import { parseCsvDocument, stringifyCsv, sniffCsvDialect } from '@jarenjs/josl/csv';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
+import { formatMs } from './format.js';
 
 const compileTypeTest = createTypeTestCompiler();
 
 const now = () => performance.now();
 const fmt = (v) => (v === undefined ? '(no result)' : JSON.stringify(v, null, 2));
-const fmtMs = (ms) => (typeof ms !== 'number' ? '—' : ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`);
 const msg = (err) => String(/** @type {any} */ (err)?.message ?? err);
 const code = (err) => /** @type {any} */ (err)?.code;
 
@@ -147,8 +147,8 @@ export const ENGINE_LIST = [
       return ok(fmt(nodes.map((n) => n.value)), t1 - t0, t2 - t1, [
         deepCards('how', 'How it matched', [
           { title: 'Matches', value: String(nodes.length) },
-          { title: 'Compile', value: fmtMs(t1 - t0) },
-          { title: 'Run', value: fmtMs(t2 - t1) },
+          { title: 'Compile', value: formatMs(t1 - t0) },
+          { title: 'Run', value: formatMs(t2 - t1) },
         ]),
         deepCode('paths', 'The normalized paths', fmt(nodes.map((n) => n.path))),
       ]);
@@ -258,8 +258,8 @@ export const ENGINE_LIST = [
       return ok(fmt(out), t1 - t0, t2 - t1, [
         deepCards('how', 'How it ran', [
           { title: 'Items', value: String(items) },
-          { title: 'Compile', value: fmtMs(t1 - t0) },
-          { title: 'Run', value: fmtMs(t2 - t1) },
+          { title: 'Compile', value: formatMs(t1 - t0) },
+          { title: 'Run', value: formatMs(t2 - t1) },
         ]),
       ]);
     },
@@ -283,8 +283,8 @@ export const ENGINE_LIST = [
       // (shared, copy-on-write) — worth teaching, so the deep card says which
       return ok(fmt(out), t1 - t0, t2 - t1, [
         deepCards('how', 'How it transformed', [
-          { title: 'Compile', value: fmtMs(t1 - t0) },
-          { title: 'Transform', value: fmtMs(t2 - t1) },
+          { title: 'Compile', value: formatMs(t1 - t0) },
+          { title: 'Transform', value: formatMs(t2 - t1) },
           { title: 'Output', value: out === d.value ? '=== input' : 'a new document', note: out === d.value ? 'shared, copy-on-write' : undefined },
         ]),
       ]);
@@ -469,7 +469,7 @@ export const ENGINE_LIST = [
       if (report.schemaError) return fail(report.schemaError, 'SCHEMA');
       const errs = report.errors ?? [];
       const summary = (report.valid ? '✓ valid' : `✗ ${errs.length} error${errs.length === 1 ? '' : 's'}`)
-        + ` · ${report.draft} · compiled ${fmtMs(report.compileMs)} · validated ${fmtMs(report.validateMs)}`;
+        + ` · ${report.draft} · compiled ${formatMs(report.compileMs)} · validated ${formatMs(report.validateMs)}`;
       const panels = [{ id: 'verdict', label: 'Verdict', kind: 'note', tone: report.valid ? 'ok' : 'warn', text: summary }];
       if (errs.length) {
         panels.push({

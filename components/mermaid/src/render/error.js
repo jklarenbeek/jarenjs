@@ -4,39 +4,47 @@
  * throws: a parse/layout failure becomes a clear error box — message +
  * offending line — mirroring Mermaid's own error box, keyed so the
  * patcher swaps it cleanly.
+ *
+ * It themes like every other diagram (DESIGN.md §7): concrete colors ride
+ * as presentation attributes so `toSvgString()` stays standalone-valid,
+ * and the root carries the inline `--mm-*` stamp plus a class per shape,
+ * so a host theme re-colors the error box along with the diagrams it
+ * replaces. The font is pinned to monospace because the box quotes source.
  */
 
-import { rect, textAt } from '@jarenjs/view/helpers';
+import { rect, svgRoot, textAt } from '@jarenjs/view/helpers';
 import { hashContent } from '../utils.js';
+import { createTheme } from '../theme.js';
 
 /**
  * @param {string} message
  * @param {number} [line]
  * @param {string} [sourceLine] the offending source line, if known
+ * @param {ReturnType<typeof createTheme>} [theme] the resolved theme; the
+ *   default keeps the vnode renderable on its own (a parse failure has no
+ *   document to read a theme from)
  * @returns {any} an SVG error vnode
  */
-export function errorVnode(message, line = 0, sourceLine = '') {
+export function errorVnode(message, line = 0, sourceLine = '', theme = createTheme('default')) {
   const width = 520;
   const height = sourceLine ? 96 : 72;
   const key = 'mmerr-' + hashContent(message + ':' + line);
   const lineLabel = line > 0 ? `Line ${line}: ` : '';
-  return ['svg', {
-    class: 'mermaid mm-error',
-    role: 'img',
-    xmlns: 'http://www.w3.org/2000/svg',
-    viewBox: `0 0 ${width} ${height}`,
-    width,
-    height,
-    key,
-    style: { 'max-width': '100%', 'font-family': 'monospace' },
-  },
-    rect(1, 1, width - 2, height - 2, { rx: 6, fill: '#fdf2f2', stroke: '#e74c3c', 'stroke-width': 1.5 }),
-    textAt(14, 26, 'Mermaid parse error', 14, { 'font-weight': 'bold', fill: '#c0392b' }),
-    textAt(14, 48, lineLabel + message, 12, { fill: '#7b241c' }),
+  const t = theme.tokens;
+  return svgRoot('mermaid mm-error', width, height, theme, [
+    rect(1, 1, width - 2, height - 2, {
+      rx: 6, class: 'mm-error-box', fill: t.errFill, stroke: t.errStroke, 'stroke-width': 1.5,
+    }),
+    textAt(14, 26, 'Mermaid parse error', 14, {
+      class: 'mm-error-title', 'font-weight': 'bold', fill: t.errTitle,
+    }),
+    textAt(14, 48, lineLabel + message, 12, { class: 'mm-error-msg', fill: t.errText }),
     ...(sourceLine
-      ? [textAt(14, 72, truncate(sourceLine, 72), 12, { fill: '#555', style: { 'white-space': 'pre' } })]
+      ? [textAt(14, 72, truncate(sourceLine, 72), 12, {
+        class: 'mm-error-source', fill: t.errSource, style: { 'white-space': 'pre' },
+      })]
       : []),
-  ];
+  ], key, { fontFamily: 'monospace' });
 }
 
 /**

@@ -22,6 +22,7 @@ import {
 
 import {
   encodeJSONPointerSegment,
+  decodeJSONPointerSegment,
 } from '@jarenjs/json/pointer';
 
 
@@ -38,8 +39,9 @@ export function encodeJsonPointerPath(path, key, index) {
 function decodeJsonPointerKey(key) {
   // Lenient decode: `$ref` fragments arrive here unvalidated, so a stray
   // `~` must pass through instead of throwing like the strict parser does.
-  // RFC 6901 section 4: `~1` before `~0`, or `~01` collapses to `/`.
-  return decodeURIComponent(key).replace(/~1/g, '/').replace(/~0/g, '~');
+  // The percent-decode is this site's own: these keys arrive from a URI
+  // fragment, which the plain reference-token decode knows nothing about.
+  return decodeJSONPointerSegment(decodeURIComponent(key));
 }
 
 export function decodeJsonPointerPath(path) {

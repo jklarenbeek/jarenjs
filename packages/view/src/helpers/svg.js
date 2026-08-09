@@ -82,12 +82,16 @@ export function anchorForAngle(angle) {
  * here rather than in CSS.
  * @param {any[]} children
  * @param {string} [key]
- * @param {{ fit?: boolean }} [options] `fit: false` omits the inline
- *   `max-width`, leaving the element at its natural size for a scrolling frame
+ * @param {{ fit?: boolean, fontFamily?: string }} [options] `fit: false` omits
+ *   the inline `max-width`, leaving the element at its natural size for a
+ *   scrolling frame; `fontFamily` overrides the theme's base font for a root
+ *   whose type is part of its meaning (an error box quotes source, so it sets
+ *   monospace) — it must be written here because the theme variables are
+ *   inline, and an inline font outranks any stylesheet rule
  * @returns {any}
  */
 export function svgRoot(className, width, height, theme, children, key, options = {}) {
-  const style = { ...theme.cssVars, 'font-family': theme.tokens.fontFamily };
+  const style = { ...theme.cssVars, 'font-family': options.fontFamily ?? theme.tokens.fontFamily };
   if (options.fit !== false) style['max-width'] = '100%';
   const props = {
     class: className,

@@ -10,7 +10,7 @@ Everything here follows the house architecture of the schema validator (see [`pa
 |------|---------|
 | `src/basic.js` | string validation for JSON, JSON Pointer, JSONPath (`isValidJSON`, `isValidJSONPointer`, `isValidJSONPathStrict`, ...) |
 | `src/canonical.js` | Canonical JSON (RFC 8785 / JCS): `canonicalizeJson` deterministic serialization for hashing and signing |
-| `src/pointer.js` | the RFC 6901 + Relative JSON Pointer compiler (`compileJSONPointer`, `compileRelativeJSONPointer`, `compileDataRef`) and the write-side encode (`encodeJSONPointerSegment`, `formatJSONPointer`) |
+| `src/pointer.js` | the RFC 6901 + Relative JSON Pointer compiler (`compileJSONPointer`, `compileRelativeJSONPointer`, `compileDataRef`) and the reference-token codec (`encodeJSONPointerSegment`, `decodeJSONPointerSegment`, `formatJSONPointer`) |
 | `src/cow.js` | package-internal copy-on-write core: owned-set state, spine cloning, step encoding (not exported) |
 | `src/patch.js` | JSON Patch (RFC 6902) + JSON Merge Patch (RFC 7396): compiled copy-on-write appliers and the structural diffs |
 | `src/write.js` | standalone write operations: set/insert/remove at pointers, normalized paths, or every JSONPath match |

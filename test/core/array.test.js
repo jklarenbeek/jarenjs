@@ -6,6 +6,7 @@ import {
   getUniqueArray,
   isUniqueArray,
   includesAll,
+  pickAllowed,
 } from '@jarenjs/core/array';
 
 describe('isArrayish', () => {
@@ -122,5 +123,25 @@ describe('includesAll', () => {
   it('should handle mixed types', () => {
     assert.isTrue(includesAll([1, '2', 3], [1, 3]));
     assert.isFalse(includesAll([1, 2, 3], ['1']));
+  });
+});
+
+describe('pickAllowed', () => {
+  it('passes a value that is one of the allowed set', () => {
+    assert.strictEqual(pickAllowed('stage', ['files', 'editor', 'stage'], 'editor'), 'stage');
+    assert.strictEqual(pickAllowed('files', ['files', 'editor', 'stage'], 'editor'), 'files');
+  });
+
+  it('falls back for anything outside the set', () => {
+    assert.strictEqual(pickAllowed('nope', ['a', 'b'], 'a'), 'a');
+    assert.strictEqual(pickAllowed(undefined, ['a', 'b'], 'b'), 'b');
+    assert.strictEqual(pickAllowed(null, ['a', 'b'], 'b'), 'b');
+    assert.strictEqual(pickAllowed(0, ['a', 'b'], 'a'), 'a');
+    assert.strictEqual(pickAllowed({}, ['a', 'b'], 'a'), 'a');
+  });
+
+  it('compares by identity, so a look-alike does not pass', () => {
+    assert.strictEqual(pickAllowed('1', [1, 2], 2), 2);
+    assert.strictEqual(pickAllowed(1, [1, 2], 2), 1);
   });
 });

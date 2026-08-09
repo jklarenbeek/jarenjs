@@ -17,6 +17,12 @@
  *
  * Only the token tables live here; the resolution mechanics are shared
  * (`@jarenjs/view/helpers` `resolveTheme`).
+ *
+ * The error-box tokens are `err*`, not `error*`, and must stay that way:
+ * every root stamps every token, `mm-error` is the class marking a root as
+ * an error box, and a `--mm-error-*` stamp would put that marker on every
+ * healthy diagram — so anything testing the marker by substring would read
+ * a working render as a failure.
  */
 
 import { resolveTheme } from '@jarenjs/view/helpers';
@@ -42,6 +48,11 @@ const THEMES = {
     noteFill: '#fef3c7',
     noteStroke: '#d97706',
     noteText: '#1f2020',
+    errFill: '#fdf2f2',
+    errStroke: '#e74c3c',
+    errTitle: '#c0392b',
+    errText: '#7b241c',
+    errSource: '#555555',
     fontFamily: '"trebuchet ms", verdana, arial, sans-serif',
   },
   dark: {
@@ -63,6 +74,11 @@ const THEMES = {
     noteFill: '#3b3b26',
     noteStroke: '#aaaa33',
     noteText: '#f4f4f4',
+    errFill: '#2b1b1b',
+    errStroke: '#e74c3c',
+    errTitle: '#f5827a',
+    errText: '#f0c9c5',
+    errSource: '#8a8a8a',
     fontFamily: '"trebuchet ms", verdana, arial, sans-serif',
   },
   neutral: {
@@ -84,6 +100,11 @@ const THEMES = {
     noteFill: '#f3f3d9',
     noteStroke: '#b7b76d',
     noteText: '#111',
+    errFill: '#fdf2f2',
+    errStroke: '#e74c3c',
+    errTitle: '#c0392b',
+    errText: '#7b241c',
+    errSource: '#555555',
     fontFamily: '"trebuchet ms", verdana, arial, sans-serif',
   },
   forest: {
@@ -105,6 +126,11 @@ const THEMES = {
     noteFill: '#fff5ad',
     noteStroke: '#aaaa33',
     noteText: '#13540c',
+    errFill: '#fdf2f2',
+    errStroke: '#e74c3c',
+    errTitle: '#c0392b',
+    errText: '#7b241c',
+    errSource: '#555555',
     fontFamily: '"trebuchet ms", verdana, arial, sans-serif',
   },
 };
@@ -134,6 +160,11 @@ export const HOST_VARS = {
   noteFill: '--warn-soft',
   noteStroke: '--warn',
   noteText: '--fg',
+  errFill: '--fail-soft',
+  errStroke: '--fail',
+  errTitle: '--fail',
+  errText: '--fg',
+  errSource: '--muted',
 };
 
 /**

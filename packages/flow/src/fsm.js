@@ -15,27 +15,9 @@
  * suite keeps.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { FlowCompileError, FlowRuntimeError } from './errors.js';
-
-/**
- * @param {unknown} v
- * @returns {v is Record<string, any>}
- */
-function isJsonObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/**
- * Normalize a caught value to an Error. Flow has no host boundaries —
- * the only throw sources here are the query engine's own error classes —
- * so this is belt-and-braces, not hostile-input hardening.
- * @param {unknown} v
- * @returns {Error}
- */
-function asError(v) {
-  return v instanceof Error ? v : new Error(`non-Error thrown (${typeof v})`);
-}
+import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 /**
  * A compiled effect: the registered handler name, the compiled `with`

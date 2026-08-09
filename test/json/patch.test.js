@@ -14,6 +14,7 @@ import {
   JsonPatchCompileError,
   JsonPatchRuntimeError,
   encodeJSONPointerSegment,
+  decodeJSONPointerSegment,
   formatJSONPointer,
 } from '@jarenjs/json';
 
@@ -756,6 +757,22 @@ describe('encodeJSONPointerSegment / formatJSONPointer', () => {
     strictEqual(formatJSONPointer([]), '');
     strictEqual(formatJSONPointer(['a/b', 0, '']), '/a~1b/0/');
     strictEqual(formatJSONPointer(['m~n']), '/m~0n');
+  });
+
+  it('decodes RFC 6901 escapes, inverse of the encoder', () => {
+    strictEqual(decodeJSONPointerSegment('plain'), 'plain');
+    strictEqual(decodeJSONPointerSegment('a~1b'), 'a/b');
+    strictEqual(decodeJSONPointerSegment('m~0n'), 'm~n');
+    strictEqual(decodeJSONPointerSegment('~0~1'), '~/');
+    for (const raw of ['plain', 'a/b', 'm~n', '~/', '~01', '~1', '']) {
+      strictEqual(decodeJSONPointerSegment(encodeJSONPointerSegment(raw)), raw);
+    }
+  });
+
+  it('decodes ~1 before ~0, so ~01 survives as a name', () => {
+    // decoding ~0 first would fold ~01 into ~1 and then into '/'
+    strictEqual(decodeJSONPointerSegment('~01'), '~1');
+    strictEqual(encodeJSONPointerSegment('~1'), '~01');
   });
 });
 

@@ -17,15 +17,8 @@
  * the headless step scope.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { compileFsm } from './fsm.js';
-
-/**
- * @param {unknown} v
- * @returns {v is Record<string, any>}
- */
-function isJsonObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
 
 /**
  * Bake a string as a LITERAL expression leaf: a `$`-leading name must

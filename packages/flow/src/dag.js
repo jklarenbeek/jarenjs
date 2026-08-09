@@ -17,25 +17,9 @@
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { FlowCompileError, FlowRuntimeError } from './errors.js';
-
-/**
- * @param {unknown} v
- * @returns {v is Record<string, any>}
- */
-function isJsonObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** @param {unknown} v @returns {Error} */
-function asError(v) {
-  return v instanceof Error ? v : new Error(`non-Error thrown (${typeof v})`);
-}
-
-/** JSON Pointer segment escaping (RFC 6901) for node ids in docPaths. */
-function escapeSegment(id) {
-  return id.replaceAll('~', '~0').replaceAll('/', '~1');
-}
+import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import { isJsonObject } from '@jarenjs/core/object';
+import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 const KINDS = ['input', 'output', 'const', 'query', 'jslt', 'task'];
 
@@ -133,7 +117,7 @@ export function compileDag(doc, options) {
   const order = Object.keys(doc.nodes);
   for (const id of order) {
     const decl = doc.nodes[id];
-    const base = `/nodes/${escapeSegment(id)}`;
+    const base = `/nodes/${encodeJSONPointerSegment(id)}`;
     if (!isJsonObject(decl) || !KINDS.includes(decl.kind)) {
       throw new FlowCompileError('JF0011',
         `node '${id}' must be an object with a kind from ${KINDS.join('|')}`,

@@ -55,6 +55,11 @@
   --mm-note-fill: #fef3c7;
   --mm-note-stroke: #d97706;
   --mm-note-text: #1f2020;
+  --mm-err-fill: #fdf2f2;
+  --mm-err-stroke: #e74c3c;
+  --mm-err-title: #c0392b;
+  --mm-err-text: #7b241c;
+  --mm-err-source: #555555;
 
   display: block;
   max-width: 100%;
@@ -78,6 +83,10 @@
 .mermaid .mm-note text { fill: var(--mm-note-text); }
 
 .mermaid.mm-error { font-family: monospace; }
+.mermaid .mm-error-box { fill: var(--mm-err-fill); stroke: var(--mm-err-stroke); }
+.mermaid .mm-error-title { fill: var(--mm-err-title); }
+.mermaid .mm-error-msg { fill: var(--mm-err-text); }
+.mermaid .mm-error-source { fill: var(--mm-err-source); }
 
 /* --- dark scheme --------------------------------------------------- */
 .dark .mermaid, .mermaid.dark {
@@ -98,4 +107,9 @@
   --mm-note-fill: #3b3b26;
   --mm-note-stroke: #aaaa33;
   --mm-note-text: #f4f4f4;
+  --mm-err-fill: #2b1b1b;
+  --mm-err-stroke: #e74c3c;
+  --mm-err-title: #f5827a;
+  --mm-err-text: #f0c9c5;
+  --mm-err-source: #8a8a8a;
 }

@@ -19,7 +19,8 @@
  */
 
 import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
-import { stableStringify } from '@jarenjs/core/object';
+import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import { isJsonObject, stableStringify } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
@@ -35,14 +36,8 @@ const AGGREGATE_MEMBERS = new Map([
   ['$min', 'min'], ['$max', 'max'],
 ]);
 
-const isPlainObject = (value) => value !== null && typeof value === 'object'
-  && !Array.isArray(value);
-
-/** Unescape one RFC 6901 token. */
-const unescapeToken = (token) => token.replace(/~1/g, '/').replace(/~0/g, '~');
-
 /** Split an emitted pointer into unescaped segments. */
-const segmentsOf = (path) => path.split('/').slice(1).map(unescapeToken);
+const segmentsOf = (path) => path.split('/').slice(1).map(decodeJSONPointerSegment);
 
 /**
  * Peel the canonical wrappers off a document the way the planner
@@ -55,7 +50,7 @@ function unwrapDocument(document) {
   let offset = 0;
   let limit = null;
   let windowed = false;
-  while (isPlainObject(doc) && Array.isArray(doc.$subsequence)
+  while (isJsonObject(doc) && Array.isArray(doc.$subsequence)
     && Object.keys(doc).length === 1
     && typeof doc.$subsequence[1] === 'number'
     && (doc.$subsequence[2] === undefined || typeof doc.$subsequence[2] === 'number')) {
@@ -66,13 +61,13 @@ function unwrapDocument(document) {
     doc = doc.$subsequence[0];
   }
   let aggregate = null;
-  if (isPlainObject(doc)) {
+  if (isJsonObject(doc)) {
     const keys = Object.keys(doc);
     if (keys.length === 1 && AGGREGATE_MEMBERS.has(keys[0])) {
       aggregate = { name: keys[0], fn: AGGREGATE_MEMBERS.get(keys[0]) };
       doc = doc[keys[0]];
       // a window INSIDE the aggregate is still a windowed aggregate
-      while (isPlainObject(doc) && Array.isArray(doc.$subsequence)
+      while (isJsonObject(doc) && Array.isArray(doc.$subsequence)
         && Object.keys(doc).length === 1) {
         windowed = true;
         doc = doc.$subsequence[0];
@@ -84,7 +79,7 @@ function unwrapDocument(document) {
 
 /** The single for-binding name of a canonical flwor, or null. */
 function bindingNameOf(inner) {
-  if (!isPlainObject(inner) || !isPlainObject(inner.$for)) return null;
+  if (!isJsonObject(inner) || !isJsonObject(inner.$for)) return null;
   const names = Object.keys(inner.$for);
   if (names.length !== 1) return null;
   return inner.$for[names[0]] === '$[*]' ? names[0] : null;
@@ -113,13 +108,13 @@ function documentsSource(binding, where) {
  */
 function recogniseGroupForm(inner) {
   const binding = bindingNameOf(inner);
-  if (binding === null || !isPlainObject(inner.$groupby)) return null;
+  if (binding === null || !isJsonObject(inner.$groupby)) return null;
   const allowed = new Set(['$for', '$where', '$groupby', '$return']);
   if (!Object.keys(inner).every((key) => allowed.has(key))) return null;
   const groupNames = Object.keys(inner.$groupby);
   if (groupNames.length !== 1) return null;
   const group = groupNames[0];
-  if (!isPlainObject(inner.$return)) return null;
+  if (!isJsonObject(inner.$return)) return null;
   const members = [];
   for (const name of Object.keys(inner.$return)) {
     const expr = inner.$return[name];
@@ -127,13 +122,13 @@ function recogniseGroupForm(inner) {
       members.push({ name, kind: 'key', defaulted: false });
       continue;
     }
-    if (isPlainObject(expr) && Array.isArray(expr.$default)
+    if (isJsonObject(expr) && Array.isArray(expr.$default)
       && expr.$default.length === 2 && expr.$default[0] === `$${group}`
       && expr.$default[1] === null && Object.keys(expr).length === 1) {
       members.push({ name, kind: 'key', defaulted: true });
       continue;
     }
-    if (isPlainObject(expr) && Object.keys(expr).length === 1
+    if (isJsonObject(expr) && Object.keys(expr).length === 1
       && AGGREGATE_MEMBERS.has(Object.keys(expr)[0])) {
       const op = Object.keys(expr)[0];
       members.push({ name, kind: 'aggregate', fn: AGGREGATE_MEMBERS.get(op), operand: expr[op] });

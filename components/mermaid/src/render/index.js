@@ -44,7 +44,8 @@ export function diagramToVnode(docOrSource, options = {}) {
     doc = typeof docOrSource === 'string' ? parseMermaid(docOrSource, options) : docOrSource;
   }
   catch (err) {
-    return toError(err, typeof docOrSource === 'string' ? docOrSource : '');
+    // a parse failure has no document, so only the caller's theme is known
+    return toError(err, typeof docOrSource === 'string' ? docOrSource : '', createTheme(options.theme ?? 'default'));
   }
   try {
     const themeArg = options.theme ?? doc.config?.theme ?? doc.config ?? 'default';
@@ -72,20 +73,21 @@ export function diagramToVnode(docOrSource, options = {}) {
     }
   }
   catch (err) {
-    return toError(err, '');
+    return toError(err, '', createTheme(options.theme ?? 'default'));
   }
 }
 
 /**
  * @param {any} err
  * @param {string} source
+ * @param {ReturnType<typeof createTheme>} theme
  * @returns {any}
  */
-function toError(err, source) {
+function toError(err, source, theme) {
   if (err instanceof MermaidParseError) {
     const lines = source.split(/\r\n?|\n/);
     const sourceLine = err.line > 0 && err.line <= lines.length ? lines[err.line - 1] : '';
-    return errorVnode(err.message, err.line, sourceLine);
+    return errorVnode(err.message, err.line, sourceLine, theme);
   }
-  return errorVnode(err && err.message ? String(err.message) : String(err));
+  return errorVnode(err && err.message ? String(err.message) : String(err), 0, '', theme);
 }

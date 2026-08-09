@@ -94,7 +94,7 @@ genuinely name `''`.
 
 `compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
 
-The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`) and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.
+The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`), `decodeJSONPointerSegment(token)` is its inverse for one token (decoding `~1` before `~0`, so a member named `~1` survives the round trip), and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.
 
 `parseJSONPointerPath(pointer)` is the typed variant: it returns
 `(string|number)[]`, narrowing canonical array indexes to numbers

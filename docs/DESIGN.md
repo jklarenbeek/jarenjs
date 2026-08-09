@@ -243,7 +243,11 @@ must match — mermaid (`components/mermaid/src/theme.js` ↔ the `--mm-*` fallb
 - Calc plot series: `series1` = accent blue, `series2` = cyan, `series3` = amber (all
   host-linked where a host token exists). 3-D surfaces shade within the blue family.
 - Mermaid: nodes/actors = accent-soft fill + accent stroke; clusters = neutral
-  surface/border; notes = amber (`--warn` family).
+  surface/border; notes = amber (`--warn` family); the parse-error box = the
+  `--fail`/`--fail-soft` family. Its tokens are named `err*` (`--mm-err-*`),
+  not `error*`: every root stamps every token, and `mm-error` is the class
+  that marks a root as an error box, so an `--mm-error-*` stamp would put
+  that marker on every healthy diagram.
 
 ## 9. Browser chrome & PWA
 

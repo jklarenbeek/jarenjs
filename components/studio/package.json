@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/studio",
   "private": false,
-  "version": "0.30.8",
+  "version": "0.30.9",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -59,11 +59,11 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.30.8",
-    "@jarenjs/validate": "^0.30.8",
-    "@jarenjs/json": "^0.30.8",
-    "@jarenjs/app": "^0.30.8",
-    "@jarenjs/flow": "^0.30.8",
-    "@jarenjs/db": "^0.30.8"
+    "@jarenjs/core": "^0.30.9",
+    "@jarenjs/validate": "^0.30.9",
+    "@jarenjs/json": "^0.30.9",
+    "@jarenjs/app": "^0.30.9",
+    "@jarenjs/flow": "^0.30.9",
+    "@jarenjs/db": "^0.30.9"
   }
 }

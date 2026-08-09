@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/locales",
   "private": false,
-  "version": "0.30.8",
+  "version": "0.30.9",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -90,6 +90,6 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.30.8"
+    "@jarenjs/core": "^0.30.9"
   }
 }
