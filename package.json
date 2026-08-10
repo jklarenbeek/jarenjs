@@ -109,6 +109,8 @@
     "qt3:convert": "node ./benchmark/tools/qt3-convert.js --quiet",
     "benchmark:qt3": "node ./benchmark/qt3-runner.js",
     "benchmark:coverage": "node ./benchmark/coverage.js --dead-code",
+    "docs:benchmarks": "node ./scripts/generate-benchmark-facts.js",
+    "docs:check": "node ./scripts/generate-benchmark-facts.js --check",
     "benchmark:generate": "npm run benchmark:generate --workspace=@jarenjs/website",
     "website:dev": "npm run dev --workspace=@jarenjs/website",
     "website:build": "npm run build --workspace=@jarenjs/website",

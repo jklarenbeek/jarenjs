@@ -59,8 +59,8 @@ megabytes of fixtures you will never run.
 ### Pick the packages you actually need
 
 The dependency arrow is one-way and cycle-free, so a subset is always
-coherent. For server-side or browser **validation only**, five packages
-suffice:
+coherent. For server-side or browser **validation only**, these packages
+suffice — the first three are required, the rest only when their row says so:
 
 | Package | Needed for |
 |---|---|
@@ -71,8 +71,9 @@ suffice:
 | `@jarenjs/refs` | Only if you `$ref` the official meta-schemas offline |
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
 
-`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `josl`,
-`ai`, `flow`, `linq` and `db` are independent of that set — leave them out unless you use them.
+`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
+`play`, `josl`, `ai`, `flow`, `linq` and `db` are independent of that set — leave
+them out unless you use them.
 
 ### Wire the packages into your workspace
 

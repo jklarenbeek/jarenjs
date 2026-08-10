@@ -261,19 +261,18 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 Measured, not claimed — `npm run benchmark:markdown`, 2026-07-19, Node
 v22.22.2 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: ~75 µs for a typical ~2 kB document, ~0.30 ms for
-  ~10 kB, ~3.0 ms for ~100 kB — linear in input. A CPU profile puts the
+- **Parse to AST**: <!--bm:md.parseTimes-->~0.12 ms for a typical ~2 kB document, ~0.49 ms for ~10 kB, ~4.9 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
   inline phase at ~36% of that and the source hash for `meta.hash` at
   ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
   `/\s+$/` regex at paragraph close with a scan was worth 4–17%
   depending on how paragraph-dense the document is — measured as an A/B
   on this corpus, because the same change looked like noise on a
   differently shaped one.)
-- **Parse + render to HTML** (the cross-engine row): within 1.1–1.5x of
-  `marked` and `markdown-it`, 6–15x faster than `micromark`, on the
+- **Parse + render to HTML** (the cross-engine row): within <!--bm:md.vsPeers-->1.2–1.9<!--/bm-->x of
+  `marked` and `markdown-it`, <!--bm:md.vsMicromark-->6.0–10.5<!--/bm-->x faster than `micromark`, on the
   same GFM documents.
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
-  the cached projection in ~30 ns — and because block vnodes carry
+  the cached projection in <!--bm:md.cachedNs-->53–96<!--/bm--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
   vnodes, the view patcher skips unchanged blocks in O(1). A JSLT
   identity transform returns the document by reference; a partial

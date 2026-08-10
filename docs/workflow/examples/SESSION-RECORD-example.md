@@ -22,7 +22,7 @@ resolving (see Decisions & divergences).
   HTTP-date, capped by maxMs when the date is far off')` to the
   `ai — the retry policy` suite, using the suite's own `scriptedClient`
   helper; the work order's sole in-scope file.
-- `workflow/examples/SESSION-RECORD-example.md` — this record (created).
+- `docs/workflow/examples/SESSION-RECORD-example.md` — this record (created).
 - `packages/ai/src/client.js` — temporarily mutated twice (HTTP-date
   branch of `retryAfterMs` removed for the checklist's kill-check, then
   restored exactly); net unchanged by this session.

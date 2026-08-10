@@ -108,3 +108,6 @@ harness/
 # playwright artifacts
 test-results/
 playwright-report/
+
+# generated on every website build from the git revision (scripts/generate-build-info.js)
+packages/website/public/build.json

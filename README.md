@@ -8,25 +8,27 @@ Every engine in the repository follows one philosophy: **parse and decide everyt
 
 ## ✅ Conformance & Speed
 
-Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)** — including the optional format suites — for all benchmarked drafts, while being faster than Ajv on roughly four of five individual test cases in every draft and about twice as fast on the success-only totals. All numbers below were measured on 2026-07-21 with Node v22.22.2; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
+Jaren passes **100% of the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)** — including the optional format suites — for all benchmarked drafts, while being faster than Ajv on roughly four of five individual test cases in every draft and about twice as fast on the success-only totals. All numbers below were measured on <!--bm:benchmarks.measured-->2026-08-02 with Node v22.22.2<!--/bm-->; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
 
 ### @jarenjs/validate — vs Ajv over the official suite
 
 `node benchmark/profiler.js --profile-all --draft draft7,draft2019-09,draft2020-12` (1000 iterations per test; the time totals cover the *success-only* tests, i.e. those Ajv can also compile and pass — Jaren additionally passes every test Ajv fails):
 
+<!--bm:validate.table-->
 | Draft | Jaren | Ajv | Success-only totals | Jaren faster on |
 |---|---|---|---|---|
-| draft-07 | **308 passed, 0 failed, 0 errors** | 294 passed, 13 failed, 1 error | **122 ms** vs 249 ms | 266 of 294 tests |
-| 2019-09 | **425 passed, 0 failed, 0 errors** | 406 passed, 15 failed, 4 errors | **195 ms** vs 382 ms | 332 of 406 tests |
-| 2020-12 | **433 passed, 0 failed, 0 errors** | 390 passed, 33 failed, 10 errors | **170 ms** vs 330 ms | 306 of 390 tests |
+| draft-07 | **308 passed, 0 failed, 0 errors** | 294 passed, 13 failed, 1 error | **112 ms** vs 250 ms | 269 of 294 tests |
+| 2019-09 | **425 passed, 0 failed, 0 errors** | 406 passed, 15 failed, 4 errors | **192 ms** vs 389 ms | 337 of 406 tests |
+| 2020-12 | **433 passed, 0 failed, 0 errors** | 390 passed, 33 failed, 10 errors | **161 ms** vs 352 ms | 317 of 390 tests |
+<!--/bm-->
 
 These runs exercise `@jarenjs/formats` and `@jarenjs/refs` too: the optional format suites are included, and every draft's bundled meta-schemas are in play. `unevaluatedProperties`/`unevaluatedItems` checks that sibling keywords make unreachable are compiled away entirely, so the `unevaluated*` outliers that once dragged the 2020-12 totals to a near-tie are gone; per-test medians favor Jaren in all three drafts.
 
 ### @jarenjs/json — four compiled engines, five benchmarks
 
-- **JSONPath** (`npm run benchmark:jsonpath`, `:profile`): **all 703 tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass (normalized paths included; json-p3 also passes 703). Performance vs [json-p3](https://www.npmjs.com/package/json-p3): **18.7x faster on the CTS mean** (151 ns vs 2.81 µs per query), and 4.9x (singular) to 81.8x (descendant `$..value`) on the synthetic 1000-item scenarios.
+- **JSONPath** (`npm run benchmark:jsonpath`, `:profile`): **all 703 tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass (normalized paths included; json-p3 also passes 703). Performance vs [json-p3](https://www.npmjs.com/package/json-p3): **<!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean** (<!--bm:jsonpath.ctsTimes-->157 ns vs 3.61 µs<!--/bm--> per query), and 4.9x (singular) to 81.8x (descendant `$..value`) on the synthetic 1000-item scenarios.
 - **JSON Pointer** (`npm run benchmark:jsonpointer`): compiled getters resolve absolute pointers **12–16x faster** than the interpretive resolver they replaced and relative pointers (the `$data` hot path) **4–16x faster**, beating the `jsonpointer` npm package on every scenario (escaped keys by an order of magnitude).
-- **Jaren JSON Query** (`npm run benchmark:jsonquery:profile`): **14–215x faster** than [fontoxpath](https://www.npmjs.com/package/fontoxpath) (XQuery 3.1 in JavaScript) and **10–63x faster** than [jsonata](https://www.npmjs.com/package/jsonata) across the scenario matrix (filter, join, group, reshape at 4 → 10,000 books); compiles a query in 24 µs — 18.9x faster than fontoxpath, 2.7x faster than jsonata.
+- **Jaren JSON Query** (`npm run benchmark:jsonquery:profile`): **14–215x faster** than [fontoxpath](https://www.npmjs.com/package/fontoxpath) (XQuery 3.1 in JavaScript) and **10–63x faster** than [jsonata](https://www.npmjs.com/package/jsonata) across the scenario matrix (filter, join, group, reshape at 4 → 10,000 books); compiles a query in <!--bm:jsonquery.compile-->39 µs — 13.8x faster than fontoxpath, 2.8x faster than jsonata<!--/bm-->.
 - **JSLT** (`npm run benchmark:jslt:profile`): the identity transform returns the input reference in **24–81 ns** regardless of document size (proof-of-no-change sharing; native JS and JSONata deep-copy in milliseconds), and every expressible transformation beats JSONata's transform operator by **6.6–45x**. Hand-written per-scenario JavaScript remains 3.4–143x faster than the generic dispatcher — the honestly measured cost of the abstraction.
 - **QT3 scorecard** (`npm run benchmark:qt3`): the W3C XQuery/XPath 3.1 suite (31,821 cases) runs through the XQuery text front-end with **zero unattributed failures** — 1,858 passes, 21,191 honestly classified as outside the text subset, 540 attributed to the format's documented deviations, 0 regressions against the committed baseline.
 
@@ -218,9 +220,10 @@ I will look up what that means, later...
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the monorepo fits together and the shared compile-to-closures design; each package links its own deeper ARCHITECTURE document from there.
 - [ROADMAP.md](docs/ROADMAP.md) — release milestones and the open work per package. It lists what is *not* done: shipped capability is documented in the package docs, not there.
 - [REFACTOR.md](docs/REFACTOR.md) — the reusable codebase-health playbook: find duplication, collapse it into the right parent package, repair drifted documentation, and the gate a pass must end on.
-- [workflow/](workflow/) — the context-free, work-order development workflow this monorepo was built with, committed as a reusable harness. [`CONVENTIONS.md`](workflow/CONVENTIONS.md) binds the rules, [`BOOTSTRAP.md`](workflow/BOOTSTRAP.md) is the fresh-session prompt, and [`examples/`](workflow/examples/) holds a real work order executed from the bootstrap alone together with the session record it produced.
+- [CAMPAIGN.md](docs/CAMPAIGN.md) — how a body of work too large for one session becomes a campaign: a router that settles the decisions once and numbered, self-contained work orders. The authoring playbook — measure before planning, what the router must contain, how orders are scoped and sequenced, and the rails a campaign ends on.
+- [workflow/](docs/workflow/) — the context-free, work-order development workflow this monorepo was built with, committed as a reusable harness. [`CONVENTIONS.md`](docs/workflow/CONVENTIONS.md) binds the rules, [`BOOTSTRAP.md`](docs/workflow/BOOTSTRAP.md) is the fresh-session prompt, and [`examples/`](docs/workflow/examples/) holds a real work order executed from the bootstrap alone together with the session record it produced.
 - [DESIGN.md](docs/DESIGN.md) — the visual design system and UI/UX constraints for the website and the visual components: brand palette, token vocabulary, spacing scale, breakpoints, accessibility rules and the host-linked theming architecture.
-- [PUBLISHING.md](docs/PUBLISHING.md) — npm authentication, synchronized versioning, the compatibility policy, release checks and publishing the nineteen public workspaces.
+- [PUBLISHING.md](docs/PUBLISHING.md) — npm authentication, synchronized versioning, the compatibility policy, release checks and publishing the public workspaces.
 - [SECURITY.md](docs/SECURITY.md) — how to report a vulnerability privately, what is in scope, and the supply-chain posture.
 - [benchmark/README.md](benchmark/README.md) — the complete measuring and debugging toolbox: conformance suites, profilers, the test-failure debugger, code coverage, call graphs, and the QT3 scorecard.
 - Language specifications: [QUERY-FORMAT.md](packages/json/docs/QUERY-FORMAT.md) (the Jaren JSON Query format), [JSLT-FORMAT.md](packages/json/docs/JSLT-FORMAT.md) (the JSLT stylesheet format), [XQUERY-FRONTEND.md](packages/json/docs/XQUERY-FRONTEND.md) (the XQuery text subset), [VIEW-FORMAT.md](packages/view/docs/VIEW-FORMAT.md) (the vnode format), [APP-FORMAT.md](packages/app/docs/APP-FORMAT.md) (the app document format).

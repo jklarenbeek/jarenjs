@@ -365,14 +365,16 @@ this is text.
 [csv-spectrum](https://www.npmjs.com/package/csv-spectrum), the de-facto
 acceptance corpus, and on a scorecard of damaged documents.
 
+<!--bm:csv.table-->
 | engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |
 | --- | --- | --- | --- | --- |
-| **jaren** | **11/11** | 1.9 ms | 3.4 ms | 1.4 ms |
+| **jaren** | **11/11** | 2.0 ms | 3.6 ms | 1.4 ms |
 | udsv | 11/11 | **1.5 ms** | **3.0 ms** | **1.0 ms** |
-| papaparse | 11/11 | 5.4 ms | 8.2 ms | 2.3 ms |
-| csv-parse | 11/11 | 19.5 ms | 13.6 ms | 12.7 ms |
-| d3-dsv | 11/11 | 2.8 ms | 4.7 ms | 1.8 ms |
-| @vanillaes/csv | n/a | 7.7 ms | 9.8 ms | 5.6 ms |
+| papaparse | 11/11 | 5.5 ms | 8.0 ms | 2.2 ms |
+| csv-parse | 11/11 | 20.2 ms | 14.0 ms | 12.4 ms |
+| d3-dsv | 11/11 | 4.3 ms | 6.3 ms | 2.6 ms |
+| @vanillaes/csv | n/a | 7.5 ms | 9.6 ms | 6.1 ms |
+<!--/bm-->
 
 (The suite's twelfth fixture, `location_coordinates`, is excluded: its
 expectation is a bare object where every other case is an array, its

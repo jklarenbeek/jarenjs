@@ -261,7 +261,7 @@ detection + Jison + validation — so it is heavy and noisy; these are
 representative, not a bare-grammar microbenchmark.)
 
 The headless **parse → layout → SVG string** rows are jaren-only
-(~0.35 ms for a 25-node flowchart, ~1.1 ms at 100 nodes): mermaid.js
+(<!--bm:mermaid.svgMs-->~0.46 ms for a 25-node flowchart, ~1.4 ms at 100 nodes<!--/bm-->): mermaid.js
 needs a browser DOM (`getBBox`) to render, so there is no fair
 full-render head-to-head — producing a complete standalone SVG in pure
 Node is a capability it lacks.

@@ -190,7 +190,7 @@ built with `@jarenjs/flow` and XState v5 and asserted to agree before
 timing:
 
 - **Transitions** — the pure `step` runs several times faster than an
-  XState actor's `send` (≈6–11× across 5/50/500-state machines); the
+  XState actor's `send` (≈<!--bm:flow.fsmBand-->5.6–8.1<!--/bm-->× across 5/50/500-state machines); the
   `createFsmSession` wrapper is on the page too.
 - **Compile** — `compileFsm` beats `createMachine` + `createActor`
   ≈1.5–2.6×. Not like-for-like: XState builds a scheduling actor, so the

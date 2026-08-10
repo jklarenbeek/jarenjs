@@ -1,7 +1,7 @@
 # WO-EXAMPLE — cover the Retry-After HTTP-date branch of the chat client
 
 Self-contained sample work order (the worked example for
-`workflow/CONVENTIONS.md`). Read first: `packages/ai/src/client.js`
+`docs/workflow/CONVENTIONS.md`). Read first: `packages/ai/src/client.js`
 (the `retryAfterMs` helper and the retry loop in `createChatClient`)
 and `test/ai/client.test.js` (the `ai — the retry policy` suite and its
 `scriptedClient` harness — match its conventions exactly).
@@ -49,4 +49,4 @@ STOP and record it as a divergence instead of patching the client here.
 - [ ] Full gate green: `npm run lint` 0/0, `npm test`,
       `npm run website:build`, `npm run benchmark:coverage` 0 findings.
 - [ ] Session record written to
-      `workflow/examples/SESSION-RECORD-example.md`.
+      `docs/workflow/examples/SESSION-RECORD-example.md`.

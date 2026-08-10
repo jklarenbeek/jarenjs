@@ -95,7 +95,7 @@ split real; it extends `sourceFiles` without changing the contract.
 
 The component is a factory, not a self-mounting widget: the host composes
 its `rules`/`modes`/`viewModel` into the site document and registers the
-DOM-touching widgets. As of v0.28.2 the website mounts it live at
+DOM-touching widgets. The website mounts it live at
 `#/project`:
 
 - the **stage host** boots the active `app` file's assembled document as
