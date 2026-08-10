@@ -26,6 +26,7 @@ export const DB_CODES = Object.freeze({
   JD0005: 'the model document is invalid',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
+  JD0012: 'work waited too long for the open transaction to settle',
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
@@ -49,6 +50,7 @@ export const DB_CODES = Object.freeze({
   JD2051: 'the change log is not enabled',
   JD2060: 'the maintained live state exceeded its bound',
   JD2061: 'another context owns the database',
+  JD2062: 'the store closed with job handlers still in flight',
 });
 
 /**

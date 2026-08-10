@@ -63,6 +63,21 @@ class BunShapedDatabase {
   }
 }
 
+/**
+ * The same double, plus the native lazy row iterator real `bun:sqlite`
+ * has. The plain one deliberately omits it so the driver's
+ * `all()`-composed fallback stays covered; this one proves the binding
+ * FORWARDS a native cursor when the runtime provides one — without which
+ * a query that streams on Node materialises every row in a compiled Bun
+ * binary, on identical code and identical data.
+ */
+class BunShapedDatabaseWithCursor extends BunShapedDatabase {
+  prepare(sql) {
+    const statement = this.db.prepare(sql);
+    return { ...super.prepare(sql), iterate: (...params) => statement.iterate(...params) };
+  }
+}
+
 describe('the import graph (D6)', () => {
   it("the root export's closure contains no node: or bun: specifier", () => {
     const closure = importClosure(path.join(PKG_SRC, 'index.js'));
@@ -241,6 +256,40 @@ describe('the sync-capable helpers', () => {
     });
     const iterated = [...await toPromise(wrapped.iterate([]))];
     assert.deepStrictEqual(iterated.map((r) => r.v), [1, 2]);
+  });
+
+  it('the Bun binding FORWARDS a native cursor when the runtime has one', async () => {
+    // real `bun:sqlite` exposes `Statement.iterate`; the binding used to
+    // assume it did not, so the driver composed a cursor over `all()` and
+    // a query that streams on Node materialised every row on Bun
+    const connection = await toPromise(
+      fromBunModule({ Database: BunShapedDatabaseWithCursor }, ':memory:'));
+    connection.exec('CREATE TABLE t (v INTEGER)');
+    connection.exec('INSERT INTO t VALUES (1), (2), (3)');
+    const statement = connection.prepare('SELECT v FROM t ORDER BY v');
+    const cursor = await toPromise(statement.iterate([]));
+    // a NATIVE cursor yields on demand; the `all()` fallback would already
+    // hold every row before the first `next()`
+    assert.strictEqual(Array.isArray(cursor), false);
+    const first = cursor.next();
+    assert.strictEqual(first.value.v, 1);
+    assert.strictEqual(first.done, false);
+    const rest = [];
+    for (const row of { [Symbol.iterator]: () => cursor }) rest.push(row.v);
+    assert.deepStrictEqual(rest, [2, 3]);
+    connection.close();
+  });
+
+  it('and still composes one over all() when the binding lacks it', async () => {
+    const connection = await toPromise(
+      fromBunModule({ Database: BunShapedDatabase }, ':memory:'));
+    connection.exec('CREATE TABLE t (v INTEGER)');
+    connection.exec('INSERT INTO t VALUES (1), (2)');
+    const statement = connection.prepare('SELECT v FROM t ORDER BY v');
+    const values = [];
+    for (const row of await toPromise(statement.iterate([]))) values.push(row.v);
+    assert.deepStrictEqual(values, [1, 2]);
+    connection.close();
   });
 
   it('adaptNodeDatabase wraps an already-open DatabaseSync, iterating lazily', async () => {

@@ -170,7 +170,7 @@ delete it or fix it.
   [its browser tests](../packages/website/README.md#browser-tests)). The
   accessibility half is untested and unclaimed: dialog focus traps and focus
   restoration under an actual screen reader, AT semantics, and
-  `prefers-reduced-motion`. APP-FORMAT §8.4/§8.5 state the contracts that audit
+  `prefers-reduced-motion`. APP-FORMAT §8.4/§8.7 state the contracts that audit
   would have to prove.
 - [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§8: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).

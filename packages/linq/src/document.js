@@ -13,6 +13,14 @@
  * phrase (default `$return: "$it"`) and opens a new segment iterating
  * the closed one — `orderBy().where()` really does sort first and
  * filter second, exactly as written.
+ *
+ * Empty clause slots carry {@link EMPTY}, never `null`. `null` is a
+ * legal query expression — `where(() => null)` filters everything out,
+ * `select(() => null)` projects nulls, `groupBy(() => null)` is one
+ * null-keyed group — so a slot that used `null` for "nothing here" could
+ * not tell an absent clause from a null-valued one, and silently emitted
+ * the document WITHOUT the clause. Every such query then returned its
+ * unfiltered, unprojected source.
  */
 
 import { LinqBuildError } from './errors.js';
@@ -20,9 +28,15 @@ import { LinqBuildError } from './errors.js';
 /** The fixed clause order a phrase may fill left-to-right. */
 const SLOT_ORDER = ['where', 'groupby', 'orderby', 'return'];
 
+/** The "this clause slot is unfilled" sentinel: a fresh object, so no
+ * value a caller can express is ever mistaken for it. */
+const EMPTY = Symbol('linq.emptySlot');
+
 /** An open FLWOR phrase under construction. */
 function openPhrase(source) {
-  return { source, fold: null, where: null, groupby: null, orderby: null, ret: null };
+  return {
+    source, fold: EMPTY, where: EMPTY, groupby: EMPTY, orderby: EMPTY, ret: EMPTY,
+  };
 }
 
 /** Whether every slot AFTER `slot` is still empty — chain order must
@@ -30,41 +44,41 @@ function openPhrase(source) {
 function laterSlotsFree(phrase, slot) {
   for (let i = SLOT_ORDER.indexOf(slot) + 1; i < SLOT_ORDER.length; i++) {
     const later = SLOT_ORDER[i];
-    if (phrase[later === 'return' ? 'ret' : later] !== null) return false;
+    if (phrase[later === 'return' ? 'ret' : later] !== EMPTY) return false;
   }
   return true;
 }
 
 /** Whether `slot` may be filled fresh (itself empty, order respected). */
 function slotFree(phrase, slot) {
-  return phrase[slot === 'return' ? 'ret' : slot] === null
+  return phrase[slot === 'return' ? 'ret' : slot] === EMPTY
     && laterSlotsFree(phrase, slot);
 }
 
 /** Close a phrase into a query expression. */
 function closePhrase(phrase) {
-  const untouched = phrase.fold === null && phrase.where === null
-    && phrase.groupby === null && phrase.orderby === null && phrase.ret === null;
+  const untouched = phrase.fold === EMPTY && phrase.where === EMPTY
+    && phrase.groupby === EMPTY && phrase.orderby === EMPTY && phrase.ret === EMPTY;
   if (untouched) return phrase.source;
   const doc = {};
-  if (phrase.fold !== null) doc.$fold = { acc: phrase.fold };
+  if (phrase.fold !== EMPTY) doc.$fold = { acc: phrase.fold };
   doc.$for = { it: phrase.source };
-  if (phrase.where !== null) doc.$where = phrase.where;
-  if (phrase.groupby !== null) doc.$groupby = { g: phrase.groupby };
-  if (phrase.orderby !== null) {
+  if (phrase.where !== EMPTY) doc.$where = phrase.where;
+  if (phrase.groupby !== EMPTY) doc.$groupby = { g: phrase.groupby };
+  if (phrase.orderby !== EMPTY) {
     doc.$orderby = phrase.orderby.length === 1 ? phrase.orderby[0] : phrase.orderby;
   }
   // the default group shape: an object member takes exactly one item,
   // so the member sequence packs into an array constructor and an
   // empty grouping key reads as null
-  doc.$return = phrase.ret ?? (phrase.groupby !== null
+  doc.$return = phrase.ret !== EMPTY ? phrase.ret : (phrase.groupby !== EMPTY
     ? { key: { $default: ['$g', null] }, items: ['$it'] }
     : '$it');
   return doc;
 }
 
 /** Combine two predicates. */
-const andJoin = (a, b) => (a === null ? b : { $and: [a, b] });
+const andJoin = (a, b) => (a === EMPTY ? b : { $and: [a, b] });
 
 /**
  * Emit the query document for a stage list.
@@ -97,7 +111,7 @@ export function emitDocument(root, stages) {
         phrase.orderby = [stage.spec];
         break;
       case 'thenBy': {
-        if (phrase.orderby === null || phrase.ret !== null) {
+        if (phrase.orderby === EMPTY || phrase.ret !== EMPTY) {
           throw new LinqBuildError('JL0005',
             'thenBy/thenByDescending must directly follow orderBy/orderByDescending');
         }
@@ -121,8 +135,8 @@ export function emitDocument(root, stages) {
       case 'aggregate': {
         // the seeded fold: its own phrase, closed immediately — the
         // result is one accumulated value, not a tuple stream
-        if (phrase.fold !== null || phrase.where !== null || phrase.groupby !== null
-          || phrase.orderby !== null || phrase.ret !== null) reseat();
+        if (phrase.fold !== EMPTY || phrase.where !== EMPTY || phrase.groupby !== EMPTY
+          || phrase.orderby !== EMPTY || phrase.ret !== EMPTY) reseat();
         phrase.fold = stage.seed;
         phrase.ret = stage.step;
         reseat();

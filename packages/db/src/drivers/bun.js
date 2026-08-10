@@ -10,6 +10,12 @@
  * `bun:sqlite`'s `Database` exposes no `function`, no `aggregate` and
  * no `createSession` — on Bun the UDF hatch does not exist and there
  * is no session-based change capture. The capability table says so.
+ *
+ * What it DOES expose is a native lazy row iterator, forwarded below.
+ * Without it the driver's generic fallback composes a cursor over
+ * `all()`, which materialises every row first — so a query that streams
+ * on Node would spike memory in a compiled Bun binary, on the same code
+ * and the same data. A cursor that is not lazy is not a cursor.
  */
 
 import { lazyOpen, openConnection } from '../driver.js';
@@ -20,9 +26,10 @@ import { sqliteDialect } from '../dialects/sqlite.js';
  * with its shape) into a probed connection. Exported so the adapter is
  * exercisable without the builtin.
  * @param {any} db - A Bun `Database`-shaped database
+ * @param {{ queueTimeout?: number }} [options]
  * @returns {any} a Connection, or a promise of one
  */
-export function adaptBunDatabase(db) {
+export function adaptBunDatabase(db, options) {
   const raw = {
     /** @param {string} sql */
     exec: (sql) => db.run(sql),
@@ -36,8 +43,12 @@ export function adaptBunDatabase(db) {
         // create-or-verify and absence check misfires
         get: (params = []) => statement.get(...params) ?? undefined,
         all: (params = []) => statement.all(...params),
-        // no native lazy row iterator is assumed; the driver-level
-        // wrapper composes one over `all`
+        // the native lazy iterator when this build has one; the
+        // driver-level wrapper composes one over `all` when it does not,
+        // and `iterate` stays absent here so that fallback is reached
+        ...(typeof statement.iterate === 'function'
+          ? { iterate: (params = []) => statement.iterate(...params) }
+          : undefined),
       };
     },
     close: () => db.close(),
@@ -45,6 +56,7 @@ export function adaptBunDatabase(db) {
   return openConnection(raw, {
     dialect: sqliteDialect,
     synchronous: true,
+    queueTimeout: options?.queueTimeout,
     declared: {
       sessions: false,
       userFunctions: false,
@@ -60,13 +72,13 @@ export function adaptBunDatabase(db) {
  * substitute module.
  * @param {any} mod - The `bun:sqlite` module (or a substitute)
  * @param {string} path
- * @param {{ readOnly?: boolean }} [options]
+ * @param {{ readOnly?: boolean, queueTimeout?: number }} [options]
  * @returns {any}
  */
 export function fromBunModule(mod, path, options) {
   return adaptBunDatabase(options?.readOnly === true
     ? new mod.Database(path, { readonly: true })
-    : new mod.Database(path));
+    : new mod.Database(path), options);
 }
 
 /**
@@ -79,6 +91,7 @@ export function bunDriver() {
     dialect: sqliteDialect,
     /**
      * @param {string} path
+     * @param {{ readOnly?: boolean, queueTimeout?: number }} [options]
      * @returns {Promise<any>}
      */
     open: (path, options) => lazyOpen('bun:sqlite',

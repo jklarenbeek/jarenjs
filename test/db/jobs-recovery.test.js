@@ -177,13 +177,19 @@ describe('recovery: the reclaimed job RESUMES from its checkpoint', () => {
       assert.strictEqual(job.attempts, 2);
       assert.deepStrictEqual(seen, ['A', 'B']);
 
-      await workerB.stop();
-      // worker A is wedged on purpose: closing its store must not hang
-      // the test — stop only B's loops, then close B's store.
+      assert.deepStrictEqual(await workerB.stop(), { drained: true, inFlight: 0 });
       await storeB.close();
+
+      // Worker A is wedged on purpose, and closing its store must still
+      // release the file. `close()` signals abort, waits out the grace
+      // period, closes the connection anyway, and REPORTS the handler it
+      // could not wait for — the alternative, waiting forever, is what
+      // used to leave a locked database behind.
+      await assert.rejects(() => storeA.close({ graceMs: 20 }),
+        (error) => /** @type {any} */ (error).code === 'JD2062');
       cleanup();
     }
-    finally { /* cleanup ran above; the wedged worker dies with the process */ }
+    finally { /* cleanup ran above */ }
   });
 
   it('checkpoint rows are pruned on completion and kept for the dead', async () => {

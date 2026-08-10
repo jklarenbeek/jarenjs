@@ -12,7 +12,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { compileDag } from '@jarenjs/flow';
 import { openStore, createDagJobRunner, JOBS_TABLE } from '@jarenjs/db';
@@ -54,10 +54,12 @@ describe('the injection boundary', () => {
     const srcDir = new URL('../../packages/db/src/', import.meta.url);
     const walk = (dir) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir.pathname ?? String(dir), entry.name);
         if (entry.isDirectory()) walk(new URL(`${entry.name}/`, dir));
         else if (entry.name.endsWith('.js')) {
-          const text = fs.readFileSync(full, 'utf8');
+          // a file URL's `pathname` is not a filesystem path — on Windows
+          // it carries a leading slash before the drive letter, which
+          // `path.join` turns into `C:\C:\…`
+          const text = fs.readFileSync(fileURLToPath(new URL(entry.name, dir)), 'utf8');
           assert.ok(!/(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]@jarenjs\/flow/.test(text),
             `${entry.name} must not import @jarenjs/flow`);
         }

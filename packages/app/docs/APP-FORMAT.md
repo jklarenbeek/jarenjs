@@ -416,7 +416,9 @@ queue drain evaluates and applies transitions. A dispatch made from an
 effect handler, a state listener, a transaction observer, a
 subscription handler or callback, a widget `emit`, or any lifecycle
 hook **queues behind the current transaction** — dispatches never
-nest. Within a transaction the order is fixed:
+nest. `setState` (§8.5) is a transaction on the same queue, so nothing
+that changes state runs outside it. Within a transaction the order is
+fixed:
 
 1. action evaluation and state commit;
 2. effect invocation;
@@ -536,7 +538,53 @@ bounding rect. `app.destroy()` cancels pending intents through the
 handler's `dispose()`. A headless app never flushes — the queue is a
 documented no-op there.
 
-### 8.5 Accessible component contracts (non-normative)
+### 8.5 `setState` is a transaction
+
+`app.setState(next)` replaces the whole state from OUTSIDE the action
+loop — SSR hydration, or a studio hot-swapping an edited `state` block
+into a running app without a reboot. It runs no reducer and no effects,
+notifies listeners with `null` changed-paths, refreshes `when`-gated
+subscriptions and schedules one render.
+
+It is public, so it is a contract, and it holds every guarantee §8.1
+gives a dispatch:
+
+- it **takes its turn** in the FIFO queue, so a replacement requested
+  from inside a listener, effect or subscription handler queues behind
+  the transaction that is running rather than interleaving with it;
+- `validateState` **decides before the commit**, with the context
+  `{ previous, action: null, payload: null, changes: null }` — `action`
+  is `null` because no reducer ran, and `changes` is `null` because a
+  replacement changes everything. A rejected replacement is `JA2005` and
+  the state stands;
+- every listener observes the SAME state, in registration order;
+- the turn guard counts it, so a `setState` loop is `JA2010` rather than
+  a hang;
+- observers see one record, `source: 'setState'`, `changedPaths: null`;
+- a parked sink failure settles **at the `setState` caller**, not out of
+  the next unrelated dispatch.
+
+A reference-identical replacement is a `noop`; a call after `stop()` or
+`destroy()` does nothing.
+
+### 8.6 Subscription ownership
+
+A subscription slot is OWNED from before its handler runs, not from
+after it returns. A handler is host code and can reach the app surface,
+so it can re-enter reconciliation; a slot that only became live on the
+way out looked startable to that re-entry, started again, and each
+return overwrote the single cleanup slot — leaking every acquisition but
+the last, past `destroy()`. The claim-first rule means one live slot is
+one start and one release, whatever the handler does.
+
+The `for` fan-out bound (`maxSubInstances`) stops the WORK, not just the
+retention: enumeration halts the moment the bound is crossed and reports
+`JA2017` with how many items were left. Bounding only what is kept still
+ran every key and props expression of a runaway query first, so the
+limit cost memory and CPU proportional to the mistake it existed to
+contain.
+
+### 8.7 Accessible component contracts (non-normative)
 
 The format's accessibility position: **the widget escape hatch is not
 an accessibility escape hatch**, and the primitives above exist so the

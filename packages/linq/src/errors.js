@@ -25,6 +25,7 @@ export const LINQ_CODES = Object.freeze({
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
+  JL2004: 'an asynchronous provider cannot back the synchronous surface',
 });
 
 /**
@@ -72,6 +73,10 @@ export class LinqBuildError extends CodedError {
  *  - `JL2002` — `single()`/`singleOrDefault()` over two or more
  *    elements
  *  - `JL2003` — `elementAt(i)` with no element at position `i`
+ *  - `JL2004` — a provider's `execute()` answered a promise. A
+ *    `Sequence` terminal is a value (`toArray(): T[]`), so a promise
+ *    cannot be returned under that type; emit `toDocument()` and await
+ *    the provider directly instead.
  */
 export class LinqRuntimeError extends CodedError {
   /**

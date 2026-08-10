@@ -66,13 +66,18 @@ describe('every JL code fires', () => {
     assert.throws(() => from([]).first(), (e) => e instanceof LinqRuntimeError && e.code === 'JL2001');
     assert.throws(() => from([1, 2]).single(), (e) => e.code === 'JL2002');
     assert.throws(() => from([1]).elementAt(5), (e) => e.code === 'JL2003');
+    // an asynchronous provider cannot back a synchronous terminal: the
+    // promise used to be returned under the value's type, so `count()`
+    // handed back a Promise typed `number` and `first()` read undefined
+    assert.throws(() => from({ execute: async () => [[1]] }).toArray(),
+      (e) => e instanceof LinqRuntimeError && e.code === 'JL2004');
   });
 
   it('LINQ_CODES is frozen and covers exactly the raised codes', () => {
     assert.strictEqual(Object.isFrozen(LINQ_CODES), true);
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006',
-      'JL2001', 'JL2002', 'JL2003',
+      'JL2001', 'JL2002', 'JL2003', 'JL2004',
     ]);
   });
 

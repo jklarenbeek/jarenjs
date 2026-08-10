@@ -133,9 +133,33 @@ q.toArray(); // [2, 3, 4] — the source was read AGAIN
 ```
 
 The compiled query is shared through a bounded cache keyed by the
-document's content (`contentKey`), so re-enumeration is cheap without
-pretending the results are frozen. `for…of` a sequence iterates
-`toArray()`'s result (one enumeration per loop).
+document's COMPLETE structural identity (`semanticKey`), so
+re-enumeration is cheap without pretending the results are frozen.
+A 32-bit fingerprint would not do here: it collides after tens of
+thousands of documents, and a collision means one query runs another
+query's compiled program — wrong rows, cache hit reported, nothing said.
+`for…of` a sequence iterates `toArray()`'s result (one enumeration per
+loop).
+
+**`toDocument()` is a deep snapshot.** A sequence is immutable, so the
+document it hands out is an independent tree: writing into a returned
+document cannot change what a later enumeration answers.
+
+**A `null` a callback returns is a VALUE, not an absent clause.**
+`where(() => null)` filters everything out (null is not true),
+`select(() => null)` projects nulls, `groupBy(() => null)` is one
+null-keyed group, and a null seed still folds. The emitted document
+carries the clause with its null in place.
+
+**A captured constant crosses a real JSON boundary.** The query data
+model is JSON, so a `Date`, `Map`, `Set`, `RegExp` or class instance is
+refused (`JL0005`) rather than embedded — `Object.keys` reports nothing
+for them, so they would embed as `{}` and the query would compare against
+an empty object. `NaN` and `±Infinity` are refused for the same reason
+(JSON has neither, and lenient serialization folds them into `null`), and
+so is `-0`, which shares its JSON text with `0` while dividing to the
+opposite infinity. Convert first — a `Date` to its ISO string or epoch
+number — or bind through `params()`.
 
 ## 6. Terminal semantics
 
@@ -198,10 +222,37 @@ execute(queryDocument, options) -> undefined | item | items[]
   (`undefined` = empty, a single item as itself, several items as an
   array) — the in-memory runner is the reference semantics every
   provider MUST match, and it implements this same interface.
-- 0.1 is synchronous; the asynchronous surface is §§10–12 (reserved).
+- **`execute` is SYNCHRONOUS.** A `Sequence` terminal is a value —
+  `toArray(): T[]`, `count(): number` — so a promise cannot be returned
+  under that type. A provider that answers one is refused with `JL2004`
+  at the seam, because the alternative is not a slow answer but a wrong
+  one: the promise came back typed as the value, `count()` handed a
+  `Promise` to arithmetic, and `first()` indexed the promise and returned
+  `undefined`. An asynchronous provider (a wasm/OPFS driver) is reached
+  by emitting `toDocument()` and awaiting the provider directly.
 
 `@jarenjs/db` implements this contract without either package
 importing the other; a test double proves the document arrives whole.
+
+### 8.1 Compilation registries
+
+`from(source, options)` and `fromDocument(source, doc, options)` take the
+engine's own compile options, so a document that is expressible is also
+executable in memory:
+
+| option | what it enables |
+|---|---|
+| `compileTypeTest` | `ofType`/`cast` (the schema operators) |
+| `collations` | `orderBy(…, { collation })` — a `nl` sort is `JQ0010` without it |
+| `functions` | `$call` in a hand-written or saved document |
+| `pathFunctions` | custom RFC 9535 path function extensions |
+| `limits` | step, sequence and result bounds — the reason a SAVED document can be run at all |
+| `registry` | an explicit cache-partition key, when the hooks above are rebuilt per call |
+
+Compiled documents are cached per registry COMBINATION, not per document
+alone: the same document compiles to different code with and without a
+collation registry, so sharing one partition would answer a caller who
+passed no collations with the compiled-with version.
 
 ## 9. Error codes
 
@@ -224,6 +275,7 @@ Runtime errors (`LinqRuntimeError`):
 | `JL2001` | `first`/`single` found no element |
 | `JL2002` | `single` found more than one element |
 | `JL2003` | `elementAt` is out of range |
+| `JL2004` | an asynchronous provider cannot back the synchronous surface |
 
 Engine errors (`JQ…`) from a hand-written `fromDocument` document pass
 through unwrapped — they already carry their own code and `docPath`.
@@ -250,6 +302,7 @@ because the engine itself materialises for `$orderby`/`$groupby`):
 | `distinct` | stream, with a running key set (the grouping relation: `NaN` groups with `NaN`) |
 | `defaultIfEmpty` | stream (an emptiness flag) |
 | `concat` | stream for a CONSTANT array; another sequence is refused (`JL0005`) — an async source is single-pass and cannot be re-iterated for a second chain |
+| | on the SYNC surface, `concat` also requires the same source: a query document reads one input, so the other sequence contributes its EXPRESSION, and a foreign sequence would have that expression evaluated against THIS source — reading the wrong rows twice instead of concatenating two inputs |
 | `orderBy`/`thenBy`, `groupBy`, `join`, `aggregate`, `reverse` | BARRIER, named by `explain()` with the reason |
 | `count`, `any`, `all`, `first`, `single`, `elementAt` | stream with early exit where semantics allow |
 | `sum`, `average`, `min`, `max`, `last` | consume the stream; the aggregate itself runs through the ENGINE over the collected items, so its semantics (type errors included) are identical to the sync surface |

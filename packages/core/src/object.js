@@ -280,21 +280,161 @@ export function stableStringify(value) {
  * The suite's one MEMO-GRADE content key: `hashContent(stableStringify
  * (value) ?? '')`. Two structurally equal plain-JSON values produce the
  * same key regardless of property insertion order — which is exactly
- * what a cache wants and exactly what `JSON.stringify`-based keys get
- * wrong.
+ * what a reconciliation key wants and exactly what `JSON.stringify`-based
+ * keys get wrong.
  *
- * Two properties a caller must know, inherited from `stableStringify`:
- * **`undefined` members are dropped** (two values differing only in an
- * `undefined` member share a key) and there is **no cycle guard** (a
- * cyclic value overflows the stack). Both are fine for a memo key and
- * wrong for a checksum — for anything hashed, signed or recorded, use
- * `canonicalizeJson` (`@jarenjs/json/canonical`, RFC 8785) instead.
- * Do not conflate the two.
- * @param {*} value - The value to derive a cache key for
+ * **This is a 32-bit FINGERPRINT, never an identity.** Distinct values
+ * DO share a key — the birthday bound puts the first collision around
+ * 65k documents, and one turns up after ~113k trivially different query
+ * documents in practice. So it is sound for a vnode `key`, a DOM id, a
+ * bucket index or a diagnostic label, and WRONG as the sole identity of
+ * anything whose reuse changes a result: a compiled query, a query plan,
+ * a registered SQL function body, a memoized render. For those use
+ * {@link semanticKey}, which compares the whole serialization.
+ *
+ * Two further properties a caller must know, inherited from
+ * `stableStringify`: **`undefined` members are dropped** (two values
+ * differing only in an `undefined` member share a key) and there is
+ * **no cycle guard** (a cyclic value overflows the stack). Both are fine
+ * for a fingerprint and wrong for a checksum — for anything hashed,
+ * signed or recorded, use `canonicalizeJson`
+ * (`@jarenjs/json/canonical`, RFC 8785) instead. Do not conflate the
+ * three.
+ * @param {*} value - The value to derive a fingerprint for
  * @returns {string} base-36 content hash of the stable serialization
  */
 export function contentKey(value) {
   return hashContent(stableStringify(value) ?? '');
+}
+
+/**
+ * The raw tokens {@link semanticKey} uses for the values JSON text cannot
+ * tell apart. Each is emitted UNQUOTED, which alone is enough that no
+ * string can forge one — `JSON.stringify` always puts quotes around a
+ * string. The leading NUL is belt and braces: `JSON.stringify` escapes it
+ * to `\u0000` inside a string, so a token cannot occur in serialized text
+ * at all.
+ *
+ * Written as `\u0000` escapes on purpose. The same character as a literal
+ * byte is invisible in every editor and diff and makes tooling treat the
+ * file as binary, so a test pins that it stays an escape.
+ */
+const SEMANTIC_TOKENS = {
+  undefined: '\u0000undef',
+  nan: '\u0000nan',
+  posInfinity: '\u0000+inf',
+  negInfinity: '\u0000-inf',
+  // -0 needs no sentinel: JSON text for the NUMBER -0 is `0`, so this
+  // two-character form is already unreachable as a number's key
+  negZero: '-0',
+};
+
+/**
+ * Serialize one node of a semantic key, or throw when the value cannot
+ * be keyed injectively.
+ * @param {*} value
+ * @param {string} path - JSON-Pointer-ish trail, for the error message
+ * @param {Set<object>} open - Ancestors on the current path (cycle guard)
+ * @returns {string}
+ */
+function semanticToken(value, path, open) {
+  const refuse = (what) => {
+    throw new TypeError(
+      `semanticKey: ${what} at ${path === '' ? 'the root' : path} cannot be a cache identity`);
+  };
+  if (value === null) return 'null';
+  switch (typeof value) {
+    case 'boolean': return value ? 'true' : 'false';
+    case 'string': return JSON.stringify(value);
+    case 'number':
+      if (Number.isNaN(value)) return SEMANTIC_TOKENS.nan;
+      if (value === Infinity) return SEMANTIC_TOKENS.posInfinity;
+      if (value === -Infinity) return SEMANTIC_TOKENS.negInfinity;
+      // -0 and 0 are one token in JSON text and two values to every
+      // arithmetic the engine performs (1/-0 is -Infinity)
+      return Object.is(value, -0) ? SEMANTIC_TOKENS.negZero : String(value);
+    case 'undefined': return SEMANTIC_TOKENS.undefined;
+    case 'bigint': return `\u0000big${value}`;
+    case 'function': return refuse('a function');
+    case 'symbol': return refuse('a symbol');
+    default: break;
+  }
+  const object = /** @type {object} */ (value);
+  if (open.has(object)) refuse('a cycle');
+  const proto = Object.getPrototypeOf(object);
+  // a symbol-keyed member is data the serialization cannot show, so two
+  // values differing only there would share an identity
+  if (Object.getOwnPropertySymbols(object).length > 0)
+    refuse('a symbol-keyed member');
+  open.add(object);
+  let out;
+  if (Array.isArray(object)) {
+    // a subclass carries behavior the key cannot see
+    if (proto !== Array.prototype) refuse('an Array subclass instance');
+    const items = /** @type {any[]} */ (object);
+    // an own property beyond the elements would vanish positionally
+    for (const key of Object.keys(items)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= items.length)
+        refuse(`the extra array property ${JSON.stringify(key)}`);
+    }
+    out = '[';
+    for (let i = 0; i < items.length; i++)
+      out += (i === 0 ? '' : ',') + semanticToken(items[i], `${path}/${i}`, open);
+    out += ']';
+  }
+  else {
+    // Date, Map, Set, RegExp and every class instance stringify to `{}`
+    // through `Object.keys` — a whole family collapsing onto one key
+    if (proto !== Object.prototype && proto !== null)
+      refuse(`a ${object.constructor?.name ?? 'non-plain'} instance`);
+    const keys = Object.keys(object).sort(compareCodePoints);
+    out = '{';
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      out += (i === 0 ? '' : ',') + JSON.stringify(key) + ':'
+        + semanticToken(/** @type {any} */ (object)[key], `${path}/${key}`, open);
+    }
+    out += '}';
+  }
+  open.delete(object);
+  return out;
+}
+
+/**
+ * The suite's one COLLISION-FREE semantic key: the COMPLETE
+ * deterministic serialization of a plain-data value. Two values share a
+ * key exactly when they are structurally equal, so a cache keyed by it
+ * can never serve one document's compiled semantics for another —
+ * which a hash-only key inevitably does (see {@link contentKey}).
+ *
+ * Use it wherever reuse changes a RESULT: compiled queries, query
+ * plans, load specifications, safe profiles, registered SQL function
+ * bodies, memoized renders. The key is longer than a fingerprint; for a
+ * bounded cache of a few hundred entries that cost is a few kilobytes
+ * and the alternative is wrong data.
+ *
+ * Injective over plain data, and STRICT about the rest: it distinguishes
+ * `-0` from `0`, `NaN`/`±Infinity` from `null` and from each other, and
+ * a present-but-`undefined` member from an absent one — every case
+ * `stableStringify` silently folds together. Values that cannot be
+ * keyed injectively are REFUSED with a `TypeError` rather than folded:
+ * functions, symbols, cycles, and non-plain objects (a `Date`, `Map`,
+ * `RegExp` or class instance, all of which serialize to `{}`), plus the
+ * two members a serialization cannot show — a symbol key, and an own
+ * array property past the last element. A caller that may hold such a
+ * value must treat the refusal as "not cacheable" and compute afresh —
+ * never as "reuse whatever shares the key".
+ *
+ * The identity covers OWN ENUMERABLE string-keyed properties, the same
+ * surface JSON reads. Two values differing only in a non-enumerable
+ * member are one value to this key, as they are to `JSON.stringify`.
+ * @param {*} value - The value to derive an identity for
+ * @returns {string} the complete deterministic serialization
+ * @throws {TypeError} When the value cannot be keyed injectively
+ */
+export function semanticKey(value) {
+  return semanticToken(value, '', new Set());
 }
 
 /**

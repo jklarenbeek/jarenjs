@@ -13,6 +13,20 @@
  * lease_owner=?`: execution is at-least-once, completion is
  * exactly-once. `now` and `random` are injectable — the runtime
  * defaults are the clock and `Math.random`; every test injects.
+ *
+ * The worker LIFECYCLE holds two invariants that a long-running process
+ * depends on, and neither is a detail:
+ *
+ *  - **No handler value can break the loop.** A handler is host code and
+ *    may resolve with something JSON cannot express, or reject with a
+ *    value whose own `message` throws when read. Both are normalized
+ *    totally, and `runOne` is isolated inside the loop, so the worst a
+ *    single job can do is fail its own attempt. A rejected claim-execute
+ *    loop would stop draining the queue silently.
+ *  - **Shutdown is bounded.** Handlers receive an `AbortSignal` and
+ *    `stop()` takes a deadline, so a handler that never settles cannot
+ *    hold `stop()` — and therefore `store.close()`, and therefore the
+ *    database file — open forever.
  */
 
 import { chain } from './driver.js';
@@ -27,7 +41,53 @@ export const JOB_DEFAULTS = Object.freeze({
   pollInterval: 500,
   backoffBase: 1_000,
   backoffCap: 60_000,
+  /** How long `stop()` waits for in-flight handlers after signalling
+   * abort, before it stops waiting and reports what is still running.
+   * Bounded on purpose: an unbounded wait makes one stuck handler
+   * indistinguishable from a hung process. */
+  stopGraceMs: 5_000,
 });
+
+/**
+ * A diagnostic string for ANY value, including ones that fight back — a
+ * getter that throws, a null-prototype object, a revoked proxy, a
+ * symbol. Total by construction: an error report is never the thing that
+ * fails.
+ * @param {any} value
+ * @returns {string}
+ */
+export function describeValue(value) {
+  try {
+    if (value === null || value === undefined) return String(value);
+    if (typeof value === 'symbol') return value.toString();
+    if (typeof value !== 'object') return String(value);
+    const message = /** @type {any} */ (value).message;
+    if (typeof message === 'string') return message;
+    return String(value);
+  }
+  catch {
+    return '[unreportable value]';
+  }
+}
+
+/**
+ * JSON text for a job result, or `null` when the value cannot be
+ * expressed — a BigInt, a cycle, a `toJSON` that throws. The caller
+ * treats that as a failed attempt, never as a broken worker.
+ * @param {any} value
+ * @returns {{ text: string | null } | { reason: string }}
+ */
+export function serializeResult(value) {
+  if (value === undefined || value === null) return { text: null };
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return { reason: 'the result is not representable as JSON' };
+    return { text };
+  }
+  catch (error) {
+    return { reason: `the result could not be serialized: ${describeValue(error)}` };
+  }
+}
 
 const CREATE_JOBS = `CREATE TABLE IF NOT EXISTS "${JOBS_TABLE}" (
   id TEXT PRIMARY KEY,
@@ -178,13 +238,22 @@ export function createJobEngine(options) {
     return Math.round(Math.min(cap, base * 2 ** (attempts - 1)) * (0.5 + random() / 2));
   };
 
-  /** Complete a leased job — guarded, exactly-once (§3). */
-  const complete = (id, owner, result) => chain(
-    prepared('complete', `UPDATE "${JOBS_TABLE}"
-      SET state='done', result=?, lease_until=NULL, updated_at=?
-      WHERE id=? AND state='leased' AND lease_owner=?`).run([
-      result === undefined ? null : JSON.stringify(result), now(), id, owner,
-    ]), (out) => Number(out.changes ?? 0) > 0);
+  /**
+   * Complete a leased job — guarded, exactly-once (§3). A result JSON
+   * cannot express is refused HERE, before any write, so the caller can
+   * fail the attempt instead of the worker.
+   * @throws {TypeError} when the result is not representable
+   */
+  const complete = (id, owner, result) => {
+    const serialized = serializeResult(result);
+    if (!('text' in serialized)) throw new TypeError(serialized.reason);
+    return chain(
+      prepared('complete', `UPDATE "${JOBS_TABLE}"
+        SET state='done', result=?, lease_until=NULL, updated_at=?
+        WHERE id=? AND state='leased' AND lease_owner=?`).run([
+        serialized.text, now(), id, owner,
+      ]), (out) => Number(out.changes ?? 0) > 0);
+  };
 
   /** Fail a leased job: schedule the retry or dead-letter (§4). */
   const fail = (id, owner, error, workerDefaults) => chain(get(id), (job) => {
@@ -198,7 +267,8 @@ export function createJobEngine(options) {
       : prepared('retry', `UPDATE "${JOBS_TABLE}"
           SET state='failed', last_error=?, lease_until=NULL, run_at=?, updated_at=?
           WHERE id=? AND state='leased' AND lease_owner=?`);
-    const message = String(error?.message ?? error);
+    // host code decides what it throws; reading it must not throw back
+    const message = describeValue(error);
     const params = terminal
       ? [message, at, id, owner]
       : [message, at + backoffOf(job.attempts, workerDefaults), at, id, owner];
@@ -298,21 +368,56 @@ export function createJobEngine(options) {
       for (const sleeper of [...sleepers]) sleeper.wake();
     };
 
+    /** Aborted when `stop()` is called: the handler's cue to wind up. */
+    let shutdown = new AbortController();
+    /** In-flight handler count, so `stop()` can report what it left. */
+    let inFlight = 0;
+
+    /**
+     * Record one failed attempt. Reporting a failure must never itself
+     * fail the loop, so a storage error here is swallowed after the
+     * attempt count has already been incremented by the claim.
+     */
+    const recordFailure = async (job, error) => {
+      stats.failures += 1;
+      try {
+        await Promise.resolve(fail(job.id, owner, error, workerOptions));
+      }
+      catch {
+        // the lease will expire and the job will be re-claimed (§5);
+        // a worker must not die because the failure write failed
+      }
+    };
+
     const runOne = async (job) => {
       stats.claims += 1;
-      let result;
+      inFlight += 1;
       try {
-        result = await handlers[job.kind](job.payload, { job, checkpointsFor });
+        let result;
+        try {
+          result = await handlers[job.kind](job.payload,
+            { job, checkpointsFor, signal: shutdown.signal });
+        }
+        catch (error) {
+          await recordFailure(job, error);
+          return;
+        }
+        try {
+          // a §7 handler may have completed transactionally already; the
+          // guarded update makes this a no-op then
+          await Promise.resolve(complete(job.id, owner, result ?? null));
+        }
+        catch (error) {
+          // an unrepresentable result, or a storage failure at the
+          // completion write: this attempt failed, the worker did not
+          await recordFailure(job, error);
+          return;
+        }
+        stats.completions += 1;
       }
-      catch (error) {
-        stats.failures += 1;
-        await Promise.resolve(fail(job.id, owner, error, workerOptions));
-        return;
+      finally {
+        inFlight -= 1;
       }
-      // a §7 handler may have completed transactionally already; the
-      // guarded update makes this a no-op then
-      await Promise.resolve(complete(job.id, owner, result ?? null));
-      stats.completions += 1;
     };
 
     const loop = async () => {
@@ -330,25 +435,52 @@ export function createJobEngine(options) {
           await sleep();
           continue;
         }
-        await runOne(job);
+        try {
+          await runOne(job);
+        }
+        catch {
+          // `runOne` normalizes every handler outcome, so reaching here
+          // means the normalization itself broke. The loop still must not
+          // die: a stopped claim-execute loop drains nothing, silently.
+          stats.failures += 1;
+        }
       }
     };
 
     const worker = {
-      stats: () => ({ ...stats }),
+      stats: () => ({ ...stats, inFlight }),
       start() {
         if (running) throw new TypeError('the worker is already started');
         running = true;
+        shutdown = new AbortController();
         loops = Array.from({ length: concurrency }, () => loop());
         return worker;
       },
-      async stop() {
+      /**
+       * Stop claiming, signal in-flight handlers to abort, and wait for
+       * the loops — but only up to `graceMs`. A handler that ignores its
+       * signal cannot hold the process open; the resolved record says so
+       * instead, and the lease expiry (§5) lets another worker re-claim.
+       * @param {{ graceMs?: number }} [stopOptions]
+       * @returns {Promise<{ drained: boolean, inFlight: number }>}
+       */
+      async stop(stopOptions) {
         running = false;
+        shutdown.abort();
         onWake();
-        await Promise.all(loops);
-        loops = [];
+        const graceMs = stopOptions?.graceMs
+          ?? workerOptions.stopGraceMs ?? defaults.stopGraceMs;
+        /** @type {any} */
+        let timer;
+        const drained = await Promise.race([
+          Promise.all(loops).then(() => true),
+          new Promise((resolve) => { timer = setTimeout(() => resolve(false), graceMs); }),
+        ]);
+        clearTimeout(timer);
+        if (drained) loops = [];
         wakers.delete(onWake);
         workers.delete(worker);
+        return { drained: drained === true, inFlight };
       },
     };
     wakers.add(onWake);
@@ -366,6 +498,10 @@ export function createJobEngine(options) {
     fail,
     checkpointsFor,
     createWorker,
-    stopAll: () => Promise.all([...workers].map((worker) => worker.stop())),
+    /** Stop every worker, bounded. Resolves to the per-worker outcome so
+     * `close()` can report a handler it could not wait out rather than
+     * hanging on it. */
+    stopAll: (stopOptions) =>
+      Promise.all([...workers].map((worker) => worker.stop(stopOptions))),
   };
 }

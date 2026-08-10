@@ -25,6 +25,35 @@ const RESERVED_NAMES = new Set(['it', 'it2', 'acc', 'g']);
 
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * A deep, independent copy of an emitted query document. Plain data
+ * only, which is exactly what a document is — every captured expression
+ * has already passed the JSON-domain boundary in `expression.js`, so
+ * there is nothing here a structural copy would lose.
+ * @param {any} node
+ * @returns {any}
+ */
+function snapshot(node) {
+  if (node === null || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(snapshot);
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const key of Object.keys(node)) defineOwn(out, key, snapshot(node[key]));
+  return out;
+}
+
+/**
+ * Assign an OWN property, so a `__proto__` member stays a member instead
+ * of silently replacing the object's prototype and vanishing.
+ * @param {Record<string, any>} target
+ * @param {string} key
+ * @param {any} value
+ */
+function defineOwn(target, key, value) {
+  Object.defineProperty(target, key,
+    { value, writable: true, enumerable: true, configurable: true });
+}
+
 /** @param {number} value @param {string} what */
 function requireIndex(value, what) {
   if (!Number.isInteger(value) || value < 0) {
@@ -48,7 +77,8 @@ export class Sequence {
    * @param {any} root - the root expression items come from
    * @param {readonly any[]} stages
    * @param {ReadonlyMap<string, any>} params
-   * @param {{ compileTypeTest?: any }} options
+   * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
+   *   pathFunctions?: any, limits?: any, registry?: object }} options
    */
   constructor(source, sourceKind, root, stages, params, options) {
     this.#source = source;
@@ -138,8 +168,8 @@ export class Sequence {
     return this.#with({ kind: 'groupBy', key: this.#capture(key) });
   }
 
-  /** Both join sides read ONE input document in 0.1 — a query document
-   * has one root. Cross-source joins arrive with the relational order.
+  /** Both sides read ONE input document in 0.1 — a query document has
+   * one root. Cross-source composition arrives with the relational order.
    * @param {Sequence} inner @param {string} what */
   #requireSameSource(inner, what) {
     if (!(inner instanceof Sequence)) {
@@ -147,7 +177,7 @@ export class Sequence {
     }
     if (inner.#source !== this.#source) {
       throw new LinqBuildError('JL0005',
-        `${what}'s inner side must derive from the same source in 0.1 — `
+        `${what}'s other side must derive from the same source in 0.1 — `
         + 'a query document reads one input; load both collections under one root '
         + '(the relational order lifts this)');
     }
@@ -210,10 +240,17 @@ export class Sequence {
   }
 
   /** Concatenate another sequence over the SAME source, or a constant
-   * array (embedded verbatim; its elements join the stream). */
+   * array (embedded verbatim; its elements join the stream).
+   *
+   * The same-source check is not a formality. A query document reads ONE
+   * input, so the other sequence contributes its expression, not its
+   * data — and a sequence built over a different source would have its
+   * expression evaluated against THIS source, quietly reading the wrong
+   * rows twice instead of concatenating two inputs. */
   concat(other) {
     let expr;
     if (other instanceof Sequence) {
+      this.#requireSameSource(other, 'concat');
       expr = other.toDocument();
     }
     else if (Array.isArray(other)) {
@@ -291,17 +328,30 @@ export class Sequence {
 
   /** The chain as ONE query document — public API, not a debug toy:
    * loggable, cacheable, storable, diffable, transportable, and
-   * compilable by a bare `compileJsonQuery` with no linq involvement. */
+   * compilable by a bare `compileJsonQuery` with no linq involvement.
+   *
+   * A DEEP, independent snapshot. The emitted tree embeds the captured
+   * expressions a stage holds, so handing them out by reference made this
+   * a live window into a sequence documented as immutable: writing into
+   * the returned document rewrote the predicate, and the next
+   * enumeration answered differently. A snapshot cannot do that. */
   toDocument() {
-    return emitDocument(this.#root, this.#stages);
+    return snapshot(emitDocument(this.#root, this.#stages));
   }
 
   /** The compiled view of the chain: the document, its externals and
-   * its dependency sets. Providers extend this shape. */
+   * its dependency sets.
+   *
+   * This always explains the IN-MEMORY compilation — it is the reference
+   * semantics, and it is not the provider's plan. It cannot report SQL
+   * pushdown, index use, residual execution or a strict refusal, and it
+   * will fail on an operator or collation only the provider can compile.
+   * For a provider's real plan, emit `toDocument()` and call that
+   * provider's own explanation. */
   explain() {
     const document = this.toDocument();
     const compiled = compileDocument(document, {
-      compileTypeTest: this.#options.compileTypeTest,
+      ...this.#options,
       externals: [...this.#params.keys()],
     });
     return {
@@ -317,10 +367,26 @@ export class Sequence {
     const externalNames = [...this.#params.keys()];
     const externals = Object.fromEntries(this.#params);
     if (this.#sourceKind === 'provider') {
-      return this.#source.execute(document, { externals });
+      const result = this.#source.execute(document, { externals });
+      // A `Sequence` terminal is a VALUE — `toArray(): T[]`,
+      // `count(): number`. A provider whose `execute` answers a promise
+      // (the wasm/OPFS drivers do) cannot satisfy that, and the old seam
+      // let the promise through under the value's type: `count()` handed
+      // back a `Promise` typed `number`, and `first()` indexed the promise
+      // and returned `undefined` — a wrong answer with no error anywhere.
+      // Refuse at the seam instead, and name the surface that does work.
+      if (result !== null && typeof result === 'object'
+        && typeof (/** @type {any} */ (result).then) === 'function') {
+        throw new LinqRuntimeError('JL2004',
+          `this provider's execute() answered a promise, and a Sequence terminal is a `
+          + 'value — an asynchronous provider cannot back the synchronous surface. '
+          + 'Emit the document with toDocument() and await the provider directly, or '
+          + 'use a synchronous provider.');
+      }
+      return result;
     }
     return executeInMemory(this.#source, document, {
-      compileTypeTest: this.#options.compileTypeTest,
+      ...this.#options,
       externalNames, externals,
     });
   }
@@ -440,8 +506,15 @@ export class Sequence {
  * enumerated locally; any iterable gets the in-memory reference
  * semantics; anything else is `JL0001` now, not at enumeration time.
  * @param {any} source
- * @param {{ compileTypeTest?: any }} [options] - `compileTypeTest`
- *   enables `ofType`/`cast` (schema operators)
+ * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
+ *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
+ *   the engine registries this sequence compiles against, under the
+ *   engine's own option names: `compileTypeTest` enables `ofType`/`cast`,
+ *   `collations` makes `orderBy(..., {collation})` executable in memory,
+ *   `functions`/`pathFunctions` make `$call` and custom path functions
+ *   resolvable, and `limits` bounds step and result counts. Pass
+ *   `registry` when the hooks are rebuilt per call, so compiled documents
+ *   still share a cache partition.
  * @returns {Sequence}
  */
 export function from(source, options = {}) {
@@ -454,7 +527,10 @@ export function from(source, options = {}) {
  * it. A version envelope is unwrapped so the expression embeds.
  * @param {any} source - iterable or provider, as `from`
  * @param {any} document - a Jaren query document
- * @param {{ compileTypeTest?: any }} [options]
+ * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
+ *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
+ *   as {@link from}. A SAVED document is the case `limits` exists for:
+ *   bound its steps and results before running it.
  * @returns {Sequence}
  */
 export function fromDocument(source, document, options = {}) {

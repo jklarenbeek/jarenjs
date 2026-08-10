@@ -1,7 +1,7 @@
 # Publishing the Jaren packages
 
 The repository root and the benchmark/website workspaces are private. A
-release publishes the nineteen public workspaces:
+release publishes the 21 public workspaces:
 
 - `@jarenjs/core`
 - `@jarenjs/json`
@@ -152,7 +152,7 @@ must bundle under an isolated Vite build. A machine without a `bun`
 binary on `PATH` fails the gate before anything is packed — install Bun
 before publishing.
 
-The root command reruns the release gate and publishes only the nineteen public workspaces:
+The root command reruns the release gate and publishes only the 21 public workspaces:
 
 ```bash
 npm run publish
@@ -193,7 +193,15 @@ npm view @jarenjs/charts version
 npm view @jarenjs/studio version
 npm view @jarenjs/josl version
 npm view @jarenjs/ai version
+npm view @jarenjs/flow version
+npm view @jarenjs/play version
+npm view @jarenjs/linq version
+npm view @jarenjs/db version
 ```
+
+The list above is every workspace the root `publish` script names — check
+it against `package.json` rather than trusting this copy, and keep the two
+in step when a package is added.
 
 ## Provenance
 

@@ -15,7 +15,10 @@ export {
   SQLITE_FLOOR, chain, toPromise, isThenable, compareVersions,
   openConnection, wrapStatement, lazyOpen,
 } from './driver.js';
-export { planCollection, compileIndexPath, schemaTypeAt, KEY_COLUMN, DOC_COLUMN } from './ddl.js';
+export {
+  planCollection, compileIndexPath, schemaTypeAt, KEY_COLUMN, DOC_COLUMN,
+  normalizeDeclaredSql, comparableDeclaredSql,
+} from './ddl.js';
 export {
   planQuery, assertDecidedKind, entityShape, entityPathRef,
   planEntityPredicate, planEntityQuery,
@@ -56,5 +59,6 @@ export { classifyLiveQuery, createLiveRegistry, diffRows, LIVE_DEFAULTS } from '
 export { createSortedWindow, compareCodepoint } from './window.js';
 export {
   createJobEngine, JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_DEFAULTS,
+  describeValue, serializeResult,
 } from './jobs.js';
 export { createDagJobRunner } from './dag-job.js';

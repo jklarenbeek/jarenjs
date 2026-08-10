@@ -137,10 +137,12 @@ describe('session capture', () => {
     const store = await open();
     const seen = [];
     store.observe((record) => seen.push(record));
-    await store.transaction(async () => {
+    await store.transaction(async (tx) => {
       await store.collection('notes').insert({ id: 'kept', body: 'yes' });
       try {
-        await store.transaction(async () => {
+        // nesting goes through the store the callback RECEIVED: the outer
+        // store cannot tell an inner transaction from an unrelated caller
+        await tx.transaction(async () => {
           await store.collection('notes').insert({ id: 'ghost', body: 'no' });
           throw new Error('inner');
         });

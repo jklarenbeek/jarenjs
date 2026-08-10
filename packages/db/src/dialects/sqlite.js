@@ -152,8 +152,20 @@ export const sqliteDialect = createDialect({
     foreignKeysOn: () => 'SELECT foreign_keys AS enabled FROM pragma_foreign_keys',
     dataVersion: () => 'SELECT data_version AS v FROM pragma_data_version',
     foreignKeyList: (table) =>
-      `SELECT "table" AS target, "from" AS source_column, "to" AS target_column, on_delete `
-      + `FROM pragma_foreign_key_list(${stringLiteral(table)})`,
+      `SELECT "table" AS target, "from" AS source_column, "to" AS target_column, `
+      + `on_delete, on_update, seq FROM pragma_foreign_key_list(${stringLiteral(table)}) `
+      + 'ORDER BY id, seq',
+    // Every schema object one table owns, with the CREATE text SQLite
+    // stored verbatim. That text is where the physical facts no pragma
+    // reports actually live — STRICT, CHECK, a generated column's
+    // expression, a partial index predicate, an index term's collation
+    // and direction, the primary key's position — so comparing it against
+    // the planned statements is what makes "verify, never alter" true
+    // rather than approximately true.
+    declaredSql: (table) =>
+      'SELECT type, name, sql FROM sqlite_schema '
+      + `WHERE tbl_name = ${stringLiteral(table)} AND sql IS NOT NULL `
+      + 'ORDER BY type, name',
     // the whole declared schema, for shape-equality comparison after a
     // rebuild: every object that carries SQL text, in a stable order
     schemaDump: () =>

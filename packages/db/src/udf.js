@@ -6,8 +6,15 @@
  * analysis proves deterministic and side-effect-free qualify — no
  * externals (their values change per call, and a deterministic
  * function must not close over changing state), no host functions, no
- * collations. Registration is keyed by `contentKey(fragment)` so
- * identical fragments share one registration per store.
+ * collations. Registration is keyed by the fragment's COLLISION-FREE
+ * structural identity, so identical fragments share one registration
+ * per store and different fragments never do. A fingerprint could not
+ * decide this: two colliding fragments would claim one SQL function
+ * name, the second would silently reuse the first's predicate, and the
+ * WHERE clause would filter on the wrong condition. The SQL identifier
+ * still derives from a short fingerprint — names must be short — but a
+ * fingerprint clash between DIFFERENT identities is disambiguated with
+ * a suffix rather than collapsed.
  *
  * WHERE-clause use only: an INDEX over a registered function would
  * make the database unwritable from any connection that has not
@@ -25,8 +32,19 @@
  * aggregate) stays the residual — Ring 2 keeps it correct.
  */
 
-import { contentKey } from '@jarenjs/core/object';
+import { semanticKey } from '@jarenjs/core/object';
+import { hashContent } from '@jarenjs/core/string';
 import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
+
+/**
+ * The SQL identifier for one fragment identity: a short fingerprint of
+ * the identity, not the identity itself (SQLite names are not the place
+ * for a whole serialized document). Distinct identities may collide
+ * here; {@link registerFragment} disambiguates.
+ * @param {string} identity
+ * @returns {string}
+ */
+const functionNameFor = (identity) => `jaren_p_${hashContent(identity)}`;
 
 /**
  * Decide whether a raw predicate fragment qualifies for the hatch, and
@@ -68,10 +86,20 @@ export function deterministicFragment(fragment, operators = null) {
     if (registered !== null && Object.prototype.hasOwnProperty.call(registered, name)
       && !pushable.has(name)) return null;
   }
-  const key = contentKey(fragment);
+  /** @type {string} */
+  let key;
+  try {
+    key = semanticKey(fragment);
+  }
+  catch {
+    // a fragment that cannot be keyed injectively must not be shared
+    // under some other fragment's registration; the residual is always
+    // correct, so it does not qualify for the hatch
+    return null;
+  }
   return {
     key,
-    name: `jaren_p_${key.replace(/[^A-Za-z0-9]/g, '').slice(0, 24)}`,
+    name: functionNameFor(key),
     compile: () => {
       const compiled = compileJsonQuery({ $let: { it: '$' }, $return: fragment }, analyzeOpts);
       return (docText) => (compiled.ebv(JSON.parse(docText)) ? 1 : 0);
@@ -80,17 +108,25 @@ export function deterministicFragment(fragment, operators = null) {
 }
 
 /**
- * Register a qualified fragment once per store.
+ * Register a qualified fragment once per store, and answer the SQL name
+ * to call. Identity is the fragment's structural key, so the same
+ * fragment registers once and two different fragments always get two
+ * different functions — even when their short names fingerprint alike,
+ * which the suffix resolves.
  * @param {any} connection
- * @param {Set<string>} registered - The store's registration set
+ * @param {Map<string, string>} registered - The store's registrations,
+ *   fragment identity → the SQL function name it owns
  * @param {{ key: string, name: string, compile: () => Function }} fragment
  * @returns {string} the function name to call in the WHERE clause
  */
 export function registerFragment(connection, registered, fragment) {
-  if (!registered.has(fragment.key)) {
-    connection.registerFunction(fragment.name, { deterministic: true },
-      fragment.compile());
-    registered.add(fragment.key);
-  }
-  return fragment.name;
+  const owned = registered.get(fragment.key);
+  if (owned !== undefined) return owned;
+  const stem = functionNameFor(fragment.key);
+  const taken = new Set(registered.values());
+  let name = stem;
+  for (let n = 2; taken.has(name); n++) name = `${stem}_${n}`;
+  connection.registerFunction(name, { deterministic: true }, fragment.compile());
+  registered.set(fragment.key, name);
+  return name;
 }

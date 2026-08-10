@@ -207,10 +207,10 @@ async function runCorpus(mode, seed, steps) {
       }
       else {
         // a caught inner rollback inside a committed outer
-        await store.transaction(async () => {
+        await store.transaction(async (tx) => {
           await store.collection('docs').put(randomDoc(rand, 'outer'), 'outer');
           try {
-            await store.transaction(async () => {
+            await tx.transaction(async () => {
               await store.collection('docs').put(randomDoc(rand, 'inner-ghost'), 'inner-ghost');
               throw new Error('inner');
             });

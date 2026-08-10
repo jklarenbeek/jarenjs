@@ -118,14 +118,15 @@ describe('the journal fallback', () => {
       { driver: nodeDriver(), capture: { mode: 'journal' } });
     const seen = [];
     store.observe((record) => seen.push(record));
-    await store.transaction(async () => {
+    await store.transaction(async (tx) => {
       await store.collection('notes').insert({ id: 'kept', body: 'yes' });
-      // a SUCCESSFUL nested async transaction keeps its records
-      await store.transaction(async () => {
+      // a SUCCESSFUL nested async transaction keeps its records; nesting
+      // goes through the store the callback received
+      await tx.transaction(async () => {
         await store.collection('notes').insert({ id: 'nested-async', body: 'in' });
       });
       try {
-        await store.transaction(async () => {
+        await tx.transaction(async () => {
           await store.collection('notes').insert({ id: 'ghost', body: 'no' });
           throw new Error('inner');
         });
@@ -148,14 +149,14 @@ describe('the journal fallback', () => {
       { driver: nodeDriver(), capture: { mode: 'journal' } });
     const seen = [];
     store.observe((record) => seen.push(record));
-    store.sync.transaction(() => {
+    store.sync.transaction((tx) => {
       store.sync.collection('notes').insert({ id: 'kept2', body: 'yes' });
       // a SUCCESSFUL nested twin transaction keeps its records
-      store.sync.transaction(() => {
+      tx.sync.transaction(() => {
         store.sync.collection('notes').insert({ id: 'nested-ok', body: 'in' });
       });
       try {
-        store.sync.transaction(() => {
+        tx.sync.transaction(() => {
           store.sync.collection('notes').insert({ id: 'ghost2', body: 'no' });
           throw new Error('inner sync');
         });

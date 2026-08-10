@@ -219,14 +219,150 @@ export function planCollection(name, collection, dialect) {
         ...generated.map((g) => ({ name: g.name, type: g.type, generated: true })),
       ],
       indexes: indexes
+        // the COLUMNS keep their declared order — an index is ordered, and
+        // comparing sorted term lists made `(a,b)` and `(b,a)` equal. Only
+        // the index list itself is sorted, to compare by name.
         .map((index) => ({
           name: index.name,
           unique: index.unique,
-          columns: [...index.columns].sort(),
+          columns: [...index.columns],
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
   };
+}
+
+/**
+ * Normalize a stored `CREATE` statement for comparison: collapse runs of
+ * whitespace, drop whitespace around punctuation, and strip the
+ * `IF NOT EXISTS` SQLite does not keep. What survives is every token that
+ * carries meaning, so two statements compare equal exactly when they
+ * declare the same physical object.
+ * @param {string} sql
+ * @returns {string}
+ */
+export function normalizeDeclaredSql(sql) {
+  return String(sql)
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([(),])\s*/g, '$1')
+    .replace(/\bIF NOT EXISTS\s+/i, '')
+    .trim();
+}
+
+/**
+ * Split a comma-separated list at TOP-LEVEL commas only, so a
+ * `CHECK(x IN (1,2))` or a multi-column constraint stays one item.
+ * @param {string} body
+ * @returns {string[]}
+ */
+function splitTopLevel(body) {
+  /** @type {string[]} */
+  const parts = [];
+  let depth = 0;
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (quote !== '') {
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ',' && depth === 0) {
+      parts.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(body.slice(start));
+  return parts.map((part) => part.trim()).filter((part) => part !== '');
+}
+
+/**
+ * A comparable form of one `CREATE` statement.
+ *
+ * For a TABLE the column definitions compare as a SET, because
+ * `ALTER TABLE … ADD COLUMN` can only append — so a migrated table and a
+ * freshly built one legitimately differ in column order, and this store
+ * never reads a column positionally. Everything else is exact: each
+ * column's full definition (type, `PRIMARY KEY`, `NOT NULL`, `DEFAULT`,
+ * `CHECK`, `GENERATED … AS`, `REFERENCES … ON DELETE …`), the table
+ * constraints, and the trailing table options (`STRICT`,
+ * `WITHOUT ROWID`).
+ *
+ * For an INDEX the text compares whole, because an index IS its order —
+ * `(a,b)` and `(b,a)` serve different lookups — as are its partial
+ * predicate and each term's collation and direction.
+ * @param {string} sql
+ * @returns {string}
+ */
+export function comparableDeclaredSql(sql) {
+  const normalized = normalizeDeclaredSql(sql);
+  const open = normalized.indexOf('(');
+  const close = normalized.lastIndexOf(')');
+  if (!/^CREATE\s+TABLE\b/i.test(normalized) || open < 0 || close < open)
+    return normalized;
+  const head = normalized.slice(0, open);
+  const options = normalized.slice(close + 1).trim();
+  const items = splitTopLevel(normalized.slice(open + 1, close));
+  // a column definition opens with the quoted column name; anything else
+  // (PRIMARY KEY(...), UNIQUE(...), CHECK(...), FOREIGN KEY(...)) is a
+  // table constraint, and those are unordered too
+  const columns = items.filter((item) => item.startsWith('"')).sort();
+  const constraints = items.filter((item) => !item.startsWith('"')).sort();
+  return `${head}(${[...columns, ...constraints].join(',')})${options}`;
+}
+
+/**
+ * The declared-SQL half of verification: compare every schema object the
+ * table owns against the statements the plan would have created.
+ *
+ * The structural pragma comparison above reads column names, types and
+ * index membership — real facts, and nowhere near all of them. A table
+ * can lose its PRIMARY KEY, its NOT NULL, its STRICT, a CHECK, a default
+ * or a generated column's expression; a foreign key can change
+ * `ON DELETE SET NULL` to `ON DELETE CASCADE`; a composite index can
+ * reverse its terms, gain a partial predicate, or change an index term's
+ * collation — and every one of those leaves names and types untouched.
+ * They all live in the CREATE text, so this compares that, and a drifted
+ * database is refused instead of opened.
+ * @param {any} connection
+ * @param {any} plan
+ * @param {(difference: string) => never} disagree
+ * @returns {any} value-or-promise
+ */
+function verifyDeclaredSql(connection, plan, disagree) {
+  const dialect = connection.dialect;
+  const planned = new Map();
+  for (const sql of plan.createSql) {
+    const comparable = comparableDeclaredSql(sql);
+    // the object's name is the first quoted identifier in the statement
+    const name = /"((?:[^"]|"")*)"/.exec(comparable)?.[1]?.replace(/""/g, '"');
+    if (name === undefined) continue;
+    planned.set(name, comparable);
+  }
+  return chain(connection.prepare(dialect.introspect.declaredSql(plan.table)),
+    (statement) => chain(statement.all([]), (rows) => {
+      /** @type {Map<string, string>} */
+      const actual = new Map();
+      for (const row of rows) actual.set(String(row.name), comparableDeclaredSql(row.sql));
+      for (const [name, wanted] of planned) {
+        const have = actual.get(name);
+        if (have === undefined)
+          disagree(`the model declares '${name}', which the database does not have`);
+        if (have !== wanted) {
+          disagree(`'${name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}`);
+        }
+      }
+      for (const name of actual.keys()) {
+        if (!planned.has(name)) {
+          disagree(`the database has '${name}', which the model does not declare — `
+            + 'an undeclared index or trigger changes deletion semantics and query plans');
+        }
+      }
+      return null;
+    }));
 }
 
 /**
@@ -286,13 +422,17 @@ export function verifyShape(connection, plan, collection, docPath) {
               disagree(`index '${have.name}'${have.unique ? ' (unique)' : ''} does not match the declared '${want.name}'`);
             return chain(connection.prepare(dialect.introspect.indexColumns(have.name)), (statement) =>
               chain(statement.all([]), (rows) => {
-                const haveColumns = rows.map((row) => String(row.name)).sort();
+                // NOT sorted: `(a,b)` and `(b,a)` are different indexes —
+                // one serves an `a`-prefix lookup and the other does not,
+                // and sorting made them compare equal
+                const haveColumns = rows.map((row) => String(row.name));
                 if (haveColumns.join(',') !== want.columns.join(','))
-                  disagree(`index '${have.name}' covers (${haveColumns.join(', ')}), the model declares (${want.columns.join(', ')})`);
+                  disagree(`index '${have.name}' covers (${haveColumns.join(', ')}) in that order, the model declares (${want.columns.join(', ')})`);
                 return collectColumns(i + 1);
               }));
           };
-          return collectColumns(0);
+          return chain(collectColumns(0), () =>
+            verifyDeclaredSql(connection, plan, disagree));
         }));
     }));
 }
@@ -380,7 +520,15 @@ export function planEntity(name, entityMapping, entities, dialect) {
     columnNames: new Set(columns.map((column) => column.name)),
     expectedForeignKeys: columns
       .filter((column) => column.references !== undefined)
-      .map((column) => ({ column: column.name, references: column.references.table })),
+      .map((column) => ({
+        column: column.name,
+        references: column.references.table,
+        // the ACTION, not just the edge: SET NULL and CASCADE are both
+        // "a foreign key exists" and mean opposite things for the row
+        onDelete: column.references.onDelete ?? null,
+        onUpdate: column.references.onUpdate ?? null,
+        targetColumn: column.references.column ?? null,
+      })),
     expected: {
       columns: columns
         .map((column) => ({ name: column.name, type: column.type, generated: false }))
@@ -424,7 +572,11 @@ export function planJoinTable(tableName, join, entities, dialect) {
       compositeKey: [join.left.column, join.right.column],
     })],
     expectedForeignKeys: columns.map((column) => ({
-      column: column.name, references: column.references.table,
+      column: column.name,
+      references: column.references.table,
+      onDelete: column.references.onDelete ?? null,
+      onUpdate: column.references.onUpdate ?? null,
+      targetColumn: column.references.column ?? null,
     })),
     expected: {
       columns: columns

@@ -24,7 +24,7 @@ import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
-import { chain, toPromise } from './driver.js';
+import { chain, toPromise, isThenable } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
@@ -331,10 +331,28 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
           return chain(verifyShape(connection, plan, name, docPath), () =>
             chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
               chain(fkStatement.all([]), (fkRows) => {
+                // the whole TUPLE, not the count: a key that changed
+                // `ON DELETE SET NULL` to `ON DELETE CASCADE`, or that now
+                // points at a different table or column, keeps the count
+                // identical and deletes different rows
                 const expectedFks = (plan.expectedForeignKeys ?? []);
-                if (fkRows.length !== expectedFks.length) {
+                /** @param {any} fk */
+                const describe = (fk) => `${fk.column} -> ${fk.references}`
+                  + `${fk.targetColumn === null ? '' : `(${fk.targetColumn})`}`
+                  + ` ON DELETE ${String(fk.onDelete ?? 'NO ACTION').toUpperCase()}`
+                  + ` ON UPDATE ${String(fk.onUpdate ?? 'NO ACTION').toUpperCase()}`;
+                const actual = fkRows.map((row) => describe({
+                  column: String(row.source_column),
+                  references: String(row.target),
+                  targetColumn: row.target_column === null ? null : String(row.target_column),
+                  onDelete: row.on_delete,
+                  onUpdate: row.on_update,
+                })).sort();
+                const wanted = expectedFks.map(describe).sort();
+                if (actual.join(' | ') !== wanted.join(' | ')) {
                   throw new DbCompileError('JD0002',
-                    `entity '${name}': ${fkRows.length} foreign keys exist, the model declares ${expectedFks.length}`,
+                    `entity '${name}': the foreign keys are [${actual.join(', ')}], `
+                    + `the model declares [${wanted.join(', ')}]`,
                     docPath);
                 }
                 return step(i + 1);
@@ -604,7 +622,7 @@ function resolveOperators(options) {
  * Open (or create) a store described by a model document.
  * @param {any} model - A `jaren-model` document (the 0.1 subset)
  * @param {{ driver: any, path?: string, compileSchema?: Function,
- *   busyTimeout?: number, journalMode?: string,
+ *   busyTimeout?: number, queueTimeout?: number, journalMode?: string,
  *   statementCacheBound?: number, profile?: any, operators?: any,
  *   functions?: any, extensions?: any,
  *   readOnly?: boolean }} options
@@ -646,8 +664,88 @@ export function openStore(model, options) {
     : normalizeProfile(options.profile);
 
   return toPromise(chain(
-    options.driver.open(path, { timeout: busyTimeout, readOnly }),
-    (connection) => {
+    options.driver.open(path,
+      { timeout: busyTimeout, readOnly, queueTimeout: options.queueTimeout }),
+    (opened) => {
+      /**
+       * The transaction SCOPE that currently owns the driver connection,
+       * or `null`. A top-level `store.transaction()` sets it for the
+       * callback's whole lifetime so the collection/entity cores below
+       * reach the open transaction instead of queueing behind it.
+       * @type {any}
+       */
+      let scope = null;
+
+      /**
+       * What the cores talk to: the owning transaction's scope while one
+       * is open, the driver connection otherwise. One indirection here
+       * instead of a parallel set of handles per transaction — and it is
+       * why a write inside a transaction callback runs immediately as the
+       * owner rather than waiting for a commit it is part of.
+       */
+      const connection = Object.freeze({
+        get synchronous() { return opened.synchronous; },
+        get capabilities() { return opened.capabilities; },
+        get dialect() { return opened.dialect; },
+        /** @param {string} sql */
+        exec: (sql) => (scope ?? opened).exec(sql),
+        /** @param {string} sql */
+        prepare: (sql) => (scope ?? opened).prepare(sql),
+        /** Internal transaction users (jobs, checkpoints, migrations)
+         * nest when a transaction is open and take the gate when not. */
+        transaction: (fn) => withScope((scope ?? opened).transaction, fn),
+        registerFunction: opened.registerFunction === null ? null
+          : (/** @type {string} */ name, /** @type {any} */ o, /** @type {Function} */ fn) =>
+            opened.registerFunction(name, o, fn),
+        session: opened.session === null ? null
+          : (/** @type {any} */ table) => opened.session(table),
+        close: () => opened.close(),
+      });
+
+      /**
+       * Run `fn` as a transaction opened by `open`, with `scope` bound to
+       * it for the callback's whole lifetime and restored afterwards.
+       * @param {(inner: (s: any) => any) => any} open - the driver's
+       *   `transaction`, gated (top level) or nesting (inner)
+       * @param {(store: any) => any} fn
+       */
+      function withScope(open, fn) {
+        return open((inner) => {
+          const outer = scope;
+          scope = inner;
+          const restore = () => { scope = outer; };
+          let out;
+          try {
+            out = fn(scopedStore());
+          }
+          catch (error) {
+            restore();
+            throw error;
+          }
+          if (!isThenable(out)) {
+            restore();
+            return out;
+          }
+          return out.then(
+            (value) => { restore(); return value; },
+            (error) => { restore(); throw error; });
+        });
+      }
+
+      /** Set once the store object exists; the transaction callback's
+       * argument, whose `transaction` NESTS instead of queueing. */
+      let scopedStore = () => undefined;
+
+      /**
+       * A TOP-LEVEL store transaction. It takes the connection's gate
+       * first, so two of them never share a savepoint stack no matter how
+       * their callbacks interleave, and the capture scope opens INSIDE it
+       * — a rollback then undoes the translated patch together with the
+       * rows it describes.
+       * @param {(store: any) => any} fn
+       */
+      let topLevelTransaction = (fn) => withScope(opened.transaction, fn);
+
       const dialect = connection.dialect;
       /** @type {Map<string, any>} */
       const plans = new Map();
@@ -683,7 +781,40 @@ export function openStore(model, options) {
               return null;
             }))));
 
-      return chain(pragmas, () =>
+      // ————— the rejection boundary around an ACQUIRED connection —————
+      // Initialization continues for a long way past `driver.open`:
+      // pragmas, shape verification, capture, jobs, readiness. Every one
+      // of those can refuse, and a refusal that walks away from the open
+      // handle leaks it — on Windows the database file simply stays
+      // locked, which is how three of these showed up as `EPERM` while
+      // a temporary directory was being removed. So: close exactly once
+      // on any failure after acquisition, and keep the initialization
+      // error primary — a close that also fails is retained beside it
+      // rather than replacing the reason the open was refused.
+      let closed = false;
+      /**
+       * Release the handle and re-reject with the original failure.
+       * @param {any} error
+       * @returns {Promise<never>}
+       */
+      const failClosed = (error) => {
+        if (closed) return Promise.reject(error);
+        closed = true;
+        /** @param {any} closeError */
+        const both = (closeError) => Promise.reject(new AggregateError([error, closeError],
+          'the store failed to open, and closing the acquired connection failed too'));
+        let closing;
+        try {
+          closing = opened.close();
+        }
+        catch (closeError) {
+          return both(closeError);
+        }
+        return isThenable(closing)
+          ? closing.then(() => Promise.reject(error), both)
+          : Promise.reject(error);
+      };
+      const opening = () => chain(pragmas, () =>
         chain(ensureShape(connection, collections, plans, readOnly), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, readOnly), () => {
           /** @type {Map<string, any>} */
@@ -788,6 +919,10 @@ export function openStore(model, options) {
             retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
           });
           const guard = capture === null ? (fn) => fn() : capture.wrap;
+          if (capture !== null) {
+            topLevelTransaction = (fn) => withScope(opened.transaction,
+              (tx) => capture.nest(() => fn(tx)));
+          }
           // the live registry rides the capture stream; its dispatcher
           // registers FIRST so maintenance sees every record before any
           // user observer can commit a further write (LIVE-FORMAT §8)
@@ -1137,9 +1272,12 @@ export function openStore(model, options) {
                   keyOf: null,
                 });
               }),
-            transaction: lift((fn) => (capture === null
-              ? connection.transaction(() => fn(store))
-              : capture.nest(() => connection.transaction(() => fn(store))))),
+            // A TOP-LEVEL transaction: it takes the connection's gate, so
+            // it never shares a savepoint stack with another one. To nest,
+            // use the store the callback RECEIVES — the outer store cannot
+            // tell an inner transaction from an unrelated caller, and an
+            // unrelated caller must wait for the commit.
+            transaction: lift((fn) => topLevelTransaction(fn)),
             observe: (fn) => {
               if (capture === null) {
                 throw new TypeError(
@@ -1162,12 +1300,60 @@ export function openStore(model, options) {
               checkpointsFor: jobsEngine.checkpointsFor,
               createWorker: jobsEngine.createWorker,
             }),
-            close: lift(() => {
+            /**
+             * Close the store. Job workers are asked to stop and given a
+             * bounded grace period; the connection is then closed WHETHER
+             * OR NOT a handler wound up. That bound is the point: an
+             * unbounded wait let one handler that never settles hold the
+             * database file open for the life of the process, which is how
+             * an abandoned worker in the suite left a locked file behind.
+             * @param {{ graceMs?: number }} [closeOptions]
+             */
+            close: lift((closeOptions) => {
               if (liveRegistry !== null) liveRegistry.closeAll();
               return chain(
-                jobsEngine === null ? null : jobsEngine.stopAll(),
-                () => connection.close());
+                jobsEngine === null ? null : jobsEngine.stopAll(closeOptions),
+                (stopped) => chain(connection.close(), () => {
+                  const stuck = (stopped ?? []).filter(
+                    (/** @type {any} */ outcome) => outcome.drained === false);
+                  if (stuck.length === 0) return undefined;
+                  // reported, not swallowed: the handle is released, but
+                  // handlers are still running against a closed connection
+                  throw new DbRuntimeError('JD2062',
+                    `the store closed with ${stuck.reduce(
+                      (/** @type {number} */ n, /** @type {any} */ o) => n + o.inFlight, 0)} `
+                    + `job handler(s) still in flight across ${stuck.length} worker(s); `
+                    + 'they were signalled to abort and did not settle within the grace period');
+                }));
             }),
+          };
+
+          // The transaction callback's argument. It is the store, with one
+          // difference that matters: its `transaction` NESTS through the
+          // owning savepoint instead of queueing behind it. Everything
+          // else already reaches the open transaction, because the cores
+          // read the active scope.
+          /** @type {any} */
+          let txStore = null;
+          /** Nest through the savepoint that owns the connection now. The
+           * capture scope goes INSIDE the savepoint, so a rollback undoes
+           * the translated patch with the rows it describes. */
+          const nested = (/** @type {any} */ fn) => withScope(scope.transaction,
+            (tx) => (capture === null ? fn(tx) : capture.nest(() => fn(tx))));
+          /** The overriding member on a view of the FROZEN store: plain
+           * assignment cannot shadow a non-writable inherited property. */
+          const override = (/** @type {any} */ value) =>
+            ({ value, writable: false, enumerable: true, configurable: false });
+          scopedStore = () => {
+            if (txStore === null) {
+              const members = { transaction: override(nested) };
+              if (store.sync !== undefined) {
+                members.sync = override(Object.create(store.sync,
+                  { transaction: override(nested) }));
+              }
+              txStore = Object.freeze(Object.create(store, members));
+            }
+            return txStore;
           };
 
           if (connection.synchronous) {
@@ -1192,9 +1378,7 @@ export function openStore(model, options) {
                 }
                 return handle;
               },
-              transaction: (fn) => (capture === null
-                ? connection.transaction(() => fn(store))
-                : capture.nest(() => connection.transaction(() => fn(store)))),
+              transaction: (fn) => topLevelTransaction(fn),
               entity(name) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
@@ -1225,5 +1409,14 @@ export function openStore(model, options) {
             () => chain(jobsEngine === null ? null : jobsEngine.ready,
               () => Object.freeze(store)));
         })));
+
+      let opened_;
+      try {
+        opened_ = opening();
+      }
+      catch (error) {
+        return failClosed(error);
+      }
+      return isThenable(opened_) ? opened_.then((value) => value, failClosed) : opened_;
     }));
 }

@@ -136,7 +136,8 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './e
  * @property {number} seq - Monotonic transaction sequence number.
  * @property {string} action - The dispatched action name.
  * @property {string} source - What queued it: `'dispatch'` (external),
- *   `'binding'` (DOM/widget), `'effect'`, `'subscription'`.
+ *   `'binding'` (DOM/widget), `'effect'`, `'subscription'`, or
+ *   `'setState'` (a whole-state replacement from outside the loop).
  * @property {'applied' | 'noop' | 'rejected' | 'failed'} status
  * @property {string[] | null} changedPaths - Changed JSON Pointers, or
  *   `null` when the whole state was replaced (unknown = everything).
@@ -244,6 +245,10 @@ export function createApp(appDoc, options = {}) {
    * document order of the resolved item sequence). */
   const subStates = subs.map(() => ({
     live: false, cleanup: undefined, key: null,
+    /** True while this slot's handler is running: ownership is claimed
+     * before the handler, so a re-entrant reconciliation cannot start the
+     * same subscription a second time and orphan the first acquisition. */
+    starting: false,
     /** @type {Map<string, { cleanup: any, propsKey: string }> | null} */
     instances: null,
   }));
@@ -251,7 +256,10 @@ export function createApp(appDoc, options = {}) {
   /**
    * The FIFO transaction queue (APP-FORMAT §8). Entries carry the
    * already-JSON-reduced event — native events never wait in the queue.
-   * @type {Array<{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, value: unknown }> | null }>}
+   * A `replace` entry carries a whole next state instead of an action
+   * name: `setState` is a transaction like any other, so it serializes
+   * with dispatches rather than cutting in front of them.
+   * @type {Array<{ kind?: 'replace', state?: any, source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, value: unknown }> | null }>}
    */
   const actionQueue = [];
   let draining = false;
@@ -348,6 +356,25 @@ export function createApp(appDoc, options = {}) {
       if (failures.length > 0) extractorFailures = failures;
     }
     actionQueue.push({ source, name, payload, event, unknownFields, extractorFailures });
+    drainQueue();
+  }
+
+  /**
+   * Queue a whole-state replacement and drain if no drain is running.
+   * @param {any} next
+   */
+  function queueReplace(next) {
+    if (!running) return;
+    actionQueue.push({
+      kind: 'replace',
+      state: next,
+      source: 'setState',
+      name: 'setState',
+      payload: null,
+      event: null,
+      unknownFields: null,
+      extractorFailures: null,
+    });
     drainQueue();
   }
 
@@ -469,6 +496,68 @@ export function createApp(appDoc, options = {}) {
           `action '${entry.name}' event-field extractor '${field}' threw: ${safeErrorMessage(cause)}`,
           { cause }));
       }
+    }
+
+    // ————— a whole-state replacement (`setState`) —————
+    // It commits through the SAME path as an action: validated before
+    // commit, listeners in registration order over one state/changes pair,
+    // subscriptions reconciled once, one render scheduled, one record
+    // observed. Replacing state outside the queue broke every one of those
+    // — validation was skipped, a listener that dispatched saw its own
+    // transaction interleaved, and a sink failure surfaced out of the next
+    // unrelated dispatch instead of at the setState caller.
+    if (entry.kind === 'replace') {
+      const next = entry.state;
+      if (next === state) {
+        finish('noop', null);
+        return;
+      }
+      if (options.validateState !== undefined) {
+        let verdict;
+        try {
+          verdict = options.validateState(next, {
+            previous: state,
+            // the replacement is not an action; the context says so rather
+            // than borrowing a name no reducer ran under
+            action: null,
+            payload: null,
+            changes: null,
+          });
+        }
+        catch (err) {
+          const cause = toError(err);
+          safeError(new AppRuntimeError('JA2015',
+            `the validateState hook threw for an external state replacement: ${safeErrorMessage(cause)}`,
+            { cause }));
+          finish('failed', 'JA2015');
+          return;
+        }
+        if (verdict === false
+          || (verdict !== null && typeof verdict === 'object' && verdict.valid === false)) {
+          const err = new AppRuntimeError('JA2005',
+            'an external state replacement violated the app\'s state invariants; it was rejected');
+          err.detail = typeof verdict === 'object' ? verdict.errors : undefined;
+          safeError(err);
+          finish('rejected', 'JA2005');
+          return;
+        }
+      }
+      state = next;
+      for (const listener of stateListeners) {
+        try {
+          listener(state, null);
+        }
+        catch (err) {
+          const cause = toError(err);
+          safeError(new AppRuntimeError('JA2011',
+            `a state listener threw: ${safeErrorMessage(cause)}`, { cause }));
+        }
+      }
+      refreshSubs();
+      scheduleRender();
+      renderScheduled = true;
+      finish('applied', null);
+      return;
     }
 
     const action = actions.get(entry.name);
@@ -760,6 +849,8 @@ export function createApp(appDoc, options = {}) {
   function refreshFanout(sub, slot, i, live) {
     const instances = slot.instances ?? (slot.instances = new Map());
     let next = null;
+    /** Set when the fan-out bound was crossed mid-enumeration. */
+    let overflow = 0;
     if (live) {
       next = new Map();
       let failingMember = 'for';
@@ -768,6 +859,15 @@ export function createApp(appDoc, options = {}) {
         const items = resolved === undefined ? []
           : Array.isArray(resolved) ? resolved : [resolved];
         for (let k = 0; k < items.length; k++) {
+          // The bound stops the WORK, not just the retained instances.
+          // Checking it after the loop bounded what was kept while a
+          // runaway `for` query still ran every key and props expression
+          // and serialized every result first — so the limit cost memory
+          // and CPU proportional to the mistake it was there to contain.
+          if (next.size >= maxSubInstances) {
+            overflow = next.size + (items.length - k);
+            break;
+          }
           const item = items[k];
           failingMember = sub.keyQuery !== null ? 'key' : 'for';
           const key = sub.keyQuery !== null
@@ -792,9 +892,10 @@ export function createApp(appDoc, options = {}) {
         reportSubQueryFailure(sub, i, failingMember, err);
         next = null; // fail closed: treat as not live this refresh
       }
-      if (next !== null && next.size > maxSubInstances) {
+      if (next !== null && overflow > 0) {
         safeError(new AppRuntimeError('JA2017',
-          `subscription '${sub.run}' fan-out resolved ${next.size} instances, more than maxSubInstances (${maxSubInstances})`,
+          `subscription '${sub.run}' fan-out reached maxSubInstances (${maxSubInstances}) `
+          + `with at least ${overflow} items to resolve; enumeration stopped there`,
           { docPath: `/subs/${i}/for` }));
         return; // the previous instance set is kept, deliberately
       }
@@ -924,20 +1025,30 @@ export function createApp(appDoc, options = {}) {
         slot.key = null;
         runSubCleanup(sub, cleanup);
       }
-      if (live && !slot.live) {
+      if (live && !slot.live && !slot.starting) {
         const handler = lookupSubHandler(sub);
         if (handler === undefined) continue;
         let cleanup;
+        // Ownership is claimed BEFORE the handler runs. A handler may
+        // acquire a resource and then re-enter reconciliation — it is host
+        // code, and the app surface is reachable from it — and a slot that
+        // only became `live` on the way out looked startable to that
+        // re-entry. It started again, and again, and each return overwrote
+        // the single cleanup slot: every acquisition but the last leaked,
+        // past destroy, forever.
+        slot.starting = true;
         try {
           cleanup = handler(props, subDispatch);
         }
         catch (err) {
+          slot.starting = false;
           const cause = toError(err);
           safeError(new AppRuntimeError('JA2013',
             `subscription '${sub.run}' threw while starting; it stays stopped: ${safeErrorMessage(cause)}`,
             { cause }));
           continue;
         }
+        slot.starting = false;
         slot.live = true;
         slot.cleanup = cleanup;
         slot.key = key;
@@ -1281,23 +1392,20 @@ export function createApp(appDoc, options = {}) {
      * `null` changed-paths (treat everything as changed); `when`-gated
      * subscriptions refresh; a render is scheduled. A no-op when the state
      * is reference-identical or the loop has been stopped.
+     *
+     * It is a TRANSACTION, with every guarantee a dispatch has: it takes
+     * its turn in the FIFO queue, `validateState` decides before the
+     * commit, listeners all observe the same state, the turn guard counts
+     * it, one record reaches the observers, and a sink failure settles at
+     * this caller. Replacing state directly had none of those — a listener
+     * that dispatched saw the two transactions interleave and never
+     * observed its own committed state, an invalid replacement committed
+     * unvalidated, and the resulting `JA2011` emerged from the next
+     * unrelated dispatch.
      * @param {any} next - the replacement state
      */
     setState(next) {
-      if (!running || next === state) return;
-      state = next;
-      for (const listener of stateListeners) {
-        try {
-          listener(state, null);
-        }
-        catch (err) {
-          const cause = toError(err);
-          safeError(new AppRuntimeError('JA2011',
-            `a state listener threw: ${safeErrorMessage(cause)}`, { cause }));
-        }
-      }
-      refreshSubs();
-      scheduleRender();
+      queueReplace(next);
     },
     /** The current view output — for SSR or custom renderers. */
     getVnode: vnode,

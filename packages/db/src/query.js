@@ -5,11 +5,13 @@
  * import edge), the streaming cursor (`query`), and `explain()`.
  *
  * The statement cache is a CALLER of the core primitives:
- * `createBoundedCache` keyed by `contentKey(document)` (memo-grade —
- * dropped `undefined` members and no cycle guard are both acceptable
- * for a cache key) plus collection, dialect and strictness;
- * `store.stats()` exposes hits, misses and evictions so the cache is
- * proven rather than assumed.
+ * `createSemanticCache` keyed by the whole discriminating tuple —
+ * document plus collection, dialect, strictness, pushdown and profile.
+ * The identity is the tuple's COMPLETE serialization, never a
+ * fingerprint of it: a 32-bit content hash collides after tens of
+ * thousands of documents, and a collision here answers one query with
+ * another query's plan and rows. `store.stats()` exposes hits, misses
+ * and evictions so the cache is proven rather than assumed.
  *
  * Bind-time diversion: if any referenced external is missing or not a
  * string or finite number, the call runs the always-compilable set
@@ -18,8 +20,7 @@
  * a missing external must raise the ENGINE's error, not a driver's.
  */
 
-import { createBoundedCache } from '@jarenjs/core/cache';
-import { contentKey } from '@jarenjs/core/object';
+import { createSemanticCache } from '@jarenjs/core/cache';
 import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
@@ -48,9 +49,10 @@ import {
  */
 export function createQueryState(bound = undefined, operators = null) {
   return {
-    cache: createBoundedCache(bound ?? 128),
+    cache: createSemanticCache(bound ?? 128),
     counters: { hits: 0, misses: 0, evictions: 0 },
-    registered: new Set(),
+    /** Fragment identity → the SQL function name registered for it. */
+    registered: new Map(),
     operators: operators ?? null,
   };
 }
@@ -111,8 +113,9 @@ export function createQueryEngine(context) {
       // Ring 3: admit the registry's pushable:'scalar' operators too
       const qualified = deterministicFragment(fragment, operators);
       if (qualified === null) return null;
-      registerFragment(connection, state.registered, qualified);
-      return qualified;
+      // the store owns the final name: a fingerprint clash between two
+      // distinct fragments is disambiguated at registration
+      return { ...qualified, name: registerFragment(connection, state.registered, qualified) };
     }
     : undefined;
 
@@ -134,8 +137,9 @@ export function createQueryEngine(context) {
    *   set residual (the oracle's forced-residual mode)
    */
   const entryFor = (document, strict, profile, pushdown) => {
-    const key = `${contentKey(document)}|${collection.name}|${dialect.name}|${strict ? 1 : 0}`
-      + `|${pushdown ? 1 : 0}|${profile === null ? '-' : contentKey(profile)}`;
+    // one TUPLE, not a `|`-joined string: a document may itself contain
+    // the separator, so concatenation is not injective and the tuple is
+    const key = ['C', document, collection.name, dialect.name, strict, pushdown, profile];
     const cached = state.cache.get(key);
     if (cached !== undefined) {
       state.counters.hits++;
@@ -226,8 +230,8 @@ export function createQueryEngine(context) {
     };
 
     const sizeBefore = state.cache.size();
-    state.cache.set(key, entry);
-    if (state.cache.size() === sizeBefore) state.counters.evictions++;
+    if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
+      state.counters.evictions++;
     return entry;
   };
 
@@ -561,7 +565,7 @@ export function createEntityQueryEngine(context) {
   const physicalOf = (name) => ({ table: mapping.entities[name].table });
 
   const entryFor = (document, pushdown) => {
-    const key = `E|${contentKey(document)}|${dialect.name}|${pushdown ? 1 : 0}`;
+    const key = ['E', document, dialect.name, pushdown];
     const cached = state.cache.get(key);
     if (cached !== undefined) {
       state.counters.hits++;
@@ -587,8 +591,8 @@ export function createEntityQueryEngine(context) {
       entry.slots = emitted.slots;
     }
     const sizeBefore = state.cache.size();
-    state.cache.set(key, entry);
-    if (state.cache.size() === sizeBefore) state.counters.evictions++;
+    if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
+      state.counters.evictions++;
     return entry;
   };
 
@@ -895,24 +899,15 @@ export function createLoadEngine(context, entityName) {
   };
 
   const buildLoad = (spec) => {
-    /** @type {string | null} */
-    let key;
-    try {
-      key = `L|${entityName}|${contentKey(spec ?? {})}|${dialect.name}`;
+    // a cyclic specification cannot be keyed, so the cache reports a
+    // permanent miss and buildTree gets to NAME the cycle
+    const key = ['L', entityName, spec ?? {}, dialect.name];
+    const cached = state.cache.get(key);
+    if (cached !== undefined) {
+      state.counters.hits++;
+      return cached;
     }
-    catch {
-      // contentKey is memo-grade and has no cycle guard; a cyclic
-      // specification skips the cache so buildTree can NAME the cycle
-      key = null;
-    }
-    if (key !== null) {
-      const cached = state.cache.get(key);
-      if (cached !== undefined) {
-        state.counters.hits++;
-        return cached;
-      }
-      state.counters.misses++;
-    }
+    state.counters.misses++;
     /** @type {ParamCollector} */
     const slots = [];
     const param = (slot) => {
@@ -976,11 +971,9 @@ export function createLoadEngine(context, entityName) {
     }
 
     const entry = { sql, slots, tree, pagination, statement: null };
-    if (key !== null) {
-      const sizeBefore = state.cache.size();
-      state.cache.set(key, entry);
-      if (state.cache.size() === sizeBefore) state.counters.evictions++;
-    }
+    const sizeBefore = state.cache.size();
+    if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
+      state.counters.evictions++;
     return entry;
   };
 

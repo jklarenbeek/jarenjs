@@ -72,5 +72,5 @@ This suite covers the **lifecycle** half of the app/view real-browser
 matrix. The **accessibility** half — dialog focus traps and focus
 restoration under an actual screen reader, AT semantics,
 `prefers-reduced-motion` — is not covered yet and is tracked in
-[ROADMAP.md](../../docs/ROADMAP.md); [APP-FORMAT](../app/docs/APP-FORMAT.md) §8.5
+[ROADMAP.md](../../docs/ROADMAP.md); [APP-FORMAT](../app/docs/APP-FORMAT.md) §8.7
 states the contracts it will have to prove.

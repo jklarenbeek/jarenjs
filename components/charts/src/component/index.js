@@ -9,13 +9,20 @@
  * reference-equal vnode, so an unchanged chart patches in O(1). The
  * memo is a WeakMap keyed on the DATA object's identity (streaming
  * snapshots are fresh objects, so every tick re-renders; static data is
- * stable, so navigation is free), with an inner map keyed on the
- * stable-stringified config hash.
+ * stable, so navigation is free), with an inner cache keyed on the
+ * config's structural identity. That identity is the whole serialized
+ * config, not a fingerprint of it: the memo hands back the vnode, so a
+ * hash collision would draw one chart's config under another's.
  */
 
-import { contentKey } from '@jarenjs/core/object';
+import { createSemanticCache } from '@jarenjs/core/cache';
 import { compileChart } from '../core/chart.js';
 import { createChartSession } from '../core/session.js';
+
+/** Distinct configs memoized per data object before the oldest is
+ * dropped — one chart is redrawn from a handful of configs at most, so
+ * the bound only stops an unbounded churn of generated configs. */
+const CONFIG_MEMO_LIMIT = 64;
 
 /**
  * @typedef {object} ChartComponentOptions
@@ -50,8 +57,8 @@ import { createChartSession } from '../core/session.js';
 export function createChartComponent(options = {}) {
   const compileOptions = { theme: options.theme, tooltip: options.tooltip };
 
-  /** Data-identity memo; inner maps key on the config hash. */
-  /** @type {WeakMap<object, Map<string, any>>} */
+  /** Data-identity memo; inner caches key on the config's identity. */
+  /** @type {WeakMap<object, import('@jarenjs/core/cache').SemanticCache<any>>} */
   const byData = new WeakMap();
 
   const compile = (config, data = config) => compileChart(config, data, compileOptions);
@@ -70,16 +77,12 @@ export function createChartComponent(options = {}) {
       }
       let byConfig = byData.get(data);
       if (byConfig === undefined) {
-        byConfig = new Map();
+        byConfig = createSemanticCache(CONFIG_MEMO_LIMIT);
         byData.set(data, byConfig);
       }
-      const key = contentKey(config);
-      let vnode = byConfig.get(key);
-      if (vnode === undefined) {
-        vnode = compile(config, data).toVnode();
-        byConfig.set(key, vnode);
-      }
-      return vnode;
+      // structural identity, not a fingerprint: this memo RETURNS the
+      // vnode, so a collision would draw one chart's config as another
+      return byConfig.getOrCreate(config, () => compile(config, data).toVnode());
     },
 
     // No app effects yet: rendering is synchronous and pure. Streaming

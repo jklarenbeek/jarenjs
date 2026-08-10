@@ -51,6 +51,9 @@ export function normalizeMapAsyncOptions(options) {
 export async function* applyMapAsync(items, fn, opts) {
   const controller = new AbortController();
   const { signal } = controller;
+  /** The pipeline's own failure, so source cleanup cannot displace it.
+   * @type {{ reason: any } | null} */
+  let failure = null;
 
   try {
     if (opts.mode === 'concat' || (opts.mode === 'parallel' && opts.concurrency === 1)) {
@@ -150,7 +153,12 @@ export async function* applyMapAsync(items, fn, opts) {
       const id = nextId++;
       inflight.set(id, Promise.resolve(fn(step.value, signal)).then(
         (value) => ({ id, value }),
-        (error) => { throw Object.assign(error ?? new Error('mapAsync failed'), { __mapAsyncId: id }); }));
+        // the task's identity rides in an internal ENVELOPE, never on the
+        // rejection value. Stamping the value mutated whatever the handler
+        // threw: a frozen error became a different TypeError, a thrown
+        // string came back boxed, an ordinary error grew a private
+        // property, and a hostile proxy could break normalization outright.
+        (error) => { throw new TaskFailure(id, error); }));
     };
     while (!sourceDone && inflight.size < opts.concurrency) await start();
     while (inflight.size > 0) {
@@ -159,7 +167,10 @@ export async function* applyMapAsync(items, fn, opts) {
         settled = await Promise.race(inflight.values());
       }
       catch (err) {
-        inflight.delete(/** @type {any} */ (err).__mapAsyncId);
+        if (err instanceof TaskFailure) {
+          inflight.delete(err.id);
+          throw err.reason; // the ORIGINAL value, unmodified
+        }
         throw err;
       }
       inflight.delete(settled.id);
@@ -168,11 +179,35 @@ export async function* applyMapAsync(items, fn, opts) {
     }
   }
   catch (err) {
-    controller.abort();
+    failure = { reason: err };
     throw err;
   }
   finally {
     controller.abort(); // early termination aborts in-flight work
-    if (typeof items.return === 'function') await items.return(undefined);
+    if (typeof items.return === 'function') {
+      // The TASK's failure is the primary one — it is why the caller is
+      // here — so a failing close travels ALONGSIDE it as an aggregate
+      // rather than replacing it, and stands alone only when the pipeline
+      // itself succeeded. Composed as a rejection the `await` adopts,
+      // because a `throw` here would be the very substitution this
+      // avoids: it discards whatever completion the block was carrying.
+      await Promise.resolve(items.return(undefined)).then(undefined,
+        (cleanupError) => Promise.reject(failure === null
+          ? cleanupError
+          : new AggregateError([failure.reason, cleanupError],
+            'mapAsync failed, and closing the source failed too')));
+    }
+  }
+}
+
+/**
+ * The internal envelope carrying which in-flight task rejected, so the
+ * rejection VALUE never has to be touched to find out.
+ */
+class TaskFailure {
+  /** @param {number} id @param {any} reason */
+  constructor(id, reason) {
+    this.id = id;
+    this.reason = reason;
   }
 }

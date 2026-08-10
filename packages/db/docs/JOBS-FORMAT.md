@@ -123,9 +123,44 @@ stats() }`:
   store wakes every idle local loop immediately, so same-process
   latency is not poll-bound; **cross-process wake-up is polling**,
   plainly (§8);
-- `stop()` resolves after in-flight handlers settle; closing the
-  store stops every worker first;
-- `stats()` reports claims, completions, failures, wakes and polls.
+- `stop({ graceMs })` aborts in-flight handlers and resolves once they
+  settle **or** the grace period expires (default 5 s), answering
+  `{ drained, inFlight }` — see §6.1;
+- `stats()` reports claims, completions, failures, wakes, polls and the
+  in-flight handler count.
+
+### 6.1 A handler cannot break the loop, and cannot hold shutdown
+
+Two invariants a long-running process depends on.
+
+**No handler outcome rejects the claim-execute loop.** A handler is host
+code: it may resolve with something JSON cannot express (a `BigInt`, a
+cycle, a throwing `toJSON`) or reject with a value whose own `message`
+throws when read. Both are normalized totally and become an ordinary
+failed attempt — retried with backoff, dead-lettered at `maxAttempts`,
+recorded in `last_error`. The reason this matters more than it looks: a
+rejected loop stops claiming, and a queue that has silently stopped
+draining looks exactly like a queue with nothing to do.
+
+**Shutdown is bounded.** Handlers receive an `AbortSignal` alongside the
+job:
+
+```js
+handlers: {
+  sync: async (payload, { job, signal, checkpointsFor }) => {
+    const res = await fetch(url, { signal });   // cancelled on stop()
+    …
+  },
+}
+```
+
+`stop({ graceMs })` aborts the signal, waits up to `graceMs`, and then
+returns `{ drained, inFlight }` regardless. `store.close({ graceMs })`
+does the same and **closes the connection either way**, then reports
+`JD2062` when handlers were left running — a report, not a refusal: the
+handle really is released. A handler that ignores its signal therefore
+cannot hold the database file open for the life of the process, and the
+lease expiry (§5) lets another worker re-claim its job.
 
 ## 7. The DAG composition
 

@@ -14,9 +14,10 @@ import { sqliteDialect } from '../dialects/sqlite.js';
  * object with its shape) into a probed connection. Exported so the
  * adapter is exercisable without the builtin.
  * @param {any} db - A `DatabaseSync`-shaped database
+ * @param {{ queueTimeout?: number }} [options]
  * @returns {any} a Connection, or a promise of one
  */
-export function adaptNodeDatabase(db) {
+export function adaptNodeDatabase(db, options) {
   const raw = {
     /** @param {string} sql */
     exec: (sql) => db.exec(sql),
@@ -40,6 +41,7 @@ export function adaptNodeDatabase(db) {
   return openConnection(raw, {
     dialect: sqliteDialect,
     synchronous: true,
+    queueTimeout: options?.queueTimeout,
     declared: {
       sessions: true,
       userFunctions: true,
@@ -55,7 +57,8 @@ export function adaptNodeDatabase(db) {
  * whole open path runs under any runtime with a substitute module.
  * @param {any} mod - The `node:sqlite` module (or a substitute)
  * @param {string} path
- * @param {{ timeout?: number, readOnly?: boolean }} [options]
+ * @param {{ timeout?: number, readOnly?: boolean,
+ *   queueTimeout?: number }} [options]
  * @returns {any}
  */
 export function fromNodeModule(mod, path, options) {
@@ -66,7 +69,7 @@ export function fromNodeModule(mod, path, options) {
   const db = Object.keys(open).length > 0
     ? new mod.DatabaseSync(path, open)
     : new mod.DatabaseSync(path);
-  return adaptNodeDatabase(db);
+  return adaptNodeDatabase(db, options);
 }
 
 /**
@@ -79,7 +82,8 @@ export function nodeDriver() {
     dialect: sqliteDialect,
     /**
      * @param {string} path
-     * @param {{ timeout?: number, readOnly?: boolean }} [options]
+     * @param {{ timeout?: number, readOnly?: boolean,
+     *   queueTimeout?: number }} [options]
      * @returns {Promise<any>}
      */
     open: (path, options) => lazyOpen('node:sqlite',

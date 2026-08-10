@@ -331,3 +331,98 @@ describe('the synchronous fast path', () => {
     await store.close();
   });
 });
+
+describe('a refused open never keeps the handle', () => {
+  /** A driver whose connection records whether it was closed. */
+  const countingDriver = (onClose) => ({
+    name: 'counting',
+    dialect: nodeDriver().dialect,
+    open: async (dbPath, options) => {
+      const connection = await nodeDriver().open(dbPath, options);
+      return Object.freeze({
+        ...connection,
+        exec: (sql) => connection.exec(sql),
+        prepare: (sql) => connection.prepare(sql),
+        transaction: (fn) => connection.transaction(fn),
+        close: () => {
+          onClose();
+          return connection.close();
+        },
+      });
+    },
+  });
+
+  const DISAGREEING = {
+    $model: '0.1',
+    collections: {
+      notes: {
+        schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        key: '/id',
+        indexes: [{ name: 'by_missing', path: '$.absent' }],
+      },
+    },
+  };
+  const BASE = {
+    $model: '0.1',
+    collections: {
+      notes: {
+        schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        key: '/id',
+        indexes: [],
+      },
+    },
+  };
+
+  it('a shape disagreement closes the connection it acquired', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const first = await openStore(BASE, { driver: nodeDriver(), path: dbPath });
+      await first.close();
+      let closes = 0;
+      await assert.rejects(
+        () => openStore(DISAGREEING, { driver: countingDriver(() => { closes += 1; }), path: dbPath }),
+        (error) => /** @type {any} */ (error).code === 'JD0002');
+      assert.strictEqual(closes, 1, 'closed exactly once, not zero and not twice');
+    }
+    finally {
+      cleanup();   // would be EPERM on Windows if the handle had leaked
+    }
+  });
+
+  it('a close that ALSO fails keeps the open failure primary', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const first = await openStore(BASE, { driver: nodeDriver(), path: dbPath });
+      await first.close();
+      const brokenClose = {
+        name: 'broken-close',
+        dialect: nodeDriver().dialect,
+        open: async (path, options) => {
+          const connection = await nodeDriver().open(path, options);
+          return Object.freeze({
+            ...connection,
+            exec: (sql) => connection.exec(sql),
+            prepare: (sql) => connection.prepare(sql),
+            close: () => {
+              connection.close();          // really release it
+              throw new Error('close boom');
+            },
+          });
+        },
+      };
+      await assert.rejects(
+        () => openStore(DISAGREEING, { driver: brokenClose, path: dbPath }),
+        (error) => {
+          const aggregate = /** @type {any} */ (error);
+          assert.ok(aggregate instanceof AggregateError);
+          assert.strictEqual(aggregate.errors[0].code, 'JD0002',
+            'the reason the open was refused stays first');
+          assert.strictEqual(aggregate.errors[1].message, 'close boom');
+          return true;
+        });
+    }
+    finally {
+      cleanup();
+    }
+  });
+});

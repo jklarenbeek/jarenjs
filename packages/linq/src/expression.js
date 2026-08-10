@@ -47,16 +47,34 @@ function embedString(s) {
 }
 
 /**
- * True when `value` (a plain JSON tree, no proxies) can embed verbatim.
+ * True when `value` is a plain JSON tree (no proxies) that can embed
+ * verbatim.
+ *
+ * "Plain JSON" is checked, not assumed. Walking `Object.keys` alone
+ * accepted every value whose own enumerable keys happen to be JSON —
+ * which a `Date`, a `Map`, a `RegExp`, a `Set` and every class instance
+ * satisfy vacuously, because `Object.keys` reports nothing for them. Each
+ * one then embedded as `{}` and the query filtered on an empty object.
+ * The numeric domain matters just as much: `NaN` and `±Infinity` are not
+ * JSON numbers, and `-0` is a legal number that shares JSON text with
+ * `0` while dividing to the opposite infinity. So the prototype is
+ * required to be plain and the numeric domain is required to be finite,
+ * and a captured constant outside that boundary is refused at capture —
+ * where the caller can see which value it was.
  * @param {any} value
  */
 function isPlainJson(value) {
-  if (value === null || typeof value !== 'object') {
-    return typeof value !== 'function' && typeof value !== 'symbol'
-      && value !== undefined;
-  }
+  if (value === null) return true;
+  const type = typeof value;
+  if (type === 'string' || type === 'boolean') return true;
+  if (type === 'number') return Number.isFinite(value) && !Object.is(value, -0);
+  if (type !== 'object') return false; // undefined, function, symbol, bigint
   if (value[NODE] !== undefined) return false;
-  if (Array.isArray(value)) return value.every(isPlainJson);
+  const proto = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    return proto === Array.prototype && value.every(isPlainJson);
+  }
+  if (proto !== Object.prototype && proto !== null) return false;
   for (const key of Object.keys(value)) {
     if (!isPlainJson(value[key])) return false;
   }
@@ -77,7 +95,22 @@ export function toExpression(value) {
   if (value === null) return null;
   const t = typeof value;
   if (t === 'string') return embedString(value);
-  if (t === 'number' || t === 'boolean') return value;
+  if (t === 'boolean') return value;
+  if (t === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new LinqBuildError('JL0005',
+        `a captured expression cannot embed ${String(value)} — the query data model is `
+        + 'JSON, which has no NaN or Infinity, and lenient serialization would fold it '
+        + 'into null');
+    }
+    if (Object.is(value, -0)) {
+      throw new LinqBuildError('JL0005',
+        'a captured expression cannot embed -0 — it shares its JSON text with 0 while '
+        + 'dividing to the opposite infinity, so a document holding it cannot be '
+        + 'keyed, stored or compared faithfully; use 0, or negate at query time');
+    }
+    return value;
+  }
   if (t === 'object') {
     const record = value[NODE];
     if (record !== undefined) {
@@ -88,13 +121,40 @@ export function toExpression(value) {
       // verbatim data: cheaper and clearer than a constructor tree
       return { $const: value };
     }
-    if (Array.isArray(value)) return value.map(toExpression);
+    const proto = Object.getPrototypeOf(value);
+    if (Array.isArray(value)) {
+      if (proto !== Array.prototype) {
+        throw new LinqBuildError('JL0005',
+          'a captured expression cannot embed an Array subclass instance — its behaviour '
+          + 'is not expressible as query data');
+      }
+      return value.map(toExpression);
+    }
+    if (proto !== Object.prototype && proto !== null) {
+      // a Date, Map, Set, RegExp or class instance: `Object.keys` reports
+      // nothing for it, so embedding it verbatim produced `{}` and the
+      // query silently compared against an empty object
+      throw new LinqBuildError('JL0005',
+        `a captured expression cannot embed a ${value.constructor?.name ?? 'non-plain'} `
+        + 'instance — it carries no own enumerable members, so it would embed as {}. '
+        + 'Convert it to query data first (a Date to its ISO string or epoch number, a '
+        + 'Map to an object), or bind it through params().');
+    }
     const keys = Object.keys(value);
     if (keys.some((k) => k.charCodeAt(0) === 0x24)) {
       return { $map: keys.map((k) => [embedString(k), toExpression(value[k])]) };
     }
     const out = {};
-    for (const key of keys) out[key] = toExpression(value[key]);
+    // an own `__proto__` member is DATA here; plain assignment would set
+    // the builder's prototype and drop the member
+    for (const key of keys) {
+      Object.defineProperty(out, key, {
+        value: toExpression(value[key]),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
     return out;
   }
   throw new LinqBuildError('JL0005',

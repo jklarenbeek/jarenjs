@@ -8,39 +8,108 @@
  * semantics every other provider must match and the proof the seam is
  * real.
  *
- * Compiled documents are shared through a bounded LRU keyed by
- * `contentKey(document)` (the memo-grade key — `canonicalizeJson` is
- * signature-grade and throws on non-JSON; do not conflate them), one
- * cache per `compileTypeTest` identity because the hook changes what
- * compiles.
+ * Compiled documents are shared through a bounded LRU keyed by the
+ * document's COLLISION-FREE structural identity, one cache per REGISTRY
+ * identity — the hooks change what compiles, so two different registries
+ * must not share compiled programs.
+ * A fingerprint would not do: a 32-bit content hash collides after tens
+ * of thousands of documents, and a collision here runs one query's
+ * compiled program for another query's document — silently wrong rows.
  */
 
 import { compileJsonQuery, JsonQueryCompileError } from '@jarenjs/json/query';
-import { contentKey } from '@jarenjs/core/object';
-import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
+import { createSemanticCache, createWeakCache } from '@jarenjs/core/cache';
 import { LinqBuildError } from './errors.js';
 
-/** The cache key sentinel for "no compileTypeTest supplied". */
+/** Stands in for an absent hook while walking the identity chain. */
 const NO_HOOK = Object.freeze({});
 
 const CACHES = createWeakCache();
-const cacheFor = () => createBoundedCache(512);
+const cacheFor = () => createSemanticCache(512);
+
+/** The root of the hook-identity chain. */
+const REGISTRY_IDS = createWeakCache();
+/** The token minted for each distinct COMBINATION of hook identities. */
+const REGISTRY_TOKEN = Symbol('linq.registryToken');
+
+/**
+ * The compile options a sequence forwards to the engine, beyond the
+ * document itself. `orderBy(..., {collation})` and `$call` emit perfectly
+ * good documents, and without the matching registry the in-memory
+ * compiler could only answer `JQ0010` — so a Dutch sort was expressible
+ * and not executable. These are the registries that close that gap; the
+ * engine's own option names, deliberately, so there is one vocabulary.
+ */
+export const COMPILE_OPTION_KEYS = Object.freeze([
+  'compileTypeTest', 'functions', 'collations', 'pathFunctions', 'limits',
+]);
+
+/**
+ * Pick the forwarded compile options out of a sequence's options bag.
+ * @param {Record<string, any>} options
+ * @returns {Record<string, any>}
+ */
+export function compileOptionsOf(options) {
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const key of COMPILE_OPTION_KEYS) {
+    if (options[key] !== undefined) out[key] = options[key];
+  }
+  return out;
+}
+
+/**
+ * A stable token for one COMBINATION of hook identities, so compiled
+ * programs are shared exactly among callers whose hooks agree.
+ *
+ * Partitioning on one hook is not enough: a document naming a `nl`
+ * collation compiles to different code with and without that registry,
+ * and a shared partition would serve the compiled-with version to a
+ * caller who passed no collations at all — which is a wrong answer, not
+ * a missing error. The chain walks every hook slot in a fixed order
+ * through WeakMaps, so a token lives exactly as long as the registries
+ * that produced it. `limits` is plain data and rides in the cache key
+ * instead of here, so a fresh `{ steps: 1000 }` literal per call does
+ * not mint a fresh partition every time.
+ * @param {Record<string, any>} options
+ * @returns {object} the partition key
+ */
+function registryIdentity(options) {
+  if (options.registry !== undefined) return options.registry;
+  let node = /** @type {any} */ (REGISTRY_IDS);
+  for (const key of ['compileTypeTest', 'functions', 'collations', 'pathFunctions']) {
+    const hook = options[key];
+    const slot = hook === undefined || hook === null ? NO_HOOK : hook;
+    node = node.getOrCreate(slot, () => {
+      const next = createWeakCache();
+      /** @type {any} */ (next)[REGISTRY_TOKEN] = Object.freeze({});
+      return next;
+    });
+  }
+  return /** @type {any} */ (node)[REGISTRY_TOKEN];
+}
 
 /**
  * Compile a query document, shared across equal documents.
  * @param {any} document - the emitted (or hand-written) query document
- * @param {{ compileTypeTest?: any, externals: readonly string[] }} options
+ * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
+ *   pathFunctions?: any, limits?: any, registry?: object,
+ *   externals: readonly string[] }} options - `registry` is the cache
+ *   partition key: one object identity per distinct set of hooks, since
+ *   the hooks decide what a document compiles to
  * @returns {any} the compiled query
  * @throws {LinqBuildError} `JL0003` when a schema operator needs the
  *   missing `compileTypeTest` hook
  */
 export function compileDocument(document, options) {
-  const cache = /** @type {any} */ (CACHES.getOrCreate(options.compileTypeTest ?? NO_HOOK, cacheFor));
-  const key = contentKey({ document, externals: options.externals });
-  return cache.getOrCreate(key, () => {
+  const cache = /** @type {any} */ (CACHES.getOrCreate(registryIdentity(options), cacheFor));
+  // the externals and the limits are part of the identity: the same
+  // document compiles differently against a different set of declared
+  // names, and differently again under a step or result bound
+  return cache.getOrCreate([document, options.externals, options.limits ?? null], () => {
     try {
       return compileJsonQuery(document, {
-        compileTypeTest: options.compileTypeTest,
+        ...compileOptionsOf(options),
         externals: options.externals,
       });
     }
@@ -91,7 +160,7 @@ export function classifySource(source) {
  */
 export function executeInMemory(source, document, options) {
   const compiled = compileDocument(document,
-    { compileTypeTest: options.compileTypeTest, externals: options.externalNames });
+    { ...options, externals: options.externalNames });
   const data = Array.isArray(source) ? source : [...source];
   return compiled(data, options.externals);
 }

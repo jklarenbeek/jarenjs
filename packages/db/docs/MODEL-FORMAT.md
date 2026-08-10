@@ -94,11 +94,35 @@ name the dialect's JSON path grammar cannot carry (an embedded `"` or
 a control character, on SQLite) is `JD0004`.
 
 **Opening an existing database verifies, never alters.** If a declared
-collection's table already exists, its columns (name, type, generated)
-and its created indexes (name, uniqueness, covered columns) MUST match
-what the model would create; any disagreement is `JD0002` naming the
-first difference. Reshaping a live database is the migration story — a
-later capability — and `openStore` MUST NOT attempt it.
+collection's table already exists it MUST match what the model would
+create; any disagreement is `JD0002` naming the first difference.
+Reshaping a live database is the migration story — a later capability —
+and `openStore` MUST NOT attempt it.
+
+"Match" means every physical property that decides behaviour, not just
+the names and types:
+
+- structurally — column names, declared types and generated flags; index
+  names, uniqueness, and covered columns **in their declared order**
+  (`(a,b)` and `(b,a)` are different indexes: one serves an `a`-prefix
+  lookup and the other does not);
+- by DECLARED TEXT — the stored `CREATE` statement is compared against
+  the planned one, which is where the properties no pragma reports live:
+  `PRIMARY KEY`, `NOT NULL`, `DEFAULT`, `CHECK`, `STRICT`, a generated
+  column's expression, an index's partial predicate, and each index
+  term's collation and direction. A table that lost its primary key, or
+  whose `gx_a` now reads `$.b`, keeps every name and type it had;
+- for entities, the whole foreign-key TUPLE — source and target column,
+  `ON DELETE` and `ON UPDATE`. Comparing counts accepted
+  `ON DELETE SET NULL` becoming `ON DELETE CASCADE`, which deletes
+  different rows;
+- an index the database has and the model does not declare is also
+  drift: it changes deletion semantics and the plans the optimizer picks.
+
+Physical column ORDER is deliberately **not** drift. SQLite's
+`ALTER TABLE … ADD COLUMN` can only append, so a migrated table and a
+freshly built one legitimately disagree there, and this store never reads
+a column positionally.
 
 ## 4. The driver contract and the synchronous fast path
 
@@ -215,6 +239,49 @@ throw rolls back exactly its own level and rethrows — an outer
 transaction that catches the error continues and its own work
 commits. There is no implicit retry.
 
+### 5.1 Transaction ownership
+
+A SQLite connection holds ONE savepoint stack, so two transactions that
+overlap in time on one connection cannot both be correct: `RELEASE`
+discards everything opened after its target, so whichever finished first
+would take the other's savepoint with it, and the second would then fail
+with *no such savepoint* over rows it had already committed. Unique
+savepoint names do not help — the stack is a stack.
+
+So a **top-level transaction owns its connection until it settles**, and
+an overlapping one waits its turn. Two concurrent request handlers
+sharing a store both commit, and both report success.
+
+Nesting is asked for in one of two ways, and the difference is not
+cosmetic:
+
+- **Synchronously** — a `transaction` called while an owning callback is
+  still on the stack nests, because nothing can interleave there. This is
+  `store.sync.transaction` inside `store.sync.transaction`.
+- **Through the scope** — an `async` callback has already awaited, so the
+  stack cannot say whether a request is its own nested work or an
+  unrelated caller. Nest through the store the callback RECEIVED:
+
+  ```js
+  await store.transaction(async (tx) => {
+    await store.collection('docs').put(doc, 'a');   // joins this transaction
+    await tx.transaction(async () => { … });        // nests inside it
+  });
+  ```
+
+  Reaching back through the outer `store.transaction` from inside a
+  callback queues behind the transaction the caller is part of, so it
+  waits for itself; after `queueTimeout` (default 5 s, the busy-timeout
+  default) that becomes `JD0012` naming the fix rather than hanging.
+
+**One residual, stated plainly.** A bare statement issued while a
+transaction is open JOINS that transaction and shares its fate, because
+SQLite has no per-statement transaction scope and every operation inside
+a callback reaches the connection the same way an unrelated caller does.
+Work that must be in the transaction is therefore safe; an unrelated
+writer on a SHARED store is not. Give each concurrent writer its own
+store when independent writes must not share a rollback.
+
 ## 6. Identity
 
 Key allocation is declared, never guessed (three strategies, platform
@@ -251,6 +318,7 @@ error.
 | `JD0005` | the model document is invalid |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |
+| `JD0012` | work waited too long for the open transaction to settle |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
@@ -270,6 +338,7 @@ error.
 | `JD2051` | the change log is not enabled |
 | `JD2060` | the maintained live state exceeded its bound |
 | `JD2061` | another context owns the database |
+| `JD2062` | the store closed with job handlers still in flight |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
