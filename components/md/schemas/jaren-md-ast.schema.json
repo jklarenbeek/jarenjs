@@ -33,6 +33,7 @@
         { "$ref": "#/$defs/code" },
         { "$ref": "#/$defs/html" },
         { "$ref": "#/$defs/table" },
+        { "$ref": "#/$defs/footnoteDefinition" },
         { "$ref": "#/$defs/custom" },
         { "$ref": "#/$defs/extensionNode" }
       ]
@@ -49,6 +50,7 @@
         { "$ref": "#/$defs/break" },
         { "$ref": "#/$defs/softBreak" },
         { "$ref": "#/$defs/html" },
+        { "$ref": "#/$defs/footnoteReference" },
         { "$ref": "#/$defs/custom" },
         { "$ref": "#/$defs/extensionNode" }
       ]
@@ -205,7 +207,30 @@
         "type": { "const": "link" },
         "url": { "type": "string" },
         "title": { "type": ["string", "null"] },
+        "auto": {
+          "type": "boolean",
+          "description": "present and true on a GFM literal autolink (bare www./http:///email); the canonical printer prints such a link back bare, and nothing else reads it"
+        },
         "children": { "$ref": "#/$defs/inlineChildren" }
+      }
+    },
+    "footnoteDefinition": {
+      "type": "object",
+      "required": ["type", "identifier", "label", "children"],
+      "properties": {
+        "type": { "const": "footnoteDefinition" },
+        "identifier": { "type": "string" },
+        "label": { "type": "string" },
+        "children": { "$ref": "#/$defs/blockChildren" }
+      }
+    },
+    "footnoteReference": {
+      "type": "object",
+      "required": ["type", "identifier", "label"],
+      "properties": {
+        "type": { "const": "footnoteReference" },
+        "identifier": { "type": "string" },
+        "label": { "type": "string" }
       }
     },
     "image": {
@@ -260,7 +285,8 @@
               "paragraph", "heading", "thematicBreak", "blockquote",
               "list", "listItem", "code", "html", "table", "tableRow",
               "tableCell", "text", "emphasis", "strong", "strikethrough",
-              "link", "image", "inlineCode", "break", "softBreak", "custom"
+              "link", "image", "inlineCode", "break", "softBreak", "custom",
+              "footnoteDefinition", "footnoteReference"
             ]
           }
         }

@@ -76,6 +76,12 @@ const app = createSiteApp({
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   },
+  // an in-page link in a rendered document: the target heading carries
+  // the id @jarenjs/md minted for it. The header overlap is the
+  // stylesheet's job (`--md-scroll-margin`), so this stays one line.
+  scrollToAnchor: (id) => {
+    document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  },
   applyTheme: (next) => {
     document.documentElement.classList.toggle('dark', next === 'dark');
     localStorage.setItem(THEME_KEY, next);

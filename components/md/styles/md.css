@@ -25,6 +25,38 @@
 .md h2 { font-size: 1.4em; }
 .md h3 { font-size: 1.2em; }
 
+/* A fragment scrolled into view lands under a sticky header unless the
+   target reserves the room itself. That is a layout concern, so it lives
+   here and not in whatever scrolls the page: a host with a header of its
+   own sets `--md-scroll-margin`, one without keeps a little breathing
+   room above the heading. */
+.md :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: var(--md-scroll-margin, 4.5rem); }
+
+/* --- heading anchors (`headingAnchors: true`) ---------------------- */
+/* The affordance is quiet until the heading is hovered or the link is
+   focused, so a document does not read as a column of `#`. It stays in
+   the DOM either way — hiding it with `display: none` would take it off
+   the keyboard, and it is the keyboard path that needs it most. */
+.md .md-anchor {
+  margin-left: 0.35em;
+  color: var(--md-muted, #5b6472);
+  font-weight: 400;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.md :is(h1, h2, h3, h4, h5, h6):hover .md-anchor,
+.md .md-anchor:focus-visible { opacity: 1; }
+.md .md-anchor:hover { color: var(--md-link, #2456c4); }
+.md .md-anchor:focus-visible {
+  outline: 2px solid var(--md-link, #2456c4);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md .md-anchor { transition: none; }
+}
+
 .md p, .md ul, .md ol, .md table { margin: 0.6em 0; }
 .md ul, .md ol { padding-left: 1.5em; }
 .md li > ul, .md li > ol { margin: 0.15em 0; }
@@ -78,6 +110,39 @@
 .md th { background: var(--md-code-bg, #f2f4f8); }
 
 .md img { max-width: 100%; }
+
+/* --- GFM footnotes ------------------------------------------------- */
+/* The section is appended after the last block of the document, so it
+   needs the rule a reader expects between a document and its notes —
+   the emitter writes no `<hr>` of its own, because that would be a
+   thematic break the author did not write. Small type, muted, and the
+   back-arrow sized so a thumb can hit it. */
+.md .footnotes {
+  margin-top: 2em;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--md-rule, #d0d4dc);
+  font-size: 0.9em;
+  color: var(--md-muted, #5b6472);
+}
+.md .footnotes > ol { margin: 0; }
+.md .footnotes li { margin: 0.3em 0; }
+.md .footnotes p { margin: 0.3em 0; }
+/* The cited note is highlighted when a reader jumps to it, so a landing
+   in the middle of a list of notes says which one it landed on. */
+.md .footnotes li:target { background: var(--md-code-bg, #f2f4f8); }
+
+.md .footnote-backref {
+  text-decoration: none;
+  padding: 0 0.25em;
+  font-size: 1.1em;
+  line-height: 1;
+}
+.md .footnote-backref sup { font-size: 0.7em; }
+
+/* A citation is small and easy to miss; give it a target a pointer can
+   land on without shifting the line it sits in. */
+.md sup > a { text-decoration: none; padding: 0 0.15em; }
+.md sup > a:hover { text-decoration: underline; }
 
 .md input[type='checkbox'] { margin-right: 0.4em; }
 

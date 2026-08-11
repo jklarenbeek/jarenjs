@@ -509,6 +509,11 @@ export const ACTIONS = {
       { run: 'readme-goto', with: { hash: '$payload.hash' } },
     ],
   },
+  // an in-page link inside a rendered document: scroll, and change
+  // nothing else — the route belongs to the page behind the dialog
+  'readme/anchor': {
+    effects: [{ run: 'scroll-to-anchor', with: { id: '$payload.id' } }],
+  },
   'readme/history': {
     patch: [
       { op: 'replace', path: '/readme/stack', value: '$payload.stack' },

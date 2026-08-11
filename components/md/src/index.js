@@ -2,8 +2,9 @@
 /**
  * @jarenjs/md - Markdown + frontmatter as JSON documents.
  *
- * parseMarkdown turns Markdown (CommonMark core + GFM tables/
- * strikethrough/task lists + YAML/JSON/TOML frontmatter) into a plain
+ * parseMarkdown turns Markdown (CommonMark core + GFM tables,
+ * strikethrough, task lists, footnotes and autolink literals +
+ * YAML/JSON/TOML frontmatter) into a plain
  * JSON AST the rest of the suite consumes natively: JSLT/JTLT and
  * query documents transform it, `mdToVnode` projects it to
  * @jarenjs/view vnodes with content-hash keys, `toMarkdown` prints
@@ -36,6 +37,8 @@ export {
 } from './loader.js';
 
 export { toMarkdown } from './to-md.js';
+
+export { toHtml } from './to-html.js';
 
 export {
   mdToVnode,

@@ -19,8 +19,18 @@ import { RAW, REPO } from '../content/packages.js';
 
 // theme 'host': diagram cssVars reference the site tokens, so memoized
 // SVGs follow light/dark live (docs/DESIGN.md §7)
+// headingIds/headingAnchors: every heading gets a GitHub-compatible `id`
+// and a copy-a-link affordance, so a committed README's own
+// `[see below](#the-section)` links land here exactly as they do on
+// GitHub. No `slugPrefix`: the documents this renders are repo-authored,
+// so an id they mint is one the site chose to trust. That reasoning is
+// what the prefix exists for, and it belongs to the SOURCE, not to this
+// component — a surface rendering markdown from anywhere else must set
+// the prefix rather than inherit the decision made here.
 export const md = createMdComponent({
   plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host', interactive: true })],
+  headingIds: true,
+  headingAnchors: true,
 });
 
 //#region README-relative links
@@ -42,9 +52,13 @@ export const md = createMdComponent({
 //                      the hash BEHIND the open modal, which reads as a
 //                      dead link
 //
+//   an #anchor      -> stay put: a `readme/anchor` binding
+//                      (preventDefault) that scrolls to the heading;
+//                      the hash router must never see the fragment
+//
 // Relative image sources resolve to the raw base the same way, so a
-// README's own images load. Other absolute URLs, mailto: and in-page
-// #anchors pass through untouched. The dialog's title for a navigated
+// README's own images load. Other absolute URLs and mailto: pass through
+// untouched. The dialog's title for a navigated
 // document is its repo path — the package names belong to the docs
 // page's own buttons.
 
@@ -65,8 +79,22 @@ function isDirectoryPath(path) {
 /** The rewritten anchor for a repo-relative href, or null to keep it. */
 function rewriteAnchor(props, base) {
   const href = props.href;
-  if (typeof href !== 'string' || href === '' || href.startsWith('#')
-    || href.startsWith('//'))
+  if (typeof href !== 'string' || href === '')
+    return null;
+  if (href.startsWith('#')) {
+    // An in-page fragment, on a hash-routed site. Left alone it sets
+    // `location.hash`, which the router reads as a PAGE name: `#setup` is
+    // not a known page, so the reader is thrown out of the document they
+    // were reading and onto the home page. The fragment is handled here
+    // instead — scroll to the heading, leave the route alone.
+    return {
+      ...props,
+      on: {
+        click: { action: 'readme/anchor', with: { id: href.slice(1) }, preventDefault: true },
+      },
+    };
+  }
+  if (href.startsWith('//'))
     return null;
   if (href.startsWith(SITE)) {
     // a link to the site the reader is already on: routing behind an

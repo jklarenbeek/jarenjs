@@ -22,7 +22,8 @@ import { mdToVnode } from './to-vnode.js';
  */
 /**
  * @typedef {MdParseOptions & { retainSource?: boolean,
- *   html?: 'skip'|'text' }} MdCompileOptions
+ *   html?: 'skip'|'text', headingIds?: boolean, slugPrefix?: string,
+ *   headingAnchors?: boolean }} MdCompileOptions
  */
 /**
  * The compiled closure bundle.
@@ -86,6 +87,9 @@ export function compileMarkdown(sourceOrDoc, options = {}) {
           plugins: options.plugins,
           html: options.html,
           sanitizeUrl: options.sanitizeUrl,
+          headingIds: options.headingIds,
+          slugPrefix: options.slugPrefix,
+          headingAnchors: options.headingAnchors,
         });
       }
       return vnode;

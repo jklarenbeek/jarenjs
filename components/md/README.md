@@ -6,7 +6,8 @@ separated layers**:
 1. **The engine** (`@jarenjs/md`, part one). Where JTLT (in
    [`@jarenjs/json`](../../packages/json)) turns JSON into text, the
    engine is the inverse arrow: it parses Markdown — CommonMark core,
-   GFM tables/strikethrough/task lists, YAML/JSON/TOML frontmatter —
+   GFM tables, strikethrough, task lists, footnotes and autolink
+   literals, YAML/JSON/TOML frontmatter —
    into a stable, serializable AST that the rest of the suite consumes
    natively. JSLT stylesheets transform it, query documents address it,
    [`@jarenjs/view`](../../packages/view) renders it (DOM and SSR), and
@@ -80,6 +81,114 @@ const html = renderToString(vnode);       // → SSR string
 const md = compileMarkdown(source, { retainSource: false });
 md.toVnode() === md.toVnode();            // true — built at most once
 ```
+
+### An HTML string, in one call
+
+```js
+import { parseMarkdown, toHtml } from '@jarenjs/md';
+
+toHtml(parseMarkdown(source));                        // '<h1>Hi</h1><p>…</p>'
+toHtml(doc, { wrap: 'article class="md"' });          // wrapped, like the vnode path
+toHtml(doc, { html: 'raw' });                         // TRUSTED INPUT ONLY
+```
+
+`toHtml` writes bytes; `mdToVnode` builds a patchable tree. Neither is
+implemented in terms of the other, because their targets differ: a vnode
+is keyed, memoized and reconciled in O(1) by `@jarenjs/view`, and its
+safety is structural — there is no slot in it for unescaped author
+markup. A string has one, which is why the raw-HTML corner of CommonMark
+is reachable through `toHtml` and only through it.
+
+The `html` option is the whole difference:
+
+| mode | what a raw-HTML node becomes |
+|---|---|
+| `'escape'` (default) | escaped text — the markup is **visible**, not live |
+| `'skip'` | dropped, as the vnode path drops it by default |
+| `'raw'` | passed through verbatim — **trusted input only** |
+
+The URL policy is orthogonal and runs in **every** mode: `'raw'` says
+"this document's HTML blocks are trusted", not "trust everything", so a
+markdown `[x](javascript:…)` still loses its `href`. No surface in this
+repository passes `'raw'`.
+
+For markup a vnode *can* express, the two emitters produce byte-identical
+output — asserted over the CommonMark corpus in
+[`test/md/to-html.test.js`](../../test/md/to-html.test.js), not on one
+fixture.
+
+### Heading anchors
+
+`[see below](#the-section)` needs something to land on, so the emitter can
+give every heading a GitHub-compatible `id` — the same slug GitHub mints,
+so one committed README anchors identically on GitHub, in an editor
+preview and wherever you render it:
+
+```js
+mdToVnode(doc, { headingIds: true });
+// ['h2', { id: 'quick-start' }, 'Quick start']
+
+mdToVnode(doc, { headingIds: true, headingAnchors: true });
+// … plus a trailing ['a', { class: 'md-anchor', href: '#quick-start', … }, '#']
+// so a reader can copy a link to the section
+
+mdToVnode(doc, { headingIds: true, slugPrefix: 'user-content-' });
+// every id and anchor href prefixed — set this for markdown you did not
+// author, so its ids cannot collide with your own page's
+```
+
+Repeated headings are numbered the way GitHub numbers them (`setup`,
+`setup-1`, `setup-2`), and a heading with no slug-worthy text (`## ***`)
+lands on `section`. Ids are **off by default on purpose**: CommonMark
+renders a heading as `<h1>Foo</h1>`, so emitting one by default would put
+the conformance score below at odds with what the package produces. The
+rules are normative in [MD-FORMAT.md](docs/MD-FORMAT.md) §4.5; the slug
+transform is `slugify` from `@jarenjs/core/string`.
+
+The affordance styles itself from `styles/md.css` and stays quiet until
+its heading is hovered or it takes focus. A page with a sticky header
+sets `--md-scroll-margin` so a scrolled-to heading does not land beneath
+it.
+
+### Footnotes and bare links (GFM)
+
+Both are on with `gfm` (the default) and both are **additive**: with
+`gfm: false` the output is byte-for-byte what it was before they existed.
+
+```md
+A claim.[^1] Visit www.example.com or mail a@b.test.
+
+[^1]: The source, which may hold [several](/blocks) blocks.
+```
+
+A footnote definition stays **where the author wrote it** in the AST —
+the document is what was written, not what one renderer makes of it — and
+the emitters collect it: references become `<sup>` links, uncited
+definitions render nothing at all, and one `<section class="footnotes">`
+is appended after the last block.
+
+- **Numbering follows the first reference**, not definition order or
+  label order. Cite `[^b]` before `[^a]` and `b` is footnote 1.
+- **An undefined `[^nope]` stays literal text**, exactly as on GitHub —
+  a citation of nothing is not a link to nothing.
+- **Ids carry `user-content-` by default** (GitHub's own answer), so a
+  document dropped into a page you own cannot collide with its `#fn-1`.
+  `slugPrefix` replaces the prefix; `slugPrefix: ''` opts out.
+- **A footnote cited twice gets two landing places** and two
+  back-references, so `↩` returns the reader where they left.
+- **A footnote may cite another**, cycles included; the collection
+  terminates because each definition is rendered once.
+- With `wrap: null` (a bare fragment) the section is appended **inside**
+  the fragment, after the last block — a consumer concatenating fragments
+  gets one footnotes section per fragment.
+
+Literal autolinks follow GFM's extended grammar, trailing-punctuation
+rules and all — `www.example.com/a.b.` links `www.example.com/a.b` and
+leaves the sentence's full stop alone. The AST holds a plain `link` with
+the scheme already inserted (`http://www.example.com/a.b`) plus an
+`auto: true` flag, which exists for exactly one consumer: `toMarkdown`,
+which prints it back bare instead of as `[text](url)`. Both features are
+normative in [MD-FORMAT.md](docs/MD-FORMAT.md) §4.6 and §4.7.
 
 ### End to end: URL → frontmatter → JSLT → plugins → DOM + SSR
 
@@ -258,37 +367,79 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 
 ## Performance contract
 
-Measured, not claimed — `npm run benchmark:markdown`, 2026-07-19, Node
-v22.22.2 (run it yourself; micro-timings vary ±15%):
+Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->2026-08-10, Node v24.19.0<!--/bm-->
+(run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: <!--bm:md.parseTimes-->~0.12 ms for a typical ~2 kB document, ~0.49 ms for ~10 kB, ~4.9 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
+- **Parse to AST**: <!--bm:md.parseTimes-->~0.1 ms for a typical ~2 kB document, ~0.47 ms for ~10 kB, ~4.9 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
   inline phase at ~36% of that and the source hash for `meta.hash` at
   ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
   `/\s+$/` regex at paragraph close with a scan was worth 4–17%
   depending on how paragraph-dense the document is — measured as an A/B
   on this corpus, because the same change looked like noise on a
   differently shaped one.)
-- **Parse + render to HTML** (the cross-engine row): within <!--bm:md.vsPeers-->1.2–1.9<!--/bm-->x of
-  `marked` and `markdown-it`, <!--bm:md.vsMicromark-->6.0–10.5<!--/bm-->x faster than `micromark`, on the
-  same GFM documents.
+- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes
+  <!--bm:md.vsPeers-->0.6–0.9<!--/bm-->x the time `marked` and `markdown-it` take, and is
+  <!--bm:md.vsMicromark-->12.6–20.3<!--/bm-->x faster than `micromark`, on the same GFM documents.
+  Through the **vnode** path the same documents cost roughly twice that
+  — keys, memoization and a tree the patcher can reconcile are not free,
+  and the benchmark publishes that row beside this one rather than
+  quoting only the flattering half.
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
-  the cached projection in <!--bm:md.cachedNs-->53–96<!--/bm--> ns — and because block vnodes carry
+  the cached projection in <!--bm:md.cachedNs-->43–86<!--/bm--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
   vnodes, the view patcher skips unchanged blocks in O(1). A JSLT
   identity transform returns the document by reference; a partial
   transform keeps every unmatched subtree `===`. That pipeline — not
   the one-shot HTML render — is what this package is optimized for.
-- **CommonMark scorecard**: 571 of 655 spec examples (87.2%) under the
-  spec's normalization, reported honestly as coverage of the pragmatic
-  dialect. 47 of the 84 remaining **cannot pass by construction**: the
-  spec renders raw HTML verbatim, including a lone `</div>` or a
-  never-closed tag, and a vnode tree cannot hold half an element. The
-  rest are real dialect gaps (loose-list paragraph wrapping, emphasis
-  flanking, link-label edge cases) tracked in the
-  [ROADMAP](../../docs/ROADMAP.md). The scorecard runs against the official
-  spec as a git submodule, QT3-style, and compares rendered meaning:
-  whitespace that only lays markup out is normalized away on every
-  engine's output, not just this one's.
+- **CommonMark scorecard**, both paths, because the difference between
+  them *is* the safety boundary:
+  - `toHtml` (`html: 'raw'`, the like-for-like row):
+    <!--bm:md.scorecard-->655 of 655 (100.0%)<!--/bm--> — for scale, <!--bm:md.scorecardPeers-->marked 620, markdown-it 655, micromark 650<!--/bm-->.
+    **No dialect gap remains on this path**: every example the spec
+    contains passes, and the round-trip suite additionally asserts that
+    all 655 survive `parseMarkdown → toMarkdown → parseMarkdown` with an
+    identical AST and an unchanged canonical form.
+  - `mdToVnode` + SSR: <!--bm:md.scorecardVnode-->593 of 655 (90.5%)<!--/bm-->. **Every** example the two
+    paths disagree on contains raw HTML — asserted, not asserted-at:
+    [`test/md/to-html.test.js`](../../test/md/to-html.test.js) checks that no
+    vnode-path failure is free of an `html` node. The spec renders raw
+    HTML verbatim, including a lone `</div>` or a never-closed tag, and a
+    vnode tree cannot hold half an element. That is a property of the
+    format, not a gap to close — it is the same property that makes the
+    vnode path safe for Markdown you did not write.
+
+- **GFM extension scorecard**, the five extension sections of the GFM
+  specification with every engine's extensions switched on — because the
+  CommonMark corpus says nothing about any of them, and the part of the
+  dialect every engine advertises was the only part nobody measured:
+  <!--bm:md.gfmScorecard-->22 of 24 (91.7%)<!--/bm--> through `toHtml`, <!--bm:md.gfmScorecardVnode-->22 of 24 (91.7%)<!--/bm--> through the vnode
+  path; for scale, <!--bm:md.gfmPeers-->marked 22, markdown-it 14, micromark 23<!--/bm-->.
+  Autolink literals are <!--bm:md.gfmAutolinks-->11 of 11<!--/bm-->, ahead of every rival here. The two
+  this package does not pass are **stated boundaries, not to-do items**:
+  - **table alignment is written as `style="text-align:center"`, not the
+    deprecated `align` attribute** (1 example). Both render identically;
+    `align` was removed from HTML in 2014, and switching would change the
+    bytes every existing consumer already receives.
+  - **the "disallowed raw HTML" extension is not implemented** (1
+    example). It escapes the `<` of `<title>`, `<script>`, `<iframe>` and
+    six others when raw HTML passes through. Our raw mode is documented
+    trusted-input-only, and the two modes a host actually points at
+    untrusted Markdown — `escape` and the vnode path — already neutralize
+    those tags **and every other one**, which is a stronger guarantee
+    than a nine-tag deny-list. Implementing it would add a fourth
+    HTML policy that is safer than `raw` and weaker than the default.
+
+  Footnotes are not in this table because the GFM specification does not
+  cover them: GitHub ships them, the spec never grew a section for them,
+  so there is no reference corpus to score. They are covered by
+  hand-written tests written from GitHub's rendering
+  ([`test/md/gfm.test.js`](../../test/md/gfm.test.js)).
+
+  Both scorecards run against their official spec as a git submodule,
+  QT3-style, and compare rendered meaning: whitespace that only lays
+  markup out — and the order in which a serializer happened to print a
+  tag's attributes — is normalized away on every engine's output, not
+  just this one's.
 
 ## Development
 

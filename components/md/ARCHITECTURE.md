@@ -61,6 +61,7 @@ flowchart TD
     S["source text"] -->|parse| D["MdDocument<br/>(plain JSON AST)"]
     D --> M["toMarkdown()<br/>canonical round-trip"]
     D --> V["mdToVnode()<br/>view vnodes, hash keys"]
+    D --> H["toHtml()<br/>HTML string, directly"]
     D --> Q["JSLT / query"]
     N["everything right of the parse is a<br/>compiled projection, cached per document"]
     D -.- N
@@ -70,6 +71,39 @@ flowchart TD
 Everything right of the parse is a compiled projection: dispatch tables
 keyed on node `type`, built once per plugin set, cached per document.
 
+### Two emitters over one AST
+
+`mdToVnode` and `toHtml` are siblings, not layers, and there will not be
+a third:
+
+| | `mdToVnode` | `toHtml` |
+|---|---|---|
+| output | a patchable tree | bytes |
+| identity | content-hash keys + per-node memo, so an unchanged block patches in O(1) | none — nothing downstream reconciles a string |
+| raw HTML | drop / show as text / parse through an allow-list | escape (default) / skip / verbatim (`'raw'`, trusted input only) |
+| conformance | limited by the format: a vnode cannot hold half an element | reaches the raw-HTML corner of CommonMark |
+
+Implementing either in terms of the other would either import the
+vnode's structural limit into the string path — defeating the point — or
+cost the vnode path a serialization round trip. What they genuinely
+share is factored instead: the escapers are `@jarenjs/view`'s (the same
+ones its SSR renderer uses, which is what lets the two outputs be
+byte-identical wherever a vnode can express the markup), the URL policy
+is `@jarenjs/view/helpers`, heading slugs are `@jarenjs/core/string`'s
+`slugify` behind `utils.js`, and plugin dispatch is the parser's own
+table. `renderToString(mdToVnode(doc))` still works — it is simply no
+longer how anyone gets a string.
+
+A string built by folding into an accumulator beat one built from an
+array of chunks joined at the end at every document size measured
+(1.2–2.1× at 2–100 kB), so the emitter concatenates.
+
+Every node type lands in both tables in the same change. A type that one
+emitter knows and the other does not is the exact divergence this
+arrangement exists to prevent, and the test suite drives one table of
+documents through both and compares bytes rather than holding two
+hand-written expectations.
+
 ## Module map
 
 | File | Role |
@@ -78,8 +112,10 @@ keyed on node `type`, built once per plugin set, cached per document.
 | `src/parser.js` | The block parser (container stack + one open leaf), the inline parser (delimiter stack), plugin tables, `parseMarkdown`, `createIncrementalParser` |
 | `src/frontmatter.js` | YAML-subset / JSON / TOML-subset parsers, written from scratch; `options.toml` injects `@jarenjs/josl` |
 | `src/ast.js` | Node constructors (one hidden class per type), `walkAst`, compiled-visitor `visitAst` |
+| `src/footnotes.js` | Which footnote definitions a document cites, in which order, and what to call them — the one answer both emitters use, because two implementations of an id rule is how a back-reference ends up pointing at nothing |
 | `src/compiler.js` | `compileMarkdown` — the closure bundle with cached projections; `frontmatterExternals`, `mdToForm` |
 | `src/to-md.js` | Canonical printer (round-trip fixed point) |
+| `src/to-html.js` | String emitter: AST → HTML bytes, the raw-HTML modes, `wrap` |
 | `src/to-vnode.js` | Vnode emitter (per-node memo, content-hash keys), `createMdRenderer` with hydrate scheduling |
 | `src/loader.js` | LRU cache + validators, in-flight sharing, AbortSignal, `streamMarkdown` |
 | `src/plugins/` | `definePlugin` + the two reference plugins (highlight, mermaid) |
@@ -118,6 +154,18 @@ stack for links/images. Batch parsing resolves inlines after the whole
 block phase (so later reference definitions bind); the incremental
 parser resolves each block when it is yielded (the documented streaming
 trade-off).
+
+GFM's literal autolinks are the one construct that runs *after* that
+pass rather than inside it, over the finished `text` nodes. Three
+reasons, and all three are structural rather than stylistic: the trigger
+characters are `w`, `h`, `f` and `@`, so putting them in the dispatch
+table would break the plain-text fast path on roughly every tenth
+character of English prose; an email address begins to the LEFT of its
+trigger, which a forward scanner cannot see; and the rule that pulls
+`&hl;` back out of a link is only meaningful once character references
+have been resolved, because a REAL entity is no longer spelled `&…;` by
+then. It costs ~0.27 ms on a 100 kB GFM document, measured A/B, and
+nothing at all with `gfm: false`.
 
 ### Plugin tables
 

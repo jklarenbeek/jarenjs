@@ -20,18 +20,19 @@ definePlugin({
   inlines: [ /* inline rule descriptors, §4 */ ],
   node: 'mermaid',                    // the AST type this plugin emits
   render: (node, h, ctx) => vnode,    // pure, synchronous vnode renderer
+  toHtml: (node, ctx) => '<figure>…',  // pure HTML-string renderer, for toHtml
   hydrate: async (el, node, ctx) => {}, // optional browser-only upgrade
 });
 ```
 
 `definePlugin` validates the shape (name present and kebab-case, rule
-descriptors well-formed, `render` a function when `node` is declared)
+descriptors well-formed, `render` and `toHtml` functions when present)
 and returns `Object.freeze`d data. Every member except `name` is
 optional.
 
 Plugins are passed as `options.plugins: MdPlugin[]` to `parseMarkdown`,
 `compileMarkdown` and `loadMarkdown`. At compile time they merge into
-five prebuilt tables:
+six prebuilt tables:
 
 | table | indexed by | consulted |
 |---|---|---|
@@ -39,9 +40,10 @@ five prebuilt tables:
 | block starts | first non-space character | once per unclaimed line |
 | inline scans | trigger character | from the inline scanner's dispatch |
 | renders | AST `type` | by the vnode emitter |
+| html renderers | AST `type` | by the string emitter (`toHtml`) |
 | hydrators | AST `type` | by `createMdRenderer` after mount |
 
-All five are built once per compile; the hot loops do only indexed
+All six are built once per compile; the hot loops do only indexed
 lookups. Two plugins claiming the same fence word, block character
 *and* matching the same line, inline character, or node type: the
 **first plugin in the array wins** (deterministic, documented, no
@@ -67,8 +69,7 @@ plugin, the same source is a plain `code` node with `lang: 'mermaid'` —
 
 ## 3. Block rule descriptors
 
-For syntax that is not a fence (callout blocks, directives, footnote
-definitions):
+For syntax that is not a fence (callout blocks, directives, sidenotes):
 
 ```js
 {
@@ -123,6 +124,28 @@ core's URL filtering does not run for it. A plugin that writes an
 drop the attribute when it returns `null` (MD-FORMAT §4.3). A URL the
 plugin composes itself from a trusted constant needs no filtering.
 
+### 5.1 Rendering to a string
+
+`toHtml(node, ctx) => string` is the same contract for the string
+emitter: pure, synchronous, and shadowing the core emitter for its node
+type — so the URL rule above applies unchanged, and a plugin that writes
+markup MUST escape document content itself (`escapeText`/`escapeAttribute`
+from `@jarenjs/view`). `ctx` is the emission context: `{ options, html,
+sanitizeUrl, headingIds, slugPrefix, headingAnchors }`, where `html` is
+the raw-HTML policy in force.
+
+The two hooks are independent. A plugin MAY provide either, and the
+emitters degrade differently when one is missing:
+
+- no `toHtml`, and the node type is one the CORE emitter knows (the
+  highlight plugin claims `code`): the core emitter prints it — the
+  content is never lost, it simply arrives without the plugin's
+  decoration;
+- no `toHtml`, and the type is the plugin's own (`mermaid`): `toHtml`
+  emits `<!-- unsupported plugin node: <type> -->`. The gap is SHOWN,
+  because a silently dropped diagram looks like a document that never
+  had one.
+
 Anything asynchronous or DOM-dependent goes in
 `hydrate(el, node, ctx)`, which `createMdRenderer` invokes **after**
 the patcher mounts the element. A hydratable render marks its root element with
@@ -135,7 +158,9 @@ default `console.error`).
 ## 6. The reference plugins
 
 Both ship from `@jarenjs/md/plugins` and are the canonical templates
-for third-party plugins (math, callouts/admonitions, footnotes, embeds).
+for third-party plugins (math, callouts/admonitions, embeds). GFM
+footnotes are NOT a plugin — they are part of the dialect
+([MD-FORMAT.md](MD-FORMAT.md) §4.6), gated on `gfm` like tables are.
 
 ### 6.1 mermaidPlugin({ theme })
 

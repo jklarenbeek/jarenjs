@@ -329,3 +329,55 @@ export function hashContent(str) {
 export function kebabCase(s) {
   return s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 }
+
+/** One code point that a slug keeps: a letter, a digit, or a combining
+ * mark (which belongs to the letter in front of it). Everything else
+ * outside ASCII is punctuation, a symbol or an emoji, and is dropped. */
+const SLUG_KEEP = /[\p{L}\p{N}\p{M}]/u;
+
+/**
+ * Convert heading text into a URL fragment the way GitHub does, so one
+ * committed document anchors identically on GitHub, in an editor preview
+ * and in a renderer that uses this: lower-case, drop punctuation and
+ * symbols, and turn each whitespace character into a hyphen.
+ *
+ * `-` and `_` survive, as do non-ASCII letters and digits
+ * (`Ünicode Wörks` → `ünicode-wörks`); a `§` or an em dash does not,
+ * because it is a symbol rather than a letter. Text that reduces to
+ * nothing (`***`) yields `''` — what an empty slug means is the caller's
+ * decision, not this function's.
+ *
+ * This is the suite's ONLY slug implementation: a second one would drift
+ * from the first and break the promise above. Whitespace is converted one
+ * character at a time, not per run, because that is what GitHub does and
+ * the resulting `--` is part of the fragment a reader may already have
+ * bookmarked.
+ *
+ * @example
+ * slugify('Hello, World!');   // 'hello-world'
+ * slugify('§ 3.1 — Setup');   // '-31--setup'
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function slugify(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) {
+      if (code >= 0x61 && code <= 0x7a) out += text[i]; // a-z
+      else if (code >= 0x41 && code <= 0x5a) out += String.fromCharCode(code + 32); // A-Z
+      else if (code >= 0x30 && code <= 0x39) out += text[i]; // 0-9
+      else if (code === 0x2d || code === 0x5f) out += text[i]; // - _
+      else if (code === 0x20 || (code >= 0x09 && code <= 0x0d)) out += '-';
+      continue;
+    }
+    // Outside ASCII a slug decision needs the whole code point, so an
+    // astral pair is read (and skipped over) as one character.
+    const point = /** @type {number} */ (text.codePointAt(i));
+    const char = String.fromCodePoint(point);
+    if (point > 0xffff) i++;
+    if (SLUG_KEEP.test(char)) out += char.toLowerCase();
+  }
+  return out;
+}

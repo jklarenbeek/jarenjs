@@ -221,16 +221,28 @@ delete it or fix it.
 
 ## @jarenjs/md
 
-- [ ] **CommonMark conformance push** — 571/655 spec examples pass
-  (`npm run benchmark:markdown --score-only --verbose` lists the failures).
-  **47 of the remaining 84 cannot be reached at all**: CommonMark renders raw
-  HTML verbatim, including a lone `</div>`, an unknown `<bab>` and a
-  never-closed tag, and a vnode tree has no way to hold half an element. The
-  `html: 'vnode'` mode already takes the balanced cases. What is left that is
-  *fixable* is ~37 examples of real dialect gaps, in four groups worth doing
-  one at a time: loose-list `<p>` wrapping (List items, Lists), emphasis
-  flanking rules, link-label edge cases, and empty/`<>` destinations.
-- [ ] **Parse-speed workstream** — ~0.32 ms per 10 kB to AST. A CPU profile
+- [ ] **One component, one rendering policy** — `createMdComponent` fixes its
+  options at construction and `view(source)` takes none, so a host that renders
+  documents of *different provenance* through one component must pick a single
+  policy for all of them. The website is the live case: the same instance
+  renders repo-authored READMEs (trusted, so heading ids are minted without a
+  `slugPrefix`) and assistant replies and user text (not trusted, and now
+  minting unprefixed ids into a page that owns ids of its own). Splitting them
+  into two components is not the answer — hydration runs off one instance's
+  hydratable index, so a second component silently stops hydrating what the
+  first indexed. Per-call options on `view()` (memoized per source *and*
+  policy) is the shape that fits, and it is the same seam a `slugPrefix` for
+  untrusted markdown would use.
+- [ ] **In-page links only navigate where a host wires them** — a `#fragment`
+  href is inert markup as far as the emitter is concerned; making it *scroll*
+  needs an event binding, which is app-layer. The website wires it for the
+  README dialog only (`rewriteAnchor`), so markdown rendered in the play,
+  studio and assistant surfaces still carries raw fragments that a hash router
+  reads as a page name. Either the md component grows an opt-in "fragments
+  navigate" projection, or the website hoists its rewrite out of the dialog
+  path — the current split is a trap for the next surface that renders a
+  document with a table of contents.
+- [ ] **Parse-speed workstream** — parsing costs <!--bm:md.parseTimes-->~0.1 ms for a typical ~2 kB document, ~0.47 ms for ~10 kB, ~4.9 ms for ~100 kB<!--/bm-->. A CPU profile
   says the block scan is **not** where the time is (~14%): the inline phase is
   ~36% (`parseInlines`, `resolveEmphasis`, `mergeText`, `closeBracket`) and
   hashing the source for `meta.hash` is ~10% on its own. The leads in order of
@@ -521,7 +533,7 @@ effect) rather than as an operator (QUERY-FORMAT §8.13).
 
 Note the deadline this program does *not* have: TC39 Temporal reached Stage 4
 in March 2026 and ships in Chrome 144+, Firefox 139+ and Node 26+, but not
-Safari and not this repo's Node ≥ 22 baseline. The string/number
+Safari and not this repo's Node ≥ 24 baseline. The string/number
 representation is what `Temporal.Instant.from()` consumes, so the kernel can
 delegate to Temporal internally once the baseline moves, without changing a
 public surface. Building a general-purpose date *library* is therefore the one

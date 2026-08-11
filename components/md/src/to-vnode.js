@@ -27,10 +27,16 @@
 
 import { h, createDomRenderer } from '@jarenjs/view';
 import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
-import { hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
+import {
+  hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, permalinkLabel,
+} from './utils.js';
 import { parseHtmlFragment, parseHtmlTag } from './html.js';
-import { walkAst } from './ast.js';
+import { walkAst, textOf } from './ast.js';
 import { buildPluginTables } from './parser.js';
+import {
+  collectFootnotes, footnoteId, footnoteRefId, backrefLabel,
+  FOOTNOTE_PREFIX, BACKREF_MARK,
+} from './footnotes.js';
 
 /**
  * @typedef {import('./ast.js').MdNode} MdNode
@@ -51,6 +57,24 @@ import { buildPluginTables } from './parser.js';
  *   filter, replacing the default deny-list; return the URL to emit, or
  *   `null` to drop the attribute. Supply one only to widen the policy for
  *   trusted content (a custom scheme, say) — it is the whole guard.
+ * @property {boolean} [headingIds] give every heading a GitHub-compatible
+ *   `id` so `[see below](#the-section)` lands (default `false`). The
+ *   default is OFF ON PURPOSE and must stay that way: CommonMark
+ *   specifies `<h1>Foo</h1>`, so an id emitted by default would fail
+ *   every heading example in the conformance corpus and make the
+ *   package's published score a lie. A host that wants anchors asks for
+ *   them; the spec path stays honest.
+ * @property {string} [slugPrefix] prepended to every heading id and
+ *   anchor href (default `''`). A host rendering markdown it did not
+ *   author into a page it owns sets this — GitHub's own answer is
+ *   `user-content-` — so an author cannot mint an id that collides with
+ *   the host's own DOM.
+ * @property {boolean} [headingAnchors] append a `#` link to each heading
+ *   so a reader can copy a link to the section (default `false`).
+ *   Requires `headingIds`; without ids there is nothing to link to.
+ * @property {string} [footnotesLabel] the accessible name of the
+ *   appended footnotes section (default `'Footnotes'`) — the one string
+ *   this emitter writes that a reader can hear.
  */
 
 /**
@@ -87,6 +111,10 @@ function htmlNodeVnode(node, rctx, blockClass) {
  * @typedef {{ tables: any, html: 'skip'|'text'|'vnode', options: MdVnodeOptions,
  *   parseHtml: (html: string) => any,
  *   sanitizeUrl: (url: string) => (string|null),
+ *   headingIds: boolean, slugPrefix: string, headingAnchors: boolean,
+ *   slugs: Map<string, number>,
+ *   footnotes: import('./footnotes.js').Footnotes|null,
+ *   footnotePrefix: string, footnotesLabel: string,
  *   hash: (str: string) => string, counts: Map<string, number> }} RenderCtx
  */
 
@@ -232,6 +260,18 @@ const INLINE_RENDERERS = {
   break: () => ['br', {}],
   softBreak: () => '\n',
   html: (node, rctx) => htmlNodeVnode(node, rctx, null),
+
+  footnoteReference: (node, rctx) => {
+    const cite = rctx.footnotes?.refs.get(node);
+    // see the string emitter: a citation of nothing renders as the text
+    // it was written as, never as a link to a missing anchor
+    if (cite === undefined) return '[^' + (node.label ?? node.identifier) + ']';
+    const prefix = rctx.footnotePrefix;
+    return ['sup', {}, ['a', {
+      href: '#' + footnoteId(prefix, cite.number),
+      id: footnoteRefId(prefix, cite.number, cite.occurrence),
+    }, String(cite.number)]];
+  },
 };
 
 /**
@@ -256,8 +296,13 @@ function inlineVnode(node, rctx) {
 const BLOCK_RENDERERS = {
   paragraph: (node, rctx) => intoVnode(['p', {}], node.children, rctx),
 
-  heading: (node, rctx) =>
-    intoVnode(['h' + node.depth, {}], node.children, rctx),
+  heading: (node, rctx) => {
+    if (rctx.headingIds !== true) return intoVnode(['h' + node.depth, {}], node.children, rctx);
+    const id = headingId(textOf(node), rctx.slugs, rctx.slugPrefix);
+    const vnode = intoVnode(['h' + node.depth, { id }], node.children, rctx);
+    if (rctx.headingAnchors === true) vnode.push(headingAnchor(node, id));
+    return vnode;
+  },
 
   thematicBreak: () => ['hr', {}],
 
@@ -296,8 +341,70 @@ const BLOCK_RENDERERS = {
       body.length === 0 ? null : ['tbody', {}, body]];
   },
 
+  // Collected, not rendered in place (MD-FORMAT.md §4.6).
+  footnoteDefinition: () => null,
+
   custom: (node, rctx) => fallbackVnode(node, rctx, false),
 };
+
+/**
+ * The footnotes section appended after the last block: one `<li>` per
+ * cited definition, in first-citation order, each ending in a
+ * back-reference per citation. Keyed, because it sits among the keyed
+ * block children of the article.
+ * @param {RenderCtx} rctx
+ * @returns {any}
+ */
+function footnotesVnode(rctx) {
+  const notes = rctx.footnotes;
+  if (notes === null || notes.defs.length === 0) return null;
+  const prefix = rctx.footnotePrefix;
+  const items = [];
+  for (let i = 0; i < notes.defs.length; i++) {
+    const def = notes.defs[i];
+    const number = /** @type {number} */ (notes.numbers.get(def.identifier));
+    const back = [];
+    const times = notes.counts.get(def.identifier) ?? 1;
+    for (let k = 1; k <= times; k++) {
+      back.push(' ');
+      back.push(['a', {
+        class: 'footnote-backref',
+        href: '#' + footnoteRefId(prefix, number, k),
+        'aria-label': backrefLabel(number, k),
+      }, BACKREF_MARK, k > 1 ? ['sup', {}, String(k)] : null]);
+    }
+    /** @type {any[]} */
+    const content = [];
+    const blocks = def.children;
+    const last = blocks.length - 1;
+    for (let b = 0; b < blocks.length; b++) {
+      content.push(b === last && blocks[b].type === 'paragraph'
+        ? ['p', {}, ...inlineChildren(blocks[b].children, rctx), ...back]
+        : blockVnode(blocks[b], rctx, false));
+    }
+    if (blocks.length === 0 || blocks[last].type !== 'paragraph') content.push(['p', {}, ...back]);
+    items.push(['li', { id: footnoteId(prefix, number), key: 'fn-' + number }, ...content]);
+  }
+  return ['section', {
+    class: 'footnotes', 'aria-label': rctx.footnotesLabel, key: 'md-footnotes',
+  }, ['ol', {}, items]];
+}
+
+/**
+ * The copy-a-link affordance appended to a heading: a real link, so it is
+ * reachable by keyboard, with an accessible name that says which section
+ * it points at.
+ * @param {MdNode} node
+ * @param {string} id
+ * @returns {any[]}
+ */
+function headingAnchor(node, id) {
+  return ['a', {
+    class: 'md-anchor',
+    href: '#' + id,
+    'aria-label': permalinkLabel(textOf(node)),
+  }, '#'];
+}
 
 /**
  * @param {MdNode[]} cells
@@ -332,6 +439,10 @@ function listItemVnode(item, rctx, tight) {
   const children = item.children;
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
+    // A tight item's blocks are separated by a newline: with the
+    // paragraphs unwrapped there is no element boundary left to do it,
+    // and `<h2>Bar</h2>baz` would run a heading into the text below it.
+    if (i > 0) content.push('\n');
     // Tight lists unwrap their paragraphs (standard HTML rendering).
     if (tight && child.type === 'paragraph') {
       content.push(...inlineChildren(child.children, rctx));
@@ -393,7 +504,15 @@ function blockVnode(node, rctx, keyed) {
   // The memo outlives one emission (a CompiledMd carries it), so every
   // option that changes the output has to be part of the cache identity.
   if (cached !== undefined && cached.keyed === keyed && cached.html === rctx.html
-    && cached.sanitizeUrl === rctx.sanitizeUrl) {
+    && cached.sanitizeUrl === rctx.sanitizeUrl && cached.headingIds === rctx.headingIds
+    && cached.slugPrefix === rctx.slugPrefix && cached.headingAnchors === rctx.headingAnchors
+    // Footnote numbering is a property of the WHOLE document, so a block
+    // carrying a citation cannot be reused across two documents that
+    // number it differently. The collection is memoized per AST array,
+    // which is what keeps re-rendering ONE document on the fast path;
+    // documents without footnotes compare `null === null` and are
+    // untouched by this.
+    && cached.footnotes === rctx.footnotes) {
     return cached.vnode;
   }
   const plugin = rctx.tables.renders.get(node.type);
@@ -403,7 +522,11 @@ function blockVnode(node, rctx, keyed) {
   if (keyed && Array.isArray(vnode) && typeof vnode[0] === 'string') {
     vnode = withKey(vnode, blockKey(node, rctx));
   }
-  memo.set(node, { vnode, keyed, html: rctx.html, sanitizeUrl: rctx.sanitizeUrl });
+  memo.set(node, {
+    vnode, keyed, html: rctx.html, sanitizeUrl: rctx.sanitizeUrl,
+    headingIds: rctx.headingIds, slugPrefix: rctx.slugPrefix,
+    headingAnchors: rctx.headingAnchors, footnotes: rctx.footnotes,
+  });
   return vnode;
 }
 
@@ -502,11 +625,21 @@ export function mdToVnode(docOrCompiled, options = {}) {
     sanitizeUrl: typeof options.sanitizeUrl === 'function'
       ? options.sanitizeUrl
       : defaultSanitizeUrl,
+    headingIds: options.headingIds === true,
+    slugPrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : '',
+    headingAnchors: options.headingIds === true && options.headingAnchors === true,
+    slugs: new Map(),
     options,
+    footnotes: collectFootnotes(ast),
+    footnotePrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : FOOTNOTE_PREFIX,
+    footnotesLabel: typeof options.footnotesLabel === 'string' ? options.footnotesLabel : 'Footnotes',
     hash: hashContent,
     counts: new Map(),
   };
-  return ['article', { class: 'md' }, blockChildren(ast, rctx, true)];
+  const children = blockChildren(ast, rctx, true);
+  const notes = footnotesVnode(rctx);
+  if (notes !== null) children.push(notes);
+  return ['article', { class: 'md' }, children];
 }
 
 // ------------------------------------------------------------------
@@ -522,6 +655,9 @@ export function mdToVnode(docOrCompiled, options = {}) {
  *   container: any,
  *   plugins?: any[],
  *   html?: 'skip'|'text',
+ *   headingIds?: boolean,
+ *   slugPrefix?: string,
+ *   headingAnchors?: boolean,
  *   document?: any,
  *   onEvent?: (binding: any, event: any) => void,
  *   onHydrateError?: (err: any) => void,
@@ -552,6 +688,9 @@ export function createMdRenderer(options) {
         plugins: options.plugins,
         html: options.html,
         sanitizeUrl: options.sanitizeUrl,
+        headingIds: options.headingIds,
+        slugPrefix: options.slugPrefix,
+        headingAnchors: options.headingAnchors,
       });
     domRender(vnode);
     if (tables.hydrates.size === 0) return;

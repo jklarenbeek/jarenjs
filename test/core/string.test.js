@@ -20,6 +20,7 @@ import {
   fnv1a,
   FNV1A_OFFSET_BASIS,
   kebabCase,
+  slugify,
 } from '@jarenjs/core/string';
 
 describe('isStringEmpty', () => {
@@ -354,6 +355,37 @@ describe('kebabCase', () => {
     assert.deepEqual(kebabCase('background'), 'background');
     assert.deepEqual(kebabCase('line-color'), 'line-color');
     assert.deepEqual(kebabCase(''), '');
+  });
+});
+
+describe('slugify', () => {
+  it('should lower-case and hyphenate a plain heading', () => {
+    assert.deepEqual(slugify('Hello, World!'), 'hello-world');
+    assert.deepEqual(slugify('Quick Start'), 'quick-start');
+  });
+
+  it('should drop symbols and keep each whitespace as one hyphen', () => {
+    assert.deepEqual(slugify('§ 3.1 — Setup'), '-31--setup');
+    assert.deepEqual(slugify('a\tb\nc'), 'a-b-c');
+  });
+
+  it('should keep non-ASCII letters and digits', () => {
+    assert.deepEqual(slugify('Ünicode Wörks'), 'ünicode-wörks');
+    assert.deepEqual(slugify('日本語 の 見出し'), '日本語-の-見出し');
+  });
+
+  it('should keep hyphens and underscores', () => {
+    assert.deepEqual(slugify('snake_case-kept'), 'snake_case-kept');
+  });
+
+  it('should reduce punctuation-only text to the empty string', () => {
+    assert.deepEqual(slugify('***'), '');
+    assert.deepEqual(slugify(''), '');
+    assert.deepEqual(slugify('!?@#'), '');
+  });
+
+  it('should drop an emoji without eating its neighbours', () => {
+    assert.deepEqual(slugify('Ship 🚀 it'), 'ship--it');
   });
 });
 

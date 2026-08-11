@@ -25,6 +25,8 @@ const CORPUS = [
   'auto <https://x.y/> and mail <a@b.cd>\n',
   'hard  \nbreak and\nsoft\n',
   '***\n\nSetext\n======\n',
+  'A claim[^1] and www.example.com and a@b.test\n\n[^1]: The source, with [^1] itself.\n',
+  '[^uncited]: a definition nothing points at\n',
 ];
 
 describe('the AST JSON Schema', function () {
@@ -57,6 +59,15 @@ describe('the AST JSON Schema', function () {
     assert.equal(validate({ ...base, ast: [{ type: 'code', value: 'x' }] }), false);
     assert.equal(validate({ ...base, ast: [{ type: 'text', value: 'inline at block level?' }] }), false);
     assert.equal(validate({ $md: '9.9', frontmatter: null, ast: [], meta: base.meta }), false);
+    // the new types are core types, so a malformed one is an error and
+    // not an extension node that happens to be shaped differently
+    assert.equal(validate({ ...base, ast: [{ type: 'footnoteDefinition', label: 'x', children: [] }] }), false);
+    assert.equal(validate({
+      ...base,
+      ast: [{ type: 'paragraph', children: [{ type: 'footnoteReference', identifier: 'x' }] }],
+    }), false);
+    assert.equal(validate({ ...base, ast: [{ type: 'footnoteReference', identifier: 'x', label: 'x' }] }),
+      false);
   });
 });
 

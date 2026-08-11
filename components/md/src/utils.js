@@ -9,11 +9,50 @@
  * O(1) fast paths everywhere downstream. `fnv1a` is that same mixing
  * step, exposed for the two callers that fold a hash incrementally (the
  * streaming parser's chunks, the structural block-key walk) and so must
- * seed it themselves from `FNV1A_OFFSET_BASIS`. The remaining helpers
- * are md's own allocation-light scanner utilities.
+ * seed it themselves from `FNV1A_OFFSET_BASIS`. Heading slugs come from
+ * the same place for the same reason: `slugify` is a pure text→fragment
+ * transform with no Markdown knowledge, so the suite keeps exactly one
+ * of it. The remaining helpers are md's own allocation-light scanner
+ * utilities.
  */
 
-export { hashContent, fnv1a, FNV1A_OFFSET_BASIS } from '@jarenjs/core/string';
+import { slugify } from '@jarenjs/core/string';
+
+export { hashContent, fnv1a, FNV1A_OFFSET_BASIS, slugify } from '@jarenjs/core/string';
+
+/**
+ * The `id` for one heading, unique within one emission.
+ *
+ * Both emitters mint ids, so the rule lives here once: slug the text,
+ * substitute `section` when nothing slug-worthy survives, number
+ * repeats the way GitHub numbers them (`setup`, `setup-1`, `setup-2`)
+ * and prefix the result. The COUNTER belongs to the caller — one map per
+ * emission, never shared with another numbering (a block key's hash and
+ * a slug share a namespace only by accident, and a collision there would
+ * shift an unrelated heading's number).
+ *
+ * @param {string} text the heading's plain text (`textOf`)
+ * @param {Map<string, number>} seen the emission's slug counter
+ * @param {string} prefix prepended to the result
+ * @returns {string}
+ */
+export function headingId(text, seen, prefix) {
+  const base = slugify(text) || 'section';
+  const count = seen.get(base) ?? 0;
+  seen.set(base, count + 1);
+  return prefix + (count === 0 ? base : base + '-' + count);
+}
+
+/**
+ * The accessible name for a heading's permalink affordance — `#` alone
+ * names nothing, so the link says which section it points at.
+ * @param {string} text the heading's plain text (`textOf`)
+ * @returns {string}
+ */
+export function permalinkLabel(text) {
+  const trimmed = text.trim();
+  return trimmed === '' ? 'Permalink to this section' : 'Permalink to ' + trimmed;
+}
 
 /**
  * Count leading space characters (U+0020 only; the scanner expands no

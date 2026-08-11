@@ -15,7 +15,7 @@
  * blocks while later chunks are still arriving (docs/LOADER.md §4).
  */
 
-import { countIndent, isBlankLine, expandTabs, hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
+import { countIndent, expandTabs, hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
 import { parseFrontmatter } from './frontmatter.js';
 import {
   scanThematicBreak,
@@ -33,8 +33,15 @@ import {
   scanLinkDefinition,
   scanLinkDestination,
   scanLinkTitle,
+  scanFootnoteDefinition,
+  scanFootnoteReference,
+  scanAutolinkLiterals,
   normalizeLabel,
   isSpaceCode,
+  ASCII_PUNCT,
+  isUnicodeWhitespace,
+  isUnicodePunctuation,
+  codePointBefore,
 } from './scanner.js';
 import { scanEntity } from './entities.js';
 import {
@@ -43,6 +50,7 @@ import {
   code, htmlBlock, tableRow, tableCell,
   text, emphasis, strong, strikethrough, link, image, inlineCode,
   hardBreak, softBreak, textOf,
+  autolink, footnoteDefinition, footnoteReference,
 } from './ast.js';
 
 /**
@@ -69,6 +77,7 @@ const NO_TABLES = Object.freeze({
   blocks: EMPTY_MAP,
   inlines: EMPTY_MAP,
   renders: EMPTY_MAP,
+  htmls: EMPTY_MAP,
   hydrates: EMPTY_MAP,
   plugins: Object.freeze([]),
   vnodeMemo: new WeakMap(),
@@ -96,6 +105,8 @@ export function buildPluginTables(plugins) {
   const inlines = new Map();
   /** @type {Map<string, any>} */
   const renders = new Map();
+  /** @type {Map<string, any>} */
+  const htmls = new Map();
   /** @type {Map<string, any>} */
   const hydrates = new Map();
   for (const plugin of plugins) {
@@ -127,9 +138,15 @@ export function buildPluginTables(plugins) {
       if (!renders.has(type)) renders.set(type, plugin);
       if (typeof plugin.hydrate === 'function') hydrates.set(type, plugin);
     }
+    // the string emitter's table: a plugin may serve one emitter, the
+    // other, or both, so this is registered independently of `render`
+    if (typeof plugin.toHtml === 'function') {
+      const type = plugin.node ?? plugin.name;
+      if (!htmls.has(type)) htmls.set(type, plugin);
+    }
   }
   tables = {
-    fences, blocks, inlines, renders, hydrates, plugins,
+    fences, blocks, inlines, renders, htmls, hydrates, plugins,
     vnodeMemo: new WeakMap(),
     hydrateMemo: new WeakMap(),
   };
@@ -140,6 +157,15 @@ export function buildPluginTables(plugins) {
 // ------------------------------------------------------------------
 // Block parser
 // ------------------------------------------------------------------
+
+/**
+ * The content indent of a footnote definition's continuation lines.
+ * Fixed at four columns, unlike a list item's, whose marker decides it:
+ * `[^label]:` has no width a reader can count, so the reference
+ * implementation picked a constant and every document written for
+ * GitHub is indented to it.
+ */
+const FOOTNOTE_INDENT = 4;
 
 /**
  * The block parser state. Not exported — reach it through
@@ -166,6 +192,27 @@ class BlockParser {
     /** Link reference definitions seen so far. */
     /** @type {Map<string, { url: string, title: string|null }>} */
     this.defs = new Map();
+    /**
+     * Footnote definitions seen so far, by normalized identifier (first
+     * definition wins, as for link references). The inline phase
+     * consults it: `[^x]` with nothing to point at stays literal text,
+     * which is what GitHub does and what keeps a bracketed `^` in prose
+     * from becoming a dangling superscript.
+     * @type {Map<string, MdNode>}
+     */
+    this.footnotes = new Map();
+    /**
+     * Blocks whose last line was blank. List tightness is decided from
+     * this at list close (§Lists, "a list is loose if any of its
+     * constituent list items are separated by blank lines, or if any of
+     * its constituent list items directly contain two block-level
+     * elements with a blank line between them") — a rule about a list's
+     * OWN items, which is why it cannot be a flag on the open list: a
+     * blank line inside a sublist or a blockquote belongs to that
+     * container, not to the list around it.
+     * @type {WeakSet<any>}
+     */
+    this.blankEnd = new WeakSet();
     /** Plugin rule context. */
     this.ctx = { frontmatter: /** @type {any} */ (null), options };
   }
@@ -179,7 +226,6 @@ class BlockParser {
     let offset = 0;
     let matched = 0;
     const stack = this.stack;
-    const blank = isBlankLine(line);
     while (matched < stack.length) {
       const entry = stack[matched];
       if (entry.type === 'blockquote') {
@@ -190,8 +236,21 @@ class BlockParser {
         if (content === -1) break;
         offset = content;
       }
-      else if (entry.type === 'listItem') {
-        if (blank) { /* blank lines belong to the item */ }
+      else if (entry.type === 'listItem' || entry.type === 'footnoteDefinition') {
+        // A footnote definition continues exactly as a list item does —
+        // indented content, lazy continuation, one leading blank at most
+        // — so the two share this branch and differ only in where their
+        // content indent comes from (a marker's width, or a fixed 4).
+        //
+        // Blankness is a property of what is LEFT of the line, not of the
+        // whole line: inside `>>`, the item sees a blank line even though
+        // the line is not.
+        if (isBlankFrom(line, offset)) {
+          // An item may begin with at most one blank line, so a blank
+          // line does not continue an item that is still empty — it ends
+          // it (and the list with it).
+          if (this.isItemEmpty(entry, matched)) break;
+        }
         else {
           let i = offset;
           let spaces = 0;
@@ -204,13 +263,19 @@ class BlockParser {
       matched++;
     }
 
+    const blank = isBlankFrom(line, offset);
+
     if (matched < stack.length) {
       const rest = line.slice(offset);
-      // Lazy continuation: an open paragraph swallows plain text lines
-      // even when container markers are missing.
+      // Lazy continuation: an open paragraph swallows a line that would
+      // not start a block of its own. The paragraph-INTERRUPTION rules
+      // (no empty list item, no ordered list starting elsewhere than 1)
+      // deliberately do not apply here: they govern a paragraph that is
+      // the innermost matched container, and this paragraph is not —
+      // its own containers just failed to match. `1. a\n2. b\n3) c`
+      // starts a second list for exactly that reason.
       if (this.leaf !== null && this.leaf.kind === 'paragraph'
-        && !blank && !this.interruptsParagraph(rest)
-        && !this.continuesOpenList(rest)) {
+        && !blank && !this.startsBlock(rest)) {
         this.leaf.lines.push(stripIndent(rest));
         return;
       }
@@ -289,6 +354,9 @@ class BlockParser {
       const kind = scanHtmlBlockStart(rest, indent, true);
       return kind !== 0 && kind !== 7;
     }
+    if (c === 0x5B /* [ */ && this.gfm && scanFootnoteDefinition(rest, indent) !== null) {
+      return true;
+    }
     const marker = scanListMarker(rest, indent);
     if (marker !== null) {
       // Only non-empty items — and ordered lists starting at 1 —
@@ -300,26 +368,49 @@ class BlockParser {
   }
 
   /**
-   * Does `rest` start a new item of an already-open list (any ordinal
-   * continues its own list, unlike the paragraph-interruption rule)?
+   * Would this text open ANY block, with no paragraph in the way? The
+   * lazy-continuation test: a line that starts a block is not paragraph
+   * text, whatever the paragraph would have preferred.
+   *
+   * Indented code and setext underlines are absent on purpose — both
+   * need the paragraph to be the innermost matched container, which is
+   * exactly the case this method is not asked about.
    * @param {string} rest
    * @returns {boolean}
    */
-  continuesOpenList(rest) {
+  startsBlock(rest) {
     const indent = countIndent(rest);
-    if (indent >= 4) return false;
-    const marker = scanListMarker(rest, indent);
-    if (marker === null || marker.contentOffset >= rest.length) return false;
-    const stack = this.stack;
-    for (let i = stack.length - 1; i >= 0; i--) {
-      const entry = stack[i];
-      if (entry.type === 'list'
-        && entry.bullet === marker.bullet
-        && entry.delimiter === marker.delimiter) {
-        return true;
+    if (indent >= 4 || indent >= rest.length) return false;
+    const c = rest.charCodeAt(indent);
+    if (c === 0x3E /* > */) return true;
+    if (c === 0x23 /* # */ && scanAtxHeading(rest, indent) !== null) return true;
+    if (scanThematicBreak(rest, indent)) return true;
+    if (scanFenceOpen(rest, indent) !== null) return true;
+    if (c === 0x3C /* < */ && scanHtmlBlockStart(rest, indent, false) !== 0) return true;
+    if (c === 0x5B /* [ */ && this.gfm && scanFootnoteDefinition(rest, indent) !== null) return true;
+    if (scanListMarker(rest, indent) !== null) return true;
+    const rules = this.tables.blocks.get(c);
+    if (rules !== undefined) {
+      const trimmed = rest.slice(indent);
+      for (let i = 0; i < rules.length; i++) {
+        if (rules[i].start(trimmed, this.ctx) != null) return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Is the list item at stack depth `index` still empty — nothing
+   * closed into it, no open leaf and no deeper container? Only the
+   * innermost entry can own the open leaf, which is what makes this a
+   * cheap check rather than a walk.
+   * @param {any} entry @param {number} index
+   * @returns {boolean}
+   */
+  isItemEmpty(entry, index) {
+    return entry.node.children.length === 0
+      && index === this.stack.length - 1
+      && this.leaf === null;
   }
 
   /**
@@ -357,7 +448,7 @@ class BlockParser {
       }
 
       const c = rest.charCodeAt(indent);
-      const para = this.leaf !== null && this.leaf.kind === 'paragraph'
+      let para = this.leaf !== null && this.leaf.kind === 'paragraph'
         ? this.leaf : null;
 
       // Setext underline turns the open paragraph into a heading.
@@ -366,11 +457,18 @@ class BlockParser {
         if (depth !== 0) {
           const lines = para.lines;
           this.leaf = null;
-          const raw = lines.join('\n').trim();
+          // Link reference definitions are shed BEFORE the underline is
+          // applied: they are not heading text. A paragraph that was
+          // nothing but definitions leaves no content to underline, so
+          // the `=` line falls through and starts a paragraph of its own.
+          const raw = this.extractDefinitions(lines.join('\n')).trim();
           if (raw !== '') {
             this.add({ type: 'heading', depth, children: [], raw });
             return;
           }
+          // nothing left to underline: this line is ordinary content, and
+          // the paragraph it would have continued no longer exists
+          para = null;
         }
       }
 
@@ -446,13 +544,8 @@ class BlockParser {
           entry = {
             type: 'list', node,
             bullet: marker.bullet, delimiter: marker.delimiter,
-            blank: false,
           };
           this.stack.push(entry);
-        }
-        else if (entry.blank) {
-          entry.node.tight = false;
-          entry.blank = false;
         }
         const item = listItem(null, []);
         this.stack.push({ type: 'listItem', node: item, contentIndent: marker.contentOffset });
@@ -468,6 +561,26 @@ class BlockParser {
           this.leaf = { kind: 'html', htmlKind: kind, lines: [rest] };
           if (scanHtmlBlockEnd(kind, rest)) this.closeLeaf();
           return;
+        }
+      }
+
+      // GFM footnote definition. A block, not a paragraph-leading
+      // definition like `[foo]:` — so it interrupts, and it is tried
+      // BEFORE the paragraph closes, which is what keeps `[^1]: x` from
+      // reaching `extractDefinitions` and becoming a link reference
+      // named `^1`.
+      if (this.gfm && c === 0x5B /* [ */) {
+        const note = scanFootnoteDefinition(rest, indent);
+        if (note !== null) {
+          this.closeLeaf();
+          this.closeList();
+          const node = footnoteDefinition(normalizeLabel(note.label), note.label, []);
+          if (!this.footnotes.has(node.identifier)) this.footnotes.set(node.identifier, node);
+          this.stack.push({
+            type: 'footnoteDefinition', node, contentIndent: FOOTNOTE_INDENT,
+          });
+          rest = rest.slice(Math.min(note.contentOffset, rest.length));
+          continue;
         }
       }
 
@@ -499,14 +612,61 @@ class BlockParser {
     }
   }
 
-  /** A blank line was consumed: flag open lists for looseness. */
+  /**
+   * A blank line was consumed: remember which block it ended, so the
+   * enclosing list can decide its own tightness when it closes.
+   *
+   * The blank belongs to the innermost open block — the last child of
+   * the innermost container, the leaf having just been closed into it.
+   * Two exclusions carry the spec's meaning: a blockquote absorbs the
+   * blank (`* a\n  > b\n  >\n* c` is a TIGHT list), and an item that has
+   * nothing in it yet is not "ending with a blank line" — its own
+   * opening blank must not make its list loose.
+   */
   sawBlank() {
-    const stack = this.stack;
-    for (let i = 0; i < stack.length; i++) {
-      if (stack[i].type === 'list' && stack[i].node.children.length + Number(hasOpenItem(stack, i)) > 0) {
-        stack[i].blank = true;
+    const top = this.stack[this.stack.length - 1];
+    if (top === undefined || top.type === 'blockquote') return;
+    const children = top.node.children;
+    if (children.length > 0) this.blankEnd.add(children[children.length - 1]);
+  }
+
+  /**
+   * Does this block end with a blank line? A list or item answers for
+   * its last child, which is how a blank at the end of a sublist
+   * reaches the item that contains it.
+   * @param {MdNode} node
+   * @returns {boolean}
+   */
+  endsWithBlankLine(node) {
+    if (this.blankEnd.has(node)) return true;
+    if (node.type !== 'list' && node.type !== 'listItem') return false;
+    const children = node.children;
+    return children.length > 0 && this.endsWithBlankLine(children[children.length - 1]);
+  }
+
+  /**
+   * Decide a finished list's tightness (§Lists): loose if a non-final
+   * item ends with a blank line, or if an item directly contains two
+   * block-level children with a blank line between them.
+   * @param {MdNode} node
+   */
+  finalizeList(node) {
+    const items = node.children;
+    for (let i = 0; i < items.length; i++) {
+      if (i < items.length - 1 && this.endsWithBlankLine(items[i])) {
+        node.tight = false;
+        return;
+      }
+      const blocks = items[i].children;
+      for (let k = 0; k < blocks.length; k++) {
+        if ((i < items.length - 1 || k < blocks.length - 1)
+          && this.endsWithBlankLine(blocks[k])) {
+          node.tight = false;
+          return;
+        }
       }
     }
+    node.tight = true;
   }
 
   /** Close a directly enclosing list when non-list content arrives. */
@@ -593,6 +753,7 @@ class BlockParser {
     this.closeLeaf();
     while (this.stack.length > depth) {
       const entry = /** @type {any} */ (this.stack.pop());
+      if (entry.type === 'list') this.finalizeList(entry.node);
       this.add(entry.node);
     }
   }
@@ -608,14 +769,6 @@ class BlockParser {
     if (top === undefined) {
       this.blocks.push(node);
       return;
-    }
-    if (top.type === 'listItem') {
-      const listEntry = stack[stack.length - 2];
-      if (top.node.children.length > 0 && listEntry !== undefined
-        && listEntry.type === 'list' && listEntry.blank) {
-        listEntry.node.tight = false;
-        listEntry.blank = false;
-      }
     }
     top.node.children.push(node);
   }
@@ -637,17 +790,17 @@ function stripIndent(text) {
 }
 
 /**
- * Is the entry at `listIndex` the list containing the currently open
- * item (so an opening blank inside a first, still-empty item does not
- * count for looseness)?
- * @param {any[]} stack
- * @param {number} listIndex
+ * Is the rest of the line, from `from`, blank? Blankness is relative to
+ * what a container has already consumed.
+ * @param {string} line @param {number} from
  * @returns {boolean}
  */
-function hasOpenItem(stack, listIndex) {
-  const item = stack[listIndex + 1];
-  return item !== undefined && item.type === 'listItem'
-    && item.node.children.length > 0;
+function isBlankFrom(line, from) {
+  for (let i = from; i < line.length; i++) {
+    const c = line.charCodeAt(i);
+    if (c !== 0x20 && c !== 0x09) return false;
+  }
+  return true;
 }
 
 // ------------------------------------------------------------------
@@ -657,11 +810,7 @@ function hasOpenItem(stack, listIndex) {
 // eslint-disable-next-line no-control-regex -- the spec excludes all control characters
 const RE_AUTOLINK_URI = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/;
 const RE_AUTOLINK_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+)>/;
-const RE_INLINE_HTML = /^<(?:[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/[a-zA-Z][a-zA-Z0-9-]*\s*>|!--(?:[^-]|-[^-])*-->|\?[^>]*\?>|![A-Za-z][^>]*>|!\[CDATA\[[\s\S]*?\]\]>)/;
-
-/** ASCII punctuation membership for emphasis flanking. */
-const PUNCT = new Uint8Array(128);
-for (const ch of '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') PUNCT[ch.charCodeAt(0)] = 1;
+const RE_INLINE_HTML = /^<(?:[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/[a-zA-Z][a-zA-Z0-9-]*\s*>|!--->|!-->|!--[\s\S]*?-->|\?[^>]*\?>|![A-Za-z][^>]*>|!\[CDATA\[[\s\S]*?\]\]>)/;
 
 /** Characters the inline scanner dispatches on; the rest fast-skip. */
 const INLINE_SPECIAL = new Uint8Array(128);
@@ -671,7 +820,9 @@ for (const ch of '\\`*_~[!]<&\n') INLINE_SPECIAL[ch.charCodeAt(0)] = 1;
 /**
  * The inline parsing context threaded through one document.
  * @typedef {{ defs: Map<string, {url: string, title: string|null}>,
- *   inlines: Map<number, any[]>, gfm: boolean, ctx: any }} InlineCtx
+ *   footnotes?: Map<string, MdNode>,
+ *   inlines: Map<number, any[]>, gfm: boolean, ctx: any,
+ *   unresolved?: boolean, deferred?: {node: any, raw: string}[] }} InlineCtx
  */
 
 /**
@@ -746,7 +897,7 @@ export function parseInlines(src, ictx) {
           textStart = pos;
           continue;
         }
-        if (next < 128 && PUNCT[next] === 1) {
+        if (next < 128 && ASCII_PUNCT[next] === 1) {
           flush(pos);
           nodes.push(text(src[pos + 1]));
           pos += 2;
@@ -793,12 +944,12 @@ export function parseInlines(src, ictx) {
         while (run < src.length && src.charCodeAt(run) === c) run++;
         const count = run - pos;
         if (c === 0x7E && count !== 2) { pos = run; continue; }
-        const before = pos === 0 ? 0x0A : src.charCodeAt(pos - 1);
-        const after = run >= src.length ? 0x0A : src.charCodeAt(run);
-        const wsBefore = before === 0x20 || before === 0x0A || before === 0x09;
-        const wsAfter = after === 0x20 || after === 0x0A || after === 0x09;
-        const punctBefore = before < 128 && PUNCT[before] === 1;
-        const punctAfter = after < 128 && PUNCT[after] === 1;
+        const before = pos === 0 ? 0x0A : codePointBefore(src, pos);
+        const after = run >= src.length ? 0x0A : /** @type {number} */ (src.codePointAt(run));
+        const wsBefore = isUnicodeWhitespace(before);
+        const wsAfter = isUnicodeWhitespace(after);
+        const punctBefore = isUnicodePunctuation(before);
+        const punctAfter = isUnicodePunctuation(after);
         const leftFlank = !wsAfter && (!punctAfter || wsBefore || punctBefore);
         const rightFlank = !wsBefore && (!punctBefore || wsAfter || punctAfter);
         let canOpen = leftFlank;
@@ -818,10 +969,28 @@ export function parseInlines(src, ictx) {
         continue;
       }
       case 0x5B /* [ */: {
+        // GFM footnote reference. A defined `[^x]` is a citation; an
+        // undefined one is not a bracket to close either, so it falls
+        // through and stays literal text.
+        if (ictx.gfm && src.charCodeAt(pos + 1) === 0x5E /* ^ */) {
+          const ref = scanFootnoteReference(src, pos);
+          if (ref !== null) {
+            const identifier = normalizeLabel(ref.label);
+            if (ictx.footnotes !== undefined && ictx.footnotes.has(identifier)) {
+              flush(pos);
+              nodes.push(footnoteReference(identifier, ref.label));
+              pos = ref.end;
+              textStart = pos;
+              continue;
+            }
+            // a definition may still arrive further down a stream
+            ictx.unresolved = true;
+          }
+        }
         flush(pos);
         const node = text('[');
         nodes.push(node);
-        brackets.push({ index: nodes.length - 1, delims: delims.length, image: false, active: true });
+        brackets.push({ index: nodes.length - 1, delims: delims.length, image: false, active: true, start: pos + 1 });
         pos++;
         textStart = pos;
         continue;
@@ -830,7 +999,7 @@ export function parseInlines(src, ictx) {
         if (src.charCodeAt(pos + 1) === 0x5B) {
           flush(pos);
           nodes.push(text('!['));
-          brackets.push({ index: nodes.length - 1, delims: delims.length, image: true, active: true });
+          brackets.push({ index: nodes.length - 1, delims: delims.length, image: true, active: true, start: pos + 2 });
           pos += 2;
           textStart = pos;
           continue;
@@ -903,7 +1072,59 @@ export function parseInlines(src, ictx) {
   }
   flush(src.length);
   resolveEmphasis(nodes, delims, 0);
-  return mergeText(nodes);
+  const out = mergeText(nodes);
+  return ictx.gfm ? linkifyLiterals(out) : out;
+}
+
+/**
+ * Turn bare URLs and email addresses in an inline run into links (GFM
+ * §Autolinks).
+ *
+ * This runs AFTER the inline phase rather than inside its dispatch
+ * switch, which is the reference implementation's shape and the right
+ * one for three reasons: the trigger characters (`w`, `h`, `f`, `@`) are
+ * ordinary letters, and putting them in the hot table would break the
+ * plain-text fast path on roughly every tenth character of English
+ * prose; an email address begins to the LEFT of its trigger, which a
+ * forward scanner cannot see; and the entity rule (`&copy;`) is only
+ * meaningful once references have been resolved, because a real entity
+ * is no longer spelled `&…;` by the time we look.
+ *
+ * Link subtrees are skipped — links do not nest — and only `text` nodes
+ * are examined, so code spans and raw HTML are untouched by
+ * construction.
+ * @param {MdNode[]} nodes
+ * @returns {MdNode[]}
+ */
+function linkifyLiterals(nodes) {
+  /** @type {MdNode[] | null} */
+  let out = null;
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node.type === 'text') {
+      const hits = scanAutolinkLiterals(node.value);
+      if (hits === null) {
+        if (out !== null) out.push(node);
+        continue;
+      }
+      if (out === null) out = nodes.slice(0, i);
+      const value = node.value;
+      let at = 0;
+      for (let k = 0; k < hits.length; k++) {
+        const hit = hits[k];
+        if (hit.start > at) out.push(text(value.slice(at, hit.start)));
+        out.push(autolink(hit.url, value.slice(hit.start, hit.end)));
+        at = hit.end;
+      }
+      if (at < value.length) out.push(text(value.slice(at)));
+      continue;
+    }
+    if (node.type !== 'link' && Array.isArray(node.children)) {
+      node.children = linkifyLiterals(node.children);
+    }
+    if (out !== null) out.push(node);
+  }
+  return out === null ? nodes : out;
 }
 
 /**
@@ -919,12 +1140,16 @@ export function parseInlines(src, ictx) {
  * @returns {number}
  */
 function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
-  let opener = null;
-  for (let i = brackets.length - 1; i >= 0; i--) {
-    if (brackets[i].active) { opener = brackets[i]; break; }
+  // Only the MOST RECENT opener may close here. An inactive one (a link
+  // opener deactivated because links do not nest) is discarded and the
+  // `]` stays literal — walking outward to an older active opener would
+  // let `![[[a](u1)](u2)](u3)` close the image on the wrong bracket.
+  const opener = brackets[brackets.length - 1];
+  if (opener === undefined) return -1;
+  if (!opener.active) {
     brackets.pop();
+    return -1;
   }
-  if (opener === null) return -1;
 
   let url = null;
   let title = null;
@@ -967,9 +1192,12 @@ function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
       }
     }
     if (label === null) {
-      // Collapsed / shortcut: label is the bracketed text itself.
+      // Collapsed / shortcut: the label is the bracketed text, taken
+      // from the SOURCE — a definition matches on what the author
+      // wrote, so `[foo\!]` and `[foo!]` are different labels even
+      // though they render the same.
       flush(pos);
-      label = textOfRange(nodes, opener.index + 1);
+      label = src.slice(opener.start, pos);
       if (end === -1) end = pos + 1;
     }
     const def = ictx.defs.get(normalizeLabel(label));
@@ -1002,18 +1230,6 @@ function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
     }
   }
   return end;
-}
-
-/**
- * The literal text of `nodes[from..]` (for shortcut reference labels).
- * @param {MdNode[]} nodes
- * @param {number} from
- * @returns {string}
- */
-function textOfRange(nodes, from) {
-  let out = '';
-  for (let i = from; i < nodes.length; i++) out += textOf(nodes[i]);
-  return out;
 }
 
 /**
@@ -1122,6 +1338,7 @@ function mergeText(nodes) {
 // ------------------------------------------------------------------
 
 const RE_TASK = /^\[([ xX])\] +/;
+const RE_ESCAPED_PIPE = /\\\|/g;
 
 /**
  * Resolve the buffered raw text of finished blocks into inline
@@ -1199,7 +1416,12 @@ function finishTable(node, ictx) {
     /** @type {MdNode[]} */
     const rowCells = [];
     for (let ci = 0; ci < width; ci++) {
-      const raw = ci < cells.length ? cells[ci].trim() : '';
+      // `\|` puts a pipe in a cell "including inside other inline spans"
+      // (GFM §Tables), so the escape has to be spent before the inline
+      // phase — a code span would otherwise keep the backslash it was
+      // never meant to show. Splitting already spent the ones between
+      // spans; these are the ones it stepped over.
+      const raw = ci < cells.length ? cells[ci].trim().replace(RE_ESCAPED_PIPE, '|') : '';
       rowCells.push(tableCell(raw === '' ? [] : parseInlines(raw, ictx)));
     }
     rows.push(tableRow(rowCells));
@@ -1233,6 +1455,7 @@ export function parseMarkdown(source, options = {}) {
   parser.finish();
   const ictx = {
     defs: parser.defs,
+    footnotes: parser.footnotes,
     inlines: tables.inlines,
     gfm: parser.gfm,
     ctx: parser.ctx,
@@ -1329,6 +1552,7 @@ export function createIncrementalParser(options = {}) {
   const deferred = [];
   const ictx = {
     defs: parser.defs,
+    footnotes: parser.footnotes,
     inlines: tables.inlines,
     gfm: parser.gfm,
     ctx: parser.ctx,

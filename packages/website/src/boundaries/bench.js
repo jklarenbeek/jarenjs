@@ -686,7 +686,7 @@ function markdown(data) {
         cells: [engine, `${data.scorecard[engine]?.pass} / ${data.scorecard[engine]?.total}`],
         strong: engine === 'jaren-md',
       })),
-      'Jaren renders Markdown to JSON vnodes with no unescaped HTML by design, so raw-HTML pass-through examples cannot pass — its score is honest dialect coverage, not a compliance claim.'));
+      'Two Jaren rows, because the difference between them is the safety boundary: the string emitter (toHtml) can pass raw HTML through, while the vnode path renders Markdown to JSON vnodes that structurally cannot hold unescaped markup — so its lower score is the price of being safe on documents it did not write, not a dialect gap.'));
   }
   const profile = data.profile;
   if (profile !== undefined && profile !== null) {
@@ -697,7 +697,7 @@ function markdown(data) {
       (profile.render ?? []).map((p) => ({
         cells: [p.name, ...engines.map((e) => formatMs(p.results[e]))],
       })),
-      'marked and markdown-it are the mainstream one-shot parsers; Jaren stays within ~1.1–1.5× while producing a JSON AST and keyed vnodes, not just an HTML string.'));
+      'marked and markdown-it are the mainstream one-shot parsers. The jaren-md row is toHtml — source to HTML string, the same unit; the vnode row does the same work and then builds a keyed, patchable tree, which is what the extra time buys.'));
     if (Array.isArray(profile.jaren)) {
       out.push(table(
         'Jaren-only: the compiled pipeline',

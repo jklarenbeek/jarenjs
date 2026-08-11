@@ -69,7 +69,7 @@ byte-stable across Node/ICU versions.
 ## Not here
 
 `Temporal` is deliberately not a dependency (it is not in this repo's
-Node ≥ 22 baseline); the string/number representation is exactly what
+Node ≥ 24 baseline); the string/number representation is exactly what
 `Temporal.Instant.from()` consumes, so the kernel can delegate
 internally later without a surface change. Relative-time phrasing and
 month-name catalogs are `@jarenjs/locales`' job; `formatMinimum`/

@@ -33,6 +33,7 @@ function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelConte
   let routeCb = null;
   const themes = [];
   const hashes = [];
+  const scrolled = [];
   let storeData = stored;
   const app = createSiteApp({
     node: container,
@@ -51,10 +52,11 @@ function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelConte
       write: (data) => { storeData = JSON.parse(JSON.stringify(data)); },
     },
     modelContext,
+    scrollToAnchor: (id) => scrolled.push(id),
     onError: (err) => { throw err; },
   });
   const go = (h) => routeCb(parseHash(h));
-  return { app, container, go, themes, hashes, storage: () => storeData };
+  return { app, container, go, themes, hashes, scrolled, storage: () => storeData };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -380,7 +382,8 @@ describe('website — the site as one app document', function () {
       '![logo](../../jaren.png)\n\n'
       + '- the reference is [DATES](./docs/DATES.md)\n'
       + '- see [formats](../formats) and [LICENSE](./LICENSE)\n\n'
-      + 'More at [spec](https://example.com/spec) and [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n',
+      + 'More at [spec](https://example.com/spec) and [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n\n'
+      + '## Quick start\n\nJump to [quick start](#quick-start).\n',
     [`${RAW_MAIN}/packages/core/docs/DATES.md`]:
       '# dates doc\n\nBack to [the README](../README.md).\n',
     [`${RAW_MAIN}/packages/formats/README.md`]: '# formats readme\n',
@@ -425,6 +428,25 @@ describe('website — the site as one app document', function () {
     const image = find(container, (n) => n.tagName === 'img'
       && n.attributes?.get('src') === `${RAW_MAIN}/jaren.png`);
     assert.notStrictEqual(image, undefined, 'a relative image resolves against the raw base');
+  });
+
+  it('an in-page link scrolls to the heading and leaves the route alone', async function () {
+    const { app, container, hashes, scrolled } = await openCoreReadme();
+
+    const heading = find(container, (n) => n.tagName === 'h2'
+      && n.attributes?.get('id') === 'quick-start');
+    assert.notStrictEqual(heading, undefined,
+      'the heading carries the GitHub-compatible id the link points at');
+
+    const before = hashes.length;
+    fire(find(container, (n) => n.tagName === 'a'
+      && n.childNodes?.[0]?.nodeValue === 'quick start'), 'click');
+    await tick();
+    assert.deepStrictEqual(scrolled, ['quick-start'], 'the fragment scrolled the document');
+    assert.strictEqual(hashes.length, before,
+      'the router was never handed the fragment — parseHash would resolve it to home');
+    assert.strictEqual(app.getState().route.page, 'docs', 'the reader stayed on the page');
+    assert.match(serialize(container), /md-dialog/, 'and inside the open dialog');
   });
 
   it('a link to the site itself closes the dialog and routes in-app', async function () {

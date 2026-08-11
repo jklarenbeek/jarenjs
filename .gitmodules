@@ -13,3 +13,6 @@
 [submodule "benchmark/commonmark-spec"]
 	path = benchmark/commonmark-spec
 	url = https://github.com/commonmark/commonmark-spec.git
+[submodule "benchmark/gfm-spec"]
+	path = benchmark/gfm-spec
+	url = https://github.com/github/cmark-gfm.git

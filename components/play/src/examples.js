@@ -366,7 +366,10 @@ Parse **CommonMark** with *GFM* extensions into a plain JSON AST —
 then query it, transform it with JSLT, and render it as vnodes.
 
 - [x] tables, strikethrough, task lists
+- [x] footnotes[^1] and bare links like www.commonmark.org
 - [ ] your ~~regex~~ hand-rolled parser
+
+[^1]: Collected out of the flow and rendered at the end, GitHub-style.
 
 | engine | output |
 | :----- | -----: |

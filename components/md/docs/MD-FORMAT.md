@@ -36,11 +36,20 @@ The parser recognizes the CommonMark core constructs (ATX headings,
 setext headings, paragraphs, thematic breaks, fenced and indented code,
 blockquotes, ordered/unordered lists, inline emphasis/links/images/code,
 hard and soft breaks, backslash escapes, autolinks, raw HTML blocks and
-spans) plus the three GFM extensions in universal use: **tables**,
-**strikethrough** and **task lists**. It is a fast, pragmatic dialect —
-this specification, not the CommonMark spec, is normative for this
-package; the benchmark workspace scores the parser against the official
-CommonMark example corpus and reports the honest number.
+spans) plus the GFM extensions in universal use: **tables**,
+**strikethrough**, **task lists**, **footnotes** (§4.6) and **literal
+autolinks** (§4.7). The parser passes **every example in the CommonMark
+specification** through the string emitter (§4.4a), and the benchmark
+workspace scores both emitters against the official corpus — and against
+the GFM specification's extension sections — on every run.
+
+This specification remains normative for the package: it covers the
+frontmatter, the AST, and the extensions neither spec describes
+(footnotes are GitHub's, documented nowhere but here). Where it and
+CommonMark speak about the same construct they agree. Two places where
+this package deliberately differs from the GFM reference implementation
+are stated with their reasons in the package README's scorecard section;
+neither is a dialect gap a document can fall into.
 
 ## 2. The document envelope
 
@@ -159,6 +168,7 @@ unchanged where possible.
 | `table` | `align` (array of `"left"`/`"right"`/`"center"`/`null`), `children` | children are `tableRow`s; the first row is the header |
 | `tableRow` | `children` | children are `tableCell`s |
 | `tableCell` | `children` | inline content |
+| `footnoteDefinition` | `identifier`, `label`, `children` | GFM; block content, collected rather than rendered in place (§4.6) |
 
 ### 4.2 Inline nodes
 
@@ -168,12 +178,13 @@ unchanged where possible.
 | `emphasis` | `children` | `*x*` / `_x_` |
 | `strong` | `children` | `**x**` / `__x__` |
 | `strikethrough` | `children` | `~~x~~` (GFM) |
-| `link` | `url`, `title` (string or `null`), `children` | inline links and autolinks; `url` is verbatim, filtered at render (§4.3) |
+| `link` | `url`, `title` (string or `null`), `children` | inline links and autolinks; `url` is verbatim, filtered at render (§4.3). A GFM literal autolink additionally carries `auto: true` and a RESOLVED `url` (§4.7) |
 | `image` | `url`, `title` (string or `null`), `alt` (string) | `alt` is plain text; `url` as for `link` |
 | `inlineCode` | `value` | backtick spans |
 | `break` | — | hard break (two spaces or `\` before newline) |
 | `softBreak` | — | an in-paragraph newline |
 | `html` | `value` | a raw inline HTML span |
+| `footnoteReference` | `identifier`, `label` | GFM; the citation mark (§4.6) |
 
 ### 4.3 URL safety (normative)
 
@@ -224,18 +235,196 @@ emitter renders unknown literal nodes as plain `pre` text and unknown
 containers by their children; without the mermaid plugin, a
 ` ```mermaid ` fence is just a `code` node with `lang: "mermaid"`.
 
+### 4.4a Raw HTML and the two emitters (normative)
+
+An `html` node holds markup verbatim (§4.1, §4.2). What a consumer may do
+with it depends on what the consumer emits, and this format recognizes
+exactly two emission targets:
+
+- a **vnode tree** (`mdToVnode`) has no representation for unbalanced or
+  unknown markup — a lone `</div>`, a never-closed `<span>` — because a
+  tree node is an element or it is nothing. An emitter to vnodes MUST
+  therefore drop (`html: 'skip'`, the default), show as literal text
+  (`'text'`), or PARSE through an allow-list (`'vnode'`). It MUST NOT
+  have a mode that emits author markup unescaped, and that impossibility
+  — not a filtering promise — is what makes the vnode path safe for
+  Markdown a host did not write;
+- a **string** (`toHtml`) can hold any byte sequence. A string emitter
+  MUST offer `'escape'` (the default: the markup is shown, escaped),
+  `'skip'` (parity with the vnode default) and `'raw'` (verbatim). `'raw'`
+  is the mode CommonMark specifies and the mode a conformance scorecard
+  measures; it MUST be per-call, MUST NOT be the default, and MUST be
+  documented as trusted-input-only.
+
+The URL rule of §4.3 is **orthogonal to all of this** and applies in
+every mode of both emitters: `'raw'` states that a document's HTML blocks
+are trusted, not that its markdown links are.
+
+Neither emitter may be implemented in terms of the other: a string
+emitter built on vnodes inherits the tree's structural limit, and a vnode
+emitter built on strings would have to re-parse its own output. For every
+document whose markup a vnode CAN express, the two MUST agree
+byte-for-byte, which is the property that keeps them one dialect with two
+targets rather than two dialects.
+
+### 4.5 Heading identifiers (normative)
+
+A `heading` node carries no identifier: an `id` is a *rendering*
+decision, so the AST stays the text the author wrote and two emitters can
+disagree about anchors without disagreeing about the document.
+
+An emitter that offers heading ids MUST compute one from the heading's
+plain text (`textOf`, §4.2 — image `alt` counts, formatting does not) by
+this algorithm, which is GitHub's, so a document anchors identically on
+GitHub, in an editor preview and in this renderer:
+
+1. lower-case the text;
+2. drop every character that is not a letter, a digit, a combining mark,
+   `-` or `_` — so punctuation, symbols (`§`, `—`) and emoji go, while
+   non-ASCII letters and digits stay;
+3. replace each remaining whitespace character with `-`, one for one (a
+   run of two spaces yields `--`).
+
+The result MAY be empty (`## ***`); an emitter MUST then substitute
+`section`, because a heading with no landing place cannot be linked.
+Within one document, the **second** heading yielding a given identifier
+MUST get `-1` appended, the third `-2`, and so on, counted over the
+substituted value so `***` twice yields `section` and `section-1`. The
+counter is per emission and MUST NOT be shared with any other numbering
+in the emitter.
+
+An emitter MUST offer a prefix (`slugPrefix`) prepended to every emitted
+identifier and to every anchor href it writes, and its default MUST be
+empty. A host rendering a document it did not author into a page it owns
+sets the prefix (GitHub's own answer is `user-content-`) so an author
+cannot mint an identifier that collides with the host's own DOM.
+
+Emitting ids MUST be opt-in and off by default: CommonMark renders a
+heading as `<h1>Foo</h1>`, and a default that adds an attribute would put
+this package's conformance score at odds with the documents it produces.
+
+`mdToVnode` implements this as `headingIds`, `slugPrefix` and
+`headingAnchors`; the slug transform itself is `slugify` from
+`@jarenjs/core/string`, the suite's only one.
+
+### 4.6 Footnotes (normative)
+
+Footnotes are a GFM extension the GFM *specification* never described —
+GitHub ships them, the spec has no section for them — so their behaviour
+is pinned here, matching GitHub's rendering.
+
+**Two node types.** A producer MUST emit a `footnoteDefinition` for
+`[^label]: …` and a `footnoteReference` for `[^label]`, both carrying an
+`identifier` (the label under the normalization of §Link reference
+definitions — trim, collapse whitespace, case fold) and a `label` (the
+text as written). Both are recognized only when `gfm` is on.
+
+**One label grammar, both sides.** A label is `[^` followed by one or
+more characters that are not `]`, `[` or whitespace, then `]`. The same
+grammar decides a definition and a reference, so `[^my note]` is neither
+rather than one without the other.
+
+**A definition is a container block**, not a leading definition like
+`[foo]:`. It therefore MAY interrupt a paragraph, its continuation lines
+are indented four columns, it takes lazy continuation, and — like a list
+item — a blank line ends it while it is still empty. A producer MUST
+record only the FIRST definition of an identifier.
+
+**A definition stays where it was written.** A producer MUST NOT hoist
+definitions: the AST is the document, and moving them would make
+`toMarkdown` print a document the author did not write. Collecting them
+is the *emitter's* job (§4.4a: what a consumer may do depends on what it
+emits).
+
+An emitter that renders footnotes MUST:
+
+1. **number by first reference** — not by definition order, not by label.
+   References inside a rendered footnote count, and are numbered after
+   the references in the document body;
+2. **render nothing for an uncited definition**, in place or at the end;
+3. **render a reference with no definition as the literal text it was
+   written as** (`[^nope]`), never as a link to a missing anchor. (A
+   parser cannot produce such a node — the inline rule requires a
+   definition — but a transform can.);
+4. **terminate on a cycle.** A footnote MAY cite another, itself
+   included; an emitter MUST render each definition at most once, which
+   makes termination a property of the algorithm rather than a depth
+   limit;
+5. **give each citation its own identifier**, so a footnote cited *n*
+   times has *n* landing places and *n* back-references. The
+   identifiers are `<prefix>fn-<number>` for the definition and
+   `<prefix>fnref-<number>` for the first citation, `-2`, `-3` … for the
+   rest;
+6. **default the prefix to `user-content-`**, and use `slugPrefix` when
+   it is given. This differs from §4.5 on purpose: a heading id is
+   opt-in and asserted bare by CommonMark, while a footnote id is
+   emitted by the default rendering of a feature that is *nothing but* a
+   link between two places on one page. No corpus example asserts a bare
+   `fn-1`, so the safe default costs nothing;
+7. **append one section after the last block**, inside whatever fragment
+   or wrapper it is producing. A consumer concatenating fragments
+   receives one footnotes section per fragment, which is the only
+   placement a fragment emitter can offer.
+
+### 4.7 Literal autolinks (normative)
+
+With `gfm` on, a producer MUST recognize GFM's extended autolinks — bare
+`www.…`, `http://…`, `https://…`, `ftp://…` and email addresses — under
+the grammar of GFM §Autolinks (extension), including:
+
+- a match MAY begin only at the start of the text, after whitespace, or
+  after one of `*`, `_`, `~`, `(`. The start of a `text` node counts:
+  what precedes it is a sibling node, not a character;
+- matching is **case-sensitive**. `WWW.EXAMPLE.COM` is not a link, here
+  or on GitHub;
+- trailing `?`, `!`, `.`, `,`, `:`, `*`, `_`, `~` are excluded from the
+  link, though they MAY appear in its interior;
+- a trailing `)` is excluded only while the link holds more `)` than
+  `(`, so `(www.a.test/x)` links `www.a.test/x` and
+  `www.a.test/x(y)` links all of it;
+- a trailing `;` is excluded only as part of an entity-shaped tail
+  (`&` + alphanumerics + `;`), and then the whole tail goes, not the
+  semicolon;
+- a `<` ends the link at that character.
+
+**The node type is `link`.** A literal autolink IS a link, and inventing
+a second type would make every consumer, plugin and schema learn two
+spellings of one thing. The `url` holds the RESOLVED destination — a
+`www.` link gets `http://`, an address gets `mailto:` — so no consumer
+re-derives it. A producer MUST set `auto: true` on such a node; exactly
+one consumer reads it, the canonical printer, which prints the link back
+bare (§5). A consumer that does not know the flag renders a correct
+link, which is why it is a flag and not a type.
+
+Recognition happens **after** inline parsing, over `text` nodes, and MUST
+NOT descend into a `link` — links do not nest. Consequently a literal
+autolink is never found inside a code span, raw HTML or link text, and
+the entity rule above is meaningful: by then `&copy;` has become `©`, and
+the only `&…;` left to exclude is one that was never an entity.
+
 ## 5. Canonical Markdown and round-trips
 
 `toMarkdown(doc)` prints **canonical Markdown**: ATX headings, `-`
 bullets, `1.` ordered markers (renumbered from `start`), fenced code
 with backticks, `*emphasis*`/`**strong**`, reference-free inline links,
 `|`-piped tables with an alignment row, and blank lines between blocks.
+A footnote definition prints where it stands, its later blocks indented
+four columns; a literal autolink prints bare, escaped so that a `_` or
+`&` in a destination survives the trip back.
 
 The normative round-trip guarantees:
 
 1. `parseMarkdown(toMarkdown(doc))` produces an AST deep-equal to
-   `doc.ast` for any document this package produced (canonical form is
-   a fixed point);
+   `doc.ast` for any document this package produced, and printing that
+   AST again reproduces the same text (canonical form is a fixed
+   point). Both halves are checked over the whole CommonMark example
+   corpus, not a sample: a printer that cannot represent a construct it
+   just parsed — an autolink, a heading carrying a soft break, two
+   adjacent lists, a text run holding a literal newline — shows up
+   there and nowhere else. The same check runs over the GFM
+   specification's 672 examples with the extensions ON, which is the
+   only place tables, task lists, strikethrough, footnotes and literal
+   autolinks are printed at corpus scale;
 2. a document produced by a JTLT stylesheet parses into an AST that an
    identity JSLT stylesheet (`[]`) maps back — by reference — to the
    same AST, which prints to the canonical equivalent of the JTLT

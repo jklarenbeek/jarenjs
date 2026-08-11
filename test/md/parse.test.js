@@ -57,12 +57,64 @@ describe('parseMarkdown: CommonMark core', function () {
     assert.equal(html('3. a\n4. b'), '<ol start="3"><li>a</li><li>b</li></ol>');
   });
 
+  // The blocks of a list item are separated by a newline — with a tight
+  // item's paragraphs unwrapped, nothing else marks the boundary
+  // (CommonMark §List items, e.g. `- Bar\n  ---\n  baz` renders as
+  // `<li>\n<h2>Bar</h2>\nbaz</li>`).
   it('nests blocks inside list items by indentation', function () {
-    assert.equal(html('- a\n  - b'), '<ul><li>a<ul><li>b</li></ul></li></ul>');
+    assert.equal(html('- a\n  - b'), '<ul><li>a\n<ul><li>b</li></ul></li></ul>');
     assert.equal(html('- a\n\n  b'),
-      '<ul><li><p>a</p><p>b</p></li></ul>');
+      '<ul><li><p>a</p>\n<p>b</p></li></ul>');
     assert.equal(html('1. a\n   > q'),
-      '<ol><li>a<blockquote><p>q</p></blockquote></li></ol>');
+      '<ol><li>a\n<blockquote><p>q</p></blockquote></li></ol>');
+    assert.equal(html('- Bar\n  ---\n  baz'),
+      '<ul><li><h2>Bar</h2>\nbaz</li></ul>');
+  });
+
+  // §List items, "an empty list item": a marker followed by nothing but
+  // whitespace opens an item with no content. It cannot INTERRUPT a
+  // paragraph, but inside a list that is already open it starts the
+  // next item like any other marker.
+  it('opens empty list items', function () {
+    assert.equal(html('- foo\n-\n- bar'), '<ul><li>foo</li><li></li><li>bar</li></ul>');
+    assert.equal(html('1. foo\n2.\n3. bar'), '<ol><li>foo</li><li></li><li>bar</li></ol>');
+    // trailing whitespace after the marker is still an empty item, and
+    // it does not make the list loose
+    assert.equal(html('- foo\n-   \n- bar'), '<ul><li>foo</li><li></li><li>bar</li></ul>');
+    // an item may begin with at most one blank line: the second ends it
+    assert.equal(html('-\n\n  foo'), '<ul><li></li></ul><p>foo</p>');
+    // …but a bare `-` under a paragraph is still a setext underline
+    assert.equal(html('foo\n-\n'), '<h2>foo</h2>');
+  });
+
+  // §Lists, tight vs loose: looseness is a property of a list's OWN
+  // items. A blank line inside a sublist or a blockquote belongs to that
+  // container and must not leak outward.
+  it('decides tightness from a list\'s own items', function () {
+    assert.equal(html('- a\n  - b\n\n    c\n- d'),
+      '<ul><li>a\n<ul><li><p>b</p>\n<p>c</p></li></ul></li><li>d</li></ul>');
+    assert.equal(html('* a\n  > b\n  >\n* c'),
+      '<ul><li>a\n<blockquote><p>b</p></blockquote></li><li>c</li></ul>');
+    // a blank line BETWEEN two items is the loose case
+    assert.equal(html('- a\n\n- b'), '<ul><li><p>a</p></li><li><p>b</p></li></ul>');
+  });
+
+  // §Lists: changing the delimiter (or the bullet) starts a new list,
+  // even where the old one's paragraph was still open.
+  it('starts a new list when the marker changes', function () {
+    assert.equal(html('1. foo\n2. bar\n3) baz'),
+      '<ol><li>foo</li><li>bar</li></ol><ol start="3"><li>baz</li></ol>');
+    assert.equal(html('- a\n+ b'), '<ul><li>a</li></ul><ul><li>b</li></ul>');
+  });
+
+  // §List items: a blank container line closes the paragraph, so what
+  // follows opens a second block inside the same item — it is not a lazy
+  // continuation of the first.
+  it('reopens after a blank line inside nested containers', function () {
+    assert.equal(html('   > > 1.  one\n>>\n>>     two'),
+      '<blockquote><blockquote><ol><li><p>one</p>\n<p>two</p></li></ol></blockquote></blockquote>');
+    assert.equal(html('>>- one\n>>\n  >  > two'),
+      '<blockquote><blockquote><ul><li>one</li></ul><p>two</p></blockquote></blockquote>');
   });
 
   it('parses fenced code with info strings', function () {
@@ -89,6 +141,11 @@ describe('parseMarkdown: CommonMark core', function () {
     assert.equal(html('a *b **c** d* e'), '<p>a <em>b <strong>c</strong> d</em> e</p>');
     assert.equal(html('foo_bar_baz'), '<p>foo_bar_baz</p>');
     assert.equal(html('a * b * c'), '<p>a * b * c</p>');
+    // the flanking rules are defined over UNICODE classes: a no-break
+    // space is whitespace, and a currency SYMBOL counts as punctuation
+    assert.equal(html('* a *'), '<p>* a *</p>');
+    assert.equal(html('*£*bravo.'), '<p>*£*bravo.</p>');
+    assert.equal(html('*𞋿*delta.'), '<p>*𞋿*delta.</p>');
   });
 
   it('parses code spans with space stripping and backtick runs', function () {
@@ -105,6 +162,36 @@ describe('parseMarkdown: CommonMark core', function () {
     // in the attribute it lands in, so it percent-encodes on the way out
     assert.equal(html('[t](<u v>)'), '<p><a href="u%20v">t</a></p>');
     assert.equal(html('[*em* t](/u)'), '<p><a href="/u"><em>em</em> t</a></p>');
+  });
+
+  // §Link reference definitions: a definition is shed from the
+  // paragraph BEFORE a setext underline can turn what is left into a
+  // heading, `<>` is a valid empty destination, and a title has to be
+  // separated from the destination by whitespace.
+  it('sheds link reference definitions ahead of the setext rule', function () {
+    assert.equal(html('[foo]: /url\nbar\n===\n[foo]'),
+      '<h1>bar</h1><p><a href="/url">foo</a></p>');
+    assert.equal(html('[foo]: /url\n===\n[foo]'),
+      '<p>===\n<a href="/url">foo</a></p>');
+  });
+
+  it('accepts an empty <> destination and rejects a jammed title', function () {
+    assert.equal(html('[foo]: <>\n\n[foo]'), '<p><a href="">foo</a></p>');
+    assert.equal(html('[foo]: <bar>(baz)\n\n[foo]'),
+      '<p>[foo]: (baz)</p><p>[foo]</p>');
+  });
+
+  // §Links: labels match on the text as WRITTEN — an escape delimits
+  // but does not resolve — and matching case-folds (`ẞ` meets `SS`).
+  it('matches reference labels on raw text, case-folded', function () {
+    assert.equal(html('[bar][foo\\!]\n\n[foo!]: /url'), '<p>[bar][foo!]</p>');
+    assert.equal(html('[foo][ref\\[]\n\n[ref\\[]: /uri'), '<p><a href="/uri">foo</a></p>');
+    assert.equal(html('[ẞ]\n\n[SS]: /url'), '<p><a href="/url">ẞ</a></p>');
+  });
+
+  it('closes the most recent bracket, never an outer one', function () {
+    assert.equal(html('![[[foo](uri1)](uri2)](uri3)'),
+      '<p><img src="uri3" alt="[foo](uri2)"></p>');
   });
 
   it('parses reference links: full, collapsed and shortcut', function () {

@@ -44,7 +44,7 @@ Please read [Understanding JSON Schema](https://json-schema.org/UnderstandingJSO
 npm install @jarenjs/validate @jarenjs/formats @jarenjs/refs
 ```
 
-Node ≥ 22, ESM only, no third-party runtime dependencies. To pin a source
+Node ≥ 24, ESM only, no third-party runtime dependencies. To pin a source
 checkout instead of a registry version — or to work on Jaren itself — see
 [CONSUMING.md](docs/CONSUMING.md).
 
@@ -185,7 +185,7 @@ The wedge, measured against XState v5 (`npm run benchmark:flow`): the pure `step
 
 ### 📄 @jarenjs/md — Markdown as JSON documents
 
-Where JTLT turns JSON into Markdown, `@jarenjs/md` is the inverse arrow: a from-scratch, zero-dependency parser (CommonMark core + GFM tables/strikethrough/task lists + YAML/JSON/TOML frontmatter) whose output is a plain JSON AST published as a schema (`jaren-md-ast.schema.json`) — transformable with JSLT, addressable with queries, rendered by `@jarenjs/view` with content-hash keys and structural sharing so unchanged blocks patch in O(1). Extensibility is compile-time plugins (mermaid and a built-in syntax highlighter ship as the reference pair), loading is a lazy URL loader with caching, AbortSignal and block-by-block streaming, and `toMarkdown` prints canonical round-trip text. The scorecard against the official CommonMark examples runs in the benchmark workspace (`npm run benchmark:markdown`). See [components/md](components/md/README.md).
+Where JTLT turns JSON into Markdown, `@jarenjs/md` is the inverse arrow: a from-scratch, zero-dependency parser (CommonMark core + GFM tables, strikethrough, task lists, footnotes and autolink literals + YAML/JSON/TOML frontmatter) whose output is a plain JSON AST published as a schema (`jaren-md-ast.schema.json`) — transformable with JSLT, addressable with queries, rendered by `@jarenjs/view` with content-hash keys and structural sharing so unchanged blocks patch in O(1). Extensibility is compile-time plugins (mermaid and a built-in syntax highlighter ship as the reference pair), loading is a lazy URL loader with caching, AbortSignal and block-by-block streaming, and `toMarkdown` prints canonical round-trip text. The scorecard against the official CommonMark examples runs in the benchmark workspace (`npm run benchmark:markdown`). See [components/md](components/md/README.md).
 
 ### 🌊 @jarenjs/josl — JOSL, JSONX & CSV, the streaming data languages
 

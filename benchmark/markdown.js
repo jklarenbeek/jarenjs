@@ -9,12 +9,23 @@
  * 1. CommonMark scorecard — the examples embedded in the official
  *    spec (benchmark/commonmark-spec submodule, spec.txt) run through
  *    every engine; outputs compare after the spec's whitespace
- *    normalization. @jarenjs/md is a pragmatic dialect (see
- *    components/md/docs/MD-FORMAT.md §1.3), so its number is a coverage
- *    report, not a compliance claim — the competitors' numbers under
- *    the same normalizer give the scale.
+ *    normalization. Two @jarenjs/md rows are scored, because the
+ *    package has two emitters and the difference between them is its
+ *    safety boundary: the string emitter can pass raw HTML through, and
+ *    the vnode emitter structurally cannot (components/md/docs/MD-FORMAT.md
+ *    §4.4a). The competitors' numbers under the same normalizer give the
+ *    scale.
  *
- * 2. Performance — parse+render to HTML (every engine's natural unit)
+ * 2. GFM extension scorecard — the same treatment for the five
+ *    extension sections of the GFM spec (benchmark/gfm-spec submodule),
+ *    with every engine's extensions switched on. The CommonMark corpus
+ *    says nothing about tables, task lists, strikethrough, autolink
+ *    literals or disallowed raw HTML, so without this the part of the
+ *    dialect every engine here advertises would be the only part nobody
+ *    measured. Optional: no submodule, no scorecard, and the CommonMark
+ *    numbers stand on their own.
+ *
+ * 3. Performance — parse+render to HTML (every engine's natural unit)
  *    over synthetic documents at three sizes, plus jaren-only rows for
  *    parse-to-AST and the compiled re-render fast path.
  *
@@ -28,8 +39,9 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { parseMarkdown, compileMarkdown, mdToVnode } from '@jarenjs/md';
+import { parseMarkdown, compileMarkdown, mdToVnode, toHtml } from '@jarenjs/md';
 import { timeIt } from './lib/measure.js';
+import { extractExamples, normalizeHtml } from './lib/commonmark.js';
 import { renderToString } from '@jarenjs/view';
 import { marked } from 'marked';
 import MarkdownIt from 'markdown-it';
@@ -37,6 +49,7 @@ import { micromark } from 'micromark';
 import { gfm as micromarkGfm, gfmHtml as micromarkGfmHtml } from 'micromark-extension-gfm';
 
 const SPEC = fileURLToPath(new URL('./commonmark-spec/spec.txt', import.meta.url));
+const GFM_SPEC = fileURLToPath(new URL('./gfm-spec/test/spec.txt', import.meta.url));
 
 const args = process.argv.slice(2);
 const flags = {
@@ -55,31 +68,56 @@ const flags = {
 // ------------------------------------------------------------------
 
 const mdit = new MarkdownIt('commonmark');
-const mditGfm = new MarkdownIt({ html: true }).enable(['table', 'strikethrough']);
+// Each rival is configured on its own fastest/fullest route to GFM:
+// markdown-it needs `linkify` switched on for extended autolinks (task
+// lists are a separate npm plugin it does not ship, and its 0/2 there
+// says exactly that — not that it renders them wrongly).
+const mditGfm = new MarkdownIt({ html: true, linkify: true })
+  .enable(['table', 'strikethrough', 'linkify']);
 
 const ENGINES = [
   {
     name: 'jaren-md',
-    // `html: 'vnode'` parses raw HTML through the allow-list — the
-    // comparable setting, since the markdown-it 'commonmark' preset and
-    // every other engine here pass HTML through rather than escape it.
+    // The string emitter, `html: 'raw'` — the like-for-like row: every
+    // rival here passes raw HTML through, and this is the path a
+    // consumer takes to get an HTML string.
+    render: (src) => toHtml(parseMarkdown(src, { gfm: false, frontmatter: false }), { html: 'raw' }),
+    renderGfm: (src) => toHtml(parseMarkdown(src, { frontmatter: false }), { html: 'raw' }),
+    renderPerf: (src) => toHtml(parseMarkdown(src)),
+  },
+  {
+    // The vnode path, scored beside the string path on purpose: the
+    // difference between the two rows IS the safety boundary (a vnode
+    // tree cannot hold a lone `</div>`, so raw HTML goes through an
+    // allow-list instead), and reporting only the better number would
+    // flatter the package.
+    name: 'jaren-md (vnode)',
     render: (src) => renderToString(mdToVnode(parseMarkdown(src, { gfm: false, frontmatter: false }), { html: 'vnode' }))
+      .slice('<article class="md">'.length, -'</article>'.length),
+    renderGfm: (src) => renderToString(mdToVnode(parseMarkdown(src, { frontmatter: false }), { html: 'vnode' }))
       .slice('<article class="md">'.length, -'</article>'.length),
     renderPerf: (src) => renderToString(mdToVnode(parseMarkdown(src))),
   },
   {
     name: 'marked',
     render: (src) => marked.parse(src, { async: false, gfm: false }),
+    renderGfm: (src) => marked.parse(src, { async: false, gfm: true }),
     renderPerf: (src) => marked.parse(src, { async: false }),
   },
   {
     name: 'markdown-it',
     render: (src) => mdit.render(src),
+    renderGfm: (src) => mditGfm.render(src),
     renderPerf: (src) => mditGfm.render(src),
   },
   {
     name: 'micromark',
     render: (src) => micromark(src, { allowDangerousHtml: true }),
+    renderGfm: (src) => micromark(src, {
+      allowDangerousHtml: true,
+      extensions: [micromarkGfm()],
+      htmlExtensions: [micromarkGfmHtml()],
+    }),
     renderPerf: (src) => micromark(src, {
       allowDangerousHtml: true,
       extensions: [micromarkGfm()],
@@ -87,68 +125,11 @@ const ENGINES = [
     }),
   },
 ].filter((engine) => flags.engines === null || flags.engines.includes(engine.name)
-  || (engine.name === 'jaren-md' && flags.engines.includes('jaren')));
+  || (engine.name.startsWith('jaren-md') && flags.engines.includes('jaren')));
 
 // ------------------------------------------------------------------
 // CommonMark scorecard
 // ------------------------------------------------------------------
-
-/**
- * Extract the spec's embedded examples (32-backtick example fences,
- * `.` separates markdown from expected html; → is a literal tab).
- * @param {string} spec
- */
-function extractExamples(spec) {
-  const out = [];
-  const re = /^`{32} example\n([\s\S]*?)^\.\n([\s\S]*?)^`{32}$/gm;
-  let match;
-  while ((match = re.exec(spec)) !== null) {
-    out.push({
-      markdown: match[1].replace(/→/g, '\t'),
-      html: match[2].replace(/→/g, '\t'),
-      number: out.length + 1,
-    });
-  }
-  return out;
-}
-
-/**
- * Tags whose surrounding whitespace is formatting, never content: the
- * block-level elements CommonMark output is built from, plus `<br>`.
- */
-const LAYOUT_TAG = 'p|div|ul|ol|li|blockquote|pre|h[1-6]|hr|table|thead|tbody|tr|td|th';
-const RE_BEFORE_BLOCK = new RegExp(`\\s+(?=</?(?:${LAYOUT_TAG})[ >])`, 'g');
-const RE_AFTER_BREAK = /(<br>)\s+/g;
-
-/**
- * The spec's normalization, approximated: collapse whitespace runs,
- * drop whitespace between tags, normalize self-closing voids.
- *
- * The comparison is of RENDERED meaning, not of source formatting — so
- * whitespace that only lays the markup out is dropped on both sides.
- * The reference implementations print a newline after `<br />` and
- * before a nested `<ul>`; a producer that emits a vnode tree has no
- * place to put one, and treating that as a difference would score
- * pretty-printing rather than conformance. Every rule here applies to
- * every engine, and the sweep that added them checked no engine's score
- * moved for a reason other than this.
- *
- * Whitespace next to an INLINE tag is left alone: the space in
- * `<p>a <em>b</em></p>` is content, and collapsing it would hide a real
- * difference.
- * @param {string} html
- */
-function normalizeHtml(html) {
-  return html
-    .replace(/\s+/g, ' ')
-    .replace(/> </g, '><')
-    .replace(/ \/>/g, '>')
-    .replace(RE_BEFORE_BLOCK, '')
-    .replace(RE_AFTER_BREAK, '$1')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .trim();
-}
 
 /**
  * Score every engine against the CommonMark spec examples.
@@ -188,9 +169,92 @@ function runScorecard() {
   for (const engine of ENGINES) {
     const s = scorecard[engine.name];
     const pct = ((100 * s.pass) / examples).toFixed(1);
-    console.log(`  ${engine.name.padEnd(14)} ${String(s.pass).padStart(4)} / ${examples}  (${pct}%)`);
+    console.log(`  ${engine.name.padEnd(17)} ${String(s.pass).padStart(4)} / ${examples}  (${pct}%)`);
     if (flags.verbose && s.failures.length > 0) {
       console.log(`    failing examples: ${s.failures.slice(0, 40).join(', ')}${s.failures.length > 40 ? ', …' : ''}`);
+    }
+  }
+}
+
+// ------------------------------------------------------------------
+// GFM extension scorecard
+// ------------------------------------------------------------------
+
+/**
+ * The extension sections of the GFM specification, in spec order. The
+ * CommonMark corpus says nothing about any of them, so without this the
+ * five features every engine here advertises would be the only part of
+ * the dialect nobody scored.
+ */
+const GFM_SECTIONS = [
+  'Tables (extension)',
+  'Task list items (extension)',
+  'Strikethrough (extension)',
+  'Autolinks (extension)',
+  'Disallowed Raw HTML (extension)',
+];
+
+/**
+ * Score every engine, with its extensions ON, against the GFM spec's
+ * extension examples. Returns null when the submodule is absent — the
+ * corpus is optional, and a missing one must not take the CommonMark
+ * numbers down with it.
+ * @returns {{ examples: number, totals: Record<string, number>,
+ *   scorecard: Record<string, { pass: number, total: number,
+ *     sections: Record<string, number>, failures: number[] }> } | null}
+ */
+function computeGfmScorecard() {
+  if (!existsSync(GFM_SPEC)) return null;
+  const examples = extractExamples(readFileSync(GFM_SPEC, 'utf8'))
+    .filter((e) => GFM_SECTIONS.indexOf(e.section) !== -1);
+  /** @type {Record<string, number>} */
+  const totals = {};
+  for (const example of examples) totals[example.section] = (totals[example.section] ?? 0) + 1;
+  /** @type {Record<string, any>} */
+  const scorecard = {};
+  for (const engine of ENGINES) {
+    let pass = 0;
+    const failures = [];
+    /** @type {Record<string, number>} */
+    const sections = {};
+    for (const section of GFM_SECTIONS) sections[section] = 0;
+    for (const example of examples) {
+      let ok = false;
+      try {
+        ok = normalizeHtml(String(engine.renderGfm(example.markdown)))
+          === normalizeHtml(example.html);
+      }
+      catch {
+        ok = false;
+      }
+      if (ok) {
+        pass++;
+        sections[example.section]++;
+      }
+      else failures.push(example.number);
+    }
+    scorecard[engine.name] = { pass, total: examples.length, sections, failures };
+  }
+  return { examples: examples.length, totals, scorecard };
+}
+
+function runGfmScorecard() {
+  const result = computeGfmScorecard();
+  if (result === null) {
+    console.log('\nGFM extension scorecard — skipped'
+      + ' (run: git submodule update --init benchmark/gfm-spec)');
+    return;
+  }
+  console.log(`\nGFM extension scorecard — ${result.examples} examples from the spec's`
+    + ' five extension sections, every engine\'s extensions on');
+  for (const engine of ENGINES) {
+    const s = result.scorecard[engine.name];
+    const per = GFM_SECTIONS
+      .map((section) => `${section.split(' ')[0]} ${s.sections[section]}/${result.totals[section]}`)
+      .join('  ');
+    console.log(`  ${engine.name.padEnd(17)} ${String(s.pass).padStart(3)} / ${s.total}   ${per}`);
+    if (flags.verbose && s.failures.length > 0) {
+      console.log(`    failing examples: ${s.failures.join(', ')}`);
     }
   }
 }
@@ -263,12 +327,12 @@ function runPerformance() {
     for (const engine of ENGINES) {
       const ms = row.results[engine.name];
       const ratio = engine.name === 'jaren-md' ? '' : ` (${(ms / base).toFixed(2)}x)`;
-      console.log(`    ${engine.name.padEnd(14)} ${ms.toFixed(4).padStart(9)} ms${ratio}`);
+      console.log(`    ${engine.name.padEnd(17)} ${ms.toFixed(4).padStart(9)} ms${ratio}`);
     }
     if (flags.profile) {
       const j = perf.jaren[i];
-      console.log(`    ${'· parse→AST'.padEnd(14)} ${j.parseMs.toFixed(4).padStart(9)} ms`);
-      console.log(`    ${'· cached vnode'.padEnd(14)} ${j.vnodeNs.toFixed(0).padStart(9)} ns (compiled fast path)`);
+      console.log(`    ${'· parse→AST'.padEnd(17)} ${j.parseMs.toFixed(4).padStart(9)} ms`);
+      console.log(`    ${'· cached vnode'.padEnd(17)} ${j.vnodeNs.toFixed(0).padStart(9)} ns (compiled fast path)`);
     }
   }
 }
@@ -278,6 +342,7 @@ if (flags.output === 'json') {
   // an engine list, the CommonMark scorecard, and the perf profile with
   // Jaren's compiled-pipeline rows.
   const { examples, scorecard } = computeScorecard();
+  const gfm = computeGfmScorecard();
   const perf = measurePerformance(flags.iterations);
   const data = {
     date: new Date().toISOString(),
@@ -286,6 +351,12 @@ if (flags.output === 'json') {
     examples,
     scorecard: Object.fromEntries(
       Object.entries(scorecard).map(([name, s]) => [name, { pass: s.pass, total: s.total }])),
+    gfm: gfm === null ? null : {
+      examples: gfm.examples,
+      totals: gfm.totals,
+      scorecard: Object.fromEntries(Object.entries(gfm.scorecard)
+        .map(([name, s]) => [name, { pass: s.pass, total: s.total, sections: s.sections }])),
+    },
     profile: {
       iterations: perf.iterations,
       render: perf.render.map((row) => ({ name: row.name, results: row.results })),
@@ -303,5 +374,6 @@ if (flags.output === 'json') {
 }
 else {
   if (!flags.perfOnly) runScorecard();
+  if (!flags.perfOnly) runGfmScorecard();
   if (!flags.scoreOnly) runPerformance();
 }

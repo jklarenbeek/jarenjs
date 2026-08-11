@@ -69,4 +69,4 @@ npm install @jarenjs/studio
 ```
 
 Zero third-party runtime dependencies — only other `@jarenjs/*` packages.
-Node ≥ 22, ESM.
+Node ≥ 24, ESM.

@@ -16,7 +16,7 @@ export const MD_VERSION = '0.1';
 /** Node types whose content lives in `children`. */
 const CONTAINER_TYPES = new Set([
   'paragraph', 'heading', 'blockquote', 'list', 'listItem',
-  'table', 'tableRow', 'tableCell',
+  'table', 'tableRow', 'tableCell', 'footnoteDefinition',
   'emphasis', 'strong', 'strikethrough', 'link',
 ]);
 
@@ -137,6 +137,42 @@ export function strikethrough(children) {
  */
 export function link(url, title, children) {
   return { type: 'link', url, title, children };
+}
+
+/**
+ * A GFM literal autolink (`www.example.com`, `a@b.test`): a `link`, not
+ * a type of its own — every consumer, plugin and schema would otherwise
+ * have to learn a second spelling of the same thing. The `auto` flag is
+ * carried for the ONE consumer that has to tell them apart, the
+ * canonical printer, which prints it back bare (MD-FORMAT.md §4.7).
+ * @param {string} url the resolved destination (scheme inserted)
+ * @param {string} literal the text as the author wrote it
+ * @returns {MdNode}
+ */
+export function autolink(url, literal) {
+  return { type: 'link', url, title: null, children: [{ type: 'text', value: literal }], auto: true };
+}
+
+/**
+ * A GFM footnote definition: block content collected out of the flow
+ * and rendered once, at the end, if something cites it.
+ * @param {string} identifier the normalized label (matching key)
+ * @param {string} label the label as written
+ * @param {MdNode[]} children
+ * @returns {MdNode}
+ */
+export function footnoteDefinition(identifier, label, children) {
+  return { type: 'footnoteDefinition', identifier, label, children };
+}
+
+/**
+ * A GFM footnote reference: the citation mark in the text.
+ * @param {string} identifier the normalized label (matching key)
+ * @param {string} label the label as written
+ * @returns {MdNode}
+ */
+export function footnoteReference(identifier, label) {
+  return { type: 'footnoteReference', identifier, label };
 }
 
 /**

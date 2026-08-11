@@ -370,32 +370,36 @@ export function isSpaceCode(c) {
 export function scanLinkDefinition(text, pos) {
   if (text.charCodeAt(pos) !== 0x5B /* [ */) return null;
   let i = pos + 1;
-  let label = '';
+  const labelStart = i;
   while (i < text.length) {
     const c = text.charCodeAt(i);
-    if (c === 0x5C) {
-      label += text[i + 1] ?? '';
-      i += 2;
-      continue;
-    }
+    // A backslash escape delimits but does not RESOLVE here: labels
+    // match on the text as written, so `[foo\!]` and `[foo!]` are two
+    // different definitions (and the reference side reads it the same
+    // way).
+    if (c === 0x5C) { i += 2; continue; }
     if (c === 0x5D /* ] */) break;
     if (c === 0x5B) return null;
-    label += text[i];
     i++;
   }
+  const label = text.slice(labelStart, Math.min(i, text.length));
   if (i >= text.length || label.trim() === '' || label.length > 999) return null;
   if (text.charCodeAt(i + 1) !== 0x3A /* : */) return null;
   i += 2;
   while (i < text.length && (isSpaceCode(text.charCodeAt(i)) || text.charCodeAt(i) === 0x0A)) i++;
+  const wrapped = text.charCodeAt(i) === 0x3C /* < */;
   const dest = scanLinkDestination(text, i);
-  if (dest === null || dest.url === '') return null;
+  // `<>` names an empty destination on purpose; nothing at all does not.
+  if (dest === null || (dest.url === '' && !wrapped)) return null;
   i = dest.end;
   let j = i;
   while (j < text.length && isSpaceCode(text.charCodeAt(j))) j++;
   const sawNewline = text.charCodeAt(j) === 0x0A;
   if (sawNewline) j++;
   while (j < text.length && isSpaceCode(text.charCodeAt(j))) j++;
-  const title = scanLinkTitle(text, j);
+  // The title must be separated from the destination by whitespace, so
+  // `[foo]: <bar>(baz)` is not a definition at all — it is a paragraph.
+  const title = j > i ? scanLinkTitle(text, j) : null;
   if (title !== null) {
     let k = title.end;
     while (k < text.length && isSpaceCode(text.charCodeAt(k))) k++;
@@ -470,12 +474,359 @@ export function scanLinkTitle(text, pos) {
   return null;
 }
 
+// ------------------------------------------------------------------
+// Character classes (the flanking rules and the autolink grammar)
+// ------------------------------------------------------------------
+
+/** ASCII punctuation membership (emphasis flanking, backslash escapes). */
+export const ASCII_PUNCT = new Uint8Array(128);
+for (const ch of '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') ASCII_PUNCT[ch.charCodeAt(0)] = 1;
+
 /**
- * Normalize a link label: trim, collapse internal whitespace, case
- * fold (Unicode-aware lowercasing suffices for matching).
+ * The flanking rules — and the autolink grammar's notion of a host
+ * character — are defined over UNICODE classes, not ASCII: a
+ * "whitespace character" is Zs plus tab/LF/FF/CR (so a no-break space
+ * ends a delimiter run), and a "punctuation character" is anything in
+ * P* **or** S* (so `£` and `€` are punctuation, while a letter is not).
+ * Both are consulted only for code points outside ASCII, which the table
+ * above answers without allocating.
+ */
+const RE_UNICODE_WS = /[\p{Zs}\t\n\f\r]/u;
+const RE_UNICODE_PUNCT = /[\p{P}\p{S}]/u;
+
+/**
+ * Is this code point a whitespace character in the spec's sense?
+ * @param {number} point
+ * @returns {boolean}
+ */
+export function isUnicodeWhitespace(point) {
+  if (point < 128) return point === 0x20 || point === 0x0A || point === 0x09;
+  return RE_UNICODE_WS.test(String.fromCodePoint(point));
+}
+
+/**
+ * Is this code point a punctuation character in the spec's sense (P* or S*)?
+ * @param {number} point
+ * @returns {boolean}
+ */
+export function isUnicodePunctuation(point) {
+  if (point < 128) return ASCII_PUNCT[point] === 1;
+  return RE_UNICODE_PUNCT.test(String.fromCodePoint(point));
+}
+
+/**
+ * The whole code point ending at `pos`, so a run preceded by an astral
+ * symbol classifies on the symbol and not on a surrogate half.
+ * @param {string} src @param {number} pos
+ * @returns {number}
+ */
+export function codePointBefore(src, pos) {
+  const low = src.charCodeAt(pos - 1);
+  if (low >= 0xdc00 && low <= 0xdfff && pos >= 2) {
+    const high = src.charCodeAt(pos - 2);
+    if (high >= 0xd800 && high <= 0xdbff) return (high - 0xd800) * 0x400 + low - 0xdc00 + 0x10000;
+  }
+  return low;
+}
+
+/**
+ * Normalize a link label for matching: trim, collapse internal
+ * whitespace runs to one space, and case fold.
+ *
+ * The fold is lower→upper→lower, not `toLowerCase()`: the spec asks for
+ * Unicode case folding, under which `ẞ` matches `SS`, while lower-casing
+ * alone maps `ẞ` to `ß` and never meets `ss`. The round trip routes both
+ * spellings through the same expansion (`ẞ`→`ß`→`SS`→`ss`, and `ﬁ`→`fi`),
+ * which is as close to the full fold as a zero-dependency package gets
+ * without shipping the table.
  * @param {string} label
  * @returns {string}
  */
 export function normalizeLabel(label) {
-  return label.trim().replace(/[ \t\n]+/g, ' ').toLowerCase();
+  return label.trim().replace(/[ \t\n]+/g, ' ').toLowerCase().toUpperCase().toLowerCase();
+}
+
+// ------------------------------------------------------------------
+// GFM footnotes
+// ------------------------------------------------------------------
+
+/**
+ * A footnote label: `[^` + one or more characters that are not `]`, `[`
+ * or whitespace. The no-whitespace rule is the reference
+ * implementation's and it applies to BOTH sides — a definition and a
+ * reference are recognized by the same grammar, so `[^my note]` is
+ * neither, rather than one without the other (MD-FORMAT.md §4.6).
+ * Returns the offset of the `]`, or -1.
+ * @param {string} text
+ * @param {number} start offset of the `[`
+ * @returns {number}
+ */
+function scanFootnoteLabel(text, start) {
+  if (text.charCodeAt(start) !== 0x5B /* [ */ || text.charCodeAt(start + 1) !== 0x5E /* ^ */) {
+    return -1;
+  }
+  let i = start + 2;
+  while (i < text.length) {
+    const c = text.charCodeAt(i);
+    if (c === 0x5D /* ] */) return i > start + 2 ? i : -1;
+    if (c === 0x5B /* [ */ || c === 0x20 || c === 0x09 || c === 0x0A) return -1;
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Footnote definition opener: `[^label]:` and the spaces after it.
+ * @param {string} line
+ * @param {number} start first non-space offset
+ * @returns {{ label: string, contentOffset: number } | null}
+ */
+export function scanFootnoteDefinition(line, start) {
+  const close = scanFootnoteLabel(line, start);
+  if (close === -1 || line.charCodeAt(close + 1) !== 0x3A /* : */) return null;
+  let i = close + 2;
+  while (i < line.length && isSpaceCode(line.charCodeAt(i))) i++;
+  return { label: line.slice(start + 2, close), contentOffset: i };
+}
+
+/**
+ * Footnote reference: `[^label]` in inline text.
+ * @param {string} text
+ * @param {number} start offset of the `[`
+ * @returns {{ label: string, end: number } | null}
+ */
+export function scanFootnoteReference(text, start) {
+  const close = scanFootnoteLabel(text, start);
+  return close === -1 ? null : { label: text.slice(start + 2, close), end: close + 1 };
+}
+
+// ------------------------------------------------------------------
+// GFM autolink literals
+// ------------------------------------------------------------------
+
+/** Is this an ASCII letter or digit? */
+function isAsciiAlnum(c) {
+  return (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A);
+}
+
+/**
+ * A character that may carry a domain: alphanumerics, `-` and `_`, plus
+ * any non-ASCII character that is neither whitespace nor punctuation
+ * (so an internationalized domain autolinks and an em dash after one
+ * does not).
+ * @param {number} c
+ * @returns {boolean}
+ */
+function isDomainChar(c) {
+  if (c < 128) return isAsciiAlnum(c) || c === 0x2D /* - */ || c === 0x5F /* _ */;
+  return !isUnicodeWhitespace(c) && !isUnicodePunctuation(c);
+}
+
+/** An email local-part character: alphanumeric, `.`, `-`, `_` or `+`. */
+function isEmailLocalChar(c) {
+  return isAsciiAlnum(c)
+    || c === 0x2E /* . */ || c === 0x2D /* - */ || c === 0x5F /* _ */ || c === 0x2B /* + */;
+}
+
+/**
+ * A literal autolink may only begin at the start of the text, after
+ * whitespace, or after one of `*`, `_`, `~`, `(` (GFM §Autolinks). The
+ * start of a text node counts: what precedes it is a sibling node, not a
+ * character, and a `www.` there is as unambiguous as one after a space.
+ * @param {string} text @param {number} pos
+ * @returns {boolean}
+ */
+function isAutolinkStart(text, pos) {
+  if (pos === 0) return true;
+  const c = text.charCodeAt(pos - 1);
+  return c === 0x20 || c === 0x09 || c === 0x0A
+    || c === 0x2A /* * */ || c === 0x5F /* _ */ || c === 0x7E /* ~ */ || c === 0x28 /* ( */;
+}
+
+/**
+ * A valid domain at `pos`: segments of domain characters separated by
+ * periods, at least one period, no underscore in the last two segments.
+ * A trailing period is not part of the domain. Returns the end offset,
+ * or -1.
+ *
+ * `underscores` relaxes the last-two-segments rule for the email
+ * grammar, which states only that the last character may not be `-` or
+ * `_` — the two grammars really do differ, and `foo@a_b.example` is a
+ * link while `www.a_b.example` is not.
+ * @param {string} text @param {number} pos @param {boolean} underscores
+ * @returns {number}
+ */
+function scanAutolinkDomain(text, pos, underscores) {
+  let i = pos;
+  while (i < text.length) {
+    const c = text.charCodeAt(i);
+    if (c !== 0x2E /* . */ && !isDomainChar(c)) break;
+    i++;
+  }
+  while (i > pos && text.charCodeAt(i - 1) === 0x2E) i--;
+  if (i === pos) return -1;
+  const segments = text.slice(pos, i).split('.');
+  if (segments.length < 2 || segments[segments.length - 1] === '') return -1;
+  if (!underscores) {
+    if (segments[segments.length - 1].indexOf('_') !== -1) return -1;
+    if (segments[segments.length - 2].indexOf('_') !== -1) return -1;
+  }
+  return i;
+}
+
+/**
+ * Extended autolink path validation (GFM §Autolinks): pull trailing
+ * punctuation back out of the link. `?!.,:*_~` always; a `)` only while
+ * the link holds more of them than `(`; a `;` only when it closes an
+ * entity-shaped tail (`&copy;`), which is why the whole `&…;` goes and
+ * not just the semicolon.
+ * @param {string} text @param {number} start @param {number} end
+ * @returns {number}
+ */
+function trimAutolinkEnd(text, start, end) {
+  while (end > start) {
+    const c = text.charCodeAt(end - 1);
+    if (c === 0x3F || c === 0x21 || c === 0x2E || c === 0x2C
+      || c === 0x3A || c === 0x2A || c === 0x5F || c === 0x7E) {
+      end--;
+      continue;
+    }
+    if (c === 0x3B /* ; */) {
+      let j = end - 2;
+      while (j > start && isAsciiAlnum(text.charCodeAt(j))) j--;
+      if (j < end - 2 && text.charCodeAt(j) === 0x26 /* & */) {
+        end = j;
+        continue;
+      }
+      break;
+    }
+    if (c === 0x29 /* ) */) {
+      let open = 0;
+      let close = 0;
+      for (let k = start; k < end; k++) {
+        const d = text.charCodeAt(k);
+        if (d === 0x28) open++;
+        else if (d === 0x29) close++;
+      }
+      if (close <= open) break;
+      end--;
+      continue;
+    }
+    break;
+  }
+  return end;
+}
+
+/** The URL tail after a domain: any run of non-space, non-`<` characters. */
+function scanAutolinkTail(text, pos) {
+  let i = pos;
+  while (i < text.length) {
+    const c = text.charCodeAt(i);
+    if (c === 0x20 || c === 0x09 || c === 0x0A || c === 0x3C /* < */) break;
+    i++;
+  }
+  return i;
+}
+
+/**
+ * The schemes that open an extended url autolink. Matching is
+ * case-SENSITIVE, here and for `www.`: the reference implementation
+ * compares bytes, so `WWW.EXAMPLE.COM` is not a link on GitHub either,
+ * and this package's promise is that a document renders the same in
+ * both places — not that it renders more.
+ */
+const AUTOLINK_SCHEMES = ['http://', 'https://', 'ftp://'];
+
+/**
+ * Find every extended autolink in one text value (GFM §Autolinks): bare
+ * `www.…`, `http://…`, `https://…`, `ftp://…` and email addresses.
+ * Returns the matches in order, or `null` when there are none — the
+ * common answer, and the one that costs nothing.
+ *
+ * This works on a TEXT VALUE and not on the source, which is what makes
+ * the entity rule meaningful: `&copy;` has already become `©` by the
+ * time we look, so the only `&…;` left to exclude is one that was never
+ * an entity in the first place.
+ * @param {string} value
+ * @returns {{ start: number, end: number, url: string }[] | null}
+ */
+export function scanAutolinkLiterals(value) {
+  /** @type {{ start: number, end: number, url: string }[] | null} */
+  let out = null;
+  let i = 0;
+  let floor = 0;
+  while (i < value.length) {
+    const c = value.charCodeAt(i);
+    /** @type {{ start: number, end: number, url: string } | null} */
+    let hit = null;
+    if (c === 0x40 /* @ */) {
+      hit = matchEmail(value, i, floor);
+    }
+    else if (c === 0x77 /* w */ && isAutolinkStart(value, i)) {
+      hit = matchWww(value, i);
+    }
+    else if ((c === 0x68 /* h */ || c === 0x66 /* f */) && isAutolinkStart(value, i)) {
+      hit = matchScheme(value, i);
+    }
+    if (hit === null) {
+      i++;
+      continue;
+    }
+    if (out === null) out = [];
+    out.push(hit);
+    i = hit.end;
+    floor = hit.end;
+  }
+  return out;
+}
+
+/**
+ * `www.` + a valid domain + a path tail; the scheme is inserted, so the
+ * AST holds the destination a browser would follow and no consumer has
+ * to re-derive it.
+ * @param {string} value @param {number} pos
+ */
+function matchWww(value, pos) {
+  if (!value.startsWith('www.', pos)) return null;
+  const domain = scanAutolinkDomain(value, pos + 4, false);
+  if (domain === -1) return null;
+  const end = trimAutolinkEnd(value, pos, scanAutolinkTail(value, domain));
+  if (end <= pos + 4) return null;
+  return { start: pos, end, url: 'http://' + value.slice(pos, end) };
+}
+
+/**
+ * `http://`, `https://` or `ftp://` + a valid domain + a path tail.
+ * @param {string} value @param {number} pos
+ */
+function matchScheme(value, pos) {
+  for (let s = 0; s < AUTOLINK_SCHEMES.length; s++) {
+    const scheme = AUTOLINK_SCHEMES[s];
+    if (!value.startsWith(scheme, pos)) continue;
+    const domain = scanAutolinkDomain(value, pos + scheme.length, false);
+    if (domain === -1) continue;
+    const end = trimAutolinkEnd(value, pos, scanAutolinkTail(value, domain));
+    if (end <= pos + scheme.length) continue;
+    return { start: pos, end, url: value.slice(pos, end) };
+  }
+  return null;
+}
+
+/**
+ * An email address around the `@` at `at`. The local part is found by
+ * walking BACK — the address is the only autolink whose start is left of
+ * its trigger — and never back past `floor`, the end of the previous
+ * match. The path-validation trim does not apply: the grammar rejects an
+ * address ending in `-` or `_` outright rather than shortening it.
+ * @param {string} value @param {number} at @param {number} floor
+ */
+function matchEmail(value, at, floor) {
+  let start = at;
+  while (start > floor && isEmailLocalChar(value.charCodeAt(start - 1))) start--;
+  if (start === at || !isAutolinkStart(value, start)) return null;
+  const end = scanAutolinkDomain(value, at + 1, true);
+  if (end === -1) return null;
+  const last = value.charCodeAt(end - 1);
+  if (last === 0x2D /* - */ || last === 0x5F /* _ */) return null;
+  return { start, end, url: 'mailto:' + value.slice(start, end) };
 }

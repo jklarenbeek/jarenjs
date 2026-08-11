@@ -158,7 +158,7 @@ export const DOCS_SECTIONS = [
   {
     id: 'markdown', title: 'Markdown',
     blocks: [
-      p('The inverse of JTLT: @jarenjs/md parses Markdown (CommonMark core + GFM tables, strikethrough and task lists + YAML/JSON/TOML frontmatter) into a plain JSON AST the whole suite consumes — JSLT transforms it, queries address it, toMarkdown prints canonical round-trip text, and the view patcher renders it with content-hash keys and structural sharing.'),
+      p('The inverse of JTLT: @jarenjs/md parses Markdown (CommonMark core + GFM tables, strikethrough, task lists, footnotes and autolink literals + YAML/JSON/TOML frontmatter) into a plain JSON AST the whole suite consumes — JSLT transforms it, queries address it, toMarkdown prints canonical round-trip text, and the view patcher renders it with content-hash keys and structural sharing.'),
       code(null, "import { parseMarkdown, toMarkdown } from '@jarenjs/md';\nconst doc = parseMarkdown('# Hi *there*');\ndoc.ast[0].type;          // 'heading'\ntoMarkdown(doc);          // '# Hi *there*\\n' — a fixed point"),
       p('Part two is the visual component (@jarenjs/md/component): a memoized view() projection for app viewModels, md-load / md-parse entries for the effect registry, a hydrate pass for plugins like mermaid, and the styles/md.css stylesheet. Play’s Markdown engine on this site is that component, live.'),
       code(null, "import { createMdComponent } from '@jarenjs/md/component';\nconst md = createMdComponent();\ncreateApp(appDoc, {\n  effects: { ...md.effects },\n  viewModel: (state) => ({ ...state, article: md.view(state.source) }),\n});"),

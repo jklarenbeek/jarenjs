@@ -61,6 +61,42 @@ const meanOf = (rows, engine) => rows.reduce((a, r) => a + r.engines[engine], 0)
 /** A row from a labelled `[{label, ns}]` list. */
 const byLabel = (rows, label) => rows.find((r) => r.label === label);
 
+/** One conformance row as `pass of total (pct%)`. */
+function scorecardFigure(suite, engine) {
+  const row = data(suite).scorecard[engine];
+  if (row === undefined) {
+    throw new Error(`${suite}.json has no '${engine}' scorecard row — regenerate it before quoting the number`);
+  }
+  return `${row.pass} of ${row.total} (${((100 * row.pass) / row.total).toFixed(1)}%)`;
+}
+
+/**
+ * The GFM extension scorecard block of `markdown.json`. It is null when
+ * the run had no `benchmark/gfm-spec` submodule, and a document that
+ * quotes the number must not silently print one from a run that never
+ * scored it.
+ */
+function gfmData() {
+  const gfm = data('markdown').gfm;
+  if (gfm === null || gfm === undefined) {
+    throw new Error("markdown.json has no GFM scorecard — run 'git submodule update --init "
+      + "benchmark/gfm-spec' and regenerate it before quoting the number");
+  }
+  return gfm;
+}
+
+/**
+ * `pass of total (pct%)` for one engine on the GFM extension corpus.
+ * @param {string} engine
+ */
+function gfmFigure(engine) {
+  const row = gfmData().scorecard[engine];
+  if (row === undefined) {
+    throw new Error(`markdown.json has no GFM '${engine}' row — regenerate it before quoting the number`);
+  }
+  return `${row.pass} of ${row.total} (${((100 * row.pass) / row.total).toFixed(1)}%)`;
+}
+
 /**
  * Every fact, keyed by its marker name. A fact returns the exact text
  * that replaces the marker's body — including any markdown emphasis, so
@@ -135,6 +171,40 @@ const FACTS = {
     return band(ratios, ratio);
   },
   'md.cachedNs': () => band(data('markdown').profile.jaren.map((r) => r.vnodeNs), ns),
+  // Both emitters are scored, and both numbers are published (the
+  // difference between them is the safety boundary, not a rounding
+  // error). Each fact prints `pass of total (pct%)`.
+  'md.measured': () => {
+    const d = data('markdown');
+    return `${String(d.date).slice(0, 10)}, Node ${d.node}`;
+  },
+  'md.scorecard': () => scorecardFigure('markdown', 'jaren-md'),
+  'md.scorecardVnode': () => scorecardFigure('markdown', 'jaren-md (vnode)'),
+  'md.scorecardPeers': () => {
+    const s = data('markdown').scorecard;
+    return ['marked', 'markdown-it', 'micromark']
+      .filter((peer) => s[peer] !== undefined)
+      .map((peer) => `${peer} ${s[peer].pass}`)
+      .join(', ');
+  },
+  // The GFM extension corpus, scored with every engine's extensions on.
+  // The CommonMark spec says nothing about tables, task lists,
+  // strikethrough, autolink literals or disallowed raw HTML — this is
+  // the only place those five are measured against a reference.
+  'md.gfmScorecard': () => gfmFigure('jaren-md'),
+  'md.gfmScorecardVnode': () => gfmFigure('jaren-md (vnode)'),
+  'md.gfmPeers': () => {
+    const gfm = gfmData();
+    return ['marked', 'markdown-it', 'micromark']
+      .filter((peer) => gfm.scorecard[peer] !== undefined)
+      .map((peer) => `${peer} ${gfm.scorecard[peer].pass}`)
+      .join(', ');
+  },
+  'md.gfmAutolinks': () => {
+    const gfm = gfmData();
+    const section = 'Autolinks (extension)';
+    return `${gfm.scorecard['jaren-md'].sections[section]} of ${gfm.totals[section]}`;
+  },
 
   // ——— @jarenjs/mermaid: render cost at two sizes ———
   'mermaid.svgMs': () => {
@@ -193,6 +263,7 @@ const FACTS = {
 
 const DOCS = [
   'README.md',
+  'docs/ROADMAP.md',
   'components/md/README.md',
   'components/mermaid/README.md',
   'packages/flow/README.md',

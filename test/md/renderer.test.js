@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { compileMarkdown, createMdRenderer, hashContent } from '@jarenjs/md';
+import { compileMarkdown, createMdRenderer, hashContent, mdToVnode, parseMarkdown } from '@jarenjs/md';
 import { highlightPlugin, definePlugin } from '@jarenjs/md/plugins';
 import { renderToString } from '@jarenjs/view';
 import { StubElement, createStubHost, serialize } from '../view/dom.stub.js';
@@ -29,6 +29,72 @@ function domHtml(container) {
   for (const child of container.childNodes) out += serialize(child);
   return out;
 }
+
+describe('mdToVnode: heading ids and anchors', function () {
+  /** The rendered HTML of a document, minus the article wrapper. */
+  const html = (src, options) => {
+    const out = renderToString(mdToVnode(parseMarkdown(src), options));
+    return out.slice('<article class="md">'.length, -'</article>'.length);
+  };
+  /** Every `id` attribute value, in document order. */
+  const ids = (markup) => [...markup.matchAll(/ id="([^"]*)"/g)].map((m) => m[1]);
+  /** The block `key` props of a rendered document, in document order. */
+  const keys = (src, options) =>
+    mdToVnode(parseMarkdown(src), options)[2].map((block) => block[1].key);
+
+  const SETUPS = '# Doc\n\n## Setup\n\ntext\n\n## Setup\n\nmore\n\n## Setup\n';
+
+  it('emits no id by default — CommonMark says <h1>Foo</h1>', function () {
+    const src = '# Hello, World!\n\n## Setup\n';
+    assert.equal(html(src), '<h1>Hello, World!</h1><h2>Setup</h2>');
+    // and passing the option off explicitly is the same document
+    assert.equal(html(src, { headingIds: false }), html(src));
+  });
+
+  it('slugs heading text the way GitHub does', function () {
+    assert.equal(
+      html('# Hello, World!\n', { headingIds: true }),
+      '<h1 id="hello-world">Hello, World!</h1>');
+  });
+
+  it('numbers repeated headings from a counter of its own', function () {
+    assert.deepEqual(ids(html(SETUPS, { headingIds: true })),
+      ['doc', 'setup', 'setup-1', 'setup-2']);
+  });
+
+  it('gives a heading with no slug-worthy text a landing place', function () {
+    assert.deepEqual(ids(html('## ***\n\n## !!!\n', { headingIds: true })),
+      ['section', 'section-1']);
+  });
+
+  it('prefixes every id and every anchor href with slugPrefix', function () {
+    const markup = html('## Setup\n', {
+      headingIds: true, headingAnchors: true, slugPrefix: 'user-content-',
+    });
+    assert.match(markup, /<h2 id="user-content-setup">/);
+    assert.match(markup, /href="#user-content-setup"/);
+  });
+
+  it('appends a keyboard-reachable anchor with an accessible name', function () {
+    const markup = html('## Setup\n', { headingIds: true, headingAnchors: true });
+    assert.equal(markup,
+      '<h2 id="setup">Setup<a class="md-anchor" href="#setup"'
+      + ' aria-label="Permalink to Setup">#</a></h2>');
+  });
+
+  it('emits no anchor without ids to point at', function () {
+    assert.equal(html('## Setup\n', { headingAnchors: true }), '<h2>Setup</h2>');
+  });
+
+  it('leaves block keys identical — keying hashes the node, not the props', function () {
+    const plain = keys(SETUPS);
+    assert.deepEqual(keys(SETUPS, { headingIds: true }), plain);
+    assert.deepEqual(
+      keys(SETUPS, { headingIds: true, headingAnchors: true, slugPrefix: 'user-content-' }),
+      plain);
+    assert.equal(plain.every((key) => typeof key === 'string'), true);
+  });
+});
 
 describe('createMdRenderer', function () {
   it('mounts and patches through the view DOM renderer', function () {

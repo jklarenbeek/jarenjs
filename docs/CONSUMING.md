@@ -13,7 +13,7 @@ Two properties shape everything below:
   tarball. This is the one thing that surprises source consumers, and it has
   its own section below.
 
-Runtime baseline for every package: **Node ≥ 22, ESM only** (`"type":
+Runtime baseline for every package: **Node ≥ 24, ESM only** (`"type":
 "module"`), and **zero third-party runtime dependencies** — a `@jarenjs/*`
 package depends only on other `@jarenjs/*` packages.
 

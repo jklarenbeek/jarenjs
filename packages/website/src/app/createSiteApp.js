@@ -159,6 +159,9 @@ export function createSiteApp(env) {
     // the README dialog locks the page scroll behind it; headless
     // hosts simply omit the capability
     'lock-scroll': (props) => env.lockScroll?.(props.on === true),
+    // an in-page link inside a rendered document; a headless host has
+    // nothing to scroll and omits the capability
+    'scroll-to-anchor': (props) => env.scrollToAnchor?.(String(props.id ?? '')),
     'binance-toggle': (props, dispatch) =>
       binanceToggle((action, payload) => dispatch(action, payload)),
     // the IDE store (the Project IDE's Save/Load/Share bar). Two legacy

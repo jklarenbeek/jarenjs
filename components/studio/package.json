@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/studio",
   "private": false,
-  "version": "0.31.0",
+  "version": "0.31.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -35,7 +35,7 @@
   },
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "publishConfig": {
     "access": "public",
@@ -59,11 +59,11 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.31.0",
-    "@jarenjs/validate": "^0.31.0",
-    "@jarenjs/json": "^0.31.0",
-    "@jarenjs/app": "^0.31.0",
-    "@jarenjs/flow": "^0.31.0",
-    "@jarenjs/db": "^0.31.0"
+    "@jarenjs/core": "^0.31.1",
+    "@jarenjs/validate": "^0.31.1",
+    "@jarenjs/json": "^0.31.1",
+    "@jarenjs/app": "^0.31.1",
+    "@jarenjs/flow": "^0.31.1",
+    "@jarenjs/db": "^0.31.1"
   }
 }

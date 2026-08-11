@@ -17,6 +17,9 @@ const RE_KEBAB = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
  * @property {any[]} [inlines] inline rule descriptors ({ char, scan })
  * @property {string} [node] the AST type this plugin emits/renders
  * @property {(node: any, h: any, ctx: any) => any} [render] pure vnode renderer
+ * @property {(node: any, ctx: any) => string} [toHtml] pure HTML-string
+ *   renderer, for `toHtml`. Independent of `render`: a plugin may serve
+ *   one emitter, the other, or both (docs/PLUGINS.md §5.1)
  * @property {(el: any, node: any, ctx: any) => any} [hydrate] browser-only upgrade
  */
 
@@ -61,6 +64,9 @@ export function definePlugin(spec) {
   if ((spec.fences !== undefined || spec.node !== undefined)
     && spec.render !== undefined && typeof spec.render !== 'function') {
     throw new TypeError(`md plugin '${spec.name}': render must be a function`);
+  }
+  if (spec.toHtml !== undefined && typeof spec.toHtml !== 'function') {
+    throw new TypeError(`md plugin '${spec.name}': toHtml must be a function`);
   }
   return Object.freeze(spec);
 }
