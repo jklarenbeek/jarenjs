@@ -77,7 +77,18 @@ export function tempDbPath() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-db-'));
   return {
     dbPath: path.join(dir, 'store.db'),
-    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+    // Windows keeps a deleted file's directory entry until the LAST
+    // handle to it closes, and SQLite's handles are released by the OS a
+    // moment after `close()` returns. A bare `rmSync` therefore races the
+    // kernel and throws EPERM — which, thrown from a `finally`, replaced
+    // a passing test with a failure AND left the file's process hanging
+    // (a 28-minute job, killed by the CI timeout, on a suite where every
+    // assertion had already passed).
+    //
+    // `maxRetries` is node's own answer to exactly this: it retries EPERM
+    // and EBUSY with a backoff. POSIX unlinks an open file immediately
+    // and never reaches the retry.
+    cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   };
 }
 

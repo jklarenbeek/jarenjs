@@ -60,7 +60,10 @@ before(async () => {
   await store.close();
 });
 after(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
+  // retries for the same reason as test/db/helpers.js: on Windows the
+  // directory entry of a SQLite file outlives its last handle by a
+  // moment, and an EPERM here fails a suite that already passed
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe('jaren-db', () => {
