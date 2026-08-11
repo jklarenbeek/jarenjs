@@ -4,6 +4,7 @@ import * as assert from 'node:assert/strict';
 
 import { parseMarkdown, compileMarkdown, mdToVnode } from '@jarenjs/md';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { renderToString } from '@jarenjs/view';
 
 describe('structural sharing and reference equality', function () {
   it('identity JSLT returns the document by reference', function () {
@@ -72,6 +73,41 @@ describe('structural sharing and reference equality', function () {
     const dup = parseMarkdown('# Same\n\n# Same\n');
     const [a, b] = mdToVnode(dup)[2];
     assert.notEqual(a[1].key, b[1].key); // occurrence counter disambiguates
+  });
+
+  it('keyed: false drops the keys and changes nothing else', function () {
+    // Keys cost about a quarter of the projection, and a caller that
+    // renders once and throws the tree away pays it for nothing. The
+    // default stays ON: a renderer cannot know whether its output will
+    // be patched, and guessing wrong turns O(1) reconciliation into a
+    // rebuild with no error to show for it.
+    const src = '# H\n\npara *em*\n\n- a\n- b\n\n| x |\n| - |\n| 1 |\n';
+    const doc = parseMarkdown(src);
+    const keyed = mdToVnode(doc);
+    const bare = mdToVnode(doc, { keyed: false });
+    assert.equal(keyed[2].every((block) => typeof block[1].key === 'string'), true);
+    assert.equal(bare[2].every((block) => block[1].key === undefined), true);
+    // and the rendered document is the same one, keys aside
+    const strip = (markup) => markup.replace(/ data-key="[^"]*"/g, '');
+    assert.equal(strip(renderToString(bare)), strip(renderToString(keyed)));
+    // `keyed` is part of the memo identity, and the memo holds ONE entry
+    // per node: rendering the same document under the same options is
+    // reference-stable, and switching options rebuilds rather than
+    // handing back a tree built for the other answer.
+    assert.equal(mdToVnode(doc, { keyed: false })[2][0], mdToVnode(doc, { keyed: false })[2][0]);
+    assert.notEqual(mdToVnode(doc)[2][0], bare[2][0]);
+  });
+
+  it('keys are the same strings whatever else the emitter is asked for', function () {
+    // The key scheme is a content hash of the block subtree. Every
+    // consumer's patch behaviour depends on it, so it is pinned here:
+    // a change to the hash walk shows up as a diff in this list.
+    const doc = parseMarkdown('# Title\n\nA *paragraph*.\n\n- one\n- two\n');
+    assert.deepEqual(mdToVnode(doc)[2].map((b) => b[1].key),
+      ['q9odts', '10hw0zk', 'yg4ph2']);
+    // unaffected by options that do not change the block's content
+    assert.deepEqual(mdToVnode(doc, { html: 'text' })[2].map((b) => b[1].key),
+      ['q9odts', '10hw0zk', 'yg4ph2']);
   });
 
   it('retainSource: false drops the source string', function () {

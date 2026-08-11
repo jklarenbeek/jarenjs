@@ -1073,7 +1073,24 @@ export function parseInlines(src, ictx) {
   flush(src.length);
   resolveEmphasis(nodes, delims, 0);
   const out = mergeText(nodes);
-  return ictx.gfm ? linkifyLiterals(out) : out;
+  return ictx.gfm && mayAutolink(src) ? linkifyLiterals(out) : out;
+}
+
+/**
+ * Could this leaf hold a literal autolink at all?
+ *
+ * Every match contains `@`, `www.` or `://`, and a character reference
+ * could spell any of them, so a leaf with none of the four cannot
+ * produce one — and skipping the pass skips the WALK, which is where its
+ * cost turned out to be rather than in the scan. Four vectorized
+ * substring searches per leaf replace a recursive visit of every inline
+ * node in it.
+ * @param {string} src
+ * @returns {boolean}
+ */
+function mayAutolink(src) {
+  return src.indexOf('@') !== -1 || src.indexOf('www.') !== -1
+    || src.indexOf('://') !== -1 || src.indexOf('&') !== -1;
 }
 
 /**

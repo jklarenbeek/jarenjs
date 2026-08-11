@@ -510,6 +510,8 @@ function generateMarkdown(tmp, options) {
         name: row.name,
         parseMs: sig4(row.parseMs),
         vnodeNs: Math.round(row.vnodeNs),
+        phases: row.phases === undefined ? undefined : Object.fromEntries(
+          Object.entries(row.phases).map(([k, v]) => [k, sig4(v)])),
       })),
     },
   };

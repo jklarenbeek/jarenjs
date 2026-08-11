@@ -68,17 +68,43 @@ export function collectFootnotes(ast) {
 }
 
 /**
+ * Node types whose `children` are INLINE content. A footnote definition
+ * is a block, so it can never be inside one — and skipping them turns
+ * the discovery scan from a walk of every node in the document into a
+ * walk of its block skeleton. That matters because this scan runs on
+ * EVERY emission, including the overwhelming majority of documents that
+ * have no footnotes at all: profiled at ~6% of a 100 kB projection
+ * before this, which is a cost the feature has no right to impose on
+ * documents that do not use it.
+ */
+const INLINE_PARENTS = new Set(['paragraph', 'heading', 'tableCell']);
+
+/**
+ * Find every footnote definition in a block tree, without descending
+ * into inline content.
+ * @param {MdNode[]} nodes @param {Map<string, MdNode>} byId
+ */
+function findDefinitions(nodes, byId) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node.type === 'footnoteDefinition' && !byId.has(node.identifier)) {
+      byId.set(node.identifier, node);
+    }
+    const children = node.children;
+    if (Array.isArray(children) && !INLINE_PARENTS.has(node.type)) {
+      findDefinitions(children, byId);
+    }
+  }
+}
+
+/**
  * @param {MdNode[]} ast
  * @returns {Footnotes|null}
  */
 function collect(ast) {
   /** @type {Map<string, MdNode>} */
   const byId = new Map();
-  walkAst(ast, (node) => {
-    if (node.type === 'footnoteDefinition' && !byId.has(node.identifier)) {
-      byId.set(node.identifier, node);
-    }
-  });
+  findDefinitions(ast, byId);
   if (byId.size === 0) return null;
 
   /** @type {Footnotes} */

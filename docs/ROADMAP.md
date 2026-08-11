@@ -242,14 +242,24 @@ delete it or fix it.
   navigate" projection, or the website hoists its rewrite out of the dialog
   path — the current split is a trap for the next surface that renders a
   document with a table of contents.
-- [ ] **Parse-speed workstream** — parsing costs <!--bm:md.parseTimes-->~0.1 ms for a typical ~2 kB document, ~0.47 ms for ~10 kB, ~4.9 ms for ~100 kB<!--/bm-->. A CPU profile
-  says the block scan is **not** where the time is (~14%): the inline phase is
-  ~36% (`parseInlines`, `resolveEmphasis`, `mergeText`, `closeBracket`) and
-  hashing the source for `meta.hash` is ~10% on its own. The leads in order of
-  measured weight are avoiding the adjacent-text-node merge, then deciding
-  whether `meta.hash` can be computed lazily without breaking the document
-  contract. A column-offset block scanner was the previous guess and the
-  profile does not support it.
+- [ ] **`fnv1a` loses its low bits, and fixing it would be faster** — the
+  suite's one hash step multiplies with `(hash * 0x01000193) >>> 0`, and that
+  product exceeds 2^53 for any hash above 2^29, so the float mantissa drops
+  bits the 32-bit result was supposed to keep. It is deterministic and
+  distributes well enough that nothing has ever misbehaved, but it is **not**
+  FNV-1a, and `Math.imul` is both correct and **2.1x faster** (0.38 ms to
+  0.18 ms per 100 kB, measured). The blast radius is why it is still here:
+  every hash in the suite changes — vnode block keys, `meta.hash`, the loader's
+  cache keys, the mermaid SVG cache, `data-md-hash` attributes and every pinned
+  hash in the tests. It needs its own pass, with a sweep of everything that
+  persists one.
+- [ ] **`meta.hash` costs ~11% of a parse and cannot simply go lazy** — hashing
+  the source is a full pass over it, paid by every caller including the ones
+  that never read the hash. A getter would fix that and would also make an
+  MdDocument stop being plain JSON, which MD-FORMAT §1.1 promises it is; an
+  opt-out flag would leave a document carrying a hash that is a lie. Measured
+  and left alone deliberately — the honest fix is the `Math.imul` item above,
+  which halves it for everyone.
 
 ## @jarenjs/mermaid
 

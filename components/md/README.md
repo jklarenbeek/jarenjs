@@ -367,10 +367,10 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 
 ## Performance contract
 
-Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->2026-08-10, Node v24.19.0<!--/bm-->
+Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->2026-08-11, Node v24.19.0<!--/bm-->
 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: <!--bm:md.parseTimes-->~0.1 ms for a typical ~2 kB document, ~0.47 ms for ~10 kB, ~4.9 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
+- **Parse to AST**: <!--bm:md.parseTimes-->~0.098 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
   inline phase at ~36% of that and the source hash for `meta.hash` at
   ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
   `/\s+$/` regex at paragraph close with a scan was worth 4–17%
@@ -378,14 +378,30 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
   on this corpus, because the same change looked like noise on a
   differently shaped one.)
 - **Parse + render to HTML** (the cross-engine row, `toHtml`): takes
-  <!--bm:md.vsPeers-->0.6–0.9<!--/bm-->x the time `marked` and `markdown-it` take, and is
-  <!--bm:md.vsMicromark-->12.6–20.3<!--/bm-->x faster than `micromark`, on the same GFM documents.
+  <!--bm:md.vsPeers-->0.7–1.0<!--/bm-->x the time `marked` and `markdown-it` take, and is
+  <!--bm:md.vsMicromark-->13.6–19.5<!--/bm-->x faster than `micromark`, on the same GFM documents.
   Through the **vnode** path the same documents cost roughly twice that
   — keys, memoization and a tree the patcher can reconcile are not free,
   and the benchmark publishes that row beside this one rather than
   quoting only the flattering half.
+- **Where the time goes** (~100 kB, the phase split the benchmark now
+  prints and publishes): <!--bm:md.phaseSplit-->parse 33%, AST→vnode 41%, vnode→HTML 26%<!--/bm-->. The projection, not
+  the parse, is the expensive half — and <!--bm:md.keyCost-->47%<!--/bm--> of the projection is
+  computing the content-hash **keys** (<!--bm:md.unkeyedMs-->3.2 ms against 6 ms<!--/bm--> without them).
+  Keys are what let the patcher reorder blocks instead of rebuilding
+  them, so they are worth it for a tree that will be patched — and worth
+  nothing to a caller that renders once and throws the tree away. That
+  caller passes `keyed: false`:
+
+  ```js
+  mdToVnode(doc, { keyed: false });        // SSR, a snapshot, a one-shot string
+  ```
+
+  It is deliberately not inferred. A renderer cannot know whether its
+  output will be patched, and guessing wrong turns O(1) reconciliation
+  into a rebuild with no error to show for it.
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
-  the cached projection in <!--bm:md.cachedNs-->43–86<!--/bm--> ns — and because block vnodes carry
+  the cached projection in <!--bm:md.cachedNs-->38–82<!--/bm--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
   vnodes, the view patcher skips unchanged blocks in O(1). A JSLT
   identity transform returns the document by reference; a partial

@@ -309,10 +309,29 @@ function measurePerformance(iterations) {
       results[engine.name] = timeIt(() => engine.renderPerf(src), iterations);
     }
     render.push({ name: label, chars: src.length, results });
+    // The phase split, so the next person does not have to rediscover
+    // where the time goes: parse → project (with and without keys) →
+    // serialize, plus the direct string emitter for comparison. Each is
+    // measured whole and differenced, because measuring a phase in
+    // isolation would hand it a warm cache the real pipeline never has.
     const parseMs = timeIt(() => parseMarkdown(src), iterations);
+    const projectMs = timeIt(() => mdToVnode(parseMarkdown(src)), iterations);
+    const projectUnkeyedMs = timeIt(() => mdToVnode(parseMarkdown(src), { keyed: false }), iterations);
+    const wholeMs = timeIt(() => renderToString(mdToVnode(parseMarkdown(src))), iterations);
+    const htmlMs = timeIt(() => toHtml(parseMarkdown(src)), iterations);
     const compiled = compileMarkdown(src);
     const vnodeNs = timeIt(() => compiled.toVnode(), iterations) * 1e6;
-    jaren.push({ name: label, parseMs, vnodeNs });
+    jaren.push({
+      name: label, parseMs, vnodeNs,
+      phases: {
+        parse: parseMs,
+        project: projectMs - parseMs,
+        projectUnkeyed: projectUnkeyedMs - parseMs,
+        serialize: wholeMs - projectMs,
+        toHtml: htmlMs - parseMs,
+        whole: wholeMs,
+      },
+    });
   }
   return { iterations, render, jaren };
 }
@@ -331,7 +350,13 @@ function runPerformance() {
     }
     if (flags.profile) {
       const j = perf.jaren[i];
-      console.log(`    ${'· parse→AST'.padEnd(17)} ${j.parseMs.toFixed(4).padStart(9)} ms`);
+      const p = j.phases;
+      const pct = (ms) => `${((100 * ms) / p.whole).toFixed(0)}%`.padStart(4);
+      console.log(`    ${'· parse→AST'.padEnd(17)} ${p.parse.toFixed(4).padStart(9)} ms ${pct(p.parse)}`);
+      console.log(`    ${'· AST→vnode'.padEnd(17)} ${p.project.toFixed(4).padStart(9)} ms ${pct(p.project)}`);
+      console.log(`    ${'·   unkeyed'.padEnd(17)} ${p.projectUnkeyed.toFixed(4).padStart(9)} ms ${pct(p.projectUnkeyed)}`);
+      console.log(`    ${'· vnode→html'.padEnd(17)} ${p.serialize.toFixed(4).padStart(9)} ms ${pct(p.serialize)}`);
+      console.log(`    ${'· AST→html'.padEnd(17)} ${p.toHtml.toFixed(4).padStart(9)} ms ${pct(p.toHtml)} (the string emitter)`);
       console.log(`    ${'· cached vnode'.padEnd(17)} ${j.vnodeNs.toFixed(0).padStart(9)} ns (compiled fast path)`);
     }
   }

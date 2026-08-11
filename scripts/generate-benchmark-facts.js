@@ -62,6 +62,18 @@ const meanOf = (rows, engine) => rows.reduce((a, r) => a + r.engines[engine], 0)
 const byLabel = (rows, label) => rows.find((r) => r.label === label);
 
 /** One conformance row as `pass of total (pct%)`. */
+/**
+ * The phase split of the largest markdown document measured.
+ */
+function phases() {
+  const rows = data('markdown').profile.jaren;
+  const row = rows[rows.length - 1];
+  if (row === undefined || row.phases === undefined) {
+    throw new Error('markdown.json carries no phase split — regenerate it before quoting one');
+  }
+  return row.phases;
+}
+
 function scorecardFigure(suite, engine) {
   const row = data(suite).scorecard[engine];
   if (row === undefined) {
@@ -171,6 +183,21 @@ const FACTS = {
     return band(ratios, ratio);
   },
   'md.cachedNs': () => band(data('markdown').profile.jaren.map((r) => r.vnodeNs), ns),
+  // The phase split at the largest size — where the time actually goes,
+  // so nobody has to rediscover it from a profile.
+  'md.phaseSplit': () => {
+    const p = phases();
+    const pct = (ms) => `${Math.round((100 * ms) / p.whole)}%`;
+    return `parse ${pct(p.parse)}, AST→vnode ${pct(p.project)}, vnode→HTML ${pct(p.serialize)}`;
+  },
+  'md.keyCost': () => {
+    const p = phases();
+    return `${Math.round((100 * (p.project - p.projectUnkeyed)) / p.project)}%`;
+  },
+  'md.unkeyedMs': () => {
+    const p = phases();
+    return `${ms(p.projectUnkeyed)} ms against ${ms(p.project)} ms`;
+  },
   // Both emitters are scored, and both numbers are published (the
   // difference between them is the safety boundary, not a rounding
   // error). Each fact prints `pass of total (pct%)`.

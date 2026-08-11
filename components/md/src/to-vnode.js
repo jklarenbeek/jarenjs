@@ -75,6 +75,22 @@ import {
  * @property {string} [footnotesLabel] the accessible name of the
  *   appended footnotes section (default `'Footnotes'`) — the one string
  *   this emitter writes that a reader can hear.
+ * @property {boolean} [keyed] give each top-level block a content-hash
+ *   `key` (default `true`).
+ *
+ *   Keys are what let the view patcher REORDER blocks instead of
+ *   rebuilding them, so any caller whose output will be patched needs
+ *   them — and computing one means hashing the block's whole subtree,
+ *   which is around a quarter of this emitter's cost. A caller that
+ *   renders once and throws the tree away (SSR, a string, a snapshot)
+ *   pays that for nothing and should pass `false`.
+ *
+ *   It is deliberately NOT inferred. A renderer cannot know whether its
+ *   output will be patched, and guessing wrong silently turns O(1)
+ *   reconciliation into a rebuild — a correctness-shaped failure with no
+ *   error message. The default is the safe answer; opting out is a
+ *   statement about the caller, which is why every caller in this
+ *   repository that passes `false` says why.
  */
 
 /**
@@ -577,7 +593,13 @@ function hashValue(h, value) {
     return h;
   }
   h = (h * 31 + 7) >>> 0;
-  for (const key of Object.keys(value)) {
+  // `for…in` rather than `Object.keys()`: the key array is allocated and
+  // thrown away once per NODE, and this walk visits every node of every
+  // block. AST nodes are object literals with no enumerable inherited
+  // members and no integer-like keys, so the two enumerate the same
+  // names in the same order — the hash is byte-identical, which the
+  // corpus test asserts.
+  for (const key in value) {
     h = fnv1a(key, h);
     h = hashValue(h, value[key]);
   }
@@ -636,7 +658,7 @@ export function mdToVnode(docOrCompiled, options = {}) {
     hash: hashContent,
     counts: new Map(),
   };
-  const children = blockChildren(ast, rctx, true);
+  const children = blockChildren(ast, rctx, options.keyed !== false);
   const notes = footnotesVnode(rctx);
   if (notes !== null) children.push(notes);
   return ['article', { class: 'md' }, children];
