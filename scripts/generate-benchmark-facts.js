@@ -24,11 +24,20 @@
  * Markers are HTML comments, so GitHub renders the documents unchanged.
  * The prose AROUND a marker stays human: when a band moves far enough
  * that the sentence reads wrong, the gate makes a person read it.
+ *
+ * The marker layer itself is `@jarenjs/md`'s (`bake`, and the directive
+ * scanner behind it) — this file is a registry of DERIVATIONS over the
+ * committed measurements, and nothing else. The derivations stay in
+ * JavaScript on purpose: bands, means and whole tables read worse as
+ * query one-liners, and D8 governs template vocabularies, not build
+ * scripts.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { bake } from '@jarenjs/md';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const DATA = join(ROOT, 'packages/website/public/benchmarks');
@@ -298,8 +307,6 @@ const DOCS = [
   'packages/josl/README.md',
 ];
 
-const MARKER = /<!--bm:([\w.]+)-->([\s\S]*?)<!--\/bm-->/g;
-
 const check = process.argv.includes('--check');
 /** @type {string[]} */
 const drift = [];
@@ -309,18 +316,28 @@ let rewritten = 0;
 for (const rel of DOCS) {
   const path = join(ROOT, rel);
   const before = readFileSync(path, 'utf8');
-  const after = before.replace(MARKER, (whole, key, body) => {
-    if (FACTS[key] === undefined) {
-      drift.push(`${rel}: unknown fact '${key}' — no derivation exists for this marker`);
-      return whole;
-    }
-    seen.add(key);
-    const value = FACTS[key]();
-    if (value !== body) drift.push(`${rel}: ${key}\n    doc:  ${body.trim()}\n    data: ${value.trim()}`);
-    return `<!--bm:${key}-->${value}<!--/bm-->`;
+  // The marker grammar, the pairing and the byte-local splice belong to
+  // @jarenjs/md — this script owns the DERIVATIONS and nothing else. It
+  // used to carry its own regex, which meant the repository had two
+  // ideas of what a directive is and only one of them was tested.
+  const result = bake(before, {
+    ns: 'bm',
+    resolve: (key, directive) => {
+      if (FACTS[key] === undefined) {
+        drift.push(`${rel}: unknown fact '${key}' — no derivation exists for this marker`);
+        return undefined;
+      }
+      seen.add(key);
+      const value = FACTS[key]();
+      if (value !== directive.body) {
+        drift.push(`${rel}: ${key}\n    doc:  ${directive.body.trim()}\n    data: ${value.trim()}`);
+      }
+      return value;
+    },
   });
-  if (after !== before && !check) {
-    writeFileSync(path, after);
+  for (const message of result.diagnostics) drift.push(`${rel}: ${message}`);
+  if (result.changed && !check) {
+    writeFileSync(path, result.text);
     rewritten += 1;
   }
 }

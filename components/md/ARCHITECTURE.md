@@ -113,6 +113,8 @@ hand-written expectations.
 | `src/frontmatter.js` | YAML-subset / JSON / TOML-subset parsers, written from scratch; `options.toml` injects `@jarenjs/josl` |
 | `src/ast.js` | Node constructors (one hidden class per type), `walkAst`, compiled-visitor `visitAst` |
 | `src/footnotes.js` | Which footnote definitions a document cites, in which order, and what to call them — the one answer both emitters use, because two implementations of an id rule is how a back-reference ends up pointing at nothing |
+| `src/directives.js` | The `<!--ns:payload-->…<!--/ns-->` grammar and the pairing, once. Two scanners share it: one over the AST (what a renderer sees) and one over the source (where the bytes are), because the AST carries no offsets and giving it any would change every content-hash key |
+| `src/bake.js` | Writes a derived value back into the source, splicing only the spans between markers so a hand-written document keeps every other byte |
 | `src/compiler.js` | `compileMarkdown` — the closure bundle with cached projections; `frontmatterExternals`, `mdToForm` |
 | `src/to-md.js` | Canonical printer (round-trip fixed point) |
 | `src/to-html.js` | String emitter: AST → HTML bytes, the raw-HTML modes, `wrap` |

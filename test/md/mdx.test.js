@@ -9,7 +9,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { parseMarkdown, toMarkdown } from '@jarenjs/md';
+import { parseMarkdown, toMarkdown, toHtml } from '@jarenjs/md';
 import { createMdx } from '@jarenjs/md/mdx';
 import { compileJsonQuery } from '@jarenjs/json';
 
@@ -19,6 +19,43 @@ const render = (source, data) => toMarkdown(mdx.transform(parseMarkdown(source),
 describe('@jarenjs/md/mdx — the markdown × data pass', () => {
   it('requires an injected expression compiler', () => {
     assert.throws(() => createMdx({}), /compileQuery/);
+  });
+
+  it('resolves the comment spelling through the same evaluator', () => {
+    // `{$.path}` renders as literal gibberish anywhere the transform has
+    // not run, so it can only be used in documents nobody reads raw. The
+    // comment spelling is invisible to every other renderer, which is
+    // what makes it usable in a committed file — same expression, same
+    // compiler, same cache.
+    const doc = mdx.transform(
+      parseMarkdown('Total <!--mdx:$.n-->0<!--/mdx--> and {$.n} again.\n'), { n: 42 });
+    assert.equal(toHtml(doc, { html: 'skip' }), '<p>Total 42 and 42 again.</p>');
+  });
+
+  it('keeps an interpolated value TEXT in both spellings', () => {
+    // The safety property mdx rests on: a value may come from anywhere,
+    // and it is never re-read as markdown or as markup.
+    const data = { v: '**bold** <script>alert(1)</script> [x](javascript:1)' };
+    for (const src of ['A <!--mdx:$.v-->fallback<!--/mdx--> B\n', 'A {$.v} B\n']) {
+      const out = mdx.transform(parseMarkdown(src), data);
+      const html = toHtml(out, { html: 'skip' });
+      assert.match(html, /&lt;script&gt;/, src);
+      assert.equal(html.includes('<strong>'), false, src);
+      assert.equal(html.includes('<script>'), false, src);
+      assert.equal(html.includes('javascript:'), true, 'the text is shown, not linked');
+      assert.equal(html.includes('href'), false, src);
+    }
+  });
+
+  it('keeps the markers, so the value can be re-derived', () => {
+    const once = mdx.transform(parseMarkdown('n = <!--mdx:$.n-->0<!--/mdx-->\n'), { n: 1 });
+    const twice = mdx.transform(once, { n: 2 });
+    assert.equal(toHtml(twice, { html: 'skip' }), '<p>n = 2</p>');
+  });
+
+  it('renders a bad comment expression as its diagnosis, like the brace form', () => {
+    const out = mdx.transform(parseMarkdown('x <!--mdx:$.[[[-->0<!--/mdx--> y\n'), {});
+    assert.match(toHtml(out, { html: 'skip' }), /⟨mdx: /);
   });
 
   it('interpolates {$…} expressions in text, leaving plain braces alone', () => {

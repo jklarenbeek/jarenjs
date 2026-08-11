@@ -31,6 +31,7 @@
  */
 
 import { frontmatterExternals } from './compiler.js';
+import { replaceDirectives } from './directives.js';
 
 const OPEN_IF = /^\{#if\s+(.+)\}$/;
 const OPEN_EACH = /^\{#each\s+(.+)\s+as\s+([A-Za-z_]\w*)\}$/;
@@ -197,7 +198,17 @@ export function createMdx(options) {
      */
     transform(doc, data) {
       const externals = frontmatterExternals(doc?.frontmatter ?? null);
-      return { ...doc, ast: transformBlocks(doc?.ast ?? [], data, externals) };
+      // The comment spelling first: it resolves to TEXT nodes, which the
+      // brace pass then leaves alone (an interpolated value is never
+      // re-read as a template, in either spelling — that is the whole
+      // safety property). One evaluator serves both; only the carrier
+      // differs.
+      const resolved = replaceDirectives(doc?.ast ?? [], { ns: 'mdx' }, (directive) => {
+        const out = evaluate(directive.key, data, externals);
+        const value = out.error !== undefined ? `⟨mdx: ${out.error}⟩` : stringify(out.value);
+        return [{ type: 'text', value }];
+      });
+      return { ...doc, ast: transformBlocks(resolved, data, externals) };
     },
   };
 }

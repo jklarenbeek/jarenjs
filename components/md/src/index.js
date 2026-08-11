@@ -45,6 +45,15 @@ export {
   createMdRenderer,
 } from './to-vnode.js';
 
+export {
+  scanDirectives,
+  replaceDirectives,
+  scanSourceDirectives,
+  parseMarker,
+} from './directives.js';
+
+export { bake } from './bake.js';
+
 export { definePlugin } from './plugins/index.js';
 
 export { parseHtmlFragment, parseHtmlTag } from './html.js';

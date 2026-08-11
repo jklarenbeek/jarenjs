@@ -330,9 +330,63 @@ const doc = mdx.transform(parseMarkdown(source), data);
   keeps its core+view-only dependency contract. A bad expression renders
   its diagnosis in place — the pass never throws.
 
+- `<!--mdx:$.path-->fallback<!--/mdx-->` is the **same expression through
+  the same evaluator**, carried in a comment. Use it in a document that
+  is also read raw; use `{$.path}` in one that is always rendered
+  dynamically, where it is the terser read. See Directives below.
+
 Try it live: the `MDX` engine on
 [Play](https://jklarenbeek.github.io/jarenjs/#/play) runs this pass over
 an editable data pane.
+
+### Directives — a number a machine derives and a human reads
+
+```markdown
+Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
+```
+
+Every markdown renderer on earth drops HTML comments, so GitHub, an
+editor preview and npm all show **Jaren is 23.1x faster on the CTS
+mean** — plain, correct, static text with no runtime. A directive-aware
+consumer reads the marker instead and can re-derive the value:
+
+```js
+import { scanDirectives, replaceDirectives } from '@jarenjs/md/directives';
+import { bake } from '@jarenjs/md';
+
+scanDirectives(doc, { ns: 'bm' });        // → { directives, diagnostics }
+replaceDirectives(doc, { ns: 'bm' }, …);  // → a new doc, untouched subtrees ===
+bake(source, { ns: 'bm', resolve });      // → { text, changed, diagnostics }
+```
+
+`bake` writes the fresh value **into the source**, which is what makes a
+re-derivation a reviewable diff instead of a number that quietly stopped
+being true. It splices only the spans between markers — a document with
+no directives comes back byte-identical — because `toMarkdown` is a
+canonicalizing printer and re-printing a hand-written README would reflow
+every list for no reason. This repository's own figures work exactly this
+way (`npm run docs:benchmarks`, `npm run docs:check`).
+
+The layer never interprets the payload: `bm` puts a derivation key there,
+`mdx` puts a query expression, and the vocabulary belongs to the
+consumer. Unpaired markers, stray closers and same-namespace nesting come
+back as **diagnostics** rather than being dropped — a marker nobody
+matched is how a stale figure hides.
+
+**One rule for authors: an inline marker must not begin a line.** A
+comment at the start of a line opens a CommonMark HTML block, which eats
+the rest of that line — the marker, its value and the prose after it.
+That is CommonMark, not this package, and it bites on GitHub too. `bake`
+reports it by name. (Six markers in this repository were written that way
+and three sentences were disappearing from the rendered README; the gate
+found them.)
+
+`bake` is a build-time tool for input you control, and that is the one
+place its trust level differs from mdx's: a baked body is spliced into
+the source and **will** be re-parsed as markdown — a fact that is a whole
+table is the point — whereas an mdx interpolation lands in a text node
+and is never re-read. Normative in
+[MD-FORMAT.md](docs/MD-FORMAT.md) §4.8.
 
 ### Untrusted Markdown
 
@@ -377,9 +431,7 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
   depending on how paragraph-dense the document is — measured as an A/B
   on this corpus, because the same change looked like noise on a
   differently shaped one.)
-- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes
-  <!--bm:md.vsPeers-->0.7–1.0<!--/bm-->x the time `marked` and `markdown-it` take, and is
-  <!--bm:md.vsMicromark-->13.6–19.5<!--/bm-->x faster than `micromark`, on the same GFM documents.
+- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--bm:md.vsPeers-->0.7–1.0<!--/bm-->x the time `marked` and `markdown-it` take, and is <!--bm:md.vsMicromark-->13.6–19.5<!--/bm-->x faster than `micromark`, on the same GFM documents.
   Through the **vnode** path the same documents cost roughly twice that
   — keys, memoization and a tree the patcher can reconcile are not free,
   and the benchmark publishes that row beside this one rather than
@@ -409,8 +461,7 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
   the one-shot HTML render — is what this package is optimized for.
 - **CommonMark scorecard**, both paths, because the difference between
   them *is* the safety boundary:
-  - `toHtml` (`html: 'raw'`, the like-for-like row):
-    <!--bm:md.scorecard-->655 of 655 (100.0%)<!--/bm--> — for scale, <!--bm:md.scorecardPeers-->marked 620, markdown-it 655, micromark 650<!--/bm-->.
+  - `toHtml` (`html: 'raw'`, the like-for-like row): <!--bm:md.scorecard-->655 of 655 (100.0%)<!--/bm-->; for scale, <!--bm:md.scorecardPeers-->marked 620, markdown-it 655, micromark 650<!--/bm-->.
     **No dialect gap remains on this path**: every example the spec
     contains passes, and the round-trip suite additionally asserts that
     all 655 survive `parseMarkdown → toMarkdown → parseMarkdown` with an
@@ -427,8 +478,7 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
 - **GFM extension scorecard**, the five extension sections of the GFM
   specification with every engine's extensions switched on — because the
   CommonMark corpus says nothing about any of them, and the part of the
-  dialect every engine advertises was the only part nobody measured:
-  <!--bm:md.gfmScorecard-->22 of 24 (91.7%)<!--/bm--> through `toHtml`, <!--bm:md.gfmScorecardVnode-->22 of 24 (91.7%)<!--/bm--> through the vnode
+  dialect every engine advertises was the only part nobody measured: <!--bm:md.gfmScorecard-->22 of 24 (91.7%)<!--/bm--> through `toHtml`, and <!--bm:md.gfmScorecardVnode-->22 of 24 (91.7%)<!--/bm--> through the vnode
   path; for scale, <!--bm:md.gfmPeers-->marked 22, markdown-it 14, micromark 23<!--/bm-->.
   Autolink literals are <!--bm:md.gfmAutolinks-->11 of 11<!--/bm-->, ahead of every rival here. The two
   this package does not pass are **stated boundaries, not to-do items**:

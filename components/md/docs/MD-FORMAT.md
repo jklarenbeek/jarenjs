@@ -402,6 +402,55 @@ autolink is never found inside a code span, raw HTML or link text, and
 the entity rule above is meaningful: by then `&copy;` has become `©`, and
 the only `&…;` left to exclude is one that was never an entity.
 
+### 4.8 Directives (normative)
+
+A **directive** is a value in a document that a machine derives and a
+human reads:
+
+```markdown
+Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
+```
+
+The carrier is an HTML comment, and the choice is the whole design:
+every markdown renderer drops comments, so a directive is invisible on
+GitHub, in an editor preview and on npm, while the baked text between the
+markers stays readable, correct and static.
+
+- A directive is `<!--<ns>:<payload>-->` … `<!--/<ns>-->`. `ns` matches
+  `[a-z][a-z0-9-]*`.
+- **The payload is opaque.** This format assigns it no meaning: `bm` puts
+  a derivation key there, `mdx` puts a query expression. A consumer owns
+  its own vocabulary, and a producer MUST NOT interpret another
+  namespace's payload.
+- **Block scope** is an opener and closer that are their own `html` block
+  nodes, with block nodes between them. **Inline scope** is all three
+  inside one inline container. Markers pair **within one children array**:
+  an opener inside `**bold**` and a closer outside it are two unpaired
+  markers, not one directive.
+- **Unpaired markers MUST be reported, not dropped.** An opener with no
+  closer, a stray closer, and same-`ns` nesting are each diagnostics. A
+  marker nobody matched is how a stale figure hides.
+- A consumer MUST NOT require directive support to read the document:
+  with the markers ignored, the text between them is the document's
+  content, and that is what every renderer shows.
+
+**An inline marker MUST NOT begin a line.** A comment at the start of a
+line opens a CommonMark HTML block (§HTML blocks, type 2), which consumes
+the rest of that line — so the marker, its value *and the prose after it*
+leave the document. This is a property of CommonMark, not of this
+format, and it applies to every renderer including GitHub's. Put text
+before the marker, or give the directive a block of its own.
+
+Writing a directive's current value into the source is **baking**. It is
+a build-time operation on trusted input, and it differs from mdx
+interpolation on exactly one axis that matters: a baked body is spliced
+into the source and WILL be re-parsed as markdown (a whole table is a
+legitimate body), whereas an interpolated value lands in a `text` node
+and is never re-read. A baker MUST rewrite only the spans between
+markers — a document with no directives MUST come back byte-identical —
+because canonical re-printing (§5) would reformat every hand-written
+document it touched.
+
 ## 5. Canonical Markdown and round-trips
 
 `toMarkdown(doc)` prints **canonical Markdown**: ATX headings, `-`
