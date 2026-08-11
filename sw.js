@@ -3,7 +3,7 @@
    - hashed assets (/assets/): cache-first (immutable by construction)
    - benchmark data: stale-while-revalidate */
 
-const CACHE = 'jaren-website-v13';
+const CACHE = 'jaren-website-v14';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 
 self.addEventListener('install', (event) => {
