@@ -354,6 +354,28 @@ title: The weekly digest
       { headline: 'Markdown meets data', summary: 'The same document, rendered per reader.' },
     ] }) } }] },
 
+  { id: 'mdx-comment', label: 'The comment spelling', engine: 'mdx',
+    source: { source: `# Release <!--mdx:$.version-->0.0.0<!--/mdx-->
+
+\`{$.path}\` is terser, and it is the right read in a document that is
+always rendered against data. But it shows as literal gibberish anywhere
+the transform has not run — so a document that is ALSO read raw uses the
+comment spelling instead:
+
+- shipped <!--mdx:$.date-->a while ago<!--/mdx-->
+- <!--mdx:$.packages-->some<!--/mdx--> packages, one version
+
+Same expression, same compiler, same cache. The markers survive the pass,
+so the value can be re-derived; every other renderer drops them and shows
+the baked text. An interpolated value lands in a TEXT node either way —
+it is never re-read as markdown, which is what makes the pass safe over
+data you did not write: <!--mdx:$.note-->none<!--/mdx-->
+` },
+    datasets: [{ label: 'release', data: { data: j({
+      version: '0.31.3', date: '2026-08-11', packages: 21,
+      note: '**not bold**, <script>not script</script>',
+    }) } }] },
+
   // ——— Markdown (visual: rendered by a host renderer, source-only) ———
   { id: 'md-tour', label: 'GFM tour', engine: 'markdown', datasets: [],
     source: { source: `---
@@ -391,6 +413,46 @@ weight = 3
 The same document works with \`---\` YAML, \`---json\`, a leading
 \`{\` JSON object, or \`+++\` TOML — all normalize to plain JSON on
 \`doc.frontmatter\`, and bind as JSLT externals.
+` } },
+  { id: 'md-anchors', label: 'Anchors, footnotes and bare links', engine: 'markdown', datasets: [],
+    source: { source: `# Everything linkable
+
+Every heading gets a GitHub-compatible \`id\`, so [jump to the notes](#the-notes)
+lands where you expect — the same slug GitHub mints, so one committed README
+anchors identically here, on GitHub and in an editor preview.
+
+Bare addresses become links without \`<>\`: visit www.commonmark.org/help,
+read https://spec.commonmark.org/ or mail spec@commonmark.test. Trailing
+punctuation stays out of the link — see www.commonmark.org/a.b. — and a
+citation[^why] carries its own return path.
+
+## The notes
+
+Footnotes are collected out of the flow and rendered once, at the end, in
+first-reference order. An uncited definition renders nothing at all.
+
+[^why]: Cite it twice[^why] and it grows a second back-reference.
+` } },
+  { id: 'md-directives', label: 'Directives: a number a machine derives', engine: 'markdown', datasets: [],
+    source: { source: `# Comment-carried data
+
+Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
+
+Every markdown renderer on earth drops HTML comments, so that line reads as
+plain, correct, static text — here, on GitHub and on npm. A directive-aware
+consumer reads the marker instead and re-derives the value; \`bake()\` writes
+the fresh one back into the source, so a re-derivation is a reviewable diff
+rather than a number that quietly stopped being true.
+
+This repository's own published figures work exactly this way.
+
+<!--bm:example-->
+A block directive wraps whole blocks — a table, a list, anything the
+resolver produces.
+<!--/bm-->
+
+One rule: an inline marker must not begin a line. A comment at the start of
+a line opens an HTML block and swallows the rest of that line.
 ` } },
   { id: 'md-roundtrip', label: 'Round trip is a fixed point', engine: 'markdown', datasets: [],
     source: { source: `# Canonical form

@@ -94,6 +94,11 @@ function rewriteAnchor(props, base) {
       },
     };
   }
+  // Fragment-only mode (no base): every other rewrite here resolves a
+  // repo-relative href, and a surface with no repository behind it has
+  // nothing to resolve against.
+  if (base === null)
+    return null;
   if (href.startsWith('//'))
     return null;
   if (href.startsWith(SITE)) {
@@ -154,7 +159,7 @@ function rewriteAnchor(props, base) {
 /** A relative image source, resolved against the raw base, or null. */
 function rewriteImage(props, base) {
   const src = props.src;
-  if (typeof src !== 'string' || src === '' || src.startsWith('#')
+  if (base === null || typeof src !== 'string' || src === '' || src.startsWith('#')
     || src.startsWith('//') || SCHEME.test(src))
     return null;
   try {
@@ -228,5 +233,39 @@ export function rewriteReadmeLinks(article, base) {
   rewriteCache.set(article, { base, article: rewritten });
   return rewritten;
 }
+
+/**
+ * An article rendered for any surface OTHER than the README dialog,
+ * with its in-page fragments made navigable.
+ *
+ * A `#fragment` href is inert markup as far as the emitter is concerned,
+ * and on a hash-routed site an inert one is worse than useless: clicking
+ * it sets `location.hash`, the router reads that as a PAGE name, and the
+ * reader is thrown out of the document. The dialog has handled this
+ * since heading anchors shipped; every other surface did not, which was
+ * a trap waiting for the first document with a table of contents.
+ *
+ * Footnotes made it a live one: a citation is a link to `#…fn-1` and its
+ * back-reference is a link to `#…fnref-1`, so any markdown with a
+ * footnote rendered on the play, studio or assistant surfaces carried
+ * two fragments that would navigate away from the page. This is the same
+ * rewrite the dialog does, minus the repo-relative resolution those
+ * surfaces have no base for.
+ *
+ * @param {any} article - `md.view(source)` output
+ * @returns {any}
+ */
+export function mdArticle(article) {
+  if (article === null) return article;
+  const cached = fragmentCache.get(article);
+  if (cached !== undefined) return cached;
+  const rewritten = rewriteNode(article, null);
+  fragmentCache.set(article, rewritten);
+  return rewritten;
+}
+
+/** @type {WeakMap<object, any>} the same per-article memo, for the
+ * fragment-only rewrite: reference-stable in, reference-stable out */
+const fragmentCache = new WeakMap();
 
 //#endregion

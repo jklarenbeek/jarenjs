@@ -688,6 +688,21 @@ function markdown(data) {
       })),
       'Two Jaren rows, because the difference between them is the safety boundary: the string emitter (toHtml) can pass raw HTML through, while the vnode path renders Markdown to JSON vnodes that structurally cannot hold unescaped markup — so its lower score is the price of being safe on documents it did not write, not a dialect gap.'));
   }
+  if (data.gfm !== undefined && data.gfm !== null) {
+    const sections = Object.keys(data.gfm.totals ?? {});
+    out.push(table(
+      `GFM extension scorecard (${data.gfm.examples} examples, every engine's extensions on)`,
+      ['Engine', 'Passing', ...sections.map((name) => name.replace(' (extension)', ''))],
+      engines.map((engine) => {
+        const row = data.gfm.scorecard[engine];
+        return {
+          cells: [engine, `${row?.pass} / ${row?.total}`,
+            ...sections.map((name) => `${row?.sections?.[name] ?? 0} / ${data.gfm.totals[name]}`)],
+          strong: engine === 'jaren-md',
+        };
+      }),
+      'The CommonMark corpus says nothing about tables, task lists, strikethrough, autolink literals or disallowed raw HTML, so without this the part of the dialect every engine advertises would be the only part nobody measured. Jaren does not pass two of them on purpose: table alignment is written as a style rather than the deprecated align attribute, and the disallowed-raw-HTML extension is not implemented because the modes a host points at untrusted Markdown already neutralize those tags and every other one. Both are stated in the package README.'));
+  }
   const profile = data.profile;
   if (profile !== undefined && profile !== null) {
     if (renderChart !== undefined) out.push(renderChart);
@@ -698,6 +713,18 @@ function markdown(data) {
         cells: [p.name, ...engines.map((e) => formatMs(p.results[e]))],
       })),
       'marked and markdown-it are the mainstream one-shot parsers. The jaren-md row is toHtml — source to HTML string, the same unit; the vnode row does the same work and then builds a keyed, patchable tree, which is what the extra time buys.'));
+    const phased = (profile.jaren ?? []).filter((row) => row.phases !== undefined);
+    if (phased.length > 0) {
+      out.push(table(
+        'Where the time goes (ms/op, differenced from whole-pipeline runs)',
+        ['Document', 'parse', 'AST→vnode', '· without keys', 'vnode→HTML', 'AST→HTML'],
+        phased.map((row) => ({
+          cells: [row.name, formatMs(row.phases.parse), formatMs(row.phases.project),
+            formatMs(row.phases.projectUnkeyed), formatMs(row.phases.serialize),
+            formatMs(row.phases.toHtml)],
+        })),
+        'The projection, not the parse, is the expensive half — and most of the projection is computing the content-hash keys that let the patcher reorder blocks instead of rebuilding them. A caller that renders once and throws the tree away passes keyed: false and skips it; the default keeps them, because a renderer cannot know whether its output will be patched. The last column is the direct string emitter, which never computes one.'));
+    }
     if (Array.isArray(profile.jaren)) {
       out.push(table(
         'Jaren-only: the compiled pipeline',

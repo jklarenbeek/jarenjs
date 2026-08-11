@@ -31,6 +31,20 @@ delete it or fix it.
   - [ ] compileAsync for asynchronous schema loading
   - [ ] JSON.parse reviver / JSON.stringify replacer integration
 
+## @jarenjs/core
+
+- [ ] **`fnv1a` loses its low bits, and fixing it would be faster** — the
+  suite's one hash step multiplies with `(hash * 0x01000193) >>> 0`, and that
+  product exceeds 2^53 for any hash above 2^29, so the float mantissa drops
+  bits the 32-bit result was supposed to keep. It is deterministic and
+  distributes well enough that nothing has ever misbehaved, but it is **not**
+  FNV-1a, and `Math.imul` is both correct and **2.1x faster** (0.38 ms to
+  0.18 ms per 100 kB, measured). The blast radius is why it is still here:
+  every hash in the suite changes — vnode block keys, `meta.hash`, the loader's
+  cache keys, the mermaid SVG cache, `data-md-hash` attributes and every pinned
+  hash in the tests. It needs its own pass, with a sweep of everything that
+  persists one.
+
 ## @jarenjs/json — JSONPath & addressing
 
 *The current focus.* JSON Pointer (RFC 6901), the JSONPath engine
@@ -224,35 +238,16 @@ delete it or fix it.
 - [ ] **One component, one rendering policy** — `createMdComponent` fixes its
   options at construction and `view(source)` takes none, so a host that renders
   documents of *different provenance* through one component must pick a single
-  policy for all of them. The website is the live case: the same instance
-  renders repo-authored READMEs (trusted, so heading ids are minted without a
-  `slugPrefix`) and assistant replies and user text (not trusted, and now
-  minting unprefixed ids into a page that owns ids of its own). Splitting them
-  into two components is not the answer — hydration runs off one instance's
-  hydratable index, so a second component silently stops hydrating what the
-  first indexed. Per-call options on `view()` (memoized per source *and*
-  policy) is the shape that fits, and it is the same seam a `slugPrefix` for
-  untrusted markdown would use.
-- [ ] **In-page links only navigate where a host wires them** — a `#fragment`
-  href is inert markup as far as the emitter is concerned; making it *scroll*
-  needs an event binding, which is app-layer. The website wires it for the
-  README dialog only (`rewriteAnchor`), so markdown rendered in the play,
-  studio and assistant surfaces still carries raw fragments that a hash router
-  reads as a page name. Either the md component grows an opt-in "fragments
-  navigate" projection, or the website hoists its rewrite out of the dialog
-  path — the current split is a trap for the next surface that renders a
-  document with a table of contents.
-- [ ] **`fnv1a` loses its low bits, and fixing it would be faster** — the
-  suite's one hash step multiplies with `(hash * 0x01000193) >>> 0`, and that
-  product exceeds 2^53 for any hash above 2^29, so the float mantissa drops
-  bits the 32-bit result was supposed to keep. It is deterministic and
-  distributes well enough that nothing has ever misbehaved, but it is **not**
-  FNV-1a, and `Math.imul` is both correct and **2.1x faster** (0.38 ms to
-  0.18 ms per 100 kB, measured). The blast radius is why it is still here:
-  every hash in the suite changes — vnode block keys, `meta.hash`, the loader's
-  cache keys, the mermaid SVG cache, `data-md-hash` attributes and every pinned
-  hash in the tests. It needs its own pass, with a sweep of everything that
-  persists one.
+  policy for all of them. The website is the live case: one instance renders
+  repo-authored READMEs (trusted, so heading ids are minted without a
+  `slugPrefix`) and assistant replies and user text (not trusted, and minting
+  unprefixed ids into a page that owns ids of its own). Splitting them into two
+  components is not the answer — hydration runs off one instance's hydratable
+  index, so a second component silently stops hydrating what the first indexed.
+  Per-call options on `view()`, memoized per source *and* policy, is the shape
+  that fits. Footnote ids are unaffected: they default to `user-content-`
+  precisely because they are emitted by default (MD-FORMAT §4.6), so this is now
+  a heading-id question only.
 - [ ] **`meta.hash` costs ~11% of a parse and cannot simply go lazy** — hashing
   the source is a full pass over it, paid by every caller including the ones
   that never read the hash. A getter would fix that and would also make an

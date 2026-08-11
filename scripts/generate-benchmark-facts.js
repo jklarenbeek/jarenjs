@@ -187,6 +187,23 @@ const FACTS = {
       ['marked', 'markdown-it'].map((peer) => row.results['jaren-md'] / row.results[peer]));
     return band(ratios, ratio);
   },
+  // The honesty rule in one derivation: a band like `0.6–1.1x` contains a
+  // LOSS at its top end and reads like a win. This names every row where
+  // a rival is ahead — or says there are none — so the sentence cannot
+  // quietly stop being true when a number moves.
+  'md.vsPeersDetail': () => {
+    const rows = data('markdown').profile.render;
+    const losses = [];
+    for (const row of rows) {
+      for (const peer of ['marked', 'markdown-it']) {
+        const r = row.results['jaren-md'] / row.results[peer];
+        if (r > 1) losses.push(`\`${peer}\` is ahead at ${row.name} (${ratio(r)}x)`);
+      }
+    }
+    return losses.length === 0
+      ? 'faster than both at every size measured'
+      : `faster than both at every size measured except one — ${losses.join('; ')}`;
+  },
   'md.vsMicromark': () => {
     const ratios = data('markdown').profile.render.map((row) => row.results.micromark / row.results['jaren-md']);
     return band(ratios, ratio);

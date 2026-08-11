@@ -11,7 +11,7 @@ import { toMarkdown } from '@jarenjs/md';
 import { createMdx } from '@jarenjs/md/mdx';
 import { compileJsonQuery } from '@jarenjs/json';
 import { operatorRegistry } from './engines.js';
-import { md } from './markdown.js';
+import { md, mdArticle } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { chartRenderer } from './charts.js';
 import { runValidation, localizeErrors } from './validator.js';
@@ -52,7 +52,7 @@ const renderers = {
   markdown: (source) => {
     const compiled = timed(() => md.compile(source).doc);
     const doc = compiled.value;
-    const rendered = timed(() => md.view(source));
+    const rendered = timed(() => mdArticle(md.view(source)));
     return {
       compileMs: compiled.ms,
       runMs: rendered.ms,
@@ -72,7 +72,7 @@ const renderers = {
   mdx: (source, dataValue) => {
     const compiled = timed(() => mdx.transform(md.compile(source).doc, dataValue));
     const doc = compiled.value;
-    const rendered = timed(() => md.view(doc));
+    const rendered = timed(() => mdArticle(md.view(doc)));
     return {
       compileMs: compiled.ms,
       runMs: rendered.ms,

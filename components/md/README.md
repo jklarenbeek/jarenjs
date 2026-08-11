@@ -345,10 +345,11 @@ an editable data pane.
 Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
 ```
 
-Every markdown renderer on earth drops HTML comments, so GitHub, an
-editor preview and npm all show **Jaren is 23.1x faster on the CTS
-mean** — plain, correct, static text with no runtime. A directive-aware
-consumer reads the marker instead and can re-derive the value:
+Every markdown renderer on earth drops HTML comments, so GitHub, an editor
+preview and npm all show that line as one plain sentence with the figure in
+it and no markers — static text, no runtime, correct today. A
+directive-aware consumer reads the marker instead and can re-derive the
+value:
 
 ```js
 import { scanDirectives, replaceDirectives } from '@jarenjs/md/directives';
@@ -424,22 +425,22 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->2026-08-11, Node v24.19.0<!--/bm-->
 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: <!--bm:md.parseTimes-->~0.098 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
+- **Parse to AST**: <!--bm:md.parseTimes-->~0.099 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
   inline phase at ~36% of that and the source hash for `meta.hash` at
   ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
   `/\s+$/` regex at paragraph close with a scan was worth 4–17%
   depending on how paragraph-dense the document is — measured as an A/B
   on this corpus, because the same change looked like noise on a
   differently shaped one.)
-- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--bm:md.vsPeers-->0.7–1.0<!--/bm-->x the time `marked` and `markdown-it` take, and is <!--bm:md.vsMicromark-->13.6–19.5<!--/bm-->x faster than `micromark`, on the same GFM documents.
+- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--bm:md.vsPeers-->0.6–1.1<!--/bm-->x the time `marked` and `markdown-it` take — <!--bm:md.vsPeersDetail-->faster than both at every size measured except one — `markdown-it` is ahead at ~10 kB (1.1x)<!--/bm--> — and is <!--bm:md.vsMicromark-->12.9–21.4<!--/bm-->x faster than `micromark`, on the same GFM documents.
   Through the **vnode** path the same documents cost roughly twice that
   — keys, memoization and a tree the patcher can reconcile are not free,
   and the benchmark publishes that row beside this one rather than
   quoting only the flattering half.
 - **Where the time goes** (~100 kB, the phase split the benchmark now
-  prints and publishes): <!--bm:md.phaseSplit-->parse 33%, AST→vnode 41%, vnode→HTML 26%<!--/bm-->. The projection, not
-  the parse, is the expensive half — and <!--bm:md.keyCost-->47%<!--/bm--> of the projection is
-  computing the content-hash **keys** (<!--bm:md.unkeyedMs-->3.2 ms against 6 ms<!--/bm--> without them).
+  prints and publishes): <!--bm:md.phaseSplit-->parse 35%, AST→vnode 50%, vnode→HTML 16%<!--/bm-->. The projection, not
+  the parse, is the expensive half — and <!--bm:md.keyCost-->53%<!--/bm--> of the projection is
+  computing the content-hash **keys** (<!--bm:md.unkeyedMs-->3.3 ms against 6.9 ms<!--/bm--> without them).
   Keys are what let the patcher reorder blocks instead of rebuilding
   them, so they are worth it for a tree that will be patched — and worth
   nothing to a caller that renders once and throws the tree away. That
@@ -453,7 +454,7 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
   output will be patched, and guessing wrong turns O(1) reconciliation
   into a rebuild with no error to show for it.
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
-  the cached projection in <!--bm:md.cachedNs-->38–82<!--/bm--> ns — and because block vnodes carry
+  the cached projection in <!--bm:md.cachedNs-->39–82<!--/bm--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
   vnodes, the view patcher skips unchanged blocks in O(1). A JSLT
   identity transform returns the document by reference; a partial

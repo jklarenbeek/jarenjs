@@ -12,7 +12,7 @@ import { formViewFor } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
 import { PACKAGES } from '../content/packages.js';
-import { md, rewriteReadmeLinks } from '../boundaries/markdown.js';
+import { md, mdArticle, rewriteReadmeLinks } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
@@ -161,7 +161,7 @@ const assistantView = memo1((ai) => {
     empty: ai.messages.length === 0,
     messages: ai.messages.map((m) => (m.role === 'user'
       ? { role: 'user', text: m.content }
-      : { role: 'assistant', article: md.view(m.content) })),
+      : { role: 'assistant', article: mdArticle(md.view(m.content)) })),
     // the reply currently streaming in (plain text: it changes per token)
     streaming: ai.status === 'streaming',
     pending: ai.pending,
