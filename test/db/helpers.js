@@ -78,16 +78,18 @@ export function tempDbPath() {
   return {
     dbPath: path.join(dir, 'store.db'),
     // Windows keeps a deleted file's directory entry until the LAST
-    // handle to it closes, and SQLite's handles are released by the OS a
-    // moment after `close()` returns. A bare `rmSync` therefore races the
-    // kernel and throws EPERM — which, thrown from a `finally`, replaced
-    // a passing test with a failure AND left the file's process hanging
-    // (a 28-minute job, killed by the CI timeout, on a suite where every
-    // assertion had already passed).
+    // handle to it closes, so a bare `rmSync` races the kernel and throws
+    // EPERM. `maxRetries` is node's own answer — it retries EPERM/EBUSY
+    // with a backoff — and POSIX, which unlinks an open file immediately,
+    // never reaches it.
     //
-    // `maxRetries` is node's own answer to exactly this: it retries EPERM
-    // and EBUSY with a backoff. POSIX unlinks an open file immediately
-    // and never reaches the retry.
+    // This hardens the RACE. It does not cure a handle that is genuinely
+    // still open: `jobs-concurrency.test.js` still fails here on Windows
+    // because `worker.stop()` keeps its claim loops running when they do
+    // not drain inside the grace period, and those loops hold the
+    // database — which is also why that file's process outlives its
+    // assertions. That is a @jarenjs/db shutdown defect, not a cleanup
+    // one, and it needs fixing there rather than papering over here.
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   };
 }

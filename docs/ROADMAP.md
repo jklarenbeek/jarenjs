@@ -435,6 +435,17 @@ textarea, which is what the first two entries are about.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
+- [ ] **A job worker that does not drain keeps running** — `worker.stop()`
+  races the claim loops against `stopGraceMs` and reports `drained: false`
+  honestly, but when the race is lost it leaves those loops running: they keep
+  claiming against a store the caller is about to close, they hold the database
+  file, and they keep the process alive. On Linux the loops drain inside the
+  grace period and nothing shows. On **Windows CI they do not**, and
+  `test/db/jobs-concurrency.test.js` fails its temp-directory cleanup with
+  EPERM and then outlives its own assertions by the full 30-minute job
+  timeout — the Windows gate's only red. `stop()` should cancel the loops it
+  could not drain, not just stop counting them.
+
 The fluent front door and the SQLite document store shipped as a pair;
 what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
