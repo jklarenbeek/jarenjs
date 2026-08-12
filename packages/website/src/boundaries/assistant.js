@@ -19,7 +19,7 @@
 
 import {
   createChatClient, createAgent, createToolbox, registerModelContext, PROVIDERS,
-  probeProvider, composeChecks, checkOutcome,
+  probeProvider, composeChecks, checkOutcome, createRefiner,
 } from '@jarenjs/ai';
 
 import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
@@ -817,16 +817,74 @@ const HISTORY_WINDOW = 20;
 const SAVED_WINDOW = 100;
 
 /**
+ * How many memories the agent carries into a turn. Small on purpose:
+ * they are paid for out of the same history budget the conversation is,
+ * and a retrieval that crowded out the conversation would be a worse
+ * assistant with a better memory.
+ */
+const MEMORY_WINDOW = 5;
+
+/**
+ * The ledger as the panel shows it: the active objective (a superseded
+ * or abandoned one is not "what we are doing" and is not shown), what
+ * has been recorded against it, and how many dropped rounds are sitting
+ * in slots waiting for a `recall`. One read, so the panel can never
+ * disagree with itself about which turn it is describing.
+ * @param {any} ledger
+ */
+async function readLedger(ledger) {
+  const goal = await ledger.getGoal();
+  const slots = await ledger.listSlots();
+  return {
+    goal: goal !== null && goal.status === 'active'
+      ? { objective: goal.objective, progress: goal.progress }
+      : null,
+    memories: (await ledger.listMemories()).length,
+    archived: slots.filter((slot) => slot.kind === 'agent-round').length,
+  };
+}
+
+/**
  * The assistant's impure effects: the streaming agent turn, the
- * settings persistence and the transcript persistence. Injected
- * `aiFetch` keeps the whole thing testable against a scripted
- * transport.
+ * settings persistence, the transcript persistence and the ledger. The
+ * injected `aiFetch` keeps the whole thing testable against a scripted
+ * transport, and the injected `ledger` keeps it testable without a
+ * store.
  * @param {{ toolbox: any, getApp: () => any,
  *   aiFetch?: typeof fetch,
  *   aiStorage: { read: () => any, write: (data: any) => void },
- *   aiChat: { read: () => any, write: (data: any) => void } }} deps
+ *   aiChat: { read: () => any, write: (data: any) => void },
+ *   ledger: any }} deps
  */
 export function createAssistantEffects(deps) {
+  /**
+   * The last completed turn, kept here rather than in the state: it is
+   * the trajectory a refinement reads, it is large, and nothing renders
+   * it. State holds what the panel draws; this holds what the next
+   * action needs.
+   * @type {{ messages: any[], steps: any[] } | null}
+   */
+  let lastRun = null;
+
+  /** The client the current settings describe, or a dispatched failure. */
+  const clientFor = (state, dispatch) => {
+    const s = state.ai.settings;
+    try {
+      return createChatClient({
+        provider: s.provider,
+        baseUrl: s.baseUrl,
+        apiKey: s.apiKey,
+        model: s.model,
+        fetch: deps.aiFetch,
+        headers: { 'HTTP-Referer': 'https://jklarenbeek.github.io/jarenjs/', 'X-Title': 'Jaren play' },
+      });
+    }
+    catch (err) {
+      dispatch('ai/failed', /** @type {Error} */ (err).message);
+      return null;
+    }
+  };
+
   return {
     'ai-send': (props, dispatch) => {
       const app = deps.getApp();
@@ -839,23 +897,8 @@ export function createAssistantEffects(deps) {
       }
       dispatch('ai/user', draft);
 
-      const s = state.ai.settings;
-      /** @type {any} */
-      let client;
-      try {
-        client = createChatClient({
-          provider: s.provider,
-          baseUrl: s.baseUrl,
-          apiKey: s.apiKey,
-          model: s.model,
-          fetch: deps.aiFetch,
-          headers: { 'HTTP-Referer': 'https://jklarenbeek.github.io/jarenjs/', 'X-Title': 'Jaren play' },
-        });
-      }
-      catch (err) {
-        dispatch('ai/failed', /** @type {Error} */ (err).message);
-        return;
-      }
+      const client = clientFor(state, dispatch);
+      if (client === null) return;
 
       // weak local models are first-class: enough rounds to read an
       // engine's { error } result, fetch an example and try again —
@@ -864,9 +907,16 @@ export function createAssistantEffects(deps) {
       // history budget keeps those long sessions inside a small local
       // context window (~6k tokens), which is what makes the higher
       // cap affordable.
+      //
+      // With the ledger under it, that budget stops destroying: every
+      // round it drops is archived to a slot first and the model can
+      // `recall` it back. The same ledger puts the objective and what
+      // has been learned into the prompt of every turn.
       const agent = createAgent({
         client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 16,
         historyBudget: 24_000,
+        ledger: deps.ledger,
+        retrieval: { memories: { limit: MEMORY_WINDOW } },
       });
       // build the turn from this effect's own snapshot: the ai/user
       // dispatch above is queued FIFO behind the running transaction,
@@ -883,13 +933,104 @@ export function createAssistantEffects(deps) {
       }).then(
         // an empty final message is a model quirk worth an honest line —
         // and a reasoning-only turn deserves to say what happened
-        (result) => dispatch('ai/reply', result.message.content !== ''
-          ? result.message.content
-          : result.message.reasoning !== undefined
-            ? '*The model spent the whole turn reasoning without a final reply — send another message to continue.*'
-            : '*The model ended its turn without a reply — whatever it loaded is on screen; send another message to continue.*'),
+        (result) => {
+          lastRun = { messages: result.messages, steps: result.steps };
+          dispatch('ai/reply', result.message.content !== ''
+            ? result.message.content
+            : result.message.reasoning !== undefined
+              ? '*The model spent the whole turn reasoning without a final reply — send another message to continue.*'
+              : '*The model ended its turn without a reply — whatever it loaded is on screen; send another message to continue.*');
+          // the archive grows during a turn, so the panel's count is read
+          // after it: what the model can still reach is a fact about the
+          // finished turn, not the one that started it
+          readLedger(deps.ledger).then((view) => dispatch('ai/ledger', view), () => {});
+        },
         (err) => dispatch('ai/failed', err?.message ?? String(err)),
       );
+    },
+
+    // the ledger panel: one read, dispatched as one value. Run on open
+    // (so a reloaded page shows the objective it was left with) and
+    // after anything that writes.
+    'ai-ledger-read': (props, dispatch) => {
+      readLedger(deps.ledger).then((view) => dispatch('ai/ledger', view),
+        (err) => dispatch('ai/failed', err?.message ?? String(err)));
+    },
+
+    // clearing the conversation clears what compaction archived FROM it:
+    // an archived round is a piece of a transcript, and its address only
+    // ever appeared in that transcript's synopsis. Keeping the rounds
+    // would leave the panel counting recoverable context for a
+    // conversation that no longer exists — and leave bytes in the store
+    // that nothing can ever name again. Memories and the goal survive:
+    // they are what was LEARNED, not what was said.
+    'ai-clear-archive': (props, dispatch) => {
+      deps.ledger.listSlots()
+        .then((slots) => Promise.all(slots
+          .filter((slot) => slot.kind === 'agent-round' || slot.kind === 'agent-round-index')
+          .map((slot) => deps.ledger.deleteSlot(slot.name))))
+        .then(() => readLedger(deps.ledger))
+        .then((view) => dispatch('ai/ledger', view),
+          (err) => dispatch('ai/failed', err?.message ?? String(err)));
+    },
+
+    'ai-goal-set': (props, dispatch) => {
+      const objective = deps.getApp().getState().ai.goalDraft.trim();
+      if (objective === '') return;
+      deps.ledger.setGoal({ objective }).then((goal) => {
+        if (goal?.error !== undefined) {
+          dispatch('ai/failed', goal.error);
+          return;
+        }
+        // the draft is cleared by what comes back from the ledger, not by
+        // the action: the objective on screen is the stored one
+        return readLedger(deps.ledger).then((view) => dispatch('ai/goal-committed', view));
+      }, (err) => dispatch('ai/failed', err?.message ?? String(err)));
+    },
+
+    // "clear" abandons the objective rather than deleting it: the ledger
+    // keeps what this agent was asked to do, and the panel stops showing
+    // an objective nobody is working on
+    'ai-goal-clear': (props, dispatch) => {
+      deps.ledger.setGoalStatus('abandoned')
+        .then(() => readLedger(deps.ledger))
+        .then((view) => dispatch('ai/ledger', view),
+          (err) => dispatch('ai/failed', err?.message ?? String(err)));
+    },
+
+    // the refinement button: the model proposes an RFC 6902 patch over
+    // its own supplemental state, every stage of the gate runs, and what
+    // survives is committed. The patch engine is INJECTED here, exactly
+    // as @jarenjs/ai requires — the package never imports @jarenjs/json.
+    'ai-remember': (props, dispatch) => {
+      const state = deps.getApp().getState();
+      if (lastRun === null) {
+        dispatch('ai/remembered', { note: 'Nothing to remember yet — send a message first.' });
+        return;
+      }
+      if (!isConfigured(state.ai.settings)) {
+        dispatch('ai/remembered', { note: 'Add a provider, model and key in settings first.' });
+        return;
+      }
+      const client = clientFor(state, dispatch);
+      if (client === null) return;
+      createRefiner({
+        client,
+        ledger: deps.ledger,
+        applyPatch: (document, patch) => applyJSONPatch(document, patch),
+      }).refine(lastRun).then((outcome) => {
+        const written = outcome.ok === true
+          ? outcome.memories.length + outcome.skills.length + outcome.progress.length
+          : 0;
+        dispatch('ai/remembered', {
+          note: outcome.ok !== true
+            ? `Nothing was stored — ${outcome.error}`
+            : written === 0
+              ? 'The assistant found nothing worth remembering from this session.'
+              : `Remembered ${written} evidenced item${written === 1 ? '' : 's'}.`,
+        });
+        return readLedger(deps.ledger).then((view) => dispatch('ai/ledger', view));
+      }, (err) => dispatch('ai/remembered', { note: err?.message ?? String(err) }));
     },
 
     'ai-save-settings': () => {

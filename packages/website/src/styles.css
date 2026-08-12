@@ -900,9 +900,35 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .ai-field > span { color: var(--muted); }
 .ai-settings .btn { align-self: flex-start; }
 .ai-settings-actions { display: flex; gap: var(--space-2); }
+/* the ledger surface: the objective that outlives the tab, its evidenced
+   progress, and what a compacted session can still recall */
+.ai-goal, .ai-goal-set {
+  display: flex; gap: var(--space-2);
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
+}
+.ai-goal { flex-direction: column; }
+.ai-goal-set > input { flex: 1; min-width: 0; }
+.ai-goal-head { display: flex; align-items: center; gap: var(--space-2); }
+.ai-goal-label {
+  color: var(--muted); font-size: 0.75rem; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; margin-right: auto;
+}
+.ai-goal-text { margin: 0; font-size: 0.9rem; font-weight: 600; overflow-wrap: anywhere; }
+.ai-goal-progress {
+  margin: 0; padding-left: var(--space-5);
+  color: var(--muted); font-size: 0.82rem;
+}
+.ai-goal-progress li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
+.ai-goal-progress:empty { display: none; }
+.ai-evidence { display: block; color: var(--muted); font-size: 0.75rem; font-style: italic; }
+.ai-goal-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .ai-log {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4);
+}
+.ai-archived {
+  color: var(--muted); font-size: 0.78rem; margin: 0;
+  border-top: 1px dashed var(--border); padding-top: var(--space-2);
 }
 .ai-intro { color: var(--muted); font-size: 0.88rem; }
 .ai-intro ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); }

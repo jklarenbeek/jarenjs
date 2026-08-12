@@ -154,11 +154,24 @@ describe('website boundaries — benchmark suite derivations', function () {
       // so it has to be in the published data.
       assert.strictEqual(typeof row.pairSurvived, 'boolean');
     }
-    // the pairwise ceiling is 0 at every budget that compacts anything —
-    // the campaign's starting number, published rather than smoothed
+    // The pairwise ceiling is 0 at every budget that compacts anything —
+    // published rather than smoothed, because it is the number the whole
+    // measurement exists to state. The one legal exception is a row where
+    // the cut happened to leave EVERY value in place: the context then
+    // determines the answer, and the ceiling says so. That is the payload
+    // shape being generous, not a relation being recovered, so it is
+    // asserted as exactly that condition rather than waved through —
+    // a row with a missing value and a non-zero pairwise ceiling would be
+    // a broken measurement.
     const compacting = data.rows.filter((r) => r.task === 'pairwise' && r.compacted);
     assert.ok(compacting.length > 0);
-    assert.ok(compacting.every((r) => r.ceiling === 0));
+    for (const row of compacting) {
+      assert.strictEqual(row.ceiling, row.valuePresent === row.n ? 1 : 0,
+        `${row.variant}/${row.shape}@${row.budget}: a pairwise ceiling is determinacy — it may `
+        + 'only be non-zero where every value survived the cut');
+    }
+    assert.ok(compacting.some((r) => r.ceiling === 0),
+      'a run where compaction never cost the pairwise answer is not measuring compaction');
   });
 
   it('a suite whose data failed to load renders the error callout', function () {

@@ -69,6 +69,36 @@ test('the transcript persists across a reload and clear wipes it', async ({ page
   expect(JSON.parse(stored).messages, 'clear wiped the persisted transcript').toEqual([]);
 });
 
+test('the objective survives a reload, in a real browser store', async ({ page }) => {
+  // the claim Phase A is judged on, end to end: an objective set in one
+  // page load is on screen in the next one, read back out of storage by a
+  // ledger the page rebuilds from scratch. No provider network — setting
+  // and reading a goal never calls a model.
+  await page.addInitScript(() => {
+    localStorage.setItem('jaren-ai',
+      JSON.stringify({ provider: 'ollama', baseUrl: '', model: 'qwen3:4b', apiKey: '' }));
+  });
+  await page.goto('/');
+  await page.locator('.ai-launch').tap();
+
+  await page.getByPlaceholder('Set an objective the assistant keeps across sessions…')
+    .fill('Port the CSV importer.');
+  await page.getByRole('button', { name: 'Set', exact: true }).tap();
+  await expect(page.locator('.ai-goal-text')).toHaveText('Port the CSV importer.');
+
+  // the tab closes: a fresh load, a fresh app, a fresh ledger
+  await page.reload();
+  await page.locator('.ai-launch').tap();
+  await expect(page.locator('.ai-goal-text')).toHaveText('Port the CSV importer.');
+
+  // and it is the STORE that says so, not this tab's memory
+  const stored = await page.evaluate(() => localStorage.getItem('jaren-ai-ledger'));
+  expect(stored, 'the objective is in the browser store').toContain('Port the CSV importer.');
+
+  await page.locator('.ai-icon[title="Clear the objective"]').tap();
+  await expect(page.locator('.ai-goal')).toHaveCount(0);
+});
+
 test('the flow authoring tools register on the WebMCP surface', async ({ page }) => {
   // a WebMCP host stub captures the provided tools before the app boots;
   // this drives the real registerModelContext path in a real browser,

@@ -170,8 +170,34 @@ const assistantView = memo1((ai) => {
     thinkingLabel: ai.reasoningChars > 0
       ? `Thinking… (${ai.reasoningChars} characters of reasoning)`
       : 'Thinking…',
+    // the ledger: a persistent objective, what has been recorded against
+    // it, and what a compacted session can still reach. Every number here
+    // is derived from the ledger read, so the panel cannot claim a
+    // memory the store does not hold.
+    goal: ai.goal === null ? null : {
+      objective: ai.goal.objective,
+      entries: ai.goal.progress.length,
+      // newest first: the last thing that happened is the thing a reader
+      // wants, and the whole log would push the conversation off screen
+      progress: [...ai.goal.progress].reverse().slice(0, PROGRESS_SHOWN)
+        .map((entry) => ({ note: entry.note, evidence: entry.evidence })),
+      more: Math.max(0, ai.goal.progress.length - PROGRESS_SHOWN),
+    },
+    goalDraft: ai.goalDraft,
+    memories: ai.memories,
+    memoryLabel: `${ai.memories} remembered fact${ai.memories === 1 ? '' : 's'}`,
+    archived: ai.archived,
+    // said in full sentences, because "12" beside a chat is not
+    // information: a compacted session has to LOOK recoverable
+    archivedLabel: `${ai.archived} earlier round${ai.archived === 1 ? '' : 's'} archived —`
+      + ' the assistant can fetch any of them back with recall.',
+    remembering: ai.remembering,
+    remembered: ai.remembered,
   };
 });
+
+/** Progress entries the panel shows before it says "and N more". */
+const PROGRESS_SHOWN = 3;
 
 const readmeOverlay = memo1((readme) => ({
   title: readme.title,

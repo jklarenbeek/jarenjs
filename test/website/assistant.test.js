@@ -2,7 +2,10 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
+import { createLedger } from '@jarenjs/ai';
+
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
+import { createSlotLedgerStorage } from '../../packages/website/src/lib/ledgerStore.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { flowGateTaskStub } from '../../packages/website/src/boundaries/assistant.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
@@ -21,12 +24,15 @@ const toolTurn = (name, args) => sseBody([
 ]);
 
 /** A headless site with a scripted AI transport and in-memory settings + transcript. */
-function mountSite({ hash = '#/', aiSettings = null, aiChat = null, responses = [], onFetch } = {}) {
+function mountSite({
+  hash = '#/', aiSettings = null, aiChat = null, aiLedger = null, responses = [], onFetch,
+} = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
   let aiData = aiSettings;
   let chatData = aiChat;
+  let ledgerData = aiLedger;
   const requests = [];
   const app = createSiteApp({
     node: container,
@@ -39,6 +45,10 @@ function mountSite({ hash = '#/', aiSettings = null, aiChat = null, responses = 
     storage: { read: () => null, write: () => {} },
     aiStorage: { read: () => aiData, write: (data) => { aiData = JSON.parse(JSON.stringify(data)); } },
     aiChat: { read: () => chatData, write: (data) => { chatData = JSON.parse(JSON.stringify(data)); } },
+    aiLedger: {
+      read: () => ledgerData,
+      write: (data) => { ledgerData = JSON.parse(JSON.stringify(data)); },
+    },
     aiFetch: (url, init) => {
       requests.push({ url, init });
       if (onFetch) return onFetch({ url, init, requests });
@@ -50,8 +60,15 @@ function mountSite({ hash = '#/', aiSettings = null, aiChat = null, responses = 
   });
   return {
     app, container, go: (h) => routeCb(parseHash(h)), requests,
-    settings: () => aiData, chat: () => chatData,
+    settings: () => aiData, chat: () => chatData, ledger: () => ledgerData,
   };
+}
+
+/** Open the panel (which is also what reads the ledger) and let it settle. */
+async function openPanel(site) {
+  fire(find(site.container, (n) => n.attributes?.get('class') === 'ai-launch'), 'click');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return serialize(site.container);
 }
 
 function find(node, pred) {
@@ -260,6 +277,145 @@ describe('website — the AI assistant panel', function () {
     assert.match(body.messages[0].content, /jaren_get_examples/, 'the method mentions the example tool');
     assert.strictEqual(body.messages.length, 21, 'the system turn + the last 20 chat turns');
     assert.strictEqual(body.messages[body.messages.length - 1].content, 'latest');
+  });
+});
+
+describe('website — the assistant ledger (a goal that outlives the tab)', function () {
+  it('keeps an objective and its progress across a reload, and shows them', async function () {
+    const first = mountSite({ aiSettings: CONFIGURED });
+    await openPanel(first);
+    assert.match(serialize(first.container), /Set an objective/,
+      'with no goal the surface is one input');
+
+    first.app.dispatch('ai/goal-draft', null, { target: { value: 'Port the CSV importer.' } });
+    first.app.dispatch('ai/goal-set');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(first.app.getState().ai.goal.objective, 'Port the CSV importer.');
+    assert.strictEqual(first.app.getState().ai.goalDraft, '',
+      'the draft is cleared by what came back from the ledger');
+    assert.notStrictEqual(first.ledger(), null, 'the objective went to storage, not just to state');
+
+    // the tab closes and the page reloads: a brand-new app over the same slot
+    const second = mountSite({ aiSettings: CONFIGURED, aiLedger: first.ledger() });
+    const html = await openPanel(second);
+    assert.match(html, /Port the CSV importer\./, 'the objective survived the reload');
+    assert.match(html, /Objective/);
+  });
+
+  it('puts the objective in front of the model on every turn', async function () {
+    const site = mountSite({
+      aiSettings: CONFIGURED,
+      responses: [textTurn('on it'), textTurn('still on it')],
+    });
+    site.app.dispatch('ai/goal-draft', null, { target: { value: 'Port the CSV importer.' } });
+    site.app.dispatch('ai/goal-set');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    site.app.dispatch('ai/draft', null, { target: { value: 'start' } });
+    site.app.dispatch('ai/send');
+    await settle(site.app);
+    site.app.dispatch('ai/draft', null, { target: { value: 'continue' } });
+    site.app.dispatch('ai/send');
+    await settle(site.app);
+
+    for (const request of site.requests) {
+      const body = JSON.parse(request.init.body);
+      assert.match(body.messages[0].content, /Port the CSV importer\./,
+        'the goal is composed into the system prompt of EVERY request');
+    }
+    // and never into the transcript the site persists
+    assert.ok(site.chat().messages.every((m) => !String(m.content).includes('Port the CSV importer.')
+      || m.role === 'user'));
+  });
+
+  it('clears an objective without forgetting that it existed', async function () {
+    const site = mountSite({ aiSettings: CONFIGURED });
+    site.app.dispatch('ai/goal-draft', null, { target: { value: 'A finished thing.' } });
+    site.app.dispatch('ai/goal-set');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    site.app.dispatch('ai/goal-clear');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(site.app.getState().ai.goal, null);
+    const stored = JSON.stringify(site.ledger());
+    assert.match(stored, /A finished thing\./,
+      'the ledger keeps what this agent was asked to do; the panel just stops showing it');
+    assert.match(stored, /abandoned/);
+  });
+
+  it('says how many rounds a compacted session archived', async function () {
+    // seeded through the ledger's own API over the site's slot adapter —
+    // the panel's count must come from what a `recall` could actually
+    // reach, not from a counter the panel keeps
+    let slot = null;
+    const ledger = createLedger({
+      storage: createSlotLedgerStorage({
+        read: () => slot, write: (data) => { slot = data; },
+      }),
+    });
+    await ledger.putSlot('r-abc-120', '["one archived round"]', { kind: 'agent-round' });
+    await ledger.putSlot('r-def-140', '["another"]', { kind: 'agent-round' });
+    await ledger.putSlot('rx-1-40', 'the index', { kind: 'agent-round-index' });
+
+    const site = mountSite({ aiSettings: CONFIGURED, aiLedger: slot });
+    const html = await openPanel(site);
+    assert.strictEqual(site.app.getState().ai.archived, 2, 'the index is not a round');
+    assert.match(html, /2 earlier rounds archived/);
+    assert.match(html, /recall/, 'a compacted session has to LOOK recoverable');
+
+    // clearing the conversation clears what was archived FROM it: the
+    // addresses lived in that transcript's synopsis and nothing else
+    site.app.dispatch('ai/clear');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(site.app.getState().ai.archived, 0);
+    assert.doesNotMatch(serialize(site.container), /earlier rounds archived/);
+    assert.doesNotMatch(JSON.stringify(site.ledger()), /one archived round/,
+      'and the bytes are gone from the store, not just from the count');
+  });
+
+  it('refines the ledger from a finished run: an evidenced memory, gated and stored', async function () {
+    const site = mountSite({
+      aiSettings: CONFIGURED,
+      responses: [
+        textTurn('the importer wants CRLF'),
+        // the refinement is a structured (non-streamed) completion
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify([
+          { op: 'add',
+            path: '/memories/-',
+            value: { text: 'The importer needs CRLF line endings.', evidence: 'the run above' } },
+          { op: 'add',
+            path: '/goal/progress/-',
+            value: { note: 'Diagnosed the line endings', evidence: 'the run above' } },
+        ]) } }] }),
+      ],
+    });
+    await openPanel(site);
+    site.app.dispatch('ai/goal-draft', null, { target: { value: 'Port the CSV importer.' } });
+    site.app.dispatch('ai/goal-set');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    site.app.dispatch('ai/draft', null, { target: { value: 'why does it fail?' } });
+    site.app.dispatch('ai/send');
+    await settle(site.app);
+
+    site.app.dispatch('ai/remember');
+    for (let i = 0; i < 50 && site.app.getState().ai.remembering; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const state = site.app.getState().ai;
+    assert.strictEqual(state.remembering, false);
+    assert.match(state.remembered, /Remembered 2 evidenced items/);
+    assert.strictEqual(state.memories, 1);
+    assert.strictEqual(state.goal.progress.length, 1);
+    assert.match(serialize(site.container), /Diagnosed the line endings/);
+    assert.match(JSON.stringify(site.ledger()), /CRLF line endings/,
+      'what was refined is durable, not a label on the screen');
+  });
+
+  it('refuses to remember what it has not seen, and says so', async function () {
+    const site = mountSite({ aiSettings: CONFIGURED });
+    site.app.dispatch('ai/remember');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.match(site.app.getState().ai.remembered, /Nothing to remember yet/);
   });
 });
 

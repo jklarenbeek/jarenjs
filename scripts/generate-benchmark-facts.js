@@ -119,6 +119,27 @@ function gfmFigure(engine) {
 }
 
 /**
+ * One row of the long-horizon suite. The suite is a grid — task ×
+ * compaction variant × payload shape × history budget — so every quoted
+ * number has to name all four coordinates or it is quoting whichever row
+ * happened to sort first.
+ * @param {{ variant: string, shape: string, budget: number, task?: string }} at
+ */
+function horizonRow(at) {
+  const row = data('long-horizon').rows.find((r) => r.variant === at.variant
+    && r.shape === at.shape && r.budget === at.budget && r.task === (at.task ?? 'needle'));
+  if (row === undefined) {
+    throw new Error(`long-horizon.json has no ${at.variant}/${at.shape} row at budget ${at.budget}`
+      + ' — regenerate it before quoting one');
+  }
+  return row;
+}
+
+/** Every row that actually compacted something, for one variant/task. */
+const horizonCompacting = (variant, task = 'needle') => data('long-horizon').rows
+  .filter((r) => r.variant === variant && r.task === task && r.compacted);
+
+/**
  * Every fact, keyed by its marker name. A fact returns the exact text
  * that replaces the marker's body — including any markdown emphasis, so
  * a table cell keeps its bolding.
@@ -288,6 +309,73 @@ const FACTS = {
     return ratio(byLabel(b, 'jaren jslt (no memo)').ns / byLabel(b, 'jaren hand-written []').ns);
   },
 
+  // ——— @jarenjs/ai: what a compacted agent session keeps, loses and can
+  // still reach. Every figure names its row; the budget quoted in the
+  // package README is 6 000 characters on the realistic payload shape,
+  // which is the row where the defect is most visible.
+  'horizon.measured': () => {
+    const meta = data('long-horizon').meta;
+    return `${String(meta.date).slice(0, 10)}, Node ${meta.node}, ${meta.n} tool rounds`;
+  },
+  'horizon.synopsisGap': () => {
+    const row = horizonRow({ variant: 'synopsis', shape: 'late', budget: 6000 });
+    return `${row.idPresent} of ${row.n} record ids and ${row.valuePresent} of their ${row.n} values`;
+  },
+  'horizon.ledgerRecovered': () => {
+    const row = horizonRow({ variant: 'ledger', shape: 'late', budget: 6000 });
+    return `${row.valueRecoverable} of ${row.n}`;
+  },
+  // the same rows without a ledger, as a band: the realistic shape only,
+  // because the flattering one is a different claim and averaging the two
+  // would be a third that nobody measured
+  'horizon.synopsisBand': () => {
+    const kept = horizonCompacting('synopsis')
+      .filter((r) => r.shape === 'late')
+      .map((r) => r.valuePresent);
+    return `${Math.min(...kept)} to ${Math.max(...kept)}`;
+  },
+  // the campaign's own headline: the number the ledger does NOT move.
+  // Printed as a claim about every compacting row, with the exceptions
+  // named — a row where the whole corpus still fits is the payload shape
+  // being generous, not a relation being recovered.
+  'horizon.pairwise': () => {
+    const rows = data('long-horizon').rows.filter((r) => r.task === 'pairwise' && r.compacted);
+    const determined = rows.filter((r) => r.ceiling > 0);
+    return determined.length === 0
+      ? '0% at every budget that compacts anything, with a ledger or without'
+      : `0% at every budget that compacts anything except ${determined
+        .map((r) => `${r.variant}/${r.shape} at ${r.budget}`).join(', ')}`;
+  },
+  // The live half, as a table: what a real model scored on the realistic
+  // payload shape with and without a ledger, and how many times it walked
+  // through the door. The recall column is not decoration — a ledger row
+  // that scored well with zero recalls scored on what was still in front
+  // of it, so the mechanism is only evidenced where that number is not 0.
+  'horizon.liveNeedle': () => {
+    const rows = data('long-horizon').rows
+      .filter((r) => r.task === 'needle' && r.shape === 'late' && r.compacted);
+    const budgets = [...new Set(rows.map((r) => r.budget))].sort((a, b) => b - a);
+    const cell = (row) => (row === undefined || row.actual === null
+      ? '—'
+      : `${(row.actual * 100).toFixed(1)}%`);
+    const body = budgets.map((budget) => {
+      const lossy = rows.find((r) => r.budget === budget && r.variant === 'synopsis');
+      const ledger = rows.find((r) => r.budget === budget && r.variant === 'ledger');
+      return `| ${budget} | ${cell(lossy)} | ${cell(ledger)} | ${ledger?.recalls ?? 0} |`;
+    });
+    return ['', '| history budget | without a ledger | with a ledger | recall calls |',
+      '| --- | --- | --- | --- |', ...body, ''].join('\n');
+  },
+  // whether the published file carries a live model's score at all: a
+  // keyless regeneration republishes empty actual columns, and prose that
+  // said "measured against a model" would then be quoting nothing
+  'horizon.live': () => {
+    const meta = data('long-horizon').meta;
+    return meta.model === null
+      ? 'no live model ran on the machine that generated this file'
+      : `${meta.model}, ${meta.trials} trial(s) per row, ${meta.calls} model calls`;
+  },
+
   // ——— @jarenjs/josl: the CSV reader table. Jaren's name is bold as the
   // subject; the FASTEST cell in each timing column is bold as the
   // winner, which is often not us — the table has to keep saying so.
@@ -322,6 +410,7 @@ const DOCS = [
   'packages/flow/README.md',
   'packages/view/README.md',
   'packages/josl/README.md',
+  'packages/ai/README.md',
 ];
 
 const check = process.argv.includes('--check');

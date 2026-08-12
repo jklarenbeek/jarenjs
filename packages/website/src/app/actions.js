@@ -568,8 +568,10 @@ export const ACTIONS = {
     patch: [{ op: 'replace', path: '/ai/open', value: { $not: '$.ai.open' } }],
     // opening while unconfigured pins the settings form open (see
     // ai-ensure-settings), so it cannot vanish mid-edit as typing
-    // makes the configuration valid
-    effects: [{ run: 'ai-ensure-settings' }],
+    // makes the configuration valid. The ledger read is what makes a
+    // reloaded page show the objective it was left with — the goal
+    // lives in storage, not in this tab.
+    effects: [{ run: 'ai-ensure-settings' }, { run: 'ai-ledger-read' }],
   },
   'ai/settings-toggle': {
     patch: [{ op: 'replace', path: '/ai/settingsOpen', value: { $not: '$.ai.settingsOpen' } }],
@@ -656,8 +658,53 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/status', value: 'idle' },
       { op: 'replace', path: '/ai/activity', value: null },
       { op: 'replace', path: '/ai/error', value: null },
+      { op: 'replace', path: '/ai/remembered', value: null },
     ],
-    effects: [{ run: 'ai-persist' }],
+    // the archived rounds go with the transcript they were cut from:
+    // their addresses only ever existed in its synopsis
+    effects: [{ run: 'ai-persist' }, { run: 'ai-clear-archive' }],
+  },
+
+  // the ledger surface: a persistent objective, what has been recorded
+  // against it, and the archived rounds a compacted session can still
+  // reach. `ai/ledger` is the ONLY writer of those members — they are a
+  // view of durable state, and a panel that patched them locally would
+  // start disagreeing with the storage it claims to show.
+  'ai/ledger': {
+    patch: [
+      { op: 'replace', path: '/ai/goal', value: '$payload.goal' },
+      { op: 'replace', path: '/ai/memories', value: '$payload.memories' },
+      { op: 'replace', path: '/ai/archived', value: '$payload.archived' },
+    ],
+  },
+  'ai/goal-draft': {
+    patch: [{ op: 'replace', path: '/ai/goalDraft', value: '$event.value' }],
+  },
+  // effects-only, like `ai/send`: the effect reads the draft from its own
+  // snapshot and the draft is cleared by what comes BACK from the ledger.
+  // Clearing it here would empty the field this effect is about to read.
+  'ai/goal-set': { effects: [{ run: 'ai-goal-set' }] },
+  'ai/goal-committed': {
+    patch: [
+      { op: 'replace', path: '/ai/goal', value: '$payload.goal' },
+      { op: 'replace', path: '/ai/memories', value: '$payload.memories' },
+      { op: 'replace', path: '/ai/archived', value: '$payload.archived' },
+      { op: 'replace', path: '/ai/goalDraft', value: '' },
+    ],
+  },
+  'ai/goal-clear': { effects: [{ run: 'ai-goal-clear' }] },
+  'ai/remember': {
+    patch: [
+      { op: 'replace', path: '/ai/remembering', value: true },
+      { op: 'replace', path: '/ai/remembered', value: null },
+    ],
+    effects: [{ run: 'ai-remember' }],
+  },
+  'ai/remembered': {
+    patch: [
+      { op: 'replace', path: '/ai/remembering', value: false },
+      { op: 'replace', path: '/ai/remembered', value: '$payload.note' },
+    ],
   },
 
   // ----------------------------------------------------------------

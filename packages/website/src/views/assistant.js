@@ -91,6 +91,45 @@ const composer =
     }, { $if: [{ $eq: ['$.status', 'streaming'] }, '…', 'Send'] }],
   ];
 
+// The ledger surface: one objective that outlives the tab, what has
+// been recorded against it, and the archived rounds a compacted session
+// can still reach. Without a goal it is a single input — the smallest
+// thing that can be ignored.
+const goalForm =
+  ['form', { class: 'ai-goal-set',
+    on: { submit: { action: 'ai/goal-set', preventDefault: true } } },
+    ['input', {
+      type: 'text', class: 'editor line', spellcheck: 'false',
+      placeholder: 'Set an objective the assistant keeps across sessions…',
+      value: '$.goalDraft',
+      on: { input: 'ai/goal-draft' },
+    }],
+    ['button', { type: 'submit', class: 'btn small' }, 'Set'],
+  ];
+
+const goalPanel =
+  ['div', { class: 'ai-goal' },
+    ['div', { class: 'ai-goal-head' },
+      ['span', { class: 'ai-goal-label' }, 'Objective'],
+      ['button', {
+        type: 'button', class: 'ai-icon', title: 'Clear the objective',
+        'aria-label': 'Clear the objective', on: { click: 'ai/goal-clear' },
+      }, '✕'],
+    ],
+    ['p', { class: 'ai-goal-text' }, '$.goal.objective'],
+    ['ul', { class: 'ai-goal-progress' }, [{ $apply: '$.goal.progress[*]' }]],
+    { $if: ['$.goal.more', ['p', { class: 'ai-hint' }, '…and ', '$.goal.more', ' earlier entries']] },
+    ['div', { class: 'ai-goal-actions' },
+      ['button', {
+        type: 'button', class: 'btn small',
+        disabled: { $if: ['$.remembering', 'disabled', false] },
+        on: { click: 'ai/remember' },
+      }, { $if: ['$.remembering', 'Remembering…', 'Remember this session'] }],
+      { $if: ['$.memories', ['span', { class: 'ai-hint' }, '$.memoryLabel']] },
+    ],
+    { $if: ['$.remembered', ['p', { class: 'ai-hint' }, '$.remembered']] },
+  ];
+
 const panel =
   ['div', { class: 'ai-panel' },
     ['div', { class: 'ai-head' },
@@ -109,6 +148,7 @@ const panel =
       }, '✕'],
     ],
     { $if: ['$.showSettings', settingsForm] },
+    { $if: ['$.configured', { $if: ['$.goal', goalPanel, goalForm] }] },
     ['div', { class: 'ai-log' },
       { $if: ['$.empty', { $if: ['$.configured', intro, setupIntro] }] },
       [{ $apply: '$.messages[*]' }],
@@ -119,6 +159,10 @@ const panel =
       { $if: [{ $and: [{ $eq: ['$.status', 'streaming'] }, { $not: '$.pending' }, { $not: '$.activity' }] },
         ['p', { class: 'ai-activity' }, '$.thinkingLabel']] },
       { $if: ['$.error', ['p', { class: 'ai-error' }, '$.error']] },
+      // a compacted session says so: the rounds that left the request are
+      // in slots with addresses, not gone, and the panel is where that
+      // stops being an implementation detail
+      { $if: ['$.archived', ['p', { class: 'ai-archived' }, '$.archivedLabel']] },
     ],
     { $if: ['$.configured', composer] },
   ];
@@ -151,5 +195,13 @@ export const ASSISTANT_RULES = [
     // in verbatim (no dispatch into it)
     match: "$.ui.assistant.messages[?@.role == 'assistant']", mode: 'assistant',
     body: ['div', { class: 'ai-msg assistant' }, '$.article'],
+  },
+  {
+    // one recorded step towards the objective. The evidence is shown
+    // beside the note, always: a progress log of unevidenced claims is
+    // exactly what the ledger's schema refuses to store, and the panel
+    // should not present one either.
+    match: '$.ui.assistant.goal.progress[*]', mode: 'assistant',
+    body: ['li', {}, '$.note', ['span', { class: 'ai-evidence' }, '$.evidence']],
   },
 ];

@@ -14,8 +14,10 @@
  */
 
 import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
+import { createLedger } from '@jarenjs/ai';
 
 import { ACTIONS, SUBS } from './actions.js';
+import { createSlotLedgerStorage } from '../lib/ledgerStore.js';
 import { createInitialState } from './state.js';
 import { viewModel } from './viewmodel.js';
 import { STYLESHEET } from '../views/index.js';
@@ -75,6 +77,12 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * @property {{ read: () => any, write: (data: any) => void }} [aiChat]
  *   Persistence for the assistant transcript, so a reload resumes the
  *   conversation (localStorage in the browser).
+ * @property {{ read: () => any, write: (data: any) => void }} [aiLedger]
+ *   Persistence for the assistant's LEDGER — the objective, its
+ *   progress, what it has learned, and the rounds compaction archived.
+ *   Omit it and the ledger runs in memory for the session, which is the
+ *   degrade `@jarenjs/ai` is built for; supply it and a goal survives a
+ *   reload.
  * @property {number} [debounceMs] - Boundary-run debounce (default 250;
  *   0 = synchronous, for tests).
  * @property {(error: Error) => void} [onError]
@@ -137,6 +145,14 @@ export function createSiteApp(env) {
   });
   const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
   const aiChat = env.aiChat ?? { read: () => null, write: () => {} };
+  // the assistant's durable state: one @jarenjs/ai ledger over the site's
+  // own JSON-slot idiom, or in memory when the host offers no slot. The
+  // agent reads its objective from here every turn and compaction
+  // archives every dropped round into it, so this one object is what
+  // makes a session survive a closed tab.
+  const aiLedger = createLedger(env.aiLedger === undefined
+    ? {}
+    : { storage: createSlotLedgerStorage(env.aiLedger) });
 
   // the Flow studio's runtime: nested-machine host widget + effects
   // (template loading, fail-closed text parsing, dag runs with abort)
@@ -441,7 +457,9 @@ export function createSiteApp(env) {
   // live-rates effect (plus the `when`-gated rates-poll subscription),
   // and the AI assistant's streaming-turn + settings effects.
   Object.assign(effects, calcEditEffects, rates.effects,
-    createAssistantEffects({ toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat }),
+    createAssistantEffects({
+      toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat, ledger: aiLedger,
+    }),
     // the adventure game's resolver + dynamic-tier effects; it reuses the
     // assistant's shared BYOK key (state.ai.settings) and fetch
     createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured, download: env.download, saveSlot: env.gameSave }).effects,

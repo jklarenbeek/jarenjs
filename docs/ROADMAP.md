@@ -543,7 +543,30 @@ what each does is its own documentation's job
 
 The ledger — a durable goal, memories, skills and addressable slots over an
 injected store — is what lets a run outlive a context window and a closed tab.
-What is open is what it costs and what nobody has measured yet.
+What is open is the question it does not answer, what it costs, and what nobody
+has measured yet.
+
+- [ ] **A question over everything at once is still unanswerable.** The agent's
+  own benchmark scores two shapes of question: a needle (one record's value) and
+  a pairwise relation (which two of forty records are closest). With a ledger the
+  needle is fully recoverable — every dropped round is archived and addressed —
+  and the pairwise score is <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->.
+  That is not a summariser that needs improving: the information required to
+  answer is spread across forty rounds, and forty rounds fetched one at a time do
+  not fit the budget they were cut to fit, so `recall` is the wrong shape of
+  answer. Moving it needs the corpus held OUTSIDE the context and queried
+  programmatically — the model working over metadata and naming slices rather
+  than reading them. That is a different piece of work, and until it exists this
+  package should not claim long-horizon capability without the qualifier.
+
+- [ ] **Retrieval is tag match and recency.** `recall({ tags, limit })` orders by
+  recency and matches tags; with the `compileQuery` seam wired a caller may pass a
+  real query document, and without it a predicate is refused rather than ignored.
+  There is deliberately no embedding, no ranking and no relevance model — and no
+  measurement that says one is needed. The honest next step is an instrument
+  before an implementation: a retrieval benchmark that scores whether the right
+  memory reached the prompt, on a ledger big enough for the question to be hard.
+  Adding a ranker first would be optimising a number nobody has.
 
 - [ ] **The goal section has no ceiling.** Progress is appended and never
   rewritten, and every entry composes into the system prompt of every request —
@@ -565,6 +588,16 @@ What is open is what it costs and what nobody has measured yet.
   a duplicate-pressure measurement over repeated refinements against one ledger;
   a de-duplication rule written before that measurement would be a guess about
   which of two similar memories is the better one.
+
+- [ ] **Nothing evicts an archived round.** Compaction writes every dropped
+  round to a slot and never deletes one, which is exactly the property that makes
+  a synopsis address trustworthy — and it means a ledger grows for as long as a
+  conversation does. In memory that is a session's worth of strings; over a
+  browser slot it eventually meets the storage quota, where the site degrades by
+  keeping the session correct (the in-memory map still answers every address) and
+  losing the next visit. An eviction rule needs to answer what may be dropped
+  from a store whose promise is that nothing was, so the honest shape is probably
+  a host-set budget with the ledger REPORTING what it evicted, not a silent LRU.
 
 - [ ] **The per-path record shape lives in the prompt, not the schema.** One
   `value` union serves `/memories/-`, `/skills/-` and `/goal/progress/-`, so a

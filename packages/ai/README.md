@@ -249,7 +249,10 @@ of spinning; oversized tool results are truncated (`maxToolResultChars`, default
 a local model's context is respected. `send` never mutates the history it receives — it
 returns the complete new transcript, ready to persist and send back next turn.
 
-**Long sessions fit small contexts.** `historyBudget` (characters — deterministic where
+**Long sessions fit a small context — for questions about one thing at a time.** That
+qualification is load-bearing and the numbers below are why: compaction keeps a session
+runnable and answerable one fact at a time, and a question that needs *every* fact at once
+stops being answerable the moment anything is cut. `historyBudget` (characters — deterministic where
 tokens are provider-private) compacts each request when the history outgrows it: the
 system prompt, the first user message and the largest tail that fits always survive, and
 the dropped middle becomes one synopsis message naming every dropped tool round. Cuts
@@ -261,9 +264,8 @@ own writer. The returned transcript is always the full, uncompacted history.
 On its own that is lossy, and worth being precise about, because the loss has a shape.
 Each dropped tool call leaves one line whose result excerpt is capped at 60 characters, so
 the synopsis remembers **that** `fetch_record` was called and returned a `REC0007` and
-loses **what the record said**. Measured on 40 rounds of ~440-character results at a
-6 000-character budget, the request keeps 15 of 40 record ids and 7 of their 40 values
-(`npm run benchmark:long-horizon`). A model can see the label and answer confidently from
+loses **what the record said**. Measured on <!--bm:horizon.measured-->2026-08-12, Node v22.22.2, 40 tool rounds<!--/bm--> of ~440-character results at a
+6 000-character budget, with the fact behind the padding, the request keeps <!--bm:horizon.synopsisGap-->15 of 40 record ids and 7 of their 40 values<!--/bm--> (`npm run benchmark:long-horizon`). A model can see the label and answer confidently from
 a record it no longer has. **Compaction alone is not the answer to a long session.**
 
 ### Compaction that moves instead of destroying
@@ -278,8 +280,39 @@ const agent = createAgent({ client, toolbox, historyBudget: 6000, ledger });
 ```
 
 `createLedger()` takes no arguments and works in memory, so a static page degrades cleanly;
-durability is a storage adapter the host injects (`get`/`set`/`delete`/`keys`, all async —
-back it with `@jarenjs/db` over OPFS, with `localStorage`, or with nothing).
+durability is a storage adapter the host injects — four async methods and nothing else:
+
+```js
+const storage = {
+  get: async (key) => …,              // a JSON value, or undefined
+  set: async (key, value) => …,       // value is a JSON value
+  delete: async (key) => …,           // an absent key is not an error
+  keys: async (prefix) => […],        // every key starting with prefix
+};
+```
+
+Back it with `@jarenjs/db` over OPFS, with one `localStorage` slot, with a file, with a
+server — or with nothing. The package gains no dependency either way, which is the whole
+posture: it loads in a static page with two dependencies and degrades to in-memory and
+schema-only. This site's assistant backs it with a single JSON slot
+([`ledgerStore.js`](../website/src/lib/ledgerStore.js)), which is all a browser session
+needs.
+
+The ledger holds four kinds, and they differ in every dimension that matters — lifetime,
+retrieval and who may write them:
+
+| kind | what it is | how it is retrieved | written by |
+|---|---|---|---|
+| `goal` | the one active objective and its append-only progress | always in the prompt | the host (`setGoal`), a refinement (progress only) |
+| `memory` | an evidenced fact worth carrying past this context | `recall({ tags, where, limit })` | the host, or a gated refinement |
+| `skill` | a reusable recipe: when it applies, what to do | `recallSkills(…)` | the host, or a gated refinement |
+| `slot` | addressable content too big to carry; metadata is separate from the bytes | by name (`recall` the tool) | the harness — never proposed by a model |
+
+Retrieval is tag match plus recency by default. Inject `compileQuery`
+(`compileJsonQuery` from `@jarenjs/json/query`) and a `where` predicate becomes a real
+query document — the same document `@jarenjs/db` could push down to SQL. Without that seam
+a `where` is **refused**, not ignored: a filter silently dropped answers the wrong question
+with a straight face.
 
 Each dropped round is archived to a slot **before** the synopsis is written, and every
 synopsis line carries its address:
@@ -307,12 +340,36 @@ the model fetches a round back when it needs one — a normal tool call that sho
 
 The contract, asserted over every budget the benchmark sweeps in both payload shapes
 (`test/ai/compaction-recovery.test.js`): **every fact the full transcript held is either
-still in the request verbatim or reachable through an address the request names** — 40 of
-40 record values, where the same runs without a ledger recover 1 to 28 of them. What that
+still in the request verbatim or reachable through an address the request names** — <!--bm:horizon.ledgerRecovered-->40 of 40<!--/bm--> record values at the same budget, where the same runs without a ledger keep <!--bm:horizon.synopsisBand-->1 to 28<!--/bm--> of them. What that
 costs is a few characters of verbatim retention at the tightest budgets, published beside
-the win. It does not fix everything: a question that needs *every* fact at once (which two
-of forty records are closest?) is still unanswerable once anything is cut, because forty
-rounds fetched one at a time do not fit the budget they were cut to fit.
+the win.
+
+That is the model-free half. Here is a real model on the same contexts — the realistic
+payload shape, one needle question per trial, scored by whether the answer is right:
+
+<!--bm:horizon.liveNeedle-->
+| history budget | without a ledger | with a ledger | recall calls |
+| --- | --- | --- | --- |
+| 20000 | 66.7% | 100.0% | 1 |
+| 10000 | 33.3% | 100.0% | 4 |
+| 6000 | 0.0% | 66.7% | 3 |
+| 4000 | 33.3% | 66.7% | 4 |
+| 2000 | 0.0% | 33.3% | 7 |
+<!--/bm-->
+
+The last column is the point: those answers were fetched, not remembered. A ledger row
+that scored well with **zero** recalls would have scored on what was still in front of it,
+and the number is printed either way so that cannot be read as a win. Three trials per row
+is a small sample with a wide error bar — the ceilings above are the structural claim, this
+is the check that a model can actually use them.
+
+**And here is what it does not fix.** A question that needs *every* fact at once (which two
+of forty records are closest?) is unanswerable the instant one round is cut, and a ledger
+does not change that: forty rounds fetched one at a time do not fit the budget they were
+cut to fit. The benchmark scores that question too and publishes it beside the needle: <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->.
+Recall is the wrong shape of answer for it. Moving that number needs the corpus held
+*outside* the context and queried programmatically, which is a different piece of work and
+is not in this package yet. The live tier of that measurement ran on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 176 model calls<!--/bm-->.
 
 Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
@@ -396,6 +453,11 @@ Refinement is open-ended authoring, which the field notes above say weak models 
 so it was measured on the qwen tier rather than assumed, on a four-step incident-diagnosis
 run with facts planted in the tool results (`REC0007`, `pg-bouncer`, `v4.19.2`), so that
 grounding and invention are both checkable without a judge.
+
+These figures are **dated, not regenerated** — measured 2026-08-12 by a live probe that
+needs a key and fifteen model calls, so it is not part of the committed benchmark suite and
+not driven by the figure gate the numbers above it are. Read them as a record of one run on
+one day, and re-run the probe rather than trusting the table if it matters.
 
 | model | trials | accepted | first attempt | records | grounded | fabricated ids | median |
 |---|---|---|---|---|---|---|---|

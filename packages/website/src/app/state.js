@@ -122,6 +122,16 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       status: 'idle',        // 'idle' | 'streaming' | 'error'
       activity: null,        // the tool the model is currently calling
       error: null,
+      // the @jarenjs/ai LEDGER, as the panel shows it. Read from the
+      // ledger (not mirrored into it): the objective is durable state and
+      // this slice is a view of it, so a reload shows what storage holds
+      // rather than what this tab last typed.
+      goal: null,            // { objective, progress: [ { at, note, evidence } ] }
+      goalDraft: '',         // the objective composer
+      memories: 0,           // evidenced facts carried into every turn
+      archived: 0,           // dropped rounds sitting in slots, recallable
+      remembering: false,    // a refinement is in flight
+      remembered: null,      // what the last refinement did, in one line
     },
 
     // the adventure game (boundaries/game.js): a point-and-click pirate

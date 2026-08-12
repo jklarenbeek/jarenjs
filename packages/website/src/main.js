@@ -17,6 +17,7 @@ const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
 const AI_KEY = 'jaren-ai';
 const AI_CHAT_KEY = 'jaren-ai-chat';
+const AI_LEDGER_KEY = 'jaren-ai-ledger';
 const GAME_KEY = 'jaren-game';
 
 /** A localStorage-backed JSON slot; failures degrade to in-memory. */
@@ -131,6 +132,10 @@ const app = createSiteApp({
   aiFetch: (url, init) => fetch(url, init),
   aiStorage: jsonStore(AI_KEY),
   aiChat: jsonStore(AI_CHAT_KEY),
+  // the assistant's ledger: the objective, its progress, what it learned
+  // and the rounds compaction archived — one slot, so a closed tab is not
+  // the end of a session
+  aiLedger: jsonStore(AI_LEDGER_KEY),
   // the adventure save slot: a raw JSONX string (the game serializes itself)
   gameSave: {
     read: () => { try { return localStorage.getItem(GAME_KEY); } catch { return null; } },
