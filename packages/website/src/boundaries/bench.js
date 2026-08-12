@@ -47,6 +47,7 @@ export const SUITES = [
   { key: 'db', label: 'Data' },
   { key: 'orm', label: 'ORM' },
   { key: 'live', label: 'Live' },
+  { key: 'long-horizon', label: 'Long horizon' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -81,6 +82,7 @@ export function deriveSuite(state, suite) {
     case 'db': return dbSuite(data);
     case 'orm': return ormSuite(data);
     case 'live': return liveSuite(data);
+    case 'long-horizon': return scoreTables(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }
@@ -392,6 +394,28 @@ function genericTables(data, note) {
       t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
       note),
   ]);
+}
+
+/**
+ * Score-style payloads: `{ headline?: { title, text },
+ * tables: [{ title, head: [], rows: [{ cells: [], strong? }], note }] }`.
+ *
+ * A suite whose numbers are SCORES rather than timings carries its own
+ * display strings, because `formatNs` would render a percentage as
+ * nanoseconds. Nothing here is suite-specific — the generated file
+ * decides the columns, so a new suite of this kind needs no derivation
+ * of its own beyond naming this function.
+ */
+function scoreTables(data) {
+  const out = [];
+  if (data.headline != null)
+    out.push(callout(data.headline.title, data.headline.text));
+  for (const t of data.tables ?? []) {
+    out.push(table(t.title, t.head,
+      t.rows.map((r) => ({ cells: r.cells, strong: r.strong === true })),
+      t.note ?? null));
+  }
+  return out;
 }
 
 /**

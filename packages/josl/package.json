@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/josl",
   "private": false,
-  "version": "0.31.7",
+  "version": "0.32.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -99,6 +99,6 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.31.7"
+    "@jarenjs/core": "^0.32.0"
   }
 }

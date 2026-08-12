@@ -134,10 +134,10 @@ test('save/load and the CSV admiralty-forms gag', async ({ page }) => {
 });
 
 // the DYNAMIC tier: with a real key, an NPC answers live and in-voice.
-// Skipped without OR_KEY so CI stays offline.
+// Skipped without OPENROUTER_AI_KEY so CI stays offline.
 test('dynamic tier — an NPC answers live when the player brings a key', async ({ page }) => {
-  const KEY = process.env.OR_KEY;
-  test.skip(!KEY, 'set OR_KEY to exercise the live AI tier');
+  const KEY = process.env.OPENROUTER_AI_KEY;
+  test.skip(!KEY, 'set OPENROUTER_AI_KEY to exercise the live AI tier');
   test.setTimeout(60000);
   // seed the shared BYOK slot the assistant uses (localStorage 'jaren-ai')
   await page.addInitScript((key) => {

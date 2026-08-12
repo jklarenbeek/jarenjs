@@ -27,6 +27,7 @@
  *   db.json           db.js             — document store + pushdown vs PouchDB/RxDB/lowdb
  *   orm.json          orm.js            — entities + graph loads vs Prisma/Drizzle/Kysely (Node + Bun)
  *   live.json         live.js           — live queries/capture/jobs vs RxDB/TinyBase (incremental vs re-run)
+ *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
  * Usage:
@@ -59,7 +60,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, qt3');
+        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, qt3');
         process.exit(0);
         break;
       default:
@@ -735,7 +736,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'orm', 'live',
+  'orm', 'live', 'long-horizon',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -1031,6 +1032,37 @@ function generateLive(tmp, options) {
 }
 
 /**
+ * The long-horizon suite: what survives `@jarenjs/ai`'s history
+ * compaction, as a model-free ceiling and — when the generating machine
+ * has a key — as a real model's score over the same contexts.
+ *
+ * `--live` is passed unconditionally and that is safe: with no key the
+ * benchmark prints its ceilings, says the live tier was skipped and exits
+ * 0, so the file regenerates on any machine. It also means a KEYLESS
+ * regeneration republishes this file with empty `actual` columns rather
+ * than keeping numbers it did not measure — the honest behaviour, and the
+ * reason the skip reason travels in the file's own meta.
+ */
+function generateLongHorizon(tmp, options) {
+  const file = path.join(tmp, 'long-horizon.json');
+  try {
+    runTool([
+      '--env-file-if-exists=.env',
+      'benchmark/long-horizon.js', '--live',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: long-horizon run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
+  // the entry point already emits the published document — passing it
+  // through keeps one definition of the file's shape
+  return readJson(file);
+}
+
+/**
  * The phase-B ORM suite: entities, the one-statement graph load, the
  * unit of work and the typed surface against Prisma, Drizzle and
  * Kysely — on Node, and on Bun where a first-party route exists. The
@@ -1202,6 +1234,11 @@ async function main() {
     const live = generateLive(tmp, options);
     if (live !== null)
       generated.live = live;
+  }
+  if (!options.skip.has('long-horizon')) {
+    const horizon = generateLongHorizon(tmp, options);
+    if (horizon !== null)
+      generated['long-horizon'] = horizon;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

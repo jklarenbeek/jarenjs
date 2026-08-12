@@ -29,6 +29,7 @@ number in a README performance table names the command that produced it.
 | [`mermaid.js`](./mermaid.js) | Mermaid coverage scorecard + parse speed | Benchmarking the headless Mermaid engine |
 | [`flow-fsm.js`](./flow-fsm.js) | FSM compile/transition vs XState v5 + the serializability wedge | Benchmarking `@jarenjs/flow` machines |
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
+| [`long-horizon.js`](./long-horizon.js) | What survives `@jarenjs/ai`'s history compaction — needle + pairwise, ceiling and live model | Measuring agent context retention |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
@@ -571,6 +572,108 @@ machines are asserted equivalent before timing; both Jaren routes and
 both engines' losses are on the page; the hand-written JS is a floor, not
 a rival, because nothing else runs JSON dataflow. npm shortcuts:
 `npm run benchmark:flow`, `benchmark:flow-fsm`, `benchmark:flow-dag`.
+
+## long-horizon.js — agent context retention
+
+What `createAgent`'s `historyBudget` compaction keeps, and what it destroys.
+The measurement drives the **real agent** through N tool rounds against a
+recording stub client, then asks whether the fact needed to answer is present
+in the request the client receives.
+
+Two tasks, because they scale differently:
+
+- **needle** (linear) — the question asks for one record's value. Answerable
+  if that one round survives, and it degrades gracefully with the budget. This
+  is the task compaction is designed for.
+- **pairwise** (quadratic) — the question is a relation over *every* pair
+  ("which two records have the closest values"). It needs all N facts at once,
+  which makes it all-or-nothing: with one value missing the answer is not
+  determined by what is visible, because an absent record could be closer to a
+  visible one than the visible best pair is to each other.
+
+Two numbers for each, and both are published:
+
+- **ceiling** — model-free and deterministic: is the fact needed to answer
+  present in the request at all? It needs no key, costs nothing and cannot
+  flake, which makes it the tier CI runs and the right way to state a
+  structural claim.
+- **actual** — what a real model scores over the same contexts. The **gap** is
+  the interesting quantity: a large gap means the information was there and the
+  model failed to use it, which is a prompt problem rather than a context
+  problem. Publishing only one of the two would let a later change claim a win
+  it did not earn.
+
+The two ceilings are **not the same kind of number**, and the run says so
+rather than letting a reader assume:
+
+- the **needle** ceiling is a hard upper bound — a value that is not in the
+  context cannot be read out of it. Its *actual* is a `JAREN_AI_TRIALS`-sample
+  estimate, though, so at three trials it carries a wide error bar and the
+  hit count is printed beside every percentage;
+- the **pairwise** ceiling is **determinacy**: does the context determine the
+  answer at all? A model can still name the true closest pair out of a subset
+  that happens to contain it, so a pairwise actual may legitimately land above
+  its own ceiling. The model-free `pair survived` column reports exactly when
+  that was available, and the run prints every above-ceiling row with the
+  reason attached.
+
+And two payload shapes, because the shape changes the answer. The built-in
+synopsis excerpts the **first 60 characters** of a dropped tool result, so a
+fact at the front usually rides out inside that excerpt and a fact behind the
+padding does not. Both run; the table labels them `front` and `late`, and
+`late` is the realistic one. Reporting only `front` would flatter the package,
+which is why neither shape may be dropped.
+
+```bash
+node benchmark/long-horizon.js                    # the ceilings; no key needed
+npm run benchmark:long-horizon                    # the same, with .env loaded
+node --env-file-if-exists=.env benchmark/long-horizon.js --live
+node benchmark/long-horizon.js --live --trials 1 --budgets 6000 --verbose
+```
+
+The live tier is **opt-in and never mandatory**: with no key the ceilings still
+print and the run says the live tier was skipped and why, then exits 0. Its
+configuration comes from the environment through one helper
+([`lib/env.js`](./lib/env.js) — the only live-model environment reader in the
+workspace), loaded by Node itself with `--env-file-if-exists=.env`; there is no
+dotenv dependency and there must never be one. See [`.env.example`](../.env.example)
+for the variables and the spend guards (`JAREN_AI_MAX_CALLS`,
+`JAREN_AI_MAX_CONCURRENCY`, `JAREN_AI_TRIALS`), which are hard ceilings rather
+than hints. The model id is printed beside the numbers, so a published result
+can never be misattributed, and the key itself is never logged.
+
+A live call that fails or runs past its deadline is counted, reported in full
+(the listing is capped, the count is not) and leaves its row's `actual` **null**
+rather than a guess. The live tier **streams**, and that is a measured decision
+rather than a default: unstreamed, this benchmark lost 13 of 72 calls to a
+300-second deadline, all on the tightest budgets — which reads convincingly like
+a model thinking harder about a compacted context, and is not. The identical
+request answered in 2.9 seconds streamed after hanging past 300 seconds
+unstreamed. The deadline is now only a backstop.
+
+Two measurement decisions worth knowing about:
+
+- **The live tier replays the gathering and asks one question.** The forty tool
+  rounds are produced by the same deterministic stub the ceiling uses; the model
+  is then asked a single question over exactly the context that was scored. That
+  isolates the quantity the ceiling bounds — given this context, can the model
+  answer? — and costs one call per trial instead of forty.
+- **Values are globally unique six-digit integers.** Unique so presence is
+  testable with a plain `includes` and no proximity window; six digits so every
+  record serializes to the same byte length whatever the seed, since compaction
+  cuts at byte-counted round boundaries.
+
+The probe has its own self-tests in `test/ai/benchmark-probe.test.js`, and they
+are not decoration: two probe bugs (searching the *stringified* transcript,
+where a tool result's quotes are escaped; and a proximity regex, where the
+padding separates an id from its value) each read 0/40 on **every** row
+including the uncapped control. The control reading 40/40 in both payload
+shapes is what tells those apart from a real finding.
+
+The generated file is `packages/website/public/benchmarks/long-horizon.json`
+(`npm run benchmark:generate` writes it, and the Benchmarks page renders it).
+A keyless regeneration republishes it with empty `actual` columns and the skip
+reason in its own metadata, rather than keeping numbers it did not measure.
 
 ## qt3-runner.js — the W3C QT3 scorecard
 

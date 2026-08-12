@@ -125,6 +125,42 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /flatbush/, 'the index rival is named');
   });
 
+  it('derives the long-horizon suite, keeping both tasks and both shapes', function () {
+    const data = loadBench('long-horizon');
+    const state = { benchStatus: { 'long-horizon': 'loaded' }, bench: { 'long-horizon': data }, benchUi: {} };
+    const nodes = deriveSuite(state, 'long-horizon');
+    const text = JSON.stringify(nodes);
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    // D7: both tasks and both numbers. A page that showed only the needle
+    // would hide the finding the whole measurement exists to state.
+    assert.match(text, /Pairwise ceiling/, 'the pairwise column may not be dropped');
+    assert.match(text, /Needle ceiling/);
+    assert.match(text, /FRONT of the tool result/, 'the flattering payload shape is labelled');
+    assert.match(text, /BEHIND the padding/, 'the realistic payload shape renders beside it');
+    assert.match(text, /DETERMINACY/,
+      'the page says what the pairwise ceiling is, since it is not a hard bound on the score');
+    // and the underlying rows carry the contract every later measurement
+    // states its delta against
+    assert.ok(data.rows.length > 0);
+    for (const row of data.rows) {
+      assert.ok(['needle', 'pairwise'].includes(row.task));
+      assert.ok(['front', 'late'].includes(row.shape));
+      assert.strictEqual(typeof row.ceiling, 'number');
+      assert.ok(row.actual === null || typeof row.actual === 'number');
+      // NOT asserted: actual <= ceiling. The needle ceiling is a hard
+      // bound but its actual is a small-sample estimate, and the pairwise
+      // ceiling is determinacy — a model can name the right pair out of a
+      // surviving subset. `pairSurvived` is what makes such a row legible,
+      // so it has to be in the published data.
+      assert.strictEqual(typeof row.pairSurvived, 'boolean');
+    }
+    // the pairwise ceiling is 0 at every budget that compacts anything —
+    // the campaign's starting number, published rather than smoothed
+    const compacting = data.rows.filter((r) => r.task === 'pairwise' && r.compacted);
+    assert.ok(compacting.length > 0);
+    assert.ok(compacting.every((r) => r.ceiling === 0));
+  });
+
   it('a suite whose data failed to load renders the error callout', function () {
     const nodes = deriveSuite({ benchStatus: { toml: 'error' }, bench: {}, benchUi: {} }, 'toml');
     assert.match(JSON.stringify(nodes), /Data unavailable/);
