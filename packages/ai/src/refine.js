@@ -50,7 +50,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { checkOutcome } from './check.js';
 import { createStructuredOutput } from './structured.js';
 import { REFINEMENT_PATCH_SCHEMA, refinementPatchSchema } from './schemas/patch.js';
-import { excerpt, truncate } from './text.js';
+import { excerpt, truncate } from '@jarenjs/core/chunk';
 
 /**
  * The id stood in while a proposal is validated. A proposal never

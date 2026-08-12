@@ -33,7 +33,8 @@ import { createToolbox } from './toolbox.js';
 import {
   RECALL_TOOL_NAME, createRecallTool, roundSlotName, indexSlotName, slotAddress, slotRef,
 } from './recall.js';
-import { excerpt, truncate } from './text.js';
+import { environmentTools } from './environment.js';
+import { excerpt, truncate, sizeOf } from '@jarenjs/core/chunk';
 
 /**
  * @typedef {Object} AgentHooks
@@ -54,6 +55,7 @@ import { excerpt, truncate } from './text.js';
  *   retrieval?: { memories?: { tags?: string[], where?: any, limit?: number },
  *     skills?: { tags?: string[], where?: any, limit?: number } },
  *   now?: () => number,
+ *   environment?: any, transcript?: { slot?: string, window?: number },
  *   compaction?: (droppedRounds: any[][], addresses?: any[]) => string }} options
  *   - `historyBudget` caps the request history in CHARACTERS (tokens
  *   are provider-private; characters are deterministic). When a
@@ -87,6 +89,19 @@ import { excerpt, truncate } from './text.js';
  *   else is worth carrying is the host's call.
  *   - `now` returns milliseconds (`Date.now` by default), injected so a
  *   time budget is testable.
+ *   - `environment` (from `createEnvironment`) registers the corpus
+ *   operations as tools — `env_digest`, `env_peek`, `env_grep`,
+ *   `env_chunk`, `env_stat`, `env_read` — beside the host's, skipping any
+ *   name the host already registered. Content never enters a request
+ *   unasked: every one of them answers with metadata and addresses
+ *   except `env_read`, which makes the model state a character budget.
+ *   - `transcript` (needs `environment`) makes the CONVERSATION one of
+ *   those slots: it is written whole before every call and the request
+ *   keeps `window` round units plus the address of the rest. That is the
+ *   alternative to `historyBudget` rather than a tuning of it — there is
+ *   no budget to exceed when the history is addressed instead of resent.
+ *   Both together is legal and redundant; neither changes the other's
+ *   behaviour.
  * @returns {{ send: (history: any[], hooks?: AgentHooks) => Promise<{
  *   message: any, messages: any[], steps: any[], stopReason: string }>,
  *   resume: (history?: any[], hooks?: AgentHooks) => Promise<{
@@ -104,6 +119,16 @@ export function createAgent(options) {
   const budget = options.budget ?? null;
   const retrieval = options.retrieval ?? null;
   const clock = options.now ?? (() => Date.now());
+  const environment = options.environment ?? null;
+  // the transcript-as-slot path is opt-in even with an environment
+  // present: an environment is a corpus to work on, and deciding that
+  // the CONVERSATION is one of its slots is a separate choice
+  const transcript = environment === null || options.transcript === undefined
+    ? null
+    : {
+      slot: options.transcript.slot ?? 'transcript',
+      window: Math.max(1, options.transcript.window ?? TRANSCRIPT_WINDOW),
+    };
   // kept separately from the effective writer: the ledger path treats a
   // HOST writer differently from the built-in one (see `compactToLedger`)
   const hostCompaction = options.compaction ?? null;
@@ -116,6 +141,10 @@ export function createAgent(options) {
   // one recall tool per agent, and only with a ledger — a toolbox is
   // built here rather than in the loop so its schema compiles once
   const recallBox = ledger === null ? null : recallToolbox(ledger);
+  // the environment's operations, as tools, compiled once for the same
+  // reason. The model reaches the corpus through exactly the calls a
+  // harness makes — one implementation, in `environment.js`.
+  const envBox = environment === null ? null : toolboxOf(environmentTools(environment));
 
   // what this agent has spent, across every `send` it has served. The
   // counters live on the agent and not on a call, because a budget that
@@ -201,8 +230,9 @@ export function createAgent(options) {
    * @param {any} args
    * @param {boolean} recalling - whether this agent listed `recall`
    */
-  async function dispatch(name, args, recalling) {
-    if (recalling && name === RECALL_TOOL_NAME) return recallBox.box.execute(name, args);
+  async function dispatch(name, args, listed) {
+    if (listed.recalling && name === RECALL_TOOL_NAME) return recallBox.box.execute(name, args);
+    if (listed.env.has(name)) return envBox.execute(name, args);
     if (toolbox === null) return { error: 'no tools are available' };
     return toolbox.execute(name, args);
   }
@@ -220,9 +250,22 @@ export function createAgent(options) {
     // of one function name is not a wire-legal request
     const recalling = recallBox !== null
       && !hostTools.some((tool) => tool?.function?.name === RECALL_TOOL_NAME);
-    const tools = recalling
-      ? [...hostTools, ...recallBox.box.toFunctionTools()]
-      : hostTools;
+    const named = new Set(hostTools.map((tool) => tool?.function?.name));
+    // same rule as `recall`: a host that registered its own tool of that
+    // name keeps it, because two definitions of one function name is not
+    // a wire-legal request. What this agent LISTED is what it dispatches.
+    const envTools = envBox === null
+      ? []
+      : envBox.toFunctionTools().filter((tool) => !named.has(tool?.function?.name));
+    const listed = {
+      recalling,
+      env: new Set(envTools.map((tool) => tool.function.name)),
+    };
+    const tools = [
+      ...hostTools,
+      ...(recalling ? recallBox.box.toFunctionTools() : []),
+      ...envTools,
+    ];
     /** @type {any[]} */
     const steps = [];
     // the goal and the retrieved state, composed onto whatever base
@@ -241,11 +284,19 @@ export function createAgent(options) {
       }
 
       const request = composeRequest(messages, composed);
-      const sent = historyBudget === undefined
+      // the transcript as a slot: the conversation is written to the
+      // environment and the request keeps a window of it plus the
+      // address of the whole. This runs BEFORE any character budget,
+      // because a request that already carries two rounds has nothing
+      // left for compaction to cut.
+      const windowed = transcript === null
         ? request
+        : await windowThroughEnvironment(request, transcript, environment);
+      const sent = historyBudget === undefined
+        ? windowed
         : ledger === null
-          ? compactMessages(request, historyBudget, compaction)
-          : await compactToLedger(request, historyBudget, hostCompaction,
+          ? compactMessages(windowed, historyBudget, compaction)
+          : await compactToLedger(windowed, historyBudget, hostCompaction,
             ledger, recallBox.options);
       if (startedAt === null) startedAt = clock();
       const completion = await client.complete({
@@ -300,7 +351,7 @@ export function createAgent(options) {
         const parsed = parseArguments(call.arguments);
         const result = parsed.error !== undefined
           ? parsed
-          : await dispatch(call.name, parsed.value, recalling);
+          : await dispatch(call.name, parsed.value, listed);
         hooks.onToolResult?.({ name: call.name, result });
         steps.push({ name: call.name, arguments: call.arguments, result });
         messages.push({
@@ -455,6 +506,94 @@ async function retrieved(pending, what) {
 
 //#endregion
 
+//#region the transcript as a slot
+
+/** Round units kept in the request when the transcript is a slot. */
+const TRANSCRIPT_WINDOW = 2;
+
+/**
+ * A toolbox holding one set of definitions, compiled once.
+ * @param {any[]} definitions
+ */
+function toolboxOf(definitions) {
+  const box = createToolbox();
+  for (const definition of definitions) box.add(definition);
+  return box;
+}
+
+/**
+ * The conversation as text a `grep` can answer from: one header line per
+ * message, then its content. Line-oriented on purpose — `grep` reports
+ * the line that matched, so a tool result written as one JSON line comes
+ * back as one legible hit with its address beside it.
+ * @param {any[]} messages
+ * @returns {string}
+ */
+export function transcriptText(messages) {
+  return messages.map((message, index) => {
+    const head = `[${index}] ${message.role}`;
+    if (Array.isArray(message.tool_calls)) {
+      return message.tool_calls
+        .map((call) => `${head} → ${call.function?.name}(${call.function?.arguments})`)
+        .join('\n');
+    }
+    if (message.role === 'tool') return `${head} ${message.name}: ${message.content}`;
+    return `${head}: ${message.content}`;
+  }).join('\n');
+}
+
+/**
+ * Write the whole conversation to its slot and keep a window of it in
+ * the request, with the address of the rest.
+ *
+ * This is the alternative to a history budget rather than a tuning of
+ * one. A budget answers "what do I cut to fit?"; this answers "why is
+ * the conversation in the request at all?" — it is stored, it is
+ * addressable, and the model reaches the part it needs with the same
+ * `env_grep`/`env_read` it uses on any other corpus. The request stops
+ * growing with the conversation: pins, one pointer, N rounds.
+ *
+ * The window is counted in ROUND UNITS, so an assistant message and the
+ * tool replies it belongs to are never split — the same wire-legality
+ * rule compaction obeys.
+ * @param {any[]} messages
+ * @param {{ slot: string, window: number }} transcript
+ * @param {any} environment
+ * @returns {Promise<any[]>}
+ */
+async function windowThroughEnvironment(messages, transcript, environment) {
+  const written = await environment.put(transcript.slot, transcriptText(messages),
+    { kind: 'transcript', count: messages.length });
+
+  /** @type {any[]} */
+  const pinnedSystem = [];
+  let rest = messages;
+  if (messages[0]?.role === 'system') {
+    pinnedSystem.push(messages[0]);
+    rest = messages.slice(1);
+  }
+  const units = roundUnits(rest);
+  const firstUser = units.findIndex((unit) => unit[0].role === 'user');
+  const cut = Math.max(firstUser + 1, units.length - transcript.window);
+  if (cut <= firstUser + 1) return messages;
+
+  const pointer = {
+    role: 'assistant',
+    content: `[The whole conversation is in the environment as slot "${transcript.slot}"`
+      + ` (${messages.length} messages, ${written?.size ?? 0} characters). Nothing was dropped:`
+      + ` env_grep finds the round you need and env_read returns it. This request carries the`
+      + ` last ${units.length - cut} round(s).]`,
+  };
+  return [
+    ...pinnedSystem,
+    ...(firstUser >= 0 ? units[firstUser] : []),
+    pointer,
+    ...units.slice(cut).flat(),
+  ];
+}
+
+//#endregion
+
 //#region budgets
 
 /** The dimensions a run is bounded by, in the order they are checked. */
@@ -487,7 +626,7 @@ function tokensOf(sent, completion, estimate) {
   if (reported > 0) return reported;
   if (!estimate) return 0;
   let chars = String(completion?.message?.content ?? '').length;
-  for (const message of sent) chars += messageSize(message);
+  for (const message of sent) chars += sizeOf(message);
   return Math.ceil(chars / TOKEN_CHARS);
 }
 
@@ -514,15 +653,13 @@ function budgetMessage(dimension, budget, spent) {
 
 //#region history compaction
 
-/** @param {any} message */
-function messageSize(message) {
-  return JSON.stringify(message).length;
-}
-
-/** @param {any[]} unit */
+/** The characters one round unit costs a request. `sizeOf` is the
+ * suite's one size rule (`@jarenjs/core/chunk`); a second local copy of
+ * "how big is this" is how two budgets in one repository come to
+ * disagree about the same message. */
 function unitSize(unit) {
   let total = 0;
-  for (const message of unit) total += messageSize(message);
+  for (const message of unit) total += sizeOf(message);
   return total;
 }
 
@@ -643,7 +780,7 @@ const RESERVE_PASSES = 4;
  */
 function planCompaction(messages, budget, reserveFor) {
   let total = 0;
-  for (const message of messages) total += messageSize(message);
+  for (const message of messages) total += sizeOf(message);
   if (total <= budget) return null;
 
   /** @type {any[]} */
@@ -655,7 +792,7 @@ function planCompaction(messages, budget, reserveFor) {
   }
   const units = roundUnits(rest);
   const firstUser = units.findIndex((unit) => unit[0].role === 'user');
-  const pinned = pinnedSystem.reduce((n, m) => n + messageSize(m), 0)
+  const pinned = pinnedSystem.reduce((n, m) => n + sizeOf(m), 0)
     + (firstUser >= 0 ? unitSize(units[firstUser]) : 0);
 
   // budget the pins plus room for the synopsis itself, then take tail
@@ -686,7 +823,7 @@ function planCompaction(messages, budget, reserveFor) {
     pins: [...pinnedSystem, ...(firstUser >= 0 ? units[firstUser] : [])],
     dropped,
     tail,
-    kept: pinned + tail.reduce((n, m) => n + messageSize(m), 0),
+    kept: pinned + tail.reduce((n, m) => n + sizeOf(m), 0),
   };
 }
 
@@ -705,7 +842,7 @@ function planCompaction(messages, budget, reserveFor) {
  */
 function assemble(plan, content, budget, floor) {
   const synopsis = { role: 'assistant', content };
-  const excess = plan.kept + messageSize(synopsis) - budget;
+  const excess = plan.kept + sizeOf(synopsis) - budget;
   if (excess > 0) {
     synopsis.content = truncate(synopsis.content,
       Math.max(floor, synopsis.content.length - excess));
@@ -851,12 +988,12 @@ async function writeArchive(ledger, archive) {
  */
 async function compactToLedger(messages, budget, hostWriter, ledger, recallOptions) {
   const ceiling = Math.max(SYNOPSIS_RESERVE, Math.floor(budget / SYNOPSIS_SHARE));
-  const sizeOf = (dropped) => Math.min(ceiling, messageSize({
+  const reserveFor = (dropped) => Math.min(ceiling, sizeOf({
     role: 'assistant',
     content: synopsizeAddressed(dropped, planArchive(dropped),
       hostWriter === null ? null : () => synopsize(dropped)),
   }));
-  const plan = planCompaction(messages, budget, sizeOf);
+  const plan = planCompaction(messages, budget, reserveFor);
   if (plan === null) return messages;
 
   const archive = planArchive(plan.dropped);

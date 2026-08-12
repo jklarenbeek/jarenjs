@@ -137,6 +137,13 @@ export const SLOT_SCHEMA = {
     size: { type: 'integer', minimum: 0 },
     excerpt: { type: 'string' },
     at: AT,
+    // OPTIONAL, and optional on purpose: `size` is what a slot costs and
+    // is always known, while `count` is what it CONTAINS — lines,
+    // records, pieces — which only the writer knows and only sometimes.
+    // A root view listing a hundred slots is far more useful with "1 240
+    // lines" beside a size, and a slot whose writer could not say is
+    // better off saying nothing than guessing.
+    count: { type: 'integer', minimum: 0 },
   },
   required: ['name', 'kind', 'size', 'excerpt', 'at'],
   additionalProperties: false,

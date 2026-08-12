@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.32.3",
+  "version": "0.33.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -47,6 +47,10 @@
     "./cache": {
       "types": "./dist/types/cache.d.ts",
       "default": "./src/cache.js"
+    },
+    "./chunk": {
+      "types": "./dist/types/chunk.d.ts",
+      "default": "./src/chunk.js"
     },
     "./color": {
       "types": "./dist/types/color.d.ts",

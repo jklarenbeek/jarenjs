@@ -15,12 +15,15 @@ export { createChatClient, createStreamAccumulator } from './client.js';
 export { createStructuredOutput } from './structured.js';
 export { checkOutcome, composeChecks, invalidInput } from './check.js';
 export { createToolbox, registerModelContext } from './toolbox.js';
-export { createAgent } from './agent.js';
+export { createAgent, transcriptText } from './agent.js';
 export {
   RECALL_TOOL_NAME, createRecallTool, roundSlotName, indexSlotName,
   slotRef, slotAddress, slotAddressesIn,
 } from './recall.js';
 export { createLedger } from './ledger.js';
+export {
+  createEnvironment, environmentTools, chunkSlotName, chunkFamily, CHUNK_KIND,
+} from './environment.js';
 export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';
 export {

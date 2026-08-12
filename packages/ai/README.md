@@ -368,8 +368,9 @@ of forty records are closest?) is unanswerable the instant one round is cut, and
 does not change that: forty rounds fetched one at a time do not fit the budget they were
 cut to fit. The benchmark scores that question too and publishes it beside the needle: <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->.
 Recall is the wrong shape of answer for it. Moving that number needs the corpus held
-*outside* the context and queried programmatically, which is a different piece of work and
-is not in this package yet. The live tier of that measurement ran on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 176 model calls<!--/bm-->.
+*outside* the context and queried programmatically — which is what the environment below
+is for, though the measurement of it is not in yet. The live tier of the numbers above ran
+on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 176 model calls<!--/bm-->.
 
 Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
@@ -485,6 +486,73 @@ One incidental result, recorded because the long-horizon benchmark found the opp
 the same provider. It was slower on the thinking model (69 s against 56 s median) and
 identical in outcome. The smaller `27b` answered in a tenth of that, from a fifth of the
 completion tokens — a thinking model spends most of a refinement thinking.
+
+## The environment — a corpus you work on, not one you read
+
+Everything above makes a long context *fit*. The environment asks the other question:
+why is the corpus in the request at all?
+
+```js
+import { createEnvironment } from '@jarenjs/ai';
+import { compileJsonQuery } from '@jarenjs/json/query';
+
+const environment = createEnvironment({ ledger, compileQuery: compileJsonQuery });
+await environment.put('report', await file.text());          // 10 MB is fine
+await environment.chunk('report', { strategy: 'line', size: 4000 });
+
+const agent = createAgent({ client, toolbox, environment });  // env_* tools registered
+```
+
+Content lives in named slots. The model sees a **digest** — name, kind, size, count, one
+line of excerpt — and works by naming slots in operations:
+
+| operation | answers with | never |
+|---|---|---|
+| `digest()` | every slot's metadata, capped, plus how many it did not list | content |
+| `peek(name)` | metadata and the first characters | the slot |
+| `chunk(name, …)` | addresses of the pieces, capped, plus how many more | the pieces |
+| `grep(pattern, …)` | which slot matched, a window **around the hit**, and its offset | the slot |
+| `select(name, query)` | the address of a new slot holding the result | the rows |
+| `stat(name)` | counts, sizes, kinds — for one slot or a whole family | anything read |
+| `read(name, { chars })` | exactly that many characters | more than asked |
+
+**No operation returns bulk content.** Every result is capped by construction, so it is the
+same size whether the slot holds 10 kB or 10 MB — that is asserted, not intended. `read` is
+the single exception and it makes the caller state a budget, because a design where reading
+is as easy as peeking is a design that ends up back in the transcript.
+
+**The root view does not grow with the corpus.** Sweeping a corpus across three orders of
+magnitude (10 kB → 10 MB, `test/ai/environment-scale.test.js`), the root request stays
+inside a 3 000-character band and moves by *tens* of characters between decades — the extra
+digits in a chunk's index, and nothing else. The digest lists at most twelve slots and
+reports how many it did not list; a cap that hid the difference would let a model conclude
+a four-hundred-slot corpus is twelve slots long. The same sweep runs against an
+asynchronous, out-of-process stub adapter, because a property that only held for the
+in-memory default would be a property of the test.
+
+Addresses are derived, never stored: a chunk is `parent#strategy:size/index`, so chunking
+the same slot twice writes the same slots instead of a second copy. `select` needs the
+`compileQuery` seam and declines with a stated reason without it — naming `grep` as the way
+around it — while every other operation is unaffected.
+
+### The transcript is just another slot
+
+```js
+const agent = createAgent({ client, toolbox, environment, transcript: { window: 2 } });
+```
+
+The growing conversation is a long prompt too. With `transcript`, it is written whole to a
+slot before every call and the request keeps a window of it plus the address of the rest —
+so the request stops growing with the conversation, and an earlier round is reached the way
+anything else is: `env_grep` for it, `env_read` at the offset it reports. Over forty
+gathering rounds the request stays under 3 000 characters, and a value that a
+6 000-character `historyBudget` run no longer carries comes back from a 600-character read
+(`test/ai/transcript-slot.test.js`).
+
+This is the alternative to `historyBudget` rather than a tuning of it: there is no budget to
+exceed when the history is addressed instead of resent. `historyBudget` keeps working
+exactly as it did — an agent with no `environment` is byte-identical to one built before
+this existed — and which to reach for is the choice, not a migration.
 
 ### Heartbeats are the host's
 

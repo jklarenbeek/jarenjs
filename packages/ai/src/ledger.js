@@ -37,7 +37,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { checkOutcome, invalidInput } from './check.js';
 import { createMemoryStorage } from './storage/memory.js';
 import { LEDGER_SCHEMAS } from './schemas/ledger.js';
-import { excerpt } from './text.js';
+import { excerpt } from '@jarenjs/core/chunk';
 
 /** The key space. State and snapshots are separate prefixes on purpose:
  * a rollback wipes state and must not take the other snapshots with it. */
@@ -441,7 +441,9 @@ export function createLedger(options = {}) {
    * name a hundred of them without carrying any of their content.
    * @param {string} name
    * @param {string} content
-   * @param {{ kind?: string, at?: string }} [meta]
+   * @param {{ kind?: string, at?: string, count?: number }} [meta]
+   *   `count` is what the content HOLDS (lines, records, pieces) where
+   *   the writer knows it; absent where it does not, rather than guessed.
    */
   async function putSlot(name, content, meta = {}) {
     const text = typeof content === 'string' ? content : JSON.stringify(content ?? null);
@@ -451,6 +453,7 @@ export function createLedger(options = {}) {
       size: text.length,
       excerpt: excerpt(text, SLOT_EXCERPT_CHARS),
       at: meta.at ?? now(),
+      count: meta.count,
     });
     const rejected = validate('slot', slot);
     if (rejected !== null) return rejected;

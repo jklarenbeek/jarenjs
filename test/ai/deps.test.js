@@ -72,14 +72,19 @@ describe('ai — the dependency contract (D3)', function () {
     // and would end the property that this package runs in a static page
     // with two dependencies — so the engine arrives as `applyPatch` and
     // refinement declines with a stated reason when nobody wired it.
-    for (const file of ['ledger.js', 'refine.js', 'text.js',
+    for (const file of ['ledger.js', 'refine.js', 'environment.js',
       'storage/memory.js', 'schemas/ledger.js', 'schemas/patch.js']) {
       const source = readFileSync(
         new URL(`../../packages/ai/src/${file}`, import.meta.url), 'utf8');
       for (const match of source.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gms)) {
         const specifier = match[1];
         if (specifier.startsWith('.')) continue;
-        assert.ok(['@jarenjs/core', '@jarenjs/validate'].includes(specifier),
+        // a SUBPATH of an allowed package is still that package: the
+        // excerpt/size/chunk helpers live in `@jarenjs/core/chunk`
+        // because the repo's rule sends pure helpers to core, and a
+        // second copy here is exactly what that rule exists to prevent
+        const pkg = specifier.split('/').slice(0, 2).join('/');
+        assert.ok(['@jarenjs/core', '@jarenjs/validate'].includes(pkg),
           `${file} imports '${specifier}' — inject it instead`);
       }
     }
