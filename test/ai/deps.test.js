@@ -44,6 +44,25 @@ describe('ai — the dependency contract (D3)', function () {
     }
   });
 
+  it('the compaction path imports nothing outside those two either', function () {
+    // same rule as below, one level looser on the specifier: `recall.js`
+    // reaches for `@jarenjs/core/string` because the suite has exactly
+    // one content-hash primitive and a second one here would give the
+    // same round two addresses. A SUBPATH of an allowed package is still
+    // that package; a different package is not.
+    for (const file of ['agent.js', 'recall.js']) {
+      const source = readFileSync(
+        new URL(`../../packages/ai/src/${file}`, import.meta.url), 'utf8');
+      for (const match of source.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gms)) {
+        const specifier = match[1];
+        if (specifier.startsWith('.')) continue;
+        const pkg = specifier.split('/').slice(0, 2).join('/');
+        assert.ok(['@jarenjs/core', '@jarenjs/validate'].includes(pkg),
+          `${file} imports '${specifier}' — inject it instead`);
+      }
+    }
+  });
+
   it('the ledger and its default storage import nothing outside those two', function () {
     // the manifest is a claim; the source is the fact. A relative import
     // is this package's own code, a bare specifier is a dependency.

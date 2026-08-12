@@ -30,7 +30,7 @@
  * own self-test; it is asserted in `test/ai/`, not only here.
  */
 
-import { createAgent, createToolbox } from '@jarenjs/ai';
+import { createAgent, createToolbox, slotAddressesIn } from '@jarenjs/ai';
 
 /** The baseline's parameters. Changing one changes every published row. */
 export const DEFAULTS = {
@@ -232,7 +232,22 @@ export function recordToolbox(corpus, padding, shape) {
  * @returns {{ idPresent: number, valuePresent: number }}
  */
 export function retention(messages, corpus) {
-  const text = messages.map((m) => String(m.content ?? '')).join('\n');
+  return retentionIn(transcriptText(messages), corpus);
+}
+
+/** The text a message array actually carries, as a model would read it. */
+export function transcriptText(messages) {
+  return messages.map((m) => String(m.content ?? '')).join('\n');
+}
+
+/**
+ * The same count over any text, so the verbatim tier and the recoverable
+ * tier are scored by one rule and a difference between them can only
+ * come from what was reachable.
+ * @param {string} text
+ * @param {{ n: number, ids: string[], values: number[] }} corpus
+ */
+export function retentionIn(text, corpus) {
   let idPresent = 0;
   let valuePresent = 0;
   for (let i = 0; i < corpus.n; i++) {
@@ -244,6 +259,58 @@ export function retention(messages, corpus) {
     if (hasId && text.includes(`"value":${corpus.values[i]}`)) valuePresent++;
   }
   return { idPresent, valuePresent };
+}
+
+/**
+ * One archived slot as a reader of it sees it. A round slot holds the
+ * exact wire messages, serialized — so its facts are one JSON level
+ * deeper than the transcript's and a probe reading the raw string would
+ * miss them for the same escaping reason the header warns about. The
+ * index slot is plain text and passes straight through.
+ * @param {any} content
+ * @returns {string}
+ */
+function slotText(content) {
+  try {
+    const parsed = JSON.parse(String(content));
+    if (Array.isArray(parsed)) return transcriptText(parsed);
+  }
+  catch {
+    // the index listing is not JSON, and that is not an error
+  }
+  return String(content);
+}
+
+/**
+ * Everything a request can still REACH: its own text, plus the content
+ * of every slot address it names — transitively, because the synopsis
+ * header names an index whose listing names the rounds. This is the
+ * model-free reading of D4's promise: a fact that left the request is
+ * only "moved" if something in the request still leads to it.
+ *
+ * One implementation, used by the benchmark's ledger tier and by the
+ * package's own recoverability sweep, so the number published and the
+ * number asserted cannot drift apart.
+ * @param {any[]} messages - the request the client received
+ * @param {{ readSlot: (name: string) => Promise<any> }} ledger
+ * @returns {Promise<{ text: string, slots: string[] }>}
+ */
+export async function reachable(messages, ledger) {
+  const parts = [transcriptText(messages)];
+  /** @type {Set<string>} */
+  const seen = new Set();
+  const queue = slotAddressesIn(parts[0]);
+  while (queue.length > 0) {
+    const name = /** @type {string} */ (queue.shift());
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const content = await ledger.readSlot(name);
+    if (content === undefined || content === null) continue;
+    const text = slotText(content);
+    parts.push(text);
+    for (const next of slotAddressesIn(text)) if (!seen.has(next)) queue.push(next);
+  }
+  return { text: parts.join('\n'), slots: [...seen] };
 }
 
 /**
@@ -266,15 +333,25 @@ export function pairSurvived(messages, corpus) {
 /**
  * Drive the real `createAgent` through `rounds` tool calls at the given
  * history budget and report what reached the client.
+ *
+ * With a `ledger`, the same run is measured twice: what the request
+ * carries VERBATIM (the same columns as the ledger-free tier, so the two
+ * are comparable line for line) and what it can still REACH through the
+ * addresses it names. Those are different quantities and both are
+ * reported — a recoverable fact costs the model one `recall` call, which
+ * a verbatim one does not.
  * @param {{ corpus: any, padding?: number, budget?: number,
- *   shape?: 'front'|'late' }} options
+ *   shape?: 'front'|'late', ledger?: any }} options
  *   - `budget` undefined runs the agent with no `historyBudget` at all
  *   (the uncapped control).
  * @returns {Promise<{ idPresent: number, valuePresent: number,
  *   messages: any[], messageCount: number, sent: number, full: number,
- *   compacted: boolean, pairSurvived: boolean }>}
+ *   compacted: boolean, pairSurvived: boolean,
+ *   idRecoverable: number, valueRecoverable: number, slots: string[] }>}
  */
-export async function probe({ corpus, padding = DEFAULTS.padding, budget, shape = 'front' }) {
+export async function probe({
+  corpus, padding = DEFAULTS.padding, budget, shape = 'front', ledger,
+}) {
   const client = recordingClient(corpus.n);
   const agent = createAgent({
     client,
@@ -282,11 +359,20 @@ export async function probe({ corpus, padding = DEFAULTS.padding, budget, shape 
     system: 'You gather records.',
     maxToolRounds: corpus.n + 1,
     historyBudget: budget,
+    ledger,
   });
   const result = await agent.send([{ role: 'user', content: 'Gather every record, then answer.' }]);
   const last = client.requests[client.requests.length - 1];
+  const verbatim = retention(last, corpus);
+  const reached = ledger === undefined
+    ? { text: null, slots: [] }
+    : await reachable(last, ledger);
+  const recoverable = reached.text === null ? verbatim : retentionIn(reached.text, corpus);
   return {
-    ...retention(last, corpus),
+    ...verbatim,
+    idRecoverable: recoverable.idPresent,
+    valueRecoverable: recoverable.valuePresent,
+    slots: reached.slots,
     messages: last,
     messageCount: last.length,
     sent: JSON.stringify(last).length,

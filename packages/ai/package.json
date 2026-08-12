@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/ai",
   "private": false,
-  "version": "0.32.0",
+  "version": "0.32.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -74,6 +74,10 @@
       "types": "./dist/types/agent.d.ts",
       "default": "./src/agent.js"
     },
+    "./recall": {
+      "types": "./dist/types/recall.d.ts",
+      "default": "./src/recall.js"
+    },
     "./ledger": {
       "types": "./dist/types/ledger.d.ts",
       "default": "./src/ledger.js"
@@ -89,7 +93,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.32.0",
-    "@jarenjs/validate": "^0.32.0"
+    "@jarenjs/core": "^0.32.1",
+    "@jarenjs/validate": "^0.32.1"
   }
 }

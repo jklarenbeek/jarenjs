@@ -948,3 +948,24 @@ async function ledgerBlock() {
   void content;
 }
 void ledgerBlock;
+
+// @jarenjs/ai — compaction that moves: the agent takes the ledger, and
+// the address scheme it writes is public so a host can read one back
+// without re-deriving the syntax.
+import { createAgent, createRecallTool, slotAddressesIn } from '@jarenjs/ai';
+import { roundSlotName } from '@jarenjs/ai/recall';
+
+async function recallBlock() {
+  const ledger = createLedger();
+  const agent = createAgent({
+    client: { complete: async () => ({ message: { role: 'assistant', content: 'ok' } }) },
+    historyBudget: 4000,
+    ledger,
+  });
+  const sent = await agent.send([{ role: 'user', content: 'go' }]);
+  const names: string[] = slotAddressesIn(String(sent.message.content));
+  const name: string = roundSlotName('[]');
+  const tool = createRecallTool(ledger);
+  void (await tool.execute({ slot: names[0] ?? name }));
+}
+void recallBlock;

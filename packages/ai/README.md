@@ -255,8 +255,66 @@ system prompt, the first user message and the largest tail that fits always surv
 the dropped middle becomes one synopsis message naming every dropped tool round. Cuts
 happen only at tool-round boundaries, so `tool_calls`/`tool` pairing stays wire-legal —
 always. The built-in synopsis is pure string work (no second model call; a single local
-model runs unassisted); `compaction: (droppedRounds) => string` swaps in your own writer.
-The returned transcript is always the full, uncompacted history.
+model runs unassisted); `compaction: (droppedRounds, addresses) => string` swaps in your
+own writer. The returned transcript is always the full, uncompacted history.
+
+On its own that is lossy, and worth being precise about, because the loss has a shape.
+Each dropped tool call leaves one line whose result excerpt is capped at 60 characters, so
+the synopsis remembers **that** `fetch_record` was called and returned a `REC0007` and
+loses **what the record said**. Measured on 40 rounds of ~440-character results at a
+6 000-character budget, the request keeps 15 of 40 record ids and 7 of their 40 values
+(`npm run benchmark:long-horizon`). A model can see the label and answer confidently from
+a record it no longer has. **Compaction alone is not the answer to a long session.**
+
+### Compaction that moves instead of destroying
+
+Give the agent a ledger and nothing leaves the request without a copy that can be named:
+
+```js
+import { createAgent, createLedger } from '@jarenjs/ai';
+
+const ledger = createLedger({ storage });        // storage is yours to inject
+const agent = createAgent({ client, toolbox, historyBudget: 6000, ledger });
+```
+
+`createLedger()` takes no arguments and works in memory, so a static page degrades cleanly;
+durability is a storage adapter the host injects (`get`/`set`/`delete`/`keys`, all async —
+back it with `@jarenjs/db` over OPFS, with `localStorage`, or with nothing).
+
+Each dropped round is archived to a slot **before** the synopsis is written, and every
+synopsis line carries its address:
+
+```
+[Earlier context was compacted. 33 round(s) are ARCHIVED, not lost: recall("rx-…") lists
+ every address; recall(name) returns one in full. What happened:]
+- called fetch_record({"index":7}) → {"id":"REC0007","notes":"xxxx… [recall("r-8kq2p-442") · 442B]
+```
+
+The excerpt is now a *preview*, not a summary. A `recall` tool is registered alongside your
+own (only when there is a ledger, and never over a `recall` you registered yourself), so
+the model fetches a round back when it needs one — a normal tool call that shows up in
+`steps` like any other, rather than an automatic re-expansion guessing which round mattered.
+
+- **Addresses are content-derived**, so compacting the same history twice writes the same
+  slots rather than a second copy.
+- **The allowance grows with the number of archived rounds** instead of being flat, and is
+  capped at a quarter of the budget so the addresses cannot crowd out the recent tail. The
+  budget still holds to the character.
+- **The header survives truncation.** If the synopsis itself has to be cut, the per-round
+  addresses go but the index address does not — and the index lists every one of them.
+- **A store that refuses a write throws** (`AiError` `AI0001`). The alternative is dropping
+  a round while claiming an address for it, which is the failure this exists to remove.
+
+The contract, asserted over every budget the benchmark sweeps in both payload shapes
+(`test/ai/compaction-recovery.test.js`): **every fact the full transcript held is either
+still in the request verbatim or reachable through an address the request names** — 40 of
+40 record values, where the same runs without a ledger recover 1 to 28 of them. What that
+costs is a few characters of verbatim retention at the tightest budgets, published beside
+the win. It does not fix everything: a question that needs *every* fact at once (which two
+of forty records are closest?) is still unanswerable once anything is cut, because forty
+rounds fetched one at a time do not fit the budget they were cut to fit.
+
+Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
 ## House rules
 

@@ -2,7 +2,11 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { createAgent, createToolbox } from '@jarenjs/ai';
+import { hashContent } from '@jarenjs/core/string';
+
+import {
+  createAgent, createToolbox, createLedger, slotAddressesIn, roundSlotName,
+} from '@jarenjs/ai';
 
 /** A scripted client: each complete() call shifts the next reply. */
 function scriptedClient(replies) {
@@ -265,6 +269,30 @@ describe('ai — history compaction', function () {
       'system + full history + the final reply');
   });
 
+  it('with no ledger the compacted request is byte-identical to what it always was', async function () {
+    // D6, pinned rather than described. These fingerprints were taken
+    // from the implementation as it stood BEFORE compaction learned to
+    // archive: `git show <pre>:packages/ai/src/agent.js`, driven by this
+    // same history. Four budgets, so the pin covers the ordinary cut
+    // (4000), a cut deep enough to lose most of the tail (2500) and two
+    // where the synopsis itself is truncated to fit (1200, 800).
+    //
+    // A change to any of them is not a test to update — it is a silent
+    // change to every existing caller, which is the thing D6 forbids.
+    const pinned = { 4000: '6oyyv4', 2500: '170jrpc', 1200: '1j3wles', 800: '1175fov' };
+    for (const [budget, fingerprint] of Object.entries(pinned)) {
+      const { wires, client } = capturingClient();
+      const agent = createAgent({
+        client: /** @type {any} */ (client),
+        system: 'You are the assistant.',
+        historyBudget: Number(budget),
+      });
+      await agent.send(longHistory(12));
+      assert.strictEqual(hashContent(JSON.stringify(wires[0])), fingerprint,
+        `the ledger-free request at budget ${budget} changed`);
+    }
+  });
+
   it('a custom compaction hook receives exactly the dropped rounds', async function () {
     const { wires, client } = capturingClient();
     /** @type {any[][] | null} */
@@ -289,4 +317,164 @@ describe('ai — history compaction', function () {
       }
     }
   });
+
+  //#region compaction that moves (D4)
+
+  it('with a ledger every dropped round is archived and its address travels', async function () {
+    const { wires, client } = capturingClient();
+    const ledger = createLedger();
+    const agent = createAgent({
+      client: /** @type {any} */ (client),
+      system: 'You are the assistant.',
+      historyBudget: 4_000,
+      ledger,
+    });
+    const history = longHistory(12);
+    await agent.send(history);
+    const wire = wires[0];
+    const synopsis = wire.find((m) => typeof m.content === 'string'
+      && m.content.startsWith('[Earlier context'));
+
+    // the header announces the mechanism where the model needs it, and
+    // names the index; the lines carry one address each
+    assert.match(synopsis.content, /ARCHIVED, not lost/);
+    const addresses = slotAddressesIn(synopsis.content);
+    assert.ok(addresses.length > 1, 'the index address plus one per dropped round');
+
+    // every address the request names answers, and the content is the
+    // round itself — not a summary of it
+    for (const name of addresses) {
+      const content = await ledger.readSlot(name);
+      assert.ok(typeof content === 'string' && content.length > 0, `slot ${name} is empty`);
+    }
+    const rounds = await ledger.listSlots();
+    assert.ok(rounds.length > 0);
+    for (const slot of rounds) {
+      assert.ok(['agent-round', 'agent-round-index'].includes(slot.kind));
+    }
+
+    // the address is derived from the round's own bytes: the dropped
+    // assistant turn is inside the slot it addresses
+    const first = JSON.parse(await ledger.readSlot(addresses[1]));
+    assert.ok(Array.isArray(first) && first[0].role === 'assistant');
+    assert.strictEqual(roundSlotName(JSON.stringify(first)), addresses[1],
+      'the name IS the hash of the content, so the same round cannot be stored twice');
+  });
+
+  it('recall is registered, appears in steps, and answers { error } for an unknown slot', async function () {
+    /** @type {any[]} */
+    const seenTools = [];
+    let archived = '';
+    const ledger = createLedger();
+    const client = {
+      complete: async ({ messages, tools }) => {
+        seenTools.push(tools);
+        const synopsis = messages.find((m) => typeof m.content === 'string'
+          && m.content.startsWith('[Earlier context'));
+        if (synopsis !== undefined && archived === '') {
+          [, archived] = slotAddressesIn(synopsis.content);
+          return toolTurn([
+            { id: 'r1', name: 'recall', arguments: JSON.stringify({ slot: archived }) },
+            { id: 'r2', name: 'recall', arguments: '{"slot":"r-nope-1"}' },
+          ]);
+        }
+        return final('done');
+      },
+    };
+    const agent = createAgent({
+      client: /** @type {any} */ (client),
+      system: 'You are the assistant.',
+      historyBudget: 4_000,
+      ledger,
+    });
+    const result = await agent.send(longHistory(12));
+
+    assert.ok(seenTools[0].some((t) => t.function.name === 'recall'),
+      'a ledger registers recall — and only a ledger does');
+    assert.deepStrictEqual(result.steps.map((s) => s.name), ['recall', 'recall'],
+      'a recall is an ordinary step, inspectable like any other call');
+    assert.strictEqual(result.steps[0].result.slot, archived);
+    assert.match(result.steps[0].result.content, /jaren_studio_patch/);
+    // the miss never throws, and points at the listing rather than
+    // leaving the model with a refusal it cannot act on
+    assert.match(result.steps[1].result.error, /unknown slot 'r-nope-1'/);
+    assert.match(result.steps[1].result.hint, /lists every address/);
+  });
+
+  it('no ledger means no recall tool, and a host that has its own keeps it', async function () {
+    const bare = createToolbox();
+    bare.add({
+      name: 'recall',
+      description: 'the host had this name first',
+      inputSchema: { type: 'object' },
+      execute: () => ({ mine: true }),
+    });
+    /** @type {any[]} */
+    const seenTools = [];
+    const client = {
+      complete: async ({ tools }) => {
+        seenTools.push(tools ?? []);
+        return final('ok');
+      },
+    };
+
+    await createAgent({ client: /** @type {any} */ (client), toolbox: mathToolbox() })
+      .send([{ role: 'user', content: 'x' }]);
+    assert.deepStrictEqual(seenTools[0].map((t) => t.function.name), ['add'],
+      'without a ledger the tool list is exactly the host\'s');
+
+    await createAgent({ client: /** @type {any} */ (client), toolbox: bare, ledger: createLedger() })
+      .send([{ role: 'user', content: 'x' }]);
+    assert.deepStrictEqual(seenTools[1].map((t) => t.function.name), ['recall'],
+      'two definitions of one function name is not a wire-legal request');
+    assert.strictEqual(seenTools[1][0].function.description, 'the host had this name first');
+  });
+
+  it('a custom compaction hook is given the addresses, and the header survives it', async function () {
+    const { wires, client } = capturingClient();
+    /** @type {any[] | null} */
+    let addresses = null;
+    const agent = createAgent({
+      client: /** @type {any} */ (client),
+      historyBudget: 4_000,
+      ledger: createLedger(),
+      compaction: (dropped, given) => {
+        addresses = /** @type {any[]} */ (given);
+        return `HOST WROTE ${dropped.length}`;
+      },
+    });
+    await agent.send(longHistory(12));
+    const synopsis = wires[0].find((m) => typeof m.content === 'string'
+      && m.content.startsWith('[Earlier context'));
+    assert.match(synopsis.content, /HOST WROTE \d+/);
+    assert.strictEqual(slotAddressesIn(synopsis.content).length, 1,
+      'a writer that ignores the addresses still cannot lose them: the header names the index');
+    assert.ok(Array.isArray(addresses) && addresses.length > 0);
+    for (const address of /** @type {any[]} */ (addresses)) {
+      assert.strictEqual(typeof address.name, 'string');
+      assert.strictEqual(typeof address.size, 'number');
+    }
+  });
+
+  it('a ledger that cannot store fails loudly instead of dropping the round', async function () {
+    const { client } = capturingClient();
+    const refusing = {
+      putSlot: async () => ({ error: 'quota exceeded' }),
+      getSlot: async () => null,
+      readSlot: async () => undefined,
+    };
+    const agent = createAgent({
+      client: /** @type {any} */ (client), historyBudget: 4_000, ledger: refusing,
+    });
+    await assert.rejects(() => agent.send(longHistory(12)), (/** @type {any} */ err) => {
+      assert.strictEqual(err.code, 'AI0001');
+      assert.match(err.message, /could not archive a round/);
+      return true;
+    });
+
+    assert.throws(() => createAgent({ client: /** @type {any} */ (client), ledger: {} }),
+      /AI0001.*putSlot/s, 'a ledger-shaped thing that is not one is caught at construction');
+  });
+
+  //#endregion
 });
