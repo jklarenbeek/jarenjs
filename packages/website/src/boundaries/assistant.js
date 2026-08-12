@@ -25,6 +25,8 @@ import {
 import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
 import { compileFsm, compileDag } from '@jarenjs/flow';
 import { JarenValidator } from '@jarenjs/validate';
+import { jsonFormats } from '@jarenjs/formats';
+import { OUR_SCHEMA_OPTIONS } from '../lib/schema-options.js';
 
 import fsmSchema from '@jarenjs/flow/schemas/jaren-fsm.schema.json' with { type: 'json' };
 import dagSchema from '@jarenjs/flow/schemas/jaren-dag.schema.json' with { type: 'json' };
@@ -67,14 +69,16 @@ export const flowGateTaskStub = () => null;
 
 const FLOW_CHECKS = {
   fsm: composeChecks(
-    new JarenValidator({ collectErrors: true }).addSchema(querySchema).compile(fsmSchema),
+    new JarenValidator({ ...OUR_SCHEMA_OPTIONS, skipErrors: true })
+      .addFormats(jsonFormats).addSchema(querySchema).compile(fsmSchema),
     compileGate(compileFsm)),
   // a dag needs its task registry to compile; the assistant checks
   // STRUCTURE (schema) + acyclicity/ports/output against a registry
   // stubbed from the document's own task names, so a document naming a
   // handler still passes the shape gate
   dag: composeChecks(
-    new JarenValidator({ collectErrors: true }).addSchema(querySchema).addSchema(jsltSchema).compile(dagSchema),
+    new JarenValidator({ ...OUR_SCHEMA_OPTIONS, skipErrors: true })
+      .addFormats(jsonFormats).addSchema(querySchema).addSchema(jsltSchema).compile(dagSchema),
     compileGate((doc) => {
       /** @type {Record<string, any>} */
       const tasks = {};

@@ -4,6 +4,7 @@ import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
 import { JarenValidator } from '@jarenjs/validate';
+import { jsonFormats } from '@jarenjs/formats';
 import { compileFsm, compileDag } from '@jarenjs/flow';
 import {
   downlevelDraft07,
@@ -24,12 +25,14 @@ const dagSchema07 = load('../../packages/flow/schemas/jaren-dag.draft-07.schema.
 
 function compileFsmSchema() {
   return new JarenValidator()
+      .addFormats(jsonFormats)
     .addSchema(querySchema)
     .compile(fsmSchema);
 }
 
 function compileDagSchema() {
   return new JarenValidator()
+      .addFormats(jsonFormats)
     .addSchema(querySchema)
     .addSchema(jsltSchema)
     .compile(dagSchema);
@@ -134,6 +137,7 @@ describe('the jaren-fsm schema artifact', function () {
 
   it('the draft-07 twin validates through the draft-07 query twin', function () {
     const validate = new JarenValidator()
+      .addFormats(jsonFormats)
       .addSchema(querySchema07)
       .compile(fsmSchema07);
     for (const doc of formatDocExamples().filter((d) => d.$dag === undefined)) {
@@ -188,6 +192,7 @@ describe('the jaren-dag schema artifact', function () {
 
   it('the draft-07 twin validates through the draft-07 grammar twins', function () {
     const validate = new JarenValidator()
+      .addFormats(jsonFormats)
       .addSchema(querySchema07)
       .addSchema(jsltSchema07)
       .compile(dagSchema07);

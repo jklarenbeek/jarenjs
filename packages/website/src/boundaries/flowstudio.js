@@ -20,6 +20,8 @@ import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/jso
 import { createApp } from '@jarenjs/app';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 import { JarenValidator } from '@jarenjs/validate';
+import { jsonFormats } from '@jarenjs/formats';
+import { OUR_SCHEMA_OPTIONS } from '../lib/schema-options.js';
 
 import dagSchema from '@jarenjs/flow/schemas/jaren-dag.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
@@ -314,7 +316,8 @@ const runMount = memo1((doc, revision, context) => ({ doc, revision, context }))
 // The run-mode runtime: nested app widget + dag runner + parse effect
 // ------------------------------------------------------------------
 
-const validateDagDoc = new JarenValidator()
+const validateDagDoc = new JarenValidator(OUR_SCHEMA_OPTIONS)
+  .addFormats(jsonFormats)
   .addSchema(querySchema)
   .addSchema(jsltSchema)
   .compile(dagSchema);

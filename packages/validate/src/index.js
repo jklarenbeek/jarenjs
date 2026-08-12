@@ -237,6 +237,7 @@ export class ValidationOptions {
    * @param {boolean} [vocabValidation=true] - Whether the validation vocabulary is enabled (false when the schema's metaschema omits it via $vocabulary)
    * @param {boolean|null} [formatAssertion=null] - Whether format asserts (null = auto: asserts below draft 2020-12, annotation-only from 2020-12 on)
    * @param {boolean} [messages=true] - Whether collected errors carry rendered message text; false skips rendering (message: '', params/msgid still set)
+   * @param {'error'|'ignore'} [unknownFormats='ignore'] - What to do when an ASSERTING `format` names something no compiler is registered for: 'ignore' (the default, and what the specification requires) accepts it as an annotation; 'error' throws at COMPILE time. Never affects instance validation, and never applies where format is annotation-only anyway.
    */
   constructor(
     skipErrors = true,
@@ -246,7 +247,8 @@ export class ValidationOptions {
     draftVersion = 7,
     vocabValidation = true,
     formatAssertion = null,
-    messages = true
+    messages = true,
+    unknownFormats = 'ignore'
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -264,6 +266,8 @@ export class ValidationOptions {
     this.formatAssertion = formatAssertion;
     /** @type {boolean} Whether collected errors carry rendered message text */
     this.messages = messages;
+    /** @type {'error'|'ignore'} What an asserting `format` with no registered compiler does */
+    this.unknownFormats = unknownFormats;
   }
 }
 
@@ -1241,7 +1245,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1255,7 +1259,8 @@ export class ValidatorOptions {
           opts.draftVersion ?? 7,
           true,
           opts.formatAssertion ?? null,
-          opts.messages ?? true
+          opts.messages ?? true,
+          opts.unknownFormats ?? 'ignore'
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1306,6 +1311,7 @@ export class ValidatorOptions {
  * @property {number} [draftVersion] - The JSON Schema draft version
  * @property {boolean} [formatAssertion] - Assert the format keyword
  * @property {boolean} [messages] - Render English message text on collected errors
+ * @property {'error'|'ignore'} [unknownFormats] - What an ASSERTING `format` with no registered compiler does: 'ignore' (default, per spec) accepts it as an annotation, 'error' throws at compile time
  */
 
 /**
@@ -1497,12 +1503,12 @@ export class JarenValidator {
    * @param {Map} schemas
    * @returns {(data) => boolean | {valid: boolean, errors: import("./messages.js").ValidationError[]}}
    */
-  static #compileSchema(self, origin, schemas) {
+  static #compileSchema(self, origin, schemas, validation = self.#options.validation) {
     const root = new ValidationRoot(
       origin,
       schemas,
       self.#formats,
-      self.#options.validation,
+      validation,
       self.#options.traverse,
       self);
 
@@ -1571,20 +1577,37 @@ export class JarenValidator {
    */
   addMetaSchema(schema, key = undefined) {
     key = JarenValidator.normalizeUriKey(key)
+    // A meta-schema is infrastructure, not something the caller authored:
+    // every JSON Schema meta-schema declares `format: "uri-reference"` on
+    // `$id`/`$ref`, and nobody registers formats in order to check that a
+    // SCHEMA is well-formed. The unknownFormats guard protects an author
+    // from a keyword of their own that silently checks nothing, so it does
+    // not apply here — otherwise merely registering draft-07 would throw.
+    const validation = JarenValidator.#withOption(this.#options.validation,
+      'unknownFormats', 'ignore');
     if (Array.isArray(schema)) {
       const first = schema.shift();
       const { origin, map } = JarenValidator.#traverseSchema(first, schema, undefined, new TraverseOptions(key));
-      const compiled = JarenValidator.#compileSchema(this, origin, map);
+      const compiled = JarenValidator.#compileSchema(this, origin, map, validation);
       this.#metaSchemas.set(origin, compiled);
       mergeMap(this.#schemas, map);
     }
     else if (isBoolOrObjectClass(schema)) {
       const { origin, map } = JarenValidator.#traverseSchema(schema, undefined, undefined, new TraverseOptions(key));
-      const compiled = JarenValidator.#compileSchema(this, origin, map);
+      const compiled = JarenValidator.#compileSchema(this, origin, map, validation);
       this.#metaSchemas.set(origin, compiled);
       mergeMap(this.#schemas, map);
     }
     return this;
+  }
+
+  /** A ValidationOptions with one member replaced, leaving the original
+   * untouched (the validator's own options must not drift). */
+  static #withOption(validation, name, value) {
+    const next = new ValidationOptions();
+    Object.assign(next, validation ?? new ValidationOptions());
+    next[name] = value;
+    return next;
   }
 
   /**
@@ -1849,7 +1872,8 @@ export class JarenValidator {
       draftVersion,
       vocabValidation,
       formatAssertion,
-      existingValidation.messages ?? true
+      existingValidation.messages ?? true,
+      existingValidation.unknownFormats ?? 'ignore'
     );
 
     // Pre-compile all refs before returning the validator

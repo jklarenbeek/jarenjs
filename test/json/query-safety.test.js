@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { JarenValidator } from '@jarenjs/validate';
+import { jsonFormats } from '@jarenjs/formats';
 
 describe('query execution limits', function () {
   it('limits.sequenceItems bounds phrase materialization with a stable JQ2009', function () {
@@ -237,7 +238,10 @@ describe('the schema twins accept $call and $collation', function () {
 
   for (const twin of ['jaren-query.schema.json', 'jaren-query.draft-07.schema.json']) {
     it(`${twin} validates the new constructs`, function () {
+      // the grammars declare format: "json-path"; registering the
+      // compilers is what makes that keyword check anything at all
       const validate = new JarenValidator()
+        .addFormats(jsonFormats)
         .compile(load(`../../packages/json/schemas/${twin}`));
       assert.strictEqual(validate(doc), true);
       assert.strictEqual(validate({ $call: 'upper' }), false,

@@ -10,7 +10,15 @@ import {
 export const name = "Jaren";
 
 function buildValidator(draft, remoteSchemas, options = undefined) {
-  const jaren = new JarenValidator(options ? new ValidatorOptions(options) : undefined)
+  // `unknownFormats: 'ignore'` is Jaren's default and also the
+  // specification's rule — "implementations MUST NOT fail validation or
+  // cease processing due to an unknown format attribute", which
+  // `optional/format/unknown.json` tests with assertion forced ON. It is
+  // passed EXPLICITLY here anyway: this harness must measure the spec
+  // whatever the library default happens to be, and a future flip of that
+  // default would otherwise silently cost three tests (one per draft).
+  const jaren = new JarenValidator(
+    new ValidatorOptions({ unknownFormats: 'ignore', ...(options ?? {}) }))
     .addFormats(formats.numberFormats)
     .addFormats(formats.stringFormats)
     .addFormats(formats.dateTimeFormats)

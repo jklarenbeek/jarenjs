@@ -4,6 +4,7 @@ import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
 import { JarenValidator } from '@jarenjs/validate';
+import { jsonFormats } from '@jarenjs/formats';
 import {
   downlevelDraft07,
   draftNeutralSubsetViolations,
@@ -22,6 +23,7 @@ const vnodeSchema = load('../../packages/view/schemas/jaren-vnode.schema.json');
 
 function compileApp() {
   return new JarenValidator()
+      .addFormats(jsonFormats)
     .addSchema(querySchema)
     .addSchema(jsltSchema)
     .compile(appSchema);
@@ -85,6 +87,7 @@ describe('the jaren-app meta-schema', function () {
 
   it('the draft-07 twin validates through the draft-07 grammar twins', function () {
     const validate = new JarenValidator()
+      .addFormats(jsonFormats)
       .addSchema(querySchema07)
       .addSchema(jsltSchema07)
       .compile(appSchema07);
@@ -95,7 +98,8 @@ describe('the jaren-app meta-schema', function () {
 
 describe('the jaren-vnode schema', function () {
   it('accepts real view output and rejects malformed props', function () {
-    const validate = new JarenValidator().compile(vnodeSchema);
+    const validate = new JarenValidator()
+      .addFormats(jsonFormats).compile(vnodeSchema);
     assert.strictEqual(validate(['main', { class: 'x' },
       ['h1', {}, 'Title'],
       [['li', { key: 1, on: { click: 'pick' } }, 'a'], ['li', { key: 2 }, 'b']],
@@ -110,11 +114,13 @@ describe('the jaren-vnode schema', function () {
       name: 'virtual-grid', props: { rows: [1, 2] }, tag: 'div',
       key: 'grid', class: 'grid-host', on: { click: 'pick' },
     }];
-    const validate = new JarenValidator().compile(vnodeSchema);
+    const validate = new JarenValidator()
+      .addFormats(jsonFormats).compile(vnodeSchema);
     assert.strictEqual(validate(widgetNode), true,
       'a widget node is a valid vnode (and stays a valid plain element — backward compatible)');
 
-    const widget = new JarenValidator().addSchema(vnodeSchema)
+    const widget = new JarenValidator()
+      .addFormats(jsonFormats).addSchema(vnodeSchema)
       .compile({ $ref: 'https://jarenjs.dev/schemas/jaren-vnode/0.1#/$defs/widget' });
     assert.strictEqual(widget(widgetNode), true);
     assert.strictEqual(widget(['jaren-widget', { name: 'grid' }]), true,

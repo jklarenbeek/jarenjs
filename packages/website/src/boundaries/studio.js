@@ -30,6 +30,8 @@
  */
 
 import { JarenValidator } from '@jarenjs/validate';
+import { jsonFormats } from '@jarenjs/formats';
+import { OUR_SCHEMA_OPTIONS } from '../lib/schema-options.js';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { createApp, createFormView, formEventFields } from '@jarenjs/app';
 import { createDomRenderer } from '@jarenjs/view';
@@ -50,7 +52,8 @@ const MAX_ERRORS = 20;
 
 // the meta-schema composes the published query and JSLT grammars by
 // reference — register those artifacts alongside it (APP-FORMAT §2)
-const validateApp = new JarenValidator({ skipErrors: false, collectErrors: true })
+const validateApp = new JarenValidator(OUR_SCHEMA_OPTIONS)
+  .addFormats(jsonFormats)
   .addSchema(querySchema)
   .addSchema(jsltSchema)
   .compile(appSchema);

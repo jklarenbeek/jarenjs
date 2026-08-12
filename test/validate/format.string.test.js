@@ -16,10 +16,58 @@ compiler.addFormats(formats.stringFormats);
 describe('Schema String Formats', function () {
 
   describe('#formatBasic()', function () {
-    it('should not throw an error when the format is unknown', function () {
-      assert.doesNotThrow(() => compiler.compile({
-        format: 'something-invalid'
+    // `unknownFormats` defaults to 'ignore' (the specification's rule); a
+    // validator that wants to be told sets it, and this project's own
+    // schemas always do — see test/validate/our-schema-formats.test.js
+    const strictly = () => new JarenValidator({ unknownFormats: 'error' })
+      .addFormats(formats.stringFormats);
+
+    it('should accept an unknown format as an annotation BY DEFAULT', function () {
+      // the specification: an implementation "MUST NOT fail validation or
+      // cease processing due to an unknown format attribute"
+      const validate = compiler.compile({ format: 'something-invalid' });
+      assert.isTrue(validate('anything at all'), 'an unknown format asserts nothing');
+    });
+
+    it('should throw at COMPILE time when told to, and an asserting format is unknown', function () {
+      // The silent failure this replaces: an unregistered name compiled to
+      // a validator that accepted every value, so a schema asking for a
+      // checked string got no check and said nothing about it. The
+      // complaint is raised against the schema's AUTHOR at compile time —
+      // instance validation stays spec-exact, and no data is ever
+      // invalidated by an unknown format.
+      assert.throws(() => strictly().compile({ format: 'something-invalid' }),
+        /Unknown format 'something-invalid'/);
+    });
+
+    it('should name the two ways out in the message', function () {
+      // an error that says only "unknown format" leaves the reader to
+      // guess between registering one and accepting the annotation
+      assert.throws(() => strictly().compile({ format: 'something-invalid' }),
+        /addFormat/, 'names registration as a fix');
+      assert.throws(() => strictly().compile({ format: 'something-invalid' }),
+        /unknownFormats/, 'and names the opt-out');
+    });
+
+    it('should stay quiet where format is annotation-only anyway', function () {
+      // draft 2020-12 makes format an annotation unless the metaschema opts
+      // in, so an unregistered name loses nothing there and complaining
+      // would be complaining about the spec
+      assert.doesNotThrow(() => strictly().compile({
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        format: 'something-invalid',
       }));
+    });
+
+    it('should throw when a format is registered with a tester, not a compiler', function () {
+      // `formatTesters` and `stringFormats` are both objects full of
+      // functions; registering the wrong one used to produce a validator
+      // that checked nothing, which is exactly what it looks like when
+      // everything is fine
+      const wrong = new JarenValidator({ unknownFormats: 'error' });
+      wrong.addFormats(formats.formatTesters);
+      assert.throws(() => wrong.compile({ format: 'email' }),
+        /Register the format COMPILERS/);
     });
 
     it('should validate format: \'alpha\'', function () {

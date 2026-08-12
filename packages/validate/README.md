@@ -497,19 +497,86 @@ new JarenValidator({ formatAssertion: true }).addFormats(formats.stringFormats)
   .compile(schema)('nope');                       // => false (asserted)
 ```
 
-### Formats are never registered implicitly
+### Formats are never registered implicitly — and an unregistered one is an error
 
-`@jarenjs/validate` does not depend on `@jarenjs/formats`. An unregistered
-format name is an unknown annotation and **passes**, per spec — so a
-`format: 'email'` that was never registered validates everything:
+`@jarenjs/validate` does not depend on `@jarenjs/formats`, so a fresh
+validator has an **empty format registry**. Registering the groups you use is
+the whole setup:
 
 ```javascript
 import * as formats from '@jarenjs/formats';
 
 const jaren = new JarenValidator()
-  .addFormats(formats.stringFormats)     // email, uri, uuid, hostname, ...
-  .addFormats(formats.dateTimeFormats);  // date-time, date, time, duration
+  .addFormats(formats.stringFormats)     // email, uri, uuid, hostname, iban, ...
+  .addFormats(formats.dateTimeFormats)   // date-time, date, time, duration
+  .addFormats(formats.numberFormats)     // int32, double, decimal, ...
+  .addFormats(formats.jsonFormats)       // json-pointer, json-path, regex, ...
+  .addFormats(formats.geoFormats);       // geohash, lat-long, ...
 ```
+
+**An unregistered format name asserts nothing, and by default says nothing** —
+that is the specification's rule ("implementations MUST NOT fail validation or
+cease processing due to an unknown format attribute"), and it is the default
+because a library has to be able to compile a schema it did not write. The
+cost is a real trap: a `format: 'date-time'` you believed was checking
+timestamps, checking nothing, and looking exactly like one that works.
+
+**`unknownFormats: 'error'` turns that into a compile-time throw.** Set it for
+schemas you own:
+
+```javascript
+new JarenValidator({ unknownFormats: 'error' })
+  .compile({ type: 'string', format: 'date-time' });
+// => Error: Unknown format 'date-time': no compiler is registered for it,
+//    so this schema would accept every value for that keyword. Register one
+//    (addFormats(dateTimeFormats) …), or pass { unknownFormats: 'ignore' } …
+```
+
+Instance validation is untouched either way — **no data is ever invalidated by
+an unknown format**, so `'error'` stays inside the specification's letter: it
+reports to the schema's *author*, at compile time, where a missing
+registration is a fact about the setup rather than about the data. The
+official suite's `optional/format/unknown.json` (unknown format, assertion
+forced on, everything must validate) passes on the default and is the one
+thing `'error'` would fail, which is why it is opt-in.
+
+This repository sets `'error'` for every schema it ships, and a gate
+(`test/validate/our-schema-formats.test.js`) fails if any of them names a
+format `@jarenjs/formats` does not implement. It is worth copying: the
+published `jaren-query` grammar declared `format: "json-path"` from the day it
+was written, nothing that compiled it registered `jsonFormats`, and so no path
+string was ever checked by that keyword. Nothing failed. That is the shape of
+this bug.
+
+Where **not** to reach for `'error'`: a schema a user hands you. Refusing to
+compile a stranger's valid schema over a format you happen not to implement is
+your problem presented as theirs — this repo keeps the default for the
+validator playground's input and for project files in the studio, and uses
+`'error'` only for its own grammars. `@jarenjs/ai`'s ledger is the other
+exception: it cannot depend on `@jarenjs/formats` at all, so it stays on the
+default and puts a `pattern` beside the `format` to do the enforcing.
+
+Two things `'error'` deliberately leaves alone. It does not fire where
+`format` is annotation-only anyway (draft 2020-12 without the format-assertion
+vocabulary) — nothing is lost there, so there is nothing to report. And
+**meta-schemas** are exempt: every JSON Schema meta-schema declares
+`format: "uri-reference"` on `$id`, and nobody registers formats in order to
+check that a *schema* is well-formed, so `addMetaSchema` compiles with
+`unknownFormats: 'ignore'` regardless.
+
+Registering a format with something that is **not a compiler** throws under
+either setting, because that mistake is never intentional:
+
+```javascript
+new JarenValidator().addFormats(formats.formatTesters)   // testers, not compilers
+  .compile({ type: 'string', format: 'email' });
+// => Error: Format 'email' failed to compile: … Register the format COMPILERS
+//    (stringFormats, dateTimeFormats, …) rather than the raw testers.
+```
+
+`formatTesters` and `stringFormats` are both objects full of functions, so the
+mistake registers cleanly and then checks nothing. Only the **compilers** take
+`(schemaObj, jsonSchema)` and return the per-value validator.
 
 Registration never overwrites an existing name, so register your own
 overrides *before* a bundled group if you want them to win.

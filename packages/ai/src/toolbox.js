@@ -19,10 +19,7 @@
 
 import { JarenValidator } from '@jarenjs/validate';
 
-import { checkOutcome } from './check.js';
-
-/** Validation errors reported back to the model per rejected call. */
-const MAX_INPUT_ERRORS = 8;
+import { checkOutcome, invalidInput } from './check.js';
 
 /** Whether a property schema asks for structure (object or array). */
 function wantsStructure(schema) {
@@ -143,18 +140,10 @@ export function createToolbox(options = {}) {
     }
     if (!outcome.valid) {
       const stringly = stringStructureKeys(tool.inputSchema, input);
-      return {
-        error: `invalid input for ${name}`,
-        errors: outcome.errors.slice(0, MAX_INPUT_ERRORS).map((e) => ({
-          instancePath: e.instancePath ?? '',
-          keyword: e.keyword ?? '',
-          message: e.message ?? 'invalid',
-        })),
-        ...(stringly.length === 0 ? {} : {
+      return invalidInput(name, outcome, tool.inputSchema,
+        stringly.length === 0 ? {} : {
           hint: `${stringly.map((k) => `'${k}'`).join(', ')} arrived as a JSON-encoded string that does not parse — pass a real JSON value, not quoted JSON text`,
-        }),
-        inputSchema: tool.inputSchema,
-      };
+        });
     }
     try {
       const value = tool.execute(input);

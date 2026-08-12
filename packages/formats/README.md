@@ -27,6 +27,10 @@ validate('$.store.book[?@.price < 10]'); // true
 
 Format assertion follows the specification per draft: asserted through draft 2019-09, annotation-only from draft 2020-12 on unless enabled via the `formatAssertion` option (`new JarenValidator({ formatAssertion: true })`) or a metaschema that declares the `format-assertion` vocabulary.
 
+**Register the group before you use a name from it, and register the right one.** The groups are split, so `date-time` lives in `dateTimeFormats` and *not* in `stringFormats`, and `json-path` lives in `jsonFormats`. Registering only `stringFormats` and then writing `format: 'date-time'` leaves the keyword accepting every value — per spec, an unregistered format is an annotation and asserts nothing, so nothing anywhere reports it. For schemas you own, compile with `new JarenValidator({ unknownFormats: 'error' })`: the missing registration then fails at compile time instead of silently. This repository does that for every schema it ships, gated by `test/validate/our-schema-formats.test.js`.
+
+**Register the compilers, not the testers.** `stringFormats` and `formatTesters` are both objects full of functions, but only the *compilers* take `(schemaObj, jsonSchema)` and return the per-value validator; a tester registered in a compiler's place compiles to nothing. That one throws under either `unknownFormats` setting, because it is never intentional. Use `formatTesters` directly — as [`@jarenjs/forms`](../forms) does for per-keystroke field validation — rather than through `addFormats`.
+
 ## ✍ The complete format list
 
 ### ✍ Formats for strings

@@ -74,6 +74,18 @@
       "types": "./dist/types/agent.d.ts",
       "default": "./src/agent.js"
     },
+    "./ledger": {
+      "types": "./dist/types/ledger.d.ts",
+      "default": "./src/ledger.js"
+    },
+    "./storage/memory": {
+      "types": "./dist/types/storage/memory.d.ts",
+      "default": "./src/storage/memory.js"
+    },
+    "./schemas/ledger": {
+      "types": "./dist/types/schemas/ledger.d.ts",
+      "default": "./src/schemas/ledger.js"
+    },
     "./package.json": "./package.json"
   },
   "dependencies": {

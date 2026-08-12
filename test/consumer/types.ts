@@ -912,3 +912,39 @@ void genStore.entity('Ghost');
 void genStore.entity('User').load({ include: { ghosts: true } });
 // @ts-expect-error — add() takes the INPUT shape, checked
 void genStore.entity('User').add({ email: 7 });
+
+// @jarenjs/ai — the ledger: durable state over an injected storage
+// adapter. Both entry points are exercised (the index re-export and the
+// ./ledger subpath), because a subpath that resolves at runtime but not
+// under `moduleResolution: nodenext` is a bug a consumer finds first.
+import { createLedger, createMemoryStorage } from '@jarenjs/ai';
+import { createLedger as createLedgerSubpath } from '@jarenjs/ai/ledger';
+import { MEMORY_SCHEMA } from '@jarenjs/ai/schemas/ledger';
+import { createMemoryStorage as memoryStorageSubpath } from '@jarenjs/ai/storage/memory';
+
+void [createLedgerSubpath, memoryStorageSubpath, MEMORY_SCHEMA];
+
+async function ledgerBlock() {
+  // no arguments at all: in-memory storage, no query seam
+  const bare = createLedger();
+  const memory = await bare.addMemory({ text: 'a fact', evidence: 'a source', tags: ['t'] });
+  void memory;
+
+  // and the wired shape a host injects
+  const ledger = createLedger({
+    storage: createMemoryStorage(),
+    compileQuery: compileJsonQuery,
+    now: () => new Date().toISOString(),
+  });
+  const goal = await ledger.setGoal({ objective: 'finish the campaign' });
+  void goal;
+  const recalled = await ledger.recall({ tags: ['t'], limit: 5 });
+  void recalled;
+  const token: string = await ledger.snapshot();
+  void (await ledger.rollback(token));
+  const slot = await ledger.putSlot('transcript', 'text', { kind: 'transcript' });
+  void slot;
+  const content = await ledger.readSlot('transcript');
+  void content;
+}
+void ledgerBlock;

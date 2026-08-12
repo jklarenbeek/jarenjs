@@ -12,6 +12,7 @@ import * as assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 
 import { JarenValidator } from '@jarenjs/validate';
+import { dateTimeFormats } from '@jarenjs/formats';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { tempDbPath } from './helpers.js';
@@ -111,7 +112,10 @@ describe('identity and defaults', () => {
   });
 
   it("an 'updated' stamp changes on every update; validation sees completed documents", async () => {
-    const validator = new JarenValidator({ collectErrors: true, skipErrors: false });
+    // the model stamps `updated` as format: 'date-time' — registering the
+    // compilers means the test verifies the stamp, not just its presence
+    const validator = new JarenValidator({ collectErrors: true, skipErrors: false })
+      .addFormats(dateTimeFormats);
     const store = await openStore(MODEL, {
       driver: nodeDriver(),
       compileSchema: (schema) => validator.compile(schema),
@@ -201,7 +205,7 @@ describe('the two standing proofs', () => {
       }
       return out;
     };
-    const validator = new JarenValidator();
+    const validator = new JarenValidator().addFormats(dateTimeFormats);
     const withVocabulary = validator.compile(MODEL.entities.User.schema);
     const stripped = validator.compile(strip(MODEL.entities.User.schema));
     const corpus = [

@@ -14,11 +14,12 @@
 
 import { createStreamReader, createJsonxStreamReader } from '@jarenjs/josl';
 import { JarenValidator } from '@jarenjs/validate';
+import { OUR_SCHEMA_OPTIONS } from '../lib/schema-options.js';
 import { compileChart } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 import chartSchema from '@jarenjs/charts/schemas/chart-definition.schema.json' with { type: 'json' };
 
-const validateDefinition = new JarenValidator({ skipErrors: false, collectErrors: true })
+const validateDefinition = new JarenValidator(OUR_SCHEMA_OPTIONS)
   .compile(chartSchema);
 
 /** Parse a definition through the streaming readers, buffering events. */
