@@ -346,6 +346,50 @@ const FACTS = {
       : `0% at every budget that compacts anything except ${determined
         .map((r) => `${r.variant}/${r.shape} at ${r.budget}`).join(', ')}`;
   },
+  // The same question asked of an environment: the number the compaction
+  // rows above cannot move, and what it costs the root to move it. The
+  // pairwise row is quoted rather than the needle because it is the one
+  // the campaign is judged on.
+  'horizon.program': () => {
+    const row = data('long-horizon').rows
+      .find((r) => r.variant === 'program' && r.task === 'pairwise' && r.shape === 'late');
+    if (row === undefined) throw new Error('long-horizon.json has no program/pairwise/late row');
+    return `${(row.ceiling * 100).toFixed(0)}%, with ${row.valuePresent} of ${row.n} records`
+      + ` reaching the reduce over ${row.subcalls} sub-calls, while the root request carried`
+      + ` ${row.charsSent} characters against a corpus of ${row.charsFull}`;
+  },
+  // what the concurrency bought, at a stated synthetic latency — the
+  // paper's own "RLMs without asynchronous LM calls are slow" limitation
+  'horizon.programFanout': () => {
+    const s = data('long-horizon').meta.scheduling;
+    if (s === undefined || s === null) throw new Error('long-horizon.json has no scheduling block');
+    return `${(s.sequential.ms / s.parallel.ms).toFixed(1)}x (${s.sequential.ms}ms sequential vs`
+      + ` ${s.parallel.ms}ms at concurrency ${s.parallel.concurrency}, ${s.parallel.subcalls}`
+      + ` sub-calls of ${s.delayMs}ms each)`;
+  },
+  // D8: whether the cheap tier can author a plan that compiles, and do
+  // the piece work. Published whichever way it falls — a tier that
+  // cannot is a real result, and prose that quoted nothing would hide it.
+  'horizon.programLive': () => {
+    const a = data('long-horizon').meta.authoring;
+    if (a === null || a === undefined) return 'no live model ran on the machine that generated this file';
+    // a timed-out attempt is NOT a rejected program, and reporting the
+    // two together would read as "the tier cannot author" when what the
+    // run measured was the transport giving up. The distinction is the
+    // whole point of publishing this number, so the count is split.
+    const timedOut = a.errors.filter((e) => /timeout/i.test(e)).length;
+    const returned = a.trials - timedOut;
+    const authored = `${a.compiled} of ${a.trials} authored programs compiled`
+      + (timedOut === 0
+        ? ` (${a.generations} generation(s) including repairs)`
+        : ` — but ${timedOut} of those attempts never came back at all (the 300 s deadline),`
+          + ` so of the ${returned} that answered, ${a.compiled} compiled`);
+    return a.valuesReached === null
+      ? `${authored}; the piece work was not run within the spend guard`
+      : `${authored}. Answering ${a.subcalls} sub-calls itself it reached ${a.valuesReached}`
+        + ` of 40 records (${a.subcallsFailed} sub-call(s) failed) and named the`
+        + ` ${a.scored ? 'CORRECT' : 'wrong'} pair`;
+  },
   // The live half, as a table: what a real model scored on the realistic
   // payload shape with and without a ledger, and how many times it walked
   // through the door. The recall column is not decoration — a ledger row

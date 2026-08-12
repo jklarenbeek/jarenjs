@@ -67,14 +67,19 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { createAgent, createLedger } from '@jarenjs/ai';
+import {
+  createAgent, createLedger, createEnvironment, createProgramAuthor, createStructuredOutput,
+} from '@jarenjs/ai';
 import { createChatClient } from '@jarenjs/ai/client';
 import { resolveEndpoint } from '@jarenjs/ai/providers';
+import { compileJsonQuery } from '@jarenjs/json/query';
+import querySchema from '@jarenjs/json/schemas/jaren-query.llm-profile.schema.json' with { type: 'json' };
 
 import { readAiEnv, describeAiEnv, mapLimit, AI_ENV } from './lib/env.js';
 import {
   DEFAULTS, SHAPES, makeCorpus, needleTargets, probe, ceilingFor,
   needleQuestion, pairwiseQuestion, scoreNeedle, scorePairwise,
+  pairwiseProgram, needleProgram, programProbe, extractingClient, corpusText,
 } from './lib/horizon.js';
 
 //#region flags
@@ -141,6 +146,13 @@ const TASK_KEYS = /** @type {const} */ (['needle', 'pairwise']);
 const CALL_TIMEOUT_MS = 300000;
 /** How many tool rounds a live recall run may spend before it answers. */
 const RECALL_ROUNDS = 3;
+/** Needle targets the model-free program tier samples. Free (no model),
+ * so it is sampled wider than the live tier's `trials`. */
+const NEEDLE_SAMPLES = 8;
+/** The synthetic per-sub-call latency the scheduling comparison uses. */
+const SCHEDULING_DELAY_MS = 20;
+/** The fan-out the scheduling comparison measures against sequential. */
+const SCHEDULING_CONCURRENCY = 4;
 
 /**
  * The two compaction settings measured side by side, and what each one
@@ -198,6 +210,105 @@ async function runCeilings(corpus) {
     }
   }
   return out;
+}
+
+/**
+ * The program tier: the same two questions, asked of an environment
+ * instead of a transcript.
+ *
+ * Nothing about the corpus changes — same records, same padding, same
+ * payload shape — so the only difference between these rows and the ones
+ * above is the MECHANISM. Compaction is asked what survived being cut;
+ * a program is asked what it visited, and it visits by address.
+ *
+ * The sub-call here is deterministic (`extractingClient`), which is what
+ * makes this a ceiling in the same sense as every other ceiling in this
+ * file: the model's competence is held at perfect and what remains is
+ * whether the harness puts the answer within reach. `--live` then swaps
+ * in a real model and the gap between the two is the tier's.
+ * @param {any} corpus
+ */
+async function runPrograms(corpus) {
+  const out = [];
+  for (const shape of SHAPE_KEYS) {
+    const pairwise = await programProbe({
+      corpus, padding: flags.padding, shape, program: pairwiseProgram(),
+    });
+
+    // the needle is scored over the same uniform draw the compaction
+    // tiers sample, so the two columns mean the same thing
+    const targets = needleTargets(corpus, flags.quick ? 3 : NEEDLE_SAMPLES, 11);
+    let correct = 0;
+    let subcalls = 0;
+    let reached = 0;
+    for (const index of targets) {
+      const row = await programProbe({
+        corpus, padding: flags.padding, shape, program: needleProgram(corpus, index),
+      });
+      subcalls += row.subcalls;
+      reached += row.valuesReached > 0 ? 1 : 0;
+      if (scoreNeedle(row.answerText, corpus, index)) correct += 1;
+    }
+
+    out.push({
+      shape,
+      pairwise: {
+        ok: pairwise.ok,
+        valuesReached: pairwise.valuesReached,
+        ceiling: ceilingFor('pairwise', { valuePresent: pairwise.valuesReached, n: corpus.n }),
+        scored: scorePairwise(pairwise.answerText, corpus),
+        // did the closest pair itself reach the reduce? With every value
+        // reached this is implied, but a run that loses sub-calls can
+        // still answer correctly, and only this column says whether that
+        // was determinacy or luck
+        pairReached: pairwise.pairReached,
+        subcalls: pairwise.subcalls,
+        failed: pairwise.failed,
+        rootChars: pairwise.rootChars,
+        corpusChars: pairwise.corpusChars,
+        answer: pairwise.answerText,
+      },
+      needle: {
+        trials: targets.length,
+        correct,
+        // "was the record reached at all", which is the needle's ceiling
+        // in the same determinacy sense: a grep that found the piece puts
+        // the value within one sub-call
+        ceiling: reached / targets.length,
+        subcalls,
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Parallel against sequential, over the same program and the same
+ * number of sub-calls.
+ *
+ * The latency is synthetic and stated as such: a benchmark that made
+ * eighty real model calls to time its own scheduler would be measuring
+ * the provider's queue, not the harness. What is measured here is
+ * exactly what the harness controls — how many sub-calls are allowed to
+ * be waiting at once — with the per-call wait held fixed.
+ * @param {any} corpus
+ */
+async function runScheduling(corpus) {
+  const rows = {};
+  for (const sequential of [false, true]) {
+    const client = extractingClient({ delayMs: SCHEDULING_DELAY_MS });
+    const result = await programProbe({
+      corpus, padding: flags.padding, program: pairwiseProgram(), client, sequential,
+      maxConcurrentSubcalls: SCHEDULING_CONCURRENCY,
+    });
+    rows[sequential ? 'sequential' : 'parallel'] = {
+      ms: result.ms,
+      subcalls: result.subcalls,
+      concurrency: result.concurrency,
+      peak: client.state.peak,
+    };
+  }
+  return { ...rows, delayMs: SCHEDULING_DELAY_MS };
 }
 
 /**
@@ -404,6 +515,127 @@ async function fetchPricing(config) {
 
 //#region output
 
+/**
+ * The live program tier — the D8 measurement, in two halves that are
+ * reported separately because they can fail independently.
+ *
+ * **Authoring**: can the cheap tier write a plan that COMPILES? The
+ * paper reports its own weak model making template mistakes 13–16% of
+ * the time writing Python; the counter-hypothesis this campaign is
+ * testing is that a schema-constrained document with a compile gate is
+ * easier for the same class of model. The number that settles it is the
+ * pass rate, and it is published whichever way it falls.
+ *
+ * **Piece work**: can it do one sub-call correctly? Every piece is one
+ * record and one question, which is the easiest thing this campaign asks
+ * of a model — and if the cheap tier cannot do that, the fan-out is a
+ * fast way to be wrong forty times, which is also worth knowing.
+ *
+ * The two are measured over ONE canonical program so a failure is
+ * attributable: an authored program that compiles is still scored on
+ * whether it compiles, not run, because running forty sub-calls per
+ * authored candidate would spend the whole guard on variance.
+ * @param {any} corpus
+ * @param {any} config
+ */
+async function runLivePrograms(corpus, config) {
+  const client = createChatClient({
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    model: config.model,
+  });
+
+  const usage = { prompt: 0, completion: 0, total: 0 };
+  let calls = 0;
+  const counting = {
+    endpoint: client.endpoint,
+    complete: async (request) => {
+      calls += 1;
+      const result = await client.complete({
+        ...request,
+        // streaming is FORCED, not defaulted, and this is the one place
+        // it matters most: `createStructuredOutput` sets `stream: false`
+        // explicitly, which is exactly the request shape this benchmark
+        // measured hanging past a 300 s deadline and answering in 2.9 s
+        // streamed. A `?? true` here would honour the caller and inherit
+        // the hang.
+        stream: true,
+        temperature: 0,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      });
+      const u = result.usage;
+      usage.prompt += u?.prompt_tokens ?? 0;
+      usage.completion += u?.completion_tokens ?? 0;
+      usage.total += u?.total_tokens ?? 0;
+      return result;
+    },
+  };
+
+  // authoring first: it is cheap, and if the tier cannot author at all
+  // that is the headline rather than a footnote
+  const authored = { trials: 0, compiled: 0, attempts: 0, errors: [] };
+  const environment = createEnvironment();
+  await environment.put('corpus', corpusText(corpus, flags.padding, 'late'),
+    { kind: 'text', count: corpus.n });
+  const author = createProgramAuthor({
+    client: counting,
+    environment,
+    compileQuery: compileJsonQuery,
+    createStructuredOutput,
+    querySchema,
+  });
+
+  for (let trial = 0; trial < config.trials; trial++) {
+    if (calls >= config.maxCalls) break;
+    authored.trials += 1;
+    try {
+      const result = await author.author(pairwiseQuestion());
+      authored.attempts += result.attempts ?? 0;
+      if (result.value !== undefined) authored.compiled += 1;
+      else authored.errors.push(JSON.stringify(result.errors?.[0] ?? null).slice(0, 200));
+    }
+    catch (err) {
+      authored.errors.push(`authoring failed: ${/** @type {Error} */ (err).message}`);
+    }
+  }
+
+  // piece work: the canonical program, with the real model answering
+  // every sub-call. One shape only — the realistic one — because forty
+  // calls is the whole spend guard and running both would buy a number
+  // nobody would read differently.
+  let executed = null;
+  if (calls + corpus.n <= config.maxCalls) {
+    const result = await programProbe({
+      corpus,
+      padding: flags.padding,
+      shape: 'late',
+      program: pairwiseProgram(),
+      client: counting,
+      maxConcurrentSubcalls: config.maxConcurrency,
+    });
+    executed = {
+      ok: result.ok,
+      subcalls: result.subcalls,
+      failed: result.failed,
+      valuesReached: result.valuesReached,
+      scored: scorePairwise(result.answerText, corpus),
+      answer: String(result.answerText).slice(0, 200),
+      ms: result.ms,
+    };
+  }
+
+  return {
+    authored,
+    executed,
+    calls,
+    usage,
+    bounded: calls >= config.maxCalls
+      ? `stopped at ${config.maxCalls} calls (${AI_ENV.maxCalls})`
+      : null,
+  };
+}
+
 /** The console tables — the same columns as the campaign's baseline. */
 function printTables(corpus, ceilings, live, config) {
   console.log(`# long-horizon — what survives createAgent's historyBudget compaction`);
@@ -496,6 +728,56 @@ function printTables(corpus, ceilings, live, config) {
   }
 }
 
+/**
+ * The program tier's console section: the same two tasks, the same
+ * corpus, answered by a plan over an environment.
+ * @param {any} corpus
+ * @param {any[]} programs
+ * @param {any} scheduling
+ * @param {any} livePrograms
+ */
+function printPrograms(corpus, programs, scheduling, livePrograms) {
+  console.log('## the same questions, asked of an environment instead of a transcript\n');
+  console.log('| payload shape | needle ceiling | needle sub-calls | pairwise ceiling '
+    + '| pairwise answered | values reached | sub-calls | root chars | corpus chars |');
+  console.log(`|${'---|'.repeat(9)}`);
+  for (const row of programs) {
+    console.log(`| ${row.shape} | ${pct(row.needle.ceiling)} `
+      + `| ${row.needle.subcalls} over ${row.needle.trials} question(s) `
+      + `| ${pct(row.pairwise.ceiling)} | ${row.pairwise.scored ? 'yes' : 'no'} `
+      + `| ${row.pairwise.valuesReached}/${corpus.n} | ${row.pairwise.subcalls} `
+      + `| ${row.pairwise.rootChars} | ${row.pairwise.corpusChars} |`);
+  }
+  console.log('');
+  console.log('# the root carried a plan and a step report; the corpus never entered the request.');
+  console.log('# a needle costs ONE sub-call because grep narrows first; the pairwise question');
+  console.log(`#   costs ${corpus.n} because a relation over every pair needs every record.`);
+  console.log('');
+
+  console.log(`# fan-out, ${scheduling.delayMs}ms synthetic latency per sub-call `
+    + `(measuring the scheduler, not a provider's queue):`);
+  console.log(`#   sequential  ${scheduling.sequential.ms}ms `
+    + `(${scheduling.sequential.subcalls} sub-calls, peak ${scheduling.sequential.peak})`);
+  console.log(`#   parallel    ${scheduling.parallel.ms}ms `
+    + `(concurrency ${scheduling.parallel.concurrency}, peak ${scheduling.parallel.peak})`);
+  console.log(`#   => ${(scheduling.sequential.ms / scheduling.parallel.ms).toFixed(2)}x, `
+    + 'the paper\'s stated "RLMs without asynchronous LM calls are slow" limitation removed.');
+  console.log('');
+
+  if (livePrograms === null) return;
+  const { authored, executed } = livePrograms;
+  console.log('# the cheap tier, authoring and doing the piece work (D8):');
+  console.log(`#   authored ${authored.compiled}/${authored.trials} programs that COMPILE`
+    + `${authored.trials === 0 ? '' : ` (${authored.attempts} generation(s) including repairs)`}`);
+  for (const error of authored.errors.slice(0, 3)) console.log(`#     ${error}`);
+  console.log(executed === null
+    ? '#   piece work not run — the spend guard would have been exceeded'
+    : `#   piece work: ${executed.subcalls} live sub-calls, ${executed.failed} failed, `
+      + `${executed.valuesReached}/${corpus.n} values reached, `
+      + `answer ${executed.scored ? 'CORRECT' : 'wrong'} (${executed.answer})`);
+  console.log('');
+}
+
 /** The rows the output contract names, plus what a later order needs to diff. */
 function jsonRows(corpus, ceilings, live, config) {
   const rows = [];
@@ -536,6 +818,60 @@ function jsonRows(corpus, ceilings, live, config) {
         messagesSent: row.messageCount,
         charsSent: row.sent,
         charsFull: row.full,
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * The program tier as rows in the same contract. `historyBudget` is null
+ * because there is no budget to exceed: the corpus is not in the request
+ * at any size, which is the whole difference these rows report.
+ * @param {any} corpus
+ * @param {any[]} programs
+ * @param {any} livePrograms
+ * @param {any} config
+ */
+function programRows(corpus, programs, livePrograms, config) {
+  const rows = [];
+  for (const row of programs) {
+    for (const task of TASK_KEYS) {
+      const live = task === 'pairwise' && row.shape === 'late' ? livePrograms?.executed : null;
+      rows.push({
+        config: {
+          historyBudget: null,
+          maxToolRounds: null,
+          compaction: 'none — the corpus is an environment the program addresses',
+        },
+        task,
+        variant: 'program',
+        shape: row.shape,
+        budget: null,
+        ceiling: task === 'needle' ? row.needle.ceiling : row.pairwise.ceiling,
+        ceilingRecall: null,
+        actual: live === null || live === undefined ? null : (live.scored ? 1 : 0),
+        recalls: 0,
+        model: livePrograms === null ? null : config.model,
+        n: corpus.n,
+        trials: task === 'needle' ? row.needle.trials : 1,
+        compacted: false,
+        // model-free, and a boolean on every row like every other row in
+        // this file: did both records of the closest pair reach the
+        // computation? A needle program greps to one piece, so it
+        // legitimately reads false — and a pairwise row that answered
+        // correctly with this false answered from luck, not determinacy.
+        pairSurvived: task === 'pairwise' ? row.pairwise.pairReached : false,
+        idsReached: task === 'pairwise' ? row.pairwise.valuesReached : null,
+        valuePresent: task === 'pairwise' ? row.pairwise.valuesReached : null,
+        valueRecoverable: null,
+        subcalls: task === 'needle' ? row.needle.subcalls : row.pairwise.subcalls,
+        slotsArchived: 0,
+        messagesSent: null,
+        // what the ROOT carried: the plan plus the step report plus the
+        // answer, which is the quantity a budget would have bounded
+        charsSent: task === 'pairwise' ? row.pairwise.rootChars : null,
+        charsFull: task === 'pairwise' ? row.pairwise.corpusChars : null,
       });
     }
   }
@@ -601,6 +937,59 @@ function displayTables(corpus, ceilings, live, config) {
   }));
 }
 
+/**
+ * The program tier as a display table, in the same shape the benchmarks
+ * page renders every other one.
+ * @param {any} corpus
+ * @param {any[]} programs
+ * @param {any} scheduling
+ * @param {any} livePrograms
+ */
+function programTable(corpus, programs, scheduling, livePrograms) {
+  const speedup = (scheduling.sequential.ms / scheduling.parallel.ms).toFixed(1);
+  return {
+    title: 'The same questions, asked of an environment (no history budget)',
+    head: ['Payload shape', 'Needle ceiling', 'Needle sub-calls', 'Pairwise ceiling',
+      'Pairwise answered', 'Values reached', 'Pairwise sub-calls', 'Root chars', 'Corpus chars'],
+    rows: programs.map((row) => ({
+      cells: [
+        row.shape === 'front' ? 'front (flattering)' : 'late (realistic)',
+        pct(row.needle.ceiling),
+        `${row.needle.subcalls} over ${row.needle.trials}`,
+        pct(row.pairwise.ceiling),
+        row.pairwise.scored ? 'yes' : 'no',
+        `${row.pairwise.valuesReached}/${corpus.n}`,
+        String(row.pairwise.subcalls),
+        String(row.pairwise.rootChars),
+        String(row.pairwise.corpusChars),
+      ],
+      strong: row.shape === 'late',
+    })),
+    note: 'The corpus is held OUTSIDE the context as addressable slots, and the model authors a'
+      + ' compile-gated program over it: chunk the corpus, map one sub-call per piece, reduce the'
+      + ' results with a query, read the answer from the slot it wrote. The root request carries'
+      + ' the plan and a step report — never a record — which is why there is no budget column'
+      + ' here and why these numbers do not move when the corpus grows. The pairwise ceiling is'
+      + ' the same determinacy measure as the tables above: every record reached the reduce, so'
+      + ' the relation over every pair is determined. Note what the needle row costs by'
+      + ' comparison: grep narrows to the one piece that mentions the record, so a linear question'
+      + ` is one sub-call and the quadratic one is ${corpus.n}. Fan-out is concurrent —`
+      + ` ${speedup}x against the same program run sequentially at`
+      + ` ${scheduling.delayMs}ms of synthetic per-call latency, which measures the scheduler`
+      + ' rather than a provider\'s queue.'
+      + (livePrograms === null
+        ? ' The live columns are absent because the live tier was skipped on the machine that'
+          + ' generated this file.'
+        : ` The cheap tier authored ${livePrograms.authored.compiled}/${livePrograms.authored.trials}`
+          + ' programs that compile'
+          + (livePrograms.executed === null
+            ? ', and the piece work was not run within the spend guard.'
+            : `, and answering ${livePrograms.executed.subcalls} sub-calls itself it reached`
+              + ` ${livePrograms.executed.valuesReached}/${corpus.n} values and got the pair`
+              + ` ${livePrograms.executed.scored ? 'right' : 'wrong'}.`)),
+  };
+}
+
 //#endregion
 
 async function main() {
@@ -613,10 +1002,13 @@ async function main() {
 
   const corpus = makeCorpus({ n: flags.rounds, seed: flags.seed });
   const ceilings = await runCeilings(corpus);
+  const programs = await runPrograms(corpus);
+  const scheduling = await runScheduling(corpus);
 
   // the live tier is opt-in and never mandatory; the line below always
   // prints, so a run can never be mistaken for one that measured a model
   let live = null;
+  let livePrograms = null;
   let skipped = null;
   if (!flags.live) {
     skipped = env.live
@@ -631,9 +1023,11 @@ async function main() {
   }
   else {
     live = await runLive(corpus, ceilings, config);
+    livePrograms = await runLivePrograms(corpus, config);
   }
 
   printTables(corpus, ceilings, live, config);
+  printPrograms(corpus, programs, scheduling, livePrograms);
 
   if (live === null) {
     console.log(`live tier skipped: ${skipped}`);
@@ -716,6 +1110,25 @@ async function main() {
         usage: live?.usage ?? null,
         errors: live?.errors ?? [],
         bounded: live?.bounded ?? null,
+        // the program tier's two model-free facts that are not rows: how
+        // much concurrency bought, and — the D8 number — whether the
+        // cheap tier can author a plan that COMPILES. Both live in meta
+        // because a fact quoting them must not have to parse a table's
+        // prose to find them.
+        scheduling,
+        authoring: livePrograms === null ? null : {
+          trials: livePrograms.authored.trials,
+          compiled: livePrograms.authored.compiled,
+          generations: livePrograms.authored.attempts,
+          errors: livePrograms.authored.errors,
+          subcalls: livePrograms.executed?.subcalls ?? 0,
+          subcallsFailed: livePrograms.executed?.failed ?? 0,
+          valuesReached: livePrograms.executed?.valuesReached ?? null,
+          scored: livePrograms.executed?.scored ?? null,
+          calls: livePrograms.calls,
+          usage: livePrograms.usage,
+          bounded: livePrograms.bounded,
+        },
       },
       headline: {
         title: 'Compaction that moves instead of destroying — and the one number it does not fix',
@@ -742,10 +1155,18 @@ async function main() {
               + ' — rows where the whole corpus happened to still fit, which is the payload shape'
               + ' being generous rather than a relation being recovered.')
           + ' A model may still name the right pair out of whatever survived — the last column says'
-          + ' when that was available, so a lucky score cannot be read as a recovered one.',
+          + ' when that was available, so a lucky score cannot be read as a recovered one.'
+          + ` And it moves: given the same corpus as an ENVIRONMENT, a compiled program visits`
+          + ` every record by address and answers the pairwise question at`
+          + ` ${pct(programs[0].pairwise.ceiling)} while the root carries`
+          + ` ${programs[0].pairwise.rootChars} characters against a corpus of`
+          + ` ${programs[0].pairwise.corpusChars} — the bottom table.`,
       },
-      tables: displayTables(corpus, ceilings, live, config),
-      rows,
+      tables: [
+        ...displayTables(corpus, ceilings, live, config),
+        programTable(corpus, programs, scheduling, livePrograms),
+      ],
+      rows: [...rows, ...programRows(corpus, programs, livePrograms, config)],
     };
     writeFileSync(flags.filepath, JSON.stringify(payload, null, 1));
     console.log(`\nwrote ${flags.filepath}`);

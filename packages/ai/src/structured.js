@@ -69,9 +69,14 @@ function schemaInstruction(schema) {
 /**
  * Strip an accidental markdown fence from a reply ("```json … ```") —
  * the classic prompt-embedded-schema failure mode.
+ *
+ * Exported because every place this package parses a model's JSON has to
+ * make the same allowance, and two copies of "how forgiving are we about
+ * fences" is two answers to one question: `program.js`'s sub-calls parse
+ * replies the same way structured generation does.
  * @param {string} text
  */
-function unfence(text) {
+export function unfence(text) {
   const trimmed = text.trim();
   const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
   return match === null ? trimmed : match[1];

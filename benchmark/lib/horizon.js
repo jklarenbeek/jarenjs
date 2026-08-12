@@ -30,7 +30,10 @@
  * own self-test; it is asserted in `test/ai/`, not only here.
  */
 
-import { createAgent, createToolbox, slotAddressesIn } from '@jarenjs/ai';
+import {
+  createAgent, createToolbox, slotAddressesIn, createEnvironment, createProgramRunner,
+} from '@jarenjs/ai';
+import { compileJsonQuery } from '@jarenjs/json/query';
 
 /** The baseline's parameters. Changing one changes every published row. */
 export const DEFAULTS = {
@@ -325,7 +328,22 @@ export async function reachable(messages, ledger) {
  * @returns {boolean}
  */
 export function pairSurvived(messages, corpus) {
-  const text = messages.map((m) => String(m.content ?? '')).join('\n');
+  return pairSurvivedIn(messages.map((m) => String(m.content ?? '')).join('\n'), corpus);
+}
+
+/**
+ * The same question asked of any text — a request, or the results a
+ * program's map wrote into slots.
+ *
+ * One implementation, two callers, for the reason `retention`/
+ * `retentionIn` are split the same way: the compaction tiers ask it of a
+ * request and the program tier asks it of a reduce's input, and a second
+ * copy would let "did the pair survive" mean two things in one table.
+ * @param {string} text
+ * @param {{ values: number[], pair: { a: number, b: number } }} corpus
+ * @returns {boolean}
+ */
+export function pairSurvivedIn(text, corpus) {
   return text.includes(`"value":${corpus.values[corpus.pair.a]}`)
     && text.includes(`"value":${corpus.values[corpus.pair.b]}`);
 }
@@ -474,6 +492,241 @@ export function scorePairwise(text, corpus) {
   return named.length === 2
     && named.includes(corpus.ids[corpus.pair.a])
     && named.includes(corpus.ids[corpus.pair.b]);
+}
+
+//#endregion
+
+//#region the program tier
+
+/**
+ * The same corpus as a document, one record per line.
+ *
+ * Byte-for-byte the same records the tool returns, in the same payload
+ * shape, so the program tier and the compaction tiers are measured over
+ * one corpus and a difference between them is a difference in MECHANISM
+ * — not in what each was given to work with.
+ * @param {{ ids: string[], values: number[], n: number }} corpus
+ * @param {number} [padding]
+ * @param {'front'|'late'} [shape]
+ * @returns {string}
+ */
+export function corpusText(corpus, padding = DEFAULTS.padding, shape = 'front') {
+  const notes = 'x'.repeat(padding);
+  const rows = [];
+  for (let i = 0; i < corpus.n; i++) {
+    rows.push(JSON.stringify(shape === 'front'
+      ? { id: corpus.ids[i], value: corpus.values[i], notes }
+      : { id: corpus.ids[i], notes, value: corpus.values[i] }));
+  }
+  return rows.join('\n');
+}
+
+/**
+ * The closest pair, as a jaren-query document.
+ *
+ * This is the campaign's §4 decision made concrete, and it is worth
+ * reading once. The quadratic question — a minimum over every pair —
+ * is answered here by a PURE, SYNCHRONOUS, COMPILED query: a `$fold`
+ * accumulator walking `$orderby`-sorted tuples, carrying the previous
+ * record and the best gap so far. No operator in it calls a model, and
+ * none of them could: the evaluator is synchronous by construction and
+ * `@jarenjs/core`'s operators are pure functions. The model's work
+ * happens in `map`, one piece at a time, and the relation over all of
+ * them is arithmetic the engine already does.
+ *
+ * Sorting first is what turns O(n²) pairs into n−1 adjacent gaps — the
+ * closest pair in a set of numbers is always adjacent once sorted — so
+ * the reduce is linear in the number of records and the query stays
+ * small enough for a weak model to have written it.
+ */
+export const CLOSEST_PAIR_QUERY = (() => {
+  const gap = { $sub: ['$r.value', '$acc.prev.value'] };
+  return {
+    $let: {
+      walk: {
+        $fold: { acc: { prev: null, best: null } },
+        $for: { r: '$[*].value' },
+        $orderby: '$r.value',
+        $return: {
+          prev: '$r',
+          best: {
+            $if: [
+              { '$is-null': '$acc.prev' },
+              '$acc.best',
+              {
+                $if: [
+                  { $or: [{ '$is-null': '$acc.best' }, { $lt: [gap, '$acc.best.gap'] }] },
+                  { gap, a: '$acc.prev.id', b: '$r.id' },
+                  '$acc.best',
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+    // the accumulator carries a cursor as well as the answer; the answer
+    // alone is what the slot holds, or the reply would name three ids
+    $return: '$walk.best',
+  };
+})();
+
+/** The values the map found, in the order the reduce sees them. */
+export const EXTRACTED_VALUES_QUERY = { $for: { r: '$[*].value' }, $return: '$r.value' };
+
+/**
+ * The pairwise program: visit every piece, then compute over what came
+ * back. This is the plan a model is asked to author in the live tier,
+ * and the plan the model-free tier runs to establish the ceiling.
+ * @param {{ size?: number }} [options]
+ */
+export function pairwiseProgram(options = {}) {
+  return {
+    steps: [
+      { op: 'chunk', from: 'corpus', as: 'pieces', strategy: 'line', size: options.size ?? 200 },
+      {
+        op: 'map',
+        from: 'pieces',
+        as: 'found',
+        prompt: 'Return this record as {"id":…,"value":…} with the value as a number.',
+      },
+      { op: 'reduce', from: 'found', as: 'closest', query: CLOSEST_PAIR_QUERY },
+      { op: 'answer', from: 'closest' },
+    ],
+  };
+}
+
+/**
+ * The needle program: grep narrows to the one piece that mentions the
+ * record, and exactly one sub-call reads it.
+ *
+ * The contrast with the pairwise program is the point. The same
+ * environment answers a linear question for one model call and a
+ * quadratic one for forty, because the program says which — where a
+ * compacted transcript pays the same (lossy) price for both.
+ * @param {{ ids: string[] }} corpus
+ * @param {number} index
+ * @param {{ size?: number }} [options]
+ */
+export function needleProgram(corpus, index, options = {}) {
+  return {
+    steps: [
+      { op: 'chunk', from: 'corpus', as: 'pieces', strategy: 'line', size: options.size ?? 200 },
+      { op: 'grep', from: 'pieces', as: 'hits', pattern: corpus.ids[index] },
+      {
+        op: 'map',
+        from: 'hits',
+        as: 'found',
+        prompt: `Return the record ${corpus.ids[index]} as {"id":…,"value":…} with the value as a number.`,
+      },
+      { op: 'reduce', from: 'found', as: 'value', query: EXTRACTED_VALUES_QUERY },
+      { op: 'answer', from: 'value' },
+    ],
+  };
+}
+
+/**
+ * A model-free sub-call: it reads the piece it is given and returns the
+ * record in it, deterministically.
+ *
+ * This is what makes the program tier's ceiling a CEILING — it measures
+ * whether the mechanism puts the answer within reach, with the model's
+ * competence held constant at perfect. The live tier then swaps this for
+ * a real model and the gap between the two numbers is the model's, which
+ * is the only way to attribute a miss to the harness or to the tier.
+ * @param {{ delayMs?: number }} [options]
+ */
+export function extractingClient(options = {}) {
+  const delayMs = options.delayMs ?? 0;
+  const state = { calls: 0, peak: 0, inFlight: 0 };
+  return {
+    state,
+    complete: async ({ messages, signal }) => {
+      state.calls += 1;
+      state.inFlight += 1;
+      state.peak = Math.max(state.peak, state.inFlight);
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      state.inFlight -= 1;
+      if (signal?.aborted === true) throw new Error('aborted');
+      const piece = String(messages[messages.length - 1]?.content ?? '');
+      const hit = /"id":"(REC\d+)"[^\n]*?"value":(\d+)/.exec(piece);
+      return {
+        message: {
+          role: 'assistant',
+          content: hit === null ? 'null' : JSON.stringify({ id: hit[1], value: Number(hit[2]) }),
+        },
+        finishReason: 'stop',
+      };
+    },
+  };
+}
+
+/**
+ * Run one program over the corpus held as an environment, and report
+ * both what the RUN reached and what the ROOT carried.
+ *
+ * Those two numbers are the whole tier. The first says whether the
+ * answer was determined at all (the ceiling, on the same scale
+ * `ceilingFor` uses for every other row); the second says what it cost
+ * the context — the program document, the step report and the answer,
+ * which is everything a root turn would carry and is independent of the
+ * corpus by construction.
+ * @param {{ corpus: any, padding?: number, shape?: 'front'|'late',
+ *   program: any, client?: any, sequential?: boolean,
+ *   maxConcurrentSubcalls?: number, signal?: AbortSignal }} options
+ */
+export async function programProbe({
+  corpus, padding = DEFAULTS.padding, shape = 'front', program,
+  client, sequential = false, maxConcurrentSubcalls, signal,
+}) {
+  const environment = createEnvironment();
+  await environment.put('corpus', corpusText(corpus, padding, shape),
+    { kind: 'text', count: corpus.n });
+
+  const runner = createProgramRunner({
+    environment,
+    client: client ?? extractingClient(),
+    compileQuery: compileJsonQuery,
+    maxSubcalls: corpus.n + 4,
+    maxConcurrentSubcalls,
+    sequential,
+  });
+
+  const started = Date.now();
+  const result = await runner.run(program, { signal });
+  const ms = Date.now() - started;
+
+  // what the computation had in front of it: the map's results, read
+  // from the slots they were written to — never from the request
+  const slots = await environment.ledger.listSlots();
+  // `program/<binding>/<index>` is a map's per-piece result; a single
+  // `program/<binding>` is a step's own result and is not an input
+  const mapped = slots.filter((s) => /^program\/[^/]+\/\d+$/.test(s.name));
+  let reduceInput = '';
+  for (const slot of mapped) reduceInput += String(await environment.ledger.readSlot(slot.name) ?? '');
+  const reached = retentionIn(reduceInput, corpus);
+
+  return {
+    ...result,
+    ms,
+    valuesReached: reached.valuePresent,
+    idsReached: reached.idPresent,
+    // whether the closest pair itself reached the computation. This is
+    // what makes a correct answer over an INCOMPLETE map legible: a run
+    // that lost two sub-calls has not determined the relation, and if it
+    // named the right pair anyway it is because the pair was not among
+    // what it lost. Same column, same meaning, as the compaction rows.
+    pairReached: pairSurvivedIn(reduceInput, corpus),
+    // the root's whole share of this run: what it sent and what came
+    // back. `answer.text` is included because it is the one payload the
+    // root does receive, and hiding it would flatter the number.
+    rootChars: JSON.stringify(program).length
+      + JSON.stringify(result.steps ?? []).length
+      + (result.answer?.text?.length ?? 0),
+    answerText: result.answer?.text ?? '',
+    corpusChars: (await environment.ledger.getSlot('corpus')).size,
+    environment,
+  };
 }
 
 //#endregion

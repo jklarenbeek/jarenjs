@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { LEDGER_SCHEMAS } from '@jarenjs/ai';
+import { LEDGER_SCHEMAS, PROGRAM_OPS } from '@jarenjs/ai';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -43,6 +43,19 @@ describe('@jarenjs/ai documentation matches the code', () => {
     const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
     assert.strictEqual(words.indexOf(section[1]), kinds.length,
       `the README says "${section[1]}" kinds; the ledger compiles ${kinds.length}`);
+  });
+
+  it('the README\'s step table names exactly the operations a program may use', () => {
+    // the same drift, one layer up: a step type added to the grammar and
+    // not to the table leaves a reader with a language whose operations
+    // they cannot discover, and a table entry the grammar dropped is a
+    // step a model will be told to write and then refused for
+    const section = /\| step \| does \| calls a model \|\n\|[-| ]+\|\n([\s\S]*?)\n\n/.exec(README);
+    assert.ok(section, 'the README no longer documents the program steps as a table');
+    const documented = [...section[1].matchAll(/^\| `([a-z]+)`(?: \/ `([a-z]+)`)? \|/gm)]
+      .flatMap((m) => [m[1], m[2]]).filter(Boolean).sort();
+    assert.deepStrictEqual(documented, [...PROGRAM_OPS].sort(),
+      'the documented program steps and PROGRAM_OPS disagree — one of them moved');
   });
 
   it('every budget stop reason the loop can return is documented, and no other', () => {

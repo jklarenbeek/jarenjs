@@ -546,18 +546,21 @@ injected store — is what lets a run outlive a context window and a closed tab.
 What is open is the question it does not answer, what it costs, and what nobody
 has measured yet.
 
-- [ ] **A question over everything at once is still unanswerable.** The agent's
-  own benchmark scores two shapes of question: a needle (one record's value) and
-  a pairwise relation (which two of forty records are closest). With a ledger the
-  needle is fully recoverable — every dropped round is archived and addressed —
-  and the pairwise score is <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->.
-  That is not a summariser that needs improving: the information required to
-  answer is spread across forty rounds, and forty rounds fetched one at a time do
-  not fit the budget they were cut to fit, so `recall` is the wrong shape of
-  answer. Moving it needs the corpus held OUTSIDE the context and queried
-  programmatically — the model working over metadata and naming slices rather
-  than reading them. That is a different piece of work, and until it exists this
-  package should not claim long-horizon capability without the qualifier.
+- [ ] **A program is authored per question, and nothing reuses one.** A question
+  over everything at once — which two of forty records are closest — is
+  unanswerable from a compacted transcript at any budget
+  (<!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->)
+  and is answered by a compiled program over the environment, which is what
+  `packages/ai/README.md` now documents. What is open is everything around the
+  single run: an authored program is thrown away after it answers, so a session
+  that asks forty similar questions authors forty similar plans and pays the
+  authoring call every time. The ledger already stores *skills*, and a program
+  that compiled and answered is exactly the evidence a skill wants — but
+  "the same question again" is a similarity judgement, and this package has
+  deliberately refused to add a relevance model without a measurement first (the
+  retrieval entry below is the same refusal). The missing input is a benchmark
+  over a question STREAM rather than a single question: how often is a stored
+  plan the right plan, and what does re-running a wrong one cost?
 
 - [ ] **Retrieval is tag match and recency.** `recall({ tags, limit })` orders by
   recency and matches tags; with the `compileQuery` seam wired a caller may pass a

@@ -351,10 +351,10 @@ payload shape, one needle question per trial, scored by whether the answer is ri
 | history budget | without a ledger | with a ledger | recall calls |
 | --- | --- | --- | --- |
 | 20000 | 66.7% | 100.0% | 1 |
-| 10000 | 33.3% | 100.0% | 4 |
-| 6000 | 0.0% | 66.7% | 3 |
-| 4000 | 33.3% | 66.7% | 4 |
-| 2000 | 0.0% | 33.3% | 7 |
+| 10000 | 50.0% | 100.0% | 3 |
+| 6000 | 0.0% | 66.7% | 4 |
+| 4000 | 33.3% | 66.7% | 6 |
+| 2000 | 0.0% | 100.0% | 4 |
 <!--/bm-->
 
 The last column is the point: those answers were fetched, not remembered. A ledger row
@@ -367,10 +367,14 @@ is the check that a model can actually use them.
 of forty records are closest?) is unanswerable the instant one round is cut, and a ledger
 does not change that: forty rounds fetched one at a time do not fit the budget they were
 cut to fit. The benchmark scores that question too and publishes it beside the needle: <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->.
-Recall is the wrong shape of answer for it. Moving that number needs the corpus held
-*outside* the context and queried programmatically — which is what the environment below
-is for, though the measurement of it is not in yet. The live tier of the numbers above ran
-on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 176 model calls<!--/bm-->.
+Recall is the wrong shape of answer for it: the fact is not missing, the *relation* is, and
+no number of one-at-a-time fetches reconstructs it inside the budget. Moving that number
+needs the corpus held *outside* the context and worked on programmatically, which is what
+[the environment](#the-environment--a-corpus-you-work-on-not-one-you-read) and
+[the action language](#the-action-language--a-program-the-model-writes-and-the-compiler-checks)
+below are for — the same question, asked of an environment, is answered by a program that
+visits every record by address while the root carries a plan and a step report. The live
+tier of the numbers above ran on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 155 model calls<!--/bm-->.
 
 Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
@@ -553,6 +557,96 @@ This is the alternative to `historyBudget` rather than a tuning of it: there is 
 exceed when the history is addressed instead of resent. `historyBudget` keeps working
 exactly as it did — an agent with no `environment` is byte-identical to one built before
 this existed — and which to reach for is the choice, not a migration.
+
+## The action language — a program the model writes and the compiler checks
+
+The environment lets a model *address* a corpus. A program lets it *work* one: a small
+document whose steps name slots and operations, generated under a schema, compiled before
+anything runs, and executed by the harness.
+
+```js
+import { createProgramRunner, createProgramAuthor, createStructuredOutput } from '@jarenjs/ai';
+import { compileJsonQuery } from '@jarenjs/json/query';
+import querySchema from '@jarenjs/json/schemas/jaren-query.llm-profile.schema.json' with { type: 'json' };
+
+const runner = createProgramRunner({ environment, client, compileQuery: compileJsonQuery });
+const author = createProgramAuthor({
+  client, environment, compileQuery: compileJsonQuery, createStructuredOutput, querySchema,
+});
+
+const { value: program } = await author.author('Which two records have the closest values?');
+const result = await runner.run(program);        // result.answer.text
+```
+
+A program is a list of steps, each reading `from` a slot or an earlier step and writing `as`
+a name the next step can read:
+
+| step | does | calls a model |
+|---|---|---|
+| `chunk` | splits a slot into addressable pieces | no |
+| `grep` | records which pieces matched a pattern | no |
+| `select` | runs a query over a JSON slot | no |
+| `stat` / `peek` | shape, sizes, a head excerpt | no |
+| `map` | asks one question of **every piece** | **yes** |
+| `reduce` | combines a map's results with a query | no |
+| `answer` | reads the slot the answer is in | no |
+
+Three properties, each asserted rather than intended:
+
+- **A program that does not compile never runs.** `run()` puts the document through the
+  schema and then the compiler, and returns the errors having written nothing and spent no
+  model call. The compiler resolves names against what the environment actually holds, so a
+  step reading something no earlier step produced is `AI0201` *with a pointer* — the class of
+  error small models repair well, and one a schema cannot catch. A query that will not
+  compile keeps the **query engine's own** code (`JQ0003`, …) with its pointer rebased onto
+  the step it came from.
+- **No step can carry content.** Every member of every step is an operation name, a binding,
+  a slot reference, a bounded instruction or a query document — `test/ai/program.test.js`
+  walks the grammar and fails if a string member is ever declared without a cap. So the
+  program is the same size for a 10 kB corpus and a 10 MB one, which is what keeps the root
+  request flat while a program runs.
+- **`map` is the only step that calls a model**, so it is the only thing to bound:
+  `maxSubcalls` caps how many are made (and a capped map *says* how many pieces it did not
+  visit), `maxConcurrentSubcalls` caps how many are in flight, and the run's `AbortSignal`
+  reaches every one of them. A sub-call that fails is a **result** — `{ error }` in its own
+  slot — and the map completes, because forty pieces of which one was unreadable is a
+  finished map with one recorded failure, not a crashed program.
+
+### Fan-out is concurrent, and that is the point
+
+The RLM paper this design follows states its own limitation plainly: its sub-calls are
+sequential, and "RLMs without asynchronous LM calls are slow". Running the fan-out in a
+harness rather than inside an evaluator is what makes concurrency available at all — the
+same program and the same sub-calls, run one at a time and then four at a time, is worth <!--bm:horizon.programFanout-->3.9x (814ms sequential vs 208ms at concurrency 4, 40 sub-calls of 20ms each)<!--/bm-->.
+The per-call latency there is synthetic and deliberately so: a benchmark that made eighty
+real calls to time its own scheduler would be measuring the provider's queue.
+
+**What it answers, and what the root pays for it.** The pairwise question that compaction
+scores 0% on at every budget is answered at a ceiling of <!--bm:horizon.program-->100%, with 40 of 40 records reaching the reduce over 40 sub-calls, while the root request carried 937 characters against a corpus of 17719<!--/bm-->.
+By contrast a needle question over the same environment costs **one** sub-call, because
+`grep` narrows to the piece that mentions the record before anything is spent on it.
+
+**On the cheap tier** (D8 — the campaign targets the weak model deliberately, and publishes
+the result whichever way it falls), the measurement is <!--bm:horizon.programLive-->1 of 3 authored programs compiled — but 2 of those attempts never came back at all (the 300 s deadline), so of the 1 that answered, 1 compiled. Answering 40 sub-calls itself it reached 38 of 40 records (2 sub-call(s) failed) and named the CORRECT pair<!--/bm-->.
+Read that second half as the campaign's own result and the first half as a caveat about the
+transport, not the tier: the sub-calls are where the model does the work, and it did it.
+
+### Why there is no `$llm` operator
+
+The obvious-looking alternative is to register an async `$llm` operator into the JSLT/query
+registry so a stylesheet could call a model inline. **Deliberately not done.**
+`@jarenjs/core`'s operators are pure synchronous functions and both evaluators are
+synchronous by construction; making them async for this one caller would change an engine
+that `@jarenjs/db` pushes down into, `@jarenjs/md` renders directives with and
+`@jarenjs/app` derives state from — every one of them would inherit a promise, to save this
+package a `map` step.
+
+So the division is fixed, and it is worth stating because it is the first thing a reader
+will want to reopen: **the program selects (pure, synchronous, compiled) and the harness
+awaits (async, bounded, cancellable).** `map` is the seam between the two halves and it is
+the only one. The pairwise question is answered under that rule — the closest pair of forty
+records is a `$fold` over `$orderby`-sorted tuples, which is arithmetic the query engine
+already does once the model has read each record once.
 
 ### Heartbeats are the host's
 

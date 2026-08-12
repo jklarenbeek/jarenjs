@@ -24,6 +24,10 @@ export { createLedger } from './ledger.js';
 export {
   createEnvironment, environmentTools, chunkSlotName, chunkFamily, CHUNK_KIND,
 } from './environment.js';
+export {
+  compileProgram, programGate, createProgramRunner, createProgramAuthor, ProgramError,
+  PROGRAM_EXAMPLE,
+} from './program.js';
 export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';
 export {
@@ -33,3 +37,6 @@ export {
   REFINEMENT_PATCH_SCHEMA, refinementPatchSchema, REFINEMENT_PATH_PATTERN, DEFAULT_MAX_OPS,
   MEMORY_PROPOSAL_SCHEMA, SKILL_PROPOSAL_SCHEMA, PROGRESS_PROPOSAL_SCHEMA,
 } from './schemas/patch.js';
+export {
+  PROGRAM_SCHEMA, programSchema, PROGRAM_OPS, MAX_STEPS, MAX_PROGRAM_CHARS, NAME_PATTERN,
+} from './schemas/program.js';
