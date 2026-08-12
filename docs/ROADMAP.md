@@ -522,6 +522,22 @@ what each does is its own documentation's job
   Pages cannot set COOP/COEP; a host that can set them may use the
   faster SharedArrayBuffer VFS family. Wiring that path (and an
   IndexedDB-backed fallback for hosts with neither) is unwritten.
+- [ ] **The browser store's boot has no failure surface.** Under
+  contention the wasm store can fail to open and never say so: the
+  studio's status line stays at `—` indefinitely while the page keeps
+  claiming to be booting. Measured in WebKit under the full
+  three-engine browser matrix, roughly one run in four; raising the
+  wait to 90 s does not help, so it is stuck rather than slow, and
+  the same load stops the page's own `load` event firing in a spec
+  that touches no store at all. Alone it settles in about a second
+  (8/8). What makes it awkward is that the boot spans page → worker →
+  wasm → VFS acquisition, and only the last stage knows it lost a
+  race, so an honest report needs each stage to time out and name
+  itself rather than one outer deadline; and the reproduction needs a
+  load no single user generates, which is exactly the condition under
+  which "stuck" and "starved" are hardest to tell apart. The e2e
+  suite absorbs it with CI retries and by running `data.spec.js`
+  serially — neither of which is a fix.
 
 ## Dates & times (cross-package)
 
