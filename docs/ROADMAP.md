@@ -539,6 +539,43 @@ what each does is its own documentation's job
   suite absorbs it with CI retries and by running `data.spec.js`
   serially — neither of which is a fix.
 
+## @jarenjs/ai
+
+The ledger — a durable goal, memories, skills and addressable slots over an
+injected store — is what lets a run outlive a context window and a closed tab.
+What is open is what it costs and what nobody has measured yet.
+
+- [ ] **The goal section has no ceiling.** Progress is appended and never
+  rewritten, and every entry composes into the system prompt of every request —
+  which is exactly what stops a resumed session redoing finished work. It also
+  means a long run's pinned system message grows without bound, and the
+  compaction planner pins it whole: past some length a tight `historyBudget`
+  spends its whole allowance on the goal. Superseding or pruning the goal is the
+  only lever today. Bounding it automatically means deciding what may be dropped
+  from a record whose entire purpose is that nothing is forgotten, so the missing
+  input is a measurement — what does dropping the oldest progress cost a resumed
+  run? — rather than a summarizer.
+
+- [ ] **Refinement's grounding is checked, not judged.** The live probe verifies
+  that a proposed record quotes something the run actually contained and invents
+  no identifier-shaped token (`REC0007`, `v4.19.2`, a region). Nothing measures
+  whether a stored memory was *worth* storing, or what happens to a ledger
+  refined after fifty runs: near-duplicates accumulate, and the prompt asks the
+  model not to add one but nothing enforces it. The instrument that is missing is
+  a duplicate-pressure measurement over repeated refinements against one ledger;
+  a de-duplication rule written before that measurement would be a guess about
+  which of two similar memories is the better one.
+
+- [ ] **The per-path record shape lives in the prompt, not the schema.** One
+  `value` union serves `/memories/-`, `/skills/-` and `/goal/progress/-`, so a
+  progress entry written in a memory's shape is legal against the patch schema
+  and is caught only when the record is validated against the ledger's own. On
+  the qwen tier that cost every first attempt until a shape table and a worked
+  example went into the prompt. `if`/`then` per path would move the constraint
+  into decoding itself, at the price of a keyword provider implementations
+  support unevenly — worth revisiting once that support is measurable rather
+  than assumed.
+
 ## Dates & times (cross-package)
 
 One program. The motivating observation is that the suite does not lack a

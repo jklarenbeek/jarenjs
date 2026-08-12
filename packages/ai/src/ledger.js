@@ -37,6 +37,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { checkOutcome, invalidInput } from './check.js';
 import { createMemoryStorage } from './storage/memory.js';
 import { LEDGER_SCHEMAS } from './schemas/ledger.js';
+import { excerpt } from './text.js';
 
 /** The key space. State and snapshots are separate prefixes on purpose:
  * a rollback wipes state and must not take the other snapshots with it. */
@@ -57,16 +58,6 @@ const SLOT_EXCERPT_CHARS = 120;
 
 /** A zero-padded sequence, so `keys()` sorts lexicographically into order. */
 const seq = (n) => String(n).padStart(6, '0');
-
-/**
- * One line of an excerpt: whitespace collapsed, hard-capped.
- * @param {string} text
- * @param {number} max
- */
-function excerpt(text, max) {
-  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
-}
 
 /**
  * A record with its `undefined` members removed.
@@ -154,8 +145,18 @@ export function createLedger(options = {}) {
    * Validate a complete record against its kind, or produce the standard
    * rejection. The record is built by the caller (defaults already
    * filled) so that what is validated is exactly what would be stored.
+   *
+   * Exported as well as used internally, because a caller that wants to
+   * know whether a record WOULD be storable before storing it — a
+   * model-proposed refinement, which has to reject an unevidenced memory
+   * without writing one — must ask the same question the write asks,
+   * against the same compiled schema. A second copy of these checks is
+   * how "the ledger rejects it" and "the gate rejects it" would come to
+   * mean different things.
    * @param {'goal'|'memory'|'skill'|'slot'} kind
    * @param {any} record
+   * @returns {null | { error: string, errors: any[], inputSchema: any }}
+   *   null when the record is storable.
    */
   function validate(kind, record) {
     const outcome = checkOutcome(checks[kind](record));
@@ -518,6 +519,7 @@ export function createLedger(options = {}) {
   //#endregion
 
   return {
+    validate,
     setGoal, getGoal, listArchivedGoals, recordProgress, setGoalStatus,
     addMemory, getMemory, listMemories, deleteMemory,
     addSkill, getSkill, listSkills, deleteSkill,

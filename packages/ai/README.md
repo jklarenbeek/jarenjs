@@ -316,6 +316,123 @@ rounds fetched one at a time do not fit the budget they were cut to fit.
 
 Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
+## A goal that outlives the tab
+
+```js
+const ledger = createLedger({ storage });                    // durable storage is yours
+await ledger.setGoal({ objective: 'Reconcile July against the bank export.' });
+
+const agent = createAgent({
+  client, toolbox, ledger,
+  budget: { turns: 40, tokens: 250_000, ms: 15 * 60_000 },   // hard stops, not warnings
+  retrieval: { memories: { tags: ['reconcile'], limit: 5 }, skills: {} },
+});
+await agent.resume();                                        // no new instruction needed
+```
+
+The active objective and everything recorded against it are composed into the **system
+prompt of every request** — unconditionally, because it is the thing being worked on.
+Memories and skills are *retrieved* (`retrieval`, using the ledger's own query shape) and
+are absent unless you ask for them. Progress is appended and never rewritten
+(`{ at, note, evidence }`), which is what stops a resumed session redoing finished work: a
+new agent built over the same storage reads what has already been tried rather than being
+told.
+
+Composition happens **in the request, never in the transcript**. `send` still returns the
+full, uncomposed history, so the transcript you persist and hand back next turn carries the
+immutable base prompt and the conversation — not yesterday's rendering of the goal. A goal
+ends by being completed, paused or cleared (`setGoalStatus`); it never ends by being
+forgotten, and there is no timeout that silently drops it.
+
+**Budgets are refusals.** `turns` (one turn = one model call), `tokens` and `ms` each stop
+the run with a named `stopReason` — `budget-turns`, `budget-tokens`, `budget-ms` — and a
+message naming what remains, the same posture as `maxToolRounds`. They bound the *run*, not
+the turn: the counters live on the agent, `spend()` reads them back and `budget.spent` seeds
+them, so a budget survives a reload. Token accounting uses the provider's reported `usage`
+and falls back to deterministic character accounting (4 chars ≈ 1 token) when a provider
+reports none — stated here because a budget that silently did not apply on the runtimes
+that report no usage would be worse than no budget.
+
+### Refinement — the only way durable state changes
+
+```js
+import { createRefiner } from '@jarenjs/ai';
+import { applyJSONPatch } from '@jarenjs/json';
+
+const refiner = createRefiner({
+  client, ledger,
+  applyPatch: (doc, patch) => applyJSONPatch(doc, patch),   // injected, never imported
+});
+const result = await agent.send(history);
+await refiner.refine(result);        // proposes, gates, commits — or declines
+```
+
+The model is asked what it learned, and answers with an **RFC 6902 JSON Patch** over the
+supplemental state, generated through `createStructuredOutput`. Four stages, in order:
+the constrained schema (three verbs, a `path` *pattern*, a cap on operations); application
+to a **copy** through the injected patch engine; validation of every resulting record
+against the ledger's own schemas; then a snapshot and the commit. A failure at any stage
+returns coded, pointered errors for one bounded repair and then declines — nothing is
+half-applied, and `rollback(result.snapshot)` restores byte-identical state after one that
+succeeded.
+
+Two properties are asserted rather than documented:
+
+- **The base system prompt is not a patch target.** It is not in the document a patch
+  applies to, and no path that could reach it matches the schema's pattern. There is no
+  operation a model can write that edits its own instructions.
+- **Every stored memory carries `evidence`**, because the ledger rejects one that does not.
+  That is the mechanism by which "evidence-backed" is enforced rather than hoped for, and
+  it is why a refinement cannot launder a hallucination into durable state.
+
+A revised memory is stored as a new record, not an edit: a different claim, with different
+evidence, at a different time. The empty patch is a legal answer, and the schema does not
+demand an operation — asking a model that learned nothing to produce something is exactly
+how an invented memory gets in.
+
+### What the cheap tier does with it (measured)
+
+Refinement is open-ended authoring, which the field notes above say weak models do badly —
+so it was measured on the qwen tier rather than assumed, on a four-step incident-diagnosis
+run with facts planted in the tool results (`REC0007`, `pg-bouncer`, `v4.19.2`), so that
+grounding and invention are both checkable without a judge.
+
+| model | trials | accepted | first attempt | records | grounded | fabricated ids | median |
+|---|---|---|---|---|---|---|---|
+| `qwen/qwen3.6-35b-a3b` (non-streamed, the shipped path) | 5 | 5 | 5 | 16 | 16/16 | 0 | 69 s |
+| `qwen/qwen3.6-35b-a3b` (streamed) | 5 | 5 | 5 | 16 | 16/16 | 0 | 56 s |
+| `qwen/qwen3.6-27b` (streamed) | 5 | 5 | 5 | 15 | 15/15 | 0 | 10 s |
+
+**Refinement does not need a stronger model** — with one caveat that is the whole finding.
+Before the prompt carried a per-path shape table and one worked example, *every* trial
+failed its first attempt and needed the repair round, always the same way: a progress entry
+written in a memory's shape (`text` where the goal wants `note`). The schema cannot rule
+that out — one `value` union serves three paths — so it is the prompt's job. Six of six
+first attempts failed without it; twenty-four of twenty-four passed with it. That is this
+package's own field note ("a few-shot example fixes *shape*") applied to its own harness,
+and it is the difference between refinement costing one call and costing two.
+
+Nothing else needed a stronger model: 47 of 47 records across every tier cited something
+that was actually in the run, and no trial invented an identifier. The scoring is
+deliberately narrow — it checks that a claim quotes the run and that no `REC…`/`v…`/region
+token appears that the run never contained — so read it as "does not fabricate the things
+we can check", not as a quality score.
+
+One incidental result, recorded because the long-horizon benchmark found the opposite:
+`createStructuredOutput` sends `stream: false`, and non-streaming did **not** hang here on
+the same provider. It was slower on the thinking model (69 s against 56 s median) and
+identical in outcome. The smaller `27b` answered in a tenth of that, from a fifth of the
+completion tokens — a thinking model spends most of a refinement thinking.
+
+### Heartbeats are the host's
+
+There is no scheduler here, deliberately. Re-entering a session on a timer is a *host*
+concern — a browser page, a service worker, a cron — and this package injects its
+environment rather than owning it. The ledger plus `agent.resume()` is the primitive: the
+goal, the progress and the memories reload from storage and the run continues. What decides
+*when* that happens is yours, and keeping it out is what lets the same agent run in a static
+page with no store at all.
+
 ## House rules
 
 Like every jarenjs package: ESM, zero runtime dependencies outside `@jarenjs/*`, no

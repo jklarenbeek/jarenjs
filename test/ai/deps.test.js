@@ -63,10 +63,17 @@ describe('ai — the dependency contract (D3)', function () {
     }
   });
 
-  it('the ledger and its default storage import nothing outside those two', function () {
+  it('the ledger, refinement and their schemas import nothing outside those two', function () {
     // the manifest is a claim; the source is the fact. A relative import
     // is this package's own code, a bare specifier is a dependency.
-    for (const file of ['ledger.js', 'storage/memory.js', 'schemas/ledger.js']) {
+    //
+    // `refine.js` is the pointed case: it applies RFC 6902 patches, and
+    // `@jarenjs/json` ships an RFC 6902 engine. One import would work,
+    // and would end the property that this package runs in a static page
+    // with two dependencies — so the engine arrives as `applyPatch` and
+    // refinement declines with a stated reason when nobody wired it.
+    for (const file of ['ledger.js', 'refine.js', 'text.js',
+      'storage/memory.js', 'schemas/ledger.js', 'schemas/patch.js']) {
       const source = readFileSync(
         new URL(`../../packages/ai/src/${file}`, import.meta.url), 'utf8');
       for (const match of source.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gms)) {

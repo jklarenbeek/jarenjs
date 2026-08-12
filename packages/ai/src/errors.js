@@ -11,6 +11,11 @@
  * problems (an unknown tool, invalid tool input, a tool that throws) —
  * those come back as `{ error }` results the model can read and
  * recover from. AiError is reserved for the transport and for misuse.
+ *
+ * Refinement (`refine.js`) rejects with its own `AI01xx` codes, enumerated
+ * there. They are the same idea one step further out: never thrown, they
+ * travel as records with a pointer, because their reader is a model
+ * repairing its own proposal.
  */
 
 import { CodedError } from '@jarenjs/core/errors';

@@ -21,7 +21,12 @@ export {
   slotRef, slotAddress, slotAddressesIn,
 } from './recall.js';
 export { createLedger } from './ledger.js';
+export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';
 export {
   LEDGER_SCHEMAS, GOAL_SCHEMA, MEMORY_SCHEMA, SKILL_SCHEMA, SLOT_SCHEMA,
 } from './schemas/ledger.js';
+export {
+  REFINEMENT_PATCH_SCHEMA, refinementPatchSchema, REFINEMENT_PATH_PATTERN, DEFAULT_MAX_OPS,
+  MEMORY_PROPOSAL_SCHEMA, SKILL_PROPOSAL_SCHEMA, PROGRESS_PROPOSAL_SCHEMA,
+} from './schemas/patch.js';
