@@ -49,9 +49,12 @@ const queryCard =
     ['p', {},
       ['button', { class: 'btn small primary', type: 'button', on: { click: 'data/run' } },
         'Run + explain'],
+      // every keystroke is published, then Enter or blur commits: this
+      // page re-renders on each live-query event, and a controlled input
+      // whose buffer is not in state is reset by that render mid-typing
       ['input', {
         class: 'data-insert-title', type: 'text', placeholder: 'new note title… (enter inserts)',
-        value: '$.insertDraft', on: { change: 'data/insert' },
+        value: '$.insertDraft', on: { input: 'data/insert-draft', change: 'data/insert' },
       }]],
     { $if: ['$.explain',
       ['details', { class: 'details-card', open: true },

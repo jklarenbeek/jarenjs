@@ -16,6 +16,15 @@
  */
 import { test, expect } from '@playwright/test';
 
+// These tests run ONE AT A TIME, which is the same fact the file is about:
+// the OPFS access-handle pool admits a single owner, and the third test
+// exists to prove a second tab is refused it. Run in parallel they are
+// several would-be owners racing for that pool plus four simultaneous wasm
+// boots in one engine — measured in WebKit, that fails a boot outright
+// roughly one run in four (30s timeout); serial, it is 4/4 green in ~6s.
+// Whatever a second tab must observe, a test opens deliberately.
+test.describe.configure({ mode: 'serial' });
+
 // the wasm build + first store open is real work; give it room
 const READY = { timeout: 30_000 };
 
@@ -62,6 +71,10 @@ test('the wasm store boots, a live query maintains, explain shows the pushdown',
 });
 
 test('data survives a reload via OPFS (or is honestly in-memory)', async ({ page }) => {
+  // the only test here that pays for TWO store opens — the wasm build boots
+  // again after the reload — so it gets more than the single-boot budget its
+  // siblings run inside
+  test.slow();
   await gotoData(page);
   const vfs = (await page.locator('.data-status .data-vfs').textContent())?.trim();
 

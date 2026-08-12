@@ -56,6 +56,10 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       // overwrite the user; a write arriving on the same file while it is
       // dirty raises a conflict instead of clobbering either side.
       buffer: null,
+      // the file-name field's own buffer ({ file, text } or null). Separate
+      // from `buffer` because its commit is a RENAME: publishing every
+      // keystroke straight through would rename the file once per letter.
+      renameDraft: null,
       results: {},       // file name -> a run result (query/jslt: later order)
       stageError: null,  // the nested app's own boot/runtime failure, if any
       // the phone layout: which single pane shows (files | editor | stage).
@@ -163,6 +167,11 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       results: [],             // the last query() result
       explain: null,           // the last explain() { sql, params, indexes, residual }
       live: { mode: null, rows: [], seq: null },
+      // the insert field's buffer. A controlled input whose value is not
+      // published per keystroke is erased by the next render, and this
+      // page renders on every live-query event — so the title had to
+      // live in state, not only in the DOM.
+      insertDraft: '',
       migration: null,         // the last planned/applied migration report
       booted: false,           // the boot effect fires exactly once
       error: null,

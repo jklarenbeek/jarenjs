@@ -201,7 +201,23 @@ export const ACTIONS = {
   // resets the mount/results so the stage re-establishes cleanly.
   'project/add-file': { effects: [{ run: 'project-add', with: { kind: '$event.value' } }] },
   'project/delete': { effects: [{ run: 'project-delete', with: { name: '$payload' } }] },
-  'project/rename': { effects: [{ run: 'project-rename', with: { name: '$event.value' } }] },
+  // the name field's typing buffer — the sibling of `project/buffer-text`,
+  // and cheap the same way: it touches no file, so nothing revalidates
+  'project/rename-draft': {
+    patch: [{
+      op: 'replace',
+      path: '/project/renameDraft',
+      value: { file: '$.project.active', text: '$event.value' },
+    }],
+  },
+  // the commit (blur or Enter), shaped like `project/file-text`: the draft
+  // has served its purpose so it clears, and the effect reads the EVENT —
+  // the value the human actually committed, with no dependence on the
+  // keystroke's own transaction having drained first
+  'project/rename': {
+    patch: [{ op: 'replace', path: '/project/renameDraft', value: null }],
+    effects: [{ run: 'project-rename', with: { name: '$event.value' } }],
+  },
   'project/added': {
     patch: [
       { op: 'replace', path: '/project/files', value: '$payload.files' },
@@ -402,7 +418,15 @@ export const ACTIONS = {
   'data/query-text': { patch: [{ op: 'replace', path: '/data/queryText', value: '$event.value' }] },
   'data/open': { effects: [{ run: 'data-open', with: { text: '$.data.modelText' } }] },
   'data/run': { effects: [{ run: 'data-run', with: { text: '$.data.queryText' } }] },
-  'data/insert': { effects: [{ run: 'data-insert', with: { title: '$event.value' } }] },
+  // the title is published per keystroke and read back from state, not
+  // from the commit event: a live-query render lands between typing and
+  // blurring, and a controlled input whose buffer is not in state is
+  // reset to it — silently, taking the insert with it
+  'data/insert-draft': { patch: [{ op: 'replace', path: '/data/insertDraft', value: '$event.value' }] },
+  'data/insert': {
+    patch: [{ op: 'replace', path: '/data/insertDraft', value: '' }],
+    effects: [{ run: 'data-insert', with: { title: '$event.value' } }],
+  },
   'data/migrate': { effects: [{ run: 'data-migrate' }] },
   'data/status': {
     patch: [

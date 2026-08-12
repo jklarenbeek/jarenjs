@@ -318,7 +318,7 @@ export function dataViewModel(state) {
     liveStrategy: data.live.mode?.strategy ?? '—',
     liveSummary: `${data.live.rows.length} rows, seq ${data.live.seq ?? 0}`,
     liveJson: JSON.stringify(data.live.rows, null, 1),
-    insertDraft: '',
+    insertDraft: data.insertDraft,
     migration: data.migration,
     migrationSteps: data.migration === null ? ''
       : data.migration.planned.join('\n'),

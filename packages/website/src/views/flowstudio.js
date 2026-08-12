@@ -134,9 +134,12 @@ const fsmRun =
 const dagRun =
   ['div', { key: 'flow-run-dag' },
     ['label', { class: 'muted' }, 'Run input (JSON)'],
+    // published per keystroke, not on blur: a run streams per-node updates,
+    // and each render reasserts this controlled textarea — with a stale
+    // value it would overwrite whatever was being typed for the next run
     ['textarea', {
       class: 'editor flow-dag-input', rows: 4, spellcheck: 'false',
-      value: '$.dagInput', on: { change: 'flow/dag-input' },
+      value: '$.dagInput', on: { input: 'flow/dag-input', change: 'flow/dag-input' },
     }],
     ['div', { class: 'flow-run-head' },
       ['button', { type: 'button', class: 'btn', on: { click: 'flow/dag-run' } }, 'Run graph'],

@@ -92,10 +92,17 @@ const shell = {
     // ——— editor ———
     ['div', { class: 'js-editor' },
       ['div', { class: 'js-editor-head' },
-        // the active file name is editable here → project/rename
-        ['input', { class: 'js-editor-name', value: '$.active', spellcheck: 'false',
+        // The active file name is editable here → project/rename on commit.
+        // It needs the SAME two-action shape as the editor textarea and for
+        // the same reason (see `editorTextarea`): a controlled value is
+        // reasserted after every settled render, so a rename typed while the
+        // debounced edit loop fires was rewritten mid-word and the commit
+        // then never came. The draft is a separate buffer rather than the
+        // committed value because a rename per keystroke would rename the
+        // file once per letter.
+        ['input', { class: 'js-editor-name', value: '$.renameDraft', spellcheck: 'false',
           autocapitalize: 'off', autocomplete: 'off', 'aria-label': 'file name',
-          on: { change: 'project/rename' } }],
+          on: { input: 'project/rename-draft', change: 'project/rename' } }],
         ['span', { class: 'js-editor-kind muted' }, '$.activeKind'],
         ['span', { class: 'js-spacer' }],
         ['span', { class: 'js-linecount' }, ['text', '$.lineCount'], ' lines'],

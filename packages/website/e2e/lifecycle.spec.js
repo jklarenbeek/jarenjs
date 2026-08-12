@@ -67,6 +67,13 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
     await expect(page.locator('main.main')).toBeVisible();
     if (group) await expect(page.locator('#site-nav .nav-trigger.active')).toContainText(group);
     else await expect(page.locator('#site-nav .nav-link.active')).toHaveText('Home');
+    // …and settle the menu before the next iteration asks whether its link
+    // is visible. `isVisible()` cannot tell an open menu from one whose
+    // route-driven close is still in flight, so on consecutive same-group
+    // pages the check would skip the open step and then click into a menu
+    // that closed underneath it. Waiting for "no group is open" makes the
+    // next answer unambiguous — this reproduced 2/2 at four workers.
+    await expect(page.locator('#site-nav .nav-group.open')).toHaveCount(0);
   }
 
   expect(await page.evaluate(() => window.__jarenE2eMarker)).toBe(42);

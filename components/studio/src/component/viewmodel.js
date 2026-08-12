@@ -124,6 +124,13 @@ export function projectViewModel(state, options = {}) {
     // aria-valuenow (the widget updates it live during a drag)
     ratioPct: Math.round((project.layout.ratio ?? 0.5) * 100),
     active: activeName,
+    // the name field's own typing buffer, defaulting to the committed name.
+    // It follows the active file, so switching files shows that file's name
+    // rather than a half-typed rename of the previous one.
+    renameDraft: (slice.renameDraft !== null && slice.renameDraft !== undefined
+      && slice.renameDraft.file === activeName)
+      ? slice.renameDraft.text
+      : activeName,
     activeKind: activeMeta?.kind ?? null,
     activeValid: activeMeta?.valid ?? true,
     activeErrors: activeMeta?.errors ?? [],
