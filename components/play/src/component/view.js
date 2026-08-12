@@ -31,8 +31,10 @@ const shell = {
     // saveable document) ———
     ['div', { class: 'jplay-bar' },
       ['strong', { class: 'jplay-title' }, '$.engine.label'],
+      // a NAME field, not a code editor: `.editor` paints the code-block
+      // background, which put a black hole in the middle of a light toolbar
       ['input', {
-        class: 'jplay-name editor line', value: '$.name', spellcheck: 'false',
+        class: 'jplay-name', value: '$.name', spellcheck: 'false',
         autocapitalize: 'off', autocomplete: 'off', placeholder: 'name this session…',
         'aria-label': 'session name', on: { input: 'play/name' },
       }],

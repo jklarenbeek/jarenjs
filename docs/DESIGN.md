@@ -61,6 +61,14 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   with `.container`.
 - One content edge: header, page content, and footer all align on the `--space-5` gutter
   (`max(var(--space-5), env(safe-area-inset-*))` for notched devices).
+  **A packaged component's root is not a page.** `@jarenjs/studio`, `@jarenjs/play` and
+  `@jarenjs/calc` render their own shell, and for as long as they were `$apply`ed straight
+  into `<main>` they were the only surfaces on the site with no edge at all — flush to the
+  screen on a phone, ignoring the 72rem column on a desktop. A component owns its markup;
+  the *host* owns the page it is dropped into, so the `.page container` wrapper lives in
+  `shell.js` (behind an `$if`, the way an absent `$apply` selector renders nothing) and
+  never in the component. `packages/website/e2e/layout.spec.js` measures the edge against
+  the header's own, per route, at both viewports.
 - Prose containers that can receive arbitrary content (`.card p`, `.page-lead`, `.doc-p`,
   table cells) carry `overflow-wrap: anywhere` — long unbreakable tokens must never widen
   the page. In copy, prefer spaced slash lists (`a / b / c`) over `a/b/c`.
@@ -106,6 +114,28 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   (the Docs 8×-viewport collapse). Scrollable children additionally carry
   `min-width: 0`. Belt-and-braces guard: `html, body { overflow-x: clip; }` (`clip`,
   not `hidden` — no scroll container, `position: sticky` keeps working).
+- **A studio is a frame, not an article: above 1024 px it is exactly the viewport.**
+  `.studio-page` (`#/project`, `#/play`) takes the leftover height and passes it down a
+  chain of `min-height: 0` to the component root, so the rails and stages that already
+  declare `overflow: auto` and `minmax(0, 1fr)` rows finally have something to scroll
+  inside. The load-bearing part is that `.site` switches from `min-height` to a definite
+  `height: 100dvh` when a studio page is present (`:has(> .main > .studio-page)`): a
+  `min-height` shell still grows to whatever the tallest pane wants, which is the whole
+  failure — Play's example rail drove the page to 2086px on a 900px viewport (every other
+  pane a column of white) while the project IDE underfilled and stranded a 236px band
+  above the footer. `.main` is the flex column that hands the height over; its children
+  carry `width: 100%`, because a flex item with `margin-inline: auto` — which every
+  `.container` has — opts out of stretching and silently narrows to fit-content.
+  Below 1024 px the one-pane switcher takes over and the panes size to content, so the
+  `min-width: 1025px` block is that block's complement, not a new breakpoint.
+- **A sidebar taller than the viewport scrolls itself.** The docs rail (`.docs-side`,
+  holding the section list *and* the README buttons) is capped at
+  `calc(100dvh - 5.5rem)` with its own `overflow-y`. Uncapped, its 1907px drove the grid
+  row next to a 297px article and one short section pushed the page past 2000px — and its
+  `position: sticky` was decorative, since an element taller than the viewport can never
+  stick. On mobile the rail is `display: contents` so its two halves place themselves as
+  grid items and the README list is `order: 1` — **the article comes before the package
+  list**; it used to sit twenty buttons below the fold.
 - Mobile patterns (reuse these, don't invent siblings):
   - **One pane at a time** — the rule for every multi-pane studio
     (`#/play`, `#/project`, `#/flow`, `#/data`). Below 1024 px a studio never
@@ -268,6 +298,11 @@ A visual pass is verified the way the original audit was made:
   overflow);
 - computed `padding` of `.page.container` elements must keep the horizontal gutter;
   Home's `h1` and every other page's `h1` must share the same x-offset;
+- **width is not the only way a page goes wrong.** A full-bleed page is exactly as wide as
+  the viewport and a too-tall page is what scrolling is for, so neither of the two failures
+  above shows up in an overflow assertion. The measurements that catch them are the page
+  root's x against the header's own, and the studio frame's height against the viewport —
+  `packages/website/e2e/layout.spec.js`, which fails on the pre-fix build in ten places;
 - grep the built `dist/` for banned hues (the historical offenders):
   `5646d6|473bce|7f75f0|4f46e5|db2777|f472b6|ECECFF|9370DB|a626a4|c678dd|b07aa1|ff9da7|hsl(245`
   — zero hits required;

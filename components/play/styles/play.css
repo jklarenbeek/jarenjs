@@ -28,7 +28,12 @@
   flex-wrap: wrap; padding-bottom: var(--space-2, 0.5rem); border-bottom: 1px solid var(--border, #e2e8f0);
 }
 .jplay-title { color: var(--fg, #0f172a); }
-.jplay-name { max-width: 12rem; }
+.jplay-name {
+  max-width: 12rem; min-width: 0;
+  border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 8px);
+  background: var(--bg, #fff); color: var(--fg, #0f172a);
+  padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem); font: inherit; font-size: 0.85rem;
+}
 .jplay-actions { display: flex; gap: var(--space-1, 0.25rem); flex-wrap: wrap; align-items: center; }
 .jplay-load { max-width: 9rem; }
 .jplay-shared { margin-left: auto; }

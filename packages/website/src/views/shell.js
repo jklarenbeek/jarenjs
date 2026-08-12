@@ -56,17 +56,36 @@ export const SHELL_RULES = [
       // other selectors come back empty and render nothing
       ['main', { class: 'main' },
         { $apply: ['$.ui.home', 'home'] },
-        // the Project IDE's save/share bar sits above the IDE shell
-        { $apply: ['$.ui.projectIde', 'project'] },
-        { $apply: ['$.ui.project', 'project'] },
-        { $apply: ['$.ui.play', 'play'] },
+        // Three surfaces are COMPONENT roots, not site pages: @jarenjs/studio,
+        // @jarenjs/play and @jarenjs/calc each render their own shell, and a
+        // published component owns its markup but never the page it is
+        // dropped into. Nothing stood between those roots and <main>, so
+        // they were the only surfaces on the site with no content edge —
+        // flush to the screen on a phone, ignoring the 72rem column the
+        // header and the footer keep on a desktop (DESIGN §3, "one content
+        // edge"). The wrapper is the host's, so it lives here; `$if` keeps
+        // it out of the DOM on every other page, the same way an absent
+        // `$apply` selector renders nothing.
+        { $if: ['$.ui.project',
+          ['div', { class: 'page container studio-page' },
+            // the Project IDE's save/share bar sits above the IDE shell
+            { $apply: ['$.ui.projectIde', 'project'] },
+            { $apply: ['$.ui.project', 'project'] },
+          ]] },
+        { $if: ['$.ui.play',
+          ['div', { class: 'page container studio-page' },
+            { $apply: ['$.ui.play', 'play'] },
+          ]] },
+        { $if: ['$.ui.calculator',
+          ['div', { class: 'page container' },
+            { $apply: ['$.ui.calculator', 'calculator'] },
+          ]] },
         { $apply: ['$.ui.flow', 'flow'] },
         { $apply: ['$.ui.game', 'game'] },
         { $apply: ['$.ui.data', 'data'] },
         { $apply: ['$.ui.bench', 'benchmarks'] },
         { $apply: ['$.ui.chartsPage', 'charts'] },
         { $apply: ['$.ui.docs', 'docs'] },
-        { $apply: ['$.ui.calculator', 'calculator'] },
       ],
       footer,
       // the package-README overlay: absent (renders nothing) until opened

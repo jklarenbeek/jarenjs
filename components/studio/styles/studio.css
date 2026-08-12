@@ -200,8 +200,23 @@
   /* the keyboard seam: the editor pane reserves the published inset as
      scroll room, so the caret clears the on-screen keyboard */
   .js-editor { padding-bottom: var(--kb-inset, 0px); }
+  /* The pen bar is a single centred row on a desktop. On a phone that row
+     has no width to give, so the template gallery wrapped into a tower of
+     chips down the middle of the bar and pushed the file count and Run out
+     to the sides — 236px of chrome above a 350px-wide editor. It becomes
+     two honest rows instead: the identity line, then the gallery as a
+     horizontal scroll strip (the suite's mobile pattern), with the
+     desktop-only spacer switched off so nothing is flung to the edges. */
+  .js-penbar { flex-wrap: wrap; }
+  .js-spacer { display: none; }
+  .js-gallery {
+    inline-size: 100%; order: 1; flex-wrap: nowrap;
+    overflow-x: auto; scrollbar-width: none;
+    mask-image: linear-gradient(90deg, #000 92%, transparent);
+  }
+  .js-template { flex: none; white-space: nowrap; }
   /* touch targets: rows, segments and pen-bar buttons are finger-sized */
-  .js-file, .js-file-del, .js-addfile,
+  .js-file, .js-file-del, .js-addfile, .js-template,
   .jstudio .seg-btn, .js-penbar .btn { min-height: 44px; }
 }
 @media (max-width: 760px) {

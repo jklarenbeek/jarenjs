@@ -136,7 +136,14 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 .site { min-height: 100vh; display: flex; flex-direction: column; }
 @supports (height: 100dvh) { .site { min-height: 100dvh; } }
 @supports (height: 100svh) { .site { min-height: 100svh; } }
-.main { flex: 1; }
+/* a flex column so ONE page kind — the studio frame below — can be handed
+   the leftover height; every other page keeps its natural height.
+   `width: 100%` is load-bearing: a flex item with `margin-inline: auto`
+   (which every `.container` has) opts out of stretching and falls back to
+   its fit-content width, so without it the flex column quietly narrowed
+   every page on the site. */
+.main { flex: 1; display: flex; flex-direction: column; }
+.main > * { flex: 0 0 auto; width: 100%; }
 .container {
   max-width: 72rem; margin: 0 auto;
   padding-inline: max(var(--space-5), env(safe-area-inset-left))
@@ -145,6 +152,13 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 /* padding-block only: a `.page.container` element must keep the
    container's horizontal gutters (the shorthand used to zero them) */
 .page { padding-block: var(--space-8) var(--space-14); }
+/* The studio frame (`#/project`, `#/play`): an app shell, not an article.
+   It comes AFTER `.page` on purpose — equal specificity, so source order
+   is what replaces the article's reading rhythm with a tighter frame. */
+.studio-page {
+  padding-block: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
 .page-lead { color: var(--muted); max-width: 46rem; margin-bottom: var(--space-5); }
 .section { margin-top: var(--space-10); }
 .muted { color: var(--muted); font-size: 0.85rem; }
@@ -203,9 +217,13 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 
 /* footer (the page's bottom padding provides the gap above it) */
 .footer { border-top: 1px solid var(--border); }
+/* the bottom padding reserves the assistant launcher's lane: it is fixed
+   to the bottom-right corner, so at the foot of a short page it sat on
+   top of the footer's own right-hand links */
 .footer-inner {
   display: flex; flex-wrap: wrap; gap: var(--space-4); justify-content: space-between;
-  padding-top: var(--space-5); padding-bottom: var(--space-6); color: var(--muted); font-size: 0.85rem;
+  padding-top: var(--space-5); padding-bottom: calc(var(--space-6) + 2.75rem);
+  color: var(--muted); font-size: 0.85rem;
 }
 .footer-links { display: flex; gap: var(--space-5); }
 
@@ -267,13 +285,20 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
   flex-wrap: wrap; margin-bottom: var(--space-3);
 }
-.card-head h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* the title takes the slack so a long one wraps INSIDE its line rather
+   than pushing the head's action onto a second, right-aligned row —
+   which is what left the Flow seed cards' Load buttons ragged */
+.card-head h3 { margin: 0; min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
 .card-head > :last-child { margin-left: auto; }
 .engine-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4);
 }
+.engine-card { display: flex; flex-direction: column; }
 .engine-card p { font-size: 0.9rem; color: var(--muted); }
-.engine-perf { color: var(--accent) !important; font-weight: 600; font-size: 0.82rem !important; }
+/* grid rows stretch to their tallest card, so a short blurb left its
+   measured line floating with white beneath it. Pinned to the bottom, the
+   perf lines form one row-wide baseline instead */
+.engine-perf { margin-top: auto; padding-top: var(--space-2); color: var(--accent) !important; font-weight: 600; font-size: 0.82rem !important; }
 
 .callout {
   background: var(--surface); border: 1px solid var(--border);
@@ -478,6 +503,10 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   --calc-equals: var(--accent);
   --calc-equals-text: var(--accent-fg);
   font-family: var(--font);
+  /* the component caps itself at 720px, which inside the 72rem column left
+     it hugging the left edge with 400px of white beside it — a keypad is
+     one object on a page, so it sits in the middle of its column */
+  margin-inline: auto;
 }
 
 /* embedded markdown articles link in the site accent (same doubled-selector
@@ -491,8 +520,25 @@ tr.strong td { font-weight: 700; color: var(--accent); }
    shrink below its largest item's min-content width, so one nowrap
    scroll strip would widen the whole page instead of scrolling */
 .docs-grid { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: var(--space-10); align-items: start; }
-.docs-nav, .docs-sections, .docs-readmes { min-width: 0; }
-.docs-nav { position: sticky; top: 4.5rem; display: flex; flex-direction: column; gap: 0.1rem; }
+.docs-side, .docs-nav, .docs-packages, .docs-sections, .docs-readmes { min-width: 0; }
+/* The rail is capped at the viewport and scrolls itself. Without the cap
+   the 33 section links plus 20 README buttons made the left column 1907px
+   tall next to a 297px article: the grid row took the taller of the two,
+   so one short section pushed the page past 2000px and left the whole
+   content column white below the fold. The cap is also what makes the
+   `sticky` real — an element taller than the viewport can never stick. */
+.docs-side {
+  position: sticky; top: 4.5rem;
+  max-height: calc(100vh - 5.5rem);
+  overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin;
+  /* the same affordance the horizontal scroll strips carry, turned 90°:
+     overlay scrollbars are invisible until you touch them, so the bottom
+     edge fades to say there is more list below it */
+  mask-image: linear-gradient(180deg, #000 94%, transparent);
+}
+@supports (height: 100dvh) { .docs-side { max-height: calc(100dvh - 5.5rem); } }
+.docs-nav { display: flex; flex-direction: column; gap: 0.1rem; }
 .docs-nav h1 { font-size: 1.3rem; margin-bottom: var(--space-2); }
 .docs-sections { display: contents; }
 .docs-link { color: var(--muted); font-size: 0.88rem; padding: var(--space-1) var(--space-3); border-radius: 6px; border-left: 2px solid transparent; }
@@ -566,6 +612,32 @@ tr.strong td { font-weight: 700; color: var(--accent); }
    (`@jarenjs/play` and `@jarenjs/studio` keep the same pairing inside
    their own stylesheets, for the same reason.) */
 .flow-panebar, .data-panebar { display: none; }
+
+/* ——— the studio frame owns the viewport above the breakpoint ———
+   `@jarenjs/play` and `@jarenjs/studio` are app shells: their rails and
+   stages scroll INTERNALLY (`overflow: auto` on `.jplay-rail`,
+   `.js-stage-mount`) and their grids declare `minmax(0, 1fr)` rows. None
+   of that does anything unless the frame has a bounded height, and it had
+   none — so Play's example rail drove the grid to 1866px on a 1280×900
+   desktop, leaving every other pane a column of white, while the project
+   IDE did the opposite and left a 236px dead band above the footer.
+   Handing the studio page the leftover height fixes both at once, and the
+   rails start scrolling as their own stylesheets always intended.
+
+   Not a new breakpoint: this is the complement of the 1024 block below,
+   where the one-pane switcher takes over and the panes size to content. */
+@media (min-width: 1025px) {
+  /* The shell is exactly the viewport — header, frame, footer — instead of
+     `min-height`, because a `min-height` shell still grows to whatever the
+     frame's tallest pane wants and that is the whole failure. A definite
+     height is what lets the chain of `min-height: 0` shrink the frame back
+     down to the space that is actually there. */
+  .site:has(> .main > .studio-page) { height: 100vh; }
+  @supports (height: 100dvh) { .site:has(> .main > .studio-page) { height: 100dvh; } }
+  .main { min-height: 0; }
+  .studio-page { flex: 1 1 auto; min-height: 0; }
+  .studio-page > .jplay, .studio-page > .jstudio { flex: 1 1 auto; min-height: 0; }
+}
 
 /* tablet: two-column grids collapse before they get cramped */
 @media (max-width: 1024px) {
@@ -647,6 +719,11 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   .pg-grid, .pg-grid.two { grid-template-columns: minmax(0, 1fr); }
   .studio-app-panels { grid-template-columns: minmax(0, 1fr); }
   .docs-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  /* the rail's box dissolves so its two halves place themselves: the
+     section strip stays at the top, the README list goes last — the
+     article is what the reader came for and it now comes second */
+  .docs-side { display: contents; }
+  .docs-packages { order: 1; }
   .docs-nav { position: static; }
   .docs-sections {
     display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
@@ -977,7 +1054,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .game-name { display: flex; flex-direction: column; gap: var(--space-2); max-width: 24rem; margin: var(--space-6) auto; text-align: left; }
 .game-name-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .game-locales { display: flex; gap: 2px; }
-.game-loc { padding: 2px var(--space-2); font-size: 0.7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--muted); cursor: pointer; }
+/* dense in-flow chrome, so the 2.2rem tier (DESIGN §5) — these were 18px */
+.game-loc { display: inline-flex; align-items: center; min-height: 2.2rem; padding: 2px var(--space-2); font-size: 0.7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--muted); cursor: pointer; }
 .game-loc.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .game-name input, .game-name select { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); }
 .game-start { font-size: 1.05rem; padding: var(--space-3) var(--space-6); }
