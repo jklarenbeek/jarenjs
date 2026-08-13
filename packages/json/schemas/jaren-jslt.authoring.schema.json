@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-jslt/0.1/authoring",
+  "title": "Jaren JSLT format 0.1 (authoring profile)",
+  "description": "Authoring profile of the canonical grammar: the document SHAPE only, with queryDocument left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
+  "allOf": [
+    {
+      "$ref": "#/$defs/stylesheetDocument"
+    }
+  ],
+  "$defs": {
+    "stylesheetDocument": {
+      "description": "A JSLT stylesheet is either a bare array of rules or the versioned envelope object.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule"
+          }
+        },
+        {
+          "$ref": "#/$defs/stylesheetEnvelope"
+        }
+      ]
+    },
+    "stylesheetEnvelope": {
+      "description": "Versioned stylesheet envelope. Unknown members are rejected; per-mode declarations only override unmatched disposition.",
+      "type": "object",
+      "properties": {
+        "$jslt": {
+          "const": "0.1"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule"
+          }
+        },
+        "unmatched": {
+          "$ref": "#/$defs/dispositionValue"
+        },
+        "modes": {
+          "$ref": "#/$defs/modesMap"
+        }
+      },
+      "required": [
+        "$jslt",
+        "rules"
+      ],
+      "additionalProperties": false
+    },
+    "rule": {
+      "description": "One closed template rule. The compiler is authoritative for rank ordering, reserved external bindings, hook availability, and body runtime semantics (JT0xxx/JT2xxx).",
+      "type": "object",
+      "properties": {
+        "match": {
+          "$ref": "#/$defs/matchSpec"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "body": {
+          "$ref": "#/$defs/queryDocument"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "matchSpec": {
+      "description": "A positional RFC 9535 JSONPath match, a shape match using an annotation-only JSON Schema literal, or both conditions in one closed object.",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "(LLM profile: the 'json-path' format assertion is relaxed here; the canonical schema enforces it)"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "(LLM profile: the 'json-path' format assertion is relaxed here; the canonical schema enforces it)"
+            },
+            "schema": {
+              "$ref": "#/$defs/schemaLiteral"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "path"
+              ]
+            },
+            {
+              "required": [
+                "schema"
+              ]
+            }
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "dispositionValue": {
+      "description": "Built-in behavior for unmatched values: share unchanged subtrees, rebuild fresh containers, or raise JT2003.",
+      "enum": [
+        "share",
+        "fresh",
+        "error"
+      ]
+    },
+    "modesMap": {
+      "description": "Mode name to unmatched-disposition override. Modes need not otherwise be declared.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/modeConfig"
+      }
+    },
+    "modeConfig": {
+      "type": "object",
+      "properties": {
+        "unmatched": {
+          "$ref": "#/$defs/dispositionValue"
+        }
+      },
+      "required": [
+        "unmatched"
+      ],
+      "additionalProperties": false
+    },
+    "queryDocument": {
+      "description": "A jaren-query expression: a JSONPath string starting with \"$\", a literal, or a one-member operator object such as {\"$sum\": \"$.prices[*]\"} or {\"$sub\": [\"$a\", \"$b\"]}. Any JSON value decodes here; the engine compiler is the authority for whether it is a legal expression."
+    },
+    "schemaLiteral": {
+      "description": "A JSON Schema literal, taken verbatim - never interpreted as a query expression, so JSON Schema's $-prefixed keywords ($ref, $defs, ...) do not collide with Rule 1. Deliberately unconstrained (a true schema is draft-neutral by definition): embedded schemas are not meta-validated by this artifact; the consumer's type-test compiler is authoritative (JQ0009)."
+    }
+  }
+}

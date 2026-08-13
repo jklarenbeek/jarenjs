@@ -32,6 +32,12 @@ export {
   createLongHorizonAgent, createBudgetAccount, createTrajectory, resolveDepth, childScope,
   MAX_DEPTH, DEFAULT_DEPTH,
 } from './recursive.js';
+export {
+  createStylesheetAuthor, stylesheetGates, compileGate, literalBodyGate, nonEmptyGate, runGate,
+  unknownOperatorGate, grammarKeywords,
+  operatorArities, operatorNames, operatorCrib, describePaths,
+  StylesheetError, STYLESHEET_EXAMPLE,
+} from './stylesheet.js';
 export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';
 export {

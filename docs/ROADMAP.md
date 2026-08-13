@@ -593,31 +593,34 @@ harder and more valuable half.
   depth cap and the shared budget are the useful parts, and depth 1 is the default
   because deeper has not earned its cost here.
 
-- [ ] **The authoring call is what times out, and streaming does not fix it.** The
+- [ ] **The authoring call is what times out, on the `a3b` tier specifically.** The
   campaign's live runs lost roughly one authoring attempt in three on the
   single-level program path and **all four** recursive tasks at depths 1 and 2, every
   one on a 300-second deadline during its first authoring call — while ordinary
-  sub-calls on the same tier, in the same run, answered 40 out of 40. These calls
-  were STREAMED, which rules out the non-streaming hang this repo measured
-  separately: the problem is the request itself, which carries the digest, the
-  question, a worked example and the whole program schema. Recursion needs one per
-  level, so the failure probability compounds with depth, which is what the numbers
-  show. **Two causes are now measured, not suspected.** Asked to author a JSLT
-  stylesheet with the full published grammar as the `response_format`, this tier
-  returns degenerate output — an empty reply, or the three characters `1.1`; with a
-  410-character envelope schema and the same compile gate, the same request answers
-  in ~28 s with a real document. That is the oversized-`response_format` failure this
-  package's field notes already record, now reproduced on the authoring path, and
-  `deriveLlmProfile` exists to shrink a grammar for exactly this reason. The second
-  cause is in the usage: of 2261 completion tokens on that successful call, **1927
-  were reasoning** — so ~85% of the output budget is spent thinking, which is why a
-  repair round (a longer prompt carrying the failed attempt) then blew a 120-second
-  deadline. Both point the same way: authoring wants a SMALL schema and room to
-  think, and the two compete. What is still open is which shrink is safe — a profile
-  narrow enough to decode reliably while still describing enough of the grammar to be
-  authored against, measured rather than guessed. `createStructuredOutput` sending
-  `stream: false` is worth revisiting in the same pass, since it is a behaviour
-  change for every caller (D6).
+  sub-calls on the same tier, in the same run, answered 40 out of 40. Recursion needs
+  one authoring call per level, so the failure probability compounds with depth, which
+  is what the numbers show.
+
+  The stylesheet-authoring pass closed the two *mechanical* causes — the oversized
+  `response_format` (a narrowed authoring profile, and `stream` is now an option on
+  `createStructuredOutput`) — and the residue is a property of the model, not the
+  request. On the identical, now-working authoring path, `qwen3.6-35b-a3b` spends
+  3,000–5,600 tokens *reasoning* per attempt at 60–90 s a call, where
+  `qwen3.6-27b` emits **zero** reasoning tokens and answers the same question
+  correctly in one call, five times out of five, in 3–6 seconds. A sparse-MoE tier
+  that cannot stop thinking is not fixed by a smaller schema; it is avoided by
+  routing authoring to a dense model. What is open is whether that routing rule
+  generalises past this one document kind — the program language and the recursive
+  tiers have not been re-measured since, and the depth numbers below still stand on
+  the old runs.
+
+- [ ] **An oversized `response_format` has one measured cure and it is per-grammar.**
+  `jaren-jslt.authoring.schema.json` exists because a JSLT stylesheet is what was
+  measured; the query, app, fsm and dag grammars have no authoring profile and the
+  same failure is available to all of them. The derivation
+  (`deriveAuthoringProfile`, a narrowing at a named `$defs` seam) is general and the
+  artifact is three lines of script — what is missing is the measurement that says
+  where each grammar's seam is, which is not guessable from the schema alone.
 
 - [ ] **Retrieval is tag match and recency.** `recall({ tags, limit })` orders by
   recency and matches tags; with the `compileQuery` seam wired a caller may pass a

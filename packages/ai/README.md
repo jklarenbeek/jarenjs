@@ -177,6 +177,152 @@ The reliable *composition* of all this is a jaren-dag: one task node authors the
 writes a validated script per action (coder model), and a query node assembles the system
 — every AI output schema-validated and compiled before the next stage, no `eval`.
 
+### When the grammar is too big to decode (measured)
+
+The pattern above has a size limit, and the published JSLT grammar is past it. Asked for a
+stylesheet with `jaren-jslt.schema.json` (18,736 characters) as the `response_format`,
+`qwen3.6-35b-a3b` returns **an empty reply — three times out of three, in 14 seconds each**.
+Not a bad document: no document. The LLM-profile twin does not help, because a relaxation
+*restates* every constraint it removes and therefore **grows** the schema (19,158
+characters). That is the failure this section exists to fix, and `@jarenjs/ai/stylesheet`
+is the fix:
+
+```javascript
+import { createStructuredOutput, createStylesheetAuthor } from '@jarenjs/ai';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import authoring from '@jarenjs/json/schemas/jaren-jslt.authoring.schema.json' with { type: 'json' };
+import canonical from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
+import grammar from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
+
+const author = createStylesheetAuthor({
+  client, createStructuredOutput,
+  compile: compileJsltStylesheet,   // the engine, INJECTED — never imported here
+  schema: authoring,                // 3,491 chars: the document shape, body open
+  canonical,                        // the full grammar, as a local check after decoding
+  grammar,                          // the operator vocabulary, for the prompt
+  models: ['qwen/qwen3.6-27b', 'qwen/qwen3.6-35b-a3b'],   // dense first — measured below
+});
+
+const { value, model } = await author.author(
+  'Use jsonpath to make a stylesheet that gets the nearest probability to a random upperclass list',
+  { sample },                       // the document it will run on
+);
+```
+
+Four changes, each one answering something that was measured rather than suspected.
+
+**1. Narrow the response format; move the vocabulary to the prompt.**
+[`jaren-jslt.authoring.schema.json`](../json/schemas/jaren-jslt.authoring.schema.json) is
+the canonical grammar cut at the one `$ref` that pulls in the whole expression language —
+**18,736 → 3,491 characters**, the document shape intact and the body open. It is
+mechanically derived and the artifact test asserts the committed file *is* the derivation.
+It is deliberately weaker than the canonical schema, which is why `canonical` is validated
+locally afterwards and the compiler still gates everything: the same validate-then-compile
+pipeline, with a smaller thing driving the decoder. What the cut removes goes into the
+system message instead, as **1,089 characters of operator names grouped by arity** —
+`operatorCrib(querySchema)`, read off the injected artifact so it cannot rot. Arity is in
+there because leaving it out was measured too: on the small schema alone the model reached
+the right algorithm and wrote `{"$if": {"$gt": …, "then": …, "else": …}}` — named members
+for an operator whose operands are an array.
+
+**2. Ground the question in the data, as paths.** A real user's prompt names no field that
+exists: *propability* is a typo and *upperclass* is a value, not a member. `describePaths`
+turns a sample into the addresses that reach it —
+
+```
+$.target                    number  e.g. 0.5
+$.records[*].class          string  e.g. "upper", "middle"
+$.records[*].probability    number  e.g. 0.61, 0.54
+```
+
+— which binds both without being told. Arrays collapse to one `[*]` entry, so four hundred
+records describe the same shape as three and the request does not grow with the data.
+
+**3. Two gates the schema and the compiler both miss.** Both of these documents validate,
+compile, and are wrong:
+
+| the document | why every existing check passes it | what catches it |
+| --- | --- | --- |
+| `{"match": "$", "body": "if (.class == \"upper\") …"}` | a body string that does not start with `$` is a legal string **literal** — the transform returns its own source | `literalBodyGate` → `AI0220` |
+| `{"$sub": ["$i.probability", "$$.target"]}` | `$$` is the escape for a literal `$`, so this is the *text* `"$.target"` — legal everywhere except arithmetic | `runGate` → the engine's own `JQ2001` at `/…/$sub/1` |
+
+The second is the sharper lesson: **compiling is not running**. That document was produced
+by a live model on the first attempt, filtering the right class and ranking by absolute
+distance — correct in every respect except one operand, and unfindable until a value flowed
+through it. The sample the digest already needs is exactly what makes it findable, so the
+run gate costs nothing extra and converts a silent wrong answer into a repair round
+carrying the engine's pointer. Neither gate judges the *answer*: a transform that runs and
+returns the wrong record passes, because a quality gate repairs badly on weak models — a
+field note this package earned once already.
+
+**4. Bound the request.** Of 2,642 completion tokens on one of these calls, **2,167 were
+reasoning**: 82% of the output budget spent thinking, and a repair round (a longer prompt
+carrying the failed attempt) escalated it to 5,131 and blew its deadline. The author sends
+`reasoning: { effort: 'low' }` and a `maxTokens` ceiling by default. The ceiling is not
+only thrift: left unset a provider substitutes the model's whole context window, which a
+credit-metered aggregator must be able to afford up front — OpenRouter answers **HTTP 402**
+naming the number it wanted rather than billing for it. `createChatClient` now takes
+`maxTokens` for this reason.
+
+**5. Name the member the model has to change.** A closed vocabulary is the one thing
+JSON Schema reports badly. Both tiers reach for `$abs` for "nearest" — a reasonable
+spelling, and one that lives in `mathPack` rather than the core grammar — and validating
+that document against the canonical schema produces **280 errors, of which the first to
+contain the string `$abs` is number 67**. A repair round carries eight. What the model
+gets back is `must be a array`, `must have required property '$query'`, `must NOT have
+additional property '$head'` — the anyOf branches failing one by one, describing
+everything except what to fix. It repaired to the identical document twice.
+`unknownOperatorGate` walks the bodies, checks every `$`-member against the grammar's own
+closed vocabulary, and says *`'$abs' is not an operator in this grammar`* with a pointer.
+It runs **before** the canonical schema, because the first invalid check is the one whose
+errors travel. A host that mounts a registry passes `operators: registry.names()` and both
+the crib and the gate widen together — a gate stricter than the prompt would refuse what
+the instructions offered.
+
+#### What it does, end to end
+
+The question is the user's, typo and all — *"Use jsonpath to make a stylesheet that gets
+the nearest propability to a random upperclass list"* — over fourteen records with a
+`class` and a `probability` and a `target` to be near. A run counts as **correct** only if
+the authored stylesheet compiles, runs, and returns the record the arithmetic says it
+should: the nearest probability *among the upper class*, which is not the nearest overall.
+
+| response format | model | trials | authored | correct | calls | wall clock | reasoning tokens/attempt |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| canonical grammar (18,736 chars) | `qwen3.6-35b-a3b` | 3 | 0 | 0 | 3 | 14 s per empty reply | n/a — the reply was empty |
+| authoring profile (3,491 chars) | `qwen3.6-27b` | 5 | 5 | **5** | 1 each | **3.3–5.5 s** | **0** |
+| authoring profile (3,491 chars) | `qwen3.6-35b-a3b` | 3 | 3 | 2 | 1 each | 40–141 s | 3,000–5,600 |
+| authoring profile (3,491 chars) | 27b → 35b escalation | 2 | 2 | **2** | 1 each | 4.0–61 s | 0 (27b answered both) |
+
+Read the last two rows before picking a tier. The **dense** 27b model — the one this
+package's older field notes call "the coding model" — answers correctly every time, in one
+call, in seconds, emitting **no reasoning tokens at all**. The sparse-MoE `a3b` model gets
+there two times in three and spends a minute or two thinking to do it. That is the
+opposite of the intuition that a bigger orchestration model should author better, and it
+is the most useful thing measured here: **route document authoring to the dense model.**
+Across every configuration that put 27b first the answer was right **7 times out of 7**.
+Three trials on the 35b rows is a small sample and the error bars are wide — the 5-of-5
+and the 40-to-141-second spread are the numbers, not a claim about model families in
+general.
+
+`models` is a list because the *call* can fail — a timeout, a transport error, a candidate
+that never passes the gates — and the next model is then tried with the same messages.
+It escalates on a failed call and never on a bad answer: a second opinion on a document
+that authored cleanly is not what a fallback is for.
+
+The failing 35b run is worth naming too, because it is the honest limit: it authored a
+stylesheet that compiled and ran and ranked over every record instead of over one class.
+No gate here refuses that, deliberately, and the arithmetic in the harness is what caught
+it. A gate that judged answers would have to be right about the question, and it isn't.
+
+**The worked example carries a `$where`, and that is load-bearing.** Without it the example
+is `$for`/`$orderby`/`$return`, and asked for the nearest probability *in one class* the
+model returned the nearest probability *overall* — a stylesheet that compiled, ran, and
+answered a question nobody asked. It copied the shape it was shown, filter and all, and the
+shape it was shown had no filter. Adding the clause to the example fixed it on the next
+run. This is the "a few-shot example fixes *shape*" note above, in its sharpest form: an
+example that omits a clause teaches the model to omit it.
+
 ## A model as a dataflow node
 
 An `@jarenjs/flow` dag runs a graph whose nodes are the suite's engines — and a *model*

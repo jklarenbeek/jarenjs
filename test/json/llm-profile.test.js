@@ -14,12 +14,15 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { compileArtifact, deriveLlmProfile } from './schema-artifact-helpers.js';
+import {
+  compileArtifact, deriveLlmProfile, deriveAuthoringProfile, JSLT_AUTHORING_OPEN,
+} from './schema-artifact-helpers.js';
 
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
 import queryProfile from '@jarenjs/json/schemas/jaren-query.llm-profile.schema.json' with { type: 'json' };
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 import jsltProfile from '@jarenjs/json/schemas/jaren-jslt.llm-profile.schema.json' with { type: 'json' };
+import jsltAuthoring from '@jarenjs/json/schemas/jaren-jslt.authoring.schema.json' with { type: 'json' };
 
 import { EXAMPLES as PLAY_EXAMPLES } from '../../components/play/src/index.js';
 
@@ -124,5 +127,65 @@ describe('json — the LLM-profile schema twins', function () {
       'the profile accepts it (the provider subset would too)');
     assert.strictEqual(checks.query(badBinding), false,
       'canonical validation rejects it locally — the documented pipeline');
+  });
+});
+
+describe('json — the JSLT authoring profile', function () {
+  const authoringCheck = compileArtifact(jsltAuthoring);
+
+  it('the committed artifact is a byte-stable derivation of the canonical schema', function () {
+    assert.deepStrictEqual(jsltAuthoring,
+      deriveAuthoringProfile(jsltSchema, { open: JSLT_AUTHORING_OPEN }),
+      'jaren-jslt.authoring.schema.json = deriveAuthoringProfile(canonical)');
+    assert.match(jsltAuthoring.$id, /\/authoring$/);
+  });
+
+  it('SHRINKS the grammar, which is the entire reason it exists', function () {
+    // the LLM profile is a relaxation: it restates every constraint it
+    // removes, so it does not get smaller — measured, it gets BIGGER.
+    // An oversized response_format is what stops a small model decoding
+    // at all, so a profile that does not shrink does not help.
+    const canonical = JSON.stringify(jsltSchema).length;
+    assert.ok(JSON.stringify(jsltProfile).length >= canonical,
+      'the relaxation is not a shrink');
+    assert.ok(JSON.stringify(jsltAuthoring).length < canonical / 4,
+      'the narrowing is: under a quarter of the canonical grammar');
+  });
+
+  it('opens the body and nothing else', function () {
+    assert.deepStrictEqual(Object.keys(jsltAuthoring.$defs.queryDocument), ['description'],
+      'the open node carries a description and no constraint');
+    for (const gone of ['expression', 'flworPhrase', 'binaryOperatorPhrase', 'objectExpression']) {
+      assert.ok(!Object.hasOwn(jsltAuthoring.$defs, gone),
+        `${gone} is reachable only through the body and left with it`);
+    }
+    for (const kept of ['stylesheetDocument', 'stylesheetEnvelope', 'rule', 'matchSpec']) {
+      assert.ok(Object.hasOwn(jsltAuthoring.$defs, kept),
+        `${kept} is document shape and stays`);
+    }
+  });
+
+  it('is a pure WIDENING: every canonical-valid stylesheet is authoring-valid', function () {
+    // the one failure mode a narrowing must not have — a document the
+    // engine can run that the response format cannot express
+    const docs = [...JSLT_CORPUS, ...playDocs('jslt', 'stylesheet', [])];
+    for (const doc of docs) {
+      assert.strictEqual(authoringCheck(doc), true,
+        `authoring-valid: ${JSON.stringify(doc).slice(0, 60)}`);
+    }
+  });
+
+  it('is DELIBERATELY weaker, so the compiler is what makes it safe', function () {
+    // nonsense in the body position decodes here and must not survive
+    // the validate-then-compile pipeline the README documents
+    const nonsense = { $jslt: '0.1', rules: [{ match: '$', body: { $nope: [1, 2, 3] } }] };
+    assert.strictEqual(authoringCheck(nonsense), true,
+      'the authoring profile accepts it — that is the trade');
+    assert.strictEqual(checks.jslt(nonsense), false,
+      'and canonical validation refuses it, before the compiler ever sees it');
+  });
+
+  it('contains none of the keywords strict provider subsets reject', function () {
+    assert.deepStrictEqual(forbiddenKeywords(jsltAuthoring), []);
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/ai",
   "private": false,
-  "version": "0.33.4",
+  "version": "0.34.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -94,6 +94,10 @@
       "types": "./dist/types/recursive.d.ts",
       "default": "./src/recursive.js"
     },
+    "./stylesheet": {
+      "types": "./dist/types/stylesheet.d.ts",
+      "default": "./src/stylesheet.js"
+    },
     "./refine": {
       "types": "./dist/types/refine.d.ts",
       "default": "./src/refine.js"
@@ -117,7 +121,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.33.4",
-    "@jarenjs/validate": "^0.33.4"
+    "@jarenjs/core": "^0.34.0",
+    "@jarenjs/validate": "^0.34.0"
   }
 }

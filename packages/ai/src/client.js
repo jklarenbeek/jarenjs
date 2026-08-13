@@ -220,6 +220,10 @@ function normalizeRetry(retry) {
  * @property {any} [toolChoice] - `tool_choice` passthrough
  * @property {string} [model] - overrides the client's configured model
  * @property {number} [temperature]
+ * @property {number} [maxTokens] - `max_tokens` ceiling for this reply.
+ *   Unset means the PROVIDER picks, and it picks the model's context
+ *   window — which a credit-metered aggregator must be able to afford up
+ *   front or it refuses the call outright. Overrides the client default.
  * @property {boolean} [stream] - default true
  * @property {{ name?: string, schema?: any, strict?: boolean, type?: 'json' }} [responseFormat]
  *   - structured output: `{ name, schema, strict? }` emits the OpenAI
@@ -242,7 +246,7 @@ function normalizeRetry(retry) {
 /**
  * @param {{ provider?: string, baseUrl?: string, apiKey?: string,
  *   model?: string, headers?: Record<string, string>,
- *   fetch?: typeof fetch,
+ *   fetch?: typeof fetch, maxTokens?: number,
  *   reasoning?: { effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high',
  *     enabled?: boolean, exclude?: boolean, max_tokens?: number },
  *   retry?: { attempts?: number, baseMs?: number, maxMs?: number,
@@ -280,6 +284,13 @@ export function createChatClient(options = {}) {
     if (Array.isArray(tools) && tools.length > 0) body.tools = tools;
     if (toolChoice !== undefined) body.tool_choice = toolChoice;
     if (typeof request.temperature === 'number') body.temperature = request.temperature;
+    // an unset ceiling is not "no ceiling": a provider substitutes the
+    // model's whole context window, and an aggregator that bills against
+    // a balance REFUSES the request when it cannot afford that worst case
+    // (OpenRouter answers 402 naming the number it wanted). A caller that
+    // knows its answer is a few thousand tokens should be able to say so.
+    const maxTokens = request.maxTokens ?? options.maxTokens;
+    if (typeof maxTokens === 'number') body.max_tokens = maxTokens;
     // the thinking control rides through untouched — a hybrid model needs
     // it to answer WITHOUT reasoning first, and a body that silently drops
     // it is indistinguishable from a provider that ignores it

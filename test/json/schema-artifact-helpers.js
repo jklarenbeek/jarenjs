@@ -189,6 +189,125 @@ export function deriveLlmProfile(schema) {
 }
 
 /**
+ * Mechanically derive the AUTHORING profile of a document grammar: the
+ * same relaxation {@link deriveLlmProfile} performs, plus a narrowing —
+ * one or more `$defs` are declared OPEN and everything reachable only
+ * through them is dropped.
+ *
+ * The reason this exists is measured, not stylistic. An oversized
+ * `response_format` degrades constrained decoding on small models to the
+ * point of returning nothing; the JSLT grammar is ~19 kB because it
+ * inlines the whole query expression language, and the LLM-profile twin
+ * is no smaller (relaxation restates what it removes, so it GROWS).
+ * Cutting at the body — the one `$ref` that pulls the expression grammar
+ * in — turns the response format back into what it is good at (holding
+ * the document's *shape*) and leaves meaning to the compiler, which was
+ * always the authority for it. This is the same seam
+ * `programSchema({ queryRef })` uses: a grammar is constrained when one
+ * is injected and gated by the engine either way.
+ *
+ * The vocabulary the narrowing removes is not lost — it belongs in the
+ * PROMPT, where {@link deriveOperatorNames} puts it, and where it costs
+ * a decoder nothing.
+ *
+ * @param {object} schema - canonical draft 2020-12 artifact
+ * @param {{ open: Record<string, string> }} options - `$defs` names to
+ *   leave open, mapped to the description the open node carries. An
+ *   open node has NO type constraint: any JSON value decodes there.
+ * @returns {object} mechanically derived authoring twin
+ */
+export function deriveAuthoringProfile(schema, options) {
+  const open = options?.open;
+  if (open === null || typeof open !== 'object')
+    throw new TypeError('deriveAuthoringProfile needs an { open } map of $defs names');
+  const defs = schema.$defs ?? {};
+  for (const name of Object.keys(open)) {
+    if (!Object.hasOwn(defs, name))
+      throw new TypeError(`deriveAuthoringProfile: no $defs.${name} to open`);
+  }
+
+  // Reachability from the root, following local $refs and stopping AT an
+  // opened def — a def reachable only through the body disappears with it.
+  const reached = new Set();
+  const localRef = (value) => (typeof value === 'string' && value.startsWith('#/$defs/')
+    ? value.slice('#/$defs/'.length)
+    : null);
+  function reach(node) {
+    if (Array.isArray(node)) { for (const item of node) reach(item); return; }
+    if (node === null || typeof node !== 'object') return;
+    for (const key of Object.keys(node)) {
+      const name = key === '$ref' ? localRef(node[key]) : null;
+      if (name === null) { reach(node[key]); continue; }
+      if (reached.has(name)) continue;
+      reached.add(name);
+      if (!Object.hasOwn(open, name)) reach(defs[name]);
+    }
+  }
+  const root = { ...schema };
+  delete root.$defs;
+  reach(root);
+
+  const twin = deriveLlmProfile({
+    ...root,
+    $defs: Object.fromEntries(Object.keys(defs)
+      .filter((name) => reached.has(name))
+      .map((name) => [name, Object.hasOwn(open, name)
+        ? { description: open[name] }
+        : defs[name]])),
+  });
+  twin.$id = schema.$id + '/authoring';
+  twin.title = schema.title + ' (authoring profile)';
+  twin.description = 'Authoring profile of the canonical grammar: the document SHAPE only, '
+    + `with ${Object.keys(open).join(', ')} left open. Constrains decoding on small models, `
+    + 'where the full grammar does not decode at all. It is deliberately WEAKER than the '
+    + 'canonical schema - a document valid here may be nonsense - so the engine compiler is '
+    + 'the gate that makes it safe, and generated documents must be compiled before use.';
+  return twin;
+}
+
+/**
+ * Where the JSLT grammar is cut for authoring, and what the open node
+ * says instead. One member, because there is one seam: `queryDocument`
+ * is the `$ref` that pulls the entire expression language into the
+ * document grammar, and it is the same seam `programSchema({ queryRef })`
+ * already leaves open. The description is what a decoder reads in place
+ * of ~16 kB of phrase shapes; the vocabulary itself belongs in the
+ * prompt (`operatorCrib` in `@jarenjs/ai/stylesheet`).
+ */
+export const JSLT_AUTHORING_OPEN = {
+  queryDocument: 'A jaren-query expression: a JSONPath string starting with "$", a literal, '
+    + 'or a one-member operator object such as {"$sum": "$.prices[*]"} or '
+    + '{"$sub": ["$a", "$b"]}. Any JSON value decodes here; the engine compiler is the '
+    + 'authority for whether it is a legal expression.',
+};
+
+/**
+ * Every operator name a grammar closes over, in one sorted list: the
+ * `propertyNames.enum` of each operator phrase. This is the vocabulary
+ * {@link deriveAuthoringProfile} takes OUT of the response format, so
+ * that a caller can put it in a prompt instead — names cost a decoder
+ * nothing and a model cannot invent `$nearest` if it has read the list.
+ * @param {object} schema - a grammar artifact (query or JSLT)
+ * @returns {string[]} sorted, de-duplicated operator names
+ */
+export function deriveOperatorNames(schema) {
+  const names = new Set();
+  function walk(node) {
+    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+    if (node === null || typeof node !== 'object') return;
+    const enumerated = node.propertyNames?.enum;
+    if (Array.isArray(enumerated)) {
+      for (const name of enumerated) {
+        if (typeof name === 'string' && name.startsWith('$')) names.add(name);
+      }
+    }
+    for (const key of Object.keys(node)) walk(node[key]);
+  }
+  walk(schema);
+  return [...names].sort();
+}
+
+/**
  * Derive the complete query-expression grammar used by JSLT rule bodies.
  * The copied query definitions are extended only by the body-local
  * `$apply` phrase; the published query artifacts remain unchanged. Throws

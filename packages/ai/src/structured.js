@@ -107,6 +107,7 @@ function compileWithRefs(schema, refs) {
  *   validator?: (value: any) => any,
  *   refs?: any[],
  *   gate?: ((value: any) => any) | Array<(value: any) => any>,
+ *   stream?: boolean,
  *   maxRepairs?: number }} options
  *   - `validator` overrides the internally compiled check (any
  *     function returning a boolean or `{ valid, errors }`).
@@ -128,6 +129,12 @@ function compileWithRefs(schema, refs) {
  *     ≥N of something" — repairs poorly on weaker models (they patch
  *     narrowly); enforce breadth in the prompt and reserve gates for
  *     schema/compile correctness.
+ *   - `stream` sends the request streamed (default `false`). The parsed
+ *     value is identical either way — the accumulator reassembles the
+ *     reply before it is parsed — so this buys observability (a client's
+ *     `onDelta`/`onReasoning` fire) and nothing else. It is opt-in
+ *     because turning it on for every caller is a behaviour change for
+ *     callers who never asked for one.
  *   - `maxRepairs` is how many failed rounds may go back to the model
  *     with the validation errors (default 1).
  * @returns {{ generate: (messages: any[], hooks?: { signal?: AbortSignal }) => Promise<
@@ -140,6 +147,16 @@ export function createStructuredOutput(options) {
     throw new TypeError('createStructuredOutput needs a JSON Schema object');
   const name = options.name ?? 'result';
   const maxRepairs = options.maxRepairs ?? 1;
+  // Non-streaming stays the DEFAULT, and the reason is a behaviour change
+  // rather than a preference: a caller reading `raw` or counting attempts
+  // gets the same answer either way, but a caller that passed a client
+  // with `onDelta` wired sees deltas start arriving where none did
+  // before. The measurement that made this an option: the campaign's
+  // authoring timeouts were on STREAMED calls, so streaming is not the
+  // cure for a slow authoring turn — but it is how a long turn stays
+  // observable, and a caller who wants that should not have to wrap the
+  // client to get it.
+  const stream = options.stream ?? false;
   const base = options.validator ?? compileWithRefs(schema, options.refs);
   const gates = options.gate === undefined ? [] : [].concat(options.gate);
   const check = gates.length === 0 ? base : composeChecks(base, ...gates);
@@ -151,7 +168,7 @@ export function createStructuredOutput(options) {
    */
   async function generate(messages, hooks = {}) {
     /** @type {any} */
-    const request = { stream: false, signal: hooks.signal };
+    const request = { stream, signal: hooks.signal };
     let turn = [...messages];
     if (tier === 'json_schema') {
       request.responseFormat = { name, schema, strict: options.strict ?? true };

@@ -94,4 +94,20 @@ describe('@jarenjs/ai documentation matches the code', () => {
     assert.deepStrictEqual([...new Set(documented)].sort(), reasons,
       'the README and the agent loop disagree about how a budgeted run stops');
   });
+
+  it('every schema size the README quotes is the size of that artifact', () => {
+    // the whole authoring section is an argument about character counts —
+    // a stale one would be an argument for a shrink that is not there
+    const sizes = {
+      'jaren-jslt.schema.json': 'canonical grammar',
+      'jaren-jslt.llm-profile.schema.json': 'LLM profile',
+      'jaren-jslt.authoring.schema.json': 'authoring profile',
+    };
+    for (const [file, label] of Object.entries(sizes)) {
+      const chars = JSON.stringify(JSON.parse(read(`packages/json/schemas/${file}`))).length;
+      const printed = chars.toLocaleString('en-US');
+      assert.ok(README.includes(printed),
+        `the README never quotes the ${label}'s real size (${printed} characters)`);
+    }
+  });
 });
