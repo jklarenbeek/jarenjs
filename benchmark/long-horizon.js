@@ -68,7 +68,8 @@
 import { writeFileSync } from 'node:fs';
 
 import {
-  createAgent, createLedger, createEnvironment, createProgramAuthor, createStructuredOutput,
+  createAgent, createLedger, createEnvironment, createProgramAuthor, createProgramRunner,
+  createStructuredOutput, createLongHorizonAgent,
 } from '@jarenjs/ai';
 import { createChatClient } from '@jarenjs/ai/client';
 import { resolveEndpoint } from '@jarenjs/ai/providers';
@@ -80,6 +81,7 @@ import {
   DEFAULTS, SHAPES, makeCorpus, needleTargets, probe, ceilingFor,
   needleQuestion, pairwiseQuestion, scoreNeedle, scorePairwise,
   pairwiseProgram, needleProgram, programProbe, extractingClient, corpusText,
+  recursionProbe, quantile,
 } from './lib/horizon.js';
 
 //#region flags
@@ -153,6 +155,11 @@ const NEEDLE_SAMPLES = 8;
 const SCHEDULING_DELAY_MS = 20;
 /** The fan-out the scheduling comparison measures against sequential. */
 const SCHEDULING_CONCURRENCY = 4;
+/** The depths the recursion tier measures. 3 is the cap; 0–2 is where
+ * the research says the interesting part of the curve is. */
+const DEPTHS = [0, 1, 2];
+/** Tasks per depth, so median and p95 are over a distribution. */
+const DEPTH_TASKS = 8;
 
 /**
  * The two compaction settings measured side by side, and what each one
@@ -516,6 +523,124 @@ async function fetchPricing(config) {
 //#region output
 
 /**
+ * The recursion tier: the same corpus, worked at depth 0, 1 and 2.
+ *
+ * What this publishes is a COST curve beside a quality one, because the
+ * research this follows is explicit that depth helps at depth 1 and
+ * mostly buys expense after — and a benchmark that reported only the
+ * quality would make depth 3 look free. Median and p95 rather than a
+ * mean (§5): the distribution's tail is the thing a caller provisions
+ * for, and averaging it away is the one dishonest summary available
+ * here.
+ * @param {any} corpus
+ */
+async function runDepths(corpus) {
+  const factories = {
+    createLedger,
+    createEnvironment,
+    createLongHorizonAgent,
+    createProgramAuthor,
+    createProgramRunner,
+    createStructuredOutput,
+    compileQuery: compileJsonQuery,
+  };
+  const rows = [];
+  for (const depth of DEPTHS) {
+    // one task per sampled needle target, so median and p95 are over a
+    // real distribution rather than over one run repeated
+    const targets = needleTargets(corpus, flags.quick ? 3 : DEPTH_TASKS, 23);
+    const runs = [];
+    for (const index of targets) {
+      runs.push(await recursionProbe({
+        corpus,
+        padding: flags.padding,
+        shape: 'late',
+        depth,
+        question: needleQuestion(corpus, index),
+        program: needleProgram(corpus, index),
+        factories,
+      }));
+    }
+    const calls = runs.map((r) => r.calls);
+    const tokens = runs.map((r) => r.tokens);
+    rows.push({
+      depth,
+      tasks: runs.length,
+      ok: runs.filter((r) => r.ok).length,
+      correct: runs.filter((r, i) => scoreNeedle(r.answer, corpus, targets[i])).length,
+      callsMedian: quantile(calls, 0.5),
+      callsP95: quantile(calls, 0.95),
+      tokensMedian: quantile(tokens, 0.5),
+      tokensP95: quantile(tokens, 0.95),
+      msMedian: quantile(runs.map((r) => r.ms), 0.5),
+      deepest: Math.max(...runs.flatMap((r) => r.depths)),
+    });
+  }
+  return rows;
+}
+
+/**
+ * The recursion tier, live: can the cheap tier author a plan at depth,
+ * and does the tree still answer?
+ *
+ * Deliberately small — depth 1 and 2, `trials` tasks each — because the
+ * point is the per-depth compile-gate pass rate and whether recursion
+ * survives a real model, not a wide sample. The pass rate is derived
+ * from the trajectory rather than counted separately, so it cannot drift
+ * from what actually happened.
+ * @param {any} corpus
+ * @param {any} config
+ * @param {any} client - the counting wrapper the program tier built
+ */
+async function runLiveDepths(corpus, config, client) {
+  const rows = [];
+  for (const depth of [1, 2]) {
+    const targets = needleTargets(corpus, Math.min(config.trials, 2), 29 + depth);
+    const authored = { total: 0, compiled: 0 };
+    let correct = 0;
+    let calls = 0;
+    const errors = [];
+    for (const index of targets) {
+      const ledger = createLedger();
+      const environment = createEnvironment({ ledger, compileQuery: compileJsonQuery });
+      await environment.put('corpus', corpusText(corpus, flags.padding, 'late'),
+        { kind: 'text', count: corpus.n });
+      const agent = createLongHorizonAgent({
+        client,
+        environment,
+        compileQuery: compileJsonQuery,
+        createStructuredOutput,
+        createProgramAuthor,
+        createProgramRunner,
+        createEnvironment,
+        querySchema,
+        depth,
+        maxSubcalls: 12,
+        // a hard stop per task, so a depth that misbehaves cannot eat
+        // the whole guard before the other depth is measured
+        budget: { turns: 12 },
+      });
+      try {
+        const result = await agent.run(needleQuestion(corpus, index));
+        for (const entry of result.trajectory) {
+          if (entry.kind !== 'author') continue;
+          authored.total += 1;
+          if (entry.ok === true) authored.compiled += 1;
+        }
+        calls += result.spent.turns;
+        if (scoreNeedle(result.answer?.text ?? '', corpus, index)) correct += 1;
+        if (result.stopReason !== null) errors.push(`depth ${depth}: ${result.stopReason}`);
+      }
+      catch (err) {
+        errors.push(`depth ${depth}: ${/** @type {Error} */ (err).message}`.slice(0, 160));
+      }
+    }
+    rows.push({ depth, tasks: targets.length, correct, calls, authored, errors });
+  }
+  return rows;
+}
+
+/**
  * The live program tier — the D8 measurement, in two halves that are
  * reported separately because they can fail independently.
  *
@@ -625,9 +750,14 @@ async function runLivePrograms(corpus, config) {
     };
   }
 
+  // the recursion tier reuses this same counting client, so one guard
+  // covers the whole live run rather than each tier having its own
+  const depths = calls + 24 <= config.maxCalls ? await runLiveDepths(corpus, config, counting) : null;
+
   return {
     authored,
     executed,
+    depths,
     calls,
     usage,
     bounded: calls >= config.maxCalls
@@ -775,6 +905,46 @@ function printPrograms(corpus, programs, scheduling, livePrograms) {
     : `#   piece work: ${executed.subcalls} live sub-calls, ${executed.failed} failed, `
       + `${executed.valuesReached}/${corpus.n} values reached, `
       + `answer ${executed.scored ? 'CORRECT' : 'wrong'} (${executed.answer})`);
+  if (livePrograms.depths === null) {
+    console.log('#   recursion not run live — the spend guard would have been exceeded');
+  }
+  else {
+    for (const row of livePrograms.depths) {
+      console.log(`#   depth ${row.depth}: ${row.authored.compiled}/${row.authored.total} authored`
+        + ` programs compiled, ${row.correct}/${row.tasks} answered, ${row.calls} calls`
+        + (row.errors.length === 0 ? '' : ` — ${row.errors[0]}`));
+    }
+  }
+  console.log('');
+}
+
+/**
+ * The recursion tier's console section: what each depth answered and
+ * what it cost.
+ * @param {any[]} depths
+ */
+function printDepths(depths) {
+  console.log('## depth — the same question, recursed\n');
+  console.log('| depth | tasks | answered | deepest level | calls (median) | calls (p95) '
+    + '| tokens (median) | tokens (p95) |');
+  console.log(`|${'---|'.repeat(8)}`);
+  for (const row of depths) {
+    console.log(`| ${row.depth} | ${row.tasks} | ${row.correct}/${row.tasks} | ${row.deepest} `
+      + `| ${row.callsMedian} | ${row.callsP95} | ${row.tokensMedian} | ${row.tokensP95} |`);
+  }
+  console.log('');
+  console.log('# median AND p95, never the mean: the research this follows reports quality at');
+  console.log('#   comparable cost with a few outlier trajectories inflating the average, so a');
+  console.log('#   mean is the one summary that would hide what a caller has to provision for.');
+  const base = depths.find((r) => r.depth === 0);
+  const deeper = depths.filter((r) => r.depth > 0 && r.callsMedian > 0);
+  for (const row of deeper) {
+    console.log(`#   depth ${row.depth} costs ${(row.callsMedian / Math.max(1, base.callsMedian)).toFixed(1)}x`
+      + ` the calls of depth 0 and answered ${row.correct}/${row.tasks} against`
+      + ` ${base.correct}/${base.tasks}.`);
+  }
+  console.log('#   Depth defaults to 1 for exactly this reason: it is the depth that pays on the');
+  console.log('#   tasks the research measured, and every deeper level multiplies the bill.');
   console.log('');
 }
 
@@ -1004,6 +1174,7 @@ async function main() {
   const ceilings = await runCeilings(corpus);
   const programs = await runPrograms(corpus);
   const scheduling = await runScheduling(corpus);
+  const depths = await runDepths(corpus);
 
   // the live tier is opt-in and never mandatory; the line below always
   // prints, so a run can never be mistaken for one that measured a model
@@ -1028,6 +1199,7 @@ async function main() {
 
   printTables(corpus, ceilings, live, config);
   printPrograms(corpus, programs, scheduling, livePrograms);
+  printDepths(depths);
 
   if (live === null) {
     console.log(`live tier skipped: ${skipped}`);
@@ -1116,6 +1288,9 @@ async function main() {
         // because a fact quoting them must not have to parse a table's
         // prose to find them.
         scheduling,
+        // the cost curve depth buys, as an order statistic rather than a
+        // mean (D7 / HORIZON_08 §5)
+        depths,
         authoring: livePrograms === null ? null : {
           trials: livePrograms.authored.trials,
           compiled: livePrograms.authored.compiled,
@@ -1128,6 +1303,8 @@ async function main() {
           calls: livePrograms.calls,
           usage: livePrograms.usage,
           bounded: livePrograms.bounded,
+          // per-depth: the D8 number HORIZON_08 is judged on
+          depths: livePrograms.depths,
         },
       },
       headline: {

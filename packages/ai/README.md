@@ -648,6 +648,84 @@ the only one. The pairwise question is answered under that rule — the closest 
 records is a `$fold` over `$orderby`-sorted tuples, which is arithmetic the query engine
 already does once the model has read each record once.
 
+## Recursion — a job, not a conversation
+
+`createAgent` is a bounded tool loop: you talk to it. `createLongHorizonAgent` is the
+other shape — a corpus, a question over all of it, and nobody waiting to answer a
+follow-up. It authors a program, runs it, and may let any sub-call be **another agent over
+its own slice**.
+
+```js
+import { createLongHorizonAgent } from '@jarenjs/ai';
+
+const agent = createLongHorizonAgent({
+  client, environment, compileQuery: compileJsonQuery,
+  createStructuredOutput, createProgramAuthor, createProgramRunner, createEnvironment,
+  depth: 1,                                   // default 1, hard cap 3
+  budget: { turns: 40, tokens: 200_000 },     // shared by the WHOLE tree
+});
+
+const { answer, trajectory, stopReason, spent } = await agent.run('Which two are closest?');
+```
+
+**Depth defaults to 1 and caps at 3.** The research this follows runs depths 0–3 and finds
+most of its gain at depth 1, with depth 3 helping only on information-dense tasks — so
+deeper is not the default, because it multiplies cost on every task where it does not help.
+Ask for more and you get the cap *and are told*: `depthClamped` is true and the trajectory
+records it. The benchmark publishes the trade rather than asserting it, as **median and p95**
+call cost per depth — never the mean, which is the one summary that would hide the outlier
+trajectories a caller has to provision for.
+
+**Budgets are shared by the tree.** Depth × fan-out is multiplicative — depth 3 fanning
+twenty ways is eight thousand leaf calls — so one account is threaded through every level,
+and a turn is *reserved before* a call rather than charged after it, which is what keeps the
+bound exact when four sub-calls launch together. Tokens cannot be known in advance, so a
+token budget may overshoot by at most `maxConcurrentSubcalls - 1` calls' worth; that bound
+is asserted, not hoped for. When a budget runs out the tree stops with a named `stopReason`
+and **leaves its partial work in slots**, which is what makes a stopped run resumable rather
+than merely failed.
+
+**A child is isolated, and the isolation is invisible to it.** Each child gets the same
+store seen through its own prefix: names go in prefixed and come out stripped, so a child's
+corpus is `corpus` and it authors exactly the program it would author at the root. A child
+naming a sibling's real address resolves *beneath itself*, so the sibling is unreachable
+rather than merely discouraged — no check has to remember to run.
+
+**A child's failure is a value.** A child whose program will not compile returns
+`{ error, depth, address }` into its parent's map result slot, and the parent's map
+completes. One bad branch is a recorded failure with somewhere to look, not a silent empty
+answer — the propagation failure the research names.
+
+### The one rule a program must follow to survive its own recursion
+
+A map element is `{ slot, value }` whether that value came from a leaf model call or from a
+whole child agent — but what is *inside* it is whatever answered. So **a reduce must emit
+the shape its map's elements carry**:
+
+```js
+// composes at every depth: output shape === input element shape
+{ value: { $max: { $for: { r: '$[*].value' }, $return: '$r.value' } } }
+
+// right at depth 0, empty at depth 1: the child's answer is a list where
+// the leaf's was an object, so the path finds nothing
+{ $for: { r: '$[*].value' }, $return: '$r.value' }
+```
+
+Both are asserted in `test/ai/recursive.test.js`. This is the research's "distinguishing
+between final answer and thought is brittle" in its concrete form here — and note where it
+lives: it is a property of the **program**, fixable in the program, not something the
+harness can paper over.
+
+### What is not guarded
+
+Guardrails for recursive LM systems are under-explored, and this package does not pretend
+otherwise. **Three bounds exist and they are the only three:** the depth cap, the shared
+budget, and the abort signal. There is no detection of a child that answers confidently and
+wrongly, no loop detection beyond depth, and no per-branch quality gate. A thinking model
+needs output room for the authoring call, and the finding in §"Thinking can be turned off"
+above is *sharper* here, not exempt: recursion is the extreme case of a tool loop, so
+turning thinking off wrecks it.
+
 ### Heartbeats are the host's
 
 There is no scheduler here, deliberately. Re-entering a session on a timer is a *host*

@@ -387,7 +387,9 @@ const mapFamily = (as) => `${RESULT_PREFIX}${as}/`;
  *   model?: string,
  *   maxSubcalls?: number, maxConcurrentSubcalls?: number,
  *   subcallChars?: number, maxReduceChars?: number,
- *   sequential?: boolean }} options
+ *   sequential?: boolean,
+ *   subcall?: (name: string, prompt: string, signal?: AbortSignal, index?: number) => Promise<any>,
+ *   account?: { reserve: Function, settle: Function, stop: () => string | null } }} options
  *   - `client` is only needed by `map`; a program without one is a
  *     perfectly good program (chunk / grep / select / stat / answer are
  *     model-free), and running a `map` without a client is a stated
@@ -395,6 +397,15 @@ const mapFamily = (as) => `${RESULT_PREFIX}${as}/`;
  *   - `sequential` runs sub-calls one at a time. It exists so the
  *     benchmark can publish parallel against sequential wall-clock with
  *     the same code path on both sides.
+ *   - `subcall` REPLACES what one piece of a map is worth. The default
+ *     asks the model about it; a recursive run passes a function that
+ *     spawns a child agent over that piece instead. This is a seam
+ *     rather than a second runner because the bound, the ordering, the
+ *     abort and the error capture must be identical at every depth —
+ *     one fan-out implementation, two things to fan out over.
+ *   - `account` is a budget shared with everything else in the run,
+ *     including other depths. Checked before each sub-call and charged
+ *     by it, so a tree cannot outspend the sum of its branches.
  * @returns {{ run: (doc: any, hooks?: { signal?: AbortSignal }) => Promise<any> }}
  */
 export function createProgramRunner(options) {
@@ -409,6 +420,7 @@ export function createProgramRunner(options) {
     : Math.max(1, options.maxConcurrentSubcalls ?? MAX_CONCURRENT);
   const subcallChars = options.subcallChars ?? SUBCALL_CHARS;
   const maxReduceChars = options.maxReduceChars ?? MAX_REDUCE_CHARS;
+  const account = options.account ?? null;
 
   /**
    * The shape gate, compiled once.
@@ -490,6 +502,9 @@ export function createProgramRunner(options) {
     if (piece.error !== undefined) return { slot: name, error: piece.error };
     /** @type {any} */
     let reply;
+    // the turn is taken before the call, not after it: four sub-calls
+    // launched together would otherwise each see the same unspent budget
+    account?.reserve();
     try {
       reply = await client.complete({
         // `stream` is deliberately NOT set. A sub-call has no UI to
@@ -516,6 +531,10 @@ export function createProgramRunner(options) {
       return { slot: name, error: `the sub-call failed: ${/** @type {Error} */ (err).message}` };
     }
     const raw = String(reply?.message?.content ?? '');
+    // settled here rather than by the caller: this is where the call
+    // actually happened, and an account that only saw the calls someone
+    // remembered to report is not a bound
+    account?.settle(reply?.usage, raw);
     try {
       return { slot: name, value: JSON.parse(unfence(raw)) };
     }
@@ -659,17 +678,28 @@ export function createProgramRunner(options) {
       }
 
       if (step.op === 'map') {
-        if (client === null) {
+        if (client === null && options.subcall === undefined) {
           return failure(step, { error: 'map needs a client — this runner was built without one' });
         }
         const members = await membersOf(target);
         const budgeted = members.slice(0, Math.max(0, maxSubcalls - subcalls));
         const skipped = members.length - budgeted.length;
+        /** @type {string|null} */
+        let spent = null;
         /** @type {any[]} */
         let results;
         try {
-          results = await pool(budgeted, concurrency,
-            (name) => subcall(name, step.prompt, signal));
+          results = await pool(budgeted, concurrency, (name, index) => {
+            // BEFORE the call, at every depth: an exhausted budget
+            // refuses rather than overruns, and the pieces it did not
+            // reach are recorded rather than silently missing
+            const reason = account?.stop() ?? null;
+            if (reason !== null) {
+              spent = reason;
+              return Promise.resolve({ slot: name, error: `stopped: ${reason}` });
+            }
+            return (options.subcall ?? subcall)(name, step.prompt, signal, index);
+          });
         }
         catch (err) {
           // the only way out of the pool is an abort: a sub-call's own
@@ -686,11 +716,13 @@ export function createProgramRunner(options) {
             { kind: 'selection' });
         }
         bindings.set(step.as, { family: mapFamily(step.as), count: results.length });
+        if (spent !== null) stopped = spent;
         report.push({
           op: step.op,
           as: step.as,
           subcalls: budgeted.length,
           failed: results.filter((r) => r.error !== undefined).length,
+          ...(spent === null ? {} : { stopped: spent }),
           // never silently: a capped map that said nothing would read as
           // a map over everything
           ...(skipped > 0
@@ -698,6 +730,11 @@ export function createProgramRunner(options) {
             : {}),
           concurrency,
         });
+        // a spent budget ends the run here rather than reducing over a
+        // map it knows is incomplete: the pieces that DID answer are in
+        // their slots, which is what makes a stopped run resumable
+        // instead of merely failed (§2)
+        if (spent !== null) break;
         continue;
       }
 

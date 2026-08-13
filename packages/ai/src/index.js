@@ -28,6 +28,10 @@ export {
   compileProgram, programGate, createProgramRunner, createProgramAuthor, ProgramError,
   PROGRAM_EXAMPLE,
 } from './program.js';
+export {
+  createLongHorizonAgent, createBudgetAccount, createTrajectory, resolveDepth, childScope,
+  MAX_DEPTH, DEFAULT_DEPTH,
+} from './recursive.js';
 export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';
 export {

@@ -571,8 +571,27 @@ export const CLOSEST_PAIR_QUERY = (() => {
   };
 })();
 
-/** The values the map found, in the order the reduce sees them. */
-export const EXTRACTED_VALUES_QUERY = { $for: { r: '$[*].value' }, $return: '$r.value' };
+/**
+ * The value the map found, in the SAME envelope a sub-call returns.
+ *
+ * The envelope is the point, and it is the one thing a program has to
+ * get right to survive its own recursion. A map's element is
+ * `{ slot, value }` whether that value came from a leaf model call or
+ * from a whole child agent — but what is INSIDE it is whatever answered.
+ * A reduce that emits a bare list works at depth 0 and returns nothing
+ * at depth 1, because the child's answer is then a list where the leaf's
+ * was `{ value: N }`.
+ *
+ * Emitting `{ value: … }` makes the reduce's output identical in shape
+ * to its input's elements, so the same program composes at every depth.
+ * This is the paper's "distinguishing between final answer and thought
+ * is brittle" failure in its concrete form — and it is a property of the
+ * PROGRAM, fixable in the program, rather than something the harness can
+ * paper over.
+ */
+export const EXTRACTED_VALUES_QUERY = {
+  value: { $max: { $for: { r: '$[*].value' }, $return: '$r.value' } },
+};
 
 /**
  * The pairwise program: visit every piece, then compute over what came
@@ -726,6 +745,97 @@ export async function programProbe({
     answerText: result.answer?.text ?? '',
     corpusChars: (await environment.ledger.getSlot('corpus')).size,
     environment,
+  };
+}
+
+//#endregion
+
+//#region the recursion tier
+
+/**
+ * The order statistic a cost distribution has to be published as.
+ *
+ * The paper's own headline is quality at COMPARABLE cost, with median
+ * runs cheaper and a few outlier trajectories inflating the average — so
+ * a mean is exactly the number that would hide the behaviour a caller
+ * needs to budget for. Median says what a run usually costs; p95 says
+ * what to provision for.
+ * @param {number[]} values
+ * @param {number} q - 0..1
+ */
+export function quantile(values, q) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  // nearest-rank: with the handful of tasks a benchmark row runs,
+  // interpolating between two samples invents a number nobody measured
+  const rank = Math.max(1, Math.ceil(q * sorted.length));
+  return sorted[rank - 1];
+}
+
+/**
+ * Run one question at one depth, model-free, and report what the tree
+ * cost.
+ *
+ * The sub-calls are deterministic (`extractingClient`), so the cost is
+ * the HARNESS's — how many calls a depth actually makes — rather than a
+ * measurement of a provider's mood. That is the quantity the depth
+ * default is chosen against.
+ * @param {{ corpus: any, padding?: number, shape?: 'front'|'late',
+ *   depth: number, question: string, program: any, factories: any,
+ *   maxSubcalls?: number }} options
+ */
+export async function recursionProbe({
+  corpus, padding = DEFAULTS.padding, shape = 'front', depth, question, program,
+  factories, maxSubcalls = 500,
+}) {
+  const state = { calls: 0, tokens: 0 };
+  const client = {
+    endpoint: { provider: 'openrouter' },
+    complete: async (request) => {
+      state.calls += 1;
+      state.tokens += 50;
+      if (request.responseFormat !== undefined) {
+        return { message: { content: JSON.stringify(program) }, usage: { total_tokens: 50 } };
+      }
+      const last = String(request.messages[request.messages.length - 1].content);
+      const hit = /"id":"(REC\d+)"[^\n]*?"value":(\d+)/.exec(last);
+      return {
+        message: {
+          content: hit === null ? 'null' : JSON.stringify({ id: hit[1], value: Number(hit[2]) }),
+        },
+        usage: { total_tokens: 50 },
+      };
+    },
+  };
+
+  const ledger = factories.createLedger();
+  const environment = factories.createEnvironment({ ledger, compileQuery: factories.compileQuery });
+  await environment.put('corpus', corpusText(corpus, padding, shape), { kind: 'text', count: corpus.n });
+
+  const agent = factories.createLongHorizonAgent({
+    client,
+    environment,
+    compileQuery: factories.compileQuery,
+    createStructuredOutput: factories.createStructuredOutput,
+    createProgramAuthor: factories.createProgramAuthor,
+    createProgramRunner: factories.createProgramRunner,
+    createEnvironment: factories.createEnvironment,
+    depth,
+    maxSubcalls,
+  });
+
+  const started = Date.now();
+  const result = await agent.run(question);
+  return {
+    depth,
+    ok: result.ok,
+    calls: state.calls,
+    tokens: state.tokens,
+    ms: Date.now() - started,
+    answer: result.answer?.text ?? '',
+    trajectory: result.trajectory.length,
+    depths: result.summary.depths,
+    stopReason: result.stopReason,
   };
 }
 

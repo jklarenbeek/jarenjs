@@ -88,6 +88,51 @@ export function chunkFamily(parent, strategy, size) {
 }
 
 /**
+ * The same slot store, confined to a prefix.
+ *
+ * **The scope is invisible from inside.** Names go in prefixed and come
+ * out stripped, so a child sees a clean namespace — its corpus is
+ * `corpus`, not `child/1/0/corpus` — and authors exactly the program it
+ * would author at the root. That is not a convenience: a child that had
+ * to know its own address would need it in the prompt, and a model that
+ * knows its address is a model that can type a sibling's.
+ *
+ * Isolation follows from the same rule. A child naming
+ * `child/1/1/mine` gets `child/1/0/child/1/1/mine`, which does not
+ * exist — the sibling is unreachable rather than merely discouraged, and
+ * no check has to remember to run.
+ *
+ * Everything that is not slot addressing (goals, memories, snapshots)
+ * passes through untouched: the ledger is shared on purpose, because a
+ * tree that could not record what it learned would defeat Phase A.
+ * @param {any} ledger
+ * @param {string} scope
+ */
+function scopedLedger(ledger, scope) {
+  /** A name on the way IN: always beneath the scope. */
+  const within = (name) => scope + String(name ?? '');
+
+  /** A slot on the way OUT: named as the scope's occupant sees it. */
+  const relative = (slot) => (slot !== null && typeof slot === 'object'
+    && typeof slot.name === 'string' && slot.name.startsWith(scope)
+    ? { ...slot, name: slot.name.slice(scope.length) }
+    : slot);
+
+  return {
+    ...ledger,
+    scope,
+    putSlot: async (name, content, meta) =>
+      relative(await ledger.putSlot(within(name), content, meta)),
+    getSlot: async (name) => relative(await ledger.getSlot(within(name))),
+    readSlot: (name) => ledger.readSlot(within(name)),
+    deleteSlot: (name) => ledger.deleteSlot(within(name)),
+    listSlots: async () => (await ledger.listSlots())
+      .filter((slot) => slot.name.startsWith(scope))
+      .map(relative),
+  };
+}
+
+/**
  * A regular expression from a model-supplied pattern, or null.
  *
  * The pattern is a string and the flags are constrained: a model that
@@ -128,9 +173,16 @@ function compilePattern(pattern, flags) {
  * @returns {any}
  */
 export function createEnvironment(options = {}) {
-  const ledger = options.ledger ?? createLedger({
+  const base = options.ledger ?? createLedger({
     storage: options.storage, now: options.now,
   });
+  // a scoped environment is the SAME store seen through a prefix, not a
+  // second store: a child of a recursive run must not be able to read or
+  // overwrite a sibling's slots, and confining it here means every
+  // operation inherits the confinement rather than each one remembering
+  const ledger = typeof options.scope === 'string' && options.scope !== ''
+    ? scopedLedger(base, options.scope)
+    : base;
   const compileQuery = typeof options.compileQuery === 'function' ? options.compileQuery : null;
   const excerptChars = options.excerptChars ?? EXCERPT_CHARS;
   const digestSlots = options.digestSlots ?? DIGEST_SLOTS;
