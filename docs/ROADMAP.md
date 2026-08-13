@@ -602,13 +602,22 @@ harder and more valuable half.
   separately: the problem is the request itself, which carries the digest, the
   question, a worked example and the whole program schema. Recursion needs one per
   level, so the failure probability compounds with depth, which is what the numbers
-  show. What is open is which part of that request is expensive — the schema is the
-  obvious suspect, and `deriveLlmProfile` already exists to shrink a grammar for
-  exactly this reason (an oversized `response_format` is a documented failure mode
-  in this package's own field notes). The measurement wanted is authoring latency
-  against request size on the cheap tier, before anything is trimmed by guesswork.
-  Until then `createStructuredOutput` still sends `stream: false` — worth revisiting
-  in the same pass, since it is a behaviour change for every caller (D6).
+  show. **Two causes are now measured, not suspected.** Asked to author a JSLT
+  stylesheet with the full published grammar as the `response_format`, this tier
+  returns degenerate output — an empty reply, or the three characters `1.1`; with a
+  410-character envelope schema and the same compile gate, the same request answers
+  in ~28 s with a real document. That is the oversized-`response_format` failure this
+  package's field notes already record, now reproduced on the authoring path, and
+  `deriveLlmProfile` exists to shrink a grammar for exactly this reason. The second
+  cause is in the usage: of 2261 completion tokens on that successful call, **1927
+  were reasoning** — so ~85% of the output budget is spent thinking, which is why a
+  repair round (a longer prompt carrying the failed attempt) then blew a 120-second
+  deadline. Both point the same way: authoring wants a SMALL schema and room to
+  think, and the two compete. What is still open is which shrink is safe — a profile
+  narrow enough to decode reliably while still describing enough of the grammar to be
+  authored against, measured rather than guessed. `createStructuredOutput` sending
+  `stream: false` is worth revisiting in the same pass, since it is a behaviour
+  change for every caller (D6).
 
 - [ ] **Retrieval is tag match and recency.** `recall({ tags, limit })` orders by
   recency and matches tags; with the `compileQuery` seam wired a caller may pass a
