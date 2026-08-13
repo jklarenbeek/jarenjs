@@ -19,10 +19,12 @@
 
 import {
   createChatClient, createAgent, createToolbox, registerModelContext, PROVIDERS,
-  probeProvider, composeChecks, checkOutcome, createRefiner,
+  probeProvider, composeChecks, checkOutcome, createRefiner, createEnvironment,
 } from '@jarenjs/ai';
 
-import { applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json';
+import {
+  applyJSONPatch, compileJSONPointer, JSONPOINTER_NOTHING, compileJsonQuery,
+} from '@jarenjs/json';
 import { compileFsm, compileDag } from '@jarenjs/flow';
 import { JarenValidator } from '@jarenjs/validate';
 import { jsonFormats } from '@jarenjs/formats';
@@ -912,10 +914,22 @@ export function createAssistantEffects(deps) {
       // round it drops is archived to a slot first and the model can
       // `recall` it back. The same ledger puts the objective and what
       // has been learned into the prompt of every turn.
+      // and with an ENVIRONMENT over that same ledger, the archive stops
+      // being a list of addresses to fetch one at a time: `env_grep`
+      // scans every archived round for a pattern and answers with which
+      // slot matched and one line of context, so "what did we try
+      // earlier?" costs one call instead of one call per round. The
+      // corpus and the archive share a store on purpose — the same
+      // operations reach both.
+      const environment = createEnvironment({
+        ledger: deps.ledger,
+        compileQuery: compileJsonQuery,
+      });
       const agent = createAgent({
         client, toolbox: deps.toolbox, system: SYSTEM_PROMPT, maxToolRounds: 16,
         historyBudget: 24_000,
         ledger: deps.ledger,
+        environment,
         retrieval: { memories: { limit: MEMORY_WINDOW } },
       });
       // build the turn from this effect's own snapshot: the ai/user

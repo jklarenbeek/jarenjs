@@ -232,6 +232,45 @@ call answers `{ error, errors, inputSchema }` — up to eight validation errors 
 named `hint` when a property that wanted structure arrived as JSON text that does not
 parse, naming the offending properties.
 
+## What the three paths actually buy
+
+One table, derived from the benchmark rather than asserted, on the realistic payload shape
+(the fact behind the padding) at the budget where compaction's defect is clearest:
+
+<!--bm:horizon.campaign-->
+| configuration | needle | pairwise | what it cost the request |
+| --- | --- | --- | --- |
+| compaction alone (budget 6000) | 17.5% | 0.0% | 5781 chars |
+| + a ledger (same budget) | 100.0% via recall | 0.0% | 5739 chars |
+| + the environment and a program | 100.0% | 100.0% | 937 chars, against a 17719-char corpus |
+<!--/bm-->
+
+Read the last column, not just the first two: the environment answers a *harder* question in
+**fewer** characters than compaction spends failing the easy one, because the corpus never
+enters the request at all. And read the pairwise column as the campaign's own scoreboard —
+it was 0% at every compacting budget before this work, which is the number all of it was
+aimed at.
+
+## Which path do I reach for?
+
+There are three, and picking wrong is expensive in both directions — a tool loop cannot
+finish a job larger than its context, and a recursive run is a silly way to answer a
+question about the last message.
+
+| you have | reach for | what it costs |
+|---|---|---|
+| a **conversation** — a user, turns, follow-ups | `createAgent({ client, toolbox })` | one model call per turn, plus one per tool round |
+| work that must **survive a tab** — a goal, things learned, a session resumed tomorrow | the same, `+ ledger` | the same, plus a storage round-trip per turn and one `recall` per fact fetched back |
+| a **job** — a corpus, a question over all of it, nobody waiting | `createLongHorizonAgent` | one authoring call, then one call per piece; recursion multiplies that per level |
+
+**`historyBudget` is not the long-horizon answer**, and this package measures rather than
+asserts it. It still works, it is still deterministic to the character, and with a `ledger`
+nothing it cuts is destroyed. But a question that needs *every* fact at once scores <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->
+under it, at every budget, with a ledger or without — because the information required to
+answer is spread across rounds that no longer fit. Compaction is the right tool for a long
+*conversation*; an environment and a program are the right tools for a long *job*. Reach for
+the third row when the corpus is the problem, not the transcript.
+
 ## The agent loop
 
 ```js
@@ -264,7 +303,7 @@ own writer. The returned transcript is always the full, uncompacted history.
 On its own that is lossy, and worth being precise about, because the loss has a shape.
 Each dropped tool call leaves one line whose result excerpt is capped at 60 characters, so
 the synopsis remembers **that** `fetch_record` was called and returned a `REC0007` and
-loses **what the record said**. Measured on <!--bm:horizon.measured-->2026-08-12, Node v22.22.2, 40 tool rounds<!--/bm--> of ~440-character results at a
+loses **what the record said**. Measured on <!--bm:horizon.measured-->2026-08-13, Node v22.22.2, 40 tool rounds<!--/bm--> of ~440-character results at a
 6 000-character budget, with the fact behind the padding, the request keeps <!--bm:horizon.synopsisGap-->15 of 40 record ids and 7 of their 40 values<!--/bm--> (`npm run benchmark:long-horizon`). A model can see the label and answer confidently from
 a record it no longer has. **Compaction alone is not the answer to a long session.**
 
@@ -350,11 +389,11 @@ payload shape, one needle question per trial, scored by whether the answer is ri
 <!--bm:horizon.liveNeedle-->
 | history budget | without a ledger | with a ledger | recall calls |
 | --- | --- | --- | --- |
-| 20000 | 66.7% | 100.0% | 1 |
-| 10000 | 50.0% | 100.0% | 3 |
-| 6000 | 0.0% | 66.7% | 4 |
-| 4000 | 33.3% | 66.7% | 6 |
-| 2000 | 0.0% | 100.0% | 4 |
+| 20000 | 66.7% | 66.7% | 0 |
+| 10000 | 50.0% | 66.7% | 1 |
+| 6000 | 0.0% | 50.0% | 3 |
+| 4000 | 33.3% | 100.0% | 3 |
+| 2000 | 0.0% | 100.0% | 5 |
 <!--/bm-->
 
 The last column is the point: those answers were fetched, not remembered. A ledger row
@@ -374,7 +413,7 @@ needs the corpus held *outside* the context and worked on programmatically, whic
 [the action language](#the-action-language--a-program-the-model-writes-and-the-compiler-checks)
 below are for — the same question, asked of an environment, is answered by a program that
 visits every record by address while the root carries a plan and a step report. The live
-tier of the numbers above ran on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 155 model calls<!--/bm-->.
+tier of the numbers above ran on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 146 model calls<!--/bm-->.
 
 Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
@@ -617,7 +656,7 @@ Three properties, each asserted rather than intended:
 The RLM paper this design follows states its own limitation plainly: its sub-calls are
 sequential, and "RLMs without asynchronous LM calls are slow". Running the fan-out in a
 harness rather than inside an evaluator is what makes concurrency available at all — the
-same program and the same sub-calls, run one at a time and then four at a time, is worth <!--bm:horizon.programFanout-->3.9x (814ms sequential vs 208ms at concurrency 4, 40 sub-calls of 20ms each)<!--/bm-->.
+same program and the same sub-calls, run one at a time and then four at a time, is worth <!--bm:horizon.programFanout-->3.9x (814ms sequential vs 209ms at concurrency 4, 40 sub-calls of 20ms each)<!--/bm-->.
 The per-call latency there is synthetic and deliberately so: a benchmark that made eighty
 real calls to time its own scheduler would be measuring the provider's queue.
 
@@ -627,7 +666,7 @@ By contrast a needle question over the same environment costs **one** sub-call, 
 `grep` narrows to the piece that mentions the record before anything is spent on it.
 
 **On the cheap tier** (D8 — the campaign targets the weak model deliberately, and publishes
-the result whichever way it falls), the measurement is <!--bm:horizon.programLive-->1 of 3 authored programs compiled — but 2 of those attempts never came back at all (the 300 s deadline), so of the 1 that answered, 1 compiled. Answering 40 sub-calls itself it reached 38 of 40 records (2 sub-call(s) failed) and named the CORRECT pair<!--/bm-->.
+the result whichever way it falls), the measurement is <!--bm:horizon.programLive-->2 of 3 authored programs compiled — but 1 of those attempts never came back at all (the 300 s deadline), so of the 2 that answered, 2 compiled. Answering 40 sub-calls itself it reached 40 of 40 records (0 sub-call(s) failed) and named the CORRECT pair<!--/bm-->.
 Read that second half as the campaign's own result and the first half as a caveat about the
 transport, not the tier: the sub-calls are where the model does the work, and it did it.
 
@@ -716,6 +755,27 @@ between final answer and thought is brittle" in its concrete form here — and n
 lives: it is a property of the **program**, fixable in the program, not something the
 harness can paper over.
 
+### What the cheap tier actually managed
+
+Published because it is the campaign's own bet (D8) and because half of it lost. On the
+qwen tier, the **program** path works: it authored plans that compile, answered all forty
+sub-calls itself, and named the right pair — the number is in §"The action language" above.
+
+The **recursive** path did not. Measured at depths 1 and 2, it managed <!--bm:horizon.depthLive-->0 of 4 tasks at depths 1 and 2 — every one of them died on the 300-second deadline during its first authoring call, so what this measured is that the recursive path does not currently RUN on this tier, not that it runs badly<!--/bm-->.
+
+Read that precisely, because the distinction matters: this is not "recursion answers badly
+on a small model". It is "recursion did not get far enough to be scored". The authoring call
+at each level carries the digest, the question, a worked example and the program schema, and
+on this tier that request exceeds a 300-second deadline — **even streamed**, which rules out
+the non-streaming hang this repo measured elsewhere. Every level needs one such call, so the
+chance of at least one timeout compounds with depth, which is exactly the shape observed:
+the single-level program path lost 1 attempt in 3, the recursive path lost 4 in 4.
+
+The model-free depth numbers in the benchmark are therefore the honest ones for now — they
+say what recursion *costs* (1.5× and 2.0× the calls for the same answer on these tasks) and
+say nothing about what it is worth on a task where depth should pay. Both gaps are open
+entries in `docs/ROADMAP.md` rather than quiet omissions.
+
 ### What is not guarded
 
 Guardrails for recursive LM systems are under-explored, and this package does not pretend
@@ -734,6 +794,29 @@ environment rather than owning it. The ledger plus `agent.resume()` is the primi
 goal, the progress and the memories reload from storage and the run continues. What decides
 *when* that happens is yours, and keeping it out is what lets the same agent run in a static
 page with no store at all.
+
+## Boundaries — what this package does not do, and why
+
+Every one of these is a decision with a reason, not an omission waiting to be fixed. They
+are collected here so nobody has to rediscover them the hard way.
+
+- **No `eval`, and therefore no arbitrary computation.** The model authors a compile-gated
+  document, not code. What it can express is the operation set plus a jaren-query — that is
+  the ceiling, deliberately, and it is a safety decision with a real cost: a computation
+  outside the query language cannot be asked for at all. What buys it is that a generated
+  program is checkable *before* it runs, on a tier where free-form code is not.
+- **Guardrails for recursive agents are under-explored** — the research says so plainly, and
+  this package inherits that. Three bounds exist: the depth cap, the shared budget, the
+  abort signal. There is no detection of a child that is confidently wrong.
+- **Heartbeats and scheduling are the host's.** Re-entering a session on a timer is a
+  browser, worker or cron concern; the ledger plus `agent.resume()` is the primitive, and
+  keeping the scheduler out is what lets the same agent run in a static page.
+- **Retrieval is tag-and-recency.** No embeddings, no ranker — and no measurement saying one
+  is needed. The honest next step is an instrument before an implementation.
+- **On the cheap tier, the transport is the fragile part, not the reasoning.** In the
+  campaign's own live run the qwen tier answered every sub-call it was given and named the
+  right pair; what failed was authoring calls dying on a 300-second deadline. The full
+  number is in §"The action language" above, and it is published whichever way it falls.
 
 ## House rules
 

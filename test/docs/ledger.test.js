@@ -2,13 +2,18 @@
 /**
  * @file The `@jarenjs/ai` documentation drift gate.
  *
- * Two facts about that package live in two places each: the ledger's
- * KINDS (a table in the README, `LEDGER_SCHEMAS` in the code) and the
- * budget STOP REASONS (a sentence in the README, string literals in the
- * agent loop). Both are contracts a reader acts on — "these are the
- * things a ledger can hold", "this is what a run stops with" — and both
- * are exactly the kind of prose that stays plausible for a year after
- * the code moved on.
+ * Four vocabularies live in two places each: the ledger's KINDS, the
+ * program's STEPS, the environment's OPERATIONS and the budget's STOP
+ * REASONS — a table or a sentence in the README, and a list or a set of
+ * exports in the code. Every one of them is a contract a reader acts on
+ * ("these are the things a ledger can hold", "these are the steps I may
+ * write"), and every one is exactly the kind of prose that stays
+ * plausible for a year after the code moved on.
+ *
+ * They matter more than ordinary docs because a MODEL reads them too: an
+ * operation the code has and the docs do not is unreachable in practice,
+ * and one the docs promise and the code dropped is a tool call that
+ * fails at runtime with the model insisting it was told otherwise.
  *
  * A count would only say that something drifted. These assert the NAMES,
  * in both directions, so the failure says which one — a kind the code
@@ -22,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { LEDGER_SCHEMAS, PROGRAM_OPS } from '@jarenjs/ai';
+import { LEDGER_SCHEMAS, PROGRAM_OPS, createEnvironment } from '@jarenjs/ai';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -56,6 +61,25 @@ describe('@jarenjs/ai documentation matches the code', () => {
       .flatMap((m) => [m[1], m[2]]).filter(Boolean).sort();
     assert.deepStrictEqual(documented, [...PROGRAM_OPS].sort(),
       'the documented program steps and PROGRAM_OPS disagree — one of them moved');
+  });
+
+  it('the README\'s operation table names exactly the operations an environment exposes', () => {
+    // the environment's operations are the vocabulary a model is taught;
+    // one that exists and is undocumented is unreachable in practice,
+    // and one documented that does not exist is a tool call that fails
+    const environment = createEnvironment();
+    const operations = Object.keys(environment)
+      .filter((key) => typeof environment[key] === 'function')
+      .sort();
+    const section = /\| operation \| answers with \| never \|\n\|[-| ]+\|\n([\s\S]*?)\n\n/.exec(README);
+    assert.ok(section, 'the README no longer documents the environment operations as a table');
+    const documented = [...section[1].matchAll(/^\| `([a-z]+)\(/gm)].map((m) => m[1]).sort();
+    // `put`/`ingest` are host-side entry points rather than operations a
+    // model calls, and `forget` is destructive and deliberately not in
+    // the model's vocabulary — the table documents what a model may use
+    const modelFacing = operations.filter((name) => !['put', 'ingest', 'forget'].includes(name));
+    assert.deepStrictEqual(documented, modelFacing,
+      'the documented operations and createEnvironment disagree — one of them moved');
   });
 
   it('every budget stop reason the loop can return is documented, and no other', () => {

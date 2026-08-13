@@ -390,6 +390,64 @@ const FACTS = {
         + ` of 40 records (${a.subcallsFailed} sub-call(s) failed) and named the`
         + ` ${a.scored ? 'CORRECT' : 'wrong'} pair`;
   },
+  // The campaign in one table: what each half of the work moved, on the
+  // realistic payload shape at the budget where the defect is most
+  // visible. Derived from the published rows, so it cannot drift from
+  // the measurement it summarises — and it carries the pairwise column,
+  // which is the number the whole campaign is judged on.
+  'horizon.campaign': () => {
+    const rows = data('long-horizon').rows;
+    const at = (variant, task, budget) => rows.find((r) => r.variant === variant
+      && r.task === task && r.shape === 'late' && r.budget === budget);
+    const pct = (x) => (x === null || x === undefined ? '—' : `${(x * 100).toFixed(1)}%`);
+    const budget = 6000;
+
+    const lossy = at('synopsis', 'needle', budget);
+    const ledger = at('ledger', 'needle', budget);
+    const program = at('program', 'pairwise', null);
+    const programNeedle = at('program', 'needle', null);
+    if (lossy === undefined || ledger === undefined || program === undefined) {
+      throw new Error('long-horizon.json is missing a configuration the campaign table names');
+    }
+
+    return ['',
+      '| configuration | needle | pairwise | what it cost the request |',
+      '| --- | --- | --- | --- |',
+      `| compaction alone (budget ${budget}) | ${pct(lossy.ceiling)} | ${pct(lossy.ceiling === null ? null : 0)}`
+        + ` | ${lossy.charsSent} chars |`,
+      `| + a ledger (same budget) | ${pct(ledger.ceilingRecall)} via recall | ${pct(0)}`
+        + ` | ${ledger.charsSent} chars |`,
+      `| + the environment and a program | ${pct(programNeedle?.ceiling)} | ${pct(program.ceiling)}`
+        + ` | ${program.charsSent} chars, against a ${program.charsFull}-char corpus |`,
+      ''].join('\n');
+  },
+  // The recursive path on the cheap tier. This one is published because
+  // it FAILED: a measurement that says "we could not get this to run"
+  // is a result, and rounding it to silence would be the exact dishonesty
+  // the campaign's own rules forbid.
+  'horizon.depthLive': () => {
+    const depths = data('long-horizon').meta.authoring?.depths;
+    if (depths === null || depths === undefined) {
+      return 'no live model ran on the machine that generated this file';
+    }
+    const tasks = depths.reduce((n, row) => n + row.tasks, 0);
+    const correct = depths.reduce((n, row) => n + row.correct, 0);
+    const calls = depths.reduce((n, row) => n + row.calls, 0);
+    const authored = depths.reduce((n, row) => n + row.authored.total, 0);
+    const compiled = depths.reduce((n, row) => n + row.authored.compiled, 0);
+    const timeouts = depths.reduce((n, row) =>
+      n + row.errors.filter((e) => /timeout/i.test(e)).length, 0);
+    const levels = depths.map((row) => row.depth).join(' and ');
+
+    if (calls === 0 && timeouts > 0) {
+      return `${correct} of ${tasks} tasks at depths ${levels} — every one of them died on the`
+        + ' 300-second deadline during its first authoring call, so what this measured is that'
+        + ' the recursive path does not currently RUN on this tier, not that it runs badly';
+    }
+    return `${correct} of ${tasks} tasks answered at depths ${levels}, ${compiled} of ${authored}`
+      + ` authored programs compiled, over ${calls} model call(s)`
+      + (timeouts === 0 ? '' : ` (${timeouts} attempt(s) lost to the 300-second deadline)`);
+  },
   // The live half, as a table: what a real model scored on the realistic
   // payload shape with and without a ledger, and how many times it walked
   // through the door. The recall column is not decoration — a ledger row

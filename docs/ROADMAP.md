@@ -541,10 +541,17 @@ what each does is its own documentation's job
 
 ## @jarenjs/ai
 
-The ledger — a durable goal, memories, skills and addressable slots over an
-injected store — is what lets a run outlive a context window and a closed tab.
-What is open is the question it does not answer, what it costs, and what nobody
-has measured yet.
+The package now has three paths — a bounded tool loop, a ledger-backed agent that
+survives a closed tab, and a recursive entry point that works a corpus larger than
+the context by addressing it instead of reading it. All three are documented in
+`packages/ai/README.md`, which is where shipped capability lives; what follows is
+only what is genuinely still open.
+
+Most of these entries share a shape worth naming: the missing thing is a
+**measurement**, not an implementation. This package has repeatedly refused to add
+a ranker, an evictor or a de-duplicator before the number that would say whether it
+helps — and every time that refusal was tested, the instrument turned out to be the
+harder and more valuable half.
 
 - [ ] **A program is authored per question, and nothing reuses one.** A question
   over everything at once — which two of forty records are closest — is
@@ -561,6 +568,47 @@ has measured yet.
   retrieval entry below is the same refusal). The missing input is a benchmark
   over a question STREAM rather than a single question: how often is a stored
   plan the right plan, and what does re-running a wrong one cost?
+
+- [ ] **A program's reduce shape is a convention the compiler cannot check.** A map
+  element is `{ slot, value }` whether that value came from a leaf model call or a
+  whole child agent, so a reduce has to emit the same shape its elements carry or
+  the identical program answers correctly at depth 0 and returns nothing at depth 1.
+  The compile gate catches undeclared names, uncompilable queries and a missing
+  final step; it cannot catch this, because query documents are not typed and the
+  element shape is whatever the sub-calls happened to answer. Both behaviours are
+  pinned in `test/ai/recursive.test.js` so the rule cannot rot, and the README
+  states it — but a rule a reader must remember is weaker than one a compiler
+  enforces. Closing it means type inference over query documents (`annotateTypes`
+  exists in `@jarenjs/json` and is the obvious starting point), which is a
+  query-engine feature with its own justification, not an AI-package patch.
+
+- [ ] **Depth has not been shown to pay on any task this repo measures.** The
+  benchmark runs depths 0–2 and publishes median and p95 cost: deeper answers the
+  same fraction correctly and costs proportionally more. That is consistent with the
+  research — which finds most of its gain at depth 1 and depth 3 helping only on
+  *information-dense* tasks — but it means this package ships a capability whose
+  benefit it cannot demonstrate, only its price. The missing piece is a task with
+  the density the research describes (a corpus where one piece cannot be summarised
+  without reading its own sub-pieces). Until that exists the honest reading is: the
+  depth cap and the shared budget are the useful parts, and depth 1 is the default
+  because deeper has not earned its cost here.
+
+- [ ] **The authoring call is what times out, and streaming does not fix it.** The
+  campaign's live runs lost roughly one authoring attempt in three on the
+  single-level program path and **all four** recursive tasks at depths 1 and 2, every
+  one on a 300-second deadline during its first authoring call — while ordinary
+  sub-calls on the same tier, in the same run, answered 40 out of 40. These calls
+  were STREAMED, which rules out the non-streaming hang this repo measured
+  separately: the problem is the request itself, which carries the digest, the
+  question, a worked example and the whole program schema. Recursion needs one per
+  level, so the failure probability compounds with depth, which is what the numbers
+  show. What is open is which part of that request is expensive — the schema is the
+  obvious suspect, and `deriveLlmProfile` already exists to shrink a grammar for
+  exactly this reason (an oversized `response_format` is a documented failure mode
+  in this package's own field notes). The measurement wanted is authoring latency
+  against request size on the cheap tier, before anything is trimmed by guesswork.
+  Until then `createStructuredOutput` still sends `stream: false` — worth revisiting
+  in the same pass, since it is a behaviour change for every caller (D6).
 
 - [ ] **Retrieval is tag match and recency.** `recall({ tags, limit })` orders by
   recency and matches tags; with the `compileQuery` seam wired a caller may pass a
