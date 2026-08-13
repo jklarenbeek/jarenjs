@@ -3,7 +3,7 @@
   "suite": "long-horizon",
   "title": "Long-horizon context retention",
   "description": "What the agent's history compaction keeps and what it destroys: a needle question over one record and a pairwise question over every pair, each as a model-free ceiling and as a live model's score.",
-  "date": "2026-08-12T23:45:25.148Z",
+  "date": "2026-08-13T01:32:43.811Z",
   "node": "v22.22.2",
   "n": 40,
   "seed": 20260812,
@@ -20,25 +20,25 @@
   "trials": 3,
   "liveSkipped": null,
   "asked": 144,
-  "calls": 155,
-  "recalls": 38,
-  "failed": 18,
+  "calls": 146,
+  "recalls": 35,
+  "failed": 20,
   "usage": {
-   "prompt": 384919,
-   "completion": 355561,
-   "total": 740480
+   "prompt": 369442,
+   "completion": 296894,
+   "total": 666336
   },
   "errors": [
-   "pairwise|synopsis|front|10000: The operation was aborted due to timeout",
-   "needle|ledger|front|6000: The operation was aborted due to timeout",
+   "pairwise|synopsis|front|20000: The operation was aborted due to timeout",
    "needle|synopsis|front|4000: The operation was aborted due to timeout",
+   "pairwise|synopsis|front|4000: The operation was aborted due to timeout",
    "needle|ledger|front|4000: The operation was aborted due to timeout",
    "needle|ledger|front|4000: The operation was aborted due to timeout"
   ],
   "bounded": null,
   "scheduling": {
    "parallel": {
-    "ms": 208,
+    "ms": 209,
     "subcalls": 40,
     "concurrency": 4,
     "peak": 4
@@ -51,25 +51,92 @@
    },
    "delayMs": 20
   },
+  "depths": [
+   {
+    "depth": 0,
+    "tasks": 8,
+    "ok": 8,
+    "correct": 8,
+    "callsMedian": 2,
+    "callsP95": 2,
+    "tokensMedian": 100,
+    "tokensP95": 100,
+    "msMedian": 3,
+    "deepest": 0
+   },
+   {
+    "depth": 1,
+    "tasks": 8,
+    "ok": 8,
+    "correct": 8,
+    "callsMedian": 3,
+    "callsP95": 3,
+    "tokensMedian": 150,
+    "tokensP95": 150,
+    "msMedian": 4,
+    "deepest": 1
+   },
+   {
+    "depth": 2,
+    "tasks": 8,
+    "ok": 8,
+    "correct": 8,
+    "callsMedian": 4,
+    "callsP95": 4,
+    "tokensMedian": 200,
+    "tokensP95": 200,
+    "msMedian": 5,
+    "deepest": 2
+   }
+  ],
   "authoring": {
    "trials": 3,
-   "compiled": 1,
+   "compiled": 2,
    "generations": 3,
    "errors": [
-    "authoring failed: The operation was aborted due to timeout",
     "authoring failed: The operation was aborted due to timeout"
    ],
    "subcalls": 40,
-   "subcallsFailed": 2,
-   "valuesReached": 38,
+   "subcallsFailed": 0,
+   "valuesReached": 40,
    "scored": true,
-   "calls": 45,
+   "calls": 51,
    "usage": {
-    "prompt": 7311,
-    "completion": 25083,
-    "total": 32394
+    "prompt": 9009,
+    "completion": 48370,
+    "total": 57379
    },
-   "bounded": null
+   "bounded": null,
+   "depths": [
+    {
+     "depth": 1,
+     "tasks": 2,
+     "correct": 0,
+     "calls": 0,
+     "authored": {
+      "total": 0,
+      "compiled": 0
+     },
+     "errors": [
+      "depth 1: The operation was aborted due to timeout",
+      "depth 1: The operation was aborted due to timeout"
+     ]
+    },
+    {
+     "depth": 2,
+     "tasks": 2,
+     "correct": 0,
+     "calls": 0,
+     "authored": {
+      "total": 0,
+      "compiled": 0
+     },
+     "errors": [
+      "depth 2: The operation was aborted due to timeout",
+      "depth 2: The operation was aborted due to timeout"
+     ]
+    }
+   ]
   }
  },
  "headline": {
@@ -147,7 +214,7 @@
       "35.0%",
       "33.3%",
       "0.0%",
-      "66.7%",
+      "100.0%",
       "yes"
      ],
      "strong": false
@@ -246,9 +313,9 @@
       "40/40",
       "65.0%",
       "100.0%",
-      "66.7%",
-      "0.0%",
       "100.0%",
+      "0.0%",
+      "66.7%",
       "yes"
      ],
      "strong": false
@@ -459,7 +526,7 @@
       "40/40",
       "65.0%",
       "100.0%",
-      "100.0%",
+      "66.7%",
       "0.0%",
       "0.0%",
       "no"
@@ -476,7 +543,7 @@
       "40/40",
       "27.5%",
       "100.0%",
-      "100.0%",
+      "66.7%",
       "0.0%",
       "0.0%",
       "no"
@@ -493,7 +560,7 @@
       "40/40",
       "15.0%",
       "100.0%",
-      "66.7%",
+      "50.0%",
       "0.0%",
       "0.0%",
       "no"
@@ -510,7 +577,7 @@
       "40/40",
       "10.0%",
       "100.0%",
-      "66.7%",
+      "100.0%",
       "0.0%",
       "0.0%",
       "no"
@@ -580,7 +647,7 @@
      "strong": true
     }
    ],
-   "note": "The corpus is held OUTSIDE the context as addressable slots, and the model authors a compile-gated program over it: chunk the corpus, map one sub-call per piece, reduce the results with a query, read the answer from the slot it wrote. The root request carries the plan and a step report — never a record — which is why there is no budget column here and why these numbers do not move when the corpus grows. The pairwise ceiling is the same determinacy measure as the tables above: every record reached the reduce, so the relation over every pair is determined. Note what the needle row costs by comparison: grep narrows to the one piece that mentions the record, so a linear question is one sub-call and the quadratic one is 40. Fan-out is concurrent — 3.9x against the same program run sequentially at 20ms of synthetic per-call latency, which measures the scheduler rather than a provider's queue. The cheap tier authored 1/3 programs that compile, and answering 40 sub-calls itself it reached 38/40 values and got the pair right."
+   "note": "The corpus is held OUTSIDE the context as addressable slots, and the model authors a compile-gated program over it: chunk the corpus, map one sub-call per piece, reduce the results with a query, read the answer from the slot it wrote. The root request carries the plan and a step report — never a record — which is why there is no budget column here and why these numbers do not move when the corpus grows. The pairwise ceiling is the same determinacy measure as the tables above: every record reached the reduce, so the relation over every pair is determined. Note what the needle row costs by comparison: grep narrows to the one piece that mentions the record, so a linear question is one sub-call and the quadratic one is 40. Fan-out is concurrent — 3.9x against the same program run sequentially at 20ms of synthetic per-call latency, which measures the scheduler rather than a provider's queue. The cheap tier authored 2/3 programs that compile, and answering 40 sub-calls itself it reached 40/40 values and got the pair right."
   }
  ],
  "rows": [
@@ -735,7 +802,7 @@
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 3,
+   "trials": 2,
    "compacted": true,
    "pairSurvived": true,
    "idPresent": 38,
@@ -843,7 +910,7 @@
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 2,
+   "trials": 3,
    "compacted": true,
    "pairSurvived": true,
    "idPresent": 21,
@@ -866,8 +933,8 @@
    "budget": 10000,
    "ceiling": 0.65,
    "ceilingRecall": 1,
-   "actual": 0.6666666666666666,
-   "recalls": 2,
+   "actual": 1,
+   "recalls": 3,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
    "trials": 3,
@@ -893,7 +960,7 @@
    "budget": 10000,
    "ceiling": 0,
    "ceilingRecall": null,
-   "actual": 1,
+   "actual": 0.6666666666666666,
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
@@ -947,7 +1014,7 @@
    "budget": 6000,
    "ceiling": 0,
    "ceilingRecall": null,
-   "actual": 0.6666666666666666,
+   "actual": 1,
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
@@ -975,10 +1042,10 @@
    "ceiling": 0.375,
    "ceilingRecall": 1,
    "actual": 1,
-   "recalls": 2,
+   "recalls": 4,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 2,
+   "trials": 3,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 15,
@@ -1059,7 +1126,7 @@
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 3,
+   "trials": 2,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 11,
@@ -1191,10 +1258,10 @@
    "ceiling": 0.125,
    "ceilingRecall": 1,
    "actual": 1,
-   "recalls": 1,
+   "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 2,
+   "trials": 1,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 5,
@@ -1406,8 +1473,8 @@
    "budget": 20000,
    "ceiling": 0.65,
    "ceilingRecall": 1,
-   "actual": 1,
-   "recalls": 1,
+   "actual": 0.6666666666666666,
+   "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
    "trials": 3,
@@ -1514,8 +1581,8 @@
    "budget": 10000,
    "ceiling": 0.275,
    "ceilingRecall": 1,
-   "actual": 1,
-   "recalls": 3,
+   "actual": 0.6666666666666666,
+   "recalls": 1,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
    "trials": 3,
@@ -1572,7 +1639,7 @@
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 2,
+   "trials": 1,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 15,
@@ -1622,11 +1689,11 @@
    "budget": 6000,
    "ceiling": 0.15,
    "ceilingRecall": 1,
-   "actual": 0.6666666666666666,
-   "recalls": 4,
+   "actual": 0.5,
+   "recalls": 3,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 3,
+   "trials": 2,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 16,
@@ -1653,7 +1720,7 @@
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 2,
+   "trials": 3,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 16,
@@ -1730,11 +1797,11 @@
    "budget": 4000,
    "ceiling": 0.1,
    "ceilingRecall": 1,
-   "actual": 0.6666666666666666,
-   "recalls": 6,
+   "actual": 1,
+   "recalls": 3,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 3,
+   "trials": 2,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 9,
@@ -1788,7 +1855,7 @@
    "recalls": 0,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
-   "trials": 1,
+   "trials": 2,
    "compacted": true,
    "pairSurvived": false,
    "idPresent": 8,
@@ -1839,7 +1906,7 @@
    "ceiling": 0.025,
    "ceilingRecall": 1,
    "actual": 1,
-   "recalls": 4,
+   "recalls": 5,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
    "trials": 2,
@@ -1866,7 +1933,7 @@
    "ceiling": 0,
    "ceilingRecall": null,
    "actual": 0,
-   "recalls": 15,
+   "recalls": 16,
    "model": "qwen/qwen3.6-35b-a3b",
    "n": 40,
    "trials": 2,
