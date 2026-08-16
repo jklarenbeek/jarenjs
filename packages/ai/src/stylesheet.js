@@ -41,29 +41,19 @@
  * gated the same way passes a different compiler.
  */
 
-import { CodedError } from '@jarenjs/core/errors';
 import { JarenValidator } from '@jarenjs/validate';
 import { checkOutcome } from './check.js';
 
 /**
- * A document that is well-formed and compilable and still not an answer.
+ * The check-outcome shape the structured-output gate seam speaks — a
+ * refusal is data, never a thrown error, because the gate's caller is a
+ * repair loop that reads it. The codes name a document that is
+ * well-formed and compilable and still not an answer:
  *
  *   AI0220 — a rule body is a bare string literal (it returns itself)
  *   AI0221 — the stylesheet has no rules
  *   AI0222 — the authoring call produced nothing on any configured model
  */
-export class StylesheetError extends CodedError {
-  /**
-   * @param {string} code - 'AI0220' … 'AI0222'
-   * @param {string} reason - the bare reason
-   * @param {string} [docPath] - JSON Pointer into the stylesheet document
-   */
-  constructor(code, reason, docPath) {
-    super('StylesheetError', code, reason, docPath);
-  }
-}
-
-/** The check-outcome shape the structured-output gate seam speaks. */
 const refuse = (code, reason, docPath) => ({
   valid: false, errors: [{ code, docPath, message: reason }],
 });

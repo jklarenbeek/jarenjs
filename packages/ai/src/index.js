@@ -36,7 +36,7 @@ export {
   createStylesheetAuthor, stylesheetGates, compileGate, literalBodyGate, nonEmptyGate, runGate,
   unknownOperatorGate, grammarKeywords,
   operatorArities, operatorNames, operatorCrib, describePaths,
-  StylesheetError, STYLESHEET_EXAMPLE,
+  STYLESHEET_EXAMPLE,
 } from './stylesheet.js';
 export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';

@@ -9,7 +9,10 @@
  * `message` throws when read must both become ordinary failed attempts.
  * Second, shutdown is bounded: handlers get an `AbortSignal`, and a
  * handler that ignores it cannot hold `stop()` — or `store.close()`, or
- * the database file — open for the life of the process.
+ * the database file — open for the life of the process. And bounded
+ * means CANCELLED, not abandoned: a loop `stop()` could not drain must
+ * never claim, write, or arm a poll timer again once its handler
+ * finally settles — its job recovers by lease expiry instead.
  */
 
 import { describe, it } from 'node:test';
@@ -175,5 +178,48 @@ describe('bounded shutdown', () => {
     // which is why a second close finds nothing left to close
     await assert.rejects(() => store.close({ graceMs: 20 }),
       /database is not open/);
+  });
+
+  it('stop() CANCELS the loop it could not drain', async () => {
+    const store = await open();
+    /** @type {(value: any) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    /** @type {() => void} */
+    let entered = () => {};
+    const inHandler = new Promise((resolve) => { entered = () => resolve(undefined); });
+    const worker = store.jobs.createWorker({
+      handlers: { hold: () => { entered(); return gate; } },
+      pollInterval: 5,
+    });
+    worker.start();
+    await store.jobs.enqueue('hold', null, { id: 'c' });
+    await inHandler;
+    assert.deepStrictEqual(await worker.stop({ graceMs: 20 }),
+      { drained: false, inFlight: 1 });
+
+    // the handler settles AFTER the caller was told stop() gave up: the
+    // cancelled loop must not write the completion — the lease expiry
+    // (§5) is the designated recovery, not a race with store.close()
+    release({ late: true });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.strictEqual(worker.stats().inFlight, 0, 'the handler did settle');
+    assert.strictEqual(worker.stats().completions, 0, 'no completion write');
+    assert.strictEqual((await store.jobs.get('c')).state, 'leased',
+      'the job is left to lease-expiry recovery');
+
+    // ...and it must not claim again either: a claimable job stays pending
+    await store.jobs.enqueue('hold', null, { id: 'l' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual(worker.stats().claims, 1,
+      'the cancelled loop claims nothing more');
+    assert.strictEqual((await store.jobs.get('l')).state, 'pending');
+
+    // a restart opens a NEW session with fresh loops; the cancelled
+    // loop stays dead instead of reviving as an extra claimer
+    worker.start();
+    await until(() => store.jobs.get('l'), (job) => job.state === 'done');
+    assert.deepStrictEqual(await worker.stop(), { drained: true, inFlight: 0 });
+    await store.close();
   });
 });

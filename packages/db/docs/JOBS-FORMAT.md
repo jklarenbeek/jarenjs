@@ -125,7 +125,8 @@ stats() }`:
   plainly (§8);
 - `stop({ graceMs })` aborts in-flight handlers and resolves once they
   settle **or** the grace period expires (default 5 s), answering
-  `{ drained, inFlight }` — see §6.1;
+  `{ drained, inFlight }`; a loop the grace period could not drain is
+  **cancelled**, not left running — see §6.1;
 - `stats()` reports claims, completions, failures, wakes, polls and the
   in-flight handler count.
 
@@ -161,6 +162,16 @@ does the same and **closes the connection either way**, then reports
 handle really is released. A handler that ignores its signal therefore
 cannot hold the database file open for the life of the process, and the
 lease expiry (§5) lets another worker re-claim its job.
+
+A loop the grace period could not drain is **cancelled**, not merely
+uncounted: when its wedged handler finally settles, the loop exits
+without writing the completion or the failure, without claiming again,
+and without re-arming its poll timer — the store it would touch is the
+one the caller is closing, and the job it abandons recovers by lease
+expiry (§5). A later `start()` builds fresh loops in a new session (and
+re-registers the worker's wake-on-enqueue hook and its place in
+`stopAll`), so a cancelled loop can never be revived as an extra
+claimer.
 
 ## 7. The DAG composition
 

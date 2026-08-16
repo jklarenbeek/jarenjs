@@ -26,7 +26,10 @@
  *  - **Shutdown is bounded.** Handlers receive an `AbortSignal` and
  *    `stop()` takes a deadline, so a handler that never settles cannot
  *    hold `stop()` — and therefore `store.close()`, and therefore the
- *    database file — open forever.
+ *    database file — open forever. A loop the deadline could not drain
+ *    is CANCELLED, not merely left behind: when its handler finally
+ *    settles it exits without another claim, store write or poll
+ *    timer, and its abandoned job recovers by lease expiry (§5).
  */
 
 import { chain } from './driver.js';
@@ -370,6 +373,17 @@ export function createJobEngine(options) {
 
     /** Aborted when `stop()` is called: the handler's cue to wind up. */
     let shutdown = new AbortController();
+    /**
+     * The per-`start()` loop session. When a `stop()` grace deadline
+     * expires the session is cancelled: a loop that could not be
+     * drained must abandon its job — no completion or failure write,
+     * no further claim, no re-armed poll timer — because the store it
+     * would touch is the one the caller is about to close. The
+     * abandoned lease expires and the next claim re-runs the job (§5).
+     * A later `start()` opens a NEW session, so a cancelled loop can
+     * never be revived.
+     */
+    let session = { cancelled: false };
     /** In-flight handler count, so `stop()` can report what it left. */
     let inFlight = 0;
 
@@ -389,7 +403,8 @@ export function createJobEngine(options) {
       }
     };
 
-    const runOne = async (job) => {
+    /** @param {{ cancelled: boolean }} loopSession */
+    const runOne = async (job, loopSession) => {
       stats.claims += 1;
       inFlight += 1;
       try {
@@ -399,9 +414,13 @@ export function createJobEngine(options) {
             { job, checkpointsFor, signal: shutdown.signal });
         }
         catch (error) {
+          // past cancellation the store is closing: leave the leased
+          // row to expiry-based recovery (§5) instead of racing it
+          if (loopSession.cancelled) return;
           await recordFailure(job, error);
           return;
         }
+        if (loopSession.cancelled) return;
         try {
           // a §7 handler may have completed transactionally already; the
           // guarded update makes this a no-op then
@@ -420,8 +439,9 @@ export function createJobEngine(options) {
       }
     };
 
-    const loop = async () => {
-      while (running) {
+    /** @param {{ cancelled: boolean }} loopSession */
+    const loop = async (loopSession) => {
+      while (running && !loopSession.cancelled) {
         let job;
         try {
           job = await Promise.resolve(claim({
@@ -430,13 +450,13 @@ export function createJobEngine(options) {
         catch {
           job = undefined; // a transient storage failure: back off to the poll
         }
-        if (!running) return;
+        if (!running || loopSession.cancelled) return;
         if (job === undefined) {
           await sleep();
           continue;
         }
         try {
-          await runOne(job);
+          await runOne(job, loopSession);
         }
         catch {
           // `runOne` normalizes every handler outcome, so reaching here
@@ -453,7 +473,12 @@ export function createJobEngine(options) {
         if (running) throw new TypeError('the worker is already started');
         running = true;
         shutdown = new AbortController();
-        loops = Array.from({ length: concurrency }, () => loop());
+        session = { cancelled: false };
+        loops = Array.from({ length: concurrency }, () => loop(session));
+        // a restart re-registers what stop() removed: the
+        // wake-on-enqueue hook and the stopAll membership
+        wakers.add(onWake);
+        workers.add(worker);
         return worker;
       },
       /**
@@ -461,6 +486,9 @@ export function createJobEngine(options) {
        * the loops — but only up to `graceMs`. A handler that ignores its
        * signal cannot hold the process open; the resolved record says so
        * instead, and the lease expiry (§5) lets another worker re-claim.
+       * A loop the grace period could not drain is cancelled outright:
+       * when its handler finally settles it exits without another
+       * claim, store write or poll timer.
        * @param {{ graceMs?: number }} [stopOptions]
        * @returns {Promise<{ drained: boolean, inFlight: number }>}
        */
@@ -478,6 +506,7 @@ export function createJobEngine(options) {
         ]);
         clearTimeout(timer);
         if (drained) loops = [];
+        else session.cancelled = true; // cancel what could not be drained
         wakers.delete(onWake);
         workers.delete(worker);
         return { drained: drained === true, inFlight };
