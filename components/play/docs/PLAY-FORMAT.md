@@ -38,8 +38,23 @@ PlayResult = {
   // and the stage omits that clause rather than printing `0 ms` — which
   // read as "it was free". Only measured phases are ever shown.
   timing: { compileMs: number | null, runMs: number | null } | null,
-  error:  { message: string, code?, path? } | null,
+  error:  PlayError | null,
   panels: Panel[],                                 // the result SCREENS ([] on error)
+}
+
+PlayError = {
+  message:   string,     // what the compiler said, verbatim
+  code?:     string,     // its stable diagnosis code, when it has one
+  // WHERE — the location half, in the format's own fields. A field is
+  // present exactly when the compiler stated it; nothing is fabricated.
+  pane?:     string,     // the pane KEY the error is about: the source pane
+                         // for a compile or run failure, the data pane
+                         // whose JSON did not parse
+  path?:     string,     // JSON Pointer into that pane's DOCUMENT
+  dataPath?: string,     // JSON Pointer into the DATA the document ran over
+  position?: number,     // 0-based offset into that pane's TEXT
+  line?:     number,     // 1-based line …
+  column?:   number,     // … and column
 }
 
 Panel = {
@@ -55,6 +70,36 @@ Panel = {
   items?:   Array<{ title, value, note? }>,        // cards: a row of stat cards
 }
 ```
+
+An error says **where**, because for a learner the location is the lesson:
+which token of the selector, which operation of the patch, which rule of
+the stylesheet. The compilers already carry it, in three shapes, and the
+error copies whichever its compiler stated: the **coded family** (patch,
+`$query`, JSLT, JTLT — `@jarenjs/core`'s `CodedError`) states `path`, a
+JSON Pointer into the document being compiled or run (`/rules/0/match`,
+`/$idiv`, `/0/path`), and a patch *runtime* error adds `dataPath`, the
+target location its operation failed at — two facts, both kept; the
+**syntax family** (JSONPath, JSON Pointer, XQuery) states `position`, a
+0-based offset into the source text; the **line/column family** (JOSL,
+CSV) states 1-based `line` and `column`. `pane` names the editor the
+location points into, and it is the whole location for a pane whose JSON
+does not parse: the host's `JSON.parse` states its offset only inside
+engine-specific message text, never as a field, so the pane is claimed and
+nothing finer. Two honest gaps: a missing host seam (`PLAY_NO_RENDERER`,
+`PLAY_NO_VALIDATOR`) is nobody's pane, and XQuery compiles a *generated*
+query document, so a location after its parse phase is a pointer into a
+document the learner never typed — stated, with no pane. `message` stays
+verbatim (a coded error composes `code: reason at path` itself), so a
+host with no structured reader still gets everything.
+
+The component lands it in two places: the editor the error is about is
+marked `aria-invalid` (the state the renderer owns; the ring is styled off
+it) and its label carries the phrase — `at /rules/0/match`, `at position
+7`, `at line 2, column 5` — while the stage's error line shows the code
+chip, the message with its own code prefix dropped rather than read twice,
+and the pane's label. A data pane a runtime error merely failed *at* is
+not marked invalid (the op was wrong, not the target) but shows the
+`dataPath` phrase, because that is where the reader looks next.
 
 Every ok run yields **at least one** panel — most engines a single `code`
 panel. The `simple` panels are the calm default: the component shows one

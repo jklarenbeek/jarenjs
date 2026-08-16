@@ -55,10 +55,37 @@ import { EXAMPLE_LIST } from './examples.js';
  */
 
 /**
+ * The error half of a Result: what the compiler said, plus WHERE — in the
+ * format's own fields, so the view can point at the pane and the location
+ * rather than only quoting the message. Every location field is present
+ * exactly when the compiler stated it (a field is never fabricated), and
+ * `pane` names the editor the location points into; a location into a
+ * document the learner never typed (XQuery's generated query document) has
+ * no pane. See PLAY-FORMAT §2.
+ * @typedef {Object} PlayError
+ * @property {string} message - the compiler's message, verbatim (a coded
+ *   error composes `code: reason at path` itself)
+ * @property {string} [code] - the stable diagnosis code, when there is one
+ * @property {string} [pane] - the pane KEY (source or data) the error is
+ *   about: the source pane for a compile or run failure, the data pane
+ *   whose JSON did not parse
+ * @property {string} [path] - JSON Pointer into that pane's DOCUMENT (a
+ *   coded error's `docPath`: the failing patch operation, the query
+ *   construct, the stylesheet rule)
+ * @property {string} [dataPath] - JSON Pointer into the DATA the document
+ *   was applied to, when a runtime error blames both (a patch operation
+ *   AND the target location it failed at)
+ * @property {number} [position] - 0-based offset into that pane's TEXT
+ *   (the syntax family: a JSONPath selector, a JSON Pointer, an XQuery)
+ * @property {number} [line] - 1-based line (the JOSL / CSV family)
+ * @property {number} [column] - 1-based column (with `line`)
+ */
+
+/**
  * @typedef {Object} PlayResult
  * @property {boolean} ok
  * @property {{ compileMs: number, runMs: number } | null} timing
- * @property {{ message: string, code?: string, path?: string } | null} error
+ * @property {PlayError | null} error - null on an ok run
  * @property {Panel[]} panels - the result screens (`[]` on error); a single
  *   `code` panel for most engines, several for the richer ones
  */

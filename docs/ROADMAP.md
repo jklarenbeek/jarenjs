@@ -39,11 +39,27 @@ delete it or fix it.
   bits the 32-bit result was supposed to keep. It is deterministic and
   distributes well enough that nothing has ever misbehaved, but it is **not**
   FNV-1a, and `Math.imul` is both correct and **2.1x faster** (0.38 ms to
-  0.18 ms per 100 kB, measured). The blast radius is why it is still here:
-  every hash in the suite changes — vnode block keys, `meta.hash`, the loader's
-  cache keys, the mermaid SVG cache, `data-md-hash` attributes and every pinned
-  hash in the tests. It needs its own pass, with a sweep of everything that
-  persists one.
+  0.18 ms per 100 kB, measured). The blast radius is why it is still here,
+  and it is **not only a sweep**. The in-process hashes — vnode block keys,
+  `meta.hash`, the md/mermaid hydration keys, the mermaid SVG cache,
+  `data-md-hash` attributes, every `contentKey` memo and every pinned hash in
+  the tests — all change and can all be swept in one pass. Two places
+  **persist** one, and a sweep cannot reach them: `@jarenjs/db` writes
+  `shapeHash`/`migrationChecksum` (`hashContent(canonicalizeJson(…))`) into
+  every database's `_jaren_migrations` rows (`from_hash`, `to_hash`,
+  `checksum`) and into the `from`/`to` literals of every migration document
+  a user has planned and saved, so a changed function makes `migrate()`
+  refuse every already-applied migration as "edited" (JD0022) and every
+  existing chain as the wrong shape (JD0020); and the `@jarenjs/ai` ledger
+  content-addresses its archived rounds (`r-<hash>-<length>`) for idempotent
+  re-compaction, so a ledger compacted across the change stores the same
+  round twice (old addresses stay readable — nothing goes dark, but the
+  idempotence the naming was chosen for is lost once). The pass therefore
+  needs a decision *before* the sweep: a hash-version marker the migration
+  history and the round addresses carry (rows verified with the function that
+  wrote them, new rows written with the new one), or an accepted and stated
+  break for pre-1.0 stores. That decision — not the `Math.imul` line — is
+  the work.
 
 ## @jarenjs/json — JSONPath & addressing
 
@@ -302,14 +318,6 @@ costs a descriptor plus examples and no UI code at all.
   parsers are pure, but they consume a stream rather than a string, so a
   descriptor for them first needs a source pane that means "feed this in
   chunks" — a question the `(source, data)` shape does not answer.
-- [ ] **`error.path` is declared and never produced** — PLAY-FORMAT gives a run
-  result an `error: { message, code?, path? }`, but every `fail(...)` site
-  passes at most a message and a code, and the view model drops the field
-  entirely. For a teaching tool the location *is* the lesson: which token of
-  the selector, which pointer in the patch, which rule of the stylesheet. The
-  compilers already carry it in their coded errors, so this is threading rather
-  than new capability — through roughly thirty call sites, and it needs a place
-  in the result view to land.
 - [ ] **JSLT, JTLT and XQuery cannot be given externals** — all three compiled
   functions accept an externals object and play passes none, so `$query` is the
   only engine with an externals pane. XQuery is the sharp case: it binds

@@ -257,6 +257,91 @@ describe('the play JSLT view renders headlessly', () => {
   });
 });
 
+describe('an error says WHERE — the view model and the view (PLAY-FORMAT §2)', () => {
+  /** A failed jslt run: the compiler blames rule 0's match path. */
+  const jsltError = {
+    ok: false, timing: null, panels: [],
+    error: { message: "JT0003: invalid match path at /rules/0/match", code: 'JT0003', pane: 'stylesheet', path: '/rules/0/match' },
+  };
+  const jsltState = (error) => state({
+    engine: 'jslt', exampleId: null, source: { stylesheet: '{"$jslt":"0.1","rules":[{"match":"$[","body":1}]}' },
+    data: { data: '{}' }, datasetIndex: 0, result: { ok: false, timing: null, panels: [], error },
+  });
+
+  it('the pane the error names is invalid and carries the location; the others are clean', () => {
+    const vm = playViewModel(jsltState(jsltError.error));
+    assert.deepStrictEqual(vm.sourcePanes.map((p) => [p.key, p.invalid, p.where]), [['stylesheet', true, 'at /rules/0/match']]);
+    assert.deepStrictEqual(vm.dataPanes.map((p) => [p.key, p.invalid, p.where]), [['data', false, '']]);
+    // the error line: the code chip, the message WITHOUT its own code prefix, and the pane's label
+    assert.deepStrictEqual(vm.result.error, {
+      code: 'JT0003', message: 'JT0003: invalid match path at /rules/0/match',
+      text: 'invalid match path at /rules/0/match', paneLabel: 'Stylesheet',
+    });
+  });
+
+  it('phrases each location family the way the compilers do; a root pointer reads "the root"', () => {
+    const where = (error, engine, source, key) => {
+      const st = state({ engine, exampleId: null, source, data: { data: '{}' }, datasetIndex: 0, result: { ok: false, timing: null, panels: [], error } });
+      return playViewModel(st).sourcePanes.find((p) => p.key === key).where;
+    };
+    assert.strictEqual(where({ message: 'm', pane: 'selector', position: 7 }, 'path', { selector: '$[' }, 'selector'), 'at position 7');
+    assert.strictEqual(where({ message: 'm', pane: 'text', line: 2, column: 5 }, 'josl', { text: '' }, 'text'), 'at line 2, column 5');
+    assert.strictEqual(where({ message: 'm', pane: 'text', line: 2 }, 'josl', { text: '' }, 'text'), 'at line 2');
+    assert.strictEqual(where({ message: 'm', pane: 'query', path: '' }, 'query', { query: '{}' }, 'query'), 'at the root');
+    assert.strictEqual(where({ message: 'm', pane: 'query' }, 'query', { query: '{oops' }, 'query'), '',
+      'a pane that merely did not parse is flagged with no phrase');
+  });
+
+  it('a patch runtime error blames the op (invalid) and points at the target location (not invalid)', () => {
+    const vm = playViewModel(state({
+      engine: 'patch', exampleId: null, source: { patch: '[{"op":"remove","path":"/missing"}]' }, data: { data: '{"a":1}' }, datasetIndex: 0,
+      result: { ok: false, timing: null, panels: [],
+        error: { message: "JP2001: the path '/missing' does not exist at /0 in data /missing", code: 'JP2001', pane: 'patch', path: '/0', dataPath: '/missing' } },
+    }));
+    assert.deepStrictEqual(vm.sourcePanes.map((p) => [p.key, p.invalid, p.where]), [['patch', true, 'at /0']]);
+    assert.deepStrictEqual(vm.dataPanes.map((p) => [p.key, p.invalid, p.where]), [['data', false, 'at /missing']],
+      'the target is where it failed, not what is wrong');
+    assert.strictEqual(vm.result.error.paneLabel, 'Patch', 'the error line names the pane the error is ABOUT — the op, by its label');
+  });
+
+  it('an error with no pane names none, and a message without a code prefix is kept whole', () => {
+    const vm = playViewModel(state({ result: { ok: false, timing: null, panels: [], error: { message: 'unknown engine: nope' } } }));
+    assert.deepStrictEqual(vm.result.error, { code: '', message: 'unknown engine: nope', text: 'unknown engine: nope', paneLabel: '' });
+    assert.ok(vm.sourcePanes.every((p) => !p.invalid && p.where === ''));
+    // a code the message does not begin with is not stripped from it
+    const other = playViewModel(state({ result: { ok: false, timing: null, panels: [], error: { message: 'renderer said no', code: 'X1' } } }));
+    assert.strictEqual(other.result.error.text, 'renderer said no');
+  });
+
+  it('a clean result flags no pane and carries no phrase', () => {
+    const vm = playViewModel(state());
+    assert.ok(vm.sourcePanes.every((p) => p.invalid === false && p.where === ''));
+    assert.ok(vm.dataPanes.every((p) => p.invalid === false && p.where === ''));
+    assert.strictEqual(vm.result.error, null);
+  });
+
+  it('renders aria-invalid on the flagged editor only, the location on its label, and the pane in the error line', () => {
+    const out = JSON.stringify(renderPlay(playViewModel(jsltState(jsltError.error))));
+    assert.match(out, /"aria-invalid":"true"/, 'the stylesheet editor is marked invalid');
+    assert.strictEqual(out.match(/"aria-invalid":"true"/g).length, 1, 'ONE editor is invalid — the data pane is not');
+    assert.match(out, /jplay-pane-where[\s\S]{0,40}at \/rules\/0\/match/, 'the label carries the location');
+    assert.match(out, /error-line[\s\S]*JT0003[\s\S]*invalid match path at \/rules\/0\/match[\s\S]*jplay-error-pane[\s\S]{0,20}Stylesheet/,
+      'code · message (once) · the pane');
+    assert.doesNotMatch(out, /JT0003: invalid/, 'the code is not read twice');
+    // an error without a code has no empty chip
+    const uncoded = JSON.stringify(renderPlay(playViewModel(state({
+      engine: 'path', source: { selector: '$[' }, data: { data: '{}' },
+      result: { ok: false, timing: null, panels: [], error: { message: "Invalid JSONPath: expected a selector at position 2 in '$['", pane: 'selector', position: 2 } },
+    }))));
+    assert.doesNotMatch(uncoded, /\["strong",\{\},""\]/, 'no empty <strong></strong> chip');
+    assert.match(uncoded, /error-line[\s\S]*Invalid JSONPath[\s\S]*jplay-error-pane[\s\S]{0,20}Selector/);
+    // and a clean render carries none of it
+    const clean = JSON.stringify(renderPlay(playViewModel(state())));
+    assert.doesNotMatch(clean, /aria-invalid/, 'no attribute at all when valid — never aria-invalid="false" noise');
+    assert.doesNotMatch(clean, /jplay-pane-where/);
+  });
+});
+
 describe('the component surface', () => {
   it('createPlayComponent composes the view, derivation and engine surface', () => {
     const c = createPlayComponent();

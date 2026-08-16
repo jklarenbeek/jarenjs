@@ -172,7 +172,15 @@ const shell = {
                   ], ''] },
               ], ''] },
           ],
-          ['p', { class: 'error-line' }, ['strong', {}, '$.result.error.code'], ' ', '$.result.error.message']] },
+          // the error line: the code chip (only when there is one), the message
+          // (its own code prefix dropped), and the editor the error is about —
+          // the pane itself is flagged and carries the location, see
+          // sourcePane / dataPane
+          ['p', { class: 'error-line' },
+            { $if: ['$.result.error.code', [['strong', {}, '$.result.error.code'], ' '], ''] },
+            '$.result.error.text',
+            { $if: ['$.result.error.paneLabel',
+              ['span', { class: 'jplay-error-pane' }, ' — ', '$.result.error.paneLabel'], ''] }]] },
         ['p', { class: 'muted jplay-hint' }, 'Pick an example, or edit the source or data — it runs live.']] },
     ],
   ],
@@ -197,15 +205,24 @@ const railExample = {
   }, '$.label'],
 };
 
+/** A pane label: the name, plus the last error's location in this pane
+ * (`at /rules/3`, `at position 7`, `at line 2, column 5`) when it has one. */
+const paneLabel = ['span', { class: 'jplay-pane-label muted' }, '$.label',
+  { $if: ['$.where', ['span', { class: 'jplay-pane-where' }, ' · ', '$.where'], ''] }];
+
+/** The editor the last error is about says so — `aria-invalid` is the
+ * state the renderer owns (the ring is styled off it), absent otherwise. */
+const invalid = { $if: ['$.invalid', 'true'] };
+
 /** One source editor (a `text` control renders an input, else a textarea). */
 const sourcePane = {
   match: `${PLAY_BASE}.sourcePanes[*]`, mode: PLAY_MODE,
   body: ['label', { class: 'jplay-pane' },
-    ['span', { class: 'jplay-pane-label muted' }, '$.label'],
+    paneLabel,
     { $if: [{ $eq: ['$.control', 'text'] },
-      ['input', { type: 'text', class: 'editor line', spellcheck: 'false', value: '$.value',
+      ['input', { type: 'text', class: 'editor line', spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
         on: { input: { action: 'play/source', with: { key: '$.key' } } } }],
-      ['textarea', { class: 'editor', rows: 6, spellcheck: 'false', value: '$.value',
+      ['textarea', { class: 'editor', rows: 6, spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
         on: { input: { action: 'play/source', with: { key: '$.key' } } } }]] },
   ],
 };
@@ -214,8 +231,8 @@ const sourcePane = {
 const dataPane = {
   match: `${PLAY_BASE}.dataPanes[*]`, mode: PLAY_MODE,
   body: ['label', { class: 'jplay-pane' },
-    ['span', { class: 'jplay-pane-label muted' }, '$.label'],
-    ['textarea', { class: 'editor', rows: 8, spellcheck: 'false', value: '$.value',
+    paneLabel,
+    ['textarea', { class: 'editor', rows: 8, spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
       on: { input: { action: 'play/data', with: { key: '$.key' } } } }],
   ],
 };

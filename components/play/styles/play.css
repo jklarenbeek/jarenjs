@@ -70,6 +70,12 @@
 .jplay-lead { font-size: 0.8rem; }
 .jplay-pane { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .jplay-pane-label { font-size: 0.7rem; font-family: var(--mono, monospace); }
+/* the last error's claim on a pane: the location rides on the label, and the
+   editor it is about carries aria-invalid — the state the renderer owns —
+   which is what the ring is styled off (the --fail family, no new hue) */
+.jplay-pane-where { color: var(--fail, #dc2626); }
+.jplay .editor[aria-invalid='true'] { border-color: var(--fail, #dc2626); }
+.jplay-error-pane { color: var(--muted, #64748b); }
 .jplay-datasets { align-self: flex-start; }
 /* the validate engine's JSON ↔ form toggle + the generated-form container */
 .jplay-dataview { align-self: flex-start; }

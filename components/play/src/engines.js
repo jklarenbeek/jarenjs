@@ -27,10 +27,18 @@ const fmt = (v) => (v === undefined ? '(no result)' : JSON.stringify(v, null, 2)
 const msg = (err) => String(/** @type {any} */ (err)?.message ?? err);
 const code = (err) => /** @type {any} */ (err)?.code;
 
-/** Parse a pane's JSON text; `{ value }` or `{ error }`. */
-function parseJson(text, label) {
+/**
+ * Parse a pane's JSON text; `{ value }` or `{ error, pane }`. `pane` is the
+ * pane KEY (what the result's error location names); `label` is the word
+ * the message uses for it, which differs where the pane's label does (the
+ * patch engine's `data` pane is its "target"). The host's `JSON.parse`
+ * states the offending offset only inside its engine-specific message
+ * text, never as a field — so a parse failure locates the PANE and
+ * nothing finer.
+ */
+function parseJson(text, pane, label = pane) {
   try { return { value: JSON.parse((text ?? 'null') === '' ? 'null' : text) }; }
-  catch (err) { return { error: `${label}: ${msg(err)}` }; }
+  catch (err) { return { error: `${label}: ${msg(err)}`, pane }; }
 }
 
 /** A single-`code`-panel Result — the shape most engines return. */
@@ -85,7 +93,7 @@ function visual(id, label, lead, opts = {}) {
       const t0 = now();
       let view;
       try { view = render(source.source ?? '', options?.config); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'source')); }
       const t1 = now();
       return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
     },
@@ -118,8 +126,50 @@ function renderedPanels(view) {
     : [];
   return [{ id: 'preview', label: 'Preview', kind: 'view', vnode }, ...deep];
 }
-/** @returns {import('./index.js').PlayResult} */
-const fail = (message, c, path) => ({ ok: false, timing: null, error: { message, code: c, path }, panels: [] });
+/**
+ * An error Result. `where` is the location half of the format's error —
+ * `pane` plus whichever of `path`/`dataPath`/`position`/`line`/`column`
+ * the compiler stated (see {@link locate}); only stated fields land on
+ * the error, so a field's presence means the compiler said it.
+ * @returns {import('./index.js').PlayResult}
+ */
+const fail = (message, c, where) => ({
+  ok: false, timing: null,
+  error: { message, ...(c === undefined ? {} : { code: c }), ...where },
+  panels: [],
+});
+
+/** The error Result of a pane whose JSON did not parse — locates the pane. */
+const failParse = (d) => fail(d.error, undefined, { pane: d.pane });
+
+/**
+ * The location an engine error carries, in the format's own fields — one
+ * adapter over the three shapes the compilers use. The coded family
+ * (`@jarenjs/core` `CodedError`: patch, query, JSLT, JTLT) states a
+ * `docPath`, a JSON Pointer into the document being compiled or run, and
+ * a patch runtime error adds the `dataPath` its operation failed at in the
+ * target; the syntax family (JSONPath, JSON Pointer, XQuery) states a
+ * 0-based `position` into the source text; the line/column family (JOSL,
+ * CSV) states 1-based `line`/`column`. Only what the error carries is
+ * copied. `pane` names the editor the phase was working on — the source
+ * pane for compile AND run (a runtime location points into the compiled
+ * document, which is that pane's text) — and is omitted where the
+ * location is into a document the learner never typed (XQuery compiles a
+ * GENERATED query document, and a location in it has no pane).
+ * @param {unknown} err
+ * @param {string} [pane] the pane key the location points into
+ */
+function locate(err, pane) {
+  const e = /** @type {any} */ (err);
+  /** @type {{ pane?: string, path?: string, dataPath?: string, position?: number, line?: number, column?: number }} */
+  const where = pane === undefined ? {} : { pane };
+  if (typeof e?.docPath === 'string') where.path = e.docPath;
+  if (typeof e?.dataPath === 'string') where.dataPath = e.dataPath;
+  if (typeof e?.position === 'number') where.position = e.position;
+  if (typeof e?.line === 'number') where.line = e.line;
+  if (typeof e?.column === 'number') where.column = e.column;
+  return where;
+}
 
 /** The compile options the query/jslt engines run with (registry-aware). */
 function compileOptions(options) {
@@ -135,14 +185,14 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'selector', label: 'Selector', control: 'text' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data) {
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       let compiled; const t0 = now();
       try { compiled = compileJSONPath(source.selector ?? ''); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'selector')); }
       const t1 = now();
       let nodes;
       try { nodes = compiled.nodes(d.value); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'selector')); }
       const t2 = now();
       return ok(fmt(nodes.map((n) => n.value)), t1 - t0, t2 - t1, [
         deepCards('how', 'How it matched', [
@@ -164,16 +214,16 @@ export const ENGINE_LIST = [
     ],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data) {
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       const pointer = source.pointer ?? '';
       const relative = /^\d/.test(pointer);
       let getter; const t0 = now();
       try { getter = relative ? compileRelativeJSONPointer(pointer) : compileJSONPointer(pointer); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'pointer')); }
       const t1 = now();
       let value;
       try { value = relative ? getter(d.value, source.location ?? '') : getter(d.value); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'pointer')); }
       const t2 = now();
       if (value === JSONPOINTER_NOTHING) return ok('(nothing — the pointer addresses no value)', t1 - t0, t2 - t1);
       return ok(fmt(value), t1 - t0, t2 - t1);
@@ -193,13 +243,13 @@ export const ENGINE_LIST = [
     }],
     run(source, data, options) {
       const mode = options?.config?.mode ?? 'patch';
-      const target = parseJson(data.data, 'target'); if (target.error) return fail(target.error);
-      const patch = parseJson(source.patch, 'patch'); if (patch.error) return fail(patch.error);
+      const target = parseJson(data.data, 'data', 'target'); if (target.error) return failParse(target);
+      const patch = parseJson(source.patch, 'patch'); if (patch.error) return failParse(patch);
       if (mode === 'merge') {
         // RFC 7396: null members delete; an unchanged document is the INPUT
         let out; const t0 = now();
         try { out = applyMergePatch(target.value, patch.value); }
-        catch (err) { return fail(msg(err), code(err)); }
+        catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
         const t1 = now();
         return ok(fmt(out), null, t1 - t0, [
           deepCards('how', 'How it merged', [
@@ -215,7 +265,7 @@ export const ENGINE_LIST = [
           jsonPatch = createJSONPatch(target.value, patch.value);
           mergePatch = createMergePatch(target.value, patch.value);
         }
-        catch (err) { return fail(msg(err), code(err)); }
+        catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
         const t1 = now();
         return okPanels([
           { id: 'out', label: `JSON Patch (${jsonPatch.length} ops)`, kind: 'code', text: fmt(jsonPatch) },
@@ -224,11 +274,11 @@ export const ENGINE_LIST = [
       }
       let apply; const t0 = now();
       try { apply = compileJSONPatch(patch.value, { changes: true }); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
       const t1 = now();
       let run;
       try { run = apply(target.value); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
       const t2 = now();
       return ok(fmt(run.doc), t1 - t0, t2 - t1, [
         deepCode('changes', 'What changed', fmt(run.changes)),
@@ -240,19 +290,19 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'query', label: 'Query', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
-      const q = parseJson(source.query, 'query'); if (q.error) return fail(q.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      const q = parseJson(source.query, 'query'); if (q.error) return failParse(q);
       let externals = {};
       if (source.externals !== undefined && String(source.externals).trim() !== '') {
-        const e = parseJson(source.externals, 'externals'); if (e.error) return fail(e.error); externals = e.value;
+        const e = parseJson(source.externals, 'externals'); if (e.error) return failParse(e); externals = e.value;
       }
       let fn; const t0 = now();
       try { fn = compileJsonQuery(q.value, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'query')); }
       const t1 = now();
       let out;
       try { out = fn(d.value, externals); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'query')); }
       const t2 = now();
       const items = out === undefined ? 0 : Array.isArray(out) ? out.length : 1;
       return ok(fmt(out), t1 - t0, t2 - t1, [
@@ -269,15 +319,15 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'stylesheet', label: 'Stylesheet', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
-      const s = parseJson(source.stylesheet, 'stylesheet'); if (s.error) return fail(s.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      const s = parseJson(source.stylesheet, 'stylesheet'); if (s.error) return failParse(s);
       let compiled; const t0 = now();
       try { compiled = compileJsltStylesheet(s.value, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'stylesheet')); }
       const t1 = now();
       let out;
       try { out = compiled(d.value); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'stylesheet')); }
       const t2 = now();
       // the identity lesson: a rule that changes nothing hands the INPUT back
       // (shared, copy-on-write) — worth teaching, so the deep card says which
@@ -295,15 +345,15 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'template', label: 'Template', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
-      const t = parseJson(source.template, 'template'); if (t.error) return fail(t.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      const t = parseJson(source.template, 'template'); if (t.error) return failParse(t);
       let render; const t0 = now();
       try { render = compileJtltStylesheet(t.value, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'template')); }
       const t1 = now();
       let out;
       try { out = render(d.value); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'template')); }
       const t2 = now();
       // JTLT emits TEXT (markdown / xml / source) — show it verbatim, not fmt'd
       return ok(out === '' ? '(empty)' : out, t1 - t0, t2 - t1, [
@@ -317,20 +367,22 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'text', label: 'XQuery', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       let doc, fn; const t0 = now();
-      try {
-        doc = parseXQuery(source.text ?? '');
-        fn = compileJsonQuery(doc, compileOptions(options));
-      }
-      catch (err) { return fail(msg(err), code(err)); }
+      // two phases: the text parses (a syntax error locates a position in
+      // the XQuery pane), then the GENERATED query document compiles and
+      // runs — a location in that document has no pane the learner typed
+      try { doc = parseXQuery(source.text ?? ''); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
+      try { fn = compileJsonQuery(doc, compileOptions(options)); }
+      catch (err) { return fail(msg(err), code(err), locate(err)); }
       const t1 = now();
       let out;
       try {
         const externals = fn.externals.includes('doc') ? { doc: d.value } : {};
         out = fn(d.value, externals);
       }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err)); }
       const t2 = now();
       return ok(out === undefined ? '(empty sequence)' : fmt(out), t1 - t0, t2 - t1, [
         // the machinery: the XQuery text parses to a runnable query DOCUMENT
@@ -355,7 +407,7 @@ export const ENGINE_LIST = [
       // parser streams document-order events as it reads — capture (capped)
       // for the "how it streamed" drill-down
       try { parsed = parseJosl(source.text ?? '', { mode, onEvent: (e) => { if (events.length < 200) events.push(e); } }); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
       const t1 = now();
       const out = stringifyJsonx(parsed, { indent: 2 });
       const t2 = now();
@@ -391,7 +443,7 @@ export const ENGINE_LIST = [
       // strict mode THROWS on the first RFC 4180 violation (with a code);
       // repair mode reads anyway and lists every fix — the lesson of the tab
       try { doc = parseCsvDocument(source.text ?? '', opts); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
       const t1 = now();
       // one calm SCREEN (the summary note) plus the drill-down: the parsed
       // records, the sniffed dialect, the repairs, and the CSV round-trip
@@ -461,12 +513,12 @@ export const ENGINE_LIST = [
       if (typeof validate !== 'function') {
         return fail('the JSON Schema engine validates in the host — inject options.validate', 'PLAY_NO_VALIDATOR');
       }
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       const locale = options?.config?.locale ?? 'en';
       let report;
       try { report = validate(source.schema ?? '', d.value, locale); }
-      catch (err) { return fail(msg(err), code(err)); }
-      if (report.schemaError) return fail(report.schemaError, 'SCHEMA');
+      catch (err) { return fail(msg(err), code(err), locate(err)); }
+      if (report.schemaError) return fail(report.schemaError, 'SCHEMA', { pane: 'schema' });
       const errs = report.errors ?? [];
       const summary = (report.valid ? '✓ valid' : `✗ ${errs.length} error${errs.length === 1 ? '' : 's'}`)
         + ` · ${report.draft} · compiled ${formatMs(report.compileMs)} · validated ${formatMs(report.validateMs)}`;
@@ -494,11 +546,11 @@ export const ENGINE_LIST = [
       if (typeof render !== 'function') {
         return fail('the MDX engine renders in the host — inject options.renderers.mdx', 'PLAY_NO_RENDERER');
       }
-      const d = parseJson(data.data, 'data'); if (d.error) return fail(d.error);
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       const t0 = now();
       let view;
       try { view = render(source.source ?? '', d.value); }
-      catch (err) { return fail(msg(err), code(err)); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'source')); }
       const t1 = now();
       return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
     },

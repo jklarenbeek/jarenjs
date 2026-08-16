@@ -23,7 +23,13 @@ Play is a **student tool**: it opens calm — one clean result per run — and
 drills deeper on demand. An engine's rich explainers (match cards, the
 compiled program, a geometry-free AST, a canonical round-trip) are `deep`
 result panels behind a quiet **"Explain ▸"** depth toggle: revealed beside
-the answer on desktop, as a full-pane swap with a ← back on a phone.
+the answer on desktop, as a full-pane swap with a ← back on a phone. And
+when a run fails, the error says **where**: the editor it is about is
+marked invalid and its label carries the compiler's own location — the
+rule of the stylesheet (`at /rules/0/match`), the token of the selector
+(`at position 7`), the line of the document (`at line 2, column 5`) — so
+the learner is pointed at the text to fix, not just told it is wrong
+([PLAY-FORMAT §2](./docs/PLAY-FORMAT.md#2-the-result)).
 
 ## The model
 

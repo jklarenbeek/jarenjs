@@ -246,3 +246,88 @@ describe('@jarenjs/play — the engines run', () => {
     assert.strictEqual(r.timing, null);
   });
 });
+
+/** The location fields of an error, without the message (asserted apart). */
+const where = (r) => { const { message: _message, ...rest } = r.error; return rest; };
+
+describe('@jarenjs/play — an error says WHERE (PLAY-FORMAT §2)', () => {
+  it('the syntax family locates a 0-based position in the source pane (JSONPath, JSON Pointer, XQuery)', () => {
+    assert.deepStrictEqual(where(runExample('path', { selector: '$[?@.a =]' }, { data: '{}' })),
+      { pane: 'selector', position: 7 });
+    assert.deepStrictEqual(where(runExample('pointer', { pointer: 'a/b' }, { data: '{}' })),
+      { pane: 'pointer', position: 0 });
+    assert.deepStrictEqual(where(runExample('xquery', { text: 'for $x in' }, { data: '{}' })),
+      { pane: 'text', position: 9 });
+  });
+
+  it('the coded family locates a JSON Pointer into the source pane\'s document (patch, query, JSLT, JTLT)', () => {
+    assert.deepStrictEqual(where(runExample('patch', { patch: '[{"op":"add"}]' }, { data: '{}' })),
+      { code: 'JP0003', pane: 'patch', path: '/0/path' });
+    assert.deepStrictEqual(where(runExample('query', { query: '{"$bogus":1}' }, { data: '{}' })),
+      { code: 'JQ0002', pane: 'query', path: '' }, 'a root pointer is a real location, kept as the empty string');
+    const jslt = runExample('jslt', { stylesheet: '{"$jslt":"0.1","rules":[{"match":"$[","body":1}]}' }, { data: '{}' });
+    assert.deepStrictEqual(where(jslt), { code: 'JT0003', pane: 'stylesheet', path: '/rules/0/match' });
+    const jtlt = runExample('jtlt', { template: '{"$jtlt":"0.1","rules":[{"match":"$","body":[{"$bogus":1}]}]}' }, { data: '{}' });
+    assert.deepStrictEqual(where(jtlt), { code: 'TL0005', pane: 'template', path: '/rules/0/body/0' },
+      'JTLT re-maps a desugared-JSLT failure onto the TEMPLATE document');
+  });
+
+  it('a runtime error locates the construct that failed — and a patch op names its target too', () => {
+    const q = runExample('query', { query: '{"$idiv":[1,0]}' }, { data: '{}' });
+    assert.deepStrictEqual(where(q), { code: 'JQ2002', pane: 'query', path: '/$idiv' });
+    const p = runExample('patch', { patch: '[{"op":"remove","path":"/missing"}]' }, { data: '{"a":1}' });
+    assert.deepStrictEqual(where(p), { code: 'JP2001', pane: 'patch', path: '/0', dataPath: '/missing' },
+      'the op in the patch AND the location in the target — two facts, both kept');
+  });
+
+  it('the line/column family locates 1-based line and column (JOSL, CSV)', () => {
+    assert.deepStrictEqual(where(runExample('josl', { text: 'a = \n' }, {})), { pane: 'text', line: 1, column: 5 });
+    const csv = runExample('csv', { text: 'a,b\n1,"2\n' }, {});
+    assert.deepStrictEqual(where(csv), { code: 'CSV1001', pane: 'text', line: 2, column: 1 });
+  });
+
+  it('a pane whose JSON does not parse locates the PANE and nothing finer', () => {
+    // the host's JSON.parse states its offset only inside engine-specific
+    // message text — never claimed as a field
+    assert.deepStrictEqual(where(runExample('path', { selector: '$' }, { data: '{oops' })), { pane: 'data' });
+    assert.deepStrictEqual(where(runExample('patch', { patch: '[' }, { data: '{}' })), { pane: 'patch' });
+    const target = runExample('patch', { patch: '[]' }, { data: '{oops' });
+    assert.deepStrictEqual(where(target), { pane: 'data' }, 'the patch target is the `data` pane, whatever the message calls it');
+    assert.match(target.error.message, /^target: /);
+    assert.deepStrictEqual(where(runExample('query', { query: '{}', externals: '{oops' }, { data: '{}' })), { pane: 'externals' });
+  });
+
+  it('a location into a document the learner never typed has no pane (XQuery compiles a GENERATED query)', () => {
+    // a runtime failure inside the generated query document: the pointer is
+    // into that document, so it is stated, and no pane is claimed
+    const r = runExample('xquery', { text: '1 idiv 0' }, { data: '{}' });
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error.pane, undefined);
+    assert.strictEqual(typeof r.error.path, 'string');
+  });
+
+  it('a missing host seam is nobody\'s pane; a host schema error is the schema pane', () => {
+    assert.deepStrictEqual(where(runExample('validate', { schema: '{}' }, { data: '{}' })), { code: 'PLAY_NO_VALIDATOR' });
+    assert.deepStrictEqual(where(runExample('markdown', { source: '#' }, {})), { code: 'PLAY_NO_RENDERER' });
+    const bad = runExample('validate', { schema: '{' }, { data: '{}' }, {
+      validate: () => ({ schemaError: 'bad schema', draft: null, compileMs: null, validateMs: null, valid: null, errors: [] }),
+    });
+    assert.deepStrictEqual(where(bad), { code: 'SCHEMA', pane: 'schema' });
+    // a renderer that throws a located error is copied field-for-field
+    const boom = () => { const e = new Error('no'); /** @type {any} */ (e).line = 3; /** @type {any} */ (e).column = 4; throw e; };
+    assert.deepStrictEqual(where(runExample('mermaid', { source: 'x' }, {}, { renderers: { mermaid: boom } })),
+      { pane: 'source', line: 3, column: 4 });
+  });
+
+  it('every location field is present exactly when the compiler stated it — never fabricated', () => {
+    for (const r of [
+      runExample('path', { selector: '$[' }, { data: '{}' }),
+      runExample('query', { query: '{"$bogus":1}' }, { data: '{}' }),
+      runExample('josl', { text: '=' }, {}),
+      runExample('path', { selector: '$' }, { data: '{' }),
+    ]) {
+      assert.strictEqual(r.ok, false);
+      for (const [k, v] of Object.entries(r.error)) assert.notStrictEqual(v, undefined, `${k} is stated, not undefined`);
+    }
+  });
+});

@@ -28,6 +28,59 @@ function formatTiming(timing) {
 }
 
 /**
+ * The location an error states, as the phrase a pane label carries — one
+ * per family, in the wording the compilers' own messages use: a JSON
+ * Pointer (`at /rules/3`; the root pointer `''` reads "at the root"), a
+ * 0-based source offset (`at position 7`), or a 1-based line and column
+ * (`at line 2, column 5`). Empty when the error states no location.
+ */
+function formatWhere(err) {
+  if (!err) return '';
+  const parts = [];
+  if (typeof err.path === 'string') parts.push(`at ${err.path === '' ? 'the root' : err.path}`);
+  if (typeof err.position === 'number') parts.push(`at position ${err.position}`);
+  if (typeof err.line === 'number') {
+    parts.push(`at line ${err.line}${typeof err.column === 'number' ? `, column ${err.column}` : ''}`);
+  }
+  return parts.join(', ');
+}
+
+/**
+ * The error's claim on one editor pane. The pane the error names is
+ * INVALID (its text is what failed — the compile, the run, or a JSON parse)
+ * and carries the location phrase; a data pane is not invalid when a
+ * runtime error merely failed AT a location in it (a patch op removing a
+ * path the target lacks blames the op, not the target), yet that location
+ * is the lesson, so the data pane carries it as `where` without the flag.
+ * @returns {{ invalid: boolean, where: string }}
+ */
+function paneError(err, key, isData) {
+  if (!err) return { invalid: false, where: '' };
+  if (err.pane === key) return { invalid: true, where: formatWhere(err) };
+  if (isData && typeof err.dataPath === 'string') {
+    return { invalid: false, where: `at ${err.dataPath === '' ? 'the root' : err.dataPath}` };
+  }
+  return { invalid: false, where: '' };
+}
+
+/**
+ * The stage's error line. `code` is shown as its own chip, so a message
+ * that begins with that same code (the coded family composes
+ * `code: reason at path`) drops the prefix rather than reading it twice;
+ * `paneLabel` names the editor the error is about (the pane's LABEL, for
+ * a reader), empty when no pane owns it.
+ */
+function deriveError(err, panes) {
+  if (!err) return null;
+  const code = err.code ?? '';
+  const message = err.message ?? '';
+  const prefix = `${code}: `;
+  const text = code !== '' && message.startsWith(prefix) ? message.slice(prefix.length) : message;
+  const pane = typeof err.pane === 'string' ? panes.find((p) => p.key === err.pane) : undefined;
+  return { code, message, text, paneLabel: pane?.label ?? '' };
+}
+
+/**
  * Shape one panel for the view: kind flags for the `$if` dispatch plus the
  * per-kind content (a `table` becomes column/cell records the JSLT can walk).
  */
@@ -62,7 +115,7 @@ function shapePanel(p) {
  * else the first — so a fresh result with different screens never strands
  * the view on a tab that is gone.
  */
-function deriveResult(r, wantedId, deepWanted, deepPick) {
+function deriveResult(r, wantedId, deepWanted, deepPick, panes) {
   const all = Array.isArray(r.panels) ? r.panels : [];
   const panels = all.filter((p) => p.depth !== 'deep');
   const deep = all.filter((p) => p.depth === 'deep');
@@ -75,7 +128,7 @@ function deriveResult(r, wantedId, deepWanted, deepPick) {
   return {
     ran: true,
     ok: r.ok === true,
-    error: r.error ? { code: r.error.code ?? '', message: r.error.message ?? '' } : null,
+    error: deriveError(r.error, panes),
     timing: formatTiming(r.timing),
     tabbed: panels.length > 1,
     tabs: panels.map((p) => ({ id: p.id, label: p.label ?? p.id, active: p.id === activeId })),
@@ -113,11 +166,16 @@ export function playViewModel(state) {
     examples: exs.map((ex) => ({ id: ex.id, label: ex.label, active: ex.id === s.exampleId })),
   }));
 
+  // the editors, each carrying the last error's claim on it (an invalid
+  // flag + a location phrase) so the pane the learner has to fix says so
+  const err = s.result?.error ?? null;
   const sourcePanes = (engine?.sourcePanes ?? []).map((p) => ({
     key: p.key, label: p.label, control: p.control ?? 'code', value: s.source?.[p.key] ?? '',
+    ...paneError(err, p.key, false),
   }));
   const dataPanes = (engine?.dataPanes ?? []).map((p) => ({
     key: p.key, label: p.label, value: s.data?.[p.key] ?? '',
+    ...paneError(err, p.key, true),
   }));
 
   // option panes: live mode selects (josl dialect, csv repair/headers/…);
@@ -133,7 +191,7 @@ export function playViewModel(state) {
   const datasets = (active?.datasets ?? []).map((ds, i) => ({ index: i, label: ds.label, active: i === datasetIndex }));
 
   const r = s.result ?? null;
-  const result = r === null ? { ran: false } : deriveResult(r, s.panel, s.deep, s.deepPick);
+  const result = r === null ? { ran: false } : deriveResult(r, s.panel, s.deep, s.deepPick, [...sourcePanes, ...dataPanes]);
 
   // the IDE half: the saveable-session chrome
   const names = Array.isArray(s.names) ? s.names : [];
