@@ -218,7 +218,9 @@ returns a validation function; the function returns `true`/`false` or
 and `store.capabilities.validated === false` — a declared downgrade.
 The cost of running without one: the database constraints only see the
 key and the indexed members; everything else is stored as given.
-`@jarenjs/db` never imports `@jarenjs/validate`.
+`@jarenjs/db` never runs a validator of its own; what it imports from
+`@jarenjs/validate` is only the pure same-document `$ref`/`$anchor`
+resolution in `@jarenjs/validate/normalize`, for model compilation.
 
 **`patch` validates the result, then updates in place.** The patch is
 applied to the stored document with the copy-on-write engine and the
@@ -280,7 +282,11 @@ SQLite has no per-statement transaction scope and every operation inside
 a callback reaches the connection the same way an unrelated caller does.
 Work that must be in the transaction is therefore safe; an unrelated
 writer on a SHARED store is not. Give each concurrent writer its own
-store when independent writes must not share a rollback.
+store when independent writes must not share a rollback. Closing this
+— scope-bound `tx` handles, with store-level calls waiting on the gate
+while a foreign scope is open — is an open ROADMAP item (`@jarenjs/db`,
+"Strong same-store transaction ownership"); until it lands, one store
+shared by independent request handlers is unsafe for bare writes.
 
 ## 6. Identity
 

@@ -6,7 +6,7 @@ Framework-agnostic form generation for JSON Schema. Turns a schema into a render
 2. **Cross field, every keystroke** — visibility, enablement, computed values, and preemptive assertions expressed as [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) documents in an `x-form` annotation, compiled once per model by [`@jarenjs/json`](../json) and evaluated per keystroke as cheap closures.
 3. **Authoritative, on submit** — the complete compiled schema validation with [`@jarenjs/validate`](../validate), which owns `required` combinations, `dependentSchemas`, `if/then/else`, `unevaluatedProperties`, and (via the `$query` keyword) the very same cross-field rules.
 
-No DOM, no framework: render the model with React, Vue, vanilla JS or anything else. Forms never imports the validator — apps wire the authoritative layer themselves. See it in action in the [Jaren playground](https://jklarenbeek.github.io/jarenjs/#/playground).
+No DOM, no framework: render the model with React, Vue, vanilla JS or anything else. Forms never runs the validator — apps wire the authoritative layer themselves; the only thing it imports from `@jarenjs/validate` is the pure same-document `$ref`/`$anchor` resolution in `@jarenjs/validate/normalize`. See it in action in the [Jaren playground](https://jklarenbeek.github.io/jarenjs/#/playground).
 
 ## Usage
 

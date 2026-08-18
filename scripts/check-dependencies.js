@@ -82,6 +82,17 @@ const KNOWN_TOOLING_ADVISORIES = {
   'pouchdb-selector-core': 'transitive under pouchdb (benchmark rival)',
   'pouchdb-utils': 'transitive under pouchdb (benchmark rival)',
   'uuid': 'the advisory-flagged version is pinned inside the pouchdb rival family',
+  // the Prisma ORM benchmark rival (D16, orm suite): GHSA-ggr8-5vv4-36mx is
+  // a stack exhaustion in `deepmerge-ts` (<8.0.0) when merging RECURSIVE
+  // object graphs, reached only through Prisma's own config loader
+  // (`@prisma/config`). Every Prisma release, including the newest 7.x,
+  // still pins deepmerge-ts 7.1.x, so there is no upgrade that clears it,
+  // and npm's suggested "fix" is a DOWNGRADE to prisma 6.12.0 — a different
+  // artifact from the one the orm suite measures. Nothing in this family is
+  // in any published package's closure (the check below proves that).
+  'prisma': 'ORM benchmark rival (benchmark workspace only); pinned to the version the orm suite measures',
+  '@prisma/config': 'transitive under prisma (benchmark rival); the config loader that pulls deepmerge-ts',
+  'deepmerge-ts': 'transitive under @prisma/config (benchmark rival); the advisory is a stack exhaustion on recursive config graphs, unreachable from anything jaren ships',
 };
 
 /*

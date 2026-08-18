@@ -647,6 +647,29 @@ automatically by `app.destroy()`). `run` is invoked through a uniform
 promise boundary: a synchronous throw and a non-promise return settle
 through the same path as a rejection/resolution.
 
+### 9.3 Structured failure — `projectError`
+
+By default a non-abort rejection settles as `{ id, error }` with `error`
+a **string**. That flattens what an HTTP host knows about a failure —
+status, a stable error code, safe details — so `createTaskEffect` takes
+an optional `projectError(err, props) => JSON` that produces the `error`
+member instead. The rules that keep the door narrow:
+
+- an `AbortError` never reaches the projector — cancellation dispatches
+  nothing, as before;
+- the projector receives the rejection value and the effect props
+  verbatim (so it can name the operation the failure belongs to);
+- its result must be JSON. A projector that throws, returns `undefined`
+  (declines) or returns a value JSON cannot carry — an `Error`, a
+  `Response`, a function, a class instance, a cycle, a non-finite number
+  — falls back to the string projection. Settlement therefore stays
+  total, and no host object enters state through this path;
+- a non-function `projectError` is a `TypeError` at construction (a host
+  programming error).
+
+The completion action stores whatever it is handed; the state schema is
+where the projected shape is pinned.
+
 ## 10. Errors
 
 ### 10.1 The host-failure normalization policy

@@ -10,7 +10,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 |---|---|
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
-| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` predicate, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging |
+| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging |
 | `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), cached regex compilation, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
 | `@jarenjs/core/cache` | the bounded LRU (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS, for caches whose entries decide a result |
 | `@jarenjs/core/chunk` | cutting a value down to size: `sizeOf` (the suite's one size rule — a string is its length, anything else its JSON), `excerpt`, `truncate`, and `chunkText` by size, line or separator with offsets that locate a piece in its source |

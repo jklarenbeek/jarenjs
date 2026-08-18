@@ -181,8 +181,8 @@ function compileRuleMessageSpec(raw, fieldPointer) {
  * document. `options.compileTypeTest` passes through to the query
  * compiler, so rules may use `$valid`/`$assert`/`$as` with a
  * caller-supplied type-test compiler (the validator package's `query`
- * module exports `createTypeTestCompiler()`; forms itself never imports
- * the validator).
+ * module exports `createTypeTestCompiler()`; forms itself never runs
+ * the validator, and imports only its pure `normalize` helpers).
  * Without the hook, a schema-using rule surfaces the engine's JQ0008.
  *
  * @param {import('./model.js').FormField} model - Root field from buildFormModel

@@ -11,6 +11,7 @@ import { describe as suite, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { parseProject, assembleArtifacts, classifyChange, describe } from '@jarenjs/studio';
+import { contentKey } from '@jarenjs/core/object';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 /** An app project with a given state and view (the rest fixed). */
@@ -70,6 +71,26 @@ suite('classifyChange — reboot vs. hot-update', () => {
       { name: 'a.query', kind: 'query', text: '{"$for":{"it":"$[*]"},"$return":"$it"}' }] });
     assert.strictEqual(classifyChange(withoutB, withExtra).perArtifact['b.jslt'], 'structural');
     assert.strictEqual(classifyChange(withExtra, withoutB).perArtifact['b.jslt'], 'structural');
+  });
+
+  it('a contentKey collision does not classify a changed artifact as unchanged', () => {
+    // Two query documents that collide under the 32-bit contentKey
+    // fingerprint (the pair pinned in test/core/content-key.test.js). A
+    // classification decides reboot-vs-hot-update, so it must use the
+    // collision-free semanticKey: this edit is 'structural', not 'none'.
+    const colliding = [
+      { $for: { it: '$[*]' }, $return: 'v1oh2' },
+      { $for: { it: '$[*]' }, $return: 'v2txd' },
+    ];
+    assert.strictEqual(contentKey(colliding[0]), contentKey(colliding[1]), 'the fixture still collides');
+    const q1 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: JSON.stringify(colliding[0]) }] });
+    const q2 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: JSON.stringify(colliding[1]) }] });
+    assert.strictEqual(classifyChange(q1, q2).perArtifact.q, 'structural');
+    assert.strictEqual(classifyChange(q1, q2).overall, 'structural');
+    // and the app path: a colliding STATE edit is still 'state-only', not 'none'
+    const a1 = appProject(colliding[0], VIEW);
+    const a2 = appProject(colliding[1], VIEW);
+    assert.strictEqual(classifyChange(a1, a2).perArtifact['app.json'], 'state-only');
   });
 
   it('a non-app artifact change is structural (its whole document is structure)', () => {

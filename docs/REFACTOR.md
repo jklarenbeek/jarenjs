@@ -44,7 +44,7 @@ edits** — see below), `npm run website:build` succeeds, the dead-code audit
 
 ## Repo model (the invariants a refactor must preserve)
 
-- Monorepo, npm workspaces (`packages/*`, `components/*`, `benchmark`). Node ≥ 22, ESM
+- Monorepo, npm workspaces (`packages/*`, `components/*`, `benchmark`). Node ≥ 24, ESM
   everywhere (`"type": "module"`). No build step for source — each package's `main` points at
   `./src/index.js`; `.d.ts` are emitted on `prepack`.
 - **Dependency arrow (one way, no cycles):**

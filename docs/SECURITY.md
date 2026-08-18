@@ -33,7 +33,7 @@ latest patch of the current minor is the supported fix.
 
 | Version | Supported |
 | --- | --- |
-| Latest minor (`0.22.x`) | ✅ |
+| Latest released minor (the newest `v*` tag; all workspaces share its version) | ✅ |
 | Anything older | ❌ — upgrade to the latest minor |
 
 ## What is in scope

@@ -10,9 +10,11 @@
  * its dispatch may already be queued, so a host that only aborts is
  * still wrong; the state-side guard is the guarantee.
  *
- * No timers, no state beyond the per-slot records, no dependencies
- * (`AbortController` is platform).
+ * No timers, no state beyond the per-slot records, no third-party
+ * dependencies (`AbortController` is platform).
  */
+
+import { isJsonValue } from '@jarenjs/core/object';
 
 import { toError, isErrorSafely, safeErrorMessage } from './errors.js';
 
@@ -53,6 +55,31 @@ function rejectionText(err) {
 }
 
 /**
+ * The `{ id, error }` payload for a non-abort rejection: the host's
+ * `projectError` result when it produced JSON, the string projection
+ * otherwise. TOTAL like everything on this path — a projector that
+ * throws, returns `undefined` (declines) or returns anything JSON cannot
+ * carry (an `Error`, a `Response`, a function, a cycle ...) falls back to
+ * the string, so no host object crosses into state through this door.
+ * @param {((err: unknown, props: any) => any) | null} projectError
+ * @param {unknown} err
+ * @param {any} props
+ * @returns {any}
+ */
+function rejectionPayload(projectError, err, props) {
+  if (projectError !== null) {
+    try {
+      const projected = projectError(err, props);
+      if (projected !== undefined && isJsonValue(projected)) return projected;
+    }
+    catch {
+      // fall through to the string projection
+    }
+  }
+  return rejectionText(err);
+}
+
+/**
  * The host's task function, typically wrapping `fetch`. A synchronous
  * return is allowed — the effect settles every result through one
  * uniform promise boundary either way.
@@ -88,6 +115,16 @@ function rejectionText(err) {
  * @typedef {Object} TaskEffectOptions
  * @property {TaskMode} [mode] - The per-slot concurrency mode
  *   (default `"switch"`).
+ * @property {(err: unknown, props: any) => any} [projectError] - Project
+ *   a NON-abort rejection into the JSON `error` member of the `{ id,
+ *   error }` settlement payload — the door for a structured HTTP failure
+ *   (status, code, safe details) that the default string projection would
+ *   flatten. Receives the rejection value and the effect props verbatim.
+ *   An `AbortError` never reaches it (cancellation dispatches nothing).
+ *   Its result must be JSON: a projector that throws, returns `undefined`
+ *   or returns a value JSON cannot carry (a host object, a function, a
+ *   cycle ...) falls back to the string, so settlement stays total and no
+ *   host object enters state through it.
  */
 
 /**
@@ -123,8 +160,10 @@ function rejectionText(err) {
  * (`err.name === "AbortError"`) dispatches **nothing** — a superseded
  * task is dead by design, its successor's dispatch carries the story;
  * any other rejection dispatches `fail ?? done` with `{ id, error }`
- * where `error` is a string, never an Error object — JSON only crosses
- * the boundary. After `dispose()` no settlement dispatches anything.
+ * where `error` is a string — or, with `options.projectError`, the JSON
+ * value the projector returned — never an Error object: JSON only
+ * crosses the boundary. After `dispose()` no settlement dispatches
+ * anything.
  * A malformed `id`/`done`/`fail`/`slot` is a host programming error:
  * the handler throws a `TypeError`, which the loop reports as `JA2007`.
  * Settlement is TOTAL for every rejection value (hostile accessors,
@@ -160,6 +199,10 @@ export function createTaskEffect(run, options = {}) {
   const mode = options.mode ?? 'switch';
   if (mode !== 'switch' && mode !== 'exhaust' && mode !== 'concat' && mode !== 'parallel') {
     throw new TypeError(`createTaskEffect: unknown mode '${String(mode)}'`);
+  }
+  const projectError = options.projectError ?? null;
+  if (projectError !== null && typeof projectError !== 'function') {
+    throw new TypeError('createTaskEffect: "projectError" must be a function');
   }
 
   /**
@@ -221,7 +264,7 @@ export function createTaskEffect(run, options = {}) {
         // still dispatches by contract, and only the state-side id
         // guard rejects it. A hostile value never breaks settlement.
         if (safeName(err) === 'AbortError') return;
-        const error = rejectionText(err);
+        const error = rejectionPayload(projectError, err, props);
         // a settlement dispatch that itself throws (a rethrowing error
         // sink surfacing at the dispatch boundary) must not become an
         // unobservable promise rejection: it is re-raised on its own

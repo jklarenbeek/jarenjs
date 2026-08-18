@@ -454,6 +454,74 @@ export function isJsonObject(value) {
 }
 
 /**
+ * True when a value is representable as JSON as it stands: `null`, a
+ * boolean, a finite number, a string, or an array/plain object (own
+ * enumerable members, prototype `Object.prototype` or `null`) whose
+ * members all are. Everything else — `undefined`, `bigint`, `symbol`,
+ * functions, `NaN`/`±Infinity`, class instances (`Error`, `Date`, `Map`,
+ * `Response`, DOM nodes ...) and any cycle — is not.
+ *
+ * This is the boundary predicate for "JSON only crosses": a host that
+ * hands a value into application state asks it once, before the value
+ * can carry an object the state validator would have to reject. It is
+ * TOTAL — a hostile accessor that throws makes the value not-JSON rather
+ * than propagating.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isJsonValue(value) {
+  try {
+    return isJsonValueRec(value, null);
+  }
+  catch {
+    return false;
+  }
+}
+
+/**
+ * @param {any} value
+ * @param {Set<object> | null} path - the containers on the current
+ *   descent (a cycle is a container met twice on ONE path; a shared
+ *   subtree met on two paths is fine JSON)
+ * @returns {boolean}
+ */
+function isJsonValueRec(value, path) {
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return true;
+    case 'number':
+      return Number.isFinite(value);
+    case 'object':
+      break;
+    default:
+      return false;
+  }
+  if (value === null) return true;
+  const isArray = Array.isArray(value);
+  if (!isArray) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return false;
+  }
+  if (path !== null && path.has(value)) return false;
+  const next = path ?? new Set();
+  next.add(value);
+  if (isArray) {
+    for (let i = 0; i < value.length; i++) {
+      if (!isJsonValueRec(value[i], next)) return false;
+    }
+  }
+  else {
+    for (const key of Object.keys(value)) {
+      if (!isJsonValueRec(value[key], next)) return false;
+    }
+  }
+  next.delete(value);
+  return true;
+}
+
+/**
  * Assign a member so that a key named `__proto__` becomes an own data
  * property instead of reassigning the object's prototype. Every builder
  * that turns untrusted names into members must go through this — a plain

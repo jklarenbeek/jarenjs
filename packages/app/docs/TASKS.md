@@ -105,8 +105,10 @@ ignored — the double-click-safe commit mode), `"concat"` (starts queue
 and run strictly in order) or `"parallel"` (APP-FORMAT §9.2). The
 handler carries the host-side controls `cancel(slot)`, `cancelAll()`
 and `dispose()` — after `dispose()` (which `app.destroy()` calls
-automatically) no late settlement can dispatch. The effect-props
-convention (all JSON):
+automatically) no late settlement can dispatch. `options.projectError`
+opens the structured-failure door: an HTTP host can settle `{ id,
+error: { status, code, ... } }` instead of a flattened string
+(APP-FORMAT §9.3). The effect-props convention (all JSON):
 
 | Prop | | Meaning |
 |---|---|---|
@@ -123,7 +125,7 @@ Settlement semantics, exactly:
 | start | The slot's in-flight controller (if any) is aborted; a fresh one is stored; `run(props, signal)` is called. |
 | resolve | `dispatch(done, { id, result })`. |
 | reject, `err.name === "AbortError"` | **Nothing.** A superseded task is dead by design; its successor's dispatch carries the story. |
-| reject, anything else | `dispatch(fail ?? done, { id, error })` — `error` is a **string**, never an Error object; JSON only crosses the boundary. |
+| reject, anything else | `dispatch(fail ?? done, { id, error })` — `error` is a **string** by default, or the JSON value `options.projectError(err, props)` returned (APP-FORMAT §9.3); never an Error object — JSON only crosses the boundary. A projector that throws, declines (`undefined`) or returns non-JSON falls back to the string. |
 | settle | The task's controller is released; a `concat` slot starts its next queued task. |
 | after `dispose()` | **Nothing** — a late settlement can no longer dispatch. |
 | malformed `id`/`done`/`fail`/`slot` | A `TypeError` from the handler — a host programming error, reported by the loop as `JA2007`. |

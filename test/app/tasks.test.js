@@ -243,3 +243,131 @@ describe('the async-task convention (docs/TASKS.md, run verbatim)', function () 
     assert.strictEqual(calls.length, 2, 'the subscription cleanup stopped the ticker');
   });
 });
+
+describe('createTaskEffect({ projectError }) — the structured error door', function () {
+  function dispatcher() {
+    const dispatched = [];
+    return { dispatched, dispatch: (name, payload) => dispatched.push([name, payload]) };
+  }
+  /** An HTTP-shaped rejection: what a fetch wrapper throws for a non-2xx. */
+  function httpError(status, body) {
+    const err = new Error(`HTTP ${status}`);
+    /** @type {any} */ (err).status = status;
+    /** @type {any} */ (err).body = body;
+    return err;
+  }
+  const projectHttp = (err, props) => (
+    typeof err === 'object' && err !== null && 'status' in err
+      ? { status: /** @type {any} */ (err).status, code: /** @type {any} */ (err).body?.code ?? null,
+        message: /** @type {any} */ (err).message, operation: props.operation ?? null }
+      : undefined);
+
+  it('a projected rejection dispatches the projector\'s JSON as `error`', async function () {
+    const { calls, run } = deferredRunner();
+    const task = createTaskEffect(run, { projectError: projectHttp });
+    const { dispatched, dispatch } = dispatcher();
+    task({ id: 1, done: 'done', operation: 'catalog.load' }, dispatch);
+    calls[0].reject(httpError(409, { code: 'REVISION_CONFLICT' }));
+    await drain();
+    assert.deepStrictEqual(dispatched, [['done', {
+      id: 1,
+      error: { status: 409, code: 'REVISION_CONFLICT', message: 'HTTP 409', operation: 'catalog.load' },
+    }]]);
+  });
+
+  it('the projector receives the effect props verbatim and routes through `fail`', async function () {
+    const { calls, run } = deferredRunner();
+    let seenProps = null;
+    const task = createTaskEffect(run, {
+      projectError: (err, props) => { seenProps = props; return { kind: 'x' }; },
+    });
+    const { dispatched, dispatch } = dispatcher();
+    const props = { id: 3, done: 'done', fail: 'failed', url: '/api/x', slot: 'detail' };
+    task(props, dispatch);
+    calls[0].reject(new Error('boom'));
+    await drain();
+    assert.strictEqual(seenProps, props);
+    assert.deepStrictEqual(dispatched, [['failed', { id: 3, error: { kind: 'x' } }]]);
+  });
+
+  it('an AbortError never reaches the projector and still dispatches nothing', async function () {
+    const { calls, run } = deferredRunner();
+    let projections = 0;
+    const task = createTaskEffect(run, { projectError: () => { projections++; return { no: 1 }; } });
+    const { dispatched, dispatch } = dispatcher();
+    task({ id: 1, done: 'done' }, dispatch);
+    task({ id: 2, done: 'done' }, dispatch); // switch: supersedes #1
+    const abort = new Error('aborted');
+    abort.name = 'AbortError';
+    calls[0].reject(abort);
+    calls[1].resolve({ ok: true });
+    await drain();
+    assert.strictEqual(projections, 0);
+    assert.deepStrictEqual(dispatched, [['done', { id: 2, result: { ok: true } }]]);
+  });
+
+  it('a projector that declines (undefined) falls back to the string projection', async function () {
+    const { calls, run } = deferredRunner();
+    const task = createTaskEffect(run, { projectError: projectHttp });
+    const { dispatched, dispatch } = dispatcher();
+    task({ id: 1, done: 'done' }, dispatch);
+    calls[0].reject(new TypeError('network down')); // no `status`: projector declines
+    await drain();
+    assert.deepStrictEqual(dispatched, [['done', { id: 1, error: 'network down' }]]);
+  });
+
+  it('a projector that throws falls back to the string projection — settlement stays total', async function () {
+    const { calls, run } = deferredRunner();
+    const task = createTaskEffect(run, { projectError: () => { throw new Error('projector bug'); } });
+    const { dispatched, dispatch } = dispatcher();
+    task({ id: 1, done: 'done' }, dispatch);
+    calls[0].reject(new Error('boom'));
+    await drain();
+    assert.deepStrictEqual(dispatched, [['done', { id: 1, error: 'boom' }]]);
+  });
+
+  it('a projection that is not JSON falls back — no host object crosses into state', async function () {
+    const cases = [
+      ['the Error itself', (err) => err],
+      ['an Error nested in details', (err) => ({ status: 500, cause: err })],
+      ['a function', () => () => 1],
+      ['a Response-like class instance', () => new (class Response {})()],
+      ['a cycle', () => { const o = { a: 1 }; o.self = o; return o; }],
+      ['a non-finite number', () => ({ retryAfter: Infinity })],
+    ];
+    for (const [label, projectError] of cases) {
+      const { calls, run } = deferredRunner();
+      const task = createTaskEffect(run, { projectError });
+      const { dispatched, dispatch } = dispatcher();
+      task({ id: 1, done: 'done' }, dispatch);
+      calls[0].reject(new Error('boom'));
+      await drain();
+      assert.deepStrictEqual(dispatched, [['done', { id: 1, error: 'boom' }]], label);
+    }
+  });
+
+  it('projected JSON lands in app state through the ordinary completion action', async function () {
+    // The TASKS.md document as shipped: `error` is stored verbatim by the
+    // completion action, so with a projector the state carries the object.
+    const { calls, run } = deferredRunner();
+    const taskEffect = createTaskEffect(run, { projectError: projectHttp });
+    const app = createApp(tasksDoc(), {
+      schedule: sync,
+      effects: { http: (props, dispatch) => taskEffect(props, dispatch) },
+      subs: { every: () => () => {} },
+    });
+    app.dispatch('loadList');
+    calls[0].reject(httpError(404, { code: 'NOT_FOUND' }));
+    await drain();
+    assert.deepStrictEqual(app.getState().tasks.list, {
+      id: 1, status: 'error',
+      error: { status: 404, code: 'NOT_FOUND', message: 'HTTP 404', operation: null },
+    });
+    app.destroy();
+  });
+
+  it('a non-function projectError is a host programming error', function () {
+    assert.throws(() => createTaskEffect(() => 1, { projectError: /** @type {any} */ ('nope') }),
+      /"projectError" must be a function/);
+  });
+});

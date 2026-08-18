@@ -3,7 +3,7 @@ import * as assert from '../assert.node.js';
 
 import {
   equalsDeep, equalsJson, mergeMap, mergeSet, stableStringify,
-  isJsonObject, setObjectMember, deepFreeze,
+  isJsonObject, isJsonValue, setObjectMember, deepFreeze,
 } from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
@@ -365,6 +365,65 @@ describe('isJsonObject', () => {
     assert.isFalse(isJsonObject(null));
     assert.isFalse(isJsonObject('x'));
     assert.isFalse(isJsonObject(undefined));
+  });
+});
+
+describe('isJsonValue', () => {
+  it('accepts every JSON scalar and container shape', () => {
+    assert.isTrue(isJsonValue(null));
+    assert.isTrue(isJsonValue(true));
+    assert.isTrue(isJsonValue(0));
+    assert.isTrue(isJsonValue(-1.5));
+    assert.isTrue(isJsonValue(''));
+    assert.isTrue(isJsonValue([]));
+    assert.isTrue(isJsonValue({}));
+    assert.isTrue(isJsonValue(Object.create(null)));
+    assert.isTrue(isJsonValue({ a: [1, { b: 'c', d: null }], e: { f: [] } }));
+  });
+
+  it('rejects what JSON cannot carry', () => {
+    assert.isFalse(isJsonValue(undefined));
+    assert.isFalse(isJsonValue(NaN));
+    assert.isFalse(isJsonValue(Infinity));
+    assert.isFalse(isJsonValue(-Infinity));
+    assert.isFalse(isJsonValue(10n));
+    assert.isFalse(isJsonValue(Symbol('s')));
+    assert.isFalse(isJsonValue(() => 1));
+    assert.isFalse(isJsonValue([undefined]));
+    assert.isFalse(isJsonValue({ a: () => 1 }));
+    assert.isFalse(isJsonValue({ a: { b: NaN } }));
+  });
+
+  it('rejects host objects at any depth', () => {
+    assert.isFalse(isJsonValue(new Error('x')));
+    assert.isFalse(isJsonValue(new Date(0)));
+    assert.isFalse(isJsonValue(new Map()));
+    assert.isFalse(isJsonValue(new Uint8Array(1)));
+    class Thing {}
+    assert.isFalse(isJsonValue(new Thing()));
+    assert.isFalse(isJsonValue({ status: 404, cause: new Error('deep') }));
+    assert.isFalse(isJsonValue([[[new Date(0)]]]));
+  });
+
+  it('rejects a cycle but accepts a shared subtree', () => {
+    /** @type {any} */
+    const cyclic = { a: 1 };
+    cyclic.self = cyclic;
+    assert.isFalse(isJsonValue(cyclic));
+    const ring = [1];
+    ring.push(/** @type {any} */ (ring));
+    assert.isFalse(isJsonValue(ring));
+    const shared = { x: 1 };
+    assert.isTrue(isJsonValue({ a: shared, b: shared, c: [shared, shared] }));
+  });
+
+  it('is total: a throwing accessor makes the value not-JSON', () => {
+    const hostile = {};
+    Object.defineProperty(hostile, 'boom', {
+      enumerable: true, get() { throw new Error('trap'); },
+    });
+    assert.isFalse(isJsonValue(hostile));
+    assert.isFalse(isJsonValue({ ok: 1, nested: hostile }));
   });
 });
 

@@ -15,10 +15,13 @@
  * HOT-DISPATCH into a running app (no reboot, the user keeps scroll and
  * inputs), while a `view`/`actions` change must reboot. It compares a
  * STRUCTURAL key (an app doc minus its `state`) via the suite's own
- * `contentKey`, so the policy in the widget reads clean, tested data.
+ * `semanticKey` — the collision-free identity, not the memo-grade
+ * `contentKey` fingerprint: a classification decides whether a running
+ * app reboots, so a fingerprint collision would read a changed document
+ * as unchanged. The artifacts are parsed JSON, so the identity is total.
  */
 
-import { contentKey } from '@jarenjs/core/object';
+import { semanticKey } from '@jarenjs/core/object';
 import { validateFile } from './validate.js';
 
 /** Kinds that are runnable artifacts on their own (vs. `state`/`data`
@@ -59,8 +62,8 @@ export function assembleArtifacts(project) {
  * (its `state` excluded); everything else in full. */
 function structuralKey(artifact) {
   return artifact.kind === 'app'
-    ? contentKey({ view: artifact.doc.view, actions: artifact.doc.actions, subs: artifact.doc.subs })
-    : contentKey(artifact.doc);
+    ? semanticKey({ view: artifact.doc.view, actions: artifact.doc.actions, subs: artifact.doc.subs })
+    : semanticKey(artifact.doc);
 }
 
 const RANK = { none: 0, 'state-only': 1, structural: 2 };
@@ -88,7 +91,7 @@ export function classifyChange(prevProject, nextProject) {
     let c;
     if (b === undefined) c = 'structural';
     else if (structuralKey(b) !== structuralKey(a)) c = 'structural';
-    else if (contentKey(b.doc) !== contentKey(a.doc)) c = 'state-only';
+    else if (semanticKey(b.doc) !== semanticKey(a.doc)) c = 'state-only';
     else c = 'none';
     perArtifact[name] = c;
     bump(c);

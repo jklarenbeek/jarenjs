@@ -94,7 +94,7 @@ effects: {
 }
 ```
 
-The helper aborts a slot's in-flight predecessor (`mode: "switch"`, the default — `"exhaust"`, `"concat"` and `"parallel"` pick the other per-slot concurrency semantics), dispatches `done` with `{ id, result }` on resolve and `fail ?? done` with `{ id, error }` (a string) on failure, and dispatches nothing for an abort. The abort is only an optimization — an aborted request may already have resolved — so the state-side id guard is the guarantee: out-of-order and polling responses are rejected by construction. The handler exposes `cancel(slot)`/`cancelAll()`/`dispose()`; `app.destroy()` disposes it automatically. The full convention, with a runnable worked example the test suite executes verbatim, is [docs/TASKS.md](docs/TASKS.md).
+The helper aborts a slot's in-flight predecessor (`mode: "switch"`, the default — `"exhaust"`, `"concat"` and `"parallel"` pick the other per-slot concurrency semantics), dispatches `done` with `{ id, result }` on resolve and `fail ?? done` with `{ id, error }` on failure — `error` a string by default, or the JSON an optional `projectError(err, props)` returns (the door for a structured HTTP failure: status, code, safe details; anything non-JSON falls back to the string) — and dispatches nothing for an abort. The abort is only an optimization — an aborted request may already have resolved — so the state-side id guard is the guarantee: out-of-order and polling responses are rejected by construction. The handler exposes `cancel(slot)`/`cancelAll()`/`dispose()`; `app.destroy()` disposes it automatically. The full convention, with a runnable worked example the test suite executes verbatim, is [docs/TASKS.md](docs/TASKS.md).
 
 ## One FIFO queue, observable transactions
 
@@ -186,7 +186,7 @@ renderToString(createApp(doc).getVnode());
 
 ## API
 
-`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), getVnode(), render(), subscribe(listener), observe(observer), stop(), destroy() }`
+`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), setState(next), getVnode(), render(), subscribe(listener), observe(observer), stop(), destroy() }`
 
 Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormActions`, `formEventFields`, `createTaskEffect`, `createFocusEffect`, `createTransactionLog`, `createSplitterWidget`, `createDocStore`, `encodeShare`, `decodeShare`, and the error classes (`AppCompileError`, `AppRuntimeError`, `HostValueError`, `toError`, `APP_CODES`).
 

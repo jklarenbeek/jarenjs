@@ -535,6 +535,30 @@ what each does is its own documentation's job
   which "stuck" and "starved" are hardest to tell apart. The e2e
   suite absorbs it with CI retries and by running `data.spec.js`
   serially — neither of which is a fix.
+- [ ] **Strong same-store transaction ownership.** MODEL-FORMAT §5.1
+  states the residual plainly: a bare write issued through the STORE
+  while an async top-level transaction is open joins that transaction
+  and shares its rollback, because the transaction callback's `tx` is
+  a view over the store that shares the store's collection/entity/
+  sync handles — every operation reaches the connection through the
+  one active scope, so the store cannot tell a tx-originated call from
+  an unrelated caller. Today the safe shapes are "own the store" or
+  "one store per concurrent writer". Closing it means scope-BOUND
+  handles: `tx.collection(...)`/`tx.entity(...)`/`tx.sync` return
+  handles pinned to the owning scope, and store-level handles, seeing
+  a foreign scope open, wait on the connection's gate (the same queue
+  an overlapping `store.transaction` already waits on, with the same
+  `queueTimeout`/`JD0012` bound) or reject under an opt-in strict
+  mode. The documented `store.collection().put()`-inside-the-callback
+  join then becomes a self-wait that `JD0012` names — the fix is
+  `tx.collection()`. Cost: one handle set per open scope, cores that
+  take their scope as an argument rather than reading a shared
+  variable, and the capture scope, jobs and live registry re-audited
+  for which handle they hold. The pinning test
+  (`test/db/transaction-ownership.test.js`, "a bare statement issued
+  while a transaction is open JOINS it") flips from "pinned, not
+  endorsed" to the regression for the new behavior. Raised by a
+  consumer wanting one shared Fastify store; not started.
 
 ## @jarenjs/ai
 

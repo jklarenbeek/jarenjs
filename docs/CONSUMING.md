@@ -17,6 +17,15 @@ Runtime baseline for every package: **Node ≥ 24, ESM only** (`"type":
 "module"`), and **zero third-party runtime dependencies** — a `@jarenjs/*`
 package depends only on other `@jarenjs/*` packages.
 
+The Node floor is a floor, not a suggestion. It is the line every gate in
+this repository runs on (`.nvmrc`; the Windows, Ubuntu, packed-consumer and
+browser jobs all read it) and it is declared in every package's `engines`,
+so an install under an older Node prints `EBADENGINE` and is unsupported by
+declaration — nothing here is tested on Node 22, and bundling a package into
+an application does not change what the package was verified against. A
+consumer that must stay on an older line should raise that upstream as a
+request for a lower, tested floor rather than install past the warning.
+
 ## Mode 1: npm packages (recommended)
 
 ```bash
