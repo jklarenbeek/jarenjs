@@ -44,7 +44,9 @@ every executor session; BOOTSTRAP.md is their operational summary.
    reverse.
 6. **Records are numbers, not adjectives.** Session records paste test
    counts and gate results; "all green" without counts is not a
-   record.
+   record. A record also names what was investigated and dropped
+   (one line each: what, why not), so the next session and the
+   close-out quirk hunt (`docs/QUIRKS.md`) do not repeat it.
 
 ## Running a program
 

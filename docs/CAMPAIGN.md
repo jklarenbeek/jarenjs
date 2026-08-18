@@ -23,6 +23,7 @@ session will improvise differently.
 |---|---|
 | One change, one session, one checklist | a single work order |
 | Duplication, drift, dead code — no new capability | [`REFACTOR.md`](REFACTOR.md), which is idempotent and may find nothing |
+| "Something is off and nobody knows how much" — quiet bugs, non-idempotent syncs, lying counts, false comments | [`QUIRKS.md`](QUIRKS.md), the evidence-first hunt: sweep, reproduce, fix with a test, report the drop list |
 | A capability that needs several dependent steps, shared decisions, and a nameable end state | **a campaign** |
 | A list of unrelated wants | [`ROADMAP.md`](ROADMAP.md) — not a campaign |
 
@@ -113,6 +114,21 @@ How to do it well:
   Inline the recipe in the router; do not leave the campaign depending on a
   scratch script.
 
+**A scoped quirk hunt is part of measuring.** Before authoring, run
+[`QUIRKS.md`](QUIRKS.md) over the packages the campaign will touch — parallel readers
+with the taxonomy brief, every finding reproduced by you. What it returns changes the
+plan in three ways, which is why it comes before the order list and not after:
+
+- A confirmed quirk *in the campaign's path* becomes a **Step 0** or its own early order,
+  so no later order builds on it. Building a new sync on top of a link pass that
+  duplicates rows on run one and crashes on run two is a campaign that fails in order 04
+  for a reason authored in order 00.
+- A confirmed quirk *beside* the path goes to the ROADMAP or to a reserved order — named,
+  not fixed in passing, because a campaign never widens.
+- The **checked-and-dropped list** goes into the router verbatim. It is the cheapest
+  section a router has: it stops seven executors from each re-investigating the same
+  suspicious-looking guard.
+
 The result goes in the router under a heading that says **measured on `<date>`
 with `<runtime>` — do not re-derive**, so seven orders do not each spend a session
 rediscovering it. Earlier campaigns used the same device with a "verified
@@ -144,7 +160,9 @@ Every answer becomes a **D-number** in the router. That is the point of asking.
 2. **The measured baseline.** Dated, with the runtime, marked *do not re-derive*.
    Tables, not adjectives. Include the numbers the campaign will be judged on —
    **especially the ones that currently look bad.** A campaign that hides its
-   starting loss cannot prove it closed it.
+   starting loss cannot prove it closed it. Include the pre-campaign quirk hunt's
+   three lists (confirmed-in-path, confirmed-beside-path with disposition,
+   checked-and-dropped with reasons) — see Authoring rule 1.
 3. **Fixed decisions (D1, D2, …).** See below.
 4. **Cross-cutting contracts.** The constraints every order obeys that are not
    decisions but obligations: house rules, the dependency arrow, the gates,
@@ -246,7 +264,12 @@ would have sent it chasing already-fixed bugs.
   of the finished one and never a reopened D-number.
 - **Every campaign ends with a close-out order**: ROADMAP entries retired or
   narrowed, capability documented where a stranger would look, measurements
-  regenerated and published, drift gates extended, site surfaces updated.
+  regenerated and published, drift gates extended, site surfaces updated — **and a
+  scoped [`QUIRKS.md`](QUIRKS.md) hunt over what the campaign built.** New capability
+  is where quirks are born (a feature that makes people bind a server to the network
+  turns every "localhost-only by construction" assumption into a hole; a new importer
+  is non-idempotent until proven otherwise). The close-out record carries the hunt's
+  three lists next to the baseline table.
 
 ## Non-negotiables (inherited, not restated)
 
@@ -272,6 +295,14 @@ Every order obeys, and the router says so once:
   exists**, grep-proven in the record.
 - **Records are numbers, not adjectives.** "All green" without counts is not a
   record.
+- **Anything an order builds that imports, syncs, migrates or reconciles passes the
+  two-run check** before its record is written: the second run on identical input
+  changes nothing, bumps no revision, and reports zero — asserted by a test, not by
+  running it twice by hand. This is [`QUIRKS.md`](QUIRKS.md)'s most productive check
+  and the one campaigns most often skip because "it worked".
+- **Records carry the drop list.** When an executor investigates a suspicion and
+  finds it unfounded, the session record says so in a line (what, why not) so the
+  next executor and the close-out hunt do not repeat the investigation.
 
 ## Documentation & reference rules
 
@@ -327,7 +358,9 @@ before committing, and never force-add them.
 ## Acceptance checklist — for the authoring pass
 
 - [ ] Preflight held: clean tree, no other campaign in flight, and the baseline
-      was **measured**, not copied from existing documentation.
+      was **measured**, not copied from existing documentation — including a scoped
+      quirk hunt over the packages in scope, its findings dispositioned (Step 0 /
+      early order / ROADMAP / dropped-with-reason) in the router.
 - [ ] Every fork that would change the order list was put to the operator and
       answered; each answer is a D-number.
 - [ ] The router has all nine required sections, and the baseline is dated, names
@@ -357,6 +390,9 @@ before committing, and never force-add them.
 - [ ] Drift gates extended to cover what this campaign made worth gating — a gate
       that would have caught the drift the campaign found is worth more than a
       paragraph promising not to drift again.
+- [ ] The close-out quirk hunt ran over what the campaign built; its three lists are in
+      the close-out record; every confirmed quirk in the campaign's own code is fixed
+      with a regression test or named in the ROADMAP with its reason.
 - [ ] No committed code, comment or document references a scratch file.
 
 ## Out of scope

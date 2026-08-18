@@ -10,6 +10,15 @@ This file is committed and self-contained: it does **not** depend on any other p
 document. (In particular it never relies on `TODO*.md`/`PROGRESS*.md`, which are gitignored —
 see the Documentation & reference rules below.)
 
+It has two siblings. [`QUIRKS.md`](QUIRKS.md) is the **quirk hunt**: the evidence-first audit
+that finds and fixes what is wrong-but-quiet (broken idempotence, lying counts, divergent twins,
+false comments) — the one pass that *is* allowed to change behavior, because every fix comes with
+its reproduction as a test. [`CAMPAIGN.md`](CAMPAIGN.md) is for building capability. The
+division of labour is deliberate: a REFACTOR pass **moves and never changes**; when it trips
+over a bug it surfaces it (see "Quirk sweep" below) and either hands it to a QUIRKS pass or, when
+the operator asked for both, fixes it under the QUIRKS rules in the same working tree — never
+silently, never without a test.
+
 ## Preflight — start only on a clean working tree (abort otherwise)
 
 **Before touching anything, the git working tree MUST be clean.** Run:
@@ -40,7 +49,8 @@ Definition of done for a run: `npm run lint` clean (**zero errors AND zero warni
 the lint sweep below), `npm test` green across ALL packages (with **no existing-fixture
 edits** — see below), `npm run website:build` succeeds, the dead-code audit
 (`npm run benchmark:coverage`) has every finding resolved, the design-conformance rules
-(**`DESIGN.md`** — see below) hold, and every documentation/reference rule below holds.
+(**`DESIGN.md`** — see below) hold, every documentation/reference rule below holds, and the
+**quirk sweep** (below) has been run with its findings surfaced in the summary.
 
 ## Repo model (the invariants a refactor must preserve)
 
@@ -207,9 +217,39 @@ Removing dead code must itself be behavior-preserving for everything still live 
 green). Run the audit on a **green** suite — findings from a red suite are unreliable (untested
 paths may simply not have run).
 
+## Quirk sweep (run every pass; surface, do not silently fix)
+
+A refactor reads more code closely than any other activity in the repo, so it is the pass most
+likely to notice a **quirk** — a defect that does not fail a gate: a helper whose two copies
+diverge in behavior (not just in name), a comment asserting an invariant a sibling module
+breaks, an importer or sync that is not idempotent, a count that reports columns as rows, a
+flag that is parsed and never read, a status mapping that answers 404 as 400. The full taxonomy
+and the verification discipline live in [`QUIRKS.md`](QUIRKS.md); this section says what a
+REFACTOR pass does with them.
+
+- **Look for them on purpose while you dedupe.** Comparing two shape-siblings is exactly when a
+  behavioral divergence shows: two "same" helpers that differ by an off-by-one, a `??` on a
+  `NOT NULL DEFAULT ''` column, an escape function that misses one character. Note it the
+  moment you see it, with `file:line` and the concrete input → wrong output.
+- **A REFACTOR pass does not change behavior, so it does not fix them in-line.** Two divergent
+  copies stay reachable via a parameter (see "Non-negotiables"), and the divergence is reported
+  as a finding: *"copy A and copy B differ on input X; A returns …, B returns …; unified under
+  parameter `p`, callers keep their old value; one of them is probably wrong."* Deciding which
+  is a QUIRKS decision, made with a reproduction and a test — not a side effect of a move.
+- **When the operator asked for a REFACTOR and a QUIRKS pass together**, fix confirmed quirks
+  under the QUIRKS rules (reproduce first, smallest fix, regression test with exact values,
+  prose repaired), but keep them **out of the relocation diff's story**: list them separately in
+  the summary as *behavior changes*, each with its test, so the reviewer can tell a move from a
+  fix. Never let "moved X to core" hide "and changed what X returns for empty input".
+- **Doc drift found on the way is not a quirk, it is this pass's job** — repair it under the
+  Documentation & reference rules above.
+- **Report the sweep even when it found nothing.** "Quirk sweep: no behavioral divergences
+  among the N shape-siblings compared" is a result; silence is not.
+
 ## Method (per candidate)
 
-1. **Locate** all shape-siblings (grep by constant/regex/structure, then read and compare bodies).
+1. **Locate** all shape-siblings (grep by constant/regex/structure, then read and compare bodies —
+   and note any behavioral divergence between them for the quirk sweep).
 2. **Choose the parent** by the purity/arrow rules and the most general accurate name.
 3. **Generalize** the signature to cover every caller (parameterize the diverging constants).
 4. **Land** it (module + barrel + export-map entry + JSDoc that states intent, not history).
@@ -249,6 +289,10 @@ logical parent.
       of truth); no named work unit flattened into a hollow word.
 - [ ] Docs (`README`/`ARCHITECTURE`/`docs/*`/`ROADMAP`) updated for every moved/renamed symbol;
       comments state intent, not migration history.
+- [ ] **Quirk sweep reported**: every behavioral divergence noticed between shape-siblings is
+      listed with `file:line` and input → output (kept reachable via a parameter, not silently
+      resolved); any quirk *fixed* because the operator asked for it is listed separately as a
+      behavior change with its regression test.
 - [ ] **No `PROGRESS*.md` (or any scratch planning file) created for the run** — summarize the
       changes in the commit message / hand-off instead.
 
@@ -280,7 +324,9 @@ release script that injects a `vX.Y.Z` commit message).
 
 ## Out of scope
 
-- Behavior changes, new features, or API additions beyond what a clean relocation needs.
+- Behavior changes, new features, or API additions beyond what a clean relocation needs. Bugs
+  found on the way are surfaced (see "Quirk sweep") and fixed only under [`QUIRKS.md`](QUIRKS.md)
+  rules — reproduced, tested, reported separately — never as an unmarked part of a move.
 - "Fixing" a duplicate's semantics while moving it (unless two copies genuinely diverged and the
   correct behavior is unambiguous — then keep both reachable via a parameter and document it).
 - Changing an existing helper's established (even quirky) behavior that current consumers rely
