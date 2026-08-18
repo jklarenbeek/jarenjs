@@ -14,7 +14,9 @@ must not change what the code does, so a bug it trips over can only be surfaced,
 [`CAMPAIGN.md`](CAMPAIGN.md) builds a capability and is forbidden from widening mid-flight. The
 quirks fall between them and rot. This document is the ritual for going and getting them.
 
-This file is committed and self-contained; it never relies on `TODO*.md`/`PROGRESS*.md`.
+This file is committed and self-contained; it never relies on `TODO*.md`/`PROGRESS*.md`. The
+rules it shares with the other passes — repo model, gates, documentation rules, the clean-tree
+preflight, the close-out protocol — live once in [`CONVENTIONS.md`](CONVENTIONS.md).
 
 ## What a quirk is
 
@@ -38,9 +40,9 @@ class carries the reason it matters, because a scanner told "find bugs" finds st
 Not a quirk: a naming preference, a formatting nit, "could be prettier", a missing feature. Those
 go to review comments or the ROADMAP. A quirk has a concrete input and a wrong output.
 
-## Preflight — start only on a clean working tree (abort otherwise)
+## Preflight — a clean working tree (CONVENTIONS §5), then a baseline
 
-`git status --porcelain` must print nothing. Otherwise abort, say what is dirty, and ask for a
+`git status --porcelain` must print nothing; otherwise abort, say what is dirty, and ask for a
 commit or stash. A quirk hunt produces many small, unrelated fixes; it must be one reviewable
 diff against a known commit, or nobody can tell a fix from in-flight work.
 
@@ -133,7 +135,7 @@ Rules for the fix itself:
 
 The sweep always finds documentation that a fix makes wrong twice over. In the same pass:
 module headers, `README`/`ARCHITECTURE`/`docs/*`, the CLI usage text and its file header, the
-route or option lists. The [`REFACTOR.md`](REFACTOR.md) §"Documentation & reference rules"
+route or option lists. The [`CONVENTIONS.md`](CONVENTIONS.md) §4 documentation & reference rules
 apply verbatim — no scratch-file pointers, the source is the source of truth, comments state
 intent not history.
 
@@ -228,9 +230,9 @@ fixes touched repaired; no scratch planning file created.
 ## Close-out & commit protocol
 
 **Default: stop for review** with the three-list report; leave the work uncommitted on the
-current branch. Only when explicitly asked to commit, run [`REFACTOR.md`](REFACTOR.md)
-§"Close-out & commit protocol" unchanged (gates → patch bump → deploy → single one-line commit →
-tag → push with tags). A quirk hunt's one-liner names the theme, not the list
+current branch. Only when explicitly asked to commit, run [`CONVENTIONS.md`](CONVENTIONS.md) §6
+unchanged (gates → patch bump → deploy → single one-line commit → tag → push with tags). A quirk
+hunt's one-liner names the theme, not the list
 (`Made imports idempotent and unified API error status mapping`).
 
 ## Out of scope

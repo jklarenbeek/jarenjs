@@ -8,10 +8,11 @@ its playground were all built this way.
 
 This file is the **authoring** playbook — how to decompose the work, what the
 router must contain, and the rails that keep a campaign honest.
-[`workflow/CONVENTIONS.md`](workflow/CONVENTIONS.md) is the companion: it binds
-the **executor**, and its four artifact templates (router, work order, session
-record, handoff) are the shapes referenced throughout. Read that file too; this
-one does not restate it.
+[`CONVENTIONS.md`](CONVENTIONS.md) is the companion: it holds, once, the rules
+every session obeys (repo model, gates, artifact naming, documentation rules,
+close-out) and binds the **executor**; the work-order and session-record shapes
+referenced throughout are in [`templates/`](templates/). Read that file too;
+this one does not restate it.
 
 Authoring a campaign is itself a deliverable. A router that is vague, unmeasured,
 or that leaves a fork open is not a plan — it is a promise that every executor
@@ -25,7 +26,7 @@ session will improvise differently.
 | Duplication, drift, dead code — no new capability | [`REFACTOR.md`](REFACTOR.md), which is idempotent and may find nothing |
 | "Something is off and nobody knows how much" — quiet bugs, non-idempotent syncs, lying counts, false comments | [`QUIRKS.md`](QUIRKS.md), the evidence-first hunt: sweep, reproduce, fix with a test, report the drop list |
 | A capability that needs several dependent steps, shared decisions, and a nameable end state | **a campaign** |
-| A list of unrelated wants | [`ROADMAP.md`](ROADMAP.md) — not a campaign |
+| A list of unrelated wants | [`ROADMAP.md`](../ROADMAP.md) — not a campaign |
 
 The test: **can you name the end state in one sentence, and does getting there
 require decisions that more than one order would otherwise re-litigate?** If yes,
@@ -41,29 +42,20 @@ the ROADMAP.
   baseline, the fixed decisions, the order table, the status ledger.
 - **Orders** — `TODO_<PROGRAM>_NN.md`, numbered from `01` in execution order,
   restarting at `01` for every campaign. Each is self-contained.
-- **Session record** and **handoff note** — per
-  [`workflow/CONVENTIONS.md`](workflow/CONVENTIONS.md), written by the executor.
+- **Session record** — `TODO_<PROGRAM>_NN_RECORD.md`, written by the executor
+  after the order is green ([`templates/session-record.md`](templates/session-record.md));
+  its Handoff section carries what the next session must know.
 
 `<PROGRAM>` is a short upper-case slug naming the capability, not the package
 path. Numbering never renumbers: an order that turns out to be two orders becomes
 `NN` plus a **new highest number**, never `NN_a`/`NN_b`.
 
-**These files are gitignored scratch** (`.gitignore` matches `TODO*.md` and
-`PROGRESS*.md`), which has two consequences that bind every campaign:
-
-1. They will not exist in a fresh clone. **No committed file may point at one.**
-   Naming the *convention* — as this document does — is fine; naming a *specific
-   file* is the rot the rule exists to prevent. When a campaign's rationale needs
-   to survive, it moves into committed documentation (package `README`,
-   `ARCHITECTURE`, the format spec) as a statement of intent, never as a pointer.
-2. They are not recoverable once deleted. Before clearing a campaign, check the
-   router's status ledger for unexecuted orders and make sure their intent lives
-   in [`ROADMAP.md`](ROADMAP.md) first.
-
-`workflow/` uses `WO-<letter>-<slug>.md` for the same role. Both namings are
-correct: `workflow/` is the **published, context-free harness**, so its examples
-must be committed files; the in-repo campaigns are working scratch and use the
-`TODO_` names. One workflow, two namings, chosen by whether the artifact ships.
+**These files are gitignored scratch** — the naming, where session records
+live, and why nothing committed may point at them are [`CONVENTIONS.md`](CONVENTIONS.md) §3
+and §4. Two consequences bind every campaign: no committed file names a specific `TODO_*`
+file (restate the intent where it belongs instead), and before clearing a campaign the
+router's ledger is checked for unexecuted orders whose intent must first move to
+[`ROADMAP.md`](../ROADMAP.md).
 
 ## Preflight — abort unless all three hold
 
@@ -166,7 +158,7 @@ Every answer becomes a **D-number** in the router. That is the point of asking.
 3. **Fixed decisions (D1, D2, …).** See below.
 4. **Cross-cutting contracts.** The constraints every order obeys that are not
    decisions but obligations: house rules, the dependency arrow, the gates,
-   `DESIGN.md` where visual work is involved, where shared code must land. A
+   `docs/DESIGN.md` where visual work is involved, where shared code must land. A
    campaign with a recurring theme gives it its own named section and says which
    orders it binds — one past campaign carried a binding mobile contract in the
    router, so a single fix hardened every surface that reused the primitive.
@@ -212,7 +204,7 @@ makes it enforceable.
 
 ## The order file — required sections
 
-Per [`workflow/WORK-ORDER.template.md`](workflow/WORK-ORDER.template.md), plus
+Per [`templates/work-order.md`](templates/work-order.md), plus
 two campaign-specific obligations:
 
 - **A router pointer and the binding D-numbers**, first line. Then **"Read
@@ -273,70 +265,46 @@ would have sent it chasing already-fixed bugs.
 
 ## Non-negotiables (inherited, not restated)
 
-Every order obeys, and the router says so once:
+Every order obeys [`CONVENTIONS.md`](CONVENTIONS.md) — the repo model (§1), the gates by
+exit code with numbers in the record (§2), the documentation rules (§4), the clean-tree
+preflight and uncommitted-on-`main` rule (§5) — and the router says so once. Two rules are
+campaign-specific enough to state here:
 
-- **The repo model and house rules** — [`REFACTOR.md`](REFACTOR.md) §"Repo model"
-  is normative: the one-way dependency arrow, the two-layer component rule, zero
-  runtime dependencies outside `@jarenjs/*`, no `eval`/`new Function`, two-stage
-  compilers, JSDoc on exports, tests as plain `node:test`/`node:assert` under
-  `test/`.
-- **The gates.** Every order ends green from the repo root: `npm run lint` at zero
-  errors **and** zero warnings, `npm test` across all packages,
-  `npm run website:build`, and `npm run benchmark:coverage` with every dead-code
-  finding resolved. Orders touching packaging add `npm run test:tree-shaking`;
-  orders touching visual code add the `DESIGN.md` sweep including the banned-hue
-  grep over `src` **and** `dist`.
 - **No redundancy, enforced during the campaign.** A campaign is where duplication
   is born: two orders each need an escape helper, a slug, a hash. The
-  [`REFACTOR.md`](REFACTOR.md) rules apply *while* building, not afterwards — pure
-  helpers to `@jarenjs/core`, vnode/URL work to `@jarenjs/view/helpers`, app
-  orchestration to `@jarenjs/app`. Make it checkable: an order that could grow a
-  duplicate carries an acceptance line asserting **exactly one implementation
-  exists**, grep-proven in the record.
-- **Records are numbers, not adjectives.** "All green" without counts is not a
-  record.
+  [`REFACTOR.md`](REFACTOR.md) placement rules apply *while* building, not
+  afterwards — pure helpers to `@jarenjs/core`, vnode/URL work to
+  `@jarenjs/view/helpers`, app orchestration to `@jarenjs/app`. Make it checkable:
+  an order that could grow a duplicate carries an acceptance line asserting
+  **exactly one implementation exists**, grep-proven in the record.
 - **Anything an order builds that imports, syncs, migrates or reconciles passes the
   two-run check** before its record is written: the second run on identical input
   changes nothing, bumps no revision, and reports zero — asserted by a test, not by
   running it twice by hand. This is [`QUIRKS.md`](QUIRKS.md)'s most productive check
-  and the one campaigns most often skip because "it worked".
-- **Records carry the drop list.** When an executor investigates a suspicion and
-  finds it unfounded, the session record says so in a line (what, why not) so the
-  next executor and the close-out hunt do not repeat the investigation.
+  and the one campaigns most often skip because "it worked". And the record carries
+  the drop list (what was investigated and found unfounded), so the next executor
+  and the close-out hunt do not repeat it.
 
 ## Documentation & reference rules
 
-1. **No committed file references a campaign's scratch files.** Not code, not
-   comments, not documentation, not a commit message. When intent must survive,
-   restate it where it belongs and drop the pointer — never flatten a named unit
-   of work into a hollow word.
-2. **The source is the source of truth.** When prose and code disagree the code
-   wins and the prose is repaired. If the code itself looks wrong, surface it in
-   the session record rather than papering over it.
-3. **Comments state intent and constraints, not history.** No "added in order 04",
-   no migration narration.
-4. **ROADMAP.md lists open work only.** A campaign *closes* entries by moving
-   shipped capability into the package docs. Do not delete an item to make a
-   section look finished, and do not keep a closed one out of caution — if
-   something remains genuinely open, leave a **narrow, accurate** entry naming the
-   decision and its reason.
-5. **Published figures are derived, never hand-written.** Numbers quoted in
-   committed markdown come from the committed measurements through the
-   benchmark-figure gate (`npm run docs:benchmarks`, `npm run docs:check`). A
-   campaign that re-measures refreshes them; it does not retype them.
-6. **Report the loss.** If a campaign's own measurement comes out worse than a
-   rival's, it is published beside the wins. A campaign may not quietly omit the
-   number it set out to improve.
+[`CONVENTIONS.md`](CONVENTIONS.md) §4, in full — with three of its rules being the ones a
+campaign most often breaks: **no committed file references a campaign's scratch files** (not
+code, not comments, not documentation, not a commit message — restate the intent, never
+flatten it into a hollow word); **`ROADMAP.md` lists open work only** (a campaign *closes*
+entries by moving shipped capability into the package docs, and narrows what stays open to
+an accurate decision); and **published figures are derived, never typed** — the campaign that
+re-measures refreshes them through the benchmark-figure gate, and **reports the loss** beside
+the win.
 
 ## Running the campaign
 
-1. Author the router and every order from the templates. Settle the D-numbers
+1. Author the router (§"The router") and every order (`templates/work-order.md`). Settle the D-numbers
    there, once. Hand the campaign to the operator for review **before** executing.
 2. Per order: a fresh session holding
-   [`workflow/BOOTSTRAP.md`](workflow/BOOTSTRAP.md), the router and that order.
+   [`BOOTSTRAP.md`](BOOTSTRAP.md), the router and that order.
    It executes, proves the gates, writes the session record, updates the router's
-   status ledger, and writes a handoff note when state must cross the session
-   boundary.
+   status ledger; the record's Handoff section carries what must cross the
+   session boundary.
 3. **Work lands on `main`, uncommitted, for review.** No executor commits, tags,
    pushes or branches on its own initiative. No `PROGRESS*.md` is created for a
    run — the session record and the commit message carry the summary.
@@ -344,16 +312,9 @@ Every order obeys, and the router says so once:
 
 ## Close-out & commit protocol
 
-Per order, and only when the operator explicitly asks, run
-[`REFACTOR.md`](REFACTOR.md) §"Close-out & commit protocol" unchanged: prove the
-gates green, bump the patch version (`npm run version:patch` + `npm install`),
-deploy the website, then commit as the repo user with a **single short one-line
-message** — no body, no attribution, no person's name, no version in the message —
-tag `v<new-version>`, and push with tags. The version lives only in the tag. A
-phase-opening order takes a minor bump instead of a patch.
-
-`git add -A` stages the work; confirm the gitignored campaign files are excluded
-before committing, and never force-add them.
+Per order, and only when the operator explicitly asks, run [`CONVENTIONS.md`](CONVENTIONS.md)
+§6 unchanged; a phase-opening order takes a minor bump instead of a patch. `git add -A`
+stages the work — confirm the gitignored campaign files are excluded, never force-add them.
 
 ## Acceptance checklist — for the authoring pass
 
@@ -401,7 +362,7 @@ before committing, and never force-add them.
   reviews it before any code moves.
 - Committing, tagging, pushing or deploying on the campaign's own initiative.
 - Creating a `PROGRESS*.md`, or any scratch planning file beyond the router, the
-  orders, the session records and the handoff notes.
+  orders and the session records.
 - Amending a D-number from inside an order.
 - Widening a campaign mid-flight. New work found while executing goes to the
   ROADMAP or to a new numbered order — never into an order already under way.

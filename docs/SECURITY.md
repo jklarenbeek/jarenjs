@@ -140,6 +140,6 @@ record linking a tarball to the workflow run and commit that produced it, and
 no signed tag to check instead. Treat the git history as the authoritative
 artifact: pin the resolved commit, verify it against this repository, and build
 from source if your threat model needs more than the registry's word. Wiring
-provenance is tracked in [PUBLISHING.md](PUBLISHING.md). See
-[PUBLISHING.md](PUBLISHING.md) for the release procedure and the
+provenance is tracked in [PUBLISHING.md](workflow/PUBLISHING.md). See
+[PUBLISHING.md](workflow/PUBLISHING.md) for the release procedure and the
 compatibility policy.

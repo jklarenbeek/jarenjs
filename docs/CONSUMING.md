@@ -2,7 +2,7 @@
 
 How to depend on the Jaren packages from another project — either as
 published npm packages or as a pinned source checkout. If you are *releasing*
-Jaren rather than consuming it, see [PUBLISHING.md](PUBLISHING.md).
+Jaren rather than consuming it, see [PUBLISHING.md](workflow/PUBLISHING.md).
 
 Two properties shape everything below:
 

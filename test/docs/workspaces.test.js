@@ -59,7 +59,7 @@ function section(text, start, end) {
 describe('the published package list matches the workspaces', () => {
   it('PUBLISHING.md lists exactly the public workspaces', () => {
     const bullets = namesIn(
-      section(read('docs/PUBLISHING.md'), 'release publishes these public workspaces:', '## Authenticate'),
+      section(read('docs/workflow/PUBLISHING.md'), 'release publishes these public workspaces:', '## Authenticate'),
       /^- `(@jarenjs\/[a-z]+)`$/gm);
     assert.deepStrictEqual(bullets, publicNames);
   });

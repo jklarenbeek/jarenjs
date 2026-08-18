@@ -6,9 +6,10 @@ most logical parent package, and repair any documentation that has drifted from 
 that finds nothing worth changing is a **valid, successful run** — report "no redundancy found"
 and stop.
 
-This file is committed and self-contained: it does **not** depend on any other planning
-document. (In particular it never relies on `TODO*.md`/`PROGRESS*.md`, which are gitignored —
-see the Documentation & reference rules below.)
+This file is committed and self-contained: it depends on no planning document. The rules it
+shares with every other pass — the repo model, the gates, the documentation rules, the clean-tree
+preflight and the close-out protocol — live once in [`CONVENTIONS.md`](CONVENTIONS.md) and are
+not restated here; this file is what is specific to a refactor.
 
 It has two siblings. [`QUIRKS.md`](QUIRKS.md) is the **quirk hunt**: the evidence-first audit
 that finds and fixes what is wrong-but-quiet (broken idempotence, lying counts, divergent twins,
@@ -19,23 +20,12 @@ over a bug it surfaces it (see "Quirk sweep" below) and either hands it to a QUI
 the operator asked for both, fixes it under the QUIRKS rules in the same working tree — never
 silently, never without a test.
 
-## Preflight — start only on a clean working tree (abort otherwise)
+## Preflight — a clean working tree (CONVENTIONS §5)
 
-**Before touching anything, the git working tree MUST be clean.** Run:
-
-```
-git status --porcelain
-```
-
-If it prints **any** line (modified, staged, or untracked non-ignored files), **abort
-immediately** — do not read code, move anything, or make edits. Tell the user, in a few lines,
-that the refactor was aborted because there are uncommitted changes, list what is dirty, and ask
-them to commit or stash first. Only proceed when the command prints nothing.
-
-Why: a refactor is a "close-in" pass. Starting from a clean commit means the entire refactor is a
-single diff against the previous commit — trivial to review, trivial to revert, and impossible to
-tangle with unrelated in-flight work. (Gitignored scratch files like `TODO*.md`/`PROGRESS*.md`
-do not count — `git status --porcelain` already ignores them.)
+`git status --porcelain` must print nothing before you read a line of code; otherwise abort,
+say what is dirty, and ask for a commit or stash. A refactor is a "close-in" pass: starting from
+a clean commit makes the whole pass one diff against the previous commit — trivial to review,
+trivial to revert, impossible to tangle with in-flight work.
 
 ## How to run
 
@@ -45,28 +35,20 @@ do not count — `git status --porcelain` already ignores them.)
   restrict the sweep to that package's helpers plus everywhere that would share them — but still
   land shared code in the correct parent (`core`/`view`/`app`), not in the scoped package.
 
-Definition of done for a run: `npm run lint` clean (**zero errors AND zero warnings** — see
-the lint sweep below), `npm test` green across ALL packages (with **no existing-fixture
-edits** — see below), `npm run website:build` succeeds, the dead-code audit
-(`npm run benchmark:coverage`) has every finding resolved, the design-conformance rules
-(**`DESIGN.md`** — see below) hold, every documentation/reference rule below holds, and the
-**quirk sweep** (below) has been run with its findings surfaced in the summary.
+Definition of done for a run: the gates of [`CONVENTIONS.md`](CONVENTIONS.md) §2 green —
+with the refactor's own sharpening that `npm test` passes with **no existing-fixture edits**
+(import-path updates for moved symbols are fine) — the design-conformance rules
+(**`docs/DESIGN.md`**, below) hold, the documentation & reference rules (CONVENTIONS §4) hold
+for every moved symbol, and the **quirk sweep** (below) has been run with its findings surfaced
+in the summary.
 
-## Repo model (the invariants a refactor must preserve)
+## Repo model
 
-- Monorepo, npm workspaces (`packages/*`, `components/*`, `benchmark`). Node ≥ 24, ESM
-  everywhere (`"type": "module"`). No build step for source — each package's `main` points at
-  `./src/index.js`; `.d.ts` are emitted on `prepack`.
-- **Dependency arrow (one way, no cycles):**
-  `@jarenjs/core` (zero-dep base) → `@jarenjs/view` → `@jarenjs/app` → `components/*` → `website`.
-  Sibling packages (`json`, `validate`, `formats`, `refs`, `forms`, `locales`) sit on `core`.
-- **Two-layer components:** a component's engine (`components/<x>/src/*`) imports only
-  `@jarenjs/core` + `@jarenjs/view`; its component layer (`src/component/*`) may add
-  `@jarenjs/app`/`@jarenjs/forms`. The arrow is one-way.
-- **House rules:** zero runtime dependencies in `packages/*` and `components/*` (except
-  `@jarenjs/*`); two-stage compilers, **no `eval`/`new Function`** (CSP-safe); char-code
-  recursive-descent parsers; JSDoc on exports; match surrounding code style; tests are plain
-  `node:test` + `node:assert` under repo-root `test/`, mirroring package names.
+The invariants a refactor must preserve are [`CONVENTIONS.md`](CONVENTIONS.md) §1: the one-way
+dependency arrow, the two-layer component rule, zero runtime dependencies outside `@jarenjs/*`,
+no `eval`/`new Function`, two-stage compilers, JSDoc on exports, plain `node:test` under `test/`
+— and, the one a refactor lives by, **where shared code lands** (pure → `core`, vnode/URL →
+`view/helpers`, app orchestration → `app`).
 
 ## The goal
 
@@ -121,37 +103,15 @@ names, or defaults differ. Do not rely on grep-by-name alone.
   batches so a regression is attributable. Keep diffs limited to relocations + import rewiring;
   do not reformat or restyle untouched code.
 
-## Documentation & reference rules (new — apply on every run)
+## Documentation & reference sweep (run every pass)
 
-These keep the committed tree honest, and they are part of the refactor's job:
-
-1. **Never reference a gitignored file from committed code, comments, or documentation.** Files
-   matched by `.gitignore` — notably `TODO*.md` and `PROGRESS*.md` (planning/scratch docs) —
-   will not exist in a fresh clone, so any reference to them rots. On each run, scan for such
-   references (e.g. `TODO_17`, `PROGRESS_19`, "see TODO", "as of TODO_18") and repair them:
-   - If the referenced file still exists, **open it, extract the real intent**, and rewrite the
-     comment/doc to state that intent directly (the design decision, the constraint, the reason)
-     — with no pointer to the file.
-   - If the referenced file is gone, recover the intent from git history and the surrounding
-     code, then rewrite to state it directly.
-   - **Never** flatten a meaningful named unit of work into a hollow word. A "`TODO_17` msgid",
-     a "design decision D8", a "work item / phase / chapter" each name something specific;
-     replace the *reference* with the *meaning*, not with a generic term like "task" that
-     carries none of it.
-2. **The source code is the source of truth.** When code and a comment/doc disagree, or when you
-   are unsure while writing or repairing documentation, the **code wins**: correct the doc to
-   match what the code actually does. Never invent behavior to satisfy a stale doc. (If the code
-   itself looks wrong, surface it in your summary — do not paper over it in prose.)
-3. **Comments state intent and constraints, not history.** A comment exists for the next reader
-   of the code, not to narrate how the code got here. While refactoring, strip migration
-   narration ("moved from X", "previously threw", "as of <planning doc>") and keep only what a
-   reader needs to understand or safely change the code. Record the *why* of a non-obvious
-   choice; drop the *when/where-it-came-from*.
-4. **Keep documentation in sync with the move.** When a symbol is relocated or renamed, update
-   every place that documents it — a package's `README.md`/`ARCHITECTURE.md`/`docs/*`, and the
-   repo-wide documents in `docs/` (`ARCHITECTURE.md`, `ROADMAP.md`, `DESIGN.md`, `HOWTO.md`) —
-   to its new name and home. The only committed Markdown outside `docs/` and the workspaces is
-   the root `README.md`.
+The rules are [`CONVENTIONS.md`](CONVENTIONS.md) §4; a refactor is the pass that *enforces* them
+across the tree, so on each run: scan committed code, comments and docs for references to
+gitignored files (`TODO_17`, `PROGRESS_19`, "see TODO", "as of TODO_18") and repair each by
+restating the real intent — from the file if it still exists, from git history if not — never by
+flattening a named unit of work into a hollow word; strip migration narration from comments;
+and update every document that names a moved or renamed symbol (the package's
+`README`/`ARCHITECTURE`/`docs/*` and the repo-wide `docs/`).
 
 ## Design conformance — DESIGN.md is binding (run every pass)
 
@@ -173,7 +133,7 @@ hold its invariants, and every pass sweeps for drift:
    decision — then update `DESIGN.md` in the same pass and say so in the summary. Never
    leave the two in conflict, and never weaken a constraint silently.
 4. When a refactor moves or renames a token, theme symbol, or palette, `DESIGN.md` is
-   updated with it like every other document (Documentation rule 4 above).
+   updated with it like every other document (CONVENTIONS §4 rule 4).
 
 ## Lint sweep (run every pass)
 
@@ -242,7 +202,7 @@ REFACTOR pass does with them.
   the summary as *behavior changes*, each with its test, so the reviewer can tell a move from a
   fix. Never let "moved X to core" hide "and changed what X returns for empty input".
 - **Doc drift found on the way is not a quirk, it is this pass's job** — repair it under the
-  Documentation & reference rules above.
+  documentation & reference sweep above.
 - **Report the sweep even when it found nothing.** "Quirk sweep: no behavioral divergences
   among the N shape-siblings compared" is a result; silence is not.
 
@@ -256,7 +216,7 @@ REFACTOR pass does with them.
 5. **Rewire** every dependent to import from the parent under the new name; **delete** the copies.
 6. **Prove** no behavior change: re-run that area's tests (golden/round-trip/render/SSR) — no
    expected-value/fixture edits.
-7. **Sweep docs/comments** in the touched area for the reference rules above.
+7. **Sweep docs/comments** in the touched area per the documentation & reference sweep above.
 
 Then **expand**: sweep `components/*` and `packages/*` `utils.js`/`render/*`/`lib/*`/`theme.js`
 for other same-shape helpers (escaping, clamping, id/slug generation, deep-equal, small
@@ -284,9 +244,9 @@ logical parent.
 - [ ] `npm run benchmark:coverage` (dead-code audit) run on a green suite; every FULLY DEAD FILE
       and DEAD FUNCTION finding resolved — removed, or covered by a new test — with any
       deliberate "keep" (a true entry point) justified and, ideally, excluded from the audit.
-- [ ] No committed code/comment/doc references any gitignored file; every prior such reference
-      rewritten to state its real intent (source code and, if needed, git history as the source
-      of truth); no named work unit flattened into a hollow word.
+- [ ] No committed code/comment/doc references any gitignored file (CONVENTIONS §4); every
+      prior such reference rewritten to state its real intent; no named work unit flattened into
+      a hollow word.
 - [ ] Docs (`README`/`ARCHITECTURE`/`docs/*`/`ROADMAP`) updated for every moved/renamed symbol;
       comments state intent, not migration history.
 - [ ] **Quirk sweep reported**: every behavioral divergence noticed between shape-siblings is
@@ -296,31 +256,14 @@ logical parent.
 - [ ] **No `PROGRESS*.md` (or any scratch planning file) created for the run** — summarize the
       changes in the commit message / hand-off instead.
 
-## Close-out & commit protocol (do NOT deviate)
+## Close-out & commit protocol
 
-**Default: stop for review.** When the pass is done, leave everything in the working tree on the
-current branch and hand it back for review. Do **not** commit, tag, push, or create a branch on
-your own initiative — even if everything is green. Do **not** create a `PROGRESS*.md`.
-
-**Only when explicitly asked to commit**, run this in order and abort at the first failure:
-
-1. **Prove it's green:** `npm run lint` (zero errors, zero warnings), `npm test` (all packages),
-   `npm run website:build`, `npm run benchmark:coverage` with every dead-code finding resolved
-   (or a justified keep), and the `DESIGN.md` conformance sweep (banned-hue grep included).
-2. **Bump the patch version by one:** `npm run version:patch`, then `npm install` to sync the
-   lockfile, and re-verify the build.
-3. **Deploy the website:** `npm run website:deploy` — it must finish successfully (`Published`).
-4. **Only then commit**, as the repo user (**Joham**), with a **single short one-line message**
-   describing the change (e.g. `Deduplicated shared helpers into core and view`):
-   - The message is ONE short line. **No body, no `Co-authored-by`, no "Generated with", no
-     Claude/AI attribution, and no person's name inside the message.**
-   - `git add -A` stages the work; gitignored files (`TODO*.md`, `PROGRESS*.md`) MUST stay out —
-     never force-add them; confirm they are excluded before committing.
-5. **Tag with the version before pushing:** `git tag v<new-version>` (the version from step 2).
-6. **Push with tags:** `git push && git push --tags`.
-
-The commit message is the human one-liner; the version lives only in the **tag** (do not use any
-release script that injects a `vX.Y.Z` commit message).
+**Default: stop for review** — leave everything in the working tree on the current branch and
+hand it back; do not commit, tag, push, branch or deploy on your own initiative, even when green,
+and do not create a `PROGRESS*.md`. Only when explicitly asked to commit, run
+[`CONVENTIONS.md`](CONVENTIONS.md) §6 unchanged (gates → patch bump → deploy → single one-line
+commit → tag → push with tags). A refactor's one-liner names the consolidation
+(`Deduplicated shared helpers into core and view`).
 
 ## Out of scope
 
@@ -331,5 +274,5 @@ release script that injects a `vX.Y.Z` commit message).
   correct behavior is unambiguous — then keep both reachable via a parameter and document it).
 - Changing an existing helper's established (even quirky) behavior that current consumers rely
   on; introduce a correctly-named replacement instead and migrate callers deliberately.
-- Publishing / version bumps / deploys, except as steps 2–3 of the commit protocol above.
+- Publishing / version bumps / deploys, except inside the close-out protocol (CONVENTIONS §6).
 - Reformatting or restyling untouched code.

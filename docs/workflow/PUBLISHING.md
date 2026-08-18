@@ -96,15 +96,15 @@ together, so a version number describes the suite, not a single package.
   case for the carve-out: `{ "maximum": { "$data": "/limit" } }` had never
   constrained anything, and a validator that quietly enforces nothing is not
   something to keep for compatibility's sake.
-- **Security fixes land on the latest minor** — see [SECURITY.md](SECURITY.md).
+- **Security fixes land on the latest minor** — see [SECURITY.md](../SECURITY.md).
   There are no support branches for older minors.
-- **What 1.0 means here**: the per-package items in [ROADMAP.md](ROADMAP.md)
+- **What 1.0 means here**: the per-package items in [ROADMAP.md](../ROADMAP.md)
   are the gate. After 1.0 this policy becomes ordinary semver, with breaking
   change confined to majors.
 
 Consumers who need a stronger guarantee than pre-1.0 minors provide should
 pin a reviewed tag and upgrade deliberately; the recipe is in
-[CONSUMING.md](CONSUMING.md#upgrading-a-pin).
+[CONSUMING.md](../CONSUMING.md#upgrading-a-pin).
 
 ## Prepare a release
 
@@ -170,7 +170,7 @@ git push && git push --tags
 Tags are lightweight and the version lives only in the tag, never in the
 commit message. A consumer pinning a source checkout pins the commit the tag
 resolves to and reviews the gitlink diff on every upgrade — see
-[CONSUMING.md](CONSUMING.md#upgrading-a-pin) — which is the control that
+[CONSUMING.md](../CONSUMING.md#upgrading-a-pin) — which is the control that
 matters here.
 
 After publishing, verify the versions:
