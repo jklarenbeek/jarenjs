@@ -21,33 +21,42 @@ export function compileArtifact(schema) {
  * @returns {object} mechanically derived draft-07 twin
  */
 export function downlevelDraft07(schema) {
-  function walk(node) {
+  // Keywords whose object value is a map of NAMES to schemas: inside one,
+  // a key is a member name, never a keyword — a document grammar that
+  // describes a `$defs` (or `items`, or `$ref`) MEMBER must keep that
+  // name verbatim while the keyword one level up is still translated.
+  const NAME_MAPS = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas']);
+  function walk(node, keysAreNames) {
     if (Array.isArray(node))
-      return node.map(walk);
+      return node.map((item) => walk(item, false));
     if (node === null || typeof node !== 'object')
       return node;
     const out = {};
     for (const key of Object.keys(node)) {
+      const value = node[key];
+      if (keysAreNames) {
+        out[key] = walk(value, false);
+        continue;
+      }
       if (key === 'prefixItems') {
         // 2020-12 `prefixItems` + object-form `items` (the rest) is
         // exactly draft-07 array-form `items` + `additionalItems`
-        out.items = walk(node.prefixItems);
+        out.items = walk(node.prefixItems, false);
         if (Object.hasOwn(node, 'items'))
-          out.additionalItems = walk(node.items);
+          out.additionalItems = walk(node.items, false);
         continue;
       }
       if (key === 'items' && Object.hasOwn(node, 'prefixItems'))
         continue; // folded into additionalItems above
       const target = key === '$defs' ? 'definitions' : key;
-      const value = node[key];
       out[target] = key === '$ref' && typeof value === 'string'
         ? value.replace('#/$defs/', '#/definitions/')
-        : walk(value);
+        : walk(value, NAME_MAPS.has(key));
     }
     return out;
   }
 
-  const twin = walk(schema);
+  const twin = walk(schema, false);
   twin.$schema = 'http://json-schema.org/draft-07/schema#';
   twin.$id = schema.$id + '/draft-07';
   return twin;

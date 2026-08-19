@@ -1,0 +1,107 @@
+{
+  "$contract": "0.1",
+  "id": "shop",
+  "version": "5",
+  "compat": ["4"],
+  "$defs": {
+    "Product": {
+      "type": "object",
+      "required": ["id", "name", "price"],
+      "properties": {
+        "id": { "type": "integer" },
+        "name": { "type": "string", "minLength": 1 },
+        "price": { "type": "number", "minimum": 0 },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Catalog": {
+      "type": "object",
+      "required": ["revision", "products"],
+      "properties": {
+        "revision": { "type": "integer" },
+        "products": { "type": "array", "items": { "$ref": "#/$defs/Product" } }
+      }
+    },
+    "Conflict": {
+      "type": "object",
+      "required": ["current"],
+      "properties": {
+        "current": { "$ref": "#/$defs/Product" }
+      }
+    }
+  },
+  "operations": {
+    "catalog.load": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "properties": {
+          "since": { "type": "string", "format": "date-time" }
+        }
+      },
+      "output": { "$ref": "#/$defs/Catalog" },
+      "errors": { "stale": { "status": 409 } },
+      "policy": { "task": "switch", "cache": "revision" },
+      "http": { "method": "GET", "path": "/api/catalog" },
+      "doc": "The whole catalog snapshot."
+    },
+    "product.save": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["id", "revision", "product"],
+        "properties": {
+          "id": { "type": "integer" },
+          "revision": { "type": "integer" },
+          "product": { "$ref": "#/$defs/Product" }
+        }
+      },
+      "output": { "$ref": "#/$defs/Product" },
+      "errors": {
+        "conflict": { "status": 409, "schema": { "$ref": "#/$defs/Conflict" } },
+        "not-found": { "status": 404 }
+      },
+      "policy": { "task": "exhaust", "idempotency": "required", "revision": "input:/revision" },
+      "http": {
+        "method": "PUT",
+        "path": "/api/products/{id}/master",
+        "in": { "revision": "body", "product": "body" }
+      }
+    },
+    "image.bytes": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "integer" } }
+      },
+      "output": true,
+      "http": { "method": "GET", "path": "/api/images/{id}", "media": "application/octet-stream" }
+    },
+    "product.search": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "properties": {
+          "q": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "tag": { "type": "array", "items": { "type": "string" } },
+          "flag": { "type": "boolean" }
+        }
+      },
+      "output": { "type": "array", "items": { "$ref": "#/$defs/Product" } },
+      "http": { "method": "GET", "path": "/api/products" }
+    },
+    "product.remove": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "integer" } }
+      },
+      "output": true,
+      "policy": { "idempotency": "optional", "retry": { "max": 2, "on": ["not-found"] }, "errors": { "details": "full" }, "limits": { "maxBodyBytes": 4096 } },
+      "errors": { "not-found": { "status": 404 } }
+    }
+  }
+}

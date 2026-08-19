@@ -45,6 +45,7 @@ flowchart BT
     FORMATS["@jarenjs/formats<br/>format keyword validators"]
     REFS["@jarenjs/refs<br/>bundled meta-schemas"]
     EMIT["@jarenjs/emit<br/>schemas to TypeScript/docs<br/>(build-time, JTLT stylesheets)"]
+    CONTRACT["@jarenjs/contract<br/>operation contracts:<br/>validators, normalizers, path matcher"]
     FORMS["@jarenjs/forms<br/>form model + x-form rules"]
     LOCALES["@jarenjs/locales<br/>error-message locale packs<br/>(zero deps, platform Intl only)"]
     LINQ["@jarenjs/linq<br/>fluent chains to query documents"]
@@ -58,6 +59,9 @@ flowchart BT
     EMIT --> CORE
     EMIT --> JSON
     EMIT --> VALIDATE
+    CONTRACT --> CORE
+    CONTRACT --> JSON
+    CONTRACT --> VALIDATE
     FORMS --> CORE
     FORMS --> JSON
     FORMS --> FORMATS
@@ -76,6 +80,7 @@ flowchart BT
 | [`@jarenjs/formats`](../packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](../packages/formats/README.md)) |
 | [`@jarenjs/refs`](../packages/refs) | Data-only meta-schema bundle | — |
 | [`@jarenjs/emit`](../packages/emit) | Build-time artifacts: a schema-analysis pass producing a published type model, then a JTLT stylesheet per target language | [ARCHITECTURE](../packages/emit/ARCHITECTURE.md) · [FORMAT](../packages/emit/docs/EMIT-FORMAT.md) |
+| [`@jarenjs/contract`](../packages/contract) | Operation contracts: the `$contract` document compiled once into per-operation validators, transport normalizers (path/query strings decoded through the input schema's own `coerceTypes` normalizer) and a static-segment path matcher; depends on core, json and validate only, and cooperates with app/db/flow/ai by generated documents, never an import | [CONTRACT-FORMAT](../packages/contract/docs/CONTRACT-FORMAT.md) |
 | [`@jarenjs/forms`](../packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](../packages/forms/README.md)) |
 | [`@jarenjs/locales`](../packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](../packages/locales/README.md) and [ERROR-MESSAGES](../packages/validate/docs/ERROR-MESSAGES.md)) |
 | [`@jarenjs/view`](../packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](../packages/view/docs/VIEW-FORMAT.md) |

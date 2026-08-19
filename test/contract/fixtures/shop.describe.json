@@ -1,0 +1,150 @@
+{
+  "$contract": "0.1",
+  "id": "shop",
+  "version": "5",
+  "compat": [
+    "4"
+  ],
+  "revision": null,
+  "operations": [
+    {
+      "id": "catalog.load",
+      "kind": "read",
+      "method": "GET",
+      "path": "/api/catalog",
+      "status": 200,
+      "media": "application/json",
+      "opaque": false,
+      "in": {
+        "since": "query"
+      },
+      "body": null,
+      "task": "switch",
+      "idempotency": "none",
+      "cache": "revision",
+      "inferred": {
+        "http": false,
+        "status": true,
+        "media": true,
+        "in": [
+          "since"
+        ],
+        "task": false,
+        "idempotency": true,
+        "cache": false
+      }
+    },
+    {
+      "id": "product.save",
+      "kind": "command",
+      "method": "PUT",
+      "path": "/api/products/{id}/master",
+      "status": 200,
+      "media": "application/json",
+      "opaque": false,
+      "in": {
+        "id": "path",
+        "revision": "body",
+        "product": "body"
+      },
+      "body": null,
+      "task": "exhaust",
+      "idempotency": "required",
+      "cache": "none",
+      "inferred": {
+        "http": false,
+        "status": true,
+        "media": true,
+        "in": [],
+        "task": false,
+        "idempotency": false,
+        "cache": true
+      }
+    },
+    {
+      "id": "image.bytes",
+      "kind": "read",
+      "method": "GET",
+      "path": "/api/images/{id}",
+      "status": 200,
+      "media": "application/octet-stream",
+      "opaque": true,
+      "in": {
+        "id": "path"
+      },
+      "body": null,
+      "task": "switch",
+      "idempotency": "none",
+      "cache": "none",
+      "inferred": {
+        "http": false,
+        "status": true,
+        "media": false,
+        "in": [],
+        "task": true,
+        "idempotency": true,
+        "cache": true
+      }
+    },
+    {
+      "id": "product.search",
+      "kind": "read",
+      "method": "GET",
+      "path": "/api/products",
+      "status": 200,
+      "media": "application/json",
+      "opaque": false,
+      "in": {
+        "q": "query",
+        "limit": "query",
+        "tag": "query",
+        "flag": "query"
+      },
+      "body": null,
+      "task": "switch",
+      "idempotency": "none",
+      "cache": "none",
+      "inferred": {
+        "http": false,
+        "status": true,
+        "media": true,
+        "in": [
+          "q",
+          "limit",
+          "tag",
+          "flag"
+        ],
+        "task": true,
+        "idempotency": true,
+        "cache": true
+      }
+    },
+    {
+      "id": "product.remove",
+      "kind": "command",
+      "method": "POST",
+      "path": "/product.remove",
+      "status": 200,
+      "media": "application/json",
+      "opaque": false,
+      "in": {
+        "id": "body"
+      },
+      "body": null,
+      "task": "exhaust",
+      "idempotency": "optional",
+      "cache": "none",
+      "inferred": {
+        "http": true,
+        "status": true,
+        "media": true,
+        "in": [
+          "id"
+        ],
+        "task": true,
+        "idempotency": false,
+        "cache": true
+      }
+    }
+  ]
+}

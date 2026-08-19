@@ -9,6 +9,7 @@ release publishes these public workspaces:
 - `@jarenjs/formats`
 - `@jarenjs/refs`
 - `@jarenjs/emit`
+- `@jarenjs/contract`
 - `@jarenjs/forms`
 - `@jarenjs/locales`
 - `@jarenjs/view`

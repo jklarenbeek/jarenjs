@@ -119,6 +119,7 @@ The monorepo is organized as a dependency chain — each package builds on the o
 | [`@jarenjs/formats`](packages/formats) | Format validators for the `format` keyword | [README](packages/formats/README.md) |
 | [`@jarenjs/refs`](packages/refs) | The official JSON Schema meta-schemas, bundled for offline use | [README](packages/refs/README.md) |
 | [`@jarenjs/emit`](packages/emit) | Build-time artifacts from JSON documents: JSON Schema → TypeScript declarations (and Markdown docs) through JTLT stylesheets, verified against the validator | [README](packages/emit/README.md) · [ARCHITECTURE](packages/emit/ARCHITECTURE.md) · [FORMAT](packages/emit/docs/EMIT-FORMAT.md) |
+| [`@jarenjs/contract`](packages/contract) | Operation contracts: a `$contract` document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher | [README](packages/contract/README.md) · [FORMAT](packages/contract/docs/CONTRACT-FORMAT.md) |
 | [`@jarenjs/forms`](packages/forms) | Framework-agnostic form generation from JSON Schema | [README](packages/forms/README.md) |
 | [`@jarenjs/locales`](packages/locales) | Locale packs (message catalogs) for validate & forms error messages | [README](packages/locales/README.md) |
 | [`@jarenjs/view`](packages/view) | The vnode format: UIs as JSON, with a keyed DOM patcher and SSR | [README](packages/view/README.md) · [FORMAT](packages/view/docs/VIEW-FORMAT.md) |

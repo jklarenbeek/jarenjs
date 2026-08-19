@@ -81,8 +81,8 @@ suffice — the first three are required, the rest only when their row says so:
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
 
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
-`play`, `josl`, `ai`, `flow`, `linq` and `db` are independent of that set — leave
-them out unless you use them.
+`play`, `josl`, `ai`, `flow`, `linq`, `db` and `contract`
+are independent of that set — leave them out unless you use them.
 
 ### Wire the packages into your workspace
 

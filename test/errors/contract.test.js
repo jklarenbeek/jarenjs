@@ -33,6 +33,7 @@ import { FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
 import { AiError } from '@jarenjs/ai';
 import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
 import { DbCompileError, DbRuntimeError } from '@jarenjs/db';
+import { ContractCompileError, ContractRuntimeError } from '@jarenjs/contract';
 import { createStructuredOutput } from '@jarenjs/ai/structured';
 
 const CAUSE = new Error('matrix cause');
@@ -84,6 +85,7 @@ describe('T6 — the cause matrix', () => {
       ['LinqBuildError', (c) => new LinqBuildError('ZZ0001', 'r', '/p', c)],
       ['LinqRuntimeError', (c) => new LinqRuntimeError('ZZ0001', 'r', '/p', c)],
       ['DbCompileError', (c) => new DbCompileError('ZZ0001', 'r', '/p', c)],
+      ['ContractCompileError', (c) => new ContractCompileError('ZZ0001', 'r', '/p', c)],
     ])) {
       it(`${cls}: omitted → no own cause`, () => assertNoCause(make()));
       it(`${cls}: positional undefined → STILL no own cause`, () => assertNoCause(make(undefined)));
@@ -102,6 +104,14 @@ describe('T6 — the cause matrix', () => {
       assert.strictEqual(Object.hasOwn(explicit, 'cause'), true);
       assert.strictEqual(explicit.cause, undefined);
       assertRealCause(new DbRuntimeError('ZZ0001', 'r', { docPath: '/p', cause: CAUSE }));
+    });
+
+    it('ContractRuntimeError (options form, hasOwn semantics): an explicitly undefined cause is preserved', () => {
+      assertNoCause(new ContractRuntimeError('ZZ0001', 'r', { msgid: 'contract/x' }));
+      const explicit = new ContractRuntimeError('ZZ0001', 'r', { msgid: 'contract/x', cause: undefined });
+      assert.strictEqual(Object.hasOwn(explicit, 'cause'), true);
+      assert.strictEqual(explicit.cause, undefined);
+      assertRealCause(new ContractRuntimeError('ZZ0001', 'r', { msgid: 'contract/x', cause: CAUSE }));
     });
 
     it('AiError (meta form, ai semantics): undefined cause is absence', () => {
@@ -131,6 +141,7 @@ describe('T6a — the location matrix', () => {
     ['LinqRuntimeError', (p) => new LinqRuntimeError('ZZ0001', 'why', p)],
     ['DbCompileError', (p) => new DbCompileError('ZZ0001', 'why', p)],
     ['DbRuntimeError', (p) => new DbRuntimeError('ZZ0001', 'why', { docPath: p })],
+    ['ContractCompileError', (p) => new ContractCompileError('ZZ0001', 'why', p)],
   ];
 
   for (const [cls, make] of docPathClasses) {

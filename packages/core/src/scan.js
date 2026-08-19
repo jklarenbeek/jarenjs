@@ -30,6 +30,7 @@ export const CC_0 = 0x30;
 export const CC_1 = 0x31;
 export const CC_9 = 0x39;
 export const CC_COLON = 0x3A;
+export const CC_SEMICOLON = 0x3B;
 export const CC_LT = 0x3C;
 export const CC_EQ = 0x3D;
 export const CC_GT = 0x3E;

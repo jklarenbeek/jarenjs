@@ -251,6 +251,32 @@ const dagNodes: readonly string[] = dag.nodes;
 void [dagNodes, dag.output];
 void dag.run(1, { onNode: (rec) => void (rec.id + rec.status + rec.ms) }).then((v) => v);
 `,
+  '@jarenjs/contract': `
+import { compileContract, ContractCompileError, ContractRuntimeError, CONTRACT_CODES } from '@jarenjs/contract';
+const contract = compileContract({
+  $contract: '0.1',
+  operations: {
+    'thing.get': {
+      kind: 'read',
+      input: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } },
+      output: { type: 'object' },
+      http: { method: 'GET', path: '/things/{id}' },
+    },
+  },
+});
+const ids: readonly string[] = contract.ids;
+void ids;
+const hit = contract.match('GET', '/things/12');
+void (hit === null ? null : [hit.op.id, hit.params.id]);
+const op = contract.operations['thing.get'];
+void [op.http.method, op.http.path, op.http.in.id, op.policy.task, op.output.validate({})];
+void (op.input === null ? null : [op.input.validate({ id: 1 }), op.input.transport?.normalize({ id: '1' })]);
+const described = contract.describe();
+void described.operations[0].inferred.http;
+const codes: Readonly<Record<string, string>> = CONTRACT_CODES;
+void codes.JC0001;
+void (ContractCompileError.name === 'ContractCompileError' && ContractRuntimeError.name === 'ContractRuntimeError');
+`,
   '@jarenjs/db': `
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';

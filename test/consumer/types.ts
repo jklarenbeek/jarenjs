@@ -631,6 +631,32 @@ const dagResult: Promise<unknown> = dag.run({ rows: [] }, {
 });
 void dagResult.catch(() => null);
 
+// @jarenjs/contract — a compiled contract: operations, match, describe
+import * as contract from '@jarenjs/contract';
+
+const shopContract = contract.compileContract({
+  $contract: '0.1',
+  operations: {
+    'product.save': {
+      kind: 'command',
+      input: { type: 'object', required: ['id'], properties: { id: { type: 'integer' }, name: { type: 'string' } } },
+      output: { type: 'object' },
+      http: { method: 'PUT', path: '/api/products/{id}' },
+    },
+  },
+});
+const contractIds: readonly string[] = shopContract.ids;
+const contractHit = shopContract.match('PUT', '/api/products/12');
+const contractParams: Readonly<Record<string, string>> | undefined = contractHit?.params;
+const saveOp: contract.CompiledOperation = shopContract.operations['product.save'];
+const saveMethod: string = saveOp.http.method;
+const saveIn: Readonly<Record<string, 'path' | 'query' | 'header' | 'body'>> = saveOp.http.in;
+const savePolicy: contract.CompiledPolicy = saveOp.policy;
+const description: contract.ContractDescription = shopContract.describe();
+void [contractIds, contractParams, saveMethod, saveIn, savePolicy.task, description.operations[0].inferred.in];
+const contractCodes: Readonly<Record<string, string>> = contract.CONTRACT_CODES;
+void [contractCodes.JC0001, contract.ContractCompileError, contract.ContractRuntimeError];
+
 // @jarenjs/linq — the typed fluent surface: precise inference on the
 // common path, honest unknown on the exotic path, never a wrong type.
 // Every claim here has a runtime twin in test/linq/types.test.js.

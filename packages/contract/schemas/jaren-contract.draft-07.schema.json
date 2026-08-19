@@ -1,0 +1,258 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-contract/0.1/draft-07",
+  "title": "Jaren operation contract 0.1",
+  "description": "Structural grammar of a jaren-contract document (see packages/contract/docs/CONTRACT-FORMAT.md): the operations two Jaren ends may exchange, each a JSON-in/JSON-out operation with a kind, an input object schema, an output schema, declared errors, a policy and an HTTP binding. Every vocabulary here is CLOSED — an unknown member of the root, an operation, policy, http or an error declaration is refused, because a silently ignored policy is a behavior bug. Embedded schemas (input, output, error schemas, $defs) are typed structurally only; the compiler is the authority for $ref resolution, the effective input type, the cross-member rules (path variables against input.properties, location conflicts, a GET body) and route-shape uniqueness.",
+  "type": "object",
+  "properties": {
+    "$contract": {
+      "description": "The contract format version.",
+      "const": "0.1"
+    },
+    "id": {
+      "description": "An optional identifier for the contract (a tool prefix, a file name).",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+    },
+    "version": {
+      "description": "The consumer's version string; a compatibility claim, unrelated to the revision hash.",
+      "type": "string",
+      "minLength": 1
+    },
+    "compat": {
+      "description": "Peer version strings this contract accepts.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "$defs": {
+      "description": "Named schemas the operations reference as #/$defs/<name>.",
+      "type": "object",
+      "additionalProperties": {
+        "description": "A JSON Schema.",
+        "type": [
+          "object",
+          "boolean"
+        ]
+      }
+    },
+    "operations": {
+      "description": "Operation id (dotted lowercase words) to operation declaration.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/operation"
+      }
+    }
+  },
+  "required": [
+    "$contract",
+    "operations"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "operation": {
+      "description": "One operation: its kind, the input object schema whose top-level members the http binding places, the output schema, declared errors, the behavior policy and the http binding (canonical POST /<id> when absent).",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "'read' or 'command'; 'subscribe' is reserved for a later format version and refused by the compiler.",
+          "enum": [
+            "read",
+            "command"
+          ]
+        },
+        "input": {
+          "description": "A JSON Schema whose effective type is object (the compiler follows $ref to check).",
+          "type": "object"
+        },
+        "output": {
+          "description": "A JSON Schema; true accepts anything (an opaque or unspecified body).",
+          "type": [
+            "object",
+            "boolean"
+          ]
+        },
+        "errors": {
+          "description": "Declared operation errors by code.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/errorDeclaration"
+          }
+        },
+        "policy": {
+          "$ref": "#/definitions/policy"
+        },
+        "http": {
+          "$ref": "#/definitions/http"
+        },
+        "doc": {
+          "description": "Human-readable documentation for projections.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "output"
+      ],
+      "additionalProperties": false
+    },
+    "errorDeclaration": {
+      "description": "One declared error: the HTTP status a binding that carries statuses uses (default 400) and an optional schema for its details.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "schema": {
+          "description": "A JSON Schema for the error details.",
+          "type": [
+            "object",
+            "boolean"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "description": "The declared behavior of an operation; every member has a default the compiler materializes (task: switch for read, exhaust for command; idempotency none; cache none; maxBodyBytes 1048576; errors.details paths).",
+      "type": "object",
+      "properties": {
+        "task": {
+          "enum": [
+            "switch",
+            "exhaust",
+            "concat",
+            "parallel"
+          ]
+        },
+        "idempotency": {
+          "description": "A read must be none (or absent).",
+          "enum": [
+            "none",
+            "optional",
+            "required"
+          ]
+        },
+        "revision": {
+          "description": "Where the revision the command asserts lives: \"input:\" followed by an RFC 6901 pointer.",
+          "type": "string",
+          "pattern": "^input:(?:/(?:[^/~]|~[01])*)*$"
+        },
+        "cache": {
+          "enum": [
+            "none",
+            "revision"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxBodyBytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "errors": {
+          "type": "object",
+          "properties": {
+            "details": {
+              "enum": [
+                "none",
+                "paths",
+                "full"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "max": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "on": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "max",
+            "on"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "http": {
+      "description": "The REST binding: an uppercase method, a path template (RFC 6570 level-1 {name} or :name segments, canonicalized to {name}), member locations, an optional whole-body member, the success status (default 200) and media type (default application/json; anything else marks the operation opaque).",
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS"
+          ]
+        },
+        "path": {
+          "description": "A leading /, non-empty segments; a variable is a whole segment {name} or :name; no wildcards, no RFC 6570 operators or modifiers.",
+          "type": "string",
+          "pattern": "^/$|^(?:/(?:[^/{}:*?#\\s\\x00-\\x1F\\x7F]+|\\{[A-Za-z_][A-Za-z0-9_]*\\}|:[A-Za-z_][A-Za-z0-9_]*))+$"
+        },
+        "in": {
+          "description": "Input member → where it travels; path variables are always path, the rest defaults to query for a read and body for a command.",
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "path",
+              "query",
+              "header",
+              "body"
+            ]
+          }
+        },
+        "body": {
+          "description": "The input member whose value IS the request body (for a raw array or scalar body).",
+          "type": "string"
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "media": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+(?:\\s*;.*)?$"
+        }
+      },
+      "required": [
+        "method",
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
