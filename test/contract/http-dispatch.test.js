@@ -376,23 +376,13 @@ describe('dispatch — HEAD, entity tags, status override, opaque, well-known', 
     const head = await server.dispatch(req('HEAD', '/api/images/7'));
     assert.strictEqual(head.status, 206);
     assert.strictEqual(head.body, null);
-    // the transport members are the whole input of image.bytes, so they are validated: JC2006, the raw handler never runs
+    // the transport members are ALWAYS the whole input of an opaque operation, so they are validated: JC2006, the raw handler never runs
     seen = undefined;
     const invalid = await server.dispatch(req('GET', '/api/images/not-a-number'));
     assert.strictEqual(invalid.status, 400);
     assert.deepStrictEqual(json(invalid).details, [{ path: '/id', keyword: 'type' }]);
     assert.strictEqual(seen, undefined);
-    // an opaque operation WITH a body-located member cannot be validated without decoding bytes: its input is handed over as decoded
-    const withBody = compileContract({ $contract: '0.1', operations: {
-      'blob.note': { kind: 'command', input: { type: 'object', required: ['id', 'note'], properties: { id: { type: 'integer' }, note: { type: 'integer' } } },
-        output: true, http: { method: 'PUT', path: '/blobs/{id}/note', media: 'application/octet-stream' } },
-    } });
-    /** @type {any} */
-    let unvalidated;
-    const wb = serveHttp(withBody, { 'blob.note': (input, ctx) => { unvalidated = { input, body: ctx.body }; return { status: 204 }; } });
-    const wbr = await wb.dispatch(req('PUT', '/blobs/x/note', { 'content-type': 'application/octet-stream' }, new Uint8Array([1])));
-    assert.strictEqual(wbr.status, 204);
-    assert.deepStrictEqual(unvalidated, { input: { id: 'x' }, body: new Uint8Array([1]) });
+    // (an opaque operation with a body-located member does not exist: the compiler refuses it with JC0017 — compile.test.js)
     // no input declared: the raw handler receives null, like a JSON handler
     const noInput = compileContract({ $contract: '0.1', operations: { 'ping.raw': { kind: 'read', output: true, http: { method: 'GET', path: '/raw', media: 'text/plain' } } } });
     /** @type {any} */

@@ -527,8 +527,15 @@ describe('compileContract — every rule has its code and docPath', () => {
     refuses(one({ kind: 'command', output: true, policy: { idempotency: 'optional', retry: { max: 1, on: ['x'] } } }), 'JC0014', '/operations/a/policy/retry');
     assert.deepStrictEqual(compileContract(one({ kind: 'command', output: true, policy: { idempotency: 'required', retry: { max: 1, on: ['x'] } } })).operations.a.policy.retry, { max: 1, on: ['x'] });
     assert.deepStrictEqual(compileContract(one({ ...READ, policy: { retry: { max: 1, on: ['x'] } } })).operations.a.policy.retry, { max: 1, on: ['x'] }, 'a read is idempotent by nature');
-    const ok = compileContract(one({ kind: 'command', output: true, policy: { revision: 'input:', task: 'concat' } }));
-    assert.strictEqual(ok.operations.a.policy.revision, 'input:');
+    const revInput = { type: 'object', properties: { revision: { $ref: '#/$defs/Rev' } } };
+    const ok = compileContract(one({ kind: 'command', input: revInput, output: true, policy: { revision: 'input:', task: 'concat' } }, { $defs: { Rev: { type: 'integer' } } }));
+    assert.strictEqual(ok.operations.a.policy.revision, 'input:', 'the empty pointer (the whole input) needs only an input');
+    // policy.revision must address a declared input member (03A): the first token names one of input.properties; deeper tokens are not checked
+    refuses(one({ kind: 'command', output: true, policy: { revision: 'input:/revision' } }), 'JC0014', '/operations/a/policy/revision', /no input/);
+    refuses(one({ kind: 'command', output: true, policy: { revision: 'input:' } }), 'JC0014', '/operations/a/policy/revision', /no input/);
+    refuses(one({ kind: 'command', input: revInput, output: true, policy: { revision: 'input:/nope' } }, { $defs: { Rev: { type: 'integer' } } }), 'JC0014', '/operations/a/policy/revision', /'\/nope'.*no member 'nope'/);
+    assert.strictEqual(compileContract(one({ kind: 'command', input: revInput, output: true, policy: { revision: 'input:/revision/deep' } }, { $defs: { Rev: { type: 'integer' } } })).operations.a.policy.revision, 'input:/revision/deep', 'deeper tokens are not checked — the member may be a $ref or open');
+    assert.strictEqual(compileContract(shop).operations['product.save'].policy.revision, 'input:/revision', 'the shop fixture compiles unchanged');
     assert.strictEqual(ok.operations.a.policy.task, 'concat');
   });
 
@@ -553,5 +560,27 @@ describe('compileContract — every rule has its code and docPath', () => {
     refuses(one({ kind: 'command', input, output: true, http: { method: 'GET', path: '/a' } }), 'JC0016', '/operations/a/http/method', /command.*GET/);
     assert.doesNotThrow(() => compileContract(one({ kind: 'command', input, output: true, http: { method: 'GET', path: '/a', in: { x: 'query' } } })));
     assert.doesNotThrow(() => compileContract(one({ kind: 'read', input, output: true, http: { method: 'POST', path: '/a', in: { x: 'body' } } })));
+  });
+
+  it('JC0017 — an opaque operation with a body-located member (three placements); opaque with path/query/header members compiles', () => {
+    const input = { type: 'object', required: ['id', 'note'], properties: { id: { type: 'integer' }, note: { type: 'integer' } } };
+    // http.body placed it
+    refuses(one({ kind: 'command', input, output: true, http: { method: 'PUT', path: '/blobs/{id}', body: 'note', media: 'application/octet-stream' } }),
+      'JC0017', '/operations/a/http/body', /opaque.*octet-stream.*'note'.*http\.body.*query or header/);
+    // http.in placed it
+    refuses(one({ kind: 'read', input, output: true, http: { method: 'POST', path: '/blobs/{id}', in: { note: 'body' }, media: 'text/plain' } }),
+      'JC0017', '/operations/a/http/in/note', /http\.in\.note/);
+    // the command default placed it: the media is the member that made the body undecodable
+    refuses(one({ kind: 'command', input, output: true, http: { method: 'PUT', path: '/blobs/{id}/note', media: 'application/octet-stream' } }),
+      'JC0017', '/operations/a/http/media', /default location of a command member.*make the operation JSON/);
+    // the same members on a JSON operation, or on an opaque one outside the body, compile
+    assert.doesNotThrow(() => compileContract(one({ kind: 'command', input, output: true, http: { method: 'PUT', path: '/blobs/{id}/note' } })));
+    const ok = compileContract(one({ kind: 'command', input, output: true, http: { method: 'PUT', path: '/blobs/{id}', in: { note: 'query' }, media: 'application/octet-stream' } }));
+    assert.deepStrictEqual({ ...ok.operations.a.http.in }, { id: 'path', note: 'query' });
+    assert.strictEqual(ok.operations.a.http.opaque, true);
+    assert.doesNotThrow(() => compileContract(one({ kind: 'command', input, output: true, http: { method: 'PUT', path: '/blobs/{id}', in: { note: 'header' }, media: 'image/png' } })));
+    // an opaque operation with no input, or with path members only (image.bytes), compiles
+    assert.doesNotThrow(() => compileContract(one({ kind: 'read', output: true, http: { method: 'GET', path: '/raw', media: 'text/plain' } })));
+    assert.strictEqual(compileContract(shop).operations['image.bytes'].http.opaque, true);
   });
 });

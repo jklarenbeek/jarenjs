@@ -1,8 +1,10 @@
 //@ts-check
 /**
  * @file The `@jarenjs/app` binding of a contract (docs/CONTRACT-FORMAT.md
- * §11): `contractAppBinding` generates the state slice, the start/done
- * actions and the slice schema as pure JSON; `createContractEffect`
+ * §11): `contractAppBinding` generates the state slice, the
+ * start/done/reset actions and the slice schema as pure JSON (the
+ * state-side guards derived from `policy.task`, the mode never named);
+ * `createContractEffect`
  * makes the one `contract` effect those actions invoke, over any open
  * client. Neither imports `@jarenjs/app` — the documents cross as JSON
  * and the task-effect factory crosses as a function the host passes in.

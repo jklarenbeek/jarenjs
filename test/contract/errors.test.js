@@ -2,7 +2,7 @@
 /**
  * @file The error surface: every code in `CONTRACT_CODES` has a one-line
  * meaning, the populated ranges are exactly the compile codes
- * `JC0001–JC0016`, the host codes `JC1001–JC1008`, the http codes
+ * `JC0001–JC0017`, the host codes `JC1001–JC1008`, the http codes
  * `JC2001–JC2015` and the client codes `JC2050–JC2058`, and every class
  * keeps its contract — the
  * coded-error contract for compile/runtime (composed message, own
@@ -19,7 +19,7 @@ const range = (/** @type {number} */ from, /** @type {number} */ to) => Array.fr
 describe('contract errors — the code table', () => {
   it('lists the compile, host, http and client ranges with one-line meanings, frozen', () => {
     const codes = Object.keys(CONTRACT_CODES);
-    assert.deepStrictEqual(codes, [...range(1, 16), ...range(1001, 1008), ...range(2001, 2015), ...range(2050, 2058)]);
+    assert.deepStrictEqual(codes, [...range(1, 17), ...range(1001, 1008), ...range(2001, 2015), ...range(2050, 2058)]);
     for (const code of codes) {
       const meaning = CONTRACT_CODES[/** @type {keyof typeof CONTRACT_CODES} */ (code)];
       assert.strictEqual(typeof meaning, 'string', code);

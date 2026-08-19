@@ -8,7 +8,8 @@
  * from the generated schema, and driven against a real `serveHttp`
  * dispatcher: reload → done, a conflicting save → error with the draft
  * and the last value untouched, a later save → done; the staleness
- * scenario the doc walks through.
+ * scenario the doc walks through, whose exhaust tail proves the
+ * double-click runs once AND lands (03A).
  */
 
 import { describe, it } from 'node:test';
@@ -109,7 +110,7 @@ describe('the worked example (docs/APP-INTEGRATION.md, run verbatim)', () => {
   it('reload → done with the catalog; a conflicting save → error, draft and value untouched; a later save → done', async () => {
     const { app, calls, errors, slot } = mountDoc();
     app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
-    assert.deepStrictEqual(slot('catalog.load'), { id: 1, status: 'loading', value: null, error: null, meta: null });
+    assert.deepStrictEqual(slot('catalog.load'), { id: 1, status: 'loading', kind: null, value: null, error: null, meta: null });
     assert.strictEqual(calls[0].url, '/api/catalog?since=2026-01-01T00%3A00%3A00Z');
     calls[0].resolve();
     await drain(() => slot('catalog.load').status !== 'loading');
@@ -125,7 +126,7 @@ describe('the worked example (docs/APP-INTEGRATION.md, run verbatim)', () => {
     calls[1].resolve();
     await drain(() => slot('product.save').status !== 'loading');
     const failed = slot('product.save');
-    assert.deepStrictEqual([failed.status, failed.value, failed.error.code, failed.error.status], ['error', null, 'conflict', 409]);
+    assert.deepStrictEqual([failed.status, failed.kind, failed.value, failed.error.code, failed.error.status], ['error', 'failure', null, 'conflict', 409]);
     assert.deepStrictEqual(failed.error.details, { id: 1, name: 'Kettle', price: 12 });
     assert.deepStrictEqual(app.getState().draft, { id: 1, name: 'Kettle XL', price: 12 }, 'the draft is untouched');
     // a later save lands; the failed value slot had nothing to keep, the catalog slot still has its list
@@ -151,12 +152,16 @@ describe('the worked example (docs/APP-INTEGRATION.md, run verbatim)', () => {
     app.dispatch('contract/catalog.load/done', { id: 1, result: { ok: true, value: [], meta: { op: 'catalog.load', attempt: 1, trace: null, revision: null, etag: null, notModified: false } } });
     assert.strictEqual(slot('catalog.load').value.length, 2, 'the id guard kept id 2\'s result');
     assert.strictEqual(transitions.length, seen, 'no transition fired');
-    // the exhaust command: a double start runs once
+    // the exhaust command: a double start runs once — the second start is a state no-op, so the one completion lands
     app.dispatch('contract/product.save/start', { id: 2, product: { id: 2, name: 'Teapot', price: 31 } });
     app.dispatch('contract/product.save/start', { id: 2, product: { id: 2, name: 'Teapot', price: 31 } });
-    assert.deepStrictEqual([slot('product.save').id, calls.length], [2, 3], 'one request for two starts');
+    assert.deepStrictEqual([slot('product.save').id, calls.length], [1, 3], 'one request for two starts; the slot stays at id 1');
     calls[2].resolve();
-    await drain(() => calls.length === 3 && saves() === 1);
-    assert.strictEqual(slot('product.save').status, 'loading', 'the completion carried id 1 against a slot at 2 — rejected, honest state');
+    await drain(() => slot('product.save').status !== 'loading');
+    assert.strictEqual(saves(), 1, 'the handler ran once');
+    assert.deepStrictEqual([slot('product.save').id, slot('product.save').status, slot('product.save').value], [1, 'done', { id: 2, name: 'Teapot', price: 31 }], 'the result landed');
+    // reset releases the slot without touching id, value or meta
+    app.dispatch('contract/product.save/reset');
+    assert.deepStrictEqual([slot('product.save').id, slot('product.save').status, slot('product.save').value.price], [1, 'idle', 31]);
   });
 });

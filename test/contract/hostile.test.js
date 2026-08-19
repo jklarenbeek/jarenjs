@@ -103,7 +103,7 @@ describe('hostile requests', () => {
     const server = serve({ 'image.bytes': (input) => { rawInput = input; return { status: 200 }; } });
     // the shape /api/products/{}/master exists under PUT and binds "\0": a 405, not a 404
     await settles(server, req('GET', '/api/products/%00/master'), 405, 'JC2002');
-    // an opaque operation validates its transport members like any other (they are its whole input):
+    // an opaque operation validates its transport members like any other (they are always its whole input — JC0017 refuses a body-located member):
     // a traversal string where the schema says integer never reaches the raw handler; a decoded `/` never re-splits
     await settles(server, req('GET', '/api/images/%2F..%2F..%2Fetc%2Fpasswd'), 400, 'JC2006');
     await settles(server, req('GET', '/api/images/' + 'a'.repeat(100000)), 400, 'JC2006');

@@ -69,9 +69,10 @@ import {
  * `null` when the operation declares none) and the context; returns the
  * output value, a promise of it, or a declared failure. An opaque
  * operation's handler is raw: it returns `{ status, headers?, body? }`
- * and reads the bytes from `ctx.body`; its `input` is the decoded
- * transport members — validated when they are the whole input (no
- * body-located member), the handler's own to check otherwise.
+ * and reads the bytes from `ctx.body`; its `input` is the decoded,
+ * validated transport members — they are always its whole input, since
+ * the compiler refuses a body-located member on an opaque operation
+ * (`JC0017`).
  * @typedef {(input: any, ctx: RequestContext) => unknown} Handler
  */
 
@@ -434,11 +435,11 @@ function run(server, request) {
   };
 
   // ——— 3. opaque: the raw handler. The transport members ARE the whole
-  // input when no member is body-located, so they are validated like any
-  // other input; with a body-located member the bytes are not decoded and
-  // the schema cannot be satisfied here — the raw handler owns it ———
+  // input (an opaque operation has no body-located member — JC0017), so
+  // they are validated like any other input; the bytes go to the handler
+  // untouched in ctx.body ———
   if (route.raw) {
-    if (route.validateInput !== null && !route.hasBody) {
+    if (route.validateInput !== null) {
       const v = verdict(route.validateInput, transported);
       if (!v.valid) {
         if (v.thrown !== undefined) observe(server, v.thrown, null);

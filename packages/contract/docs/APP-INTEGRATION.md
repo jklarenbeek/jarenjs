@@ -3,7 +3,7 @@
 How an application built with `@jarenjs/app` calls the operations of a
 contract with no route strings, no hand-written `fetch` wrappers and
 no per-operation effect handlers. The shape of the convention is one
-sentence: **every operation becomes a task slot in state plus two
+sentence: **every operation becomes a task slot in state plus three
 generated action documents, and one registered effect carries them all**
 — plain JSON the app compiles like any hand-written action, with the
 per-operation concurrency mode taken from the contract's `policy.task`
@@ -33,9 +33,9 @@ const { slice, actions, schema } = contractAppBinding(contract, {
   namespace: 'contract/',      // action-name prefix (default)
   ops: contract.ids,           // the operations this app uses (default: all)
 });
-// slice   → { 'catalog.load': { id: 0, status: 'idle', value: null, error: null, meta: null }, … }   mount it at statePath
-// actions → { 'contract/catalog.load/start': <query doc>, 'contract/catalog.load/done': <query doc>, … }  spread into the app's actions
-// schema  → the slice's JSON Schema                                                               compose into validateState
+// slice   → { 'catalog.load': { id: 0, status: 'idle', kind: null, value: null, error: null, meta: null }, … }   mount it at statePath
+// actions → { 'contract/catalog.load/start', '…/done', '…/reset': <query docs>, … }                            spread into the app's actions
+// schema  → the slice's JSON Schema                                                                           compose into validateState
 
 createApp(doc, {
   effects: { contract: createContractEffect(client, { createTaskEffect }) },   // ONE effect for every operation
@@ -48,7 +48,11 @@ there is exactly one task-effect implementation in the suite. It builds
 one inner task effect per distinct `policy.task` mode the contract
 uses (`switch` for a read, `exhaust` for a command by default) and
 routes each descriptor by its `op`, so a `switch` read and an `exhaust`
-command live behind the one `run: "contract"` the documents name.
+command live behind the one `run: "contract"` the documents name. The
+mode is never *named* in a generated document; the generator derives the
+document's state-side guards from it instead (an `exhaust` start is a
+no-op in state while its slot is loading), so state and effect tell the
+same story in every mode.
 
 ## The worked example
 
@@ -138,13 +142,15 @@ const app = createApp(
   });
 
 app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
-// → state.contract['catalog.load'] = { id: 1, status: 'loading', value: null, error: null, meta: null }
+// → state.contract['catalog.load'] = { id: 1, status: 'loading', kind: null, value: null, error: null, meta: null }
 // … the server answers …
-// → { id: 1, status: 'done', value: [ {…}, {…} ], error: null, meta: { op, attempt: 1, trace, … } }
+// → { id: 1, status: 'done', kind: null, value: [ {…}, {…} ], error: null, meta: { op, attempt: 1, trace, … } }
 
 app.dispatch('contract/product.save/start', { id: 1, product: app.getState().draft });
-// a 409 conflict → { id: 1, status: 'error', value: null, error: { code: 'conflict', status: 409, details: {…}, … }, meta }
-// state.draft is untouched; a later success → status 'done', value the saved product, error null
+// a 409 conflict → { id: 1, status: 'error', kind: 'failure', value: null, error: { code: 'conflict', status: 409, details: {…}, … }, meta }
+// state.draft is untouched; a later success → status 'done', kind null, value the saved product, error null
+app.dispatch('contract/product.save/reset');
+// → status 'idle', kind null, error null — id, value and meta untouched (dismiss the error, or release a slot the host cancelled)
 ```
 
 ## What the generated documents guarantee
@@ -155,30 +161,41 @@ app.dispatch('contract/product.save/start', { id: 1, product: app.getState().dra
   `done` carries `id: 1`, the guard compares it with the slot's `2`,
   `$if` takes no branch, and the action yields the empty sequence — no
   state change, no render, no subscriber.
-- **A double-click does not double-run a command.** `product.save` is a
-  command, `policy.task` defaults to `exhaust`: while the slot has an
-  in-flight task, a second `start` still increments the id and marks
-  `loading` (state is honest about the intent), but the effect ignores
-  the duplicate start entirely — the handler runs once. The completion
-  carries id 1 against a slot at 2 and is rejected; the slot is released
-  by the next start. (For a command that must land, `policy.task:
-  "concat"` queues; the document is the one place the choice is made.)
+- **A double-click does not double-run a command — and its result
+  lands.** `product.save` is a command, `policy.task` defaults to
+  `exhaust`: its generated `start` is wrapped in a state-side guard
+  (`$if: [{ $ne: [<slot>.status, "loading"] }, …]`), so while the slot
+  has an in-flight task a second `start` is a no-op in state *and* in
+  the effect — no patch, no effect invocation, no render; the id stays
+  at 1, the handler runs once, the single completion carries id 1
+  against a slot at 1 and lands as `done` with the saved product. (For
+  a command whose every dispatch must run, `policy.task: "concat"`
+  queues; the contract is the one place the choice is made.)
+- **`reset` releases a slot.** `contract/<op>/reset` writes `status:
+  "idle"`, `kind: null`, `error: null` and leaves `id`, `value` and
+  `meta` alone — the ordinary "dismiss the error" action, and the one
+  way out of a slot a host `effect.cancel(slot)` left `loading` on an
+  `exhaust` operation (the guarded `start` is a no-op while loading).
+  The id stays monotonic, so a late completion of the cancelled attempt
+  is still rejected.
 - **A failed reload keeps the last good value.** The error branch writes
   `status`, `error` and `meta`; `value` is untouched, so a list stays on
   screen while the error shows beside it.
 - **Cancellation is silent.** A `cancelled` outcome dispatches nothing
   (the task effect's `AbortError` rule); the slot stays `loading` until
-  its successor settles or the host dispatches its own reset.
+  its successor settles or the host dispatches `reset`.
 - **`validateState` fails closed.** The slice schema pins `status` to
-  `idle | loading | done | error`, `value` to the operation's output
-  schema or `null`, and `error`/`meta` to the outcome shapes; a rogue
-  hand-written action that writes a nonsense status is `JA2005` and the
-  state stands.
-- **Every failure lands as an outcome.** A declared error, a network
-  failure, a contract violation — and a thrown host value, projected to
-  `JC2058` — arrive in `error` as the same `{ code, message, status,
-  details, retryable }`; `kind` is recoverable from the code (`JC2051`
-  network, other `JC205x` contract, anything else a failure).
+  `idle | loading | done | error`, `kind` to `null | failure | network |
+  contract`, `value` to the operation's output schema or `null`, and
+  `error`/`meta` to the outcome shapes; a rogue hand-written action that
+  writes a nonsense status is `JA2005` and the state stands.
+- **Every failure lands as an outcome, and the slot says which kind.** A
+  declared error, a network failure, a contract violation — and a thrown
+  host value, projected to `JC2058` — arrive in `error` as the same
+  `{ code, message, status, details, retryable }`, and the slot's `kind`
+  carries the outcome's kind (`failure` | `network` | `contract`) while
+  `status` is `error`, so a view tells "you are offline" from "the
+  server refused this" without parsing `error.code`.
 
 ## Honest divergences from TASKS.md
 
@@ -189,6 +206,19 @@ app.dispatch('contract/product.save/start', { id: 1, product: app.getState().dra
 - The effect's `fail` prop is not emitted: one completion action per
   operation is the query-friendliest shape, and the outcome already
   distinguishes success from failure.
-- The state slot carries `value` and `meta` beside TASKS.md's `{ id,
-  status, error }`: the operation's output has a schema, so it has a
-  typed home in the slice rather than a hand-chosen path.
+- The state slot carries `kind`, `value` and `meta` beside TASKS.md's
+  `{ id, status, error }`: the operation's output has a schema, so it
+  has a typed home in the slice rather than a hand-chosen path, and the
+  failure class is a member rather than a code to parse.
+- One slot per operation makes `concat` and `parallel` **"latest
+  wins"**: every `start` increments the id, the effect runs them all
+  (queued, or concurrently), only the completion carrying the current
+  id lands, `status` stays `loading` until the newest does, and earlier
+  results and errors are dropped from state. TASKS.md's per-slot
+  convention says nothing about several results for one slot; a
+  consumer that needs every result of a fan-out needs a slot per key.
+- An `exhaust` operation's `start` carries a state-side guard TASKS.md
+  does not write by hand: TASKS.md's exhaust mode ignores duplicate
+  starts in the *effect*, but a hand-written start still moves the
+  slot id, so the one completion would be rejected; the generator
+  decides in state first, and the mode is still never named.

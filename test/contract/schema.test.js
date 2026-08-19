@@ -207,6 +207,7 @@ describe('the jaren-contract schema artifact', () => {
     ['JC0010', 'route-shape uniqueness', { $contract: '0.1', operations: { first: READ, second: { kind: 'command', output: true, http: { method: 'GET', path: '/a' } } } }],
     ['JC0014', 'a read declaring idempotency', one({ ...READ, policy: { idempotency: 'required' } })],
     ['JC0016', 'a GET body', one({ kind: 'read', input: { type: 'object', properties: { x: { type: 'string' } } }, output: true, http: { method: 'GET', path: '/a', in: { x: 'body' } } })],
+    ['JC0017', 'an opaque body member', one({ kind: 'command', input: { type: 'object', properties: { x: { type: 'string' } } }, output: true, http: { method: 'PUT', path: '/a', media: 'application/octet-stream' } })],
   ];
 
   it('the compiler-only rules pass the grammar and are refused by the compiler', () => {

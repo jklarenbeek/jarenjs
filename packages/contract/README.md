@@ -219,8 +219,8 @@ import { createApp, createTaskEffect } from '@jarenjs/app';
 import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
 
 const { slice, actions, schema } = contractAppBinding(contract, { ops: ['catalog.load', 'product.save'] });
-// slice   → { 'catalog.load': { id: 0, status: 'idle', value: null, error: null, meta: null }, … }   pure JSON, mount at /contract
-// actions → 'contract/catalog.load/start' + '/done' per operation — the TASKS.md id guard built in
+// slice   → { 'catalog.load': { id: 0, status: 'idle', kind: null, value: null, error: null, meta: null }, … }   pure JSON, mount at /contract
+// actions → 'contract/catalog.load/start' + '/done' + '/reset' per operation — the TASKS.md id guard built in
 // schema  → the slice's JSON Schema for validateState (value = the output schema or null)
 
 const app = createApp({ state: { contract: slice }, view, actions: { ...actions, ...own } }, {
@@ -234,14 +234,16 @@ No route strings, no hand-written wrappers, and no import of
 task-effect factory crosses as a function the host passes in. A
 superseded read dispatches once with the newer result, an out-of-order
 older response is rejected by the id guard, a double-dispatched command
-runs once, and every failure lands in state as the same outcome shape.
+runs once and its result lands, a slot can always be released with
+`reset`, and every failure lands in state as the same outcome shape with
+its kind beside it.
 The runnable walkthrough is [docs/APP-INTEGRATION.md](docs/APP-INTEGRATION.md);
 the normative binding is [CONTRACT-FORMAT.md §11](docs/CONTRACT-FORMAT.md#11-the-app-binding).
 
 ## What is here, and what is coming
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
-`describe()`, the `JC0001–JC0016` compile errors; the HTTP server binding
+`describe()`, the `JC0001–JC0017` compile errors; the HTTP server binding
 (`serveHttp`, the `JC2001–JC2015` wire taxonomy with its English catalog,
 `fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
 and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP

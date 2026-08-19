@@ -887,4 +887,7 @@ export function openHttpClient(contract, options = {}) {
   //#endregion
 }
 
-export { okOutcome, failedOutcome, makeMeta, isOutcome, assembleOutcome, prepareOutcomeRoute, hostFailureOutcome } from './outcome.js';
+export {
+  okOutcome, failedOutcome, makeMeta, outcomeError, isOutcome, assembleOutcome, prepareOutcomeRoute, hostFailureOutcome,
+  OUTCOME_ERROR_MEMBERS, OUTCOME_META_MEMBERS,
+} from './outcome.js';

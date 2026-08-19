@@ -4,14 +4,20 @@
  * `@jarenjs/app` documents of a contract (docs/CONTRACT-FORMAT.md §11) —
  * pure JSON, the `fsmToApp` shape, with no import in either direction.
  * For every operation the app uses it emits one task slot in a state
- * slice, a `start` action and a `done` action in the async-task
+ * slice, a `start`, a `done` and a `reset` action in the async-task
  * convention of `@jarenjs/app`'s TASKS.md (a monotonic slot `id`, the
  * start patches the slot AND hands the new id to the effect, the
  * completion guards on that id so an out-of-order response is a
  * provable no-op), and a JSON Schema for the slice to compose into
  * `validateState`. The app document names ONE effect, `run: "contract"`;
- * the per-operation task mode never appears in the document — it comes
- * from `policy.task` through `createContractEffect`.
+ * the per-operation task mode is never NAMED in the document — it comes
+ * from `policy.task` through `createContractEffect` — but the generator
+ * derives the document's state-side guards from it exactly as it
+ * derives the document's shape from `kind`, so that the slot and the
+ * effect tell the same story in every mode (D10): an `exhaust`
+ * operation's `start` is a no-op in state while its slot is `loading`
+ * (the effect would ignore the duplicate start; state decides first, so
+ * the one completion that arrives carries the current id and lands).
  */
 
 import { setObjectMember } from '@jarenjs/core/object';
@@ -31,15 +37,20 @@ import { ContractHostError } from '../errors.js';
  */
 
 /**
- * One task slot: the slice member of an operation.
- * @typedef {{ id: number, status: 'idle' | 'loading' | 'done' | 'error', value: unknown, error: unknown, meta: unknown }} TaskSlot
+ * One task slot: the slice member of an operation. `kind` is the failed
+ * outcome's kind while `status` is `"error"` (`"failure"` a declared or
+ * taxonomy error, `"network"`, `"contract"`; `"cancelled"` never lands —
+ * nothing is dispatched for it) and `null` otherwise, so a view tells
+ * "you are offline" from "the server refused this" without parsing
+ * `error.code`.
+ * @typedef {{ id: number, status: 'idle' | 'loading' | 'done' | 'error', kind: 'failure' | 'network' | 'contract' | null, value: unknown, error: unknown, meta: unknown }} TaskSlot
  */
 
 /**
  * The generated binding.
  * @typedef {Object} ContractAppBinding
  * @property {Record<string, TaskSlot>} slice - operation id → its initial slot; mount it at `statePath`
- * @property {Record<string, any>} actions - `<namespace><op>/start` and `<namespace><op>/done` per operation
+ * @property {Record<string, any>} actions - `<namespace><op>/start`, `<namespace><op>/done` and `<namespace><op>/reset` per operation
  * @property {any} schema - the slice's JSON Schema, `$defs` of the contract carried, for `validateState`
  * @property {'contract'} effect - the effect name the actions invoke
  */
@@ -93,20 +104,29 @@ function replace(path, value) {
 
 /**
  * Generate the app documents of a contract: a state slice with one task
- * slot per operation, `start`/`done` actions per operation with the
- * TASKS.md id guard built in, and the slice's JSON Schema.
+ * slot per operation, `start`/`done`/`reset` actions per operation with
+ * the TASKS.md id guard built in, and the slice's JSON Schema.
  *
  * The `start` action takes the operation's input as `$payload`: it
- * increments the slot `id`, sets `status: "loading"`, clears `error`,
- * and runs the `contract` effect with `{ op, input: $payload, id, done,
+ * increments the slot `id`, sets `status: "loading"`, clears `kind` and
+ * `error`, and runs the `contract` effect with `{ op, input: $payload, id, done,
  * slot }` — the `id` written as the same increment expression the patch
  * uses (everything in an action evaluates against the PRE-transition
- * state). The `done` action guards on `$payload.id` against the slot
- * id, reads the outcome from `$payload.result` (or `$payload.error`,
- * where a host failure projected by the effect lands), and stores it:
- * `ok` → `status: "done"`, `value`, `meta`, `error: null`; otherwise
- * `status: "error"`, `error`, `meta`, and `value` UNTOUCHED — a failed
- * reload keeps the last good value.
+ * state). For an operation whose `policy.task` is `exhaust` the whole
+ * start is wrapped in `$if: [{ $ne: [<slot>.status, "loading"] }, …]`
+ * — a `$if` without else is the empty sequence (APP-FORMAT §3.2): no
+ * patch, no effect, no render — so a duplicate start leaves the slot id
+ * where it is and the single completion lands. The `done` action guards
+ * on `$payload.id` against the slot id, reads the outcome from
+ * `$payload.result` (or `$payload.error`, where a host failure projected
+ * by the effect lands), and stores it: `ok` → `status: "done"`, `kind:
+ * null`, `value`, `meta`, `error: null`; otherwise `status: "error"`,
+ * `kind` (the outcome's), `error`, `meta`, and `value` UNTOUCHED — a
+ * failed reload keeps the last good value. The `reset` action releases
+ * the slot: `status: "idle"`, `kind: null`, `error: null`; `id`, `value`
+ * and `meta` stay (the id must stay monotonic so a late completion of a
+ * cancelled attempt is still rejected; the last good value survives a
+ * reset as it survives an error).
  *
  * @param {Contract} contract
  * @param {ContractAppBindingOptions} [options]
@@ -160,18 +180,26 @@ export function contractAppBinding(contract, options = {}) {
     const nextId = { $add: [idQuery, 1] };
     const done = `${namespace}${id}/done`;
 
-    setObjectMember(slice, id, { id: 0, status: 'idle', value: null, error: null, meta: null });
+    setObjectMember(slice, id, { id: 0, status: 'idle', kind: null, value: null, error: null, meta: null });
 
-    setObjectMember(actions, `${namespace}${id}/start`, {
+    const start = {
       patch: [
         replace(`${slot}/id`, nextId),
         replace(`${slot}/status`, 'loading'),
+        replace(`${slot}/kind`, null),
         replace(`${slot}/error`, null),
       ],
       effects: [
         { run: 'contract', with: { op: id, input: '$payload', id: nextId, done, slot: id } },
       ],
-    });
+    };
+    // the state-side guard derived from policy.task (the mode itself is
+    // never written): an exhaust operation's duplicate start is a no-op
+    // in state exactly as it is in the effect, so the one completion
+    // that arrives carries the current id
+    setObjectMember(actions, `${namespace}${id}/start`, op.policy.task === 'exhaust'
+      ? { $if: [{ $ne: [`${slotQuery}.status`, 'loading'] }, start] }
+      : start);
 
     setObjectMember(actions, done, {
       $if: [
@@ -183,12 +211,14 @@ export function contractAppBinding(contract, options = {}) {
               { $eq: ['$outcome.ok', true] },
               { patch: [
                 replace(`${slot}/status`, 'done'),
+                replace(`${slot}/kind`, null),
                 replace(`${slot}/value`, '$outcome.value'),
                 replace(`${slot}/meta`, '$outcome.meta'),
                 replace(`${slot}/error`, null),
               ] },
               { patch: [
                 replace(`${slot}/status`, 'error'),
+                replace(`${slot}/kind`, '$outcome.kind'),
                 replace(`${slot}/error`, '$outcome.error'),
                 replace(`${slot}/meta`, '$outcome.meta'),
               ] },
@@ -198,16 +228,28 @@ export function contractAppBinding(contract, options = {}) {
       ],
     });
 
+    setObjectMember(actions, `${namespace}${id}/reset`, {
+      patch: [
+        replace(`${slot}/status`, 'idle'),
+        replace(`${slot}/kind`, null),
+        replace(`${slot}/error`, null),
+      ],
+    });
+
     const output = op.output.schema;
     const valueSchema = output === true ? true
       : output === false ? { type: 'null' }
         : { anyOf: [{ type: 'null' }, output] };
     setObjectMember(properties, id, {
       type: 'object',
-      required: ['id', 'status', 'value', 'error', 'meta'],
+      required: ['id', 'status', 'kind', 'value', 'error', 'meta'],
       properties: {
         id: { type: 'integer', minimum: 0 },
         status: { enum: ['idle', 'loading', 'done', 'error'] },
+        // the enum, not the cross-member invariant (kind is null exactly
+        // when status is not "error"): a JSON Schema if/then would cost
+        // every transition, and the generated actions are the only writer
+        kind: { enum: [null, 'failure', 'network', 'contract'] },
         value: valueSchema,
         error: { anyOf: [{ type: 'null' }, ERROR_SCHEMA] },
         meta: { anyOf: [{ type: 'null' }, META_SCHEMA] },

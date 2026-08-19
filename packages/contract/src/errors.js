@@ -47,6 +47,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC0014: 'a policy member is mistyped or outside its declared set',
   JC0015: 'id, version, compat or an operation doc is mistyped',
   JC0016: 'an operation bound to GET or HEAD carries a body-located member (a GET body)',
+  JC0017: 'an opaque operation (a non-JSON http.media) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated',
   // ——— host programming errors (thrown ContractHostError, a TypeError) ———
   JC1001: 'serveHttp: handlers is not an object, a key names no operation of the contract, or a value is not a function',
   JC1002: 'serveHttp: an operation has no handler and options.partial is not set',

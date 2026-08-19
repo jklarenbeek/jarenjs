@@ -570,10 +570,11 @@ function checkErrors(errors, base, scope) {
  * Validate `policy` and return it with every default materialized.
  * @param {any} policy
  * @param {'read' | 'command'} kind
+ * @param {readonly string[] | null} inputMembers - the input's declared property names, `null` when the operation declares no input
  * @param {string} base - `/operations/<id>/policy`
  * @returns {CompiledPolicy}
  */
-function checkPolicy(policy, kind, base) {
+function checkPolicy(policy, kind, inputMembers, base) {
   const p = policy === undefined ? {} : policy;
   if (!isJsonObject(p)) throw refuse('JC0014', 'policy must be an object', base);
   const members = Object.keys(p);
@@ -600,11 +601,21 @@ function checkPolicy(policy, kind, base) {
     if (typeof p.revision !== 'string' || !p.revision.startsWith('input:')) {
       throw refuse('JC0014', 'policy.revision must be a string "input:<json-pointer>"', at(base, 'revision'));
     }
+    let tokens;
     try {
-      parseJSONPointer(p.revision.slice('input:'.length));
+      tokens = parseJSONPointer(p.revision.slice('input:'.length));
     }
     catch (err) {
       throw refuse('JC0014', 'policy.revision must carry a valid RFC 6901 pointer after "input:"', at(base, 'revision'), asCause(err));
+    }
+    // the pointer must address a declared input member: the first
+    // reference token names one of input.properties (deeper tokens are
+    // not checked — a member's schema may be a $ref or open)
+    if (inputMembers === null) {
+      throw refuse('JC0014', 'policy.revision names an input member but the operation has no input', at(base, 'revision'));
+    }
+    if (tokens.length > 0 && !inputMembers.includes(String(tokens[0]))) {
+      throw refuse('JC0014', `policy.revision points at '/${String(tokens[0])}' but input declares no member '${String(tokens[0])}'`, at(base, 'revision'));
     }
     revision = p.revision;
   }
@@ -681,8 +692,8 @@ function checkPolicy(policy, kind, base) {
  * `POST /<op-id>` with every member in the body when absent, otherwise
  * the declared binding with template canonicalized, locations defaulted
  * (path variables → `path`; `read` → `query`; `command` → `body`) and
- * every cross-rule (`JC0009`, `JC0016`) applied. Returns the compiled
- * http and the location table by member.
+ * every cross-rule (`JC0009`, `JC0016`, `JC0017`) applied. Returns the
+ * compiled http and the location table by member.
  * @param {any} http
  * @param {string} id
  * @param {'read' | 'command'} kind
@@ -801,9 +812,24 @@ function checkHttp(http, id, kind, members, base) {
       }
     }
   }
+  const opaque = !isJsonMedia(media);
+  if (opaque) {
+    // an opaque body is bytes the contract never decodes (§4.5): a
+    // body-located member could never be validated, so the transport
+    // members of an opaque operation are ALWAYS its whole input
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      if (locations[m] === 'body') {
+        const declaredBy = m === bodyMember ? 'http.body' : (inMap[m] !== undefined ? `http.in.${m}` : `the default location of a ${kind} member`);
+        throw refuse('JC0017',
+          `an opaque operation (media ${media}) cannot carry '${m}' in the body (placed there by ${declaredBy}) — its body is bytes the contract never decodes; map '${m}' to query or header, or make the operation JSON`,
+          m === bodyMember ? at(base, 'body') : (inMap[m] !== undefined ? at(at(base, 'in'), m) : at(base, 'media')));
+      }
+    }
+  }
   return {
     method, path: template.path, template, variables, in: locations, body: bodyMember,
-    status, media, opaque: !isJsonMedia(media),
+    status, media, opaque,
   };
 }
 
@@ -819,7 +845,7 @@ function checkHttp(http, id, kind, members, base) {
  * @param {unknown} doc - the contract document
  * @param {CompileContractOptions} [options]
  * @returns {Contract}
- * @throws {ContractCompileError} when the document violates the format (`JC0001–JC0016`)
+ * @throws {ContractCompileError} when the document violates the format (`JC0001–JC0017`)
  * @example
  * const contract = compileContract({
  *   $contract: '0.1',
@@ -893,6 +919,7 @@ export function compileContract(doc, options = {}) {
     let inputEffective = null;
     /** @type {string[]} */
     let members = [];
+    let declaredMembers = null;
     if (op.input !== undefined) {
       if (!isJsonObject(op.input)) throw refuse('JC0005', 'input must be an object schema (or a $ref to one)', at(base, 'input'));
       checkRefs(op.input, at(base, 'input'), scope, false);
@@ -901,10 +928,11 @@ export function compileContract(doc, options = {}) {
         throw refuse('JC0005', 'input must be a schema whose effective type is object (declare "type": "object")', at(base, 'input'));
       }
       members = isJsonObject(inputEffective.properties) ? Object.keys(inputEffective.properties) : [];
+      declaredMembers = members;
     }
 
     const errors = checkErrors(op.errors, at(base, 'errors'), scope);
-    const policy = checkPolicy(op.policy, kind, at(base, 'policy'));
+    const policy = checkPolicy(op.policy, kind, declaredMembers, at(base, 'policy'));
     const http = checkHttp(op.http, id, kind, members, at(base, 'http'));
 
     const shape = `${http.method} ${pathShape(http.template)}`;

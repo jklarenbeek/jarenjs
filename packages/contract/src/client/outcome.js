@@ -18,7 +18,17 @@
  * parsed error envelope. Nothing here performs I/O.
  *
  * Outcome, error and meta objects are built with a fixed member order so
- * each shape is one hidden class.
+ * each shape is one hidden class — and the shapes `makeMeta` and
+ * `outcomeError` build ARE the D6 shapes of every binding (03A): `error`
+ * is always `{ code, message, status, details, retryable }`, `meta` is
+ * always `{ op, attempt, trace, revision, etag, notModified }`, and no
+ * member is ever `undefined` (`isJsonValue` — the predicate the app's
+ * task effect and state honor — rejects it, and the outcome would fall
+ * back to a string). A binding that cannot carry a member carries `null`
+ * (`status`, `etag`, `trace`) or `false` (`notModified`) and says so in
+ * its `capabilities`; it never omits the member. The member lists are
+ * exported (`OUTCOME_ERROR_MEMBERS`, `OUTCOME_META_MEMBERS`) so a later
+ * binding asserts against them instead of restating them.
  */
 
 import { renderMessage, projectValidationDetails, verdict, HTTP_ERRORS, HANDLER_ERROR_MSGID } from '../http/wire.js';
@@ -58,6 +68,18 @@ import { renderMessage, projectValidationDetails, verdict, HTTP_ERRORS, HANDLER_
  * @property {unknown} details
  * @property {boolean} retryable
  */
+
+/**
+ * The members of every outcome `error`, in order (D6). Frozen.
+ * @type {readonly ['code', 'message', 'status', 'details', 'retryable']}
+ */
+export const OUTCOME_ERROR_MEMBERS = Object.freeze(/** @type {const} */ (['code', 'message', 'status', 'details', 'retryable']));
+
+/**
+ * The members of every outcome `meta`, in order (D6). Frozen.
+ * @type {readonly ['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']}
+ */
+export const OUTCOME_META_MEMBERS = Object.freeze(/** @type {const} */ (['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']));
 
 /**
  * @typedef {{ ok: true, value: unknown, meta: OutcomeMeta }} OkOutcome
@@ -170,9 +192,26 @@ export function clientError(catalog, code, params, status, details, retryable) {
 }
 
 /**
+ * Whether `value` is an object carrying every member of `members`, none
+ * of them `undefined` (D6: an absent member is `null`, never omitted).
+ * @param {any} value
+ * @param {readonly string[]} members
+ * @returns {boolean}
+ */
+function hasMembers(value, members) {
+  if (value === null || typeof value !== 'object') return false;
+  for (let i = 0; i < members.length; i++) {
+    if (value[members[i]] === undefined) return false;
+  }
+  return true;
+}
+
+/**
  * True for a value shaped like an outcome: a plain object with a
- * boolean `ok` and, when failed, a `kind` and an `error` object. Reads
- * guardedly, so a hostile value classifies as "not an outcome".
+ * boolean `ok`, a `meta` carrying every D6 meta member, and, when
+ * failed, a `kind` and an `error` carrying every D6 error member with a
+ * string `code` — no member `undefined`. Reads guardedly, so a hostile
+ * value classifies as "not an outcome".
  * @param {unknown} value
  * @returns {value is Outcome}
  */
@@ -180,11 +219,11 @@ export function isOutcome(value) {
   try {
     if (value === null || typeof value !== 'object') return false;
     const v = /** @type {any} */ (value);
-    if (v.ok === true) return v.meta !== null && typeof v.meta === 'object';
+    if (v.ok === true) return hasMembers(v.meta, OUTCOME_META_MEMBERS);
     if (v.ok !== false) return false;
     return (v.kind === 'failure' || v.kind === 'network' || v.kind === 'contract' || v.kind === 'cancelled')
-      && v.error !== null && typeof v.error === 'object' && typeof v.error.code === 'string'
-      && v.meta !== null && typeof v.meta === 'object';
+      && hasMembers(v.error, OUTCOME_ERROR_MEMBERS) && typeof v.error.code === 'string'
+      && hasMembers(v.meta, OUTCOME_META_MEMBERS);
   }
   catch {
     return false;

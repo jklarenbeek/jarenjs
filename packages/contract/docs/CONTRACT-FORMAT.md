@@ -152,6 +152,12 @@ a schema passed as `compileContract(doc, { schemas })` by its `$id`
 document with its validator under a synthetic id and compiles every
 operation schema as a reference into it, so `#/$defs/Product` inside an
 operation means the contract's own `$defs`, exactly as a reader expects.
+That registration is **one per compile**: the document is added to the
+(possibly host-injected, `compileContract(doc, { validator })`) validator
+under `urn:jaren:contract:<n>`, `n` a process-wide counter, and is never
+removed — a host sharing one validator across many compiles keeps them
+all; a host that compiles many documents passes a validator per compile
+or accepts the growth.
 
 ## §3 Operations, policy and the defaults
 
@@ -177,7 +183,7 @@ the resolved value and marks it inferred.
 |---|---|---|---|
 | `task` | `switch` \| `exhaust` \| `concat` \| `parallel` | `switch` for a read, `exhaust` for a command | Which task mode a host effect runs the operation in: replace an in-flight attempt, let the first one finish, queue, or run concurrently. |
 | `idempotency` | `none` \| `optional` \| `required` | `none` | Whether a command carries an idempotency key. A **read MUST be `none`** (`JC0014`). |
-| `revision` | `"input:<json-pointer>"` | absent (`null`) | Where in the input the revision a command asserts lives, as an RFC 6901 pointer after `input:` (`JC0014` on malformed). |
+| `revision` | `"input:<json-pointer>"` | absent (`null`) | Where in the input the revision a command asserts lives, as an RFC 6901 pointer after `input:` (`JC0014` on malformed). The operation MUST declare `input`, and the pointer's **first reference token** MUST name a member of `input.properties` (`JC0014` otherwise — "revision points at '/x' but input declares no member 'x'"); deeper tokens are not checked (a member's schema may be a `$ref` or open), and the empty pointer (`"input:"`) addresses the whole input. |
 | `cache` | `none` \| `revision` | `none` | Whether a read's result may be cached by revision. |
 | `limits.maxBodyBytes` | positive integer | `1048576` | The request-body ceiling a server binding enforces. |
 | `errors.details` | `none` \| `paths` \| `full` | `paths` | How much of a validation failure crosses the wire: nothing, instance path + keyword, or the raw validator errors. |
@@ -304,7 +310,14 @@ A `media` other than `application/json` (or a `+json` structured-syntax
 suffix, parameters ignored) marks the operation **opaque**: it is routed
 and matched, its path/query still decoded, its body neither decoded nor
 validated by the contract, and it is excluded from generated clients
-except as a URL builder. `image.bytes` in §2 is one.
+except as a URL builder. `image.bytes` in §2 is one. Because its body is
+bytes the contract never decodes, an opaque operation MUST NOT declare a
+**body-located member** — neither through `http.body`, nor `http.in`,
+nor the `command` default (`JC0017` at the member that placed it there,
+or at `http.media` when the default did): map the member to `query` or
+`header`, or make the operation JSON. Its transport members are
+therefore always its whole input, and are validated like any other
+input (§7.1).
 
 ## §5 The path matcher
 
@@ -368,8 +381,9 @@ carries the same codes and a test holds them equal.
 | JC0014 | a `policy` member is mistyped or outside its declared set (§3.1), a read declares `idempotency`, or a command declares `retry` without `idempotency: "required"` |
 | JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped |
 | JC0016 | an operation bound to `GET` or `HEAD` carries a body-located member (a GET body) |
+| JC0017 | an opaque operation (a non-JSON `http.media`) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated (§4.5) |
 
-`JC0017–JC0049` are reserved for further document-level rules and are
+`JC0018–JC0049` are reserved for further document-level rules and are
 appended to this table when they land. `JC1001–JC1049` are host
 programming errors (`ContractHostError`, a thrown `TypeError` with `code`
 and `reason`) and `JC2001–JC2049` the HTTP request-time errors
@@ -471,12 +485,10 @@ is the operation's output. `ctx` is frozen per request:
 An **opaque** operation (`http.opaque`) takes a *raw* handler: `(input,
 ctx) => { status, headers?, body? }` with the bytes in `ctx.body`; it
 bypasses media, parse, body assembly, idempotency and output validation.
-Its transport members are decoded and normalized into `input` and — when
-no member is body-located, so they **are** the whole input — validated
-like any other input (`JC2006`); an opaque operation that declares a
-body-located member cannot be validated without decoding bytes, so its
-`input` is handed over unvalidated and the raw handler owns the check
-(`ctx.op.input.validate` is at hand). `input` is `null` when the operation
+Its transport members are decoded and normalized into `input` and
+validated like any other input (`JC2006`) — they **are** its whole
+input, since an opaque operation cannot declare a body-located member
+(`JC0017`, §4.5). `input` is `null` when the operation
 declares none. Its response is passed through verbatim plus
 `x-jaren-trace`; a value that is not `{ status, headers?, body? }` is
 `JC2010`. It may still `ctx.fail` a declared code (answered as JSON like
@@ -820,8 +832,7 @@ stream: false, cancel: "signal" }` — frozen, the driver rule.
 `invoke(op, input, ctx) → Promise<Outcome>` with `ctx = { signal?,
 attempt?, idempotencyKey?, headers?, ifNoneMatch?, ifMatch? }`. An
 outcome is **JSON** (no `Error`, `Response`, `Headers` or
-`AbortController` ever; no member is `undefined` — an absent `details`
-is `null`), tagged:
+`AbortController` ever), tagged:
 
 ```jsonc
 { "ok": true,  "value": { "...": "the output, validated" }, "meta": { "...": "" } }
@@ -838,6 +849,27 @@ is `null`), tagged:
   store that threw (`JC2054`), an undeclared response (`JC2055`);
 - `cancelled` — `ctx.signal` aborted or `close()` was called (`JC2052`).
 
+**The fixed shapes — every binding (D6).** An outcome never carries an
+`undefined` member: an optional member that is absent is `null`
+(`isJsonValue` — the predicate `@jarenjs/app`'s task effect and state
+honor — rejects `undefined`, and an outcome with one would fall back to
+a string in the task effect). `error` is always
+
+`{ code, message, status, details, retryable }` — `OUTCOME_ERROR_MEMBERS`
+
+and `meta` is always
+
+`{ op, attempt, trace, revision, etag, notModified }` — `OUTCOME_META_MEMBERS`
+
+in that member order, on **every** binding — http, and the `local`/
+`port`/`stream` bindings that follow. A binding that cannot carry a
+member carries `null` (`status` on a binding without statuses, `etag`,
+`trace`) or `false` (`notModified`) and says so in its `capabilities`;
+it **never omits the member**. The two lists are exported from
+`@jarenjs/contract/client` (frozen arrays) so a binding asserts against
+them rather than restating them, and `isOutcome` refuses a value whose
+`error` or `meta` lacks a member or carries `undefined` in one.
+
 `meta` keeps the three identities apart, by construction: **`attempt`** is
 the caller's (`ctx.attempt`, echoed verbatim, `null` when none) — it is
 never sent and **never read from any response header**; **`trace`** is
@@ -845,8 +877,7 @@ the server's `x-jaren-trace` (`null` when the wire carried none) — it is
 never generated here; the **idempotency key** (§10.3) is the client's
 and travels only as `Idempotency-Key`. `revision` is reserved for the
 contract revision; `etag` carries a success's entity tag; `notModified`
-is true exactly for a 304. The members are always present, in this
-order.
+is true exactly for a 304.
 
 ### §10.2 What `invoke` does, in order
 
@@ -1007,32 +1038,44 @@ an operation the contract does not declare or the binding cannot carry).
 ### §11.1 The generated document
 
 Per operation, **one task slot** in the slice — `{ id: 0, status: "idle",
-value: null, error: null, meta: null }` — and **two actions**, in the
-async-task convention of `@jarenjs/app`'s TASKS.md (state-side identity,
-guard-first completion):
+kind: null, value: null, error: null, meta: null }` — and **three
+actions**, in the async-task convention of `@jarenjs/app`'s TASKS.md
+(state-side identity, guard-first completion):
 
 ```jsonc
 // <namespace><op>/start — $payload is the operation's input
 { "patch": [
     { "op": "replace", "path": "/contract/catalog.load/id",     "value": { "$add": ["$.contract['catalog.load'].id", 1] } },
     { "op": "replace", "path": "/contract/catalog.load/status", "value": "loading" },
+    { "op": "replace", "path": "/contract/catalog.load/kind",   "value": null },
     { "op": "replace", "path": "/contract/catalog.load/error",  "value": null } ],
   "effects": [ { "run": "contract", "with": {
     "op": "catalog.load", "input": "$payload",
     "id": { "$add": ["$.contract['catalog.load'].id", 1] },      // the SAME increment as the patch — everything evaluates pre-transition
     "done": "contract/catalog.load/done", "slot": "catalog.load" } } ] }
 
+// <namespace><op>/start of an operation whose policy.task is exhaust — the same document behind a state-side guard
+{ "$if": [ { "$ne": ["$.contract['product.save'].status", "loading"] },      // a $if without else is the empty sequence (APP-FORMAT §3.2):
+  { "patch": [ "…the four replaces…" ], "effects": [ "…the one contract effect…" ] } ] }   // no patch, no effect, no render while loading
+
 // <namespace><op>/done — $payload is { id, result: outcome } (or { id, error: outcome } for a projected host throw)
 { "$if": [ { "$eq": ["$payload.id", "$.contract['catalog.load'].id"] },        // the id guard: a stale response is the empty sequence
   { "$let": { "outcome": { "$coalesce": ["$payload.result", "$payload.error"] } },
     "$return": { "$if": [ { "$eq": ["$outcome.ok", true] },
       { "patch": [ { "op": "replace", "path": "/contract/catalog.load/status", "value": "done" },
+                   { "op": "replace", "path": "/contract/catalog.load/kind",   "value": null },
                    { "op": "replace", "path": "/contract/catalog.load/value",  "value": "$outcome.value" },
                    { "op": "replace", "path": "/contract/catalog.load/meta",   "value": "$outcome.meta" },
                    { "op": "replace", "path": "/contract/catalog.load/error",  "value": null } ] },
       { "patch": [ { "op": "replace", "path": "/contract/catalog.load/status", "value": "error" },
+                   { "op": "replace", "path": "/contract/catalog.load/kind",   "value": "$outcome.kind" },
                    { "op": "replace", "path": "/contract/catalog.load/error",  "value": "$outcome.error" },
                    { "op": "replace", "path": "/contract/catalog.load/meta",   "value": "$outcome.meta" } ] } ] } } ] }
+
+// <namespace><op>/reset — releases the slot; id, value and meta are untouched
+{ "patch": [ { "op": "replace", "path": "/contract/catalog.load/status", "value": "idle" },
+             { "op": "replace", "path": "/contract/catalog.load/kind",   "value": null },
+             { "op": "replace", "path": "/contract/catalog.load/error",  "value": null } ] }
 ```
 
 Rules the generator keeps:
@@ -1048,16 +1091,47 @@ Rules the generator keeps:
   current one yields the empty sequence — no state change, no render, no
   subscriber — so an out-of-order older response can never overwrite a
   newer one. Cancellation (below) is the optimization.
+- **The state slot and the effect agree in every mode (D10).** A task
+  mode is never *named* in the document or in the effect props; the
+  generator derives the document's state-side guards from `policy.task`
+  exactly as it derives the document's shape from `kind`. With one slot
+  per operation, what a second `start` does while the slot is `loading`:
+
+  | `policy.task` | in state | in the effect | which completion lands |
+  |---|---|---|---|
+  | `switch` | the id increments (newest wins) | the predecessor is aborted (its cancelled outcome dispatches nothing) | the newest; a predecessor's completion that arrives anyway is rejected by the guard |
+  | `exhaust` | **nothing** — the `start` is wrapped in `$if: [{ $ne: [<slot>.status, "loading"] }, …]`, so the id stays, no effect runs, no render | the duplicate start would be ignored (TASKS.md); it never reaches the effect | the one in flight: it carries the current id and **lands** — a double-click runs once and its result reaches state |
+  | `concat` | the id increments | the start queues and runs after its predecessors, in order | **latest wins**: only the completion carrying the current id lands; earlier results and errors are dropped from state; `status` stays `loading` until the newest lands |
+  | `parallel` | the id increments | the start runs concurrently | **latest wins**, as `concat` — the newest id lands whenever it arrives, the others are provable no-ops |
+
+  A consumer that needs every result of a `parallel` fan-out needs a
+  slot per key (one slot per operation is the rule here; keyed slots
+  are a roadmap candidate).
+- **`reset` releases a slot.** It writes `status: "idle"`, `kind: null`,
+  `error: null` and leaves `id`, `value` and `meta` alone — the id stays
+  monotonic so a late completion of a cancelled attempt is still
+  rejected, and the last good value survives a reset as it survives an
+  error. It is the one way out of a slot a host `cancel(slot)` left
+  `loading` on an `exhaust` operation (a cancelled outcome dispatches
+  nothing, and the guarded `start` is a no-op while `loading`), and the
+  ordinary "dismiss the error" action, mode-independent.
 - **A failed reload keeps the last good `value`**: the error branch
-  writes `status`, `error`, `meta` and touches `value` not at all.
-- The outcome's `kind` is recoverable from `error.code`: `JC2051` is
-  `network`, the other `JC205x` are `contract`, any other code is a
-  declared or taxonomy `failure`; `cancelled` never reaches state.
+  writes `status`, `kind`, `error`, `meta` and touches `value` not at all.
+- **`kind` says which class of failure the slot holds** — the outcome's
+  `kind` (`"failure"` a declared or taxonomy error, `"network"`,
+  `"contract"`; `"cancelled"` never lands) while `status` is `"error"`,
+  `null` otherwise (`start`, the ok branch and `reset` write `null`) —
+  so a view shows "you are offline" beside "the server refused this"
+  without parsing `error.code`.
 - `schema` is the slice's JSON Schema: per operation `id` (integer ≥ 0),
-  `status` (`idle | loading | done | error`), `value` (the operation's
-  output schema **or null**), `error` (the §10.1 error object or null),
-  `meta` (the §10.1 meta or null); when the contract has `$defs` the
-  schema carries them under its own `$defs` and declares an `$id`
+  `status` (`idle | loading | done | error`), `kind` (`null | failure |
+  network | contract` — the enum is pinned, the cross-member invariant
+  "`kind` is `null` exactly when `status` is not `error`" is not: a JSON
+  Schema `if/then` would cost every transition and the generated actions
+  are the only writer), `value` (the operation's output schema **or
+  null**), `error` (the §10.1 error object or null), `meta` (the §10.1
+  meta or null); when the contract has `$defs` the schema carries them
+  under its own `$defs` and declares an `$id`
   (`urn:jaren:contract-app:<contract id>`) so the output schemas'
   `#/$defs/…` references resolve wherever the host mounts the slice
   schema inside its `validateState` schema.
@@ -1080,7 +1154,10 @@ effect unchanged (`id`, `done`, `fail`, `slot` are TASKS.md's).
 Settlement, exactly: `run` resolves the outcome → the task effect
 dispatches `done` with `{ id, result: outcome }`; a `kind: "cancelled"`
 outcome makes `run` throw an `AbortError` → **nothing is dispatched**
-(a superseded task is dead by design); a value that is not an outcome
+(a superseded task is dead by design) — a slot left `loading` by a host
+`cancel(slot)` is released by `<namespace><op>/reset` (or by the next
+`start` on a non-`exhaust` operation); `dispose()` is terminal, nothing
+to release; a value that is not an outcome
 (a foreign client) and a **thrown** host value go through `projectError`
 — the host's own projector first, then the `JC2058` outcome — so the
 error member of `{ id, error }` is always an outcome, never a string,
@@ -1104,7 +1181,7 @@ const app = createApp({ state: { contract: slice, draft: null }, view, actions: 
   validateState: (state) => validate(state),
 });
 app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
-// … later: app.getState().contract['catalog.load'] → { id: 1, status: 'done', value: {…}, error: null, meta: {…} }
+// … later: app.getState().contract['catalog.load'] → { id: 1, status: 'done', kind: null, value: {…}, error: null, meta: {…} }
 ```
 
 The runnable version of this composition, driven against a real

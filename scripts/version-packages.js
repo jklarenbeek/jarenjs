@@ -1,6 +1,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
-const packageFiles = [
+/**
+ * The publishable manifests this script bumps — a hand-maintained list.
+ * Exported so `test/scripts/version-packages.test.js` holds it equal to
+ * the non-private workspaces of the root `package.json` (a new workspace
+ * registered in `clean`/`pack:check`/`publish` but not here was silently
+ * left behind once).
+ */
+export const packageFiles = [
   'packages/core/package.json',
   'packages/json/package.json',
   'packages/validate/package.json',
@@ -28,43 +36,48 @@ const packageFiles = [
 // private workspaces that are never versioned but whose semver ranges on
 // the publishable packages must keep tracking the release (website and
 // benchmark use file:/absent ranges and need no updating)
-const rangeOnlyFiles = [];
+export const rangeOnlyFiles = [];
 
-const rootFile = 'package.json';
-const rootPackage = readPackage(rootFile);
-const requested = process.argv[2];
-const nextVersion = resolveVersion(rootPackage.version, requested);
-const packageNames = new Set(packageFiles.map((file) => readPackage(file).name));
+/** The root manifest is bumped too (its version is the suite version). */
+export const rootFile = 'package.json';
 
-for (const file of [rootFile, ...packageFiles]) {
-  const manifest = readPackage(file);
-  manifest.version = nextVersion;
-  updateInternalRanges(manifest.dependencies);
-  updateInternalRanges(manifest.devDependencies);
-  updateInternalRanges(manifest.peerDependencies);
-  writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+// run only as a CLI: importing the lists (the drift gate) bumps nothing
+if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const rootPackage = readPackage(rootFile);
+  const requested = process.argv[2];
+  const nextVersion = resolveVersion(rootPackage.version, requested);
+  const packageNames = new Set(packageFiles.map((file) => readPackage(file).name));
+
+  const updateInternalRanges = (dependencies) => {
+    if (dependencies == null) return;
+    for (const name of Object.keys(dependencies)) {
+      if (packageNames.has(name))
+        dependencies[name] = `^${nextVersion}`;
+    }
+  };
+
+  for (const file of [rootFile, ...packageFiles]) {
+    const manifest = readPackage(file);
+    manifest.version = nextVersion;
+    updateInternalRanges(manifest.dependencies);
+    updateInternalRanges(manifest.devDependencies);
+    updateInternalRanges(manifest.peerDependencies);
+    writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  for (const file of rangeOnlyFiles) {
+    const manifest = readPackage(file);
+    updateInternalRanges(manifest.dependencies);
+    updateInternalRanges(manifest.devDependencies);
+    updateInternalRanges(manifest.peerDependencies);
+    writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  console.log(`Set all publishable Jaren packages to ${nextVersion}.`);
 }
-
-for (const file of rangeOnlyFiles) {
-  const manifest = readPackage(file);
-  updateInternalRanges(manifest.dependencies);
-  updateInternalRanges(manifest.devDependencies);
-  updateInternalRanges(manifest.peerDependencies);
-  writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
-console.log(`Set all publishable Jaren packages to ${nextVersion}.`);
 
 function readPackage(file) {
   return JSON.parse(readFileSync(file, 'utf8'));
-}
-
-function updateInternalRanges(dependencies) {
-  if (dependencies == null) return;
-  for (const name of Object.keys(dependencies)) {
-    if (packageNames.has(name))
-      dependencies[name] = `^${nextVersion}`;
-  }
 }
 
 function resolveVersion(current, value) {

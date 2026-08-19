@@ -16,7 +16,8 @@ import { readFileSync } from 'node:fs';
 import { compileContract, CONTRACT_CODES, contractMessagesEn } from '@jarenjs/contract';
 import { HTTP_ERRORS } from '@jarenjs/contract/http';
 import {
-  CLIENT_ERRORS, assembleOutcome, prepareOutcomeRoute, makeMeta, isOutcome, openHttpClient,
+  CLIENT_ERRORS, assembleOutcome, prepareOutcomeRoute, makeMeta, outcomeError, isOutcome, openHttpClient,
+  hostFailureOutcome, OUTCOME_ERROR_MEMBERS, OUTCOME_META_MEMBERS,
 } from '@jarenjs/contract/client';
 import { load } from './helpers.js';
 
@@ -194,6 +195,33 @@ describe('client outcomes — the §10.2 assembly table, row by row', () => {
     assert.strictEqual(isOutcome({ ok: true }), false);
     assert.strictEqual(isOutcome({ ok: false, kind: 'weird', error: { code: 'x' }, meta: {} }), false);
     assert.strictEqual(isOutcome(new Proxy({}, { get() { throw new Error('hostile'); } })), false);
+    // D6 (03A): the fixed shapes — a meta or error missing a member, or carrying undefined in one, is not an outcome
+    const META = makeMeta('a', 1, null);
+    const ERROR = outcomeError('c', 'm', null, undefined, false);
+    assert.strictEqual(isOutcome({ ok: false, kind: 'failure', error: { code: 'x' }, meta: {} }), false);
+    assert.strictEqual(isOutcome({ ok: true, value: 1, meta: META }), true);
+    assert.strictEqual(isOutcome({ ok: true, value: 1, meta: { ...META, notModified: undefined } }), false, 'undefined is not a member');
+    const { notModified: _n, ...noNotModified } = META;
+    assert.strictEqual(isOutcome({ ok: true, value: 1, meta: noNotModified }), false, 'a meta missing notModified');
+    assert.strictEqual(isOutcome({ ok: false, kind: 'failure', error: ERROR, meta: META }), true);
+    assert.strictEqual(isOutcome({ ok: false, kind: 'failure', error: { ...ERROR, details: undefined }, meta: META }), false, 'an error with details: undefined');
+    const { status: _s, ...noStatus } = ERROR;
+    assert.strictEqual(isOutcome({ ok: false, kind: 'failure', error: noStatus, meta: META }), false, 'an error missing status (a binding without statuses carries null)');
+    assert.strictEqual(isOutcome({ ok: false, kind: 'failure', error: { ...ERROR, code: 5 }, meta: META }), false);
+    assert.strictEqual(isOutcome(hostFailureOutcome('a', null, null)), true);
+  });
+
+  it('the D6 member lists are exactly the keys of a fresh makeMeta / outcomeError, in order, frozen', () => {
+    assert.deepStrictEqual([...OUTCOME_META_MEMBERS], Object.keys(makeMeta('a', null, null)));
+    assert.deepStrictEqual([...OUTCOME_ERROR_MEMBERS], Object.keys(outcomeError('c', 'm', null, undefined, false)));
+    assert.deepStrictEqual([...OUTCOME_META_MEMBERS], ['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']);
+    assert.deepStrictEqual([...OUTCOME_ERROR_MEMBERS], ['code', 'message', 'status', 'details', 'retryable']);
+    assert.strictEqual(Object.isFrozen(OUTCOME_META_MEMBERS) && Object.isFrozen(OUTCOME_ERROR_MEMBERS), true);
+    // every outcome the assembler produces carries exactly these members (no extra, none undefined)
+    for (const o of [from(save, 200, JSON.stringify(PRODUCT)), from(save, 409, JSON.stringify({ code: 'conflict' })), from(save, 502, 'x'), from(catalog, 304, '', { etag: 'W/"1"' })]) {
+      assert.deepStrictEqual(Object.keys(o.meta), [...OUTCOME_META_MEMBERS]);
+      if (!o.ok) assert.deepStrictEqual(Object.keys(o.error), [...OUTCOME_ERROR_MEMBERS]);
+    }
   });
 });
 
