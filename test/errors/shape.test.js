@@ -33,7 +33,7 @@ import { FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
 import { AiError } from '@jarenjs/ai';
 import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
 import { DbCompileError, DbRuntimeError } from '@jarenjs/db';
-import { ContractCompileError, ContractRuntimeError } from '@jarenjs/contract';
+import { ContractCompileError, ContractRuntimeError, ContractHostError } from '@jarenjs/contract';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GOLDEN_PATH = path.join(__dirname, 'fixtures', 'error-shapes.golden.json');
@@ -74,6 +74,7 @@ function instances() {
     ['DbRuntimeError', new DbRuntimeError(CODE, REASON, { docPath: DOC_PATH, cause: CAUSE })],
     ['ContractCompileError', new ContractCompileError(CODE, REASON, DOC_PATH, CAUSE)],
     ['ContractRuntimeError', new ContractRuntimeError(CODE, REASON, { msgid: 'contract/golden', cause: CAUSE })],
+    ['ContractHostError', new ContractHostError(CODE, REASON)],
   ];
 }
 
@@ -112,8 +113,8 @@ describe('coded error shapes (T1 golden)', () => {
   const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
 
   it('covers every coded class exactly once', () => {
-    assert.strictEqual(actual.length, 20);
-    assert.strictEqual(new Set(actual.map((s) => s.class)).size, 20);
+    assert.strictEqual(actual.length, 21);
+    assert.strictEqual(new Set(actual.map((s) => s.class)).size, 21);
   });
 
   for (const shape of actual) {

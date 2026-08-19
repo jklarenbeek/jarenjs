@@ -30,6 +30,8 @@
  * silent degradation this suite refuses.
  */
 
+import { isThenable, chain, toPromise } from '@jarenjs/core/function';
+
 import { DbCompileError } from './errors.js';
 
 /** The minimum SQLite the store accepts, asserted at open. */
@@ -44,34 +46,10 @@ export const SQLITE_FLOOR = '3.45.0';
  */
 export const DEFAULT_QUEUE_TIMEOUT = 5000;
 
-/**
- * @param {any} value
- * @returns {boolean} true when the value is a thenable
- */
-export function isThenable(value) {
-  return value !== null && typeof value === 'object' && typeof value.then === 'function';
-}
-
-/**
- * Sync-capable-async composition: apply `next` to a driver result
- * without allocating a promise when the result is already a value.
- * @param {any} value - A driver return: a value or a promise
- * @param {(value: any) => any} next
- * @returns {any} `next`'s result, promise-wrapped only if the input was
- */
-export function chain(value, next) {
-  return isThenable(value) ? value.then(next) : next(value);
-}
-
-/**
- * Lift a driver result into a promise — the ONE allocation the public
- * asynchronous surface pays per call.
- * @param {any} value
- * @returns {Promise<any>}
- */
-export function toPromise(value) {
-  return isThenable(value) ? value : Promise.resolve(value);
-}
+// the sync-capable-async helpers are `@jarenjs/core/function`'s (one
+// implementation in the suite); re-exported here because every store
+// module and the public `@jarenjs/db` surface reach them through this seam
+export { isThenable, chain, toPromise };
 
 /**
  * Compare two dotted version strings numerically.

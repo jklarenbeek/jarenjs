@@ -2,13 +2,20 @@
 /**
  * @file Public surface of @jarenjs/contract: `compileContract` turns a
  * `$contract` document into a frozen `Contract` (docs/CONTRACT-FORMAT.md);
- * the error classes and the `JC` code table are what a host catches and
- * reads. The path matcher is deliberately NOT exported — it is reached
- * only through `contract.match`.
+ * the error classes, the `JC` code table and the `ContractFailure`
+ * factory are what a host catches, reads and returns. The bindings live
+ * behind their own subpaths (`./http`, `./fetch`, `./node`, `./ledger`)
+ * so a consumer that only compiles never loads them. The path matcher is
+ * deliberately NOT exported — it is reached only through `contract.match`
+ * and `contract.allowed`.
  */
 
 export { compileContract } from './compile.js';
-export { ContractCompileError, ContractRuntimeError, CONTRACT_CODES } from './errors.js';
+export {
+  ContractCompileError, ContractRuntimeError, ContractHostError,
+  ContractFailure, isContractFailure, CONTRACT_CODES,
+} from './errors.js';
+export { contractMessagesEn, contractCatalogEn } from './messages.js';
 
 /**
  * @typedef {import('./compile.js').Contract} Contract
@@ -22,4 +29,5 @@ export { ContractCompileError, ContractRuntimeError, CONTRACT_CODES } from './er
  * @typedef {import('./compile.js').CompileContractOptions} CompileContractOptions
  * @typedef {import('./describe.js').ContractDescription} ContractDescription
  * @typedef {import('./describe.js').OperationDescription} OperationDescription
+ * @typedef {import('./errors.js').ContractFailureValue} ContractFailureValue
  */

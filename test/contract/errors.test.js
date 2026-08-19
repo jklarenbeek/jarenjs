@@ -1,20 +1,24 @@
 //@ts-check
 /**
  * @file The error surface: every code in `CONTRACT_CODES` has a one-line
- * meaning, the compile range is exactly `JC0001–JC0016` today, and both
- * classes keep the coded-error contract (composed message, own fields,
- * `hasOwn` cause).
+ * meaning, the populated ranges are exactly the compile codes
+ * `JC0001–JC0016`, the host codes `JC1001–JC1004` + `JC1006` and the
+ * http codes `JC2001–JC2015`, and every class keeps its contract — the
+ * coded-error contract for compile/runtime (composed message, own
+ * fields, `hasOwn` cause), a coded `TypeError` for host errors.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { CONTRACT_CODES, ContractCompileError, ContractRuntimeError } from '@jarenjs/contract';
+import { CONTRACT_CODES, ContractCompileError, ContractRuntimeError, ContractHostError } from '@jarenjs/contract';
+
+const range = (/** @type {number} */ from, /** @type {number} */ to) => Array.from({ length: to - from + 1 }, (_, i) => `JC${String(from + i).padStart(4, '0')}`);
 
 describe('contract errors — the code table', () => {
-  it('lists JC0001–JC0016 with one-line meanings, frozen', () => {
+  it('lists the compile, host and http ranges with one-line meanings, frozen', () => {
     const codes = Object.keys(CONTRACT_CODES);
-    assert.deepStrictEqual(codes, Array.from({ length: 16 }, (_, i) => `JC${String(i + 1).padStart(4, '0')}`));
+    assert.deepStrictEqual(codes, [...range(1, 16), ...range(1001, 1004), 'JC1006', ...range(2001, 2015)]);
     for (const code of codes) {
       const meaning = CONTRACT_CODES[/** @type {keyof typeof CONTRACT_CODES} */ (code)];
       assert.strictEqual(typeof meaning, 'string', code);
@@ -74,5 +78,19 @@ describe('contract errors — ContractRuntimeError', () => {
     assert.strictEqual(withUndefinedCause.cause, undefined);
     const thrown = new Error('host');
     assert.strictEqual(new ContractRuntimeError('JC2001', 'why', { msgid: 'contract/x', cause: thrown }).cause, thrown);
+  });
+});
+
+describe('contract errors — ContractHostError', () => {
+  it('is a TypeError with a code, a reason and the composed message', () => {
+    const err = new ContractHostError('JC1003', 'no ledger');
+    assert.ok(err instanceof TypeError);
+    assert.ok(err instanceof Error);
+    assert.strictEqual(err.name, 'ContractHostError');
+    assert.strictEqual(err.code, 'JC1003');
+    assert.strictEqual(err.reason, 'no ledger');
+    assert.strictEqual(err.message, 'JC1003: no ledger');
+    assert.strictEqual(Object.hasOwn(err, 'cause'), false);
+    assert.strictEqual(Object.hasOwn(err, 'docPath'), false);
   });
 });

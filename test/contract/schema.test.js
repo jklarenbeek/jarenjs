@@ -4,7 +4,7 @@
  * the draft-07 twin is the mechanical downlevel of the 2020-12 source,
  * the source stays in the draft-neutral subset, the shop example and
  * every ```json block of CONTRACT-FORMAT.md validate against both twins
- * AND compile, the JC code table in the doc equals `CONTRACT_CODES`, and
+ * AND compile, the JC code tables in the doc equal `CONTRACT_CODES`, and
  * every negative the grammar can express fails the grammar — with the
  * compiler-only rules named as such and proven to pass the grammar.
  */
@@ -64,7 +64,7 @@ function one(op, rootExtra = {}) {
 const READ = { kind: 'read', output: true, http: { method: 'GET', path: '/a' } };
 
 describe('CONTRACT-FORMAT.md is in sync with the code', () => {
-  it('the JC error-code table in §6 lists exactly CONTRACT_CODES', () => {
+  it('the JC error-code tables (§6 compile, §7 host and http) list exactly CONTRACT_CODES', () => {
     const inDoc = docCodes(readFileSync(FORMAT_DOC, 'utf8'));
     assert.deepStrictEqual(inDoc, Object.keys(CONTRACT_CODES).sort());
   });

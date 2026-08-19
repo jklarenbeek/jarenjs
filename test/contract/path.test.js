@@ -234,3 +234,36 @@ describe('contract path — compileRoutes over the 123-route table', () => {
     assert.throws(() => compileRoutes([/** @type {any} */ ({ method: 'GET' })]), TypeError);
   });
 });
+
+describe('contract path — allowed(path), the 405 list', () => {
+  const router = compileRoutes(entriesOf(ROUTES));
+
+  it('lists the methods whose tree reaches a leaf for the path shape, sorted', () => {
+    assert.deepStrictEqual(router.allowed('/api/products/1'), ['GET']);
+    assert.deepStrictEqual(router.allowed('/api/suppliers/7'), ['GET', 'PATCH']);
+    assert.deepStrictEqual(router.allowed('/api/suppliers'), ['GET', 'POST']);
+    assert.deepStrictEqual(router.allowed('/api/catalog'), ['GET']);
+  });
+
+  it('is empty for an unknown shape, a malformed escape, a non-path and the unmatched root', () => {
+    assert.deepStrictEqual(router.allowed('/api/nope/404'), []);
+    assert.deepStrictEqual(router.allowed('/api/products/%E0%A4%A'), []);
+    assert.deepStrictEqual(router.allowed('api/products/1'), []);
+    assert.deepStrictEqual(router.allowed(/** @type {any} */ (5)), []);
+    assert.deepStrictEqual(router.allowed('/'), []);
+  });
+
+  it('sees the root leaf and a static-over-variable shape under every method that declares it', () => {
+    const r = compileRoutes([
+      { method: 'GET', path: '/', key: 1 },
+      { method: 'POST', path: '/', key: 2 },
+      { method: 'GET', path: '/a/{id}', key: 3 },
+      { method: 'DELETE', path: '/a/{id}', key: 4 },
+      { method: 'PUT', path: '/a/fixed', key: 5 },
+    ]);
+    assert.deepStrictEqual(r.allowed('/'), ['GET', 'POST']);
+    assert.deepStrictEqual(r.allowed('/a/9'), ['DELETE', 'GET']);
+    assert.deepStrictEqual(r.allowed('/a/fixed'), ['DELETE', 'GET', 'PUT']);
+    assert.strictEqual(Object.isFrozen(r), true);
+  });
+});

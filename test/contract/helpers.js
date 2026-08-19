@@ -91,3 +91,53 @@ export function routesToContract(routes) {
   }
   return { $contract: '0.1', id: 'wms', operations };
 }
+
+//#region http
+
+/**
+ * The shop fixture's default handlers — every operation answers
+ * something valid; a test overrides the ones it exercises.
+ * @returns {Record<string, (input: any, ctx: any) => any>}
+ */
+export function shopHandlers() {
+  return {
+    'catalog.load': () => ({ revision: 1, products: [{ id: 1, name: 'a', price: 1 }] }),
+    'product.save': (input) => ({ id: input.id, name: input.product.name, price: input.product.price }),
+    'image.bytes': () => ({ status: 200, headers: { 'content-type': 'application/octet-stream' }, body: new Uint8Array([1, 2, 3]) }),
+    'product.search': (input) => [{ id: 1, name: input.q ?? 'n', price: input.limit ?? 0 }],
+    'product.remove': () => true,
+  };
+}
+
+/**
+ * A request object for `dispatch`: lowercase header names, `null` body by
+ * default.
+ * @param {string} method
+ * @param {string} url
+ * @param {Record<string, string | string[]>} [headers]
+ * @param {string | Uint8Array | null} [body]
+ */
+export function req(method, url, headers = {}, body = null) {
+  return { method, url, headers, body };
+}
+
+/**
+ * A JSON request: the body serialized, `content-type` set.
+ * @param {string} method
+ * @param {string} url
+ * @param {unknown} value
+ * @param {Record<string, string | string[]>} [headers]
+ */
+export function jsonReq(method, url, value, headers = {}) {
+  return req(method, url, { 'content-type': 'application/json', ...headers }, JSON.stringify(value));
+}
+
+/**
+ * The parsed JSON body of a response (`null` for no body).
+ * @param {{ body: string | Uint8Array | null }} response
+ */
+export function json(response) {
+  return response.body === null ? null : JSON.parse(typeof response.body === 'string' ? response.body : new TextDecoder().decode(response.body));
+}
+
+//#endregion

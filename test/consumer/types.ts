@@ -655,7 +655,49 @@ const savePolicy: contract.CompiledPolicy = saveOp.policy;
 const description: contract.ContractDescription = shopContract.describe();
 void [contractIds, contractParams, saveMethod, saveIn, savePolicy.task, description.operations[0].inferred.in];
 const contractCodes: Readonly<Record<string, string>> = contract.CONTRACT_CODES;
-void [contractCodes.JC0001, contract.ContractCompileError, contract.ContractRuntimeError];
+void [contractCodes.JC0001, contract.ContractCompileError, contract.ContractRuntimeError, contract.ContractHostError];
+const contractAllowed: string[] = shopContract.allowed('/api/products/12');
+void contractAllowed;
+
+// @jarenjs/contract/http, /fetch, /node, /ledger — the server binding: a
+// dispatcher over plain request/response objects, the two adapters, the
+// ledger interface and its documents
+import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH } from '@jarenjs/contract/http';
+import type { HttpRequest, HttpResponse, HttpDispatcher, RequestContext, Handler, ServeHttpOptions } from '@jarenjs/contract/http';
+import { toFetchHandler } from '@jarenjs/contract/fetch';
+import { toNodeHandler } from '@jarenjs/contract/node';
+import { createMemoryLedger, idempotencyLedgerModel, commandLifecycleFsm } from '@jarenjs/contract/ledger';
+import type { Ledger, LedgerRecord, ClaimResult } from '@jarenjs/contract/ledger';
+
+const saveHandler: Handler = (input, ctx: RequestContext) => {
+  ctx.etag('r1', { strong: true });
+  ctx.status(200);
+  const key: string | null = ctx.idempotency === null ? null : ctx.idempotency.key;
+  const signal: AbortSignal | null = ctx.signal;
+  void [key, signal, ctx.op.id, ctx.trace, ctx.params.id, ctx.headers['if-match'], ctx.body];
+  return input.revision > 0 ? { id: input.id, name: 'x' } : ctx.fail('conflict', { revision: input.revision }, { current: null }, { retryable: false });
+};
+const failureValue: contract.ContractFailureValue = contract.ContractFailure('conflict');
+void [failureValue.code, failureValue.retryable, contract.isContractFailure(failureValue)];
+const serveOptions: ServeHttpOptions = {
+  ledger: createMemoryLedger({ ttlMs: 1000 }), partial: false, head: true, validateOutput: 'always', wellKnown: false,
+  trace: () => 'trace', scope: (ctx) => ctx.op.id, onError: (err, ctx) => void [err, ctx], errorBody: (wire, ctx) => ({ error: wire.code, status: wire.status, op: ctx?.op.id }),
+  catalog: { 'contract/not-found': 'nope' }, now: () => 0,
+};
+const dispatcher: HttpDispatcher = serveHttp(shopContract, { 'product.save': saveHandler }, serveOptions);
+const httpRequest: HttpRequest = { method: 'PUT', url: '/api/products/12', headers: { 'content-type': 'application/json', 'x-tags': ['a', 'b'] }, body: '{"revision":1}' };
+const httpResponse: Promise<HttpResponse> = dispatcher.dispatch(httpRequest);
+void [httpResponse, dispatcher.capabilities.name === 'http', dispatcher.capabilities.cancel === 'signal', dispatcher.contract.ids, dispatcher.describe().revision];
+const wireRow: { status: number, msgid: string, retryable: boolean } = HTTP_ERRORS.JC2006;
+void [wireRow, WELL_KNOWN_PATH.startsWith('/')];
+const fetchHandler: (request: Request) => Promise<Response> = toFetchHandler(dispatcher);
+void fetchHandler;
+const nodeHandler = toNodeHandler(dispatcher);
+void nodeHandler;
+const ledger: Ledger = createMemoryLedger();
+const claimed: ClaimResult | Promise<ClaimResult> = ledger.claim({ op: 'a', scope: '', key: 'k', hash: 'h' });
+const record: LedgerRecord | null | Promise<LedgerRecord | null> = ledger.lookup({ op: 'a', scope: '', key: 'k' });
+void [claimed, record, idempotencyLedgerModel.$model === '0.1', commandLifecycleFsm.$fsm === '0.1', commandLifecycleFsm.initial];
 
 // @jarenjs/linq — the typed fluent surface: precise inference on the
 // common path, honest unknown on the exotic path, never a wrong type.

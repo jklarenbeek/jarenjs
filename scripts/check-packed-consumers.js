@@ -252,7 +252,15 @@ void [dagNodes, dag.output];
 void dag.run(1, { onNode: (rec) => void (rec.id + rec.status + rec.ms) }).then((v) => v);
 `,
   '@jarenjs/contract': `
-import { compileContract, ContractCompileError, ContractRuntimeError, CONTRACT_CODES } from '@jarenjs/contract';
+import {
+  compileContract, ContractCompileError, ContractRuntimeError, ContractHostError, ContractFailure, isContractFailure,
+  CONTRACT_CODES, contractMessagesEn, contractCatalogEn,
+} from '@jarenjs/contract';
+import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH } from '@jarenjs/contract/http';
+import type { HttpResponse, RequestContext } from '@jarenjs/contract/http';
+import { toFetchHandler } from '@jarenjs/contract/fetch';
+import { toNodeHandler } from '@jarenjs/contract/node';
+import { createMemoryLedger, idempotencyLedgerModel, commandLifecycleFsm } from '@jarenjs/contract/ledger';
 const contract = compileContract({
   $contract: '0.1',
   operations: {
@@ -276,6 +284,19 @@ void described.operations[0].inferred.http;
 const codes: Readonly<Record<string, string>> = CONTRACT_CODES;
 void codes.JC0001;
 void (ContractCompileError.name === 'ContractCompileError' && ContractRuntimeError.name === 'ContractRuntimeError');
+void contract.allowed('/things/12');
+const failure = ContractFailure('gone', { id: 1 }, { at: 1 }, { retryable: false });
+void [failure.code, isContractFailure(failure), ContractHostError.name, contractMessagesEn['contract/not-found'], contractCatalogEn];
+const server = serveHttp(contract, {
+  'thing.get': (input: any, ctx: RequestContext) => { ctx.etag('t1'); return input === null ? ctx.fail('gone') : { id: input.id, trace: ctx.trace }; },
+}, { ledger: createMemoryLedger(), head: true, validateOutput: 'always', onError: (err: unknown) => void err });
+const responded: Promise<HttpResponse> = server.dispatch({ method: 'GET', url: '/things/12', headers: {}, body: null });
+void [responded, server.capabilities.idempotency, server.capabilities.stream, server.contract.ids, server.describe(), HTTP_ERRORS.JC2001.status, WELL_KNOWN_PATH];
+const onFetch: (request: Request) => Promise<Response> = toFetchHandler(server);
+void onFetch;
+const onNode = toNodeHandler(server);
+void onNode;
+void [idempotencyLedgerModel.$model, commandLifecycleFsm.$fsm];
 `,
   '@jarenjs/db': `
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';

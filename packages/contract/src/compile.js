@@ -367,9 +367,11 @@ function checkRefs(node, docPath, scope, isRoot) {
  * The transport half of an operation's input: the members that travel
  * as strings (path, query, header) and the normalizer that decodes them
  * with `coerceTypes` scoped to exactly those members. `repeated` lists
- * the query members whose effective schema type is `array` — a query
- * decoder collects repeats of those into an array before normalizing;
- * every other query member is last-wins. Body members are never here.
+ * the query and header members whose effective schema type is `array` —
+ * a decoder collects repeats of those into an array (a repeated query
+ * key; a repeated header line or a comma-separated header list) before
+ * normalizing; every other query member is last-wins and every other
+ * header member is a single line. Body members are never here.
  * @typedef {Object} InputTransport
  * @property {(value: any) => any} normalize
  * @property {{ path: readonly string[], query: readonly string[], header: readonly string[], repeated: readonly string[] }} members
@@ -446,6 +448,9 @@ function checkRefs(node, docPath, scope, isRoot) {
  * @property {Readonly<Record<string, CompiledOperation>>} operations
  * @property {readonly string[]} ids - operation ids in document order
  * @property {(method: string, path: string) => { op: CompiledOperation, params: Readonly<Record<string, string>> } | null} match
+ * @property {(path: string) => string[]} allowed - the methods under which
+ *   this path shape reaches an operation, sorted (`[]` for none) — what a
+ *   405 answers in `Allow`; the path only, query split off, like `match`
  * @property {() => any} describe - a pure-JSON summary (docs/CONTRACT-FORMAT.md §3)
  * @property {any} $defs - frozen view of the document's `$defs` (`{}` when absent)
  */
@@ -957,13 +962,13 @@ export function compileContract(doc, options = {}) {
         const schema = p.inputEffective.properties[m];
         setObjectMember(pick, m, schema);
         if (loc === 'path') pathMembers.push(m);
-        else if (loc === 'query') {
-          queryMembers.push(m);
+        else {
+          if (loc === 'query') queryMembers.push(m);
+          else headerMembers.push(m);
           const eff = effectiveSchema(schema, scope);
           const type = isJsonObject(eff) ? eff.type : undefined;
           if (type === 'array' || (Array.isArray(type) && type.includes('array'))) repeated.push(m);
         }
-        else headerMembers.push(m);
       }
       if (pathMembers.length + queryMembers.length + headerMembers.length > 0) {
         // the sub-schema is rooted on the document itself, so every
@@ -1024,6 +1029,7 @@ export function compileContract(doc, options = {}) {
     operations: Object.freeze(operations),
     ids: Object.freeze(ids),
     match,
+    allowed: router.allowed,
     describe: () => describeContract(contract),
     $defs: src.$defs === undefined ? Object.freeze({}) : src.$defs,
   };

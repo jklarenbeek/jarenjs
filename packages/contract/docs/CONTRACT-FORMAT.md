@@ -17,10 +17,12 @@ declared errors, a behavior policy and an HTTP binding. It is compiled
 path matcher, and it is the single source every artifact around it is
 projected from.
 
-Format 0.1 covers the document, its compilation and the HTTP binding's
-*shape*. Bindings that carry an operation over a wire (HTTP server and
-client, in-process, message ports, streams), the revision hash, the
-projections (OpenAPI, TypeScript, Markdown, AI tools) and the error
+Format 0.1 covers the document, its compilation, the HTTP binding's
+*shape* (§2–§6) and the HTTP **server** binding that carries it (§7–§9:
+the request pipeline and its wire errors, idempotency and the ledger
+interface, the `fetch` and `node` adapters). The HTTP client, the
+in-process, message-port and stream bindings, the revision hash, the
+projections (OpenAPI, TypeScript, Markdown, AI tools) and the locale
 catalogs are the coming lines of this package and will append their
 sections here.
 
@@ -240,11 +242,13 @@ normalizer compiled **over those members only** with `coerceTypes`
 compiled operation carries this as
 `input.transport = { normalize, members: { path, query, header, repeated } }`
 (`null` when nothing travels as a string), where `repeated` lists the
-query members whose effective schema type is `array` — a query decoder
-collects repeats of those into an array before normalizing; every other
-query member is last-wins. The server validates the reassembled input
-object with the operation's compiled validator; the client validates the
-same object before it splits it.
+query and header members whose effective schema type is `array` — a
+decoder collects repeats of those into an array (a repeated query key; a
+repeated header line or a comma-separated header list, RFC 9110 §5.3)
+before normalizing; every other query member is last-wins and every
+other header member is one line (§7.4). The server validates the
+reassembled input object with the operation's compiled validator; the
+client validates the same object before it splits it.
 
 An operation bound to `GET` or `HEAD` MUST NOT carry a body-located
 member (`JC0016`) — including a `command` whose members default to the
@@ -322,9 +326,15 @@ query off first. Rules:
 - Variables bind through a prototype-safe setter, so a template variable
   or a request can never write `__proto__`.
 
+`contract.allowed(path)` is the matcher's second question — the methods
+under which this path shape reaches an operation, sorted (`[]` for none,
+for a malformed escape, or for a non-path) — what a server answers in a
+405's `Allow` (§7.2). It walks every method tree and is off the hot path.
+
 The matcher is package-private (`compileRoutes` is not exported); it is
-reached only through `contract.match`. Its measured cost on the reference
-123-route table is published by the benchmark suite when that lands.
+reached only through `contract.match` and `contract.allowed`. Its
+measured cost on the reference 123-route table is published by the
+benchmark suite when that lands.
 
 ## §6 Error codes
 
@@ -355,12 +365,12 @@ carries the same codes and a test holds them equal.
 | JC0016 | an operation bound to `GET` or `HEAD` carries a body-located member (a GET body) |
 
 `JC0017–JC0049` are reserved for further document-level rules and are
-appended to this table when they land. `JC1001` and its range are
-reserved for host programming errors (thrown `TypeError`s: a malformed
-`options.schemas` entry, a duplicate route shape reaching the matcher);
-`JC2xxx` for request-time errors (`ContractRuntimeError`: `{ code, msgid,
-params, status?, retryable? }`, never thrown across a binding) — both
-ranges are populated by the bindings.
+appended to this table when they land. `JC1001–JC1049` are host
+programming errors (`ContractHostError`, a thrown `TypeError` with `code`
+and `reason`) and `JC2001–JC2049` the HTTP request-time errors
+(`ContractRuntimeError` in-process, a wire error on the response) — both
+tables are in §7. Later ranges: `JC2050–JC2069` client-side,
+`JC2070–JC2089` port/local, `JC2090–JC2109` stream.
 
 The three worked examples this document is tested against, complete:
 
@@ -401,3 +411,367 @@ The three worked examples this document is tested against, complete:
   }
 }
 ```
+
+## §7 The HTTP server binding
+
+`serveHttp(contract, handlers, options)` (`@jarenjs/contract/http`) is a
+**binding**, modeled like a `@jarenjs/db` driver: it has a `name`, a
+frozen `capabilities` table that states what it cannot carry, and one
+method a host calls per request — `dispatch(request) → Promise<response>`
+over plain JSON-ish objects. It routes, decodes, normalizes, validates,
+calls the handler, validates the output, applies idempotency and
+entity-tag policy, and answers with the declared statuses and one stable
+error body. **Everything a request can do wrong is a coded response;
+nothing a request can do escapes as a throw** — `dispatch` rejects only
+for a malformed request *object* (`JC1004`), which is an adapter author's
+mistake.
+
+```jsonc
+// HttpRequest — what an adapter builds and what a test hands to dispatch
+{ "method": "PUT", "url": "/api/products/12/master?dry=true",   // origin-less path + optional ?query
+  "headers": { "content-type": "application/json", "idempotency-key": "k-1" },  // lowercase names; a value is a string, or an array when the adapter saw repeated field lines
+  "body": "{\"revision\":4,...}" }                                // string | Uint8Array | null, as received; an optional `signal` (AbortSignal) rides along
+// HttpResponse — what dispatch answers
+{ "status": 200, "headers": { "content-type": "application/json; charset=utf-8", "x-jaren-trace": "…" }, "body": "{…}" }
+```
+
+The dispatcher is `{ dispatch, capabilities, contract, describe() }`;
+`capabilities` is `{ name: "http", status: true, headers: true, media: true,
+head, etag: true, idempotency: <ledger present>, validatedOutput:
+<validateOutput === "always">, stream: false, cancel: "signal" }` — a
+declared downgrade (`head: false`, `validatedOutput: false`,
+`idempotency: false`) is reported here, never silent.
+
+### §7.1 Handlers and the request context
+
+`handlers` maps operation id → `Handler = (input, ctx) => value |
+Promise<value> | ContractFailure`. `input` is the reassembled, validated
+input object (`null` when the operation declares no `input`); the value
+is the operation's output. `ctx` is frozen per request:
+
+| member | meaning |
+|---|---|
+| `op` | the compiled operation |
+| `trace` | the server trace id of this request (also `x-jaren-trace` on the response and `requestId` in an error body) |
+| `method`, `path` | the request line, path without the query |
+| `params` | the raw decoded path strings, frozen |
+| `headers` | **declared header members only** (by header name, string values) plus `if-match`/`if-none-match` when present — the binding reads no other request header on a handler's behalf |
+| `body` | the raw request body of an **opaque** operation (`string | Uint8Array | null`); `null` for a JSON operation, whose body was decoded into `input` |
+| `signal` | the request's `AbortSignal` when the adapter has one (the node adapter aborts it when the client goes away before the response finished), else `null` |
+| `idempotency` | `{ key, scope }` when this request runs under an idempotency key, else `null` |
+| `fail(code, params?, details?, { retryable? }?)` | a declared failure by code — returns a `ContractFailure` value the handler returns; `params` feed the message catalog, `details` become the wire `details` (validated against the declaration's schema when it has one), `retryable` overrides the default taken from `policy.retry.on` |
+| `etag(tag, { strong? }?)` | arm the entity-tag path (§7.5); `tag` is the opaque tag without quotes |
+| `status(n)` | override the success status; must be an integer in 200–299 (`JC1006` otherwise — a host error the handler boundary settles into `JC2008`, seen by `onError`) |
+
+An **opaque** operation (`http.opaque`) takes a *raw* handler: `(input,
+ctx) => { status, headers?, body? }` with the bytes in `ctx.body`; it
+bypasses media, parse, body assembly, idempotency and output validation.
+Its transport members are decoded and normalized into `input` and — when
+no member is body-located, so they **are** the whole input — validated
+like any other input (`JC2006`); an opaque operation that declares a
+body-located member cannot be validated without decoding bytes, so its
+`input` is handed over unvalidated and the raw handler owns the check
+(`ctx.op.input.validate` is at hand). `input` is `null` when the operation
+declares none. Its response is passed through verbatim plus
+`x-jaren-trace`; a value that is not `{ status, headers?, body? }` is
+`JC2010`. It may still `ctx.fail` a declared code (answered as JSON like
+every other error).
+
+A handler may also **throw** a `ContractRuntimeError` whose `code` the
+operation declares — that is a declared failure too (`params` and
+`retryable` are read from it). Any other throw, rejection or hostile value
+is `JC2008`.
+
+### §7.2 The pipeline, in order
+
+1. **The request object.** `method`/`url` strings, `headers` an object,
+   `body` a string, `Uint8Array` or `null` (an absent body is `null`) — a
+   malformed object is `JC1004`, **rejected**, never a response.
+2. **Route.** `url` is split at the first `?`; the path goes to
+   `contract.match(method, path)`; under `HEAD` with `head` on, `HEAD`
+   is tried, then `GET`. No match: an undecodable path (a malformed
+   percent-escape) is `JC2011`; the `wellKnown` path answers `describe()`
+   under GET/HEAD (405 otherwise); `contract.allowed(path)` non-empty
+   (with `HEAD` added beside `GET` when `head` is on) is `JC2002` with
+   `Allow`; else `JC2001`. A matched operation without a handler (a
+   `partial` server) is `JC2013`.
+3. **The body limit.** A `content-length` above `policy.limits.maxBodyBytes`
+   is `JC2003` **before** any read (the adapters honor this too, §9); a
+   body whose byte length exceeds the limit is `JC2003` after. Applies to
+   every matched operation, opaque and body-less included.
+4. **Opaque** → the transport input validated as in step 8 when no
+   member is body-located (`JC2006`), then the raw handler through the
+   same boundary as step 10; done.
+5. **Media.** A body-carrying operation (a body-located member or a
+   whole-body member) with a non-empty body requires a `content-type`
+   whose `type/subtype` is the operation's `http.media` (parameters
+   ignored, case-insensitive; a `+json` structured-syntax suffix is
+   accepted for `application/json`); else `JC2004`. A body-less
+   operation with a body **ignores** the body. An empty body needs no
+   media.
+6. **Parse.** Bytes are decoded as strict UTF-8 first (invalid → `JC2005`;
+   a leading BOM is stripped by the decoder); then `JSON.parse` (a failure
+   is `JC2005`).
+7. **Assemble** the input object through a prototype-safe setter only, in
+   this order: path members (raw decoded strings), query members
+   (`URLSearchParams` semantics — `+` is a space; a member listed in
+   `transport.members.repeated` collects every occurrence into an array,
+   every other member is last-wins; an **undeclared query key is
+   ignored, never merged**; an undecodable query is `JC2012`), declared
+   header members (by their lowercased name; §7.4), then the transport
+   normalizer over exactly those members (`coerceTypes`), then the body,
+   **never coerced**: `http.body` names a member → the parsed value is
+   that member; otherwise the parsed value must be an object (`JC2006`
+   with `path: ""` otherwise) and each of its own members is set unless
+   it names a path/query/header member (which is **ignored** — the body
+   cannot override a location the request already answered); an
+   undeclared body member is set and left for the validator to judge
+   under the schema's own `additionalProperties`. A JSON body's own
+   `__proto__` member becomes an own data property, never a prototype.
+8. **Validate** the input with the operation's compiled validator →
+   `JC2006`, `details` by `policy.errors.details` (§7.3).
+9. **Idempotency** when `policy.idempotency !== "none"` (§8): a missing
+   `Idempotency-Key` is `JC2007` under `required` and runs plainly under
+   `optional`; otherwise the input is hashed and the ledger claimed.
+10. **The handler**, through **one uniform promise boundary** — a
+    synchronous throw, a non-promise return and a rejection settle
+    alike. A `ContractFailure` (from `ctx.fail`) or a thrown
+    `ContractRuntimeError` with a declared code → the declared error
+    response; anything else → `JC2008`, its cause handed to `onError`.
+    A value whose `then` accessor throws is a rejection here — the
+    hostile-value case of `JC2008`.
+11. **Output validation** (`validateOutput: "always"`, the default): the
+    value against the operation's output validator → `JC2010` on failure
+    or on a throwing accessor; the validator's errors reach `onError`,
+    never the wire. `"never"` is a declared downgrade
+    (`capabilities.validatedOutput: false`).
+12. **Entity tags** when the handler armed one (§7.5): `If-Match` first
+    (strong comparison; mismatch → `JC2014`), then `If-None-Match` (weak
+    comparison; match → `304` on GET/HEAD, `JC2014` on other methods).
+    Because the tag is known only after the handler runs, both are
+    evaluated **after** step 10 and only when a tag was armed — a
+    handler that wants a pre-execution precondition compares
+    `ctx.headers["if-match"]` itself.
+13. **Serialize.** `JSON.stringify(value)`; a value JSON cannot carry
+    (a cycle, a BigInt) is `JC2010`; `undefined` answers no body. Status
+    is `ctx.status()` or `http.status`; headers `content-type: <media>;
+    charset=utf-8` (when a body), `x-jaren-trace`, `etag` when armed;
+    a `204` carries no body; a HEAD carries the `content-length` of the
+    body it dropped and no body. Then the ledger claim is settled (§8).
+
+Every step's failure path returns a response. `dispatch` never rejects
+for request content; a defect of the binding itself is caught last and
+answered `JC2008` too, so a server never sees an unhandled rejection.
+
+### §7.3 The wire error
+
+Every non-2xx JSON response body is:
+
+```jsonc
+{ "code": "JC2006",                       // a JC2xxx code, or the DECLARED error code ("conflict")
+  "message": "the input of operation product.save is invalid",
+  "requestId": "3f2c…",                   // the server trace, equal to the x-jaren-trace header
+  "details": [ { "path": "/revision", "keyword": "type" } ],   // by policy.errors.details; absent under "none"
+  "retryable": false }
+```
+
+`message` is rendered from the msgid through the catalog (the host
+`catalog` option first, the English catalog in the package second) and
+**never interpolates a request value** — its parameters are the operation
+id, a declared limit, a media type, a method list, a declared header
+member name or a declared error code. `details` follows
+`policy.errors.details` for a validation failure: `none` → absent;
+`paths` → `[{ path, keyword }]` (instance path + keyword, no values, no
+schema); `full` → the validator's own error records with their `params`.
+For a **declared** failure, `details` is what the handler gave to
+`ctx.fail`, validated against `errors[code].schema` when the declaration
+has one (a mismatch is `JC2010` — the handler broke its own error
+contract; without a schema, the details must still be a JSON value) and
+crossing regardless of `policy.errors.details` (that policy governs
+validation failures; a declared error's details are the operation's own
+contract). A declared failure's message is `contract/error/<code>` from
+the host catalog when it defines one, else the generic
+`contract/handler-error` (`operation {op} failed with {code}`); its
+`retryable` is the failure's own, or whether `policy.retry.on` names the
+code. The `errorBody` option projects the wire record (the body plus
+`status`) into another JSON shape for legacy consumers; a projector that
+throws or answers non-JSON falls back to the shape above.
+
+Every response carries `x-jaren-trace: <trace>`; every error response
+also `cache-control: no-store`; a 405 carries `Allow`; a 409
+`in-progress` carries `retry-after: 1`; a 412 from `If-None-Match`
+carries the `etag`. Header names are lowercase.
+
+The taxonomy — code, status, msgid, retryable — is the normative table
+below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
+`CONTRACT_CODES` lists every code, the English catalog
+(`contractMessagesEn`) has exactly these msgids plus
+`contract/handler-error`, and a test holds the four equal.
+
+| code | status | msgid | retryable | when |
+|---|---:|---|---|---|
+| `JC2001` | 404 | `contract/not-found` | no | no operation matches method + path (a lowercase method token, an unknown path, a trailing slash) |
+| `JC2002` | 405 | `contract/method-not-allowed` | no | the path shape is served under other methods; `Allow` lists them (`HEAD` beside `GET` when `head` is on) |
+| `JC2003` | 413 | `contract/body-too-large` | no | `content-length` or read length > `policy.limits.maxBodyBytes` |
+| `JC2004` | 415 | `contract/unsupported-media` | no | a body-carrying operation with a non-empty body whose `content-type` is not the declared media (parameters ignored, `+json` accepted for JSON) |
+| `JC2005` | 400 | `contract/malformed-json` | no | body present and not valid JSON, or not valid UTF-8 |
+| `JC2006` | 400 | `contract/invalid-input` | no | the reassembled input fails the operation's input validator; also a non-object body under `body:"*"` (`path: ""`), and a body the canonicalizer refuses (a lone surrogate; keyword `canonical`) |
+| `JC2007` | 400 | `contract/idempotency-key-required` | no | `policy.idempotency: "required"` and no (or an empty) `idempotency-key` header |
+| `JC2008` | 500 | `contract/handler-failed` | no | the handler threw a non-declared error, rejected, answered an undeclared code or a hostile value, or the binding itself faulted; `onError(err, ctx)` sees the cause |
+| `JC2009` | 409 | `contract/idempotency-conflict` | see §8 | the ledger says `in-progress` (retryable, `retry-after: 1`) or `mismatch` (not retryable, `details: [{ "kind": "mismatch" }]`) |
+| `JC2010` | 500 | `contract/invalid-output` | no | the handler value fails the output validator, cannot be serialized, a raw response is malformed, or a declared error's details fail their schema — the server broke the contract |
+| `JC2011` | 400 | `contract/malformed-path` | no | the path carries a malformed percent-escape |
+| `JC2012` | 400 | `contract/malformed-query` | no | the query string is not decodable (a malformed escape, invalid UTF-8) |
+| `JC2013` | 501 | `contract/not-implemented` | no | a `partial` server has no handler for the operation |
+| `JC2014` | 412 | `contract/precondition-failed` | no | `If-Match` does not match the armed tag (strong comparison), or `If-None-Match` matches on a non-GET/HEAD |
+| `JC2015` | 400 | `contract/invalid-header` | no | a declared scalar header member arrived repeated, or a header value is not a string |
+
+`JC2016–JC2049` are reserved for later http-side codes; a new one is
+added to `CONTRACT_CODES`, this table and the English catalog in one
+change.
+
+Host programming errors are `ContractHostError` — a `TypeError` with
+`code` and `reason`, **thrown** at construction or from `ctx`, never a
+wire response:
+
+| code | when |
+|---|---|
+| `JC1001` | `serveHttp`: `handlers` is not an object, a key names no operation of the contract, a value is not a function, or an option is malformed |
+| `JC1002` | `serveHttp`: an operation has no handler and `partial` is not set |
+| `JC1003` | a binding cannot carry a declared feature: an operation declares `policy.idempotency` and no `ledger` was given (say so, never degrade) |
+| `JC1004` | `dispatch` received a malformed request object |
+| `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299 |
+
+### §7.4 Headers
+
+The binding reads, on the request: `content-type` and `content-length`
+(steps 3, 5), `idempotency-key` (§8), `if-match` and `if-none-match`
+(§7.5), and the **declared header members** — an input member mapped to
+`header` travels as the header named by the member's name lowercased
+(declare the member `x-tenant` to read `X-Tenant`). A scalar member takes
+one line (a repeated line is `JC2015`; the `fetch` adapter cannot see
+repeats — the platform combines them — while the `node` adapter passes
+distinct lines as an array); an array-typed member (listed in
+`transport.members.repeated`) collects repeated lines, or splits one line
+on commas (RFC 9110 list syntax). No other request header is read, and
+none is echoed. `x-jaren-trace` on a request is never read — the trace is
+the server's; `x-attempt` or any client attempt id is never read either.
+
+### §7.5 Entity tags and conditionals
+
+`ctx.etag(tag)` arms a weak tag (`etag: W/"tag"`), `ctx.etag(tag, {
+strong: true })` a strong one (`etag: "tag"`). `If-None-Match` is
+compared weakly (`*` matches; `W/` indicators are ignored) → `304` with
+the `etag` header and no body on GET/HEAD, `412` (`JC2014`) on other
+methods; `If-Match` is compared strongly (`*` matches; a weak candidate
+or a weak armed tag never matches) → `412` on a mismatch. Both are
+evaluated after the handler ran, and only when it armed a tag.
+
+### §7.6 HEAD, the well-known path, options
+
+`head: true` (default) answers `HEAD` for every `GET` operation by
+running the handler and dropping the body (a declared `HEAD` operation
+wins); with `head: false` a HEAD is a 405 listing `GET`. The `wellKnown`
+path (`/.well-known/jaren-contract`, or another absolute path, or `false`)
+answers `describe()` — `revision: null` until the revision lands, `compat`
+present — for negotiation. `trace` (default `crypto.randomUUID`) generates
+the server trace; `scope(ctx)` derives the idempotency scope (§8);
+`partial` allows missing handlers; `validateOutput` is `"always" |
+"never"`; `errorBody(wire, ctx)` and `onError(err, ctx)` are the two host
+hooks (`ctx` is `null` before an operation is matched); `catalog` is a
+message catalog (templates or compiled renderers) consulted before the
+English one; `now` is the clock stamped into ledger claims.
+
+## §8 Idempotency and the ledger
+
+An operation with `policy.idempotency` of `optional` or `required` runs
+under an **idempotency key**: the caller's, sent as `Idempotency-Key`,
+scoped by the host's `scope(ctx)` (an installation, a principal — never a
+rotating token) — one of the three identities this format keeps apart
+(the **trace** is the server's per request; the **attempt** id is the
+caller's per dispatch and never crosses). `serveHttp` refuses (`JC1003`)
+an idempotent operation without a `ledger`.
+
+The **request hash** is the lowercase hex SHA-256 over the RFC 8785
+canonical bytes of the validated input (`canonicalSha256` in
+`@jarenjs/json/canonical`) — so a body with its members in another order
+is the same request. The binding then calls the ledger:
+
+```jsonc
+// the Ledger interface — every method may return its value or a promise of it
+{ "claim":  "({ op, scope, key, hash, now }) → { state: 'new', ref } | { state: 'replay', response } | { state: 'in-progress' } | { state: 'mismatch' }",
+  "commit": "(ref, response) → void",
+  "fail":   "(ref, retryable, response?) → void",
+  "lookup": "({ op, scope, key }) → record | null" }
+```
+
+Semantics the binding relies on: same key + same hash → `replay` — the
+stored `{ status, headers, body }` **verbatim** with a fresh
+`x-jaren-trace` and `idempotent-replayed: true`; same key + different
+hash → `mismatch` (409, `details: [{ "kind": "mismatch" }]`, not
+retryable); `started` and not expired → `in-progress` (409, `retry-after:
+1`, retryable); `failed` with `retryable: true` → treated as `new` (the
+key may be retried); `failed` and not retryable → `replay` of the stored
+failure. After the handler: a success **commits** the response; a
+declared failure is recorded as **failed** with its response and its
+`retryable`; a server fault (`JC2008`, `JC2010`, `JC2014`) **releases**
+the key as retryable with no response. `now` on a claim is the binding's
+clock (`options.now`), which a ledger may prefer to its own. Opaque
+operations bypass the ledger; reads never carry a key. A ledger that
+throws or rejects is reported to `onError` and the response still goes
+out (a throwing `claim` is `JC2008`).
+
+`createMemoryLedger({ ttlMs = 86_400_000, now })` (`@jarenjs/contract/ledger`)
+is the reference implementation over a `Map`: synchronous,
+single-process, expiring on `claim` and `lookup`, with `sweep()` for a
+host timer and `size`. The record it keeps is:
+
+```jsonc
+{ "id": "product.save|tenant-a|k-1",      // "<op>|<scope>|<key>"
+  "op": "product.save", "scope": "tenant-a", "key": "k-1",
+  "hash": "9f2a…",                          // 64 lowercase hex characters
+  "status": "committed",                    // started | committed | failed
+  "response": { "status": 200, "headers": { "…": "…" }, "body": "{…}" },   // or null
+  "retryable": null,                        // of a failed record
+  "createdAt": 1755000000000, "updatedAt": 1755000000000, "expiresAt": 1755086400000 }
+```
+
+Two documents ship the same shape as **data**, for a host that wants
+durability (this package imports neither `@jarenjs/db` nor
+`@jarenjs/flow`): `idempotencyLedgerModel` is a `$model` 0.1 document —
+collection `ledger`, key `/id`, that record as its schema (closed),
+indexes on `expiresAt` and `status` — a host opens it with `openStore`
+and implements the interface over the collection; `commandLifecycleFsm`
+is a `$fsm` 0.1 document — `idle → started` on `claim`, `started →
+committed` on `commit`, `started → failed` on `fail`, `failed → started`
+on `claim` guarded by `$.context.retryable` — which the memory ledger
+walks exactly.
+
+## §9 Adapters
+
+Two dependency-free, structurally typed adapters put a dispatcher behind
+the platform:
+
+- **`toFetchHandler(dispatcher)`** (`@jarenjs/contract/fetch`) →
+  `(Request) => Promise<Response>` — Bun.serve, Deno, service workers,
+  Cloudflare-style hosts, and Hono. It lowercases the headers into a
+  plain object, matches the operation first (cheap) to decide how the
+  body is read — `text()` for a JSON operation, `arrayBuffer()` for an
+  opaque one, and **not at all** for an unmatched request or a declared
+  `content-length` above the operation's limit (the dispatcher answers
+  the 413 from the header) — forwards `request.signal`, and builds the
+  `Response` from the dispatcher's status, headers and body.
+- **`toNodeHandler(dispatcher)`** (`@jarenjs/contract/node`) → `(req,
+  res)` — `http.createServer`'s listener and Express middleware. It
+  collects the body chunk by chunk up to the operation's limit; on
+  overflow it stops reading, answers the 413 with `connection: close`
+  and destroys the request once the response has flushed; a declared
+  `content-length` above the limit is never read; an unmatched request's
+  body is never read. Bytes reach the dispatcher as received (its strict
+  UTF-8 decode decides `JC2005`); repeated header lines arrive as arrays
+  (`headersDistinct`); `ctx.signal` aborts when the client goes away
+  before the response finished; `content-length` is set on every body.
+
+Fastify, Hono and Express are recipes in the README, each ≤15 lines and
+executed by a test that imports the framework from the benchmark
+workspace only — no framework is a dependency of this package.

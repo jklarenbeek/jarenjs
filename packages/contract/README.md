@@ -7,14 +7,18 @@ Jaren ends may exchange: JSON in, JSON out, each with a *kind* (`read` or
 behavior *policy* and an HTTP *binding*. `compileContract` compiles it
 **once** into per-operation validators, transport normalizers and a path
 matcher whose static segments beat variables regardless of registration
-order. Everything else a consumer wants beside the runtime — the bindings
-that carry an operation over HTTP, a message port or no wire at all, the
-OpenAPI/TypeScript/Markdown projections, the AI-tool view, the revision
-and the breaking-change diff — is coming in this line as a projection of
-the same document.
+order; `serveHttp` puts it behind HTTP as a **total** dispatch pipeline —
+plain request in, plain response out, every request-caused failure a
+coded response — with a `fetch` and a `node` adapter and idempotency
+through a ledger interface. Everything else a consumer wants beside the
+runtime — the client and app bindings, the message-port and stream
+bindings, the OpenAPI/TypeScript/Markdown projections, the AI-tool view,
+the revision and the breaking-change diff — is coming in this line as a
+projection of the same document.
 
 Zero dependencies outside the suite: `@jarenjs/core`, `@jarenjs/json`,
-`@jarenjs/validate`. No `eval`, CSP-safe. The normative contract is
+`@jarenjs/validate`. No `eval`, CSP-safe; the adapters need only the
+platform's `Request`/`Response` or Node's `(req, res)`. The normative contract is
 [docs/CONTRACT-FORMAT.md](docs/CONTRACT-FORMAT.md); the grammar is
 published as JSON Schema in
 [`schemas/jaren-contract.schema.json`](schemas/jaren-contract.schema.json)
@@ -95,11 +99,90 @@ template form — each is a `ContractCompileError` with a stable code and
 the JSON Pointer of the member at fault, at compile, never at request
 time.
 
+## Serve it over HTTP
+
+```js
+import { compileContract } from '@jarenjs/contract';
+import { serveHttp } from '@jarenjs/contract/http';
+import { toNodeHandler } from '@jarenjs/contract/node';     // or toFetchHandler from '@jarenjs/contract/fetch'
+import { createMemoryLedger } from '@jarenjs/contract/ledger';
+import http from 'node:http';
+
+const server = serveHttp(compileContract(doc), {
+  'catalog.load': async (input, ctx) => {                     // input = { since? } — query strings already coerced
+    const catalog = await loadCatalog(input.since);
+    ctx.etag(String(catalog.revision));                       // 304 on a matching If-None-Match, etag: W/"…" otherwise
+    return catalog;                                           // validated against the output schema before it leaves
+  },
+  'product.save': async (input, ctx) => {                     // input = { id, revision, product } — path + body assembled
+    const saved = await save(input);
+    return saved ?? ctx.fail('conflict', {}, { current: await current(input.id) });   // 409, the declared code on the wire
+  },
+  'image.bytes': (input, ctx) => ({ status: 200, headers: { 'content-type': 'image/png' }, body: bytes(input.id) }),   // opaque: raw
+}, { ledger: createMemoryLedger() });                         // required: product.save declares idempotency
+
+http.createServer(toNodeHandler(server)).listen(8080);
+
+// or drive it directly — a pure function over plain objects, no socket needed
+const response = await server.dispatch({ method: 'GET', url: '/api/catalog?since=2026-01-01T00:00:00Z', headers: {}, body: null });
+response.status;                                             // 200
+response.headers['x-jaren-trace'];                           // the server trace of this request
+JSON.parse(response.body);                                   // the catalog
+```
+
+The pipeline routes (404/405 with `Allow`), enforces the body limit
+(413) before reading, checks the media (415), parses (400), assembles the
+input from path, query and headers through a prototype-safe setter,
+normalizes the transport strings, validates (400 with `details` by
+`policy.errors.details`), claims the idempotency key, calls the handler
+through one promise boundary, validates the output (500 — the server
+broke the contract), applies `If-Match`/`If-None-Match`, serializes.
+Every non-2xx body is `{ code, message, requestId, details?, retryable }`
+with `x-jaren-trace` on the response; a handler's thrown error never
+reaches the wire (`onError` sees it). `server.capabilities` says what
+the binding carries — `head`, `etag`, `idempotency`, `validatedOutput` —
+and never degrades silently: an idempotent operation without a `ledger`
+is refused at construction. `GET /.well-known/jaren-contract` answers
+`describe()`. The normative pipeline, taxonomy and ledger interface are
+[CONTRACT-FORMAT.md §7–§9](docs/CONTRACT-FORMAT.md#7-the-http-server-binding).
+
+### Recipes: Fastify, Hono, Express
+
+None of these is a dependency; each recipe is executed by a test that
+imports the framework from the benchmark workspace.
+
+```js
+// Fastify — a catch-all route, the raw body handed to dispatch
+const app = fastify();
+app.removeAllContentTypeParsers();
+app.addContentTypeParser('*', { parseAs: 'buffer' }, (req, body, done) => done(null, body));
+app.all('/*', async (req, reply) => {
+  const r = await server.dispatch({ method: req.method, url: req.url, headers: req.headers, body: req.body ?? null });
+  reply.code(r.status).headers(r.headers);
+  return r.body === null ? reply.send() : reply.send(r.body);
+});
+```
+
+```js
+// Hono — the fetch handler is the whole app (Bun.serve, Deno, workers alike)
+const app = new Hono();
+app.all('*', (c) => toFetchHandler(server)(c.req.raw));
+```
+
+```js
+// Express — the node handler is middleware
+const app = express();
+app.use(toNodeHandler(server));
+```
+
 ## What is here, and what is coming
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
-`describe()`, the `JC0001–JC0016` compile errors. Coming in this line:
-the HTTP server binding (`fetch` and `node` adapters) and client, the
-app-effect binding, `local`/`port`/`stream` bindings, projections
-(OpenAPI 3.1, TypeScript, Markdown, AI tools), the revision hash and
-`diffContracts`, and the locale catalogs for wire errors.
+`describe()`, the `JC0001–JC0016` compile errors; the HTTP server binding
+(`serveHttp`, the `JC2001–JC2015` wire taxonomy with its English catalog,
+`fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
+and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents). Coming
+in this line: the HTTP client and the app-effect binding,
+`local`/`port`/`stream` bindings, projections (OpenAPI 3.1, TypeScript,
+Markdown, AI tools), the revision hash and `diffContracts`, and the locale
+packs for the wire errors.

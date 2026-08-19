@@ -6,6 +6,9 @@ import {
   falseThat,
   fallbackFn,
   addFunctionToArray,
+  isThenable,
+  chain,
+  toPromise,
 } from '@jarenjs/core/function';
 
 describe('trueThat', () => {
@@ -94,5 +97,37 @@ describe('addFunctionToArray', () => {
     const fn = () => {};
     const result = addFunctionToArray(undefined, fn);
     assert.deepEqual(result.length, 1);
+  });
+});
+
+describe('the sync-capable-async helpers', () => {
+  it('isThenable keys on a callable then and nothing else', () => {
+    assert.isTrue(isThenable(Promise.resolve(1)));
+    assert.isTrue(isThenable({ then() {} }));
+    assert.isFalse(isThenable({ then: 1 }));
+    assert.isFalse(isThenable(null));
+    assert.isFalse(isThenable(undefined));
+    assert.isFalse(isThenable(3));
+    assert.isFalse(isThenable('then'));
+  });
+
+  it('chain applies next synchronously to a value and allocates no promise', () => {
+    const out = chain(2, (v) => v * 21);
+    assert.strictEqual(out, 42);
+    assert.isFalse(isThenable(out));
+  });
+
+  it('chain composes through a promise when the input is one', async () => {
+    const out = chain(Promise.resolve(2), (v) => v * 21);
+    assert.isTrue(isThenable(out));
+    assert.strictEqual(await out, 42);
+  });
+
+  it('toPromise lifts a value once and returns a promise by identity', async () => {
+    const p = Promise.resolve('x');
+    assert.strictEqual(toPromise(p), p);
+    const lifted = toPromise('y');
+    assert.isTrue(isThenable(lifted));
+    assert.strictEqual(await lifted, 'y');
   });
 });

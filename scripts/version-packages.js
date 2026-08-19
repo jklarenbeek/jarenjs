@@ -7,6 +7,7 @@ const packageFiles = [
   'packages/formats/package.json',
   'packages/refs/package.json',
   'packages/emit/package.json',
+  'packages/contract/package.json',
   'packages/forms/package.json',
   'packages/locales/package.json',
   'packages/view/package.json',

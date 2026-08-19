@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.35.0",
+  "version": "0.36.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -10,6 +10,22 @@
     ".": {
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
+    },
+    "./http": {
+      "types": "./dist/types/http/serve.d.ts",
+      "default": "./src/http/serve.js"
+    },
+    "./fetch": {
+      "types": "./dist/types/adapters/fetch.d.ts",
+      "default": "./src/adapters/fetch.js"
+    },
+    "./node": {
+      "types": "./dist/types/adapters/node.d.ts",
+      "default": "./src/adapters/node.js"
+    },
+    "./ledger": {
+      "types": "./dist/types/ledger.d.ts",
+      "default": "./src/ledger.js"
     },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
@@ -20,7 +36,7 @@
     "docs/",
     "schemas/"
   ],
-  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher",
+  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, and served over HTTP through a total dispatch pipeline with fetch and node adapters",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -43,7 +59,8 @@
     "api",
     "rest",
     "router",
-    "openapi"
+    "openapi",
+    "idempotency"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -51,8 +68,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.35.0",
-    "@jarenjs/json": "^0.35.0",
-    "@jarenjs/validate": "^0.35.0"
+    "@jarenjs/core": "^0.36.0",
+    "@jarenjs/json": "^0.36.0",
+    "@jarenjs/validate": "^0.36.0"
   }
 }

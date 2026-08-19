@@ -18,10 +18,10 @@
  *  - `JC2070–JC2089` port/local bindings
  *  - `JC2090–JC2109` stream binding
  *
- * Only the document-compile range is populated by this module today;
- * the others are reserved for the bindings and are listed here so a
- * later addition lands in its range rather than at the next free
- * number.
+ * The document-compile range, the http host and request-time ranges are
+ * populated; the others are reserved for the client, port/local and
+ * stream bindings and are listed here so a later addition lands in its
+ * range rather than at the next free number.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -47,6 +47,28 @@ export const CONTRACT_CODES = Object.freeze({
   JC0014: 'a policy member is mistyped or outside its declared set',
   JC0015: 'id, version, compat or an operation doc is mistyped',
   JC0016: 'an operation bound to GET or HEAD carries a body-located member (a GET body)',
+  // ——— host programming errors (thrown ContractHostError, a TypeError) ———
+  JC1001: 'serveHttp: handlers is not an object, a key names no operation of the contract, or a value is not a function',
+  JC1002: 'serveHttp: an operation has no handler and options.partial is not set',
+  JC1003: 'a binding cannot carry a declared feature: an operation declares idempotency and serveHttp was given no ledger',
+  JC1004: 'dispatch received a malformed request object (method or url not a string, headers not an object, body not a string, Uint8Array or null)',
+  JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299',
+  // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
+  JC2001: 'no operation matches the request method and path (404)',
+  JC2002: 'the path shape is served under other methods (405, Allow lists them)',
+  JC2003: 'the request body exceeds policy.limits.maxBodyBytes, by content-length or by read length (413)',
+  JC2004: 'a body-carrying operation received a content-type that is not its declared media (415)',
+  JC2005: 'the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400)',
+  JC2006: 'the reassembled input fails the operation\'s input validator (400)',
+  JC2007: 'the operation requires an Idempotency-Key header and none was sent (400)',
+  JC2008: 'the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it)',
+  JC2009: 'the idempotency ledger reports the key in progress (retryable) or bound to a different request (mismatch) (409)',
+  JC2010: 'the handler value fails the output validator or a declared error\'s details fail its schema — the server broke the contract (500)',
+  JC2011: 'the request path carries a malformed percent-escape (400)',
+  JC2012: 'the query string is not decodable (400)',
+  JC2013: 'the operation has no handler on this partial server (501)',
+  JC2014: 'the If-Match precondition does not match the entity tag the handler armed (412)',
+  JC2015: 'a declared header member is repeated when its schema is scalar, or fails transport decoding (400)',
 });
 
 /**
@@ -102,4 +124,77 @@ export class ContractRuntimeError extends CodedError {
     /** @type {boolean | undefined} */
     this.retryable = options.retryable;
   }
+}
+
+/**
+ * A host programming error at a binding's construction or use — a
+ * handler table that names no operation, a missing ledger for a declared
+ * idempotency policy, a malformed request object handed to `dispatch`, a
+ * `ctx.status` outside 2xx. `TypeError`, thrown, never a wire response:
+ * the mistake is the host's, not the request's. The codes are
+ * `JC1001–JC1049` (docs/CONTRACT-FORMAT.md §7).
+ */
+export class ContractHostError extends TypeError {
+  /**
+   * @param {string} code
+   * @param {string} reason - The bare reason; `message` is `${code}: ${reason}`.
+   */
+  constructor(code, reason) {
+    super(`${code}: ${reason}`);
+    this.name = 'ContractHostError';
+    /** @type {string} */
+    this.code = code;
+    /** @type {string} */
+    this.reason = reason;
+  }
+}
+
+/**
+ * A declared operation failure as a handler returns it: pure JSON — the
+ * declared error `code`, the catalog `params` for its message, the wire
+ * `details` (validated against the declaration's schema when it has
+ * one) and whether the caller may retry. Made by `ContractFailure` and
+ * recognized by identity, never by shape: a hostile handler value cannot
+ * forge one and classifying it reads no property.
+ * @typedef {Object} ContractFailureValue
+ * @property {string} code
+ * @property {Readonly<Record<string, unknown>>} params
+ * @property {unknown} details - `undefined` when the failure carries none
+ * @property {boolean | null} retryable - `null` defers to the operation's retry policy
+ */
+
+/** The identity brand of every value `ContractFailure` produced. */
+const failures = new WeakSet();
+
+/**
+ * Make a declared failure value: what a handler returns (or `ctx.fail`
+ * returns for it) to answer with one of the operation's declared error
+ * codes. A branded plain-object factory, not a class: the value crosses
+ * no binding as an `Error` and carries only JSON.
+ * @param {string} code - A code the operation declares in `errors`
+ * @param {Record<string, unknown>} [params] - Message parameters for the catalog
+ * @param {unknown} [details] - The wire `details` member
+ * @param {{ retryable?: boolean }} [options] - `retryable` overrides the
+ *   default taken from the operation's `policy.retry.on`
+ * @returns {ContractFailureValue}
+ */
+export function ContractFailure(code, params, details, options) {
+  const value = Object.freeze({
+    code,
+    params: Object.freeze(params === undefined || params === null ? {} : { ...params }),
+    details,
+    retryable: options !== undefined && options !== null && typeof options.retryable === 'boolean' ? options.retryable : null,
+  });
+  failures.add(value);
+  return value;
+}
+
+/**
+ * True exactly for a value `ContractFailure` produced. Reads nothing
+ * from the value, so it is total for a hostile object.
+ * @param {unknown} value
+ * @returns {value is ContractFailureValue}
+ */
+export function isContractFailure(value) {
+  return (typeof value === 'object' && value !== null) && failures.has(value);
 }

@@ -218,5 +218,16 @@
     "message": "ZZ0042: golden reason",
     "hasOwnCause": true,
     "causeValue": "<the fixed cause>"
+  },
+  {
+    "class": "ContractHostError",
+    "name": "ContractHostError",
+    "code": "ZZ0042",
+    "docPath": "<absent>",
+    "dataPath": "<absent>",
+    "reason": "golden reason",
+    "message": "ZZ0042: golden reason",
+    "hasOwnCause": false,
+    "causeValue": "<absent>"
   }
 ]

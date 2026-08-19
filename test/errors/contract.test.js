@@ -33,7 +33,7 @@ import { FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
 import { AiError } from '@jarenjs/ai';
 import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
 import { DbCompileError, DbRuntimeError } from '@jarenjs/db';
-import { ContractCompileError, ContractRuntimeError } from '@jarenjs/contract';
+import { ContractCompileError, ContractRuntimeError, ContractHostError } from '@jarenjs/contract';
 import { createStructuredOutput } from '@jarenjs/ai/structured';
 
 const CAUSE = new Error('matrix cause');
@@ -124,6 +124,7 @@ describe('T6 — the cause matrix', () => {
   it('classes without a cause channel never grow one', () => {
     assertNoCause(new JsonPatchRuntimeError('ZZ0001', 'r', '/p', '/d'));
     assertNoCause(new JsonWriteError('ZZ0001', 'r', '/d'));
+    assertNoCause(new ContractHostError('ZZ0001', 'r'));
   });
 });
 

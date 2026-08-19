@@ -274,6 +274,9 @@ const NO_PARAMS = Object.freeze({});
  * A compiled router.
  * @typedef {Object} Router
  * @property {(method: string, path: string) => { key: any, params: Record<string, string> } | null} match
+ * @property {(path: string) => string[]} allowed - the methods whose tree
+ *   reaches a leaf for this path shape, sorted — what a 405 lists in
+ *   `Allow`; `[]` for a malformed or unknown path
  */
 
 /**
@@ -443,5 +446,26 @@ export function compileRoutes(entries) {
     return hit(leaf, path, hasEscape);
   }
 
-  return Object.freeze({ match });
+  /**
+   * The methods that reach a leaf for this path shape — the `Allow` list
+   * of a 405. Off the hot path: it walks every method tree.
+   * @param {string} path
+   * @returns {string[]}
+   */
+  function allowed(path) {
+    /** @type {string[]} */
+    const out = [];
+    if (typeof path !== 'string' || path.charCodeAt(0) !== CC_SLASH) return out;
+    const hasEscape = path.indexOf('%') !== -1;
+    // `match` fails a malformed escape in a variable segment only when it
+    // binds the leaf; here no leaf is bound, so the whole path is checked
+    if (hasEscape && decodeSegment(path) === null) return out;
+    for (const [method, root] of trees) {
+      const leaf = path.length === 1 ? root.leaf : walk(root, path, 1, 0, hasEscape);
+      if (leaf !== null && leaf !== false) out.push(method);
+    }
+    return out.sort();
+  }
+
+  return Object.freeze({ match, allowed });
 }

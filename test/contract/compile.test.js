@@ -149,6 +149,14 @@ describe('compileContract — the shop example', () => {
     const search = contract.operations['product.search'];
     assert.ok(search.input !== null && search.input.transport !== null);
     assert.deepStrictEqual(search.input.transport.members, { path: [], query: ['q', 'limit', 'tag', 'flag'], header: [], repeated: ['tag'] });
+    // an array-typed HEADER member is listed in repeated too (a header list collects lines or splits on commas)
+    const withHeaders = compileContract(one({
+      kind: 'read',
+      input: { type: 'object', properties: { 'x-tags': { type: 'array', items: { type: 'string' } }, 'x-rev': { type: 'integer' }, q: { type: 'array' } } },
+      output: true,
+      http: { method: 'GET', path: '/a', in: { 'x-tags': 'header', 'x-rev': 'header' } },
+    }));
+    assert.deepStrictEqual(withHeaders.operations.a.input.transport.members, { path: [], query: ['q'], header: ['x-tags', 'x-rev'], repeated: ['x-tags', 'q'] });
     assert.deepStrictEqual(
       search.input.transport.normalize({ id: '12', limit: '20', flag: 'true' }),
       { id: '12', limit: 20, flag: true },

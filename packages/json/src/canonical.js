@@ -167,4 +167,33 @@ export function canonicalizeJson(value) {
   return serializeValue(value, '', new Set());
 }
 
+const HEX = '0123456789abcdef';
+
+/**
+ * The lowercase hex SHA-256 over the RFC 8785 canonical UTF-8 bytes of a
+ * JSON value — the content identity two independent processes agree on
+ * (a document revision, an idempotency request hash), which is why it is
+ * SHA-256 over the canonical text and never a 32-bit fingerprint that
+ * collides. Asynchronous because it rides the platform's
+ * `globalThis.crypto.subtle` (Node ≥ 20, Bun, browsers, workers); the
+ * canonicalization itself is synchronous and its refusals
+ * (`JsonCanonicalizeError`) surface as the rejection.
+ *
+ * @param {any} value - The JSON value to identify
+ * @returns {Promise<string>} 64 lowercase hex characters
+ * @example
+ * await canonicalSha256({ b: 1, a: 2 }) === await canonicalSha256({ a: 2, b: 1 }); // true
+ */
+export async function canonicalSha256(value) {
+  const text = canonicalizeJson(value);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  const bytes = new Uint8Array(digest);
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    out += HEX[b >> 4] + HEX[b & 15];
+  }
+  return out;
+}
+
 //#endregion
