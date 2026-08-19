@@ -1,11 +1,14 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.36.2",
+  "version": "0.36.3",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
   "sideEffects": false,
+  "bin": {
+    "jaren-contract": "./src/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
@@ -35,6 +38,10 @@
       "types": "./dist/types/app/index.d.ts",
       "default": "./src/app/index.js"
     },
+    "./project": {
+      "types": "./dist/types/project/index.d.ts",
+      "default": "./src/project/index.js"
+    },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
@@ -44,7 +51,7 @@
     "docs/",
     "schemas/"
   ],
-  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, served over HTTP through a total dispatch pipeline with fetch and node adapters, called through an HTTP client that resolves JSON outcomes, and bound to @jarenjs/app documents through generated task slots and one effect",
+  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, served over HTTP through a total dispatch pipeline with fetch and node adapters, called through an HTTP client that resolves JSON outcomes, bound to @jarenjs/app documents through generated task slots and one effect, and projected to a public subset, OpenAPI 3.1, TypeScript, Markdown and AI tool definitions with a jaren-contract CLI that checks them in CI",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -68,6 +75,7 @@
     "rest",
     "router",
     "openapi",
+    "typescript",
     "idempotency",
     "client",
     "outcome"
@@ -78,8 +86,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.36.2",
-    "@jarenjs/json": "^0.36.2",
-    "@jarenjs/validate": "^0.36.2"
+    "@jarenjs/core": "^0.36.3",
+    "@jarenjs/json": "^0.36.3",
+    "@jarenjs/validate": "^0.36.3",
+    "@jarenjs/emit": "^0.36.3"
   }
 }

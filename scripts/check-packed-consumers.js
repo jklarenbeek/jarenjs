@@ -264,6 +264,8 @@ import { createMemoryLedger, idempotencyLedgerModel, commandLifecycleFsm } from 
 import { openHttpClient, CLIENT_ERRORS } from '@jarenjs/contract/client';
 import type { Outcome, HttpClient } from '@jarenjs/contract/client';
 import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
+import { publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools } from '@jarenjs/contract/project';
+import type { OpenApiResult, ToolDefinition } from '@jarenjs/contract/project';
 const contract = compileContract({
   $contract: '0.1',
   operations: {
@@ -307,6 +309,13 @@ const binding = contractAppBinding(contract, { namespace: 'api/', statePath: '/a
 void [binding.slice['thing.get'].status, binding.actions['api/thing.get/start'], binding.schema, binding.effect];
 const effect = createContractEffect(client, { createTaskEffect: (run, opts) => Object.assign((p: any, d: any) => void [run, opts, p, d], { cancel() {}, cancelAll() {}, dispose() {} }) });
 void [effect.cancel, effect.dispose];
+const projected = publicProjection(contract);
+void compileContract(projected);
+const openapi: OpenApiResult = toOpenApi(contract, { info: { title: 'Things', version: '1' } });
+void [openapi.document, openapi.dropped.length];
+void [toTypeScript(contract).length, toMarkdown(contract).length];
+const tools: ToolDefinition[] = contractTools(contract, client);
+void [tools[0]?.name, tools[0]?.inputSchema];
 client.close();
 `,
   '@jarenjs/db': `

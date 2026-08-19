@@ -1,0 +1,754 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "shop",
+    "version": "5"
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "paths": {
+    "/api/catalog": {
+      "get": {
+        "operationId": "catalog.load",
+        "summary": "The whole catalog snapshot.",
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Catalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Declared failure: stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "requestId",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "stale"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "description": "The server trace, equal to the x-jaren-trace response header."
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-jaren-policy": {
+          "task": "switch",
+          "idempotency": "none",
+          "cache": "revision"
+        }
+      }
+    },
+    "/api/images/{id}": {
+      "get": {
+        "operationId": "image.bytes",
+        "tags": [
+          "image"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-jaren-policy": {
+          "task": "switch",
+          "idempotency": "none",
+          "cache": "none"
+        }
+      }
+    },
+    "/api/products": {
+      "get": {
+        "operationId": "product.search",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "flag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-jaren-policy": {
+          "task": "switch",
+          "idempotency": "none",
+          "cache": "none"
+        }
+      }
+    },
+    "/api/products/{id}/master": {
+      "put": {
+        "operationId": "product.save",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "The caller-generated idempotency key the server deduplicates this command on (policy.idempotency required)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "product": {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "product"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Declared failure: not-found (or the binding's JC2001)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "requestId",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "not-found",
+                        "JC2001"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "description": "The server trace, equal to the x-jaren-trace response header."
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Declared failure: conflict (or the binding's JC2009)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "requestId",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "conflict",
+                        "JC2009"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "description": "The server trace, equal to the x-jaren-trace response header."
+                    },
+                    "details": {
+                      "$ref": "#/components/schemas/Conflict"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-jaren-policy": {
+          "task": "exhaust",
+          "idempotency": "required",
+          "cache": "none",
+          "revision": "input:/revision",
+          "retry": {
+            "max": 2,
+            "on": [
+              "not-found"
+            ]
+          }
+        }
+      }
+    },
+    "/product.remove": {
+      "post": {
+        "operationId": "product.remove",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "The caller-generated idempotency key the server deduplicates this command on (policy.idempotency optional)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": true
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Declared failure: not-found (or the binding's JC2001)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "requestId",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "not-found",
+                        "JC2001"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "description": "The server trace, equal to the x-jaren-trace response header."
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/IdempotencyConflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-jaren-policy": {
+          "task": "exhaust",
+          "idempotency": "optional",
+          "cache": "none"
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Catalog": {
+        "type": "object",
+        "required": [
+          "revision",
+          "products"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "price"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "type": "object",
+        "required": [
+          "current"
+        ],
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/Product"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Answered by the binding, not the handler — JC2005: the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400); JC2006: the reassembled input fails the operation's input validator (400); JC2007: the operation requires an Idempotency-Key header and none was sent (400); JC2011: the request path carries a malformed percent-escape (400); JC2012: the query string is not decodable (400); JC2015: a declared header member is repeated when its schema is scalar, or fails transport decoding (400).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "JC2005",
+                    "JC2006",
+                    "JC2007",
+                    "JC2011",
+                    "JC2012",
+                    "JC2015"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string",
+                  "description": "The server trace, equal to the x-jaren-trace response header."
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Answered by the binding, not the handler — JC2001: no operation matches the request method and path (404).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "JC2001"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string",
+                  "description": "The server trace, equal to the x-jaren-trace response header."
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "IdempotencyConflict": {
+        "description": "Answered by the binding, not the handler — JC2009: the idempotency ledger reports the key in progress (retryable) or bound to a different request (mismatch) (409).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "JC2009"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string",
+                  "description": "The server trace, equal to the x-jaren-trace response header."
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Answered by the binding, not the handler — JC2003: the request body exceeds policy.limits.maxBodyBytes, by content-length or by read length (413).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "JC2003"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string",
+                  "description": "The server trace, equal to the x-jaren-trace response header."
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Answered by the binding, not the handler — JC2004: a body-carrying operation received a content-type that is not its declared media (415).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "JC2004"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string",
+                  "description": "The server trace, equal to the x-jaren-trace response header."
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Answered by the binding, not the handler — JC2008: the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it); JC2010: the handler value fails the output validator or a declared error's details fail its schema — the server broke the contract (500).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "retryable"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "JC2008",
+                    "JC2010"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string",
+                  "description": "The server trace, equal to the x-jaren-trace response header."
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

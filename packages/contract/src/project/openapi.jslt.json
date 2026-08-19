@@ -1,0 +1,149 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "openapi": "3.1.0",
+        "info": "$.info",
+        "servers": { "$let": { "s": "$.servers[*]" }, "$where": { "$exists": "$s" }, "$return": "$.servers" },
+        "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+        "paths": {
+          "$from-entries": {
+            "$for": { "op": "$.operations[*]" },
+            "$groupby": { "path": "$op.path" },
+            "$orderby": "$path",
+            "$return": {
+              "key": "$path",
+              "value": {
+                "$from-entries": {
+                  "$for": { "o": "$op" },
+                  "$orderby": "$o.method",
+                  "$return": { "key": "$o.method", "value": { "$apply": ["$o", "operation"] } }
+                }
+              }
+            }
+          }
+        },
+        "components": {
+          "$let": {
+            "c": {
+              "schemas": { "$let": { "n": { "$entries": "$.schemas" } }, "$where": { "$exists": "$n" }, "$return": "$.schemas" },
+              "responses": {
+                "$let": { "n": { "$entries": "$.shared" } },
+                "$where": { "$exists": "$n" },
+                "$return": {
+                  "$from-entries": {
+                    "$for": { "s": "$n" },
+                    "$return": {
+                      "key": "$s.key",
+                      "value": {
+                        "description": "$s.value.description",
+                        "content": { "application/json": { "schema": { "$apply": ["$s.value", "wire"] } } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "$where": { "$exists": { "$entries": "$c" } },
+          "$return": "$c"
+        }
+      }
+    },
+    {
+      "mode": "operation",
+      "body": {
+        "operationId": "$.id",
+        "summary": "$.summary",
+        "description": "$.description",
+        "tags": ["$.tag"],
+        "parameters": { "$let": { "p": "$.parameters[*]" }, "$where": { "$exists": "$p" }, "$return": "$.parameters" },
+        "requestBody": {
+          "$let": { "b": "$.body" },
+          "$where": { "$exists": "$b" },
+          "$return": {
+            "required": "$b.required",
+            "content": { "$map": [["$b.media", { "schema": "$b.schema" }]] }
+          }
+        },
+        "responses": {
+          "$from-entries": {
+            "$seq": [
+              {
+                "key": "$.success.status",
+                "value": {
+                  "description": "Success",
+                  "content": {
+                    "$let": { "sch": "$.success.schema" },
+                    "$where": { "$exists": "$sch" },
+                    "$return": { "$map": [["$.success.media", { "schema": "$sch" }]] }
+                  }
+                }
+              },
+              {
+                "$for": { "e": "$.errors[*]" },
+                "$groupby": { "status": "$e.status" },
+                "$orderby": "$status",
+                "$return": { "key": "$status", "value": { "$apply": [{ "status": "$status", "entries": ["$e"] }, "response"] } }
+              }
+            ]
+          }
+        },
+        "x-jaren-policy": "$.policy"
+      }
+    },
+    {
+      "mode": "response",
+      "body": {
+        "$let": {
+          "declared": { "$for": { "x": "$.entries[*]" }, "$where": "$x.declared", "$return": "$x" },
+          "shared": { "$for": { "x": "$.entries[*]" }, "$where": { "$not": "$x.declared" }, "$return": "$x" }
+        },
+        "$return": {
+          "$if": [
+            { "$exists": "$declared" },
+            {
+              "description": {
+                "$concat": [
+                  "Declared failure: ",
+                  { "$string-join": ["$declared.code", ", "] },
+                  { "$if": [
+                    { "$exists": "$shared" },
+                    { "$concat": [" (or the binding's ", { "$string-join": ["$shared.code", ", "] }, ")"] },
+                    ""
+                  ] }
+                ]
+              },
+              "content": {
+                "application/json": {
+                  "schema": { "$apply": [{ "codes": ["$.entries[*].code"], "details": ["$declared.schema"] }, "wire"] }
+                }
+              }
+            },
+            { "$map": [["$$ref", { "$concat": ["#/components/responses/", { "$head": "$shared.shared" }] }]] }
+          ]
+        }
+      }
+    },
+    {
+      "mode": "wire",
+      "body": {
+        "type": "object",
+        "required": ["code", "message", "requestId", "retryable"],
+        "properties": {
+          "code": { "type": "string", "enum": "$.codes" },
+          "message": { "type": "string" },
+          "requestId": { "type": "string", "description": "The server trace, equal to the x-jaren-trace response header." },
+          "details": {
+            "$let": { "d": "$.details[*]" },
+            "$where": { "$exists": "$d" },
+            "$return": { "$if": [{ "$eq": [{ "$count": "$d" }, 1] }, "$d", { "anyOf": ["$d"] }] }
+          },
+          "retryable": { "type": "boolean" }
+        }
+      }
+    }
+  ]
+}

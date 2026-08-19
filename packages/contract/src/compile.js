@@ -39,7 +39,7 @@ const CONTRACT_VERSION = '0.1';
 
 const ROOT_MEMBERS = new Set(['$contract', 'id', 'version', 'compat', '$defs', 'operations']);
 const OP_MEMBERS = new Set(['kind', 'input', 'output', 'errors', 'policy', 'http', 'doc']);
-const POLICY_MEMBERS = new Set(['task', 'idempotency', 'revision', 'cache', 'limits', 'errors', 'retry']);
+const POLICY_MEMBERS = new Set(['task', 'idempotency', 'revision', 'cache', 'limits', 'errors', 'retry', 'audience']);
 const LIMITS_MEMBERS = new Set(['maxBodyBytes']);
 const POLICY_ERRORS_MEMBERS = new Set(['details']);
 const RETRY_MEMBERS = new Set(['max', 'on']);
@@ -51,6 +51,7 @@ const TASKS = Object.freeze(['switch', 'exhaust', 'concat', 'parallel']);
 const IDEMPOTENCY = Object.freeze(['none', 'optional', 'required']);
 const CACHE = Object.freeze(['none', 'revision']);
 const DETAILS = Object.freeze(['none', 'paths', 'full']);
+const AUDIENCES = Object.freeze(['public', 'server']);
 const METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const LOCATIONS = Object.freeze(['path', 'query', 'header', 'body']);
 
@@ -385,6 +386,9 @@ function checkRefs(node, docPath, scope, isRoot) {
 /**
  * @typedef {Object} CompiledInput
  * @property {any} schema - the declared input schema (frozen source)
+ * @property {any} effective - the object schema `schema` resolves to: itself,
+ *   or the end of its `$ref` chain (inside the document or a registered
+ *   schema) — whose `properties` are the operation's members; frozen
  * @property {CompiledValidate} validate
  * @property {InputTransport | null} transport - `null` when no member travels as a string
  */
@@ -412,6 +416,8 @@ function checkRefs(node, docPath, scope, isRoot) {
  * @property {{ maxBodyBytes: number }} limits
  * @property {{ details: 'none' | 'paths' | 'full' }} errors
  * @property {{ max: number, on: readonly string[] } | null} retry
+ * @property {'public' | 'server'} audience - who may see the operation: `server`
+ *   keeps it out of the public projection and every projection built on it
  */
 
 /**
@@ -581,7 +587,7 @@ function checkPolicy(policy, kind, inputMembers, base) {
   for (let i = 0; i < members.length; i++) {
     if (!POLICY_MEMBERS.has(members[i])) {
       throw refuse('JC0013',
-        `unknown policy member '${members[i]}' — the policy vocabulary is closed (task, idempotency, revision, cache, limits, errors, retry)`,
+        `unknown policy member '${members[i]}' — the policy vocabulary is closed (task, idempotency, revision, cache, limits, errors, retry, audience)`,
         at(base, members[i]));
     }
   }
@@ -684,7 +690,11 @@ function checkPolicy(policy, kind, inputMembers, base) {
     }
     retry = { max: p.retry.max, on: p.retry.on.slice() };
   }
-  return { task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry };
+  const audience = p.audience === undefined ? 'public' : p.audience;
+  if (!AUDIENCES.includes(audience)) {
+    throw refuse('JC0014', 'policy.audience must be one of public, server', at(base, 'audience'));
+  }
+  return { task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry, audience };
 }
 
 /**
@@ -1024,7 +1034,7 @@ export function compileContract(doc, options = {}) {
           required: declaredRequired.filter((/** @type {unknown} */ r) => typeof r === 'string' && Object.hasOwn(pick, r)),
         };
       }
-      input = { schema: p.input, validate, transport };
+      input = { schema: p.input, effective: p.inputEffective, validate, transport };
     }
 
     /** @type {CompiledOutput} */

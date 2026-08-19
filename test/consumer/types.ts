@@ -734,6 +734,78 @@ contractEffect({ op: 'product.save', input: { id: 1 }, id: 1, done: 'd' }, () =>
 contractEffect.cancel('product.save');
 contractEffect.dispose();
 
+// @jarenjs/contract/project — the projections: the public subset, OpenAPI,
+// TypeScript, Markdown, the AI tool definitions and the shared bundler
+import { publicProjection, toOpenApi, toTypeScript, toMarkdown as toContractMarkdown, contractTools, reachableDefs, bundleSameDocument } from '@jarenjs/contract/project';
+import type { OpenApiResult, DroppedKeyword, ToolDefinition } from '@jarenjs/contract/project';
+
+const publicDoc: Record<string, unknown> = publicProjection(shopContract, { ops: ['product.save'] });
+void contract.compileContract(publicDoc);
+const openapi: OpenApiResult = toOpenApi(shopContract, { info: { title: 'Shop', version: '5' }, servers: [{ url: 'https://x' }], lenient: true });
+const droppedKeywords: DroppedKeyword[] = openapi.dropped;
+void [openapi.document, droppedKeywords[0]?.docPath];
+const dts: string = toTypeScript(shopContract, { banner: false });
+const contractMd: string = toContractMarkdown(shopContract, { title: 'Shop' });
+void [dts, contractMd];
+const contractToolDefs: ToolDefinition[] = contractTools(shopContract, httpClient, { name: (id) => id.replaceAll('.', '-') });
+void [contractToolDefs[0]?.name, contractToolDefs[0]?.inputSchema, contractToolDefs[0]?.execute({ id: 1 })];
+const reachable: string[] = reachableDefs([{ $ref: '#/$defs/X' }], { $defs: { X: {} } });
+void [reachable, bundleSameDocument({ type: 'object' }, { $defs: {} })];
+
+// The generated .d.ts of the shop fixture — `test/contract/project-typescript.test.js`
+// holds the committed file to what the generator produces today, and this
+// consumer proves it COMPILES and that a call site gets typed outcomes
+// (the emit pattern: TypeScript is the judge of a TypeScript question).
+import type {
+  Operations as ShopOperations, UrlOperations as ShopUrlOperations, Client as ShopClient,
+  Outcome as ShopOutcome, Meta as ShopMeta, WireError as ShopWireError,
+  Handlers as ShopHandlers, Failure as ShopFailure, HandlerContext as ShopHandlerContext,
+  ProductSaveInput, ProductSaveOutput, Product as ShopProduct, InvokeContext as ShopInvokeContext,
+} from '../contract/fixtures/shop.js';
+
+const shopTypedClient: ShopClient = {
+  invoke: (op, input, ctx?: ShopInvokeContext) => httpClient.invoke(op, input, ctx) as Promise<ShopOutcome<ShopOperations[typeof op]['output']>>,
+  url: (op, input) => httpClient.url(op, input),
+  close: () => httpClient.close(),
+};
+const saveInput: ProductSaveInput = { id: 1, revision: 4, product: { id: 1, name: 'x', price: 2 } };
+shopTypedClient.invoke('product.save', saveInput).then((outcome) => {
+  if (outcome.ok) {
+    const saved: ProductSaveOutput = outcome.value;
+    const name: string = saved.name;
+    void name;
+  }
+  else {
+    const kind: 'failure' | 'network' | 'contract' | 'cancelled' = outcome.kind;
+    const wireError: ShopWireError = outcome.error;
+    const maybeStatus: number | null = wireError.status;
+    void [kind, maybeStatus, wireError.retryable];
+  }
+  const shopMeta: ShopMeta = outcome.meta;
+  void [shopMeta.attempt, shopMeta.trace, shopMeta.etag, shopMeta.notModified];
+});
+// an error code outside the declared union is a compile error
+type SaveErrors = ShopOperations['product.save']['errors'];
+const saveError: SaveErrors = 'conflict';
+// @ts-expect-error 'stale' is catalog.load's error, not product.save's
+const wrongError: SaveErrors = 'stale';
+void [saveError, wrongError];
+// the opaque operation is a URL builder, never invokable
+const imageUrl: string = shopTypedClient.url('image.bytes', { id: 4 });
+void imageUrl;
+// @ts-expect-error image.bytes is not in Operations (opaque)
+void shopTypedClient.invoke('image.bytes', { id: 4 });
+const shopUrlInput: ShopUrlOperations['image.bytes'] = { id: 4 };
+void shopUrlInput;
+const shopHandlers: ShopHandlers = {
+  'catalog.load': () => ({ revision: 1, products: [] }),
+  'product.save': (input, ctx: ShopHandlerContext): ShopProduct | ShopFailure =>
+    input.revision > 0 ? { id: input.id, name: input.product.name, price: input.product.price } : ctx.fail('conflict'),
+  'product.search': async () => [],
+  'product.remove': () => true as unknown,
+};
+void shopHandlers;
+
 // @jarenjs/linq — the typed fluent surface: precise inference on the
 // common path, honest unknown on the exotic path, never a wrong type.
 // Every claim here has a runtime twin in test/linq/types.test.js.

@@ -1,0 +1,72 @@
+{
+  "$jtlt": "0.1",
+  "output": "text",
+  "rules": [
+    {
+      "match": "$",
+      "body": [
+        "$.banner",
+        "$.types",
+        "/** Every invokable public operation by id: its kind, input and output types, and the error codes it declares. */\n",
+        "export interface Operations {\n",
+        [{ "$apply": ["$.operations[?@.opaque == false]", "op"] }],
+        "}\n\n",
+        "/** Every public operation by id — opaque ones included — with its input type, for `Client.url`. */\n",
+        "export interface UrlOperations {\n",
+        [{ "$apply": ["$.operations[*]", "url"] }],
+        "}\n\n",
+        "/** The correlation members of every outcome: the caller's attempt id (never read from a response), the server's trace, the contract revision, the entity tag and whether the answer was a 304. A member a binding cannot carry is null (or false for notModified), never omitted. */\n",
+        "export type Meta = { op: string; attempt: unknown; trace: string | null; revision: string | null; etag: string | null; notModified: boolean };\n\n",
+        "/** The error member of a failed outcome: a declared code, a JC2xxx taxonomy code or a JC205x client code; status is null on a binding without statuses; details is null when none. */\n",
+        "export type WireError = { code: string; message: string; status: number | null; details: unknown; retryable: boolean };\n\n",
+        "/** What every invoke resolves to — JSON, never a thrown error: a value, or a failure tagged by kind (a declared or taxonomy error, a transport failure, a peer that broke the contract, a local abort). */\n",
+        "export type Outcome<T> = { ok: true; value: T; meta: Meta } | { ok: false; kind: 'failure' | 'network' | 'contract' | 'cancelled'; error: WireError; meta: Meta };\n\n",
+        "/** Per-call options of invoke. */\n",
+        "export interface InvokeContext { signal?: AbortSignal; attempt?: unknown; idempotencyKey?: string; headers?: Record<string, string>; ifNoneMatch?: string; ifMatch?: string }\n\n",
+        "/** A contract client over any binding, typed by this contract's operations. */\n",
+        "export interface Client {\n",
+        "  invoke<K extends keyof Operations>(op: K, input: Operations[K]['input'], ctx?: InvokeContext): Promise<Outcome<Operations[K]['output']>>;\n",
+        "  url<K extends keyof UrlOperations>(op: K, input: UrlOperations[K]): string;\n",
+        "  close(): void;\n",
+        "}\n\n",
+        "/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details and whether the caller may retry (null defers to the operation's retry policy). */\n",
+        "export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null };\n\n",
+        "/** The per-request context a server binding hands a handler. */\n",
+        "export interface HandlerContext {\n",
+        "  op: unknown;\n",
+        "  trace: string;\n",
+        "  method: string;\n",
+        "  path: string;\n",
+        "  params: Readonly<Record<string, string>>;\n",
+        "  headers: Readonly<Record<string, string>>;\n",
+        "  body: string | Uint8Array | null;\n",
+        "  signal: AbortSignal | null;\n",
+        "  idempotency: Readonly<{ key: string; scope: string }> | null;\n",
+        "  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }): Failure;\n",
+        "  etag(tag: string, options?: { strong?: boolean }): void;\n",
+        "  status(status: number): void;\n",
+        "}\n\n",
+        "/** The typed handler table of a server binding: one handler per invokable operation, answering the output, a declared failure, or a promise of either. */\n",
+        "export type Handlers = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext) => Operations[K]['output'] | Failure | Promise<Operations[K]['output'] | Failure> };\n"
+      ]
+    },
+    {
+      "mode": "op",
+      "body": [
+        "  '", "$.id", "': { kind: '", "$.kind", "'; input: ", "$.input", "; output: ", "$.output", "; errors: ",
+        {
+          "$if": [
+            { "$exists": "$.errors[*]" },
+            { "$string-join": [{ "$for": { "e": "$.errors[*]" }, "$return": { "$concat": ["'", "$e", "'"] } }, " | "] },
+            "never"
+          ]
+        },
+        " };\n"
+      ]
+    },
+    {
+      "mode": "url",
+      "body": ["  '", "$.id", "': ", "$.input", ";\n"]
+    }
+  ]
+}

@@ -11,17 +11,18 @@
  * package never collide:
  *
  *  - `JC0001–JC0049` document compile (`ContractCompileError`)
- *  - `JC0050–JC0069` binding declaration compile
+ *  - `JC0050–JC0069` binding declaration and projection compile
+ *    (`JC0060`: the OpenAPI keyword policy)
  *  - `JC1001–JC1049` host programming errors (thrown `TypeError`s)
  *  - `JC2001–JC2049` http request-time (`ContractRuntimeError`)
  *  - `JC2050–JC2069` client-side
  *  - `JC2070–JC2089` port/local bindings
  *  - `JC2090–JC2109` stream binding
  *
- * The document-compile range, the host range, the http request-time
- * range and the client range are populated; port/local and stream are
- * reserved for their bindings and are listed here so a later addition
- * lands in its range rather than at the next free number.
+ * The document-compile range, the projection code, the host range, the
+ * http request-time range and the client range are populated; port/local
+ * and stream are reserved for their bindings and are listed here so a
+ * later addition lands in its range rather than at the next free number.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -48,6 +49,8 @@ export const CONTRACT_CODES = Object.freeze({
   JC0015: 'id, version, compat or an operation doc is mistyped',
   JC0016: 'an operation bound to GET or HEAD carries a body-located member (a GET body)',
   JC0017: 'an opaque operation (a non-JSON http.media) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated',
+  // ——— projection compile (ContractCompileError, docPath into the contract document) ———
+  JC0060: 'the OpenAPI projection met a schema keyword it cannot map honestly: a boolean required (draft-04 style) or a same-document $ref that lands outside $defs (both dropped and reported under lenient), or a components member inside a schema',
   // ——— host programming errors (thrown ContractHostError, a TypeError) ———
   JC1001: 'serveHttp: handlers is not an object, a key names no operation of the contract, or a value is not a function',
   JC1002: 'serveHttp: an operation has no handler and options.partial is not set',
@@ -56,7 +59,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.url)',
   JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299',
   JC1007: 'contractAppBinding: ops names an operation the contract does not declare or one the binding cannot carry (a subscribe operation until the stream binding lands), or namespace/statePath is malformed',
-  JC1008: 'openHttpClient, client.url or createContractEffect: an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url)',
+  JC1008: 'openHttpClient, client.url, createContractEffect or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',

@@ -31,6 +31,11 @@ import {
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json';
 
+import {
+  NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
+} from '@jarenjs/core/schema';
+
 //#region Object
 export function isBoolOrObjectClass(obj) {
   return isBooleanType(obj)
@@ -83,6 +88,37 @@ export function hasSchemaDynamicRef(schema) {
   return isObjectClass(schema)
     && isStringType(schema.$dynamicRef)
     && !isStringWhiteSpace(schema.$dynamicRef);
+}
+
+/**
+ * The keywords that assert something beside a `$ref`: the siblings draft
+ * 2019-09+ applies alongside the reference and draft-07 ignores.
+ * Membership-only (order-insensitive): the shared constraint groups plus
+ * the applicators and extras. One list, read by the schema compiler (does
+ * this `$ref` carry siblings to compile?) and by the reference resolver
+ * (may this hop of a `$ref` chain be flattened away?).
+ */
+export const REF_SIBLING_KEYWORDS = Object.freeze(['type', 'const', 'enum',
+  ...NUMERIC_CONSTRAINTS, ...STRING_CONSTRAINTS,
+  ...ARRAY_CONSTRAINTS, 'maxContains', 'minContains',
+  ...OBJECT_CONSTRAINTS, 'required',
+  'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
+  'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
+  'then', 'else', 'propertyNames', 'contentEncoding', 'contentMediaType',
+  'unevaluatedProperties', 'unevaluatedItems', '$query']);
+
+/**
+ * Whether a schema carrying a `$ref` also carries a keyword of
+ * {@link REF_SIBLING_KEYWORDS}.
+ * @param {object} schema
+ * @returns {boolean}
+ */
+export function hasRefSiblings(schema) {
+  const keys = Object.keys(schema);
+  for (let i = 0; i < keys.length; i++) {
+    if (REF_SIBLING_KEYWORDS.includes(keys[i])) return true;
+  }
+  return false;
 }
 
 /**

@@ -21,12 +21,13 @@ Format 0.1 covers the document, its compilation, the HTTP binding's
 *shape* (§2–§6), the HTTP **server** binding that carries it (§7–§9:
 the request pipeline and its wire errors, idempotency and the ledger
 interface, the `fetch` and `node` adapters), the HTTP **client** binding
-(§10: outcomes, the client half of idempotency, retry, negotiation) and
-the `@jarenjs/app` binding (§11: the generated documents and the one
-effect). The in-process, message-port and stream bindings, the revision
-hash, the projections (OpenAPI, TypeScript, Markdown, AI tools) and the
-locale catalogs are the coming lines of this package and will append
-their sections here.
+(§10: outcomes, the client half of idempotency, retry, negotiation), the
+`@jarenjs/app` binding (§11: the generated documents and the one
+effect) and the **projections** (§12: the public projection every other
+artifact is built on, OpenAPI 3.1, TypeScript, Markdown, the AI tool
+definitions, and the `jaren-contract` CLI). The in-process, message-port
+and stream bindings, the revision hash and the locale catalogs are the
+coming lines of this package and will append their sections here.
 
 ### §1.1 What the format is not
 
@@ -188,9 +189,10 @@ the resolved value and marks it inferred.
 | `limits.maxBodyBytes` | positive integer | `1048576` | The request-body ceiling a server binding enforces. |
 | `errors.details` | `none` \| `paths` \| `full` | `paths` | How much of a validation failure crosses the wire: nothing, instance path + keyword, or the raw validator errors. |
 | `retry` | `{ max: integer ≥ 0, on: [codes] }` | absent (`null`) | Which error codes a client may retry (declared codes, or `JC2xxx` taxonomy codes), and how often beyond the first attempt; a network failure is always retried under a declared `retry`. A **command MUST declare `idempotency: "required"` to carry `retry`** (`JC0014`) — a retried command without a key the server deduplicates on runs twice; a read is idempotent by nature. |
+| `audience` | `public` \| `server` | `public` | Who may see the operation. A `server` operation is served and handled like any other, but is **kept out of the public projection** (§12.1) and therefore out of every projection built on it — OpenAPI, TypeScript, Markdown, the AI tools — and out of the revision. |
 
 The compiled `policy` is always
-`{ task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry }`.
+`{ task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry, audience }`.
 
 ### §3.2 `describe()`
 
@@ -249,7 +251,10 @@ normalizer compiled **over those members only** with `coerceTypes`
 (`@jarenjs/validate/normalize`); **a body member is never coerced**. The
 compiled operation carries this as
 `input.transport = { normalize, members: { path, query, header, repeated }, schemas, required }`
-(`null` when nothing travels as a string), where `schemas` holds each
+(`null` when nothing travels as a string) beside `input.effective` —
+the object schema the declared `input` resolves to (itself, or the end
+of its `$ref` chain), whose `properties` are the operation's members;
+`schemas` holds each
 transport member's declared schema and `required` the transport members
 the input requires (what a URL builder validates without the body), and
 `repeated` lists the
@@ -384,7 +389,9 @@ carries the same codes and a test holds them equal.
 | JC0017 | an opaque operation (a non-JSON `http.media`) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated (§4.5) |
 
 `JC0018–JC0049` are reserved for further document-level rules and are
-appended to this table when they land. `JC1001–JC1049` are host
+appended to this table when they land; `JC0050–JC0069` are the binding-
+declaration and projection compile codes (`JC0060`, the OpenAPI keyword
+policy, is in §12.2's table). `JC1001–JC1049` are host
 programming errors (`ContractHostError`, a thrown `TypeError` with `code`
 and `reason`) and `JC2001–JC2049` the HTTP request-time errors
 (`ContractRuntimeError` in-process, a wire error on the response) — both
@@ -660,7 +667,7 @@ wire response:
 | `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation (§10) |
 | `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299 |
 | `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare or cannot carry in the app binding, or `namespace`/`statePath` is malformed (§11) |
-| `JC1008` | `openHttpClient`, `client.url` or `createContractEffect`: an argument or option is malformed (§10, §11) |
+| `JC1008` | `openHttpClient`, `client.url`, `createContractEffect` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12) |
 
 ### §7.4 Headers
 
@@ -1187,3 +1194,177 @@ app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
 The runnable version of this composition, driven against a real
 `serveHttp` dispatcher, is [APP-INTEGRATION.md](APP-INTEGRATION.md),
 executed verbatim by the test suite.
+
+## §12 Projections
+
+Everything a consumer wants **beside** the runtime is a projection of the
+same compiled contract (`@jarenjs/contract/project` — the one subpath of
+this package that imports `@jarenjs/emit`, so a bundle that never
+projects never carries it): the public projection every other artifact
+is built on (§12.1), OpenAPI 3.1 (§12.2), TypeScript declarations
+(§12.3), Markdown reference documentation (§12.4) and AI tool
+definitions (§12.5), with the `jaren-contract` CLI (§12.6) writing and
+`--check`ing them in CI. A projection takes a **compiled** contract —
+never a raw document — so it renders resolved bindings and materialized
+policies, and every projection is **deterministic**: the same contract
+renders byte-identical artifacts.
+
+### §12.1 The public projection — normative, the revision hashes it
+
+`publicProjection(contract, { ops? })` is a JSON document that is itself
+a **valid `$contract` 0.1** (it compiles, and projecting the compile
+yields the same bytes): the browser-safe subset a client needs and no
+more, and the exact bytes the contract revision will hash. Because the
+hash is a compatibility claim, the member order is **normative**:
+
+- root: `$contract`, `id`, `version`, `compat`, `$defs`, `operations` —
+  each present only when the contract carries it (`$defs` only when a
+  retained schema reaches one);
+- operation (document order): `kind`, `input`, `output`, `errors`,
+  `policy`, `http`, `doc` — `input`, `errors` and `doc` only when
+  declared;
+- error declaration: `status` (always, resolved), `schema` (when
+  declared);
+- policy: `task`, `idempotency`, `revision` (when declared), `cache`,
+  `retry` (when declared), `audience` — every default materialized;
+  **`limits` and `errors.details` are server-side knobs and never
+  appear**;
+- http: `method`, `path` (canonical `{name}` template), `in` (every
+  member's location), `body` (when a whole-body member is declared),
+  `status`, `media` — the canonical binding is written out like any
+  declared one;
+- `$defs`: exactly the entries reachable from the retained operations'
+  `input`/`output`/error schemas by same-document `$ref` (transitively;
+  an anchor or a pointer into an entry counts as the entry), in
+  **first-reference order** — walking operations in document order,
+  each operation's `input`, `output`, then its errors in declaration
+  order.
+
+Retained = the operations whose `policy.audience` is not `"server"`,
+narrowed further by `ops` when given (`JC1008` for an id the contract
+does not declare; a listed `server` operation is still not retained).
+Schema subtrees are the compiled document's own (frozen); the
+composition is fresh.
+
+### §12.2 OpenAPI 3.1
+
+`toOpenApi(contract, { info?, servers?, lenient? })` →
+`{ document, dropped }`: a valid OpenAPI **3.1.0** document rendered by
+a JSLT stylesheet shipped as JSON (`src/project/openapi.jslt.json`,
+compiled once at module scope), built on the public projection. The
+test suite validates the rendered document against the vendored
+official OpenAPI 3.1 meta-schema with `JarenValidator`
+(`test/contract/fixtures/openapi-3.1.schema.json`, Apache-2.0 — the
+suite validating its own projection with its own validator is the
+point). The mapping:
+
+| contract | OpenAPI |
+|---|---|
+| — | `openapi: "3.1.0"`, `jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema"`, `info` (title/version defaulting to the contract id/version), `servers` when given |
+| operation | `paths[<canonical path>][<lowercased method>]`, paths sorted by path then method; `operationId` = the id; `summary` = `doc`'s first line (`description` = the whole `doc` when it has more); `tags` = the id's first dotted segment |
+| `http.in` `path`/`query`/`header` members | `parameters` (name, `in`, `schema`; `required` from the effective input's `required`, a path parameter always required); an idempotent operation gains the `Idempotency-Key` header parameter (required under `"required"`) |
+| body members | `requestBody`: the object of the body-located members (their `required` intersection, the input's `additionalProperties`); the whole input schema when every member is body-located; the member's own schema under `http.body`; `content[<http.media>]` |
+| `output`, `http.status` | `responses[<status>]` with the output schema; no content on `204`; opaque → `content[<media>]: { type: "string", format: "binary" }` |
+| declared `errors` | one response per status: the D7 wire-error schema (`code` **enum-pinned** to the codes of that status, `details` the declared schema when present) |
+| the binding's own statuses | shared `components.responses` (`BadRequest` 400, `NotFound` 404, `IdempotencyConflict` 409 on idempotent operations, `PayloadTooLarge` 413, `UnsupportedMediaType` 415 on body-carrying operations, `InternalError` 500), `$ref`'d per operation unless a declared error already answers that status |
+| `$defs` | `components.schemas`, every `#/$defs/X…` rewritten `#/components/schemas/X…` |
+| policy | the `x-jaren-policy` extension: `{ task, idempotency, cache, revision?, retry? }` verbatim (an `x-` extension is OpenAPI's sanctioned place) |
+
+An opaque operation never meets a `requestBody` here: the compiler
+refuses a body-located member on one (`JC0017`, §4.5), so the mapping
+needs no rule for it.
+
+**The keyword policy — map-or-reject, nothing silent.** Every schema the
+projection carries is walked once:
+
+| keyword | treatment |
+|---|---|
+| `nullable: true` | mapped: `"null"` added to `type` (dropped + reported when there is no `type` to widen) |
+| `nullable: false` | dropped + reported (asserts nothing in 3.1) |
+| boolean `required` | **rejected** `JC0060` at the keyword; under `lenient` dropped + reported (the array form is JSON Schema's own and passes) |
+| `$query`, `$data`, `errorMessage`, `x-form` and every `x-*` | dropped + reported (Jaren-side; the wire never enforced them for a peer) |
+| `components` inside a schema | **rejected** `JC0060`, `lenient` or not (a document member has no schema reading) |
+| a same-document `$ref` that lands outside the projection's `$defs` (an anchor, `#`, a pointer into an operation) | **rejected** `JC0060`; under `lenient` dropped + reported (the schema is honestly wider) |
+| `const`, `enum`, `default`, `examples`, `example` | data — copied verbatim, never walked |
+| everything else | copied, subschemas walked |
+
+`dropped` is the audit trail: `[{ docPath, keyword, reason }]` with the
+`docPath` of the keyword **in the contract document**, in document
+order. The projection's own code, in the `JC0050–JC0069` range beside
+§6's table:
+
+| code | condition |
+|---|---|
+| JC0060 | the OpenAPI projection met a schema keyword it cannot map honestly: a boolean `required` or a same-document `$ref` that lands outside `$defs` (both dropped and reported under `lenient`), or a `components` member inside a schema (`ContractCompileError`, `docPath` into the contract document) |
+
+### §12.3 TypeScript
+
+`toTypeScript(contract, { banner? })` renders one `.d.ts` on
+`@jarenjs/emit`'s type model (`compileEmitModel` + `renderTypeScript`,
+the suite's one declaration renderer): per public operation
+`<PascalOp>Input` / `<PascalOp>Output` / `<PascalOp><PascalCode>Details`
+(collisions uniqued with a numeric suffix; a `$defs` entry keeps its own
+name), the reachable `$defs` once, then — fixed text in a JTLT
+stylesheet (`src/project/typescript.jtlt.json`) — `Operations` (the
+typed operation map: kind, input, output, the declared error codes as a
+literal union), `UrlOperations` (opaque operations included, for
+`Client.url`), and `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`,
+`Client`, `Failure`, `HandlerContext`, `Handlers`. `Meta` and
+`WireError` spell **exactly** the fixed D6 shapes (§10.1) —
+`OUTCOME_META_MEMBERS`/`OUTCOME_ERROR_MEMBERS` are the runtime twins and
+a test holds the text to them; `details` is `unknown` and `status`
+`number | null`, never optional members. An input-less operation's
+`input` is `null`; an opaque operation appears only in `UrlOperations`.
+
+### §12.4 Markdown
+
+`toMarkdown(contract, { title? })` renders one reference document: the
+title and version, an operations table (id, method, path, kind, task,
+idempotency), one section per public operation (its `doc`, the policy
+line, parameters, body, responses, declared errors) and a Types part
+rendered by emit's Markdown target over the **same** type model as
+§12.3 — so every type name a section links to is a heading that exists.
+
+### §12.5 AI tools
+
+`contractTools(contract, client, { ops?, name? })` → an array of
+`{ name, description, inputSchema, execute }` — the `ToolDef` shape
+`@jarenjs/ai`'s `createToolbox().add` takes and WebMCP's `registerTool`
+reads, **without importing that package** (the generated-document rule:
+the shape is a plain object; the test suite registers them into a real
+toolbox). Per public, invokable operation, in document order:
+
+- `name`: the id with `.` → `_` (injective — an id carries no `_`), or
+  `options.name(id)`; every name MUST match OpenAI's
+  `^[a-zA-Z0-9_-]{1,64}$` and two operations mapping to one name is
+  `JC1008`;
+- `description`: the `doc`, or a derived `<kind> operation <id>
+  (<METHOD> <path>)`;
+- `inputSchema`: the operation's input schema made **self-contained** —
+  the `$defs` it reaches inlined under the schema's own `$defs`
+  (`bundleSameDocument`, the suite's one same-document bundler) — or a
+  closed empty object schema for an input-less operation;
+- `execute`: `(args) => client.invoke(op, args)` (`null` for an
+  input-less operation), resolving the outcome JSON — a model sees the
+  same `{ ok, value | error, meta }` an app does, and a failed outcome
+  is a resolved value, never a rejection.
+
+Opaque operations are skipped by default and refused (`JC1008`) when
+`ops` names one — a tool carries JSON; an opaque operation is reached
+through `client.url`.
+
+### §12.6 The CLI
+
+`jaren-contract <describe|public|openapi|types|docs> --contract <file>
+[--out <dir|file>] [--check] [--info-title T] [--info-version V]
+[--lenient]` (the package `bin`). `describe` prints `describe()`;
+`public`/`openapi` print or write JSON (two-space indent, trailing
+newline); `types`/`docs` the text artifacts; `--out` names a file, or a
+directory that gets `<contract id><extension>`
+(`.describe.json`/`.public.json`/`.openapi.json`/`.d.ts`/`.md`).
+`--check` writes nothing and exits **1** when the file differs from
+what the document projects today — the CI drift gate; exit **0** when
+current or written; exit **2** on a usage error, an unreadable document,
+or a compile refusal, printed as `code docPath reason`. `openapi`
+reports every dropped keyword on stderr; without `--lenient` a
+rejectable keyword is exit 2 with `JC0060` and its `docPath`.

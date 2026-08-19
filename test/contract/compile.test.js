@@ -97,6 +97,7 @@ describe('compileContract — the shop example', () => {
     assert.deepStrictEqual(op.policy, {
       task: 'exhaust', idempotency: 'required', revision: 'input:/revision', cache: 'none',
       limits: { maxBodyBytes: 1048576 }, errors: { details: 'paths' }, retry: { max: 2, on: ['not-found'] },
+      audience: 'public',
     });
     assert.deepStrictEqual(Object.keys(op.errors), ['conflict', 'not-found']);
     assert.strictEqual(op.errors.conflict.status, 409);
@@ -137,6 +138,7 @@ describe('compileContract — the shop example', () => {
     assert.deepStrictEqual(op.policy, {
       task: 'exhaust', idempotency: 'optional', revision: null, cache: 'none',
       limits: { maxBodyBytes: 4096 }, errors: { details: 'full' }, retry: null,
+      audience: 'public',
     });
     assert.deepStrictEqual(contract.operations['product.save'].policy.retry, { max: 2, on: ['not-found'] });
     assert.deepStrictEqual(contract.match('POST', '/product.remove')?.op.id, 'product.remove');

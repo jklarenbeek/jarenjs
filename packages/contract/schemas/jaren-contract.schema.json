@@ -125,7 +125,7 @@
       "additionalProperties": false
     },
     "policy": {
-      "description": "The declared behavior of an operation; every member has a default the compiler materializes (task: switch for read, exhaust for command; idempotency none; cache none; maxBodyBytes 1048576; errors.details paths).",
+      "description": "The declared behavior of an operation; every member has a default the compiler materializes (task: switch for read, exhaust for command; idempotency none; cache none; maxBodyBytes 1048576; errors.details paths; audience public).",
       "type": "object",
       "properties": {
         "task": {
@@ -198,6 +198,13 @@
             "on"
           ],
           "additionalProperties": false
+        },
+        "audience": {
+          "description": "Who may see the operation: public (the default) or server — a server operation is kept out of the public projection and every projection built on it.",
+          "enum": [
+            "public",
+            "server"
+          ]
         }
       },
       "additionalProperties": false

@@ -766,4 +766,60 @@ describe('Schema References', function () {
       ]), 'fewer items is valid');
     });
   });
+
+  describe('#refChains()', function () {
+    // A `$ref` target that itself carries a `$ref` beside asserting keywords
+    // (the shape of every object in the OpenAPI 3.1 meta-schema: `type`,
+    // `required`, `$ref: '#/$defs/specification-extensions'`,
+    // `unevaluatedProperties: false`). Flattening the chain a→b→c into a→c
+    // is only sound through PURE `$ref` hops; under 2019-09+ the siblings
+    // of an intermediate hop assert alongside the reference and must survive.
+    const chained = (draft) => ({
+      $schema: draft,
+      $defs: {
+        ext: { patternProperties: { '^x-': true } },
+        info: {
+          type: 'object', properties: { version: { type: 'string' } }, required: ['version'],
+          $ref: '#/$defs/ext', unevaluatedProperties: false,
+        },
+      },
+      type: 'object',
+      properties: { info: { $ref: '#/$defs/info' } },
+    });
+
+    it('keeps the siblings of an intermediate $ref hop under draft 2020-12', function () {
+      const validate = new JarenValidator().compile(chained('https://json-schema.org/draft/2020-12/schema'));
+      assert.isTrue(validate({ info: { version: '1' } }), 'the required member satisfies the hop');
+      assert.isFalse(validate({ info: {} }), 'the intermediate hop asserts required');
+      assert.isFalse(validate({ info: { version: '1', extra: 1 } }), 'the intermediate hop asserts unevaluatedProperties');
+      assert.isTrue(validate({ info: { version: '1', 'x-note': 1 } }), 'the chain end still admits its own pattern');
+    });
+
+    it('keeps them under draft 2019-09 too', function () {
+      const validate = new JarenValidator().compile(chained('https://json-schema.org/draft/2019-09/schema'));
+      assert.isFalse(validate({ info: {} }));
+      assert.isTrue(validate({ info: { version: '1' } }));
+    });
+
+    it('still ignores them under draft-07, where $ref replaces its siblings', function () {
+      const validate = new JarenValidator().compile(chained('http://json-schema.org/draft-07/schema#'));
+      assert.isTrue(validate({ info: {} }), 'draft-07: the hop is only its $ref');
+      assert.isTrue(validate({ info: { version: 1, extra: 1 } }));
+    });
+
+    it('still flattens a chain of pure $ref hops', function () {
+      const validate = new JarenValidator().compile({
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        $defs: {
+          a: { $ref: '#/$defs/b', title: 'an annotation only' },
+          b: { $ref: '#/$defs/c' },
+          c: { type: 'integer' },
+        },
+        type: 'object',
+        properties: { n: { $ref: '#/$defs/a' } },
+      });
+      assert.isTrue(validate({ n: 1 }));
+      assert.isFalse(validate({ n: 'one' }));
+    });
+  });
 });

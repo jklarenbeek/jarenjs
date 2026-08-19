@@ -1,6 +1,7 @@
 import {
   isBoolOrObjectClass,
   hasSchemaRef,
+  hasRefSiblings,
 } from './tools.js';
 
 import {
@@ -416,10 +417,18 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     if (!isObjectClass(item))
       return { id: base, schema: item };
 
-    // In draft 7 and earlier, $ref completely replaces the schema
-    // and all sibling keywords must be ignored. We only keep the $ref
-    // to resolve it, discarding all other keywords from this item.
+    // A pure `$ref` hop is flattened away: only the `$ref` is kept to
+    // resolve it, the other (annotation) keywords of this item are
+    // discarded. A target reached THROUGH the chain that asserts
+    // keywords beside its `$ref` is the end of what may be flattened:
+    // draft 2019-09+ applies those siblings alongside the reference, so
+    // collapsing the chain past them would drop assertions (an OpenAPI
+    // document schema is nothing but such hops). The item is kept as
+    // written and compiled as a schema object, where the resource's
+    // draft decides whether its siblings assert (draft-07 ignores them).
     if (hasSchemaRef(item)) {
+      if (item !== refschema && hasRefSiblings(item))
+        return { id: base, schema: item };
       const ref = item.$ref;
       const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);
 

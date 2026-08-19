@@ -14,14 +14,20 @@ through a ledger interface; `openHttpClient` calls it from the other end
 with the same validator and resolves a JSON **outcome** for everything a
 server or a network can do; `contractAppBinding` + `createContractEffect`
 let a `@jarenjs/app` document call every operation through one generated
-task slot per operation and one registered effect. Everything else a
-consumer wants beside the runtime — the message-port and stream
-bindings, the OpenAPI/TypeScript/Markdown projections, the AI-tool view,
-the revision and the breaking-change diff — is coming in this line as a
-projection of the same document.
+task slot per operation and one registered effect; and the
+**projections** turn the same compiled contract into every artifact a
+consumer wants beside the runtime — a browser-safe public subset that is
+itself a `$contract` document, a valid OpenAPI 3.1 document, TypeScript
+declarations with a typed operation map, Markdown reference docs and
+`@jarenjs/ai` tool definitions — with a `jaren-contract` CLI whose
+`--check` fails CI the moment an artifact drifts. Still coming in this
+line: the message-port and stream bindings, the revision and the
+breaking-change diff.
 
 Zero dependencies outside the suite: `@jarenjs/core`, `@jarenjs/json`,
-`@jarenjs/validate`. No `eval`, CSP-safe; the adapters need only the
+`@jarenjs/validate`, and — reached only from the `./project` subpath, so
+a bundle that never projects never carries it — `@jarenjs/emit`. No
+`eval`, CSP-safe; the adapters need only the
 platform's `Request`/`Response` or Node's `(req, res)`. The normative contract is
 [docs/CONTRACT-FORMAT.md](docs/CONTRACT-FORMAT.md); the grammar is
 published as JSON Schema in
@@ -240,6 +246,46 @@ its kind beside it.
 The runnable walkthrough is [docs/APP-INTEGRATION.md](docs/APP-INTEGRATION.md);
 the normative binding is [CONTRACT-FORMAT.md §11](docs/CONTRACT-FORMAT.md#11-the-app-binding).
 
+## Project it to everything else
+
+One compiled contract, five artifacts — every one deterministic, every
+one checkable in CI (`@jarenjs/contract/project`):
+
+```js
+import { publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools } from '@jarenjs/contract/project';
+
+publicProjection(contract);   // the browser-safe subset — ITSELF a valid $contract document
+                              // (server-audience operations, limits and error detail levels stripped;
+                              //  operations with `policy: { audience: 'server' }` never leave the server)
+toOpenApi(contract, { info: { title: 'Shop', version: '5' } });
+                              // → { document, dropped }: OpenAPI 3.1, validated in this repo against the
+                              //   official meta-schema; declared errors become enum-pinned wire-error
+                              //   schemas; policy rides along as x-jaren-policy; every keyword the dialect
+                              //   cannot carry is refused (JC0060) or — under lenient — dropped and REPORTED
+toTypeScript(contract);       // one .d.ts: CatalogLoadInput/Output per operation, a typed Operations map,
+                              //   Outcome<T>/Meta/WireError exactly as every binding builds them, and a
+                              //   typed Client and Handlers — invoke('product.save', …) is fully typed
+toMarkdown(contract);         // reference docs: operations table, per-operation sections, the type tables
+contractTools(contract, client);
+                              // @jarenjs/ai ToolDefs (WebMCP for free) without importing that package:
+                              //   name 'product_save', a self-contained inputSchema, execute → the outcome
+```
+
+And on the command line, the drift gate:
+
+```sh
+jaren-contract openapi --contract shop.json --out api/ --info-title Shop
+jaren-contract types   --contract shop.json --out src/shop.d.ts --check   # exit 1 when stale
+jaren-contract docs    --contract shop.json --out docs/
+```
+
+`describe` and `public` print JSON; exit 0 current/written, 1 drift
+under `--check`, 2 on a compile refusal printed as `code docPath reason`.
+The normative projection rules — the public projection's member order
+(the revision will hash those bytes), the OpenAPI mapping and keyword
+policy, the tool naming — are
+[CONTRACT-FORMAT.md §12](docs/CONTRACT-FORMAT.md#12-projections).
+
 ## What is here, and what is coming
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
@@ -249,7 +295,8 @@ Here: the document and its grammar, `compileContract`, `contract.match`,
 and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
 client (`openHttpClient`, the D6 outcomes with the `JC2050–JC2058` client
 codes, the client half of idempotency, retry, `negotiate`); the app
-binding (`contractAppBinding`, `createContractEffect`). Coming in this
-line: `local`/`port`/`stream` bindings, projections (OpenAPI 3.1,
-TypeScript, Markdown, AI tools), the revision hash and `diffContracts`,
-and the locale packs for the wire errors.
+binding (`contractAppBinding`, `createContractEffect`); the projections
+(`publicProjection`, `toOpenApi` with `JC0060`, `toTypeScript`,
+`toMarkdown`, `contractTools`) and the `jaren-contract` CLI. Coming in
+this line: `local`/`port`/`stream` bindings, the revision hash and
+`diffContracts`, and the locale packs for the wire errors.
