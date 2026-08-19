@@ -20,9 +20,9 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError } from '../errors.js';
 import { dispatch } from './dispatch.js';
-import { HTTP_ERRORS } from './wire.js';
+import { HTTP_ERRORS, WELL_KNOWN_PATH } from './wire.js';
 
-export { HTTP_ERRORS };
+export { HTTP_ERRORS, WELL_KNOWN_PATH };
 
 /**
  * @typedef {import('./wire.js').HttpRequest} HttpRequest
@@ -85,9 +85,6 @@ export { HTTP_ERRORS };
  * @property {Contract} contract
  * @property {() => any} describe
  */
-
-/** The default well-known negotiation path. */
-export const WELL_KNOWN_PATH = '/.well-known/jaren-contract';
 
 /**
  * @param {string} code

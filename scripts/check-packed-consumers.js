@@ -261,6 +261,9 @@ import type { HttpResponse, RequestContext } from '@jarenjs/contract/http';
 import { toFetchHandler } from '@jarenjs/contract/fetch';
 import { toNodeHandler } from '@jarenjs/contract/node';
 import { createMemoryLedger, idempotencyLedgerModel, commandLifecycleFsm } from '@jarenjs/contract/ledger';
+import { openHttpClient, CLIENT_ERRORS } from '@jarenjs/contract/client';
+import type { Outcome, HttpClient } from '@jarenjs/contract/client';
+import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
 const contract = compileContract({
   $contract: '0.1',
   operations: {
@@ -297,6 +300,14 @@ void onFetch;
 const onNode = toNodeHandler(server);
 void onNode;
 void [idempotencyLedgerModel.$model, commandLifecycleFsm.$fsm];
+const client: HttpClient = openHttpClient(contract, { baseUrl: 'http://x', timeoutMs: 100, fetch: toFetchHandler(server) as any });
+const outcome: Promise<Outcome> = client.invoke('thing.get', { id: 12 }, { attempt: 1 });
+void [outcome, client.url('thing.get', { id: 1 }), client.negotiate(), client.pending(), client.capabilities.durableKeys, CLIENT_ERRORS.JC2051.retryable];
+const binding = contractAppBinding(contract, { namespace: 'api/', statePath: '/api' });
+void [binding.slice['thing.get'].status, binding.actions['api/thing.get/start'], binding.schema, binding.effect];
+const effect = createContractEffect(client, { createTaskEffect: (run, opts) => Object.assign((p: any, d: any) => void [run, opts, p, d], { cancel() {}, cancelAll() {}, dispose() {} }) });
+void [effect.cancel, effect.dispose];
+client.close();
 `,
   '@jarenjs/db': `
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';

@@ -2,8 +2,9 @@
 /**
  * @file The error surface: every code in `CONTRACT_CODES` has a one-line
  * meaning, the populated ranges are exactly the compile codes
- * `JC0001–JC0016`, the host codes `JC1001–JC1004` + `JC1006` and the
- * http codes `JC2001–JC2015`, and every class keeps its contract — the
+ * `JC0001–JC0016`, the host codes `JC1001–JC1008`, the http codes
+ * `JC2001–JC2015` and the client codes `JC2050–JC2058`, and every class
+ * keeps its contract — the
  * coded-error contract for compile/runtime (composed message, own
  * fields, `hasOwn` cause), a coded `TypeError` for host errors.
  */
@@ -16,9 +17,9 @@ import { CONTRACT_CODES, ContractCompileError, ContractRuntimeError, ContractHos
 const range = (/** @type {number} */ from, /** @type {number} */ to) => Array.from({ length: to - from + 1 }, (_, i) => `JC${String(from + i).padStart(4, '0')}`);
 
 describe('contract errors — the code table', () => {
-  it('lists the compile, host and http ranges with one-line meanings, frozen', () => {
+  it('lists the compile, host, http and client ranges with one-line meanings, frozen', () => {
     const codes = Object.keys(CONTRACT_CODES);
-    assert.deepStrictEqual(codes, [...range(1, 16), ...range(1001, 1004), 'JC1006', ...range(2001, 2015)]);
+    assert.deepStrictEqual(codes, [...range(1, 16), ...range(1001, 1008), ...range(2001, 2015), ...range(2050, 2058)]);
     for (const code of codes) {
       const meaning = CONTRACT_CODES[/** @type {keyof typeof CONTRACT_CODES} */ (code)];
       assert.strictEqual(typeof meaning, 'string', code);

@@ -86,6 +86,9 @@ export const HTTP_ERRORS = Object.freeze({
 /** The msgid of a declared operation error that has no message of its own. */
 export const HANDLER_ERROR_MSGID = 'contract/handler-error';
 
+/** The default well-known negotiation path, served by `serveHttp` and asked by the client. */
+export const WELL_KNOWN_PATH = '/.well-known/jaren-contract';
+
 /** The default JSON media of the binding. */
 export const JSON_MEDIA = 'application/json';
 
@@ -329,6 +332,33 @@ export function decodeQuery(query, declared, repeated, out) {
     else setObjectMember(out, name, value);
   }
   return true;
+}
+
+//#endregion
+
+//#region validation
+
+/**
+ * The verdict of a compiled validator under either contract: the
+ * default `{ valid, errors }` or a host-injected boolean validator.
+ * TOTAL: a validator that throws is a failed verdict carrying the throw.
+ * Shared by the server pipeline and the client.
+ * @param {(value: unknown) => any} validate
+ * @param {unknown} value
+ * @returns {{ valid: boolean, errors: any[], thrown: unknown }}
+ */
+export function verdict(validate, value) {
+  try {
+    const r = validate(value);
+    if (typeof r === 'boolean') return { valid: r, errors: [], thrown: undefined };
+    if (r !== null && typeof r === 'object' && typeof r.valid === 'boolean') {
+      return { valid: r.valid, errors: Array.isArray(r.errors) ? r.errors : [], thrown: undefined };
+    }
+    return { valid: false, errors: [], thrown: undefined };
+  }
+  catch (err) {
+    return { valid: false, errors: [], thrown: err };
+  }
 }
 
 //#endregion

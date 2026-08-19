@@ -18,13 +18,15 @@ path matcher, and it is the single source every artifact around it is
 projected from.
 
 Format 0.1 covers the document, its compilation, the HTTP binding's
-*shape* (§2–§6) and the HTTP **server** binding that carries it (§7–§9:
+*shape* (§2–§6), the HTTP **server** binding that carries it (§7–§9:
 the request pipeline and its wire errors, idempotency and the ledger
-interface, the `fetch` and `node` adapters). The HTTP client, the
-in-process, message-port and stream bindings, the revision hash, the
-projections (OpenAPI, TypeScript, Markdown, AI tools) and the locale
-catalogs are the coming lines of this package and will append their
-sections here.
+interface, the `fetch` and `node` adapters), the HTTP **client** binding
+(§10: outcomes, the client half of idempotency, retry, negotiation) and
+the `@jarenjs/app` binding (§11: the generated documents and the one
+effect). The in-process, message-port and stream bindings, the revision
+hash, the projections (OpenAPI, TypeScript, Markdown, AI tools) and the
+locale catalogs are the coming lines of this package and will append
+their sections here.
 
 ### §1.1 What the format is not
 
@@ -179,7 +181,7 @@ the resolved value and marks it inferred.
 | `cache` | `none` \| `revision` | `none` | Whether a read's result may be cached by revision. |
 | `limits.maxBodyBytes` | positive integer | `1048576` | The request-body ceiling a server binding enforces. |
 | `errors.details` | `none` \| `paths` \| `full` | `paths` | How much of a validation failure crosses the wire: nothing, instance path + keyword, or the raw validator errors. |
-| `retry` | `{ max: integer ≥ 0, on: [codes] }` | absent (`null`) | Which declared error codes a client may retry, and how often. |
+| `retry` | `{ max: integer ≥ 0, on: [codes] }` | absent (`null`) | Which error codes a client may retry (declared codes, or `JC2xxx` taxonomy codes), and how often beyond the first attempt; a network failure is always retried under a declared `retry`. A **command MUST declare `idempotency: "required"` to carry `retry`** (`JC0014`) — a retried command without a key the server deduplicates on runs twice; a read is idempotent by nature. |
 
 The compiled `policy` is always
 `{ task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry }`.
@@ -240,8 +242,11 @@ Path, query and header members arrive as strings and are decoded by a
 normalizer compiled **over those members only** with `coerceTypes`
 (`@jarenjs/validate/normalize`); **a body member is never coerced**. The
 compiled operation carries this as
-`input.transport = { normalize, members: { path, query, header, repeated } }`
-(`null` when nothing travels as a string), where `repeated` lists the
+`input.transport = { normalize, members: { path, query, header, repeated }, schemas, required }`
+(`null` when nothing travels as a string), where `schemas` holds each
+transport member's declared schema and `required` the transport members
+the input requires (what a URL builder validates without the body), and
+`repeated` lists the
 query and header members whose effective schema type is `array` — a
 decoder collects repeats of those into an array (a repeated query key; a
 repeated header line or a comma-separated header list, RFC 9110 §5.3)
@@ -360,7 +365,7 @@ carries the same codes and a test holds them equal.
 | JC0011 | `errors` is malformed: not an object, a code is not `^[a-z][a-z0-9-]*$`, a status is not a 100–599 integer, or a schema is not a schema |
 | JC0012 | `http.method` is not an uppercase token of the supported set, `http.status` is not a 200–299 integer, or `http.media` is not a media type |
 | JC0013 | an unknown member in a closed object (the document root, an operation, `policy`, `limits`, `retry`, `policy.errors`, `http`, or an error declaration) |
-| JC0014 | a `policy` member is mistyped or outside its declared set (§3.1) |
+| JC0014 | a `policy` member is mistyped or outside its declared set (§3.1), a read declares `idempotency`, or a command declares `retry` without `idempotency: "required"` |
 | JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped |
 | JC0016 | an operation bound to `GET` or `HEAD` carries a body-located member (a GET body) |
 
@@ -640,7 +645,10 @@ wire response:
 | `JC1002` | `serveHttp`: an operation has no handler and `partial` is not set |
 | `JC1003` | a binding cannot carry a declared feature: an operation declares `policy.idempotency` and no `ledger` was given (say so, never degrade) |
 | `JC1004` | `dispatch` received a malformed request object |
+| `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation (§10) |
 | `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299 |
+| `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare or cannot carry in the app binding, or `namespace`/`statePath` is malformed (§11) |
+| `JC1008` | `openHttpClient`, `client.url` or `createContractEffect`: an argument or option is malformed (§10, §11) |
 
 ### §7.4 Headers
 
@@ -775,3 +783,330 @@ the platform:
 Fastify, Hono and Express are recipes in the README, each ≤15 lines and
 executed by a test that imports the framework from the benchmark
 workspace only — no framework is a dependency of this package.
+
+## §10 The HTTP client binding
+
+`openHttpClient(contract, options)` (`@jarenjs/contract/client`) is the
+client half of the http driver pair: `open(contract, options) → Client`
+with `Client = { invoke, url, negotiate, pending, capabilities, contract,
+describe(), close() }`. It is **binding-agnostic in shape** — the app
+binding (§11) and later the AI tools read only `invoke`, `contract` and
+`capabilities` — and **total in behavior**: `invoke` resolves an
+**outcome** for everything a server or a network can do and rejects
+only for the host's own mistake (`JC1005`: an operation the contract
+does not declare, or an opaque one — `invoke` carries JSON; an opaque
+operation is reached through `url`).
+
+```jsonc
+// options — every one has a default
+{ "fetch": "globalThis.fetch",            // (url, init) => Promise<Response>; injectable (a toFetchHandler, a recorder)
+  "baseUrl": "",                          // prefixed to every path; '' = relative
+  "headers": {},                          // static headers, merged UNDER per-call ones
+  "keys": "crypto.randomUUID",            // the idempotency key generator
+  "storage": null,                        // { read(), write(value) } — the @jarenjs/app docstore adapter shape — for durable key records
+  "timeoutMs": 0,                         // per request; 0 = none; composed with ctx.signal
+  "sleep": "(ms, signal) => Promise",      // the retry backoff sleeper (injectable)
+  "catalog": null,                        // a message catalog consulted before the English one
+  "wellKnown": "/.well-known/jaren-contract",   // where negotiate() asks
+  "now": "Date.now" }                     // the clock stamped into key records
+```
+
+`capabilities` is `{ name: "http", status: true, headers: true, media:
+true, etag: true, idempotency: true, durableKeys: <storage given>,
+stream: false, cancel: "signal" }` — frozen, the driver rule.
+
+### §10.1 The outcome and the three identities
+
+`invoke(op, input, ctx) → Promise<Outcome>` with `ctx = { signal?,
+attempt?, idempotencyKey?, headers?, ifNoneMatch?, ifMatch? }`. An
+outcome is **JSON** (no `Error`, `Response`, `Headers` or
+`AbortController` ever; no member is `undefined` — an absent `details`
+is `null`), tagged:
+
+```jsonc
+{ "ok": true,  "value": { "...": "the output, validated" }, "meta": { "...": "" } }
+{ "ok": false, "kind": "failure" | "network" | "contract" | "cancelled",
+  "error": { "code": "conflict", "message": "…", "status": 409, "details": null, "retryable": false },
+  "meta":  { "op": "product.save", "attempt": 3, "trace": "3f2c…", "revision": null, "etag": null, "notModified": false } }
+```
+
+- `failure` — the server answered a **declared** operation error, or a
+  `JC2xxx` taxonomy error (§7.3): the peer spoke the contract and said no;
+- `network` — the transport rejected or timed out (`JC2051`, retryable);
+- `contract` — the peer (or, pre-send, the input) violated the contract:
+  invalid input (`JC2050`), an invalid success body (`JC2053`), a key
+  store that threw (`JC2054`), an undeclared response (`JC2055`);
+- `cancelled` — `ctx.signal` aborted or `close()` was called (`JC2052`).
+
+`meta` keeps the three identities apart, by construction: **`attempt`** is
+the caller's (`ctx.attempt`, echoed verbatim, `null` when none) — it is
+never sent and **never read from any response header**; **`trace`** is
+the server's `x-jaren-trace` (`null` when the wire carried none) — it is
+never generated here; the **idempotency key** (§10.3) is the client's
+and travels only as `Idempotency-Key`. `revision` is reserved for the
+contract revision; `etag` carries a success's entity tag; `notModified`
+is true exactly for a 304. The members are always present, in this
+order.
+
+### §10.2 What `invoke` does, in order
+
+1. **Route.** An unknown `op` or an opaque one throws `JC1005`.
+2. **Validate** `input` with the operation's compiled input validator —
+   the SAME validator the server runs. `null`/`undefined` is `{}` for an
+   operation with input; an input-less operation refuses any non-null
+   input. A failure resolves `kind: "contract"` `JC2050` with `details`
+   by `policy.errors.details`; **nothing was sent**.
+3. **Split by location** (`http.in`): path variables → `encodeURIComponent`
+   per segment into the canonical template; query members →
+   `URLSearchParams` (an array-typed member repeats the key per element;
+   `null`/`undefined` members are omitted; a scalar is its string, a
+   non-scalar its JSON); header members → the header named by the
+   member lowercased (an array as a `, `-joined list); the body: `http.body`
+   names a member → `JSON.stringify` of that member's value; otherwise
+   the object of the body-located members, stringified. `method` from
+   `http.method`; `content-type: <http.media>` only when a body is sent.
+   Static `headers`, then `ctx.headers`, then the declared header
+   members, then the protocol headers the client owns (`if-none-match`,
+   `if-match`, `content-type`, `idempotency-key`) — later wins. A value
+   JSON or a URL cannot carry is `JC2050` (`keyword: "encoding"`).
+4. **Idempotency** (§10.3) when `policy.idempotency` is `optional` or
+   `required`: key = `ctx.idempotencyKey ?? keys()`, sent as
+   `Idempotency-Key`; with `storage`, recorded before the send (`JC2054`
+   when the store throws — nothing is sent blind).
+5. **Send** through `fetch` with the composed signal (`ctx.signal`,
+   `timeoutMs`, the client's `close()`). A rejection is `kind:
+   "cancelled"` when the caller's signal aborted (or the rejection is an
+   `AbortError`), else `kind: "network"` `JC2051` whose message carries
+   the error's **name only** — never its text, which may embed the URL
+   and credentials. A timeout is therefore `network`, not `cancelled`.
+6. **Assemble** the outcome from status + headers + body (the table
+   below); `meta.trace` from `x-jaren-trace`, `meta.etag` from `etag`.
+7. **Retry** (§10.4) only under a declared `policy.retry`.
+8. Settle the durable record (§10.3) and resolve.
+
+The assembly, row by row — `assembleOutcome` in the package is this
+table as code; the test column names the test case that pins the row
+(`test/contract/client-outcomes.test.js`, checked against this table):
+
+| status | body | kind | code | retryable | test |
+|---|---|---|---|---|---|
+| 2xx | empty; the output schema accepts `null` | ok, `value: null` | — | — | `2xx empty body is a null value when the output allows it` |
+| 2xx | empty; the output schema rejects `null` | contract | `JC2053` | no | `2xx empty body against a non-null output is JC2053` |
+| 2xx | JSON that validates against `output` | ok | — | — | `2xx valid JSON is ok with meta.etag from the header` |
+| 2xx | JSON that fails `output` | contract | `JC2053` (details by policy) | no | `2xx invalid output is JC2053 with details by policy` |
+| 2xx | not JSON | contract | `JC2053` | no | `2xx non-JSON is JC2053` |
+| 304 | — | ok, `value: null`, `meta.notModified`, `meta.etag` | — | — | `304 is ok null with notModified and the etag` |
+| other | JSON `{ code }` the operation declares | failure | the declared code; `status`, `details`, `message` from the body (else rendered), `retryable` from the body (else `policy.retry.on`) | body | `an error body with a declared code is a failure` |
+| other | JSON `{ code }` a `JC2xxx` taxonomy code | failure | the taxonomy code; `status`, `retryable` from the body | body | `an error body with a taxonomy code is a failure` |
+| other | JSON with an unknown/undeclared `code` | contract | `JC2055` (`status` kept) | 5xx/429 | `an undeclared code is JC2055` |
+| other | JSON without a string `code` | contract | `JC2055` | 5xx/429 | `an error body without a code is JC2055` |
+| other | not JSON, or empty | contract | `JC2055` | 5xx/429 | `a non-JSON error body is JC2055` |
+| none | the transport rejected | network | `JC2051` | yes | `a transport rejection is a network outcome named by the error name only` |
+| none | the caller aborted | cancelled | `JC2052` | no | `an abort is a cancelled outcome` |
+| none | the input failed pre-send | contract | `JC2050` | no | `invalid input is JC2050 and nothing is sent` |
+| none | the key store threw pre-send | contract | `JC2054` | no | `a throwing key store is JC2054 and nothing is sent` |
+
+"other" is every status that is neither 2xx nor 304 — 1xx, a redirect
+the platform did not follow, 4xx, 5xx. A status outside 100–599 on the
+response object is `JC2053` (the transport is broken, not the server).
+
+### §10.3 The client codes and the durable keys
+
+The client codes — `CLIENT_ERRORS` (`@jarenjs/contract/client`) is this
+table as data; `CONTRACT_CODES` lists every code; the English catalog
+has exactly these msgids beside §7's; a test holds them equal:
+
+| code | kind | msgid | retryable | when |
+|---|---|---|---|---|
+| `JC2050` | contract | `contract/client-invalid-input` | no | the input fails the operation's input validator (or cannot be encoded) before anything was sent |
+| `JC2051` | network | `contract/network` | yes | the transport rejected or the per-request timeout fired; the message names the error's name only |
+| `JC2052` | cancelled | `contract/cancelled` | no | `ctx.signal` aborted, the client was closed, or an abort interrupted a retry backoff |
+| `JC2053` | contract | `contract/invalid-response` | no | a 2xx body is not JSON or fails the output validator; a response object whose status is not 100–599 |
+| `JC2054` | contract | `contract/key-storage-failed` | no | the durable key store threw before the send |
+| `JC2055` | contract | `contract/undeclared-response` | 5xx/429 | an error response whose body is not a declared or taxonomy code; `error.status` is kept |
+| `JC2056` | — | `contract/not-a-contract` | no | `negotiate`: no description at the well-known path, not a `$contract: "0.1"` description, or another contract `id` |
+| `JC2057` | — | `contract/incompatible` | no | `negotiate`: a version neither end declares compatible |
+| `JC2058` | contract | `contract/host-failed` | no | the contract effect (§11) projected a thrown host value into an outcome |
+
+`JC2059–JC2069` are reserved for later client-side codes.
+
+**The idempotency key**, client half. For an operation whose
+`policy.idempotency` is `optional` or `required` the client **always**
+sends a key — `ctx.idempotencyKey` when given (a caller that retries by
+hand keeps the same key), else `keys()` — so the server's ledger (§8)
+can deduplicate every command the client sends, and a declared `retry`
+on a command is safe (the compiler refuses `retry` on a command whose
+idempotency is not `required`, `JC0014`). With a `storage` (the
+`@jarenjs/app` `createDocStore` adapter shape, `{ read(), write(value) }`,
+sync or async) the client records `{ op, key, hash, at }` under
+`<store>["jaren-contract"][<contract id>][<op>][<key>]` **before the
+request** — `hash` is the request hash of §8 (the same SHA-256 over the
+canonical input the server computes), `at` is `now()`, and the input
+itself is **never stored** — and drops the record after a terminal
+outcome: `ok`, any `failure`, or a `contract` outcome that is not
+retryable. A `network` or `cancelled` outcome **leaves it**, so a
+process that restarts can ask `client.pending() → [{ op, key }]` and
+reconcile each with the server (the ledger's `lookup` by op/scope/key
+is the server-side half). A store that throws on the pre-send write is
+`JC2054` and nothing is sent; a store that throws on the drop leaves
+the record (the conservative side) and the outcome is unaffected.
+
+### §10.4 Retry
+
+Only under a declared `policy.retry` (`{ max, on }`); never for an
+operation without one. Retried: a `network` outcome, and a `failure`
+outcome whose `error.code` is in `retry.on` (declared codes and
+`JC2xxx` taxonomy codes alike — `JC2009` in-progress is a natural
+member). At most `max` further attempts; the backoff before attempt
+`n+1` is `min(1000 · 2^n, 8000)` ms plus up to 250 ms of jitter through
+`sleep(ms, signal)`; an abort during the backoff resolves `cancelled`.
+The idempotency key stays the same across the attempts (that is what
+makes them safe); `meta.attempt` stays the caller's — retries are
+inside one attempt, not new ones.
+
+### §10.5 `url(op, input)` and `negotiate()`
+
+`url(op, input)` builds `baseUrl + path + ?query` for **any** operation,
+opaque ones included, validating only the path/query members of the
+input (against their declared schemas, compiled on first use);
+`JC1005` for an unknown operation, `JC1008` for a non-object input or
+members that fail their schema. It is what an `<img src>` or a link uses
+for an opaque operation; the bytes themselves are the host's to fetch.
+
+`negotiate({ signal })` fetches the server's well-known description
+(§7.6) and answers `{ compatible, reason, server, error }` with `reason`
+one of:
+
+| reason | when | compatible | error |
+|---|---|---|---|
+| `same-version` | `server.version === contract.version` (both `null` included) | yes | — |
+| `server-accepts` | `contract.version ∈ server.compat` | yes | — |
+| `client-accepts` | `server.version ∈ contract.compat` | yes | — |
+| `version-mismatch` | none of the above | no | `JC2057` |
+| `not-a-contract` | no 200, not JSON, not a `$contract: "0.1"` description with an `operations` array, or the server's `id` differs from the client's (both non-null) | no | `JC2056` |
+| `unreachable` | the transport rejected | no | `JC2051` |
+
+`server` is `{ id, version, compat, revision }` as the server described
+itself (`null` when unreachable or not a contract). **Nothing else is
+inferred**: an unrelated service on the port is exactly `not-a-contract`;
+two unversioned contracts are `same-version`.
+
+## §11 The app binding
+
+`contractAppBinding(contract, { namespace = "contract/", statePath =
+"/contract", ops = contract.ids })` (`@jarenjs/contract/app`) returns
+**pure JSON** — `{ slice, actions, schema, effect: "contract" }` — the
+`fsmToApp`/`liveAppBinding` shape: a state slice the host mounts at
+`statePath`, action documents it spreads into its `actions`, and the
+slice's JSON Schema for `validateState`. Neither package imports the
+other; the documents cross as JSON and the task-effect factory
+(`createTaskEffect` from `@jarenjs/app`) crosses as a function the host
+passes to `createContractEffect`. `ops` may name a subset (`JC1007` for
+an operation the contract does not declare or the binding cannot carry).
+
+### §11.1 The generated document
+
+Per operation, **one task slot** in the slice — `{ id: 0, status: "idle",
+value: null, error: null, meta: null }` — and **two actions**, in the
+async-task convention of `@jarenjs/app`'s TASKS.md (state-side identity,
+guard-first completion):
+
+```jsonc
+// <namespace><op>/start — $payload is the operation's input
+{ "patch": [
+    { "op": "replace", "path": "/contract/catalog.load/id",     "value": { "$add": ["$.contract['catalog.load'].id", 1] } },
+    { "op": "replace", "path": "/contract/catalog.load/status", "value": "loading" },
+    { "op": "replace", "path": "/contract/catalog.load/error",  "value": null } ],
+  "effects": [ { "run": "contract", "with": {
+    "op": "catalog.load", "input": "$payload",
+    "id": { "$add": ["$.contract['catalog.load'].id", 1] },      // the SAME increment as the patch — everything evaluates pre-transition
+    "done": "contract/catalog.load/done", "slot": "catalog.load" } } ] }
+
+// <namespace><op>/done — $payload is { id, result: outcome } (or { id, error: outcome } for a projected host throw)
+{ "$if": [ { "$eq": ["$payload.id", "$.contract['catalog.load'].id"] },        // the id guard: a stale response is the empty sequence
+  { "$let": { "outcome": { "$coalesce": ["$payload.result", "$payload.error"] } },
+    "$return": { "$if": [ { "$eq": ["$outcome.ok", true] },
+      { "patch": [ { "op": "replace", "path": "/contract/catalog.load/status", "value": "done" },
+                   { "op": "replace", "path": "/contract/catalog.load/value",  "value": "$outcome.value" },
+                   { "op": "replace", "path": "/contract/catalog.load/meta",   "value": "$outcome.meta" },
+                   { "op": "replace", "path": "/contract/catalog.load/error",  "value": null } ] },
+      { "patch": [ { "op": "replace", "path": "/contract/catalog.load/status", "value": "error" },
+                   { "op": "replace", "path": "/contract/catalog.load/error",  "value": "$outcome.error" },
+                   { "op": "replace", "path": "/contract/catalog.load/meta",   "value": "$outcome.meta" } ] } ] } } ] }
+```
+
+Rules the generator keeps:
+
+- The slot id read is `$<statePath>['<op>']` — a dotted operation id is
+  a bracketed RFC 9535 member name, so `statePath` MUST be a chain of
+  identifier-safe segments (`JC1007` otherwise); the patch paths are
+  plain JSON Pointers (`/contract/catalog.load/id`). Action names carry
+  the operation id verbatim (`contract/catalog.load/start`); the app
+  places no restriction on action names.
+- **The id guard is the guarantee.** The `done` action compares
+  `$payload.id` with the slot's id first; a payload whose id is not the
+  current one yields the empty sequence — no state change, no render, no
+  subscriber — so an out-of-order older response can never overwrite a
+  newer one. Cancellation (below) is the optimization.
+- **A failed reload keeps the last good `value`**: the error branch
+  writes `status`, `error`, `meta` and touches `value` not at all.
+- The outcome's `kind` is recoverable from `error.code`: `JC2051` is
+  `network`, the other `JC205x` are `contract`, any other code is a
+  declared or taxonomy `failure`; `cancelled` never reaches state.
+- `schema` is the slice's JSON Schema: per operation `id` (integer ≥ 0),
+  `status` (`idle | loading | done | error`), `value` (the operation's
+  output schema **or null**), `error` (the §10.1 error object or null),
+  `meta` (the §10.1 meta or null); when the contract has `$defs` the
+  schema carries them under its own `$defs` and declares an `$id`
+  (`urn:jaren:contract-app:<contract id>`) so the output schemas'
+  `#/$defs/…` references resolve wherever the host mounts the slice
+  schema inside its `validateState` schema.
+
+### §11.2 The effect
+
+`createContractEffect(client, { createTaskEffect, projectError?, catalog? })`
+returns **one** effect handler — register it as `effects: { contract: … }`
+— carrying `cancel(slot)`, `cancelAll()` and `dispose()` (which
+`app.destroy()` calls). It owns one `createTaskEffect` per distinct
+`policy.task` mode the client's contract uses, built lazily on the
+first descriptor of that mode, each with `run = (props, signal) =>
+client.invoke(props.op, props.input, { signal, attempt: props.id })`;
+a descriptor is routed by `props.op` to its operation's mode (a `switch`
+read and an `exhaust` command live in one effect; the mode never
+appears in the app document). An unknown `op` is `JC1005` — a
+`TypeError` the loop reports as `JA2007`. `props` reach the inner
+effect unchanged (`id`, `done`, `fail`, `slot` are TASKS.md's).
+
+Settlement, exactly: `run` resolves the outcome → the task effect
+dispatches `done` with `{ id, result: outcome }`; a `kind: "cancelled"`
+outcome makes `run` throw an `AbortError` → **nothing is dispatched**
+(a superseded task is dead by design); a value that is not an outcome
+(a foreign client) and a **thrown** host value go through `projectError`
+— the host's own projector first, then the `JC2058` outcome — so the
+error member of `{ id, error }` is always an outcome, never a string,
+and the generated `done` action reads it through the same `$coalesce`.
+A `JC2058` message carries nothing of the thrown value.
+
+### §11.3 Composition
+
+```js
+import { createApp, createTaskEffect } from '@jarenjs/app';
+import { JarenValidator } from '@jarenjs/validate';
+import { openHttpClient } from '@jarenjs/contract/client';
+import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
+
+const client = openHttpClient(contract, { baseUrl });
+const { slice, actions, schema } = contractAppBinding(contract, { ops: ['catalog.load', 'product.save'] });
+const validate = new JarenValidator().compile({ type: 'object', required: ['contract'], properties: { contract: schema } });
+
+const app = createApp({ state: { contract: slice, draft: null }, view, actions: { ...actions, ...own } }, {
+  effects: { contract: createContractEffect(client, { createTaskEffect }) },
+  validateState: (state) => validate(state),
+});
+app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
+// … later: app.getState().contract['catalog.load'] → { id: 1, status: 'done', value: {…}, error: null, meta: {…} }
+```
+
+The runnable version of this composition, driven against a real
+`serveHttp` dispatcher, is [APP-INTEGRATION.md](APP-INTEGRATION.md),
+executed verbatim by the test suite.

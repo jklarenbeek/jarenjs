@@ -372,9 +372,14 @@ function checkRefs(node, docPath, scope, isRoot) {
  * key; a repeated header line or a comma-separated header list) before
  * normalizing; every other query member is last-wins and every other
  * header member is a single line. Body members are never here.
+ * `schemas` holds each transport member's declared schema (what the
+ * normalizer was compiled over) and `required` the transport members the
+ * input schema requires — what a URL builder validates without the body.
  * @typedef {Object} InputTransport
  * @property {(value: any) => any} normalize
  * @property {{ path: readonly string[], query: readonly string[], header: readonly string[], repeated: readonly string[] }} members
+ * @property {Readonly<Record<string, any>>} schemas
+ * @property {readonly string[]} required
  */
 
 /**
@@ -658,6 +663,13 @@ function checkPolicy(policy, kind, base) {
       if (typeof p.retry.on[i] !== 'string' || p.retry.on[i] === '') {
         throw refuse('JC0014', 'policy.retry.on entries must be error code strings', at(at(rp, 'on'), i));
       }
+    }
+    // a command may only be retried under a key the server can deduplicate
+    // on: a retried command without one runs twice
+    if (kind === 'command' && idempotency !== 'required') {
+      throw refuse('JC0014',
+        "policy.retry on a command requires policy.idempotency 'required' — a retried command without an idempotency key runs twice",
+        rp);
     }
     retry = { max: p.retry.max, on: p.retry.on.slice() };
   }
@@ -976,9 +988,12 @@ export function compileContract(doc, options = {}) {
         // it does for the validator
         const sub = { ...src, type: 'object', properties: pick };
         const normalize = compileNormalizer(sub, { coerceTypes: true });
+        const declaredRequired = Array.isArray(p.inputEffective.required) ? p.inputEffective.required : [];
         transport = {
           normalize,
           members: { path: pathMembers, query: queryMembers, header: headerMembers, repeated },
+          schemas: pick,
+          required: declaredRequired.filter((/** @type {unknown} */ r) => typeof r === 'string' && Object.hasOwn(pick, r)),
         };
       }
       input = { schema: p.input, validate, transport };

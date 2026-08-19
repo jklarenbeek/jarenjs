@@ -61,7 +61,7 @@
         "conflict": { "status": 409, "schema": { "$ref": "#/$defs/Conflict" } },
         "not-found": { "status": 404 }
       },
-      "policy": { "task": "exhaust", "idempotency": "required", "revision": "input:/revision" },
+      "policy": { "task": "exhaust", "idempotency": "required", "revision": "input:/revision", "retry": { "max": 2, "on": ["not-found"] } },
       "http": {
         "method": "PUT",
         "path": "/api/products/{id}/master",
@@ -100,7 +100,7 @@
         "properties": { "id": { "type": "integer" } }
       },
       "output": true,
-      "policy": { "idempotency": "optional", "retry": { "max": 2, "on": ["not-found"] }, "errors": { "details": "full" }, "limits": { "maxBodyBytes": 4096 } },
+      "policy": { "idempotency": "optional", "errors": { "details": "full" }, "limits": { "maxBodyBytes": 4096 } },
       "errors": { "not-found": { "status": 404 } }
     }
   }

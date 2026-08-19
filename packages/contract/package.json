@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.36.0",
+  "version": "0.36.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -27,6 +27,14 @@
       "types": "./dist/types/ledger.d.ts",
       "default": "./src/ledger.js"
     },
+    "./client": {
+      "types": "./dist/types/client/http.d.ts",
+      "default": "./src/client/http.js"
+    },
+    "./app": {
+      "types": "./dist/types/app/index.d.ts",
+      "default": "./src/app/index.js"
+    },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
@@ -36,7 +44,7 @@
     "docs/",
     "schemas/"
   ],
-  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, and served over HTTP through a total dispatch pipeline with fetch and node adapters",
+  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, served over HTTP through a total dispatch pipeline with fetch and node adapters, called through an HTTP client that resolves JSON outcomes, and bound to @jarenjs/app documents through generated task slots and one effect",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -60,7 +68,9 @@
     "rest",
     "router",
     "openapi",
-    "idempotency"
+    "idempotency",
+    "client",
+    "outcome"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -68,8 +78,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.36.0",
-    "@jarenjs/json": "^0.36.0",
-    "@jarenjs/validate": "^0.36.0"
+    "@jarenjs/core": "^0.36.1",
+    "@jarenjs/json": "^0.36.1",
+    "@jarenjs/validate": "^0.36.1"
   }
 }

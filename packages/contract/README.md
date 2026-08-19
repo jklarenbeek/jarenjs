@@ -10,8 +10,12 @@ matcher whose static segments beat variables regardless of registration
 order; `serveHttp` puts it behind HTTP as a **total** dispatch pipeline —
 plain request in, plain response out, every request-caused failure a
 coded response — with a `fetch` and a `node` adapter and idempotency
-through a ledger interface. Everything else a consumer wants beside the
-runtime — the client and app bindings, the message-port and stream
+through a ledger interface; `openHttpClient` calls it from the other end
+with the same validator and resolves a JSON **outcome** for everything a
+server or a network can do; `contractAppBinding` + `createContractEffect`
+let a `@jarenjs/app` document call every operation through one generated
+task slot per operation and one registered effect. Everything else a
+consumer wants beside the runtime — the message-port and stream
 bindings, the OpenAPI/TypeScript/Markdown projections, the AI-tool view,
 the revision and the breaking-change diff — is coming in this line as a
 projection of the same document.
@@ -175,14 +179,75 @@ const app = express();
 app.use(toNodeHandler(server));
 ```
 
+## Call it from the other end
+
+```js
+import { openHttpClient } from '@jarenjs/contract/client';
+
+const client = openHttpClient(contract, { baseUrl: 'https://shop.example', timeoutMs: 5000 });
+
+const loaded = await client.invoke('catalog.load', { since: '2026-01-01T00:00:00Z' }, { attempt: 1 });
+// { ok: true, value: [...], meta: { op, attempt: 1, trace: '<x-jaren-trace>', revision: null, etag: 'W/"…"', notModified: false } }
+
+const saved = await client.invoke('product.save', { id: 12, revision: 3, product });   // validated with the SAME validator the server runs, then PUT /api/products/12/master with the body members as JSON and a generated Idempotency-Key
+if (!saved.ok) {
+  saved.kind;            // 'failure' (a declared error or a JC2xxx the server answered) | 'network' | 'contract' | 'cancelled'
+  saved.error;           // { code: 'conflict', message, status: 409, details: { current }, retryable: false } — JSON, never an Error
+}
+client.url('image.bytes', { id: 7 });         // 'https://shop.example/api/images/7' — an opaque operation is a URL, not an invoke
+await client.negotiate();                     // { compatible, reason: 'same-version' | 'server-accepts' | 'client-accepts' | 'version-mismatch' | 'unreachable' | 'not-a-contract', server, error }
+```
+
+`invoke` **never rejects** for anything a server or a network can do —
+invalid input is refused before anything is sent (`JC2050`), a transport
+failure is `network` (`JC2051`, the error's name only — never its text),
+an abort is `cancelled` (`JC2052`), an invalid or undeclared response is
+`contract` (`JC2053`/`JC2055`); it throws only for the host's own
+mistake (`JC1005`: an unknown or opaque operation). The three identities
+stay apart by construction: `meta.attempt` is the caller's and is never
+read from a response, `meta.trace` is the server's `x-jaren-trace`, and
+the idempotency key is generated here (`keys`, or `ctx.idempotencyKey`)
+and travels only as `Idempotency-Key` — with a durable `storage` it is
+recorded without the input and `client.pending()` lists what a restart
+must reconcile. Retry runs only under a declared `policy.retry`. The
+normative client is [CONTRACT-FORMAT.md §10](docs/CONTRACT-FORMAT.md#10-the-http-client-binding).
+
+## Call it from a @jarenjs/app document
+
+```js
+import { createApp, createTaskEffect } from '@jarenjs/app';
+import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
+
+const { slice, actions, schema } = contractAppBinding(contract, { ops: ['catalog.load', 'product.save'] });
+// slice   → { 'catalog.load': { id: 0, status: 'idle', value: null, error: null, meta: null }, … }   pure JSON, mount at /contract
+// actions → 'contract/catalog.load/start' + '/done' per operation — the TASKS.md id guard built in
+// schema  → the slice's JSON Schema for validateState (value = the output schema or null)
+
+const app = createApp({ state: { contract: slice }, view, actions: { ...actions, ...own } }, {
+  effects: { contract: createContractEffect(client, { createTaskEffect }) },   // ONE effect; the task mode comes from policy.task
+});
+app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
+```
+
+No route strings, no hand-written wrappers, and no import of
+`@jarenjs/app` from this package — the documents cross as JSON and the
+task-effect factory crosses as a function the host passes in. A
+superseded read dispatches once with the newer result, an out-of-order
+older response is rejected by the id guard, a double-dispatched command
+runs once, and every failure lands in state as the same outcome shape.
+The runnable walkthrough is [docs/APP-INTEGRATION.md](docs/APP-INTEGRATION.md);
+the normative binding is [CONTRACT-FORMAT.md §11](docs/CONTRACT-FORMAT.md#11-the-app-binding).
+
 ## What is here, and what is coming
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
 `describe()`, the `JC0001–JC0016` compile errors; the HTTP server binding
 (`serveHttp`, the `JC2001–JC2015` wire taxonomy with its English catalog,
 `fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
-and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents). Coming
-in this line: the HTTP client and the app-effect binding,
-`local`/`port`/`stream` bindings, projections (OpenAPI 3.1, TypeScript,
-Markdown, AI tools), the revision hash and `diffContracts`, and the locale
-packs for the wire errors.
+and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
+client (`openHttpClient`, the D6 outcomes with the `JC2050–JC2058` client
+codes, the client half of idempotency, retry, `negotiate`); the app
+binding (`contractAppBinding`, `createContractEffect`). Coming in this
+line: `local`/`port`/`stream` bindings, projections (OpenAPI 3.1,
+TypeScript, Markdown, AI tools), the revision hash and `diffContracts`,
+and the locale packs for the wire errors.

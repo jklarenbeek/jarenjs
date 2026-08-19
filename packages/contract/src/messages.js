@@ -1,26 +1,29 @@
 //@ts-check
 /**
- * @file The English message catalog of the wire errors: one template per
- * `contract/*` msgid the HTTP binding can answer with, plus
- * `contract/handler-error`, the generic text for a declared operation
- * error that has no message of its own. Compiled ONCE at module scope
+ * @file The English message catalog: one template per `contract/*` msgid
+ * the HTTP binding can answer with, `contract/handler-error` (the generic
+ * text for a declared operation error that has no message of its own),
+ * and one per client-originated outcome (the `JC205x` codes a client
+ * resolves without a server message). Compiled ONCE at module scope
  * with `@jarenjs/core`'s `compileMessageCatalog` (the two-stage house
  * rule applied to messages) and exported in plain form for the locale
  * packs to mirror key for key.
  *
  * A message never interpolates a request value: the parameters are the
  * operation id, a declared limit, a media type, a method list, a
- * declared header member name or a declared error code — trusted
- * artifacts, never something the caller sent (the trust-boundary rule of
- * docs/CONTRACT-FORMAT.md §7).
+ * declared header member name, a declared error code, a status, a
+ * platform error's NAME or a contract version — trusted artifacts or
+ * protocol facts, never something a peer sent as content (the
+ * trust-boundary rule of docs/CONTRACT-FORMAT.md §7).
  */
 
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 /**
  * The plain English catalog: msgid → template (`{param}` placeholders).
- * The keys are exactly the msgids of the CONTRACT-FORMAT.md §7 taxonomy
- * plus `contract/handler-error`; a test holds them equal.
+ * The keys are exactly the msgids of the CONTRACT-FORMAT.md §7 taxonomy,
+ * `contract/handler-error`, and the §10 client table; a test holds them
+ * equal.
  */
 export const contractMessagesEn = Object.freeze({
   'contract/not-found': 'no operation matches the request method and path',
@@ -39,6 +42,15 @@ export const contractMessagesEn = Object.freeze({
   'contract/precondition-failed': 'the If-Match precondition of operation {op} failed',
   'contract/invalid-header': 'the {header} header of operation {op} is invalid',
   'contract/handler-error': 'operation {op} failed with {code}',
+  'contract/client-invalid-input': 'the input of operation {op} is invalid; nothing was sent',
+  'contract/network': 'the request of {op} did not complete ({name})',
+  'contract/cancelled': 'the request of operation {op} was cancelled',
+  'contract/invalid-response': 'the response of operation {op} violates its contract',
+  'contract/key-storage-failed': 'the idempotency key of operation {op} could not be stored; nothing was sent',
+  'contract/undeclared-response': 'operation {op} answered an undeclared response (status {status})',
+  'contract/not-a-contract': 'the server does not describe contract {id} at its well-known path',
+  'contract/incompatible': 'the server speaks version {server} of contract {id}; this client speaks {client} and neither end declares the other compatible',
+  'contract/host-failed': 'operation {op} failed in the host before an outcome was produced',
 });
 
 /** The compiled English catalog (module-level singleton). */

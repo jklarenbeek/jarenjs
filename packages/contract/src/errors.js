@@ -18,10 +18,10 @@
  *  - `JC2070–JC2089` port/local bindings
  *  - `JC2090–JC2109` stream binding
  *
- * The document-compile range, the http host and request-time ranges are
- * populated; the others are reserved for the client, port/local and
- * stream bindings and are listed here so a later addition lands in its
- * range rather than at the next free number.
+ * The document-compile range, the host range, the http request-time
+ * range and the client range are populated; port/local and stream are
+ * reserved for their bindings and are listed here so a later addition
+ * lands in its range rather than at the next free number.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -52,7 +52,10 @@ export const CONTRACT_CODES = Object.freeze({
   JC1002: 'serveHttp: an operation has no handler and options.partial is not set',
   JC1003: 'a binding cannot carry a declared feature: an operation declares idempotency and serveHttp was given no ledger',
   JC1004: 'dispatch received a malformed request object (method or url not a string, headers not an object, body not a string, Uint8Array or null)',
+  JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.url)',
   JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299',
+  JC1007: 'contractAppBinding: ops names an operation the contract does not declare or one the binding cannot carry (a subscribe operation until the stream binding lands), or namespace/statePath is malformed',
+  JC1008: 'openHttpClient, client.url or createContractEffect: an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url)',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',
@@ -69,6 +72,16 @@ export const CONTRACT_CODES = Object.freeze({
   JC2013: 'the operation has no handler on this partial server (501)',
   JC2014: 'the If-Match precondition does not match the entity tag the handler armed (412)',
   JC2015: 'a declared header member is repeated when its schema is scalar, or fails transport decoding (400)',
+  // ——— client-side (outcomes of invoke; never thrown) ———
+  JC2050: 'the input fails the operation\'s input validator before anything was sent (kind contract)',
+  JC2051: 'the request did not complete: the transport rejected or timed out (kind network, retryable)',
+  JC2052: 'the request was cancelled through the caller\'s signal or client.close() (kind cancelled)',
+  JC2053: 'a success response is not JSON or fails the operation\'s output validator (kind contract)',
+  JC2054: 'the durable idempotency-key storage threw before the request was sent (kind contract)',
+  JC2055: 'the server answered a status with a body that is neither a declared error nor a taxonomy error (kind contract; retryable for 5xx and 429)',
+  JC2056: 'negotiation: the server does not answer a jaren-contract description at the well-known path, or describes another contract id',
+  JC2057: 'negotiation: the server speaks a version neither end declares compatible',
+  JC2058: 'the host threw while invoking an operation through the contract effect — projected into an outcome, never a string',
 });
 
 /**

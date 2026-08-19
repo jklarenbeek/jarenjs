@@ -96,7 +96,7 @@ describe('compileContract — the shop example', () => {
     assert.strictEqual(op.doc, null);
     assert.deepStrictEqual(op.policy, {
       task: 'exhaust', idempotency: 'required', revision: 'input:/revision', cache: 'none',
-      limits: { maxBodyBytes: 1048576 }, errors: { details: 'paths' }, retry: null,
+      limits: { maxBodyBytes: 1048576 }, errors: { details: 'paths' }, retry: { max: 2, on: ['not-found'] },
     });
     assert.deepStrictEqual(Object.keys(op.errors), ['conflict', 'not-found']);
     assert.strictEqual(op.errors.conflict.status, 409);
@@ -136,8 +136,9 @@ describe('compileContract — the shop example', () => {
     assert.strictEqual(op.input?.transport, null, 'nothing travels as a string');
     assert.deepStrictEqual(op.policy, {
       task: 'exhaust', idempotency: 'optional', revision: null, cache: 'none',
-      limits: { maxBodyBytes: 4096 }, errors: { details: 'full' }, retry: { max: 2, on: ['not-found'] },
+      limits: { maxBodyBytes: 4096 }, errors: { details: 'full' }, retry: null,
     });
+    assert.deepStrictEqual(contract.operations['product.save'].policy.retry, { max: 2, on: ['not-found'] });
     assert.deepStrictEqual(contract.match('POST', '/product.remove')?.op.id, 'product.remove');
   });
 
@@ -521,6 +522,11 @@ describe('compileContract — every rule has its code and docPath', () => {
     refuses(one({ ...READ, policy: { retry: { max: -1, on: [] } } }), 'JC0014', '/operations/a/policy/retry/max');
     refuses(one({ ...READ, policy: { retry: { max: 1, on: 'x' } } }), 'JC0014', '/operations/a/policy/retry/on');
     refuses(one({ ...READ, policy: { retry: { max: 1, on: [''] } } }), 'JC0014', '/operations/a/policy/retry/on/0');
+    // a retried command runs twice without a key the server can deduplicate on
+    refuses(one({ kind: 'command', output: true, policy: { retry: { max: 1, on: ['x'] } } }), 'JC0014', '/operations/a/policy/retry');
+    refuses(one({ kind: 'command', output: true, policy: { idempotency: 'optional', retry: { max: 1, on: ['x'] } } }), 'JC0014', '/operations/a/policy/retry');
+    assert.deepStrictEqual(compileContract(one({ kind: 'command', output: true, policy: { idempotency: 'required', retry: { max: 1, on: ['x'] } } })).operations.a.policy.retry, { max: 1, on: ['x'] });
+    assert.deepStrictEqual(compileContract(one({ ...READ, policy: { retry: { max: 1, on: ['x'] } } })).operations.a.policy.retry, { max: 1, on: ['x'] }, 'a read is idempotent by nature');
     const ok = compileContract(one({ kind: 'command', output: true, policy: { revision: 'input:', task: 'concat' } }));
     assert.strictEqual(ok.operations.a.policy.revision, 'input:');
     assert.strictEqual(ok.operations.a.policy.task, 'concat');

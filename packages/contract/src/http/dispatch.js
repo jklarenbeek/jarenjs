@@ -27,7 +27,7 @@ import { ContractHostError, ContractRuntimeError, ContractFailure, isContractFai
 import {
   HTTP_ERRORS, HANDLER_ERROR_MSGID, JSON_CONTENT_TYPE,
   renderMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
-  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse,
+  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse, verdict,
 } from './wire.js';
 
 /**
@@ -273,28 +273,6 @@ function decodable(path) {
  */
 function hasContent(body) {
   return body !== null && (typeof body === 'string' ? body.length > 0 : body.byteLength > 0);
-}
-
-/**
- * The verdict of a compiled validator under either contract: the
- * default `{ valid, errors }` or a host-injected boolean validator.
- * TOTAL: a validator that throws is a failed verdict carrying the throw.
- * @param {(value: unknown) => any} validate
- * @param {unknown} value
- * @returns {{ valid: boolean, errors: any[], thrown: unknown }}
- */
-function verdict(validate, value) {
-  try {
-    const r = validate(value);
-    if (typeof r === 'boolean') return { valid: r, errors: [], thrown: undefined };
-    if (r !== null && typeof r === 'object' && typeof r.valid === 'boolean') {
-      return { valid: r.valid, errors: Array.isArray(r.errors) ? r.errors : [], thrown: undefined };
-    }
-    return { valid: false, errors: [], thrown: undefined };
-  }
-  catch (err) {
-    return { valid: false, errors: [], thrown: err };
-  }
 }
 
 /**

@@ -699,6 +699,41 @@ const claimed: ClaimResult | Promise<ClaimResult> = ledger.claim({ op: 'a', scop
 const record: LedgerRecord | null | Promise<LedgerRecord | null> = ledger.lookup({ op: 'a', scope: '', key: 'k' });
 void [claimed, record, idempotencyLedgerModel.$model === '0.1', commandLifecycleFsm.$fsm === '0.1', commandLifecycleFsm.initial];
 
+// @jarenjs/contract/client, /app — the client binding (outcomes, the
+// identity trinity, negotiation) and the generated app documents + effect
+import { openHttpClient, CLIENT_ERRORS } from '@jarenjs/contract/client';
+import type { HttpClient, HttpClientOptions, InvokeContext, Outcome, OutcomeMeta, OutcomeError, Negotiation } from '@jarenjs/contract/client';
+import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
+import type { ContractAppBinding, ContractEffect, TaskSlot } from '@jarenjs/contract/app';
+
+const clientOptions: HttpClientOptions = {
+  baseUrl: 'http://x', headers: { authorization: 'Bearer t' }, timeoutMs: 1000, keys: () => 'k', storage: { read: () => undefined, write: () => {} },
+  sleep: async () => {}, catalog: { 'contract/network': 'down' }, wellKnown: '/.well-known/jaren-contract', now: () => 0,
+  fetch: (url, init) => fetchHandler(new Request(url, init)),
+};
+const httpClient: HttpClient = openHttpClient(shopContract, clientOptions);
+const invokeContext: InvokeContext = { attempt: 1, idempotencyKey: 'k', headers: { 'x-a': 'b' }, ifNoneMatch: 'W/"1"', signal: new AbortController().signal };
+const outcome: Promise<Outcome> = httpClient.invoke('product.save', { id: 1 }, invokeContext);
+outcome.then((o) => {
+  if (o.ok) { const v: unknown = o.value; void v; }
+  else { const e: OutcomeError = o.error; const k: 'failure' | 'network' | 'contract' | 'cancelled' = o.kind; void [e.code, e.status, e.retryable, k]; }
+  const m: OutcomeMeta = o.meta;
+  void [m.op, m.attempt, m.trace, m.revision, m.etag, m.notModified];
+});
+const negotiation: Promise<Negotiation> = httpClient.negotiate({ signal: new AbortController().signal });
+void [negotiation, httpClient.url('product.save', { id: 1 }), httpClient.pending(), httpClient.capabilities.name === 'http', httpClient.contract.ids, httpClient.describe(), CLIENT_ERRORS.JC2050.msgid];
+httpClient.close();
+const appBinding: ContractAppBinding = contractAppBinding(shopContract, { namespace: 'contract/', statePath: '/contract', ops: ['product.save'] });
+const slot: TaskSlot = appBinding.slice['product.save'];
+void [slot.id, slot.status, appBinding.actions, appBinding.schema, appBinding.effect === 'contract'];
+const contractEffect: ContractEffect = createContractEffect(httpClient, {
+  createTaskEffect: (run, options) => Object.assign((props: any, dispatch: (name: string, payload?: any) => void) => void [run(props, new AbortController().signal), options.mode, dispatch], { cancel() {}, cancelAll() {}, dispose() {} }),
+  projectError: (err, props) => ({ ok: false, kind: 'contract', error: { code: 'JC2058', message: String(err), status: null, details: null, retryable: false }, meta: { op: props.op, attempt: props.id, trace: null, revision: null, etag: null, notModified: false } }),
+});
+contractEffect({ op: 'product.save', input: { id: 1 }, id: 1, done: 'd' }, () => {});
+contractEffect.cancel('product.save');
+contractEffect.dispose();
+
 // @jarenjs/linq — the typed fluent surface: precise inference on the
 // common path, honest unknown on the exotic path, never a wrong type.
 // Every claim here has a runtime twin in test/linq/types.test.js.

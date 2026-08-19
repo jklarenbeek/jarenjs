@@ -21,6 +21,7 @@ import {
 } from '@jarenjs/contract';
 import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH } from '@jarenjs/contract/http';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
+import { CLIENT_ERRORS } from '@jarenjs/contract/client';
 import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
@@ -489,7 +490,8 @@ describe('dispatch — declared failures and the handler boundary', () => {
     const nf = serve({ 'product.save': (input, ctx) => ctx.fail('not-found') });
     const r2 = await nf.dispatch(jsonReq('PUT', '/api/products/1/master', { revision: 1, product: { id: 1, name: 'x', price: 1 } }, { 'idempotency-key': 'f2' }));
     assert.strictEqual(r2.status, 404);
-    assert.deepStrictEqual(json(r2), { code: 'not-found', message: 'operation product.save failed with not-found', requestId: r2.headers['x-jaren-trace'], retryable: false });
+    // retryable: product.save declares retry.on ['not-found']
+    assert.deepStrictEqual(json(r2), { code: 'not-found', message: 'operation product.save failed with not-found', requestId: r2.headers['x-jaren-trace'], retryable: true });
     // details that break the declared error schema: JC2010, the handler broke its own error contract
     const broken = serve({ 'product.save': (input, ctx) => ctx.fail('conflict', {}, { current: 'nope' }) });
     const r3 = await broken.dispatch(jsonReq('PUT', '/api/products/1/master', { revision: 1, product: { id: 1, name: 'x', price: 1 } }, { 'idempotency-key': 'f3' }));
@@ -507,10 +509,14 @@ describe('dispatch — declared failures and the handler boundary', () => {
   });
 
   it('retryable comes from the operation\'s retry policy by default and from ctx.fail(..., { retryable }) explicitly', async () => {
-    const byPolicy = serve({ 'product.remove': (input, ctx) => ctx.fail('not-found') });
-    assert.strictEqual(json(await byPolicy.dispatch(jsonReq('POST', '/product.remove', { id: 1 }))).retryable, true, 'retry.on names not-found');
-    const explicit = serve({ 'product.remove': (input, ctx) => ctx.fail('not-found', {}, undefined, { retryable: false }) });
-    assert.strictEqual(json(await explicit.dispatch(jsonReq('POST', '/product.remove', { id: 1 }))).retryable, false);
+    const SAVE = { revision: 1, product: { id: 1, name: 'x', price: 1 } };
+    const byPolicy = serve({ 'product.save': (input, ctx) => ctx.fail('not-found') });
+    assert.strictEqual(json(await byPolicy.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'rp-1' }))).retryable, true, 'retry.on names not-found');
+    const explicit = serve({ 'product.save': (input, ctx) => ctx.fail('not-found', {}, undefined, { retryable: false }) });
+    assert.strictEqual(json(await explicit.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'rp-2' }))).retryable, false);
+    // retry.on on the other command is not declared: not retryable by default
+    const other = serve({ 'product.remove': (input, ctx) => ctx.fail('not-found') });
+    assert.strictEqual(json(await other.dispatch(jsonReq('POST', '/product.remove', { id: 1 }))).retryable, false);
     const failure = ContractFailure('x', { a: 1 }, [1], { retryable: true });
     assert.deepStrictEqual(failure, { code: 'x', params: { a: 1 }, details: [1], retryable: true });
     assert.strictEqual(Object.isFrozen(failure), true);
@@ -614,14 +620,16 @@ describe('the English catalog', () => {
       assert.ok(text.length > 0 && !text.includes('{'), `${row.msgid} renders: ${text}`);
     }
     assert.strictEqual(contractCatalogEn['contract/handler-error']({ op: 'a.b', code: 'conflict' }), 'operation a.b failed with conflict');
-    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error'].sort());
+    const clientMsgids = Object.values(CLIENT_ERRORS).map((r) => r.msgid);
+    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids].sort());
     assert.strictEqual(Object.isFrozen(contractMessagesEn), true);
     assert.strictEqual(Object.isFrozen(contractCatalogEn), true);
-    // the parameters are trusted artifacts only: op ids, limits, media, method lists, header names, codes
+    // the parameters are trusted artifacts or protocol facts only: op ids, limits, media, method lists,
+    // header names, codes, statuses, a platform error's name, contract ids and versions
     const placeholders = new Set();
     for (const template of Object.values(contractMessagesEn)) {
       for (const m of template.matchAll(/\{([a-z]+)\}/g)) placeholders.add(m[1]);
     }
-    assert.deepStrictEqual([...placeholders].sort(), ['allow', 'code', 'header', 'kind', 'limit', 'media', 'op']);
+    assert.deepStrictEqual([...placeholders].sort(), ['allow', 'client', 'code', 'header', 'id', 'kind', 'limit', 'media', 'name', 'op', 'server', 'status']);
   });
 });
