@@ -132,3 +132,52 @@ describe('jaren-contract — failure exits', () => {
     assert.match(lenient.stderr, /dropped required at \/operations\/a\/input\/properties\/m\/required/);
   });
 });
+
+describe('jaren-contract diff — the compatibility gate', () => {
+  /** @param {(v2: any) => void} edit */
+  const withV2 = (edit) => (/** @type {string} */ dir) => {
+    const v2 = JSON.parse(JSON.stringify(shop));
+    edit(v2);
+    fs.writeFileSync(path.join(dir, 'shop-v2.json'), JSON.stringify(v2));
+  };
+
+  it('prints the classified diff and exits 0 without --fail-on, even on a breaking change', () => {
+    const r = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json'],
+      withV2((v2) => { delete v2.operations['product.remove']; }));
+    assert.strictEqual(r.status, 0);
+    const diff = JSON.parse(r.stdout);
+    assert.deepStrictEqual(diff.breaking.map((/** @type {any} */ c) => [c.rule, c.op]), [['R1', 'product.remove']]);
+    assert.deepStrictEqual([diff.additive, diff.neutral, diff.unknown], [[], [], []]);
+  });
+
+  it('--fail-on breaking exits 1 exactly when the class is present, naming the count on stderr', () => {
+    const broken = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json', '--fail-on', 'breaking'],
+      withV2((v2) => { delete v2.operations['product.remove']; }));
+    assert.strictEqual(broken.status, 1);
+    assert.match(broken.stderr, /1 breaking change/);
+
+    const additive = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json', '--fail-on', 'breaking'],
+      withV2((v2) => { v2.operations['product.save'].errors['too-many'] = { status: 429 }; }));
+    assert.strictEqual(additive.status, 0, 'an additive change passes a breaking-only gate');
+
+    const strict = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json', '--fail-on', 'breaking,additive'],
+      withV2((v2) => { v2.operations['product.save'].errors['too-many'] = { status: 429 }; }));
+    assert.strictEqual(strict.status, 1);
+  });
+
+  it('usage and compile refusals exit 2: missing --to, an unknown class, a document that does not compile', () => {
+    const missing = run(['diff', '--from', 'shop.json']);
+    assert.strictEqual(missing.status, 2);
+    assert.match(missing.stderr, /--from <file> and --to <file>/);
+
+    const badClass = run(['diff', '--from', 'shop.json', '--to', 'shop.json', '--fail-on', 'bad'],
+      withV2(() => {}));
+    assert.strictEqual(badClass.status, 2);
+    assert.match(badClass.stderr, /not a change class/);
+
+    const refused = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json'],
+      withV2((v2) => { v2.operations['product.save'].kind = 'subscribe'; }));
+    assert.strictEqual(refused.status, 2);
+    assert.match(refused.stderr, /JC0004/);
+  });
+});

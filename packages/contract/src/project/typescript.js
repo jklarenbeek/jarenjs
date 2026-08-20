@@ -32,7 +32,7 @@ import { compileEmitModel } from '@jarenjs/emit/model';
 import { renderTypeScript } from '@jarenjs/emit/typescript';
 
 import { ContractHostError } from '../errors.js';
-import { publicProjection, retainedOperations } from './public.js';
+import { publicProjection, retainedOperations } from '../public.js';
 import TYPESCRIPT_STYLESHEET from './typescript.jtlt.json' with { type: 'json' };
 
 /**

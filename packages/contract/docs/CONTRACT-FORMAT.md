@@ -1368,3 +1368,125 @@ current or written; exit **2** on a usage error, an unreadable document,
 or a compile refusal, printed as `code docPath reason`. `openapi`
 reports every dropped keyword on stderr; without `--lenient` a
 rejectable keyword is exit 2 with `JC0060` and its `docPath`.
+
+## §13 The breaking-change diff
+
+`diffContracts(a, b)` (`@jarenjs/contract/diff`) classifies every change
+from contract `a` (what consumers hold today) to contract `b` (what they
+would meet) into `{ breaking, additive, neutral, unknown }` by the rule
+table below. It takes compiled contracts or raw documents (a document is
+compiled first, so a malformed one refuses with its own `JC00xx` before
+any comparison). Each entry is a
+`Change = { kind, op, docPath, from?, to?, rule, note? }` where `kind` is
+a stable slug, `rule` names the row, and `docPath` points into the
+document that carries the change — into `a` for a removal, into `b`
+otherwise — composed over the *resolved* structure, so a constraint
+reached through a bare `{ "$ref": "#/$defs/X" }` hop reports the path a
+validator error would name.
+
+| # | Change | Class |
+|---|---|---|
+| R1 | operation removed | breaking |
+| R2 | operation added | additive |
+| R3 | `kind`, `http.method`, `http.path` (shape — variable *names* are not shape), `http.status`, `http.media` (opaqueness included), a member's `http.in` location, or `http.body` changed | breaking |
+| R4 | input: a member added to `required` (or a new required member) | breaking |
+| R5 | input: a member removed while the new input schema is `additionalProperties: false` (or the input removed entirely) | breaking; otherwise `neutral` with a note (the member is now ignored, not validated) |
+| R6 | input: a member's schema narrowed (type set shrinks, `enum`/`const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
+| R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
+| R8 | output: a member removed, made optional (dropped from `required`), or narrowed | breaking |
+| R9 | output: a new member (optional or required), a member added to `required`, or widened | additive |
+| R10 | error code removed, or its `status` changed | breaking |
+| R11 | error code added | additive |
+| R12 | `policy.idempotency` `none/optional → required` (a client must now send a key) | breaking; `required → optional/none` and `none ↔ optional` additive |
+| R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision` or `doc` changed | neutral |
+| R14 | `policy.audience` `public → server` | breaking; the reverse additive |
+| R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …) | **unknown** — reported, never silently classed |
+
+Riders the rows carry:
+
+- **R3 covers the whole wire shape.** The order's five members plus a
+  member's `in` location and the whole-body `body` member — a member
+  that moves from `query` to `header` rewrites the request exactly like
+  a moved path, so it classifies with the binding row. Renaming a path
+  *variable* alone is not an R3 change (the shape compares with
+  variables blanked); the renamed input member surfaces through
+  R4/R5/R7 instead.
+- **R12 and `retry`.** The `required → optional` additive row holds for
+  operations without `policy.retry`: an `optional`-idempotency command
+  with `retry` cannot compile (`JC0014`, §3.1), so `diffContracts`
+  never meets that pair.
+- **The schema walk models exactly R6 plus structure.** Object members
+  (`properties`, `required`, `additionalProperties`) and `items`
+  recurse; the R6 keyword set compares as constraints; pure annotations
+  (`title`, `description`, `examples`, `$comment`, `deprecated`) never
+  move a wire byte and are ignored; **everything else that differs is
+  R15**. Nested member changes classify by narrowing/widening (adding a
+  constrained optional member to an open nested object narrows it;
+  removing one from an open object widens it); the *top-level* input
+  members classify by R4/R5/R7, and output members by R8/R9 at every
+  depth.
+- **Audience is the compatibility surface.** Operations whose
+  `policy.audience` is `server` on **both** sides are skipped entirely;
+  an audience flip is R14 and subsumes the operation's other changes.
+  `policy.limits` and `policy.errors.details` are server-side knobs
+  outside the public projection and are never reported.
+
+`isCompatible(clientContract, serverContract)` (exported from
+`@jarenjs/contract/diff`, one implementation shared with the client's
+`negotiate()`) is the complementary *declared* answer: `true` when the
+two ends state the same `version`, or when either end's `compat` names
+the other's `version` — `compatReason` returns which rule held
+(`'same-version' | 'server-accepts' | 'client-accepts' | null`).
+`diffContracts` computes what changed; `isCompatible` reads what the
+authors claim. Never derive one from the other: a `version` is bumped
+by a person, a revision (§14) moves by itself.
+
+The CLI's compatibility gate: `jaren-contract diff --from a.json --to
+b.json [--fail-on breaking[,unknown,…]]` prints the classified diff as
+JSON and exits **1** when any `--fail-on` class is non-empty (exit 0
+otherwise; exit 2 on a usage error, an unreadable file or a compile
+refusal).
+
+## §14 The revision
+
+`contract.revision() → Promise<string>` is the lowercase hex SHA-256
+over the RFC 8785 canonical bytes of the **public projection** (§12.1)
+— computed with the platform's `crypto.subtle`, memoized per compiled
+contract, so `compileContract` stays synchronous and the digest is paid
+at most once per process (measured here: ~4–5 ms for a 123-operation,
+160 KB document). Because it hashes the projection and the projection
+materializes defaults in a normative member order:
+
+- two compiles of equal documents agree, across processes and platforms;
+- a change to any client-observable member — a public operation's
+  schemas, binding, declared errors, client-facing policy — moves it;
+- a change a client cannot observe — a `server`-audience operation, a
+  `policy.limits` value, an `errors.details` level, a `doc`-only edit
+  *does* move it (`doc` is projected) but a declared binding rewritten
+  to its own defaults does **not** (the projection materializes
+  defaults, so two documents that behave alike hash alike).
+
+`describe()` carries `revision: <hex | null>` — `null` until someone
+awaited `revision()`; `describe()` stays synchronous and never computes
+it. The HTTP server computes it **lazily on the first well-known
+request** (§7.6): `GET /.well-known/jaren-contract` awaits the digest
+once and answers the description with `revision` filled; the client's
+`negotiate()` reads it and carries it in `meta.revision` of every
+subsequent outcome — correlation data, never the compatibility decision
+(that is `version`/`compat`, §13). The revision is not a `version`:
+never bump `version` merely because the revision moved, and never
+compare revisions to decide compatibility.
+
+A public projection that cannot be canonicalized has no revision:
+
+| code | condition |
+|---|---|
+| JC0061 | the public projection is not canonicalizable, so no revision exists — a string member carrying an unpaired surrogate, say (`ContractCompileError` rejected from `revision()`; its `docPath` points at the offending value *inside the projection*) |
+
+(The compiler's document snapshot already refuses non-finite numbers,
+functions and cycles at `JC0001`, so an unpaired surrogate in a string
+is the reachable case.) The well-known responder reports the refusal to
+`onError` once and honestly answers `revision: null`. The revision and
+the idempotency request hash (§8) are the same computation —
+`canonicalSha256` in `@jarenjs/json` — never a 32-bit content
+fingerprint, which collides.

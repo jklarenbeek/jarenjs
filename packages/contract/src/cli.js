@@ -6,9 +6,12 @@
  * summary), `public` (the public projection), `openapi`, `types`
  * (TypeScript declarations), `docs` (Markdown) — with `--check` to fail
  * CI when a written artifact has drifted from what the document projects
- * today. Exit codes: 0 current/written, 1 drift under `--check`, 2 a
- * usage error, an unreadable document or a compile refusal (printed as
- * `code docPath message`).
+ * today; plus `diff --from a.json --to b.json`, the classified change
+ * report (docs/CONTRACT-FORMAT.md §13), whose `--fail-on <classes>`
+ * makes it a compatibility gate. Exit codes: 0 current/written (diff:
+ * no failing class), 1 drift under `--check` (diff: a `--fail-on` class
+ * is non-empty), 2 a usage error, an unreadable document or a compile
+ * refusal (printed as `code docPath message`).
  */
 
 import * as fs from 'node:fs';
@@ -16,7 +19,8 @@ import * as path from 'node:path';
 
 import { compileContract } from './compile.js';
 import { ContractCompileError, ContractHostError } from './errors.js';
-import { publicProjection } from './project/public.js';
+import { diffContracts } from './diff.js';
+import { publicProjection } from './public.js';
 import { toOpenApi } from './project/openapi.js';
 import { toTypeScript } from './project/typescript.js';
 import { toMarkdown } from './project/markdown.js';
@@ -25,6 +29,7 @@ const USAGE = `jaren-contract — projections of a jaren-contract document
 
 Usage:
   jaren-contract <command> --contract <file> [--out <dir|file>] [--check] [options]
+  jaren-contract diff --from <file> --to <file> [--fail-on <class,…>]
 
 Commands:
   describe   The describe() summary (JSON): every operation's resolved binding and policy
@@ -32,23 +37,29 @@ Commands:
   openapi    An OpenAPI 3.1 document (JSON)
   types      TypeScript declarations (.d.ts): operation types, Operations, Client, Handlers
   docs       Markdown reference documentation
+  diff       The classified changes from --from to --to (JSON: breaking, additive, neutral, unknown)
 
 Options:
-  --contract <file>     The $contract document (required)
+  --contract <file>     The $contract document (required except for diff)
   --out <dir|file>      Write here instead of printing; a directory gets <id>.<ext>
   --check               Do not write; exit 1 when the file at --out differs (for CI)
   --info-title <text>   openapi: the info.title (default: the contract id)
   --info-version <text> openapi: the info.version (default: the contract version)
   --lenient             openapi: drop and report keywords the projection would refuse
+  --from <file>         diff: the contract consumers hold today
+  --to <file>           diff: the contract they would meet
+  --fail-on <class,…>   diff: exit 1 when any named class (breaking, additive, neutral, unknown) is non-empty
   --help                This text
 
-Exit codes: 0 current or written, 1 drift under --check, 2 a usage error,
-an unreadable document, or a compile refusal (printed as code docPath message).
+Exit codes: 0 current or written (diff: no failing class), 1 drift under
+--check (diff: a --fail-on class is non-empty), 2 a usage error, an
+unreadable document, or a compile refusal (printed as code docPath message).
 
 Examples:
   jaren-contract describe --contract shop.json
   jaren-contract openapi --contract shop.json --out api/ --info-title Shop
   jaren-contract types --contract shop.json --out src/shop.d.ts --check
+  jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking
 `;
 
 const COMMANDS = /** @type {const} */ ({
@@ -67,10 +78,15 @@ function parseArgs(argv) {
     command: /** @type {string | null} */ (null), contract: /** @type {string | null} */ (null),
     out: /** @type {string | null} */ (null), check: false, help: false, lenient: false,
     infoTitle: /** @type {string | null} */ (null), infoVersion: /** @type {string | null} */ (null),
+    from: /** @type {string | null} */ (null), to: /** @type {string | null} */ (null),
+    failOn: /** @type {string | null} */ (null),
   };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--contract': options.contract = argv[++i] ?? null; break;
+      case '--from': options.from = argv[++i] ?? null; break;
+      case '--to': options.to = argv[++i] ?? null; break;
+      case '--fail-on': options.failOn = argv[++i] ?? null; break;
       case '--out': options.out = argv[++i] ?? null; break;
       case '--check': options.check = true; break;
       case '--lenient': options.lenient = true; break;
@@ -129,6 +145,57 @@ function fail(message, usage = false) {
   process.exit(2);
 }
 
+/** The class names `--fail-on` may list. */
+const DIFF_CLASSES = ['breaking', 'additive', 'neutral', 'unknown'];
+
+/**
+ * Read a contract document, exit 2 on an unreadable file.
+ * @param {string} file
+ * @param {string} flag
+ */
+function readDocument(file, flag) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  }
+  catch (error) {
+    fail(`cannot read ${flag} '${file}': ${/** @type {Error} */ (error).message}`);
+    return null; // unreachable — fail() exits
+  }
+}
+
+/**
+ * The `diff` command: classify the changes and print them; under
+ * `--fail-on` exit 1 when a named class is non-empty.
+ * @param {ReturnType<typeof parseArgs>} options
+ */
+function runDiff(options) {
+  if (options.from === null || options.to === null) return fail('diff needs --from <file> and --to <file>', true);
+  /** @type {string[]} */
+  let failOn = [];
+  if (options.failOn !== null) {
+    failOn = options.failOn.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    for (const name of failOn) {
+      if (!DIFF_CLASSES.includes(name)) return fail(`--fail-on '${name}' is not a change class (${DIFF_CLASSES.join(', ')})`, true);
+    }
+  }
+  const from = readDocument(options.from, '--from');
+  const to = readDocument(options.to, '--to');
+  let diff;
+  try {
+    diff = diffContracts(from, to);
+  }
+  catch (error) {
+    if (error instanceof ContractCompileError) return fail(`${error.code} ${error.docPath ?? ''} ${error.reason}`);
+    throw error;
+  }
+  process.stdout.write(JSON.stringify(diff, null, 2) + '\n');
+  const failing = failOn.filter((name) => diff[/** @type {keyof typeof diff} */ (name)].length > 0);
+  if (failing.length > 0) {
+    console.error(`diff: ${failing.map((name) => `${diff[/** @type {keyof typeof diff} */ (name)].length} ${name}`).join(', ')} change(s)`);
+    process.exit(1);
+  }
+}
+
 function main() {
   let options;
   try {
@@ -141,6 +208,7 @@ function main() {
     console.log(USAGE);
     return;
   }
+  if (options.command === 'diff') return runDiff(options);
   if (options.command === null || !Object.hasOwn(COMMANDS, options.command)) {
     return fail(options.command === null ? 'a command is required' : `unknown command '${options.command}'`, true);
   }

@@ -49,6 +49,7 @@
     "express": "^5.2.1",
     "fast-xml-parser": "^5.10.1",
     "fastify": "^5.12.1",
+    "find-my-way": "^9.8.0",
     "flatbush": "^4.6.2",
     "fontoxpath": "^3.34.0",
     "geolib": "^3.3.14",

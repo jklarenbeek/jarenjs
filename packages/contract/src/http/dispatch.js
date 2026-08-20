@@ -516,23 +516,34 @@ function run(server, request) {
 }
 
 /**
- * The well-known negotiation document: `describe()` (revision `null`,
- * `compat` present) under GET/HEAD, memoized as text.
+ * The well-known negotiation document: `describe()` (with `revision` and
+ * `compat`) under GET/HEAD, memoized as text. The revision is computed
+ * lazily on the FIRST well-known request — construction stays synchronous
+ * and a server nobody negotiates with never pays the digest. A projection
+ * that cannot be canonicalized (`JC0061`) is reported to `onError` once
+ * and the document honestly answers `revision: null`.
  * @param {Server} server
  * @param {string} method
  * @param {string} trace
- * @returns {HttpResponse}
+ * @returns {HttpResponse | Promise<HttpResponse>}
  */
 function wellKnown(server, method, trace) {
   if (method !== 'GET' && method !== 'HEAD') {
     return refuse(server, 'JC2002', trace, { allow: 'GET, HEAD' }, undefined, { allow: 'GET, HEAD' }, null);
   }
-  if (server.described.text === null) server.described.text = JSON.stringify(server.contract.describe());
-  return {
-    status: 200,
-    headers: { 'content-type': JSON_CONTENT_TYPE, 'x-jaren-trace': trace },
-    body: method === 'HEAD' ? null : server.described.text,
+  const respond = () => {
+    if (server.described.text === null) server.described.text = JSON.stringify(server.contract.describe());
+    return {
+      status: 200,
+      headers: { 'content-type': JSON_CONTENT_TYPE, 'x-jaren-trace': trace },
+      body: method === 'HEAD' ? null : server.described.text,
+    };
   };
+  if (server.described.text !== null) return respond();
+  return server.contract.revision().then(respond, (err) => {
+    observe(server, err, null);
+    return respond();
+  });
 }
 
 //#endregion

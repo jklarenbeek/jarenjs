@@ -10,15 +10,15 @@
  * never imports it never loads it.
  */
 
-export { publicProjection } from './public.js';
+export { publicProjection } from '../public.js';
 export { toOpenApi } from './openapi.js';
 export { toTypeScript } from './typescript.js';
 export { toMarkdown } from './markdown.js';
 export { contractTools } from './tools.js';
-export { reachableDefs, bundleSameDocument } from './bundle.js';
+export { reachableDefs, bundleSameDocument } from '../bundle.js';
 
 /**
- * @typedef {import('./public.js').PublicProjectionOptions} PublicProjectionOptions
+ * @typedef {import('../public.js').PublicProjectionOptions} PublicProjectionOptions
  * @typedef {import('./openapi.js').OpenApiOptions} OpenApiOptions
  * @typedef {import('./openapi.js').OpenApiResult} OpenApiResult
  * @typedef {import('./openapi.js').DroppedKeyword} DroppedKeyword

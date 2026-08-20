@@ -16,7 +16,7 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { renderMarkdown } from '@jarenjs/emit/markdown';
 
 import { ContractHostError } from '../errors.js';
-import { retainedOperations } from './public.js';
+import { retainedOperations } from '../public.js';
 import { contractTypeModel } from './typescript.js';
 
 /**

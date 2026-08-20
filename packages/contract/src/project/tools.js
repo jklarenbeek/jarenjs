@@ -14,8 +14,8 @@
 import { isJsonObject } from '@jarenjs/core/object';
 
 import { ContractHostError } from '../errors.js';
-import { retainedOperations } from './public.js';
-import { bundleSameDocument } from './bundle.js';
+import { retainedOperations } from '../public.js';
+import { bundleSameDocument } from '../bundle.js';
 
 /**
  * @typedef {import('../compile.js').Contract} Contract

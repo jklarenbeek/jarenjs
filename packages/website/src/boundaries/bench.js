@@ -30,6 +30,7 @@ export const SUITES = [
   { key: 'overview', label: 'Overview' },
   { key: 'validate', label: 'JSON Schema' },
   { key: 'contracts', label: 'Contracts vs Zod' },
+  { key: 'contract', label: 'Contract dispatch' },
   { key: 'jsonpath', label: 'JSONPath' },
   { key: 'jsonquery', label: 'JSON Query' },
   { key: 'jslt', label: 'JSLT' },
@@ -68,6 +69,7 @@ export function deriveSuite(state, suite) {
     case 'jsonquery': return scenarioMatrix(data, 'query documents');
     case 'jslt': return scenarioMatrix(data, 'stylesheets');
     case 'contracts': return contractsSuite(data);
+    case 'contract': return contractSuite(data);
     case 'formats': return formatsSuite(data);
     case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
@@ -486,6 +488,34 @@ function contractsSuite(data) {
     out.push(callout('Read the third table, not the second', data.caveat));
   out.push(...genericTables(data,
     'Nanoseconds per operation; lower is better. A dash is an engine dropped for that scenario because it disagreed on the verdict or the normalized value, rather than being timed doing less work.'));
+  return out;
+}
+
+/**
+ * The @jarenjs/contract suite: route match vs find-my-way and hono, the
+ * dispatch pipeline vs Fastify — through Fastify's own inject harness
+ * AND the harness-free composition (find-my-way + Ajv +
+ * fast-json-stringify), which is faster than jaren's whole pipeline on
+ * every row and stays on the page for exactly that reason — plus the
+ * loopback head-to-head and the once-per-process revision cost.
+ */
+function contractSuite(data) {
+  const out = [];
+  if (data.caveat != null)
+    out.push(callout('Read the harnesses before the numbers', data.caveat));
+  out.push(...genericTables(data,
+    'Per-request/per-lookup nanoseconds; lower is better. A dash is an engine dropped for a row because it disagreed on the probes or the response, rather than being timed doing less work.'));
+  const serialization = data.serialization ?? [];
+  if (serialization.length > 0) {
+    out.push(table(
+      'Where the jaren request goes — the serialization share',
+      ['Request', 'JSON.stringify alone', 'whole dispatch', 'share'],
+      serialization.map((r) => ({
+        cells: [r.name, formatNs(r.stringifyNs), formatNs(r.dispatchNs),
+          r.share === null ? '—' : `${(r.share * 100).toFixed(1)}%`],
+      })),
+      'JSON.stringify of the response value beside the whole in-process dispatch. This is the number that decides whether a schema-driven serializer is worth building: below ~25% the pipeline\'s time is elsewhere.'));
+  }
   return out;
 }
 

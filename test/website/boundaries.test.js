@@ -88,6 +88,17 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /ajv/, 'ajv is included rather than omitted');
   });
 
+  it('derives the contract suite: the harness caveat leads and the losses render, serialization share included', function () {
+    const state = { benchStatus: { contract: 'loaded' }, bench: { contract: loadBench('contract') }, benchUi: {} };
+    const nodes = deriveSuite(state, 'contract');
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    const text = JSON.stringify(nodes);
+    assert.match(text, /Read the harnesses before the numbers/, 'the inject-asymmetry caveat renders above the tables');
+    assert.match(text, /RegExpRouter/, 'the refused rival is reported, not dropped silently');
+    assert.match(text, /find-my-way \+ Ajv \+ fjs/, 'the harness-free rival — the one jaren loses to — is published');
+    assert.match(text, /serialization share/, 'the serializer-decision table renders');
+  });
+
   it('derives the formats suite from the generated data', function () {
     const state = { benchStatus: { formats: 'loaded' }, bench: { formats: loadBench('formats') }, benchUi: {} };
     const nodes = deriveSuite(state, 'formats');

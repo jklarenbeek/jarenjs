@@ -79,9 +79,10 @@ suffice — the first three are required, the rest only when their row says so:
 | `@jarenjs/formats` | Only if you use the `format` keyword |
 | `@jarenjs/refs` | Only if you `$ref` the official meta-schemas offline |
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
+| `@jarenjs/contract` | Only if two ends exchange operations over a wire. Closure: `core`, `json`, `validate` — plus `emit`, reached only from its `./project` subpath (projections), so a bundle that never projects never carries it. Ships the `jaren-contract` CLI (projections, `--check`, `diff --fail-on breaking`) |
 
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
-`play`, `josl`, `ai`, `flow`, `linq`, `db` and `contract`
+`play`, `josl`, `ai`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.
 
 ### Wire the packages into your workspace

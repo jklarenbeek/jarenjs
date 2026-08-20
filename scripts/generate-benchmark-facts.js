@@ -140,6 +140,26 @@ const horizonCompacting = (variant, task = 'needle') => data('long-horizon').row
   .filter((r) => r.variant === variant && r.task === task && r.compacted);
 
 /**
+ * The per-row ratio band of contract.json's in-process dispatch table
+ * against one rival column: rival/jaren (`invert` flips it for a rival
+ * that is FASTER, so the band reads as "N× faster than jaren").
+ * @param {string} rivalColumn
+ * @param {boolean} [invert]
+ */
+function contractDispatchBand(rivalColumn, invert = false) {
+  const t = data('contract').tables.find((x) => x.title.startsWith('Dispatch, in-process'));
+  const jaren = t?.columns.indexOf('@jarenjs/contract') ?? -1;
+  const rival = t?.columns.indexOf(rivalColumn) ?? -1;
+  const ratios = (t?.rows ?? [])
+    .filter((r) => Number.isFinite(r.results[jaren]) && Number.isFinite(r.results[rival]) && r.results[rival] > 0)
+    .map((r) => (invert ? r.results[jaren] / r.results[rival] : r.results[rival] / r.results[jaren]));
+  if (jaren === -1 || rival === -1 || ratios.length === 0) {
+    throw new Error(`contract.json has no dispatch rows against '${rivalColumn}' — regenerate it before quoting one`);
+  }
+  return band(ratios, ratio);
+}
+
+/**
  * Every fact, keyed by its marker name. A fact returns the exact text
  * that replaces the marker's body — including any markdown emphasis, so
  * a table cell keeps its bolding.
@@ -178,6 +198,64 @@ const FACTS = {
     });
     return ['', '| Draft | Jaren | Ajv | Success-only totals | Jaren faster on |',
       '|---|---|---|---|---|', ...rows, ''].join('\n');
+  },
+
+  // ——— @jarenjs/contract: match and dispatch vs the routing stack.
+  // Two rivals, named apart on purpose: `fastify inject` includes
+  // Fastify's own request harness, and the harness-free column
+  // (find-my-way + Ajv + fast-json-stringify, the pieces Fastify
+  // composes) is FASTER than jaren's whole pipeline on every row —
+  // that loss is a published fact, not a footnote.
+  'contract.match.vs-fmw': () => {
+    const t = data('contract').tables.find((x) => x.title.startsWith('Route match'));
+    const row = t?.rows[0];
+    const mine = row?.results[t.columns.indexOf('@jarenjs/contract')];
+    const rival = row?.results[t.columns.indexOf('find-my-way')];
+    if (!Number.isFinite(mine) || !Number.isFinite(rival)) {
+      throw new Error('contract.json carries no match row — regenerate it before quoting one');
+    }
+    return `${ns(mine)} ns per lookup vs find-my-way's ${ns(rival)} ns`;
+  },
+  'contract.match.vs-hono': () => {
+    const t = data('contract').tables.find((x) => x.title.startsWith('Route match'));
+    const row = t?.rows[0];
+    const mine = row?.results[t.columns.indexOf('@jarenjs/contract')];
+    const rival = row?.results[t.columns.indexOf('hono TrieRouter')];
+    if (!Number.isFinite(mine) || !Number.isFinite(rival)) {
+      throw new Error('contract.json carries no hono match cell — regenerate it before quoting one');
+    }
+    return `${ratio(rival / mine)}x`;
+  },
+  'contract.dispatch.vs-fastify': () => `${contractDispatchBand('fastify inject')}x`,
+  'contract.dispatch.losses': () => `${contractDispatchBand('find-my-way + Ajv + fjs', true)}x`,
+  // what the always-on response validation costs, on the heaviest row —
+  // the same pipeline with validateOutput:'never', differenced
+  'contract.validateOutput.share': () => {
+    const t = data('contract').tables.find((x) => x.title.startsWith('Dispatch, in-process'));
+    const row = t?.rows[0];
+    const mine = row?.results[t.columns.indexOf('@jarenjs/contract')];
+    const off = row?.results[t.columns.indexOf("@jarenjs/contract (validateOutput: 'never')")];
+    if (!Number.isFinite(mine) || !Number.isFinite(off)) {
+      throw new Error('contract.json carries no validateOutput column — regenerate it before quoting the share');
+    }
+    return `${(((mine - off) / mine) * 100).toFixed(0)}%`;
+  },
+  'contract.revision.ms': () => {
+    const t = data('contract').tables.find((x) => x.title.startsWith('Revision'));
+    const value = t?.rows[0]?.results[0];
+    if (!Number.isFinite(value)) throw new Error('contract.json carries no revision row — regenerate it before quoting one');
+    return `${ms(value / 1e6)} ms`;
+  },
+  // the share of a jaren request that is JSON.stringify of the response —
+  // the number that scheduled (or, measured under 25%, dropped) the
+  // schema-driven serializer
+  'contract.serialization.share': () => {
+    const rows = data('contract').serialization;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new Error('contract.json carries no serialization block — regenerate it before quoting the share');
+    }
+    const worst = rows.reduce((a, b) => (b.share > a.share ? b : a));
+    return `${(worst.share * 100).toFixed(1)}%`;
   },
 
   // ——— @jarenjs/json: JSONPath compliance-suite profile ———
@@ -507,6 +585,7 @@ const FACTS = {
 const DOCS = [
   'README.md',
   'docs/ROADMAP.md',
+  'packages/contract/README.md',
   'components/md/README.md',
   'components/mermaid/README.md',
   'packages/flow/README.md',

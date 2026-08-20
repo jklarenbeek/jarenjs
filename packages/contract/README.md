@@ -20,9 +20,15 @@ consumer wants beside the runtime — a browser-safe public subset that is
 itself a `$contract` document, a valid OpenAPI 3.1 document, TypeScript
 declarations with a typed operation map, Markdown reference docs and
 `@jarenjs/ai` tool definitions — with a `jaren-contract` CLI whose
-`--check` fails CI the moment an artifact drifts. Still coming in this
-line: the message-port and stream bindings, the revision and the
-breaking-change diff.
+`--check` fails CI the moment an artifact drifts. The contract knows its
+own identity: `contract.revision()` is the SHA-256 of the canonical
+public projection, served at the well-known path and carried in every
+outcome's `meta.revision`, and `diffContracts(a, b)` classifies what
+changed between two versions — breaking, additive, neutral or honestly
+**unknown** — by a published rule table, with `jaren-contract diff
+--fail-on breaking` as the CI gate. Still coming in this line: the
+message-port and stream bindings, and the locale packs for the wire
+errors.
 
 Zero dependencies outside the suite: `@jarenjs/core`, `@jarenjs/json`,
 `@jarenjs/validate`, and — reached only from the `./project` subpath, so
@@ -193,7 +199,8 @@ import { openHttpClient } from '@jarenjs/contract/client';
 const client = openHttpClient(contract, { baseUrl: 'https://shop.example', timeoutMs: 5000 });
 
 const loaded = await client.invoke('catalog.load', { since: '2026-01-01T00:00:00Z' }, { attempt: 1 });
-// { ok: true, value: [...], meta: { op, attempt: 1, trace: '<x-jaren-trace>', revision: null, etag: 'W/"…"', notModified: false } }
+// { ok: true, value: [...], meta: { op, attempt: 1, trace: '<x-jaren-trace>', revision, etag: 'W/"…"', notModified: false } }
+// meta.revision is the server's contract revision once negotiate() has learned it, null before
 
 const saved = await client.invoke('product.save', { id: 12, revision: 3, product });   // validated with the SAME validator the server runs, then PUT /api/products/12/master with the body members as JSON and a generated Idempotency-Key
 if (!saved.ok) {
@@ -282,9 +289,86 @@ jaren-contract docs    --contract shop.json --out docs/
 `describe` and `public` print JSON; exit 0 current/written, 1 drift
 under `--check`, 2 on a compile refusal printed as `code docPath reason`.
 The normative projection rules — the public projection's member order
-(the revision will hash those bytes), the OpenAPI mapping and keyword
+(the revision hashes those bytes), the OpenAPI mapping and keyword
 policy, the tool naming — are
 [CONTRACT-FORMAT.md §12](docs/CONTRACT-FORMAT.md#12-projections).
+
+## Know what changed: revision and diff
+
+```js
+import { diffContracts, isCompatible } from '@jarenjs/contract/diff';
+
+await contract.revision();
+// 64 lowercase hex: the SHA-256 over the RFC 8785 canonical bytes of the
+// public projection — memoized, so it is computed at most once per process.
+// Two compiles of equal documents agree across machines; a change a client
+// can observe moves it; a server-audience operation or a policy.limits
+// value does not. GET /.well-known/jaren-contract answers it (computed
+// lazily on the first request), negotiate() learns it, and every outcome
+// after that carries it in meta.revision — correlation data, never the
+// compatibility decision.
+
+const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
+// every change classified by the CONTRACT-FORMAT §13 rule table (R1–R15):
+//   breaking — an operation or error removed, a binding member moved, a new
+//              required input member, a narrowed input, a removed/optional-
+//              ized/narrowed output member, idempotency now required, an
+//              operation withdrawn to audience: server
+//   additive — an operation/error added, an optional input member, a widened
+//              schema, a relaxed idempotency
+//   neutral  — task mode, retry, cache, policy.revision, doc
+//   unknown  — what the checker does not model (anyOf/if/not, a CHANGED
+//              pattern, an external $ref, an error details schema):
+//              REPORTED, never silently classed
+// each Change = { kind, op, docPath, from?, to?, rule } — the docPath a
+// validator error would name, $refs resolved
+
+isCompatible(clientContract, serverContract);
+// the negotiation rule as a pure function (same version, or either end's
+// compat names the other's) — the SAME implementation negotiate() runs,
+// exported so a server can refuse an incompatible peer too
+```
+
+```sh
+jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking   # exit 1 on a breaking change
+```
+
+The revision answers "is this byte-for-byte the contract I compiled
+against?"; `version`/`compat` answer "do the authors claim we speak?";
+the diff answers "what exactly moved, and does it break me?". They are
+three different questions and none is derived from another —
+[CONTRACT-FORMAT.md §13–§14](docs/CONTRACT-FORMAT.md#13-the-breaking-change-diff).
+
+## Benchmarks
+
+Measured on the committed suite (`npm run benchmark:contract` — a real
+123-route table, 47 GET; recipes, fairness decisions and the correctness
+gates are in the file's header), published through the repository's
+benchmark-figure gate so no number here is typed by hand:
+
+- **Route match**: the compiled matcher resolves the probe mix —
+  static hot paths, variables, the static-beats-variable case, a miss —
+  at <!--bm:contract.match.vs-fmw-->170 ns per lookup vs find-my-way's 180 ns<!--/bm-->;
+  hono's TrieRouter is <!--bm:contract.match.vs-hono-->1.8x<!--/bm--> behind, and its RegExpRouter refuses this
+  route table outright (a static path registered after a param sibling).
+- **Dispatch, in-process**: the whole pipeline (route, decode, validate
+  input, handler, validate output,
+  serialize) is <!--bm:contract.dispatch.vs-fastify-->2.8–15.5x<!--/bm-->
+  faster than Fastify driven through its own `inject` — a number that
+  includes Fastify's mock-stream harness, which is why the next row
+  exists.
+- **The honest loss**: the bare pieces Fastify composes — find-my-way +
+  Ajv + fast-json-stringify, called directly with no harness and no
+  response validation
+  — are <!--bm:contract.dispatch.losses-->2.1–2.4x<!--/bm--> faster than
+  this pipeline. That is the measured price of a total
+  dispatch (every hostile input settles into a coded response) that also
+  proves the server kept its own contract before a byte leaves. Over a
+  real loopback socket the two stacks are level: the socket dominates
+  both.
+- **Revision**: computing it
+  costs <!--bm:contract.revision.ms-->1.9 ms<!--/bm--> for the 123-operation
+  contract, once per process.
 
 ## What is here, and what is coming
 
@@ -297,6 +381,7 @@ client (`openHttpClient`, the D6 outcomes with the `JC2050–JC2058` client
 codes, the client half of idempotency, retry, `negotiate`); the app
 binding (`contractAppBinding`, `createContractEffect`); the projections
 (`publicProjection`, `toOpenApi` with `JC0060`, `toTypeScript`,
-`toMarkdown`, `contractTools`) and the `jaren-contract` CLI. Coming in
-this line: `local`/`port`/`stream` bindings, the revision hash and
-`diffContracts`, and the locale packs for the wire errors.
+`toMarkdown`, `contractTools`); `contract.revision()` with `JC0061`,
+`diffContracts`/`isCompatible` and the `jaren-contract` CLI with `diff
+--fail-on`. Coming in this line: `local`/`port`/`stream` bindings and
+the locale packs for the wire errors.

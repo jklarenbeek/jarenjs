@@ -170,6 +170,42 @@ delete it or fix it.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
+## @jarenjs/contract
+
+- [ ] **Phase-2 bindings: `local`, `port`, `stream`** — the same compiled
+  contract carried without HTTP: `local` in-process (tests, SSR, CLI),
+  `port` over `postMessage`/`BroadcastChannel`/workers (which is where the
+  website's db-owner protocol gets re-homed — its per-tab request ids can
+  cross-settle between two client tabs, a defect the binding's
+  caller-owned attempt ids fix by construction), and `stream` carrying
+  LIVE-FORMAT `{ patch, seq }` emissions as SSE (`subscribe` operations
+  are refused with `JC0004` until then). The binding contract they must
+  satisfy — a frozen `capabilities` table that says what it cannot carry,
+  D6 outcomes with no member omitted — is already normative in
+  CONTRACT-FORMAT.md §5/§10.1.
+- [ ] **The schema-driven serializer stays unbuilt — measured, not
+  assumed.** The scheduling criterion was: build it only if serialization
+  is ≥ 25% of the per-request cost on the committed dispatch table. The
+  measured share (`benchmark/contract.js`, the in-process table's
+  heaviest row — the 5×4-body PUT)
+  is <!--bm:contract.serialization.share-->12.5%<!--/bm--> of the whole
+  jaren request, so a perfect serializer that cost nothing
+  would move the pipeline by about a tenth. Not scheduled. Revisit only
+  if a consumer's real payloads push the share past the criterion — the
+  suite prints the share on every run, so the number stays checkable.
+  (The larger measured lever is output validation,
+  at <!--bm:contract.validateOutput.share-->25%<!--/bm--> of the same row;
+  it is a correctness feature, declared off per server with
+  `validateOutput: 'never'`, whose cost the benchmark's fourth column
+  keeps visible.)
+- [ ] **Matcher promotion to core** — the static-segment path matcher is
+  private to `packages/contract/src/path.js` by design; it moves to
+  `@jarenjs/core` the moment a second consumer appears (the one-
+  implementation rule), not before.
+- [ ] **Locale packs for the `contract/*` msgids** — English ships
+  in-package; the 11 `@jarenjs/locales` packs gain the wire-error catalog
+  in the campaign close-out, where the parity tests enforce them.
+
 ## @jarenjs/forms
 
 - [ ] **Stylesheets replacing the JS composition step** — `buildFormViewModel`

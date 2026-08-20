@@ -5,8 +5,13 @@
  * marked in `inferred` so a projection can tell what the author
  * declared from what the compiler filled in. Stable member order, no
  * functions, no schemas (those stay on the compiled operations); this is
- * what a CLI prints and what a golden test compares.
+ * what a CLI prints and what a golden test compares. `revision` is read
+ * synchronously from the memo (`peekRevision`), so it is `null` until
+ * someone awaited `contract.revision()` — the well-known responder does
+ * exactly that before it renders this document.
  */
+
+import { peekRevision } from './revision.js';
 
 /**
  * The description of one operation.
@@ -36,7 +41,10 @@
  * @property {string | null} id
  * @property {string | null} version
  * @property {readonly string[]} compat
- * @property {null} revision - reserved; `null` until the revision hash lands
+ * @property {string | null} revision - the contract revision (64 lowercase
+ *   hex; docs/CONTRACT-FORMAT.md §14) when `contract.revision()` has
+ *   settled, `null` before — `describe()` stays synchronous and never
+ *   computes it
  * @property {OperationDescription[]} operations - document order
  */
 
@@ -92,7 +100,7 @@ export function describeContract(contract) {
     id: contract.id,
     version: contract.version,
     compat: contract.compat.slice(),
-    revision: null,
+    revision: peekRevision(contract),
     operations,
   };
 }

@@ -424,7 +424,7 @@ describe('dispatch — HEAD, entity tags, status override, opaque, well-known', 
     const r = await server.dispatch(req('GET', WELL_KNOWN_PATH));
     assert.strictEqual(r.status, 200);
     const body = json(r);
-    assert.strictEqual(body.revision, null);
+    assert.strictEqual(body.revision, await shop.revision());
     assert.deepStrictEqual(body.compat, ['4']);
     assert.deepStrictEqual(body, shop.describe());
     const head = await server.dispatch(req('HEAD', WELL_KNOWN_PATH));

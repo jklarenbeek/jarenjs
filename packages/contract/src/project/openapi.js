@@ -38,7 +38,7 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { ContractCompileError, ContractHostError, CONTRACT_CODES } from '../errors.js';
 import { HTTP_ERRORS } from '../http/wire.js';
-import { publicProjection, retainedOperations } from './public.js';
+import { publicProjection, retainedOperations } from '../public.js';
 import OPENAPI_STYLESHEET from './openapi.jslt.json' with { type: 'json' };
 
 /**

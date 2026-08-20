@@ -153,11 +153,11 @@ describe('adapters — the same request through node:http and toFetchHandler', (
     assert.strictEqual(await noContent.viaFetch.text(), '');
   });
 
-  it('the well-known description is served through both', async () => {
+  it('the well-known description is served through both, revision computed on first request', async () => {
     const { viaNode, viaFetch } = await both('/.well-known/jaren-contract');
     const described = await viaNode.json();
     assert.deepStrictEqual(described, await viaFetch.json());
-    assert.strictEqual(described.revision, null);
+    assert.strictEqual(described.revision, await shop.revision());
   });
 
   it('a body on a GET is never read: the request still answers', async () => {

@@ -23,12 +23,12 @@
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 
-import { ContractHostError } from '../errors.js';
+import { ContractHostError } from './errors.js';
 import { reachableDefs } from './bundle.js';
 
 /**
- * @typedef {import('../compile.js').Contract} Contract
- * @typedef {import('../compile.js').CompiledOperation} CompiledOperation
+ * @typedef {import('./compile.js').Contract} Contract
+ * @typedef {import('./compile.js').CompiledOperation} CompiledOperation
  */
 
 /**

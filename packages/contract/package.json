@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.36.3",
+  "version": "0.36.4",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -29,6 +29,10 @@
     "./ledger": {
       "types": "./dist/types/ledger.d.ts",
       "default": "./src/ledger.js"
+    },
+    "./diff": {
+      "types": "./dist/types/diff.d.ts",
+      "default": "./src/diff.js"
     },
     "./client": {
       "types": "./dist/types/client/http.d.ts",
@@ -86,9 +90,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.36.3",
-    "@jarenjs/json": "^0.36.3",
-    "@jarenjs/validate": "^0.36.3",
-    "@jarenjs/emit": "^0.36.3"
+    "@jarenjs/core": "^0.36.4",
+    "@jarenjs/json": "^0.36.4",
+    "@jarenjs/validate": "^0.36.4",
+    "@jarenjs/emit": "^0.36.4"
   }
 }

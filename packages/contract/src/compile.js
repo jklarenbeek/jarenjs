@@ -32,6 +32,7 @@ import { encodeJSONPointerSegment, parseJSONPointer } from '@jarenjs/json/pointe
 import { ContractCompileError } from './errors.js';
 import { parsePathTemplate, pathShape, compileRoutes } from './path.js';
 import { describeContract } from './describe.js';
+import { contractRevision } from './revision.js';
 
 //#region vocabulary
 
@@ -463,6 +464,9 @@ function checkRefs(node, docPath, scope, isRoot) {
  *   this path shape reaches an operation, sorted (`[]` for none) — what a
  *   405 answers in `Allow`; the path only, query split off, like `match`
  * @property {() => any} describe - a pure-JSON summary (docs/CONTRACT-FORMAT.md §3)
+ * @property {() => Promise<string>} revision - the SHA-256 (lowercase hex)
+ *   over the RFC 8785 canonical bytes of the public projection, memoized —
+ *   computed at most once per compiled contract (docs/CONTRACT-FORMAT.md §14)
  * @property {any} $defs - frozen view of the document's `$defs` (`{}` when absent)
  */
 
@@ -1084,6 +1088,7 @@ export function compileContract(doc, options = {}) {
     match,
     allowed: router.allowed,
     describe: () => describeContract(contract),
+    revision: () => contractRevision(contract),
     $defs: src.$defs === undefined ? Object.freeze({}) : src.$defs,
   };
   return freezeAll(contract);

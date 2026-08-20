@@ -10,6 +10,7 @@
  *
  *   validate.json     profiler.js       — JSON Schema suite vs Ajv (per test)
  *   contracts.json    contracts.js      — contract validation vs Zod 4/3/mini and Ajv
+ *   contract.json     contract.js       — @jarenjs/contract match + dispatch vs find-my-way/hono/Fastify
  *   jsonpath.json     jsonpath.js       — CTS compliance + per-query profile vs json-p3
  *   jsonquery.json    jsonquery.js      — scenario matrix vs fontoxpath/jsonata (+ sources)
  *   jslt.json         jslt.js           — scenario matrix vs native JS/JSONata (+ sources)
@@ -60,7 +61,7 @@ function parseArgs(argv) {
       case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, qt3');
         process.exit(0);
         break;
       default:
@@ -352,6 +353,46 @@ function generateContracts(tmp, options) {
         ...row,
         results: row.results.map((ns) => (ns === null ? null : sig4(ns))),
       })),
+    })),
+  };
+}
+
+/**
+ * The @jarenjs/contract suite: route match vs find-my-way/hono, the
+ * dispatch pipeline vs Fastify (its own inject harness AND the
+ * harness-free find-my-way + Ajv + fast-json-stringify composition,
+ * where jaren LOSES — the rows stay in), loopback, and the revision
+ * cost. Needs the find-my-way/hono/fastify benchmark devDependencies.
+ */
+function generateContract(tmp, options) {
+  const file = path.join(tmp, 'contract.json');
+  try {
+    runTool([
+      'benchmark/contract.js',
+      '--iterations', String(options.quick ? 2_000 : 20_000),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: contract run failed (${e.message}); the suite will be omitted.`);
+    console.warn('  (the head-to-head needs the find-my-way/hono/fastify benchmark devDependencies)');
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    ...raw,
+    tables: raw.tables.map((table) => ({
+      ...table,
+      rows: table.rows.map((row) => ({
+        ...row,
+        results: row.results.map((ns) => (ns === null ? null : sig4(ns))),
+      })),
+    })),
+    serialization: (raw.serialization ?? []).map((row) => ({
+      ...row,
+      stringifyNs: sig4(row.stringifyNs),
+      dispatchNs: row.dispatchNs === null ? null : sig4(row.dispatchNs),
+      share: row.share === null ? null : sig4(row.share),
     })),
   };
 }
@@ -734,7 +775,7 @@ function generateQt3() {
 
 /** Display order of the overview's headline rows (the site's suite order). */
 const SUITE_ORDER = [
-  'validate', 'contracts', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
+  'validate', 'contracts', 'contract', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
   'orm', 'live', 'long-horizon',
 ];
@@ -796,6 +837,35 @@ function buildHeadlines(generated, meta) {
         rival: 'fastest of Zod 4 / Zod 3 / zod-mini / Ajv',
         conformance: null,
         note: 'normalize + validate + map issues, the shape a request handler runs',
+      });
+    }
+  }
+  if (generated.contract !== undefined) {
+    // Table 2's HARNESS-FREE column is the honest rival: find-my-way +
+    // Ajv + fast-json-stringify called directly — the pieces Fastify
+    // composes, with no inject harness in the number. It is faster than
+    // jaren's whole pipeline on every row (jaren also validates the
+    // response before it leaves), so this ratio reads as a loss and
+    // stays on the overview for the same reason the wins do.
+    const dispatch = generated.contract.tables?.find((t) => t.title.startsWith('Dispatch, in-process'));
+    const columns = dispatch?.columns ?? [];
+    const jarenCol = columns.indexOf('@jarenjs/contract');
+    const rivalCol = columns.indexOf('find-my-way + Ajv + fjs');
+    const ratios = [];
+    if (dispatch !== undefined && jarenCol !== -1 && rivalCol !== -1) {
+      for (const row of dispatch.rows) {
+        const mine = row.results[jarenCol];
+        const rival = row.results[rivalCol];
+        if (Number.isFinite(mine) && mine > 0 && Number.isFinite(rival) && rival > 0)
+          ratios.push(rival / mine);
+      }
+    }
+    if (ratios.length > 0) {
+      add('contract', 'Contract dispatch vs Fastify', {
+        ratio: geoMean(ratios),
+        rival: 'find-my-way + Ajv + fast-json-stringify (harness-free)',
+        conformance: null,
+        note: 'the in-process dispatch table\'s harness-free column: the pieces Fastify composes, called directly with no inject harness; jaren\'s pipeline also validates the response, which the rival does not do',
       });
     }
   }
@@ -1172,6 +1242,11 @@ async function main() {
     generated.formats = generateFormats(tmp, options);
   if (!options.skip.has('contracts'))
     generated.contracts = generateContracts(tmp, options);
+  if (!options.skip.has('contract')) {
+    const contract = generateContract(tmp, options);
+    if (contract !== null)
+      generated.contract = contract;
+  }
   if (!options.skip.has('jsonpointer'))
     generated.jsonpointer = generateJsonPointer(tmp, options);
   if (!options.skip.has('jsonpatch'))

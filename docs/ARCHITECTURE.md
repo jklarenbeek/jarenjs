@@ -45,7 +45,7 @@ flowchart BT
     FORMATS["@jarenjs/formats<br/>format keyword validators"]
     REFS["@jarenjs/refs<br/>bundled meta-schemas"]
     EMIT["@jarenjs/emit<br/>schemas to TypeScript/docs<br/>(build-time, JTLT stylesheets)"]
-    CONTRACT["@jarenjs/contract<br/>operation contracts:<br/>validators, normalizers, path matcher"]
+    CONTRACT["@jarenjs/contract<br/>operation contracts: validators,<br/>path matcher, HTTP server/client,<br/>projections, revision, diff"]
     FORMS["@jarenjs/forms<br/>form model + x-form rules"]
     LOCALES["@jarenjs/locales<br/>error-message locale packs<br/>(zero deps, platform Intl only)"]
     LINQ["@jarenjs/linq<br/>fluent chains to query documents"]
@@ -62,6 +62,7 @@ flowchart BT
     CONTRACT --> CORE
     CONTRACT --> JSON
     CONTRACT --> VALIDATE
+    CONTRACT --> EMIT
     FORMS --> CORE
     FORMS --> JSON
     FORMS --> FORMATS
@@ -80,7 +81,7 @@ flowchart BT
 | [`@jarenjs/formats`](../packages/formats) | The canonical format-tester registry plus validator-contract compilers | — (single-layer; see its [README](../packages/formats/README.md)) |
 | [`@jarenjs/refs`](../packages/refs) | Data-only meta-schema bundle | — |
 | [`@jarenjs/emit`](../packages/emit) | Build-time artifacts: a schema-analysis pass producing a published type model, then a JTLT stylesheet per target language | [ARCHITECTURE](../packages/emit/ARCHITECTURE.md) · [FORMAT](../packages/emit/docs/EMIT-FORMAT.md) |
-| [`@jarenjs/contract`](../packages/contract) | Operation contracts: the `$contract` document compiled once into per-operation validators, transport normalizers (path/query strings decoded through the input schema's own `coerceTypes` normalizer) and a static-segment path matcher; depends on core, json and validate only, and cooperates with app/db/flow/ai by generated documents, never an import | [CONTRACT-FORMAT](../packages/contract/docs/CONTRACT-FORMAT.md) |
+| [`@jarenjs/contract`](../packages/contract) | Operation contracts: the `$contract` document compiled once into per-operation validators, transport normalizers (path/query strings decoded through the input schema's own `coerceTypes` normalizer) and a static-segment path matcher, served over HTTP and called with JSON outcomes, projected to OpenAPI/TypeScript/Markdown/AI tools, revisioned (SHA-256 over the canonical public projection) and diffed by a published rule table; depends on core, json and validate — plus emit, reached only from the `./project` subpath — and cooperates with app/db/flow/ai by generated documents, never an import | [CONTRACT-FORMAT](../packages/contract/docs/CONTRACT-FORMAT.md) |
 | [`@jarenjs/forms`](../packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer) | — (see its [README](../packages/forms/README.md)) |
 | [`@jarenjs/locales`](../packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](../packages/locales/README.md) and [ERROR-MESSAGES](../packages/validate/docs/ERROR-MESSAGES.md)) |
 | [`@jarenjs/view`](../packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](../packages/view/docs/VIEW-FORMAT.md) |
@@ -98,10 +99,11 @@ flowchart BT
 | [`@jarenjs/ai`](../packages/ai) | Browser-side AI: one OpenAI-compatible chat client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs `@jarenjs/validate` checks before every call, a bounded agent loop, and WebMCP registration — plus the **ledger**: a schema-validated durable goal, evidenced memories, skills and content-addressed slots over an injected storage adapter, so compaction archives a dropped round instead of destroying it and a run survives a closed tab. Above it the **environment** holds a corpus outside the context — the model sees a capped digest and works by naming slots — and the **action language** lets it author a compile-gated program over them: `map` is the only step that calls a model, its fan-out is concurrent and abortable, and a program that does not compile never runs. A `map` piece may itself be a **child agent** over its own prefix-scoped slice — depth-capped at 3, sharing one budget with the whole tree, and recording a serializable trajectory — which is the difference between an assistant and something you hand a job to. Everything heavy arrives through a seam (storage, the query compiler a `select`/`reduce` and retrieval need, the RFC 6902 patch engine a refinement applies); depends only on core and validate | [ai README](../packages/ai/README.md) |
 | [`@jarenjs/website`](../packages/website) | The GitHub Pages site, the Play host, AI assistant and the Studio — a meta-schema-gated host for AI-authored app documents (not part of the library chain) | [website README](../packages/website/README.md) |
 
-Two deliberate inversions keep the graph acyclic while letting the layers cooperate:
+Two deliberate inversions and one boundary pattern keep the graph acyclic while letting the layers cooperate:
 
 - **JSON Schema as the query type system**: `@jarenjs/json`'s `$valid`/`$assert`/`$as` and JSLT schema matches accept schema literals but compile them through an injected `compileTypeTest` hook; [`@jarenjs/validate/query`](../packages/validate/src/query.js) supplies the reference hook. Dependency direction stays validate → json.
 - **Queries inside schemas**: `@jarenjs/validate`'s `$query` keyword compiles a Jaren JSON Query per schema location — validate consumes json, never the other way around.
+- **Generated documents across package boundaries**: `@jarenjs/contract`'s app and AI bindings are plain JSON documents plus handler factories that take a *client* — `contractAppBinding` emits a state slice, actions and a schema the consumer feeds to `@jarenjs/app`, `createContractEffect(client, { createTaskEffect })` receives the task-effect factory from the host, and `contractTools` produces the `ToolDef` shape `@jarenjs/ai` reads — so the contract package never imports app, ai, db or flow (the same pattern `fsmToApp` and the db live binding established).
 
 ### Key Files of the validator
 

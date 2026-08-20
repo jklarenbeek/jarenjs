@@ -28,6 +28,7 @@ import { canonicalSha256 } from '@jarenjs/json/canonical';
 import { JarenValidator } from '@jarenjs/validate';
 
 import { ContractHostError } from '../errors.js';
+import { compatReason } from '../compat.js';
 import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage } from '../http/wire.js';
 import {
   CLIENT_ERRORS, prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, clientError,
@@ -359,6 +360,25 @@ export function openHttpClient(contract, options = {}) {
   let validator = options.validator === undefined ? null : options.validator;
   const closer = new AbortController();
   let closed = false;
+  /**
+   * The server's contract revision, learned from the well-known document
+   * by `negotiate()` (docs/CONTRACT-FORMAT.md §14) and carried in
+   * `meta.revision` of every subsequent outcome; `null` until negotiated.
+   * @type {string | null}
+   */
+  let serverRevision = null;
+
+  /**
+   * A meta in its fixed member order, with the negotiated revision.
+   * @param {string} op
+   * @param {unknown} attempt
+   * @returns {OutcomeMeta}
+   */
+  function newMeta(op, attempt) {
+    const meta = makeMeta(op, attempt, null);
+    meta.revision = serverRevision;
+    return meta;
+  }
 
   //#region helpers
 
@@ -526,7 +546,7 @@ export function openHttpClient(contract, options = {}) {
    * @returns {Promise<Outcome>}
    */
   async function send(route, url, headers, body, ctx, signal) {
-    const meta = makeMeta(route.id, ctx.attempt, null);
+    const meta = newMeta(route.id, ctx.attempt);
     if ((signal !== null && signal.aborted) || closed) return cancelled(route, meta);
     /** @type {RequestInit} */
     const init = { method: route.method, headers, signal: composeSignal(signal) };
@@ -668,7 +688,7 @@ export function openHttpClient(contract, options = {}) {
       throw new ContractHostError('JC1005', `client: '${route.id}' is an opaque operation (media ${route.media}); invoke carries JSON only — use client.url(op, input) and fetch the bytes yourself`);
     }
     if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
-    const meta = makeMeta(route.id, ctx.attempt, null);
+    const meta = newMeta(route.id, ctx.attempt);
     const signal = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
 
     // 1. validate — nothing leaves before the same verdict the server would reach
@@ -731,7 +751,7 @@ export function openHttpClient(contract, options = {}) {
         await sleep(delay, signal === null ? undefined : signal);
       }
       catch {
-        outcome = cancelled(route, makeMeta(route.id, ctx.attempt, null));
+        outcome = cancelled(route, newMeta(route.id, ctx.attempt));
         break;
       }
     }
@@ -833,9 +853,13 @@ export function openHttpClient(contract, options = {}) {
     if (server.id !== null && contract.id !== null && server.id !== contract.id) {
       return result('not-a-contract', server, 'JC2056', { id: contractId });
     }
-    if (server.version === contract.version) return result('same-version', server, null, {});
-    if (contract.version !== null && server.compat.includes(contract.version)) return result('server-accepts', server, null, {});
-    if (server.version !== null && contract.compat.includes(server.version)) return result('client-accepts', server, null, {});
+    // the same contract on the other end: its revision rides in
+    // meta.revision of every subsequent outcome, compatible or not —
+    // correlation data, never the compatibility decision (that is the
+    // version rule below)
+    serverRevision = server.revision;
+    const reason = compatReason(contract, server);
+    if (reason !== null) return result(reason, server, null, {});
     return result('version-mismatch', server, 'JC2057', { id: contractId, server: server.version, client: contract.version });
   }
 
