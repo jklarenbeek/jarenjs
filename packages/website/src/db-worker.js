@@ -9,22 +9,35 @@
  * dedicated worker, which is exactly what keeps journal capture and
  * live queries working unchanged.
  *
- * Two transports, one dispatch: `postMessage` serves the owning tab;
- * a `BroadcastChannel` serves CLIENT tabs — their requests run on
- * this same store and their live registrations stream back over the
- * channel. A second tab's attempt to install the pool is refused by
- * OPFS exclusivity; the refusal surfaces as the coded JD2061 and the
- * tab downgrades to a client.
+ * The request/response path is the @jarenjs/contract PORT binding over
+ * the studio's own contract document (`contracts/data.contract.json`):
+ * one handler table serves TWO `servePort`s — the worker's own channel
+ * (`self`) for the owning tab, and the `BroadcastChannel` for CLIENT
+ * tabs, registered only once this context actually OWNS the pool so a
+ * standalone in-memory tab can never answer another tab's requests.
+ * Request ids are client-scoped by the binding, so two client tabs on
+ * the shared channel can never cross-settle. A store rejection crosses
+ * as the declared `db` failure carrying the store's own code and
+ * message; the owner-discovery ping/pong keeps its token protocol
+ * beside the contract frames (they are distinguishable by shape), and
+ * live emissions ride the `push`/`clientPush` messages beside them
+ * until the stream binding carries subscriptions.
  */
 
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { openStore, migrate, planModelMigration } from '@jarenjs/db';
 import { wasmDriver, sqlite3Handle } from '@jarenjs/db/wasm';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
+import { compileContract, ContractFailure } from '@jarenjs/contract';
+import { servePort } from '@jarenjs/contract/port';
+
+import contractDoc from './contracts/data.contract.json' with { type: 'json' };
 
 const CHANNEL = 'jaren-data-studio';
 const POOL = 'jaren-data';
 const DB_NAME = '/jaren-data-studio.db';
+
+const contract = compileContract(contractDoc);
 
 // The data studio mounts the operator packs (MODEL-FORMAT §8.1–8.2), so
 // registered operators run over the store: finance/stats ($npv, $mean, …)
@@ -47,9 +60,11 @@ const state = {
 
 const channel = new BroadcastChannel(CHANNEL);
 
-/** Serialize an error for the wire, keeping the coded contract. */
+/** The details of the declared `db` failure — the store's own code and
+ * message, `code: null` for an uncoded fault (details are JSON; no
+ * member is ever `undefined`). */
 const wireError = (error) => ({
-  code: /** @type {any} */ (error)?.code,
+  code: /** @type {any} */ (error)?.code ?? null,
   message: String(/** @type {any} */ (error)?.message ?? error),
 });
 
@@ -89,6 +104,10 @@ async function init() {
       state.sqlite3.installOpfsSAHPoolVfs({ name: POOL }), 8_000, 'OPFS pool install');
     state.vfs = 'opfs-sahpool';
     state.isOwner = true;
+    // only an actual owner serves the shared channel: a standalone
+    // in-memory tab joining it too could answer a client whose owner is
+    // another tab's store — the wrong data with a valid frame
+    serveChannel();
     return { topology: 'owner', vfs: state.vfs, version: state.sqlite3.version.libVersion };
   }
   catch (error) {
@@ -151,29 +170,72 @@ async function open(args) {
   };
 }
 
-/** One request dispatch for BOTH transports. */
-async function handle(kind, args, push) {
-  switch (kind) {
-    case 'init': return init();
-    case 'open': return open(args);
-    case 'insert':
-      return state.store.collection(args.collection).insert(args.doc);
-    case 'put':
-      return state.store.collection(args.collection).put(args.doc, args.key);
-    case 'delete':
-      return state.store.collection(args.collection).delete(args.key);
-    case 'rows':
-      return state.store.collection(args.collection)
-        .execute([{ $for: { it: '$[*]' }, $return: '$it' }]);
-    case 'execute':
-      return state.store.collection(args.collection)
-        .execute(args.document, { externals: args.externals ?? {} });
-    case 'explain':
-      return state.store.collection(args.collection)
-        .explain(args.document, { externals: args.externals ?? {} });
-    case 'live': {
-      const live = await state.store.collection(args.collection)
-        .live(args.document);
+async function migrateTo(args) {
+  const { migration, report } = planModelMigration(state.model, args.to,
+    { dialect: state.store.dialect, id: args.id ?? 'studio-migration' });
+  const rendered = migration.steps.map((step) => step.sql ?? step.kind);
+  await state.store.close();
+  state.store = null;
+  const driver = wasmDriver(state.vfs === 'opfs-sahpool'
+    ? sqlite3Handle(state.sqlite3, { DbClass: state.poolUtil.OpfsSAHPoolDb })
+    : sqlite3Handle(state.sqlite3));
+  const path = state.vfs === 'opfs-sahpool' ? DB_NAME : ':memory:';
+  let applied;
+  try {
+    applied = state.vfs === 'opfs-sahpool'
+      ? await migrate({ driver, path }, [migration],
+        { baseline: state.model, model: args.to, shadow: true })
+      : { applied: [], note: 'memory stores recreate instead of migrating' };
+  }
+  finally {
+    state.model = args.to;
+    state.store = await openStore(args.to, { driver, path, capture: true, operators: OPERATORS });
+    state.lives.clear();
+  }
+  const note = /** @type {any} */ (applied).note;
+  return {
+    planned: rendered,
+    losses: report?.losses ?? [],
+    applied: applied.applied?.map((entry) => entry.id) ?? [],
+    ...(note !== undefined ? { note } : {}),
+  };
+}
+
+/**
+ * The handler table of one transport: every store rejection crosses as
+ * the declared `db` failure with the store's code and message (what the
+ * old wire sent, now typed by the contract), so a genuine host bug is
+ * the only thing that answers the binding's JC2070. `push` is the
+ * transport's live-emission door — the one thing that differs between
+ * the two servers, so each transport's live registrations emit on the
+ * channel that made them (a client's on the broadcast channel, the
+ * owner's on its own worker channel).
+ * @param {(payload: any) => void} push
+ */
+function makeHandlers(push) {
+  /** @param {(input: any) => any} fn */
+  const guard = (fn) => async (/** @type {any} */ input) => {
+    try {
+      return await fn(input);
+    }
+    catch (error) {
+      return ContractFailure('db', {}, wireError(error));
+    }
+  };
+  return {
+    'data.init': guard(() => init()),
+    'data.open': guard((input) => open(input)),
+    'data.insert': guard((input) => state.store.collection(input.collection).insert(input.doc)),
+    'data.put': guard((input) => state.store.collection(input.collection).put(input.doc, input.key)),
+    'data.delete': guard((input) => state.store.collection(input.collection).delete(input.key)),
+    'data.rows': guard((input) => state.store.collection(input.collection)
+      .execute([{ $for: { it: '$[*]' }, $return: '$it' }])),
+    'data.execute': guard((input) => state.store.collection(input.collection)
+      .execute(input.document, { externals: input.externals ?? {} })),
+    'data.explain': guard((input) => state.store.collection(input.collection)
+      .explain(input.document, { externals: input.externals ?? {} })),
+    'data.live': guard(async (input) => {
+      const live = await state.store.collection(input.collection).live(input.document);
       const liveId = `L${++state.liveSeq}`;
       const stop = live.subscribe((event) => {
         push({ liveId, event: {
@@ -184,79 +246,42 @@ async function handle(kind, args, push) {
       });
       state.lives.set(liveId, { live, stop });
       return { liveId, mode: live.mode, rows: live.result.rows };
-    }
-    case 'live-close': {
-      const entry = state.lives.get(args.liveId);
+    }),
+    'data.live.close': guard((input) => {
+      const entry = state.lives.get(input.liveId);
       if (entry !== undefined) {
         entry.stop();
         entry.live.close();
-        state.lives.delete(args.liveId);
+        state.lives.delete(input.liveId);
       }
       return true;
-    }
-    case 'migrate': {
-      const { migration, report } = planModelMigration(state.model, args.to,
-        { dialect: state.store.dialect, id: args.id ?? 'studio-migration' });
-      const rendered = migration.steps.map((step) => step.sql ?? step.kind);
-      await state.store.close();
-      state.store = null;
-      const driver = wasmDriver(state.vfs === 'opfs-sahpool'
-        ? sqlite3Handle(state.sqlite3, { DbClass: state.poolUtil.OpfsSAHPoolDb })
-        : sqlite3Handle(state.sqlite3));
-      const path = state.vfs === 'opfs-sahpool' ? DB_NAME : ':memory:';
-      let applied;
-      try {
-        applied = state.vfs === 'opfs-sahpool'
-          ? await migrate({ driver, path }, [migration],
-            { baseline: state.model, model: args.to, shadow: true })
-          : { applied: [], note: 'memory stores recreate instead of migrating' };
-      }
-      finally {
-        state.model = args.to;
-        state.store = await openStore(args.to, { driver, path, capture: true, operators: OPERATORS });
-        state.lives.clear();
-      }
-      return {
-        planned: rendered,
-        losses: report?.losses ?? [],
-        applied: applied.applied?.map((entry) => entry.id) ?? [],
-        note: /** @type {any} */ (applied).note,
-      };
-    }
-    default:
-      throw new TypeError(`unknown request kind '${kind}'`);
-  }
+    }),
+    'data.migrate': guard((input) => migrateTo(input)),
+  };
 }
 
-/** Serve one transport message. */
-const serve = (message, respond, push) => {
-  const { id, kind, args } = message;
-  Promise.resolve()
-    .then(() => handle(kind, args ?? {}, push))
-    .then(
-      (value) => respond({ id, ok: true, value }),
-      (error) => respond({ id, ok: false, error: wireError(error) }));
-};
+// the owning tab's own requests arrive on the worker channel
+servePort(contract, makeHandlers((payload) => globalThis.postMessage({ push: payload })),
+  { channel: /** @type {any} */ (globalThis) });
 
-globalThis.onmessage = (event) => {
-  serve(event.data,
-    (response) => globalThis.postMessage(response),
-    (payload) => globalThis.postMessage({ push: payload }));
-};
+let channelServed = false;
+/** Client tabs reach the owner here — registered exactly once, on
+ * becoming the owner; their live events broadcast back. */
+function serveChannel() {
+  if (channelServed) return;
+  channelServed = true;
+  servePort(contract, makeHandlers((payload) => channel.postMessage({ clientPush: payload })),
+    { channel });
+}
 
-// client tabs reach the owner here; their live events broadcast back
+// answer an owner-discovery ping (§11) only while actually owning; the
+// contract frames on this channel belong to servePort's own listener
 channel.onmessage = (event) => {
   const message = event.data;
   if (message === null || typeof message !== 'object') return;
-  // answer an owner-discovery ping (§11) only while actually owning
-  if (message.ping !== undefined) {
-    if (state.isOwner) channel.postMessage({ pong: message.ping });
-    return;
+  if (message.ping !== undefined && state.isOwner) {
+    channel.postMessage({ pong: message.ping });
   }
-  if (message.clientReq === undefined || state.store === null) return;
-  serve(message.clientReq,
-    (response) => channel.postMessage({ clientRes: response }),
-    (payload) => channel.postMessage({ clientPush: payload }));
 };
 
 globalThis.postMessage({ ready: true });

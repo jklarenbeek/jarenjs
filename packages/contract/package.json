@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.36.4",
+  "version": "0.37.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -38,6 +38,14 @@
       "types": "./dist/types/client/http.d.ts",
       "default": "./src/client/http.js"
     },
+    "./local": {
+      "types": "./dist/types/local/index.d.ts",
+      "default": "./src/local/index.js"
+    },
+    "./port": {
+      "types": "./dist/types/port/serve.d.ts",
+      "default": "./src/port/serve.js"
+    },
     "./app": {
       "types": "./dist/types/app/index.d.ts",
       "default": "./src/app/index.js"
@@ -55,7 +63,7 @@
     "docs/",
     "schemas/"
   ],
-  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, served over HTTP through a total dispatch pipeline with fetch and node adapters, called through an HTTP client that resolves JSON outcomes, bound to @jarenjs/app documents through generated task slots and one effect, and projected to a public subset, OpenAPI 3.1, TypeScript, Markdown and AI tool definitions with a jaren-contract CLI that checks them in CI",
+  "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, served over HTTP through a total dispatch pipeline with fetch and node adapters, in-process through the local binding and over MessagePort/Worker/BroadcastChannel through the port binding with collision-free request ids, called through clients that resolve JSON outcomes, bound to @jarenjs/app documents through generated task slots and one effect, and projected to a public subset, OpenAPI 3.1, TypeScript, Markdown and AI tool definitions with a jaren-contract CLI that checks them in CI",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -90,9 +98,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.36.4",
-    "@jarenjs/json": "^0.36.4",
-    "@jarenjs/validate": "^0.36.4",
-    "@jarenjs/emit": "^0.36.4"
+    "@jarenjs/core": "^0.37.0",
+    "@jarenjs/json": "^0.37.0",
+    "@jarenjs/validate": "^0.37.0",
+    "@jarenjs/emit": "^0.37.0"
   }
 }

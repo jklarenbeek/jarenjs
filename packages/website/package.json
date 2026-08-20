@@ -20,6 +20,7 @@
     "@jarenjs/app": "file:../app",
     "@jarenjs/calc": "file:../../components/calc",
     "@jarenjs/charts": "file:../../components/charts",
+    "@jarenjs/contract": "file:../contract",
     "@jarenjs/core": "file:../core",
     "@jarenjs/flow": "file:../flow",
     "@jarenjs/formats": "file:../formats",

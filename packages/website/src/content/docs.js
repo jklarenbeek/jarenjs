@@ -93,7 +93,7 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
-    id: 'json-query', title: 'Jaren JSON Query',
+    id: 'json-query', title: 'JSON Query',
     blocks: [
       p('XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 93-operator library extensible with host operator packs (see JSLT stylesheets, below) — as JSON documents with JSONPath leaves. The grammar is published as JSON Schema, so a constrained decoder cannot emit an invalid query.'),
       code(null, '{ "$for": { "b": "$.store.book[*]" },\n  "$where": { "$lt": ["$b.price", 10] },\n  "$orderby": ["$b.price"],\n  "$return": { "title": "$b.title", "price": "$b.price" } }'),

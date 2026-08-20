@@ -172,17 +172,17 @@ delete it or fix it.
 
 ## @jarenjs/contract
 
-- [ ] **Phase-2 bindings: `local`, `port`, `stream`** — the same compiled
-  contract carried without HTTP: `local` in-process (tests, SSR, CLI),
-  `port` over `postMessage`/`BroadcastChannel`/workers (which is where the
-  website's db-owner protocol gets re-homed — its per-tab request ids can
-  cross-settle between two client tabs, a defect the binding's
-  caller-owned attempt ids fix by construction), and `stream` carrying
-  LIVE-FORMAT `{ patch, seq }` emissions as SSE (`subscribe` operations
-  are refused with `JC0004` until then). The binding contract they must
-  satisfy — a frozen `capabilities` table that says what it cannot carry,
-  D6 outcomes with no member omitted — is already normative in
-  CONTRACT-FORMAT.md §5/§10.1.
+- [ ] **The `stream` binding and the `subscribe` kind** — the remaining
+  phase-2 binding (`local` and `port` shipped, CONTRACT-FORMAT.md
+  §15–§16, with the website's db-owner protocol re-homed on `port`):
+  `subscribe` operations carrying LIVE-FORMAT `{ patch, seq }` emissions
+  as SSE over http and as push messages over the port framing, with
+  `Last-Event-ID` resumption and a generated patch action — `subscribe`
+  is refused with `JC0004`, and the website's live emissions ride its
+  own `push`/`clientPush` messages beside the contract frames, until
+  then. The binding contract it must satisfy — a frozen `capabilities`
+  table that says what it cannot carry, D6 outcomes with no member
+  omitted — is already normative in CONTRACT-FORMAT.md §5/§10.1.
 - [ ] **The schema-driven serializer stays unbuilt — measured, not
   assumed.** The scheduling criterion was: build it only if serialization
   is ≥ 25% of the per-request cost on the committed dispatch table. The

@@ -19,15 +19,16 @@
  * a request sent is echoed into a message.
  */
 
-import { isJsonObject, isJsonValue, setObjectMember } from '@jarenjs/core/object';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { toPromise, isThenable } from '@jarenjs/core/function';
 import { canonicalSha256, JsonCanonicalizeError } from '@jarenjs/json/canonical';
 
-import { ContractHostError, ContractRuntimeError, ContractFailure, isContractFailure } from '../errors.js';
+import { ContractHostError, ContractFailure } from '../errors.js';
+import { validateOperationInput, settleOperation, safeTrace } from '../pipeline.js';
 import {
-  HTTP_ERRORS, HANDLER_ERROR_MSGID, JSON_CONTENT_TYPE,
-  renderMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
-  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse, verdict,
+  HTTP_ERRORS, JSON_CONTENT_TYPE,
+  renderMessage, declaredMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
+  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse,
 } from './wire.js';
 
 /**
@@ -37,6 +38,7 @@ import {
  * @typedef {import('../compile.js').CompiledOperation} CompiledOperation
  * @typedef {import('../compile.js').CompiledErrorDecl} CompiledErrorDecl
  * @typedef {import('../errors.js').ContractFailureValue} ContractFailureValue
+ * @typedef {import('../pipeline.js').OperationResult} OperationResult
  * @typedef {import('../ledger.js').Ledger} Ledger
  */
 
@@ -200,20 +202,12 @@ function requestShapeError(request) {
 //#region helpers
 
 /**
- * A server trace id. TOTAL: a generator that throws or answers a
- * non-string is replaced by the platform's UUID.
+ * A server trace id.
  * @param {Server} server
  * @returns {string}
  */
 function makeTrace(server) {
-  try {
-    const t = server.trace();
-    if (typeof t === 'string' && t.length > 0) return t;
-  }
-  catch {
-    // fall through
-  }
-  return globalThis.crypto.randomUUID();
+  return safeTrace(server.trace);
 }
 
 /**
@@ -439,12 +433,10 @@ function run(server, request) {
   // they are validated like any other input; the bytes go to the handler
   // untouched in ctx.body ———
   if (route.raw) {
-    if (route.validateInput !== null) {
-      const v = verdict(route.validateInput, transported);
-      if (!v.valid) {
-        if (v.thrown !== undefined) observe(server, v.thrown, null);
-        return refuse(server, 'JC2006', trace, { op: op.id }, projectValidationDetails(route.details, v.errors), null, null);
-      }
+    const invalid = validateOperationInput(route, transported);
+    if (invalid !== null && invalid.kind === 'contract') {
+      if (invalid.cause !== undefined) observe(server, invalid.cause, null);
+      return refuse(server, 'JC2006', trace, { op: op.id }, invalid.details, null, null);
     }
     Object.freeze(ctx);
     return boundary(server, route, ctx, op.input === null ? null : transported, trace, armed, isHead, ifMatch, ifNoneMatch, true);
@@ -493,13 +485,11 @@ function run(server, request) {
     }
   }
 
-  // ——— 8. validate ———
-  if (route.validateInput !== null) {
-    const v = verdict(route.validateInput, assembled);
-    if (!v.valid) {
-      if (v.thrown !== undefined) observe(server, v.thrown, null);
-      return refuse(server, 'JC2006', trace, { op: op.id }, projectValidationDetails(route.details, v.errors), null, null);
-    }
+  // ——— 8. validate (the pipeline's half) ———
+  const invalid = validateOperationInput(route, assembled);
+  if (invalid !== null && invalid.kind === 'contract') {
+    if (invalid.cause !== undefined) observe(server, invalid.cause, null);
+    return refuse(server, 'JC2006', trace, { op: op.id }, invalid.details, null, null);
   }
 
   // ——— 9. idempotency ———
@@ -551,9 +541,8 @@ function wellKnown(server, method, trace) {
 //#region the handler boundary
 
 /**
- * Call the handler through ONE uniform promise boundary — a synchronous
- * throw, a non-promise return and a rejection settle exactly alike — and
- * classify the settlement.
+ * Call the handler through the pipeline's uniform promise boundary and
+ * project the classified result onto the HTTP wire.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx - frozen
@@ -567,48 +556,44 @@ function wellKnown(server, method, trace) {
  * @returns {Promise<HttpResponse>}
  */
 function boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, raw) {
-  const handler = /** @type {Handler} */ (route.handler);
-  return new Promise((resolve) => { resolve(handler(input, ctx)); }).then(
-    (value) => raw
-      ? settleRaw(server, route, ctx, value, trace, armed, isHead)
-      : settleValue(server, route, ctx, value, trace, armed, isHead, ifMatch, ifNoneMatch),
-    (err) => settleThrow(server, route, ctx, err, trace, armed));
+  return settleOperation(route, input, ctx, server.validateOutput).then(
+    (result) => project(server, route, ctx, result, trace, armed, isHead, ifMatch, ifNoneMatch, raw));
 }
 
 /**
- * A rejection or throw: a `ContractRuntimeError` whose code the
- * operation declares is a declared failure; anything else — including a
- * hostile value whose prototype walk throws — is `JC2008`, seen by
- * `onError`, never by the wire.
+ * One classified settlement onto the wire: a declared failure renders
+ * its message and answers the declared status; a contract result
+ * (`JC2008`/`JC2010`) is a server fault — its cause goes to `onError`,
+ * never onto the wire; a value is serialized under the entity-tag and
+ * HEAD/204 rules (or passed through verbatim for a raw handler).
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
- * @param {unknown} err
+ * @param {OperationResult} result
  * @param {string} trace
  * @param {Armed} armed
+ * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
+ * @param {boolean} raw
  * @returns {HttpResponse}
  */
-function settleThrow(server, route, ctx, err, trace, armed) {
-  let declared = null;
-  try {
-    if (err instanceof ContractRuntimeError && typeof err.code === 'string' && Object.hasOwn(route.errors, err.code)) {
-      declared = { code: err.code, params: err.params, retryable: typeof err.retryable === 'boolean' ? err.retryable : null };
-    }
+function project(server, route, ctx, result, trace, armed, isHead, ifMatch, ifNoneMatch, raw) {
+  if (result.kind === 'failure') return declaredFailure(server, route, ctx, result, trace, armed);
+  if (result.kind === 'contract') {
+    if (result.cause !== undefined) observe(server, result.cause, ctx);
+    armed.outcome = 2;
+    return refuse(server, result.code, trace, { op: route.op.id }, result.details, null, ctx);
   }
-  catch {
-    declared = null;
-  }
-  if (declared !== null) return declaredFailure(server, route, ctx, declared.code, declared.params, undefined, declared.retryable, trace, armed);
-  observe(server, err, ctx);
-  armed.outcome = 2;
-  return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+  return raw
+    ? finishRaw(server, route, ctx, result.value, trace, armed, isHead)
+    : finishValue(server, route, ctx, result.value, trace, armed, isHead, ifMatch, ifNoneMatch);
 }
 
 /**
- * The value of a JSON handler: a declared failure, or the output —
- * validated (`JC2010` when it fails or its accessors throw), serialized
- * (`JC2010` when JSON cannot carry it), then the entity-tag conditionals
- * and the HEAD/204 body rules.
+ * The validated value of a JSON handler: serialized (`JC2010` when JSON
+ * cannot carry it), then the entity-tag conditionals and the HEAD/204
+ * body rules.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
@@ -620,18 +605,7 @@ function settleThrow(server, route, ctx, err, trace, armed) {
  * @param {string | undefined} ifNoneMatch
  * @returns {HttpResponse}
  */
-function settleValue(server, route, ctx, value, trace, armed, isHead, ifMatch, ifNoneMatch) {
-  if (isContractFailure(value)) return declaredFailure(server, route, ctx, value.code, value.params, value.details, value.retryable, trace, armed);
-  if (server.validateOutput) {
-    const v = verdict(route.validateOutput, value);
-    if (!v.valid) {
-      observe(server, v.thrown !== undefined ? v.thrown : new ContractRuntimeError('JC2010',
-        `the value of operation '${route.op.id}' fails its output schema`,
-        { msgid: HTTP_ERRORS.JC2010.msgid, params: { op: route.op.id }, status: 500, cause: v.errors }), ctx);
-      armed.outcome = 2;
-      return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
-    }
-  }
+function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, ifNoneMatch) {
   let text;
   try {
     text = JSON.stringify(value);
@@ -673,8 +647,8 @@ function settleValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
 
 /**
  * The value of a raw (opaque) handler: passed through verbatim plus the
- * trace header; a declared failure answers like any other; anything that
- * is not `{ status, headers?, body? }` is `JC2010`.
+ * trace header; anything that is not `{ status, headers?, body? }` is
+ * `JC2010`.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
@@ -684,8 +658,7 @@ function settleValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
  * @param {boolean} isHead
  * @returns {HttpResponse}
  */
-function settleRaw(server, route, ctx, value, trace, armed, isHead) {
-  if (isContractFailure(value)) return declaredFailure(server, route, ctx, value.code, value.params, value.details, value.retryable, trace, armed);
+function finishRaw(server, route, ctx, value, trace, armed, isHead) {
   let status;
   let body;
   /** @type {Record<string, string>} */
@@ -717,58 +690,23 @@ function settleRaw(server, route, ctx, value, trace, armed, isHead) {
 }
 
 /**
- * A declared operation error: `errors[code].status`, the declared code
- * on the wire, `details` validated against the declaration's schema
- * (`JC2010` when the handler broke its own error contract), `retryable`
- * from the failure or the operation's retry policy, and the message from
+ * A declared operation error, already validated by the pipeline: the
+ * declared status and code on the wire, the message from
  * `contract/error/<code>` in the host catalog when it has one, else the
- * generic `contract/handler-error`. An undeclared code is `JC2008`.
+ * generic `contract/handler-error`.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
- * @param {string} code
- * @param {Readonly<Record<string, unknown>>} params
- * @param {unknown} details
- * @param {boolean | null} retryable
+ * @param {Extract<OperationResult, { kind: 'failure' }>} result
  * @param {string} trace
  * @param {Armed} armed
  * @returns {HttpResponse}
  */
-function declaredFailure(server, route, ctx, code, params, details, retryable, trace, armed) {
-  const decl = typeof code === 'string' && Object.hasOwn(route.errors, code) ? route.errors[code] : undefined;
-  if (decl === undefined) {
-    observe(server, new ContractRuntimeError('JC2008',
-      `the handler of operation '${route.op.id}' answered the undeclared error code ${JSON.stringify(code)}`,
-      { msgid: HTTP_ERRORS.JC2008.msgid, params: { op: route.op.id }, status: 500 }), ctx);
-    armed.outcome = 2;
-    return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
-  }
-  if (decl.validate !== null) {
-    const v = verdict(decl.validate, details);
-    if (!v.valid) {
-      observe(server, v.thrown !== undefined ? v.thrown : new ContractRuntimeError('JC2010',
-        `the details of declared error '${code}' of operation '${route.op.id}' fail its schema`,
-        { msgid: HTTP_ERRORS.JC2010.msgid, params: { op: route.op.id }, status: 500, cause: v.errors }), ctx);
-      armed.outcome = 2;
-      return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
-    }
-  }
-  else if (details !== undefined && !isJsonValue(details)) {
-    observe(server, new ContractRuntimeError('JC2010',
-      `the details of declared error '${code}' of operation '${route.op.id}' are not a JSON value`,
-      { msgid: HTTP_ERRORS.JC2010.msgid, params: { op: route.op.id }, status: 500 }), ctx);
-    armed.outcome = 2;
-    return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
-  }
-  const messageParams = { ...params, op: route.op.id, code };
-  const own = server.catalog !== null ? server.catalog[`contract/error/${code}`] : undefined;
-  const message = own !== undefined
-    ? renderMessage(server.catalog, `contract/error/${code}`, messageParams)
-    : renderMessage(server.catalog, HANDLER_ERROR_MSGID, messageParams);
-  const retry = retryable !== null ? retryable : route.retryOn.has(code);
+function declaredFailure(server, route, ctx, result, trace, armed) {
+  const message = declaredMessage(server.catalog, route.op.id, result.code, result.params);
   armed.outcome = 1;
-  armed.retryable = retry;
-  return errorResponse(decl.status, code, message, trace, details, retry, null, server.errorBody, ctx);
+  armed.retryable = result.retryable;
+  return errorResponse(result.status, result.code, message, trace, result.details, result.retryable, null, server.errorBody, ctx);
 }
 
 //#endregion

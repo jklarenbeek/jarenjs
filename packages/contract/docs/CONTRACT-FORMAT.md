@@ -395,8 +395,8 @@ policy, is in §12.2's table). `JC1001–JC1049` are host
 programming errors (`ContractHostError`, a thrown `TypeError` with `code`
 and `reason`) and `JC2001–JC2049` the HTTP request-time errors
 (`ContractRuntimeError` in-process, a wire error on the response) — both
-tables are in §7. Later ranges: `JC2050–JC2069` client-side,
-`JC2070–JC2089` port/local, `JC2090–JC2109` stream.
+tables are in §7. Later ranges: `JC2050–JC2069` client-side (§10.3),
+`JC2070–JC2089` port/local (§15–§16), `JC2090–JC2109` stream (reserved).
 
 The three worked examples this document is tested against, complete:
 
@@ -660,14 +660,14 @@ wire response:
 
 | code | when |
 |---|---|
-| `JC1001` | `serveHttp`: `handlers` is not an object, a key names no operation of the contract, a value is not a function, or an option is malformed |
-| `JC1002` | `serveHttp`: an operation has no handler and `partial` is not set |
+| `JC1001` | `serveHttp`, `serveLocal` or `servePort`: `handlers` is not an object, a key names no operation of the contract, a value is not a function, or an option (a channel without `postMessage`, say) is malformed |
+| `JC1002` | `serveHttp`, `serveLocal` or `servePort`: an operation has no handler (on `serveHttp`, unless `partial` is set; on the status-less bindings an opaque operation is exempt — §15) |
 | `JC1003` | a binding cannot carry a declared feature: an operation declares `policy.idempotency` and no `ledger` was given (say so, never degrade) |
 | `JC1004` | `dispatch` received a malformed request object |
-| `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation (§10) |
+| `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation (§10; on `local`/`port` the binding cannot carry it at all — §15, §16) |
 | `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299 |
 | `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare or cannot carry in the app binding, or `namespace`/`statePath` is malformed (§11) |
-| `JC1008` | `openHttpClient`, `client.url`, `createContractEffect` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12) |
+| `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16) |
 
 ### §7.4 Headers
 
@@ -1490,3 +1490,167 @@ is the reachable case.) The well-known responder reports the refusal to
 the idempotency request hash (§8) are the same computation —
 `canonicalSha256` in `@jarenjs/json` — never a 32-bit content
 fingerprint, which collides.
+
+## §15 The local binding
+
+`openLocalClient(contract, handlers, options) → Client` — the same
+operation pipeline as every server binding, with no wire: the test
+seam, SSR, a CLI calling its own operations. The client and the server
+are one object; `serveLocal` is the same factory under the serve name,
+for symmetry with the driver pairs of the other bindings. The `Client`
+is the binding-agnostic shape of §10 minus what cannot exist here:
+`invoke`, `capabilities`, `contract`, `describe`, `close` — no `url`,
+no `negotiate`, no `pending`.
+
+`invoke(op, input, ctx)` with `ctx = { signal?, attempt? }`:
+
+1. an unknown operation, or an opaque one, throws `JC1005` — non-JSON
+   media does not exist in-process (`capabilities.media: false`);
+2. the input is validated with the operation's compiled validator; a
+   refusal is the pre-send `JC2050` outcome (kind `contract`, details
+   by `policy.errors.details`) and nothing ran — the same refusal every
+   client binding shares;
+3. the handler runs through the neutral pipeline with the frozen
+   context `{ op, trace, signal, params: null, headers: {}, fail,
+   idempotency: null }` — `trace` from the `trace` option (default
+   `crypto.randomUUID`), `signal` the caller's composed with the
+   client's closer. There is no `ctx.etag`, `ctx.status` or `ctx.body`:
+   statuses, entity tags and bytes do not exist here, and a handler
+   that reaches for them fails honestly (`JC2070`) instead of
+   pretending;
+4. the outcome (§10.1 shapes, assembled by the same assembler):
+
+| settlement | outcome |
+|---|---|
+| the output, valid | `{ ok: true, value, meta }` — `meta.trace` the generated trace |
+| a declared failure (`ctx.fail`, or a thrown `ContractRuntimeError` whose code the operation declares) | kind `failure` with `{ code, message, status: null, details, retryable }` — `status` is `null` and PRESENT (D6: a binding that cannot carry a member carries `null`, never omits it); the message is `contract/error/<code>` from the host catalog or the generic `contract/handler-error` |
+| any handler fault — a throw, a rejection, an undeclared code, an output or error-details schema violation | kind `contract` `JC2070`, message `contract/local-handler-failed`; the distinguishing cause goes to `onError(error, { op, trace })`, never into the outcome |
+| `ctx.signal` aborted before or while running, or the client closed | kind `cancelled` `JC2052`; a handler that settles later settles into nothing |
+
+Options: `trace`, `validateOutput` (`'never'` is a declared downgrade,
+reported in `capabilities.validatedOutput`; the output is validated
+ONCE, in the pipeline — the assembler does not re-validate what never
+crossed a wire), `catalog`, `onError`. Capabilities:
+
+```jsonc
+{ "name": "local", "status": false, "headers": false, "media": false,
+  "etag": false, "idempotency": false, "validatedOutput": true,
+  "stream": false, "cancel": "signal" }
+```
+
+Two readings that keep one handler table serving http AND locally:
+
+- **a declared `policy.idempotency` is allowed and inert.** The same
+  contract must serve over http (where the ledger enforces it) and
+  locally (where "the wire retried" cannot happen — a re-run is the
+  caller's own hand). The binding does not refuse it (`JC1003` is for a
+  feature a binding was asked to carry and cannot, like http without a
+  ledger); it carries `capabilities.idempotency: false` so the
+  downgrade is declared, never silent.
+- **an opaque operation needs no handler and may still have one.**
+  `serveLocal` exempts opaque operations from the `JC1002` handler
+  requirement (they cannot be invoked here), and accepts a handler
+  table that carries one — so an http server's table is reusable
+  verbatim; the opaque handler is simply never called.
+
+The local codes (the table shared with §16; `PORT_LOCAL_ERRORS` in
+`@jarenjs/contract/local` and `/port` is this table as data):
+
+| code | kind | msgid | retryable | when |
+|---|---|---|---|---|
+| `JC2070` | contract | `contract/local-handler-failed` | no | the serving host's handler failed in any class — a throw, an undeclared code, a broken output or error-details schema; `onError` sees the cause |
+
+## §16 The port binding
+
+`servePort(contract, handlers, { channel, trace?, validateOutput?,
+catalog?, onError? })` and `openPortClient(contract, { channel,
+timeoutMs = 15000, catalog? })` — request/response over anything with
+`postMessage` and a message-listener surface: a `MessagePort` (started
+automatically), a `Worker`, a `BroadcastChannel`, a worker's own
+`self`, or a plain object of that shape. The server prepares the same
+pipeline routes as §7 and refuses the same host mistakes (`JC1001`,
+`JC1002` — opaque operations exempt exactly as in §15); the client is
+the §10 shape minus `url`/`negotiate`/`pending`. Exactly ONE server
+should serve a shared channel — two would both answer every request.
+
+### §16.1 Frames
+
+The grammar is `schemas/jaren-contract-port.schema.json` (draft-07 twin
+beside it), and every frame the binding emits validates against it.
+Frames are JSON-safe plain objects marked `jaren: "contract/0.1"`:
+
+```jsonc
+{ "jaren": "contract/0.1", "id": "<clientId>:<seq>", "op": "data.rows",
+  "input": { "collection": "notes" } }                      // request; attempt?/key? reserved
+{ "jaren": "contract/0.1", "id": "<clientId>:<seq>", "ok": true,
+  "value": [ /* … */ ], "trace": "3f2c…" }                  // success
+{ "jaren": "contract/0.1", "id": "<clientId>:<seq>", "ok": false,
+  "error": { "code": "conflict", "message": "…", "details": { }, "retryable": false },
+  "trace": "3f2c…" }                                        // error
+{ "jaren": "contract/0.1", "cancel": "<clientId>:<seq>" }   // cancel; never answered
+```
+
+**Id scoping is the correctness rule.** `id` is `"<clientId>:<seq>"` —
+`clientId` a UUID per client instance, `seq` a per-client counter — so
+two clients on one shared channel can never collide, and a client
+ignores every frame whose id does not start with its own `clientId +
+":"` (one cheap prefix test before any map lookup). A late response
+for a cancelled or timed-out id finds no pending entry and is dropped
+silently. The request members `attempt` and `key` are reserved by the
+grammar and ignored by servers of this version: the attempt id stays
+caller-side in `meta` (D6 — the identities live in state, never in the
+transport) and idempotency is not carried on this binding.
+
+**What the wire cannot carry, it does not pretend to.** No statuses,
+no headers, no entity tags, no non-JSON media (an opaque operation is
+`JC1005` at `invoke` and answered `JC2071` if some other client asks);
+a declared failure's `status` is `null` in the outcome, member present
+(D6). `input` is the whole input object (`null` for an input-less
+operation); an `undefined` handler value crosses as `null` (frames are
+JSON). Cancellation is `cancel: "message"`: an abort posts the cancel
+frame — an optimization that stops wasted work; the id scoping is the
+guarantee.
+
+### §16.2 The server, per request frame
+
+A frame without the marker is IGNORED, never answered — other traffic
+may share the channel (an owner-discovery ping, a live push). So is a
+frame carrying `ok` (another server's response on a shared channel)
+and a marked frame without a usable string `id` (nothing to address).
+Then: an unknown or opaque `op` is answered `JC2071` **without echoing
+what was asked** (a request value never enters a message, §7.3's
+rule); an input failing its validator is `JC2006` with details by
+policy; otherwise the request runs through the pipeline under one
+`AbortController` per id — a `cancel` frame aborts it — and the
+settlement is posted back with the server `trace`: the §7.3
+classification with `JC2070` in place of §7's 500s (a declared failure
+keeps its code, message, details and retryability; every host fault is
+`JC2070` with the cause to `onError`). A response for an id whose
+controller was aborted is not posted. `close()` detaches the listener
+and aborts every in-flight request.
+
+### §16.3 The client, per outcome
+
+Pre-send exactly as §15 steps 1–2 (`JC1005` thrown, `JC2050`
+pre-send). Then one request frame; the outcome:
+
+| the channel answered | outcome |
+|---|---|
+| `ok: true` with `value` | validated against the output schema → `{ ok: true, value, meta }` (`JC2053` kind `contract` on a mismatch, as §10); `meta.trace` from the frame |
+| `ok: false` with a declared or §7 taxonomy `code` | kind `failure`, `status: null`, the frame's message/details/retryable (a peer's `JC2006` means the two ends validated differently — visible, not hidden) |
+| `ok: false` with `JC2070`/`JC2071` | kind `contract`, the code kept — a served-host fault or a contract the two ends disagree about is never dressed as a declared failure |
+| `ok: false` with any other code | kind `contract` `JC2055` (§10.3 — an undeclared response) |
+| a frame addressed to this client that does not match the grammar | kind `contract` `JC2073` |
+| nothing within `timeoutMs` | kind `network` `JC2072` (retryable); `0` disables the timer |
+| `postMessage` threw (closed, detached) | kind `network` `JC2074` |
+| `ctx.signal` aborted, or `close()` | kind `cancelled` `JC2052`; the cancel frame is posted when the channel still accepts one |
+
+The port codes (with `JC2070` of §15; `PORT_LOCAL_ERRORS` is the table
+as data):
+
+| code | kind | msgid | retryable | when |
+|---|---|---|---|---|
+| `JC2071` | contract | `contract/unknown-operation` | no | the server answered "no operation of that name is served on this channel" — unknown, or opaque |
+| `JC2072` | network | `contract/port-timeout` | yes | no answer within `timeoutMs` |
+| `JC2073` | contract | `contract/malformed-frame` | no | a response frame addressed to this client fails the frame grammar |
+| `JC2074` | network | `contract/channel-closed` | no | the channel refused the request frame |

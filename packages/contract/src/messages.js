@@ -1,10 +1,11 @@
 //@ts-check
 /**
  * @file The English message catalog: one template per `contract/*` msgid
- * the HTTP binding can answer with, `contract/handler-error` (the generic
- * text for a declared operation error that has no message of its own),
- * and one per client-originated outcome (the `JC205x` codes a client
- * resolves without a server message). Compiled ONCE at module scope
+ * a binding can answer with — the HTTP taxonomy, the port/local codes,
+ * `contract/handler-error` (the generic text for a declared operation
+ * error that has no message of its own) — and one per client-originated
+ * outcome (the `JC205x` codes a client resolves without a server
+ * message). Compiled ONCE at module scope
  * with `@jarenjs/core`'s `compileMessageCatalog` (the two-stage house
  * rule applied to messages) and exported in plain form for the locale
  * packs to mirror key for key.
@@ -51,6 +52,11 @@ export const contractMessagesEn = Object.freeze({
   'contract/not-a-contract': 'the server does not describe contract {id} at its well-known path',
   'contract/incompatible': 'the server speaks version {server} of contract {id}; this client speaks {client} and neither end declares the other compatible',
   'contract/host-failed': 'operation {op} failed in the host before an outcome was produced',
+  'contract/local-handler-failed': 'operation {op} failed in the serving host',
+  'contract/unknown-operation': 'the request names no operation served on this channel',
+  'contract/port-timeout': 'operation {op} got no answer on the channel within {ms}ms',
+  'contract/malformed-frame': 'the response frame of operation {op} is malformed',
+  'contract/channel-closed': 'the channel of operation {op} is closed',
 });
 
 /** The compiled English catalog (module-level singleton). */

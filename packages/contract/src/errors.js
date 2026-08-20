@@ -20,8 +20,8 @@
  *  - `JC2090–JC2109` stream binding
  *
  * The document-compile range, the projection code, the host range, the
- * http request-time range and the client range are populated; port/local
- * and stream are reserved for their bindings and are listed here so a
+ * http request-time range, the client range and the port/local range are
+ * populated; stream is reserved for its binding and is listed here so a
  * later addition lands in its range rather than at the next free number.
  */
 
@@ -53,14 +53,14 @@ export const CONTRACT_CODES = Object.freeze({
   JC0060: 'the OpenAPI projection met a schema keyword it cannot map honestly: a boolean required (draft-04 style) or a same-document $ref that lands outside $defs (both dropped and reported under lenient), or a components member inside a schema',
   JC0061: 'the public projection is not canonicalizable, so no revision exists — a string with an unpaired surrogate, say; docPath points at the offending value inside the projection',
   // ——— host programming errors (thrown ContractHostError, a TypeError) ———
-  JC1001: 'serveHttp: handlers is not an object, a key names no operation of the contract, or a value is not a function',
-  JC1002: 'serveHttp: an operation has no handler and options.partial is not set',
+  JC1001: 'serveHttp, serveLocal or servePort: handlers is not an object, a key names no operation of the contract, a value is not a function, or an option (a channel without postMessage, say) is malformed',
+  JC1002: 'serveHttp, serveLocal or servePort: an operation has no handler (and, on serveHttp, options.partial is not set; an opaque operation needs none on the status-less bindings)',
   JC1003: 'a binding cannot carry a declared feature: an operation declares idempotency and serveHttp was given no ledger',
   JC1004: 'dispatch received a malformed request object (method or url not a string, headers not an object, body not a string, Uint8Array or null)',
-  JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.url)',
+  JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.url on http; the status-less bindings cannot carry it at all)',
   JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299',
   JC1007: 'contractAppBinding: ops names an operation the contract does not declare or one the binding cannot carry (a subscribe operation until the stream binding lands), or namespace/statePath is malformed',
-  JC1008: 'openHttpClient, client.url, createContractEffect or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
+  JC1008: 'openHttpClient, openPortClient, client.url, createContractEffect or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',
@@ -87,6 +87,12 @@ export const CONTRACT_CODES = Object.freeze({
   JC2056: 'negotiation: the server does not answer a jaren-contract description at the well-known path, or describes another contract id',
   JC2057: 'negotiation: the server speaks a version neither end declares compatible',
   JC2058: 'the host threw while invoking an operation through the contract effect — projected into an outcome, never a string',
+  // ——— port/local bindings (outcomes of invoke or wire error frames; never thrown) ———
+  JC2070: 'the handler failed on a local or port serving host: it threw a non-declared error, rejected, answered an undeclared code, or broke its output or error-details schema (kind contract; onError sees the cause)',
+  JC2071: 'a request frame names no operation this channel serves (unknown, or opaque — a port carries JSON only)',
+  JC2072: 'a port request got no answer within timeoutMs (kind network, retryable)',
+  JC2073: 'a response frame addressed to this client does not match the frame grammar (kind contract)',
+  JC2074: 'the channel refused the request frame — closed or detached (kind network)',
 });
 
 /**

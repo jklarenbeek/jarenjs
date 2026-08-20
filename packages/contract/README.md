@@ -225,6 +225,63 @@ recorded without the input and `client.pending()` lists what a restart
 must reconcile. Retry runs only under a declared `policy.retry`. The
 normative client is [CONTRACT-FORMAT.md §10](docs/CONTRACT-FORMAT.md#10-the-http-client-binding).
 
+## Bindings: the same contract with no wire, or a message channel
+
+HTTP is one of three bindings; the other two carry the SAME operations,
+handlers and outcomes where no HTTP exists. **`local`** is the pipeline
+in-process — the test seam, SSR, a CLI calling its own operations — with
+the client and the server as one object:
+
+```js
+import { openLocalClient } from '@jarenjs/contract/local';   // serveLocal is the same factory
+
+const client = openLocalClient(contract, handlers);          // the serveHttp handler table, reused verbatim
+const saved = await client.invoke('product.save', { id: 12, revision: 3, product });
+// a declared failure: { ok: false, kind: 'failure', error: { code: 'conflict', …, status: null, … } }
+// — status is null and PRESENT: this binding carries no statuses and says so, never omits the member
+```
+
+**`port`** is request/response over a `MessagePort`, a `Worker`, a
+`BroadcastChannel` or a worker's own `self` — JSON frames marked
+`jaren: "contract/0.1"` (the grammar ships as
+`schemas/jaren-contract-port.schema.json`), so contract traffic shares a
+channel with anything else without touching it:
+
+```js
+// inside the worker
+import { servePort } from '@jarenjs/contract/port';
+servePort(contract, handlers, { channel: self });
+
+// in the page
+import { openPortClient } from '@jarenjs/contract/port';
+const client = openPortClient(contract, { channel: worker, timeoutMs: 15_000 });
+const rows = await client.invoke('data.rows', { collection: 'notes' });
+```
+
+Request ids are `"<clientId>:<seq>"` with a UUID per client instance,
+and a client ignores every frame outside its own prefix — so two tabs
+on one shared channel can never settle each other's requests, whatever
+they fire concurrently (the repository's own data studio runs its
+cross-tab db-owner protocol on exactly this). A handler fault answers
+`JC2070` (kind `contract` — never dressed as a declared failure), an
+unanswered request is `JC2072` after `timeoutMs`, cancellation crosses
+as a `cancel` frame with the id scoping as the guarantee.
+`createContractEffect` and `contractTools` take these clients unchanged
+— they read `invoke` and nothing else. What each binding carries, from
+its frozen `capabilities`:
+
+| capability | `http` server / client | `local` | `port` |
+|---|---|---|---|
+| `status` | yes | no (`error.status: null`) | no (`error.status: null`) |
+| `headers` | yes | no | no |
+| `media` (opaque operations) | yes | no (`JC1005` at invoke) | no (`JC1005`; `JC2071` to a foreign asker) |
+| `etag` | yes | no | no |
+| `idempotency` | with a `ledger` / always sent | no — declared policy inert, stated | no — `key` reserved in the frame grammar |
+| `stream` | not yet | not yet | not yet |
+| `cancel` | `'signal'` | `'signal'` | `'message'` |
+
+The normative bindings are [CONTRACT-FORMAT.md §15–§16](docs/CONTRACT-FORMAT.md#15-the-local-binding).
+
 ## Call it from a @jarenjs/app document
 
 ```js
@@ -383,5 +440,9 @@ binding (`contractAppBinding`, `createContractEffect`); the projections
 (`publicProjection`, `toOpenApi` with `JC0060`, `toTypeScript`,
 `toMarkdown`, `contractTools`); `contract.revision()` with `JC0061`,
 `diffContracts`/`isCompatible` and the `jaren-contract` CLI with `diff
---fail-on`. Coming in this line: `local`/`port`/`stream` bindings and
-the locale packs for the wire errors.
+--fail-on`; the `local` and `port` bindings (`openLocalClient`/`serveLocal`,
+`servePort`/`openPortClient`, the `JC2070–JC2074` codes and the
+`jaren-contract-port` frame grammar with collision-free client-scoped
+request ids). Coming in this line: the `subscribe` kind with the `stream`
+binding (SSE and port push carrying LIVE-FORMAT patches), and the locale
+packs for the wire errors.

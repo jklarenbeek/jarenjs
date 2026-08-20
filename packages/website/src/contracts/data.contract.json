@@ -1,0 +1,212 @@
+{
+  "$contract": "0.1",
+  "id": "jaren-data-studio",
+  "version": "1",
+  "$defs": {
+    "DbError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "description": "The store's own coded refusal (a JD code) when it had one, null for an uncoded fault.",
+          "type": ["string", "null"]
+        },
+        "message": { "type": "string" }
+      }
+    },
+    "Collection": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "operations": {
+    "data.init": {
+      "kind": "command",
+      "output": {
+        "type": "object",
+        "required": ["topology", "vfs", "version"],
+        "properties": {
+          "topology": { "enum": ["owner", "client", "memory"] },
+          "vfs": { "type": "string" },
+          "version": { "type": "string" },
+          "refusal": { "$ref": "#/$defs/DbError" }
+        }
+      },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Load the SQLite wasm build and decide the topology: owner (holds the OPFS pool), client (another context owns it — talk over the channel), or memory (OPFS absent — standalone). refusal carries the coded downgrade when there is one."
+    },
+    "data.open": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["model"],
+        "properties": {
+          "model": { "type": "object" },
+          "reset": { "type": "boolean" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["vfs", "capabilities"],
+        "properties": {
+          "vfs": { "type": "string" },
+          "capabilities": { "type": "object" }
+        }
+      },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Open (or recreate, with reset) the store from a jaren-model document. capabilities is the store's own capabilities table, passed through."
+    },
+    "data.insert": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["collection", "doc"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" },
+          "doc": { "type": "object" }
+        }
+      },
+      "output": true,
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Insert one document. The output is the store's own insert result — the driver decides its shape, so it is deliberately open."
+    },
+    "data.put": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["collection", "doc"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" },
+          "doc": { "type": "object" },
+          "key": true
+        }
+      },
+      "output": true,
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Put one document, optionally at an explicit key. The output is the store's own put result — deliberately open, like insert's."
+    },
+    "data.delete": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["collection", "key"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" },
+          "key": true
+        }
+      },
+      "output": true,
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Delete by key. Keys may be strings, numbers or the model's own key shape, so the member is deliberately open, like the output."
+    },
+    "data.rows": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["collection"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" }
+        }
+      },
+      "output": { "type": "array" },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Every document of the collection, as the canonical scan query returns them."
+    },
+    "data.execute": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["collection", "document"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" },
+          "document": true,
+          "externals": { "type": "object" }
+        }
+      },
+      "output": true,
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Run a query document. The query decides the output shape — an array pack answers rows, a bare FLWOR a sequence, an aggregate a scalar — so the output is deliberately open."
+    },
+    "data.explain": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["collection", "document"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" },
+          "document": true,
+          "externals": { "type": "object" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "sql": { "type": "string" },
+          "params": { "type": "array" },
+          "indexes": { "type": "array" },
+          "residual": { "type": ["object", "null"] }
+        }
+      },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "The store's explain record for a query document: the SQL pushed down, its parameters, the indexes chosen and the residual (null when fully pushed)."
+    },
+    "data.live": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["collection", "document"],
+        "properties": {
+          "collection": { "$ref": "#/$defs/Collection" },
+          "document": true
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["liveId", "mode", "rows"],
+        "properties": {
+          "liveId": { "type": "string" },
+          "mode": { "type": "object" },
+          "rows": { "type": "array" }
+        }
+      },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Register a live query and answer its id, maintenance mode and initial rows. The emissions themselves ride the website's push path beside this contract until the stream binding carries subscriptions."
+    },
+    "data.live.close": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["liveId"],
+        "properties": {
+          "liveId": { "type": "string" }
+        }
+      },
+      "output": { "type": "boolean" },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Stop a live query by its id. Closing an unknown id is true too — the registration is gone either way."
+    },
+    "data.migrate": {
+      "kind": "command",
+      "input": {
+        "type": "object",
+        "required": ["to"],
+        "properties": {
+          "to": { "type": "object" },
+          "id": { "type": "string" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["planned", "losses", "applied"],
+        "properties": {
+          "planned": { "type": "array", "items": { "type": "string" } },
+          "losses": { "type": "array" },
+          "applied": { "type": "array", "items": { "type": "string" } },
+          "note": { "type": "string" }
+        }
+      },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Plan a migration to a new model, shadow-verify and apply it (memory stores recreate instead — note says so), and reopen the store on the new model."
+    }
+  }
+}

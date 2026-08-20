@@ -127,6 +127,25 @@ export function renderMessage(catalog, msgid, params) {
   }
 }
 
+/**
+ * The message of a declared operation error, as every server-side
+ * binding renders it: `contract/error/<code>` from the host catalog when
+ * it defines one, else the generic `contract/handler-error` — with the
+ * failure's own params plus `op` and `code`.
+ * @param {Catalog | null} catalog
+ * @param {string} op - the operation id
+ * @param {string} code - the declared error code
+ * @param {Readonly<Record<string, unknown>>} params
+ * @returns {string}
+ */
+export function declaredMessage(catalog, op, code, params) {
+  const messageParams = { ...params, op, code };
+  const own = catalog !== null ? catalog[`contract/error/${code}`] : undefined;
+  return own !== undefined
+    ? renderMessage(catalog, `contract/error/${code}`, messageParams)
+    : renderMessage(catalog, HANDLER_ERROR_MSGID, messageParams);
+}
+
 //#endregion
 
 //#region headers

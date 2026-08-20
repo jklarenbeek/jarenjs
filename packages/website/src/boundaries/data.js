@@ -5,8 +5,15 @@
  * dedicated worker (`../db-worker.js`) that holds the sole SQLite
  * connection over the header-free OPFS SAH-pool VFS; a SECOND tab is
  * refused by OPFS exclusivity (the coded JD2061) and downgrades to a
- * CLIENT whose requests and live registrations travel a
- * `BroadcastChannel` to the owner — LIVE-FORMAT §11 made concrete.
+ * CLIENT whose requests travel a `BroadcastChannel` to the owner —
+ * LIVE-FORMAT §11 made concrete, with the request/response path on the
+ * @jarenjs/contract PORT binding over the studio's own contract
+ * document (`../contracts/data.contract.json`). The binding's
+ * client-scoped request ids are what make two client tabs on the one
+ * shared channel unable to cross-settle, whatever they fire
+ * concurrently; live emissions ride the worker's `push`/`clientPush`
+ * messages beside the contract frames until the stream binding carries
+ * subscriptions.
  *
  * The page stays a stylesheet; JavaScript lives here: the transport,
  * the effects, and the exported view model (the boundary-exports
@@ -15,8 +22,15 @@
  */
 
 import { pickAllowed } from '@jarenjs/core/array';
+import { compileContract } from '@jarenjs/contract';
+import { openPortClient } from '@jarenjs/contract/port';
+
+import contractDoc from '../contracts/data.contract.json' with { type: 'json' };
 
 const CHANNEL = 'jaren-data-studio';
+
+/** The studio's operation contract — the same document the worker serves. */
+const contract = compileContract(contractDoc);
 
 /** The phone panes, in switcher order. */
 const DATA_PANES = ['store', 'query', 'live'];
@@ -59,82 +73,68 @@ const SEEDS = [
 ];
 
 /**
- * The transport: talk to the own worker (owner) or the channel
- * (client). One in-flight map serves both.
+ * The transport: a contract PORT client over the own worker (owner) or
+ * the shared channel (client). `request` unwraps the binding's D6
+ * outcome into the value-or-throw shape the effects consume — a
+ * declared `db` failure surfaces the store's own code and message from
+ * its details.
  * @param {{ onPush: (payload: any) => void,
  *   onStatus: (status: any) => void }} hooks
  */
 function createTransport(hooks) {
-  /** @type {Map<string, { resolve: Function, reject: Function, timer: any }>} */
-  const pending = new Map();
-  let seq = 0;
+  /** @type {ReturnType<typeof openPortClient> | null} */
+  let client = null;
   /** @type {Worker | null} */
   let worker = null;
   /** @type {BroadcastChannel | null} */
   let channel = null;
-  let mode = 'boot';
 
-  const settle = (response) => {
-    const entry = pending.get(response.id);
-    if (entry === undefined) return;
-    pending.delete(response.id);
-    clearTimeout(entry.timer);
-    if (response.ok) entry.resolve(response.value);
-    else {
-      const error = new Error(response.error.message);
-      /** @type {any} */ (error).code = response.error.code;
-      entry.reject(error);
-    }
+  // live emissions (and the worker's ready note) travel beside the
+  // contract frames; the port client ignores them by shape, and this
+  // listener ignores the contract frames the same way
+  const pushListener = (/** @type {any} */ event) => {
+    const data = event?.data;
+    if (data?.push !== undefined) hooks.onPush(data.push);
+    else if (data?.clientPush !== undefined) hooks.onPush(data.clientPush);
   };
 
-  const request = (kind, args, timeoutMs = 15_000) => new Promise((resolve, reject) => {
-    const id = `r${++seq}`;
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`the ${mode === 'client' ? 'owner tab' : 'worker'} `
-        + `did not answer '${kind}' within ${timeoutMs}ms`));
-    }, timeoutMs);
-    pending.set(id, { resolve, reject, timer });
-    const message = { id, kind, args };
-    if (mode === 'client') channel?.postMessage({ clientReq: message });
-    else worker?.postMessage(message);
-  });
+  /** @param {any} outcome */
+  const unwrap = (outcome) => {
+    if (outcome.ok) return outcome.value;
+    const details = outcome.error.details;
+    const dbError = details !== null && typeof details === 'object' && typeof details.message === 'string';
+    const error = new Error(dbError ? details.message : outcome.error.message);
+    /** @type {any} */ (error).code = dbError ? details.code : outcome.error.code;
+    throw error;
+  };
+
+  const request = async (op, args) => unwrap(await /** @type {NonNullable<typeof client>} */ (client).invoke(op, args));
 
   const boot = async () => {
     worker = new Worker(new URL('../db-worker.js', import.meta.url),
       { type: 'module' });
-    worker.onmessage = (event) => {
-      const data = event.data;
-      if (data?.ready === true) return;
-      if (data?.push !== undefined) {
-        hooks.onPush(data.push);
-        return;
-      }
-      settle(data);
-    };
-    const status = await request('init', {}, 30_000);
+    worker.addEventListener('message', pushListener);
+    // the wasm build + first store open is real work: give init room
+    client = openPortClient(contract, { channel: worker, timeoutMs: 30_000 });
+    const status = await request('data.init', null);
     if (status.topology !== 'client') {
       // 'owner' (holds the OPFS pool) or 'memory' (OPFS absent — a
       // standalone in-memory store): either way this worker IS the
-      // connection, and it already joined the channel to serve clients.
-      mode = 'owner';
+      // connection; an owner also serves the channel for client tabs.
       return status;
     }
     // another context owns the pool: downgrade to a CLIENT over the
     // channel; this direct worker has nothing to hold, so it dies.
+    client.close();
     worker.terminate();
     worker = null;
-    mode = 'client';
     channel = new BroadcastChannel(CHANNEL);
-    channel.onmessage = (event) => {
-      const data = event.data;
-      if (data?.clientRes !== undefined) settle(data.clientRes);
-      else if (data?.clientPush !== undefined) hooks.onPush(data.clientPush);
-    };
+    channel.addEventListener('message', pushListener);
+    client = openPortClient(contract, { channel, timeoutMs: 30_000 });
     return status;
   };
 
-  return { boot, request, mode: () => mode };
+  return { boot, request };
 }
 
 /**
@@ -180,18 +180,18 @@ export function createDataRuntime(_env = {}) {
           // OWN connection, so both open and seed; only a CLIENT attaches
           // to the connection the owner already holds (LIVE-FORMAT §11)
           if (status.topology !== 'client') {
-            const opened = await transport.request('open', { model: DATA_MODEL });
+            const opened = await transport.request('data.open', { model: DATA_MODEL });
             dispatch('data/opened', opened);
             for (const seedDoc of SEEDS) {
-              await transport.request('insert',
+              await transport.request('data.insert',
                 { collection: 'notes', doc: seedDoc }).catch(() => {});
             }
           }
-          const live = await transport.request('live',
+          const live = await transport.request('data.live',
             { collection: 'notes', document: LIVE_QUERY });
           liveId = live.liveId;
           dispatch('data/live', { mode: live.mode, rows: live.rows });
-          const rows = await transport.request('rows', { collection: 'notes' });
+          const rows = await transport.request('data.rows', { collection: 'notes' });
           dispatch('data/rows', { rows });
         })
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
@@ -202,10 +202,10 @@ export function createDataRuntime(_env = {}) {
         dispatch('data/error', { message: model.message });
         return;
       }
-      transport?.request('open', { model: model.value, reset: true })
+      transport?.request('data.open', { model: model.value, reset: true })
         .then(async (opened) => {
           dispatch('data/opened', opened);
-          const live = await transport.request('live',
+          const live = await transport.request('data.live',
             { collection: Object.keys(model.value.collections)[0], document: LIVE_QUERY });
           liveId = live.liveId;
           dispatch('data/live', { mode: live.mode, rows: live.rows });
@@ -220,8 +220,8 @@ export function createDataRuntime(_env = {}) {
         title,
         points: Math.floor(Math.random() * 50),
       };
-      transport?.request('insert', { collection: 'notes', doc })
-        .then(() => transport.request('rows', { collection: 'notes' }))
+      transport?.request('data.insert', { collection: 'notes', doc })
+        .then(() => transport.request('data.rows', { collection: 'notes' }))
         .then((rows) => dispatch('data/rows', { rows }))
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
@@ -232,12 +232,14 @@ export function createDataRuntime(_env = {}) {
         return;
       }
       Promise.all([
-        transport?.request('execute', { collection: 'notes', document: query.value }),
-        transport?.request('explain', { collection: 'notes', document: query.value }),
+        transport?.request('data.execute', { collection: 'notes', document: query.value }),
+        transport?.request('data.explain', { collection: 'notes', document: query.value }),
       ])
         .then(([results, explain]) => dispatch('data/results', {
+          // an empty sequence crosses the JSON wire as null (undefined
+          // is not a JSON value), so both spellings mean "no rows"
           results: Array.isArray(results) ? results
-            : results === undefined ? [] : [results],
+            : results === undefined || results === null ? [] : [results],
           explain: {
             sql: explain.sql,
             params: explain.params,
@@ -251,7 +253,7 @@ export function createDataRuntime(_env = {}) {
       // the worked migration: index the title member, shadow-verified
       const to = JSON.parse(JSON.stringify(DATA_MODEL));
       to.collections.notes.indexes.push({ name: 'by_title', path: '$.title' });
-      transport?.request('migrate', { to, id: 'add-title-index' })
+      transport?.request('data.migrate', { to, id: 'add-title-index' })
         .then((report) => dispatch('data/migrated', { report }))
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },

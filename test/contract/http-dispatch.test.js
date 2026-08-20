@@ -22,6 +22,7 @@ import {
 import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH } from '@jarenjs/contract/http';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { CLIENT_ERRORS } from '@jarenjs/contract/client';
+import { PORT_LOCAL_ERRORS } from '@jarenjs/contract/port';
 import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
@@ -611,15 +612,16 @@ describe('the English catalog', () => {
     }
     assert.strictEqual(contractCatalogEn['contract/handler-error']({ op: 'a.b', code: 'conflict' }), 'operation a.b failed with conflict');
     const clientMsgids = Object.values(CLIENT_ERRORS).map((r) => r.msgid);
-    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids].sort());
+    const portLocalMsgids = Object.values(PORT_LOCAL_ERRORS).map((r) => r.msgid);
+    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids, ...portLocalMsgids].sort());
     assert.strictEqual(Object.isFrozen(contractMessagesEn), true);
     assert.strictEqual(Object.isFrozen(contractCatalogEn), true);
     // the parameters are trusted artifacts or protocol facts only: op ids, limits, media, method lists,
-    // header names, codes, statuses, a platform error's name, contract ids and versions
+    // header names, codes, statuses, a platform error's name, contract ids, versions and a declared timeout
     const placeholders = new Set();
     for (const template of Object.values(contractMessagesEn)) {
       for (const m of template.matchAll(/\{([a-z]+)\}/g)) placeholders.add(m[1]);
     }
-    assert.deepStrictEqual([...placeholders].sort(), ['allow', 'client', 'code', 'header', 'id', 'kind', 'limit', 'media', 'name', 'op', 'server', 'status']);
+    assert.deepStrictEqual([...placeholders].sort(), ['allow', 'client', 'code', 'header', 'id', 'kind', 'limit', 'media', 'ms', 'name', 'op', 'server', 'status']);
   });
 });
