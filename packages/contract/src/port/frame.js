@@ -43,6 +43,25 @@ export const FRAME_MARKER = 'contract/0.1';
  */
 
 /**
+ * A subscribe frame: opens one stream (docs/CONTRACT-FORMAT.md §18.2).
+ * `input` is the whole (validated) input object or `null`; `lastSeq`,
+ * when present, asks to resume after that seq.
+ * @typedef {{ jaren: string, subscribe: string, op: string, input: unknown, lastSeq?: number }} SubscribeFrame
+ */
+
+/**
+ * An unsubscribe frame: closes the named stream. Never answered.
+ * @typedef {{ jaren: string, unsubscribe: string }} UnsubscribeFrame
+ */
+
+/**
+ * A push frame: one stream event, server → client. `event` is
+ * `snapshot | patch | error | end` with the §18 data shapes; `seq` is
+ * the event's seq (`error`/`end` carry the last delivered one).
+ * @typedef {{ jaren: string, id: string, event: string, seq: number, data: unknown }} PushFrame
+ */
+
+/**
  * The channel shape both halves accept: a `MessagePort`, a `Worker`, a
  * `BroadcastChannel`, a worker's own `self`, or any object with
  * `postMessage` and a message-listener surface. `start` is called when
@@ -106,6 +125,38 @@ export function errorFrame(id, code, message, details, retryable, trace) {
  */
 export function cancelFrame(id) {
   return { jaren: FRAME_MARKER, cancel: id };
+}
+
+/**
+ * @param {string} id
+ * @param {string} op
+ * @param {unknown} input
+ * @param {number | null} lastSeq - omitted from the frame when `null`
+ * @returns {SubscribeFrame}
+ */
+export function subscribeFrame(id, op, input, lastSeq) {
+  return lastSeq === null
+    ? { jaren: FRAME_MARKER, subscribe: id, op, input }
+    : { jaren: FRAME_MARKER, subscribe: id, op, input, lastSeq };
+}
+
+/**
+ * @param {string} id
+ * @returns {UnsubscribeFrame}
+ */
+export function unsubscribeFrame(id) {
+  return { jaren: FRAME_MARKER, unsubscribe: id };
+}
+
+/**
+ * @param {string} id
+ * @param {string} event - `snapshot | patch | error | end`
+ * @param {number} seq
+ * @param {unknown} data
+ * @returns {PushFrame}
+ */
+export function pushFrame(id, event, seq, data) {
+  return { jaren: FRAME_MARKER, id, event, seq, data: data === undefined ? null : data };
 }
 
 /**

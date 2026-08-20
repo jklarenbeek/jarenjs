@@ -222,3 +222,80 @@ app.dispatch('contract/product.save/reset');
   starts in the *effect*, but a hand-written start still moves the
   slot id, so the one completion would be rejected; the generator
   decides in state first, and the mode is still never named.
+
+## Live data: subscribe operations
+
+A subscribe operation reaches the app as a **subscription**, not a
+task: its slot in the slice is `{ id, status: 'idle' | 'live' |
+'error', kind, input, value, error, meta, seq }`, its generated
+actions are `start`, `stop`, `snapshot`, `patch`, `error` and `reset`,
+and the binding additionally emits one **`subs` entry** per subscribe
+operation (`run: "contract-stream"`) whose `when` watches `status ===
+'live'` and whose `withQuery` resolves the slot's `id` and `input`
+from state. `start` stores its payload as the slot's `input` and flips
+the slot `live` — it emits **nothing**; the app's own subscription
+reconciliation sees the liveness and runs the handler, exactly as
+APP-FORMAT §5.3 defines it. A second `start` while `live` is a no-op
+in state (the same state-first guard as an exhaust command's start);
+`stop` flips the slot `idle`, which stops the subscription through its
+own cleanup.
+
+The worked live contract (verbatim-tested, like the two examples
+above):
+
+```json
+{
+  "$contract": "0.1",
+  "id": "board",
+  "operations": {
+    "board.feed": {
+      "kind": "subscribe",
+      "input": { "type": "object", "required": ["room"], "properties": { "room": { "type": "string" } } },
+      "output": { "type": "object", "required": ["rows"], "properties": { "rows": { "type": "array" } } }
+    }
+  }
+}
+```
+
+Composed and mounted — the subs entries spread into the document, the
+handler registered under the app's `subs` option:
+
+```js
+const { slice, actions, subs, schema } = contractAppBinding(contract);
+const app = createApp(
+  { ...doc, state: { ...doc.state, contract: slice }, actions: { ...actions, ...doc.actions }, subs: [...(doc.subs ?? []), ...subs] },
+  {
+    effects: { contract: createContractEffect(client, { createTaskEffect }) },
+    subs: { 'contract-stream': createContractSubscription(client) },
+  });
+
+app.dispatch('contract/board.feed/start', { room: 'r1' });
+// → { id: 1, status: 'live', kind: null, input: { room: 'r1' }, value: null, error: null, meta: null, seq: 0 }
+// … the snapshot arrives … → value: { rows: [...] }, seq: <seq0>
+// … a write commits …     → value patched copy-on-write,  seq: <seq>
+app.dispatch('contract/board.feed/stop');
+// → status 'idle'; the subscription's cleanup ran (client stop → wire unsubscribe)
+```
+
+What the generated documents guarantee, in the same spirit as the task
+slots:
+
+- **The handler applies the patches; state replaces.** An app action's
+  `patch` member is a *literal* op list whose members are query
+  expressions — it cannot splice a runtime array of RFC 6902 ops — so
+  `createContractSubscription` applies each `{ patch, seq }` emission
+  host-side with `@jarenjs/json/patch` (copy-on-write; unaffected rows
+  stay reference-identical) and dispatches the `patch` action with the
+  patched document; the action `replace`s the slot's `value` and `seq`.
+- **A stale instance cannot write.** Every dispatched payload carries
+  the instance's `id`; `snapshot`/`patch`/`error` guard on it against
+  the slot id, and `patch` additionally on `seq` strictly greater than
+  the slot's — an out-of-order or replayed event is a provable no-op.
+- **A dead stream is visible.** An `onError` outcome lands in the slot
+  (`status: 'error'`, the outcome's `kind`/`error`/`meta`); a server
+  `end` lands the same way as a `network`-kind outcome with the
+  channel-closed code — the stream is gone and the slot says so, so a
+  view can offer a reconnect (a fresh `start`; reconnection is never
+  automatic).
+- **`reset` releases the slot** exactly as for tasks: `status 'idle'`,
+  `kind`/`error` cleared, `id`/`input`/`value`/`meta`/`seq` kept.

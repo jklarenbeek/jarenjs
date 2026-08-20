@@ -19,9 +19,15 @@
  * the shared channel can never cross-settle. A store rejection crosses
  * as the declared `db` failure carrying the store's own code and
  * message; the owner-discovery ping/pong keeps its token protocol
- * beside the contract frames (they are distinguishable by shape), and
- * live emissions ride the `push`/`clientPush` messages beside them
- * until the stream binding carries subscriptions.
+ * beside the contract frames (they are distinguishable by shape).
+ *
+ * Live queries are `data.live`, a SUBSCRIBE operation: the handler
+ * answers the store's `live()` as the stream binding's duck-typed
+ * subscription — wrapped only to keep the registration count the
+ * `data.lives` read reports (the status surface a departed tab's
+ * release is observed through) — and the binding carries the snapshot
+ * and every `{ patch, seq }` emission as push frames on whichever
+ * channel the subscription arrived on.
  */
 
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
@@ -54,8 +60,7 @@ const state = {
   isOwner: false,
   /** @type {any} */ store: null,
   /** @type {any} */ model: null,
-  /** @type {Map<string, any>} */ lives: new Map(),
-  liveSeq: 0,
+  liveCount: 0,
 };
 
 const channel = new BroadcastChannel(CHANNEL);
@@ -145,7 +150,7 @@ async function open(args) {
   if (state.store !== null) {
     await state.store.close();
     state.store = null;
-    state.lives.clear();
+    state.liveCount = 0;
   }
   const handle = state.vfs === 'opfs-sahpool'
     ? sqlite3Handle(state.sqlite3, { DbClass: state.poolUtil.OpfsSAHPoolDb })
@@ -190,7 +195,7 @@ async function migrateTo(args) {
   finally {
     state.model = args.to;
     state.store = await openStore(args.to, { driver, path, capture: true, operators: OPERATORS });
-    state.lives.clear();
+    state.liveCount = 0;
   }
   const note = /** @type {any} */ (applied).note;
   return {
@@ -202,17 +207,17 @@ async function migrateTo(args) {
 }
 
 /**
- * The handler table of one transport: every store rejection crosses as
- * the declared `db` failure with the store's code and message (what the
- * old wire sent, now typed by the contract), so a genuine host bug is
- * the only thing that answers the binding's JC2070. `push` is the
- * transport's live-emission door — the one thing that differs between
- * the two servers, so each transport's live registrations emit on the
- * channel that made them (a client's on the broadcast channel, the
- * owner's on its own worker channel).
- * @param {(payload: any) => void} push
+ * The one handler table both transports serve: every store rejection
+ * crosses as the declared `db` failure with the store's code and
+ * message (what the old wire sent, now typed by the contract), so a
+ * genuine host bug is the only thing that answers the binding's
+ * JC2070. `data.live` answers the stream binding's duck-typed
+ * subscription over the store's `live()` — the binding forwards its
+ * `{ patch, seq }` emissions as push frames on whichever channel the
+ * subscription arrived on, and releases it (`stop()` then `close()`)
+ * exactly once when that peer unsubscribes or goes away.
  */
-function makeHandlers(push) {
+function makeHandlers() {
   /** @param {(input: any) => any} fn */
   const guard = (fn) => async (/** @type {any} */ input) => {
     try {
@@ -235,43 +240,41 @@ function makeHandlers(push) {
     'data.explain': guard((input) => state.store.collection(input.collection)
       .explain(input.document, { externals: input.externals ?? {} })),
     'data.live': guard(async (input) => {
-      const live = await state.store.collection(input.collection).live(input.document);
-      const liveId = `L${++state.liveSeq}`;
-      const stop = live.subscribe((event) => {
-        push({ liveId, event: {
-          ...(event.patch !== undefined ? { patch: event.patch, seq: event.seq } : {}),
-          ...(event.error !== undefined ? { error: wireError(event.error) } : {}),
-          rows: live.result.rows,
-        } });
-      });
-      state.lives.set(liveId, { live, stop });
-      return { liveId, mode: live.mode, rows: live.result.rows };
+      const live = await state.store.collection(input.collection)
+        .live(input.document, { externals: input.externals ?? {} });
+      // the live() object IS the subscription shape the binding reads;
+      // the thin wrap only maintains the count data.lives reports
+      state.liveCount += 1;
+      let counted = true;
+      return {
+        snapshot: () => live.result,
+        subscribe: (/** @type {(emission: any) => void} */ cb) => live.subscribe(cb),
+        close: () => {
+          if (counted) {
+            counted = false;
+            state.liveCount -= 1;
+          }
+          live.close();
+        },
+      };
     }),
-    'data.live.close': guard((input) => {
-      const entry = state.lives.get(input.liveId);
-      if (entry !== undefined) {
-        entry.stop();
-        entry.live.close();
-        state.lives.delete(input.liveId);
-      }
-      return true;
-    }),
+    'data.lives': guard(() => ({ count: state.liveCount })),
     'data.migrate': guard((input) => migrateTo(input)),
   };
 }
 
+const handlers = makeHandlers();
+
 // the owning tab's own requests arrive on the worker channel
-servePort(contract, makeHandlers((payload) => globalThis.postMessage({ push: payload })),
-  { channel: /** @type {any} */ (globalThis) });
+servePort(contract, handlers, { channel: /** @type {any} */ (globalThis) });
 
 let channelServed = false;
 /** Client tabs reach the owner here — registered exactly once, on
- * becoming the owner; their live events broadcast back. */
+ * becoming the owner; their subscriptions push back on this channel. */
 function serveChannel() {
   if (channelServed) return;
   channelServed = true;
-  servePort(contract, makeHandlers((payload) => channel.postMessage({ clientPush: payload })),
-    { channel });
+  servePort(contract, handlers, { channel });
 }
 
 // answer an owner-discovery ping (§11) only while actually owning; the

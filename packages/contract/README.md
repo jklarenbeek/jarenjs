@@ -26,9 +26,11 @@ public projection, served at the well-known path and carried in every
 outcome's `meta.revision`, and `diffContracts(a, b)` classifies what
 changed between two versions — breaking, additive, neutral or honestly
 **unknown** — by a published rule table, with `jaren-contract diff
---fail-on breaking` as the CI gate. Still coming in this line: the
-message-port and stream bindings, and the locale packs for the wire
-errors.
+--fail-on breaking` as the CI gate. A `subscribe` operation streams a
+`@jarenjs/db` `live()`-shaped subscription — the snapshot, then
+LIVE-FORMAT `{ patch, seq }` emissions — as Server-Sent Events over
+http and as push frames over port, resumable by seq. Still coming in
+this line: the locale packs for the wire errors.
 
 Zero dependencies outside the suite: `@jarenjs/core`, `@jarenjs/json`,
 `@jarenjs/validate`, and — reached only from the `./project` subpath, so
@@ -277,10 +279,11 @@ its frozen `capabilities`:
 | `media` (opaque operations) | yes | no (`JC1005` at invoke) | no (`JC1005`; `JC2071` to a foreign asker) |
 | `etag` | yes | no | no |
 | `idempotency` | with a `ledger` / always sent | no — declared policy inert, stated | no — `key` reserved in the frame grammar |
-| `stream` | not yet | not yet | not yet |
+| `stream` (`subscribe`) | yes — SSE, `Last-Event-ID` resumption | no (`JC1005` at invoke) | yes — push frames, per-client streams |
 | `cancel` | `'signal'` | `'signal'` | `'message'` |
 
-The normative bindings are [CONTRACT-FORMAT.md §15–§16](docs/CONTRACT-FORMAT.md#15-the-local-binding).
+The normative bindings are [CONTRACT-FORMAT.md §15–§16](docs/CONTRACT-FORMAT.md#15-the-local-binding),
+the stream wire [§17–§19](docs/CONTRACT-FORMAT.md#17-subscribe-operations).
 
 ## Call it from a @jarenjs/app document
 
@@ -298,6 +301,14 @@ const app = createApp({ state: { contract: slice }, view, actions: { ...actions,
 });
 app.dispatch('contract/catalog.load/start', { since: '2026-01-01T00:00:00Z' });
 ```
+
+A `subscribe` operation becomes a **subscription** instead of a task:
+the binding additionally returns `subs` (spread into the app document)
+and `createContractSubscription(client)` is the one `contract-stream`
+handler they run — `start` flips the slot live, the snapshot and every
+patch land id- and seq-guarded, and the maintained document keeps
+LIVE's structural sharing because the handler applies the emissions
+with `@jarenjs/json/patch` ([CONTRACT-FORMAT.md §11.4](docs/CONTRACT-FORMAT.md#114-subscribe-operations-the-generated-subscription)).
 
 No route strings, no hand-written wrappers, and no import of
 `@jarenjs/app` from this package — the documents cross as JSON and the
@@ -443,6 +454,9 @@ binding (`contractAppBinding`, `createContractEffect`); the projections
 --fail-on`; the `local` and `port` bindings (`openLocalClient`/`serveLocal`,
 `servePort`/`openPortClient`, the `JC2070–JC2074` codes and the
 `jaren-contract-port` frame grammar with collision-free client-scoped
-request ids). Coming in this line: the `subscribe` kind with the `stream`
-binding (SSE and port push carrying LIVE-FORMAT patches), and the locale
-packs for the wire errors.
+request ids); the `subscribe` kind with the `stream` binding
+(`client.subscribe` over SSE and port push frames carrying LIVE-FORMAT
+patches, `JC2090–JC2095`, the generated app subscription with
+`createContractSubscription`, and the one SSE codec of the suite in
+`@jarenjs/core/text/sse`). Coming in this line: the locale packs for
+the wire errors.

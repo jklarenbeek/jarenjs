@@ -327,7 +327,7 @@ describe('openHttpClient — the identity trinity and the headers', () => {
     const bad = await client.invoke('product.save', {});
     if (!bad.ok) assert.strictEqual(bad.error.message, 'nope: product.save');
     // capabilities and the rest of the surface
-    assert.deepStrictEqual(client.capabilities, { name: 'http', status: true, headers: true, media: true, etag: true, idempotency: true, durableKeys: false, stream: false, cancel: 'signal' });
+    assert.deepStrictEqual(client.capabilities, { name: 'http', status: true, headers: true, media: true, etag: true, idempotency: true, durableKeys: false, stream: true, cancel: 'signal' });
     assert.strictEqual(Object.isFrozen(client.capabilities), true);
     assert.strictEqual(client.contract, shop);
     assert.strictEqual(client.describe().operations.length, 5);

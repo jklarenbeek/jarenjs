@@ -38,10 +38,14 @@
 
 /**
  * The response surface the adapter writes — `http.ServerResponse` fits.
+ * `write` and `flushHeaders` are read only for a streaming (SSE)
+ * response.
  * @typedef {Object} NodeResponseLike
  * @property {(status: number, headers?: Record<string, string>) => unknown} writeHead
  * @property {(body?: string | Uint8Array, callback?: () => void) => unknown} end
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} on
+ * @property {(chunk: string | Uint8Array) => unknown} [write]
+ * @property {() => unknown} [flushHeaders]
  * @property {boolean} [writableFinished]
  * @property {boolean} [headersSent]
  */
@@ -111,6 +115,27 @@ function concat(chunks, total) {
 function send(res, response, close, done) {
   /** @type {Record<string, string>} */
   const headers = { ...response.headers };
+  if (typeof response.stream === 'function') {
+    // an SSE response: headers out immediately, then the pump writes
+    // events until the stream ends (the pump ends the response itself);
+    // the peer-gone path runs through the request's abort signal
+    res.writeHead(response.status, headers);
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    response.stream({
+      write: (chunk) => {
+        if (typeof res.write === 'function') res.write(chunk);
+      },
+      end: () => {
+        try {
+          res.end();
+        }
+        catch {
+          // the socket may already be gone
+        }
+      },
+    });
+    return;
+  }
   const body = response.body;
   if (body !== null && headers['content-length'] === undefined) {
     headers['content-length'] = String(typeof body === 'string' ? new TextEncoder().encode(body).byteLength : body.byteLength);

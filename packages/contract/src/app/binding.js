@@ -47,12 +47,27 @@ import { ContractHostError } from '../errors.js';
  */
 
 /**
+ * One subscription slot: the slice member of a subscribe operation
+ * (docs/CONTRACT-FORMAT.md §11.4). `input` is what `start` was
+ * dispatched with — the subscription entry reads it from state, which
+ * is what lets the generated `withQuery` resolve the stream's input
+ * without a second channel; `value` is the maintained snapshot, `seq`
+ * the last applied emission's seq.
+ * @typedef {{ id: number, status: 'idle' | 'live' | 'error', kind: 'failure' | 'network' | 'contract' | null, input: unknown, value: unknown, error: unknown, meta: unknown, seq: number }} StreamSlot
+ */
+
+/**
  * The generated binding.
  * @typedef {Object} ContractAppBinding
- * @property {Record<string, TaskSlot>} slice - operation id → its initial slot; mount it at `statePath`
- * @property {Record<string, any>} actions - `<namespace><op>/start`, `<namespace><op>/done` and `<namespace><op>/reset` per operation
+ * @property {Record<string, TaskSlot | StreamSlot>} slice - operation id → its initial slot; mount it at `statePath`
+ * @property {Record<string, any>} actions - per read/command operation
+ *   `<namespace><op>/start`, `/done` and `/reset`; per subscribe operation
+ *   `/start`, `/stop`, `/snapshot`, `/patch`, `/error` and `/reset`
+ * @property {any[]} subs - one subscription entry per subscribe operation
+ *   (`run: "contract-stream"`); spread into the app document's `subs`
  * @property {any} schema - the slice's JSON Schema, `$defs` of the contract carried, for `validateState`
- * @property {'contract'} effect - the effect name the actions invoke
+ * @property {'contract'} effect - the effect name the task actions invoke
+ * @property {'contract-stream'} subscription - the handler name the subs entries run
  */
 
 /** `statePath`: identifier-safe segments only, so it maps to a JSONPath without quoting. */
@@ -100,6 +115,139 @@ function host(reason) {
  */
 function replace(path, value) {
   return { op: 'replace', path, value };
+}
+
+/**
+ * The generated documents of one subscribe operation
+ * (docs/CONTRACT-FORMAT.md §11.4): a guarded `start` (no second
+ * subscription while the slot is `live` — the same state-first rule as
+ * an exhaust command's start), `stop`, the stream actions the
+ * subscription handler dispatches (`snapshot`, `patch` — both guarded
+ * on the slot id, `patch` additionally on a strictly greater `seq`, so
+ * a stale instance's or an out-of-order event's dispatch is a provable
+ * no-op — and `error`), `reset`, the `subs` entry whose `withQuery`
+ * resolves the slot's `id` and `input` from state (restart keyed by the
+ * resolved props by value), and the slot's schema. The `patch` action
+ * receives the WHOLE patched document in `$payload.value` — an app
+ * action's `patch` member is a literal op list whose members are query
+ * expressions, so it cannot splice a runtime array of RFC 6902 ops; the
+ * subscription handler applies the emission with `@jarenjs/json/patch`
+ * (copy-on-write, structural sharing preserved) and the action replaces
+ * the slot value with the result.
+ * @param {Contract} contract
+ * @param {any} op
+ * @param {string} id
+ * @param {string} namespace
+ * @param {string} slot
+ * @param {string} slotQuery
+ * @param {string} idQuery
+ * @param {any} nextId
+ * @param {Record<string, any>} actions
+ * @param {any[]} subs
+ * @param {Record<string, any>} properties
+ */
+function appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuery, nextId, actions, subs, properties) {
+  const idGuard = { $eq: ['$payload.id', idQuery] };
+
+  setObjectMember(actions, `${namespace}${id}/start`, {
+    $if: [
+      { $ne: [`${slotQuery}.status`, 'live'] },
+      {
+        patch: [
+          replace(`${slot}/id`, nextId),
+          replace(`${slot}/status`, 'live'),
+          replace(`${slot}/kind`, null),
+          replace(`${slot}/error`, null),
+          replace(`${slot}/input`, '$payload'),
+        ],
+      },
+    ],
+  });
+
+  setObjectMember(actions, `${namespace}${id}/stop`, {
+    patch: [replace(`${slot}/status`, 'idle')],
+  });
+
+  setObjectMember(actions, `${namespace}${id}/snapshot`, {
+    $if: [
+      idGuard,
+      {
+        patch: [
+          replace(`${slot}/value`, '$payload.value'),
+          replace(`${slot}/seq`, '$payload.seq'),
+        ],
+      },
+    ],
+  });
+
+  setObjectMember(actions, `${namespace}${id}/patch`, {
+    $if: [
+      { $and: [idGuard, { $gt: ['$payload.seq', `${slotQuery}.seq`] }] },
+      {
+        patch: [
+          replace(`${slot}/value`, '$payload.value'),
+          replace(`${slot}/seq`, '$payload.seq'),
+        ],
+      },
+    ],
+  });
+
+  setObjectMember(actions, `${namespace}${id}/error`, {
+    $if: [
+      idGuard,
+      {
+        patch: [
+          replace(`${slot}/status`, 'error'),
+          replace(`${slot}/kind`, '$payload.outcome.kind'),
+          replace(`${slot}/error`, '$payload.outcome.error'),
+          replace(`${slot}/meta`, '$payload.outcome.meta'),
+        ],
+      },
+    ],
+  });
+
+  setObjectMember(actions, `${namespace}${id}/reset`, {
+    patch: [
+      replace(`${slot}/status`, 'idle'),
+      replace(`${slot}/kind`, null),
+      replace(`${slot}/error`, null),
+    ],
+  });
+
+  subs.push({
+    run: 'contract-stream',
+    when: { $eq: [`${slotQuery}.status`, 'live'] },
+    withQuery: {
+      op: id,
+      id: idQuery,
+      input: `${slotQuery}.input`,
+      snapshot: `${namespace}${id}/snapshot`,
+      patch: `${namespace}${id}/patch`,
+      error: `${namespace}${id}/error`,
+    },
+  });
+
+  const output = op.output.schema;
+  const valueSchema = output === true ? true
+    : output === false ? { type: 'null' }
+      : { anyOf: [{ type: 'null' }, output] };
+  const inputSchema = op.input === null
+    ? { type: 'null' }
+    : { anyOf: [{ type: 'null' }, op.input.schema] };
+  setObjectMember(properties, id, {
+    type: 'object',
+    required: ['id', 'status', 'kind', 'input', 'value', 'error', 'meta', 'seq'],
+    properties: {
+      id: { type: 'integer', minimum: 0 },
+      status: { enum: ['idle', 'live', 'error'] },
+      kind: { enum: [null, 'failure', 'network', 'contract'] },
+      input: inputSchema,
+      value: valueSchema,
+      error: { anyOf: [{ type: 'null' }, ERROR_SCHEMA] },
+      meta: { anyOf: [{ type: 'null' }, META_SCHEMA] },
+      seq: { type: 'integer', minimum: 0 },
+    },
+  });
 }
 
 /**
@@ -156,10 +304,12 @@ export function contractAppBinding(contract, options = {}) {
   if (!Array.isArray(ops)) throw host('ops must be an array of operation ids');
   const queryRoot = '$' + statePath.replaceAll('/', '.');
 
-  /** @type {Record<string, TaskSlot>} */
+  /** @type {Record<string, TaskSlot | StreamSlot>} */
   const slice = {};
   /** @type {Record<string, any>} */
   const actions = {};
+  /** @type {any[]} */
+  const subs = [];
   /** @type {Record<string, any>} */
   const properties = {};
   /** @type {string[]} */
@@ -171,14 +321,18 @@ export function contractAppBinding(contract, options = {}) {
       throw host(`ops names '${String(id)}', which is not an operation of the contract`);
     }
     const op = contract.operations[id];
-    if (/** @type {string} */ (op.kind) === 'subscribe') {
-      throw host(`'${id}' is a subscribe operation; the app binding carries reads and commands until the stream binding lands`);
-    }
     const slot = `${statePath}/${id}`;
     const slotQuery = `${queryRoot}['${id}']`;
     const idQuery = `${slotQuery}.id`;
     const nextId = { $add: [idQuery, 1] };
     const done = `${namespace}${id}/done`;
+
+    if (op.kind === 'subscribe') {
+      appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuery, nextId, actions, subs, properties);
+      setObjectMember(slice, id, { id: 0, status: 'idle', kind: null, input: null, value: null, error: null, meta: null, seq: 0 });
+      required.push(id);
+      continue;
+    }
 
     setObjectMember(slice, id, { id: 0, status: 'idle', kind: null, value: null, error: null, meta: null });
 
@@ -268,5 +422,5 @@ export function contractAppBinding(contract, options = {}) {
     schema.$defs = contract.$defs;
   }
 
-  return { slice, actions, schema, effect: 'contract' };
+  return { slice, actions, subs, schema, effect: 'contract', subscription: 'contract-stream' };
 }

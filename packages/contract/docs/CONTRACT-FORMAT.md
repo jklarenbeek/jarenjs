@@ -122,9 +122,9 @@ coming lines of this package and will append their sections here.
 | `operations` | yes | Operation id → operation. MUST carry at least one. |
 
 **Every object in this format has a closed vocabulary.** The root, an
-operation, `policy` and its `limits`/`errors`/`retry`, `http`, and an
-error declaration accept exactly the members listed for them; an unknown
-member is `JC0013` at that member. A silently ignored `policy` is a
+operation, `policy` and its `limits`/`errors`/`retry`/`stream`, `http`,
+and an error declaration accept exactly the members listed for them; an
+unknown member is `JC0013` at that member. A silently ignored `policy` is a
 behavior bug, so this format refuses rather than ignores.
 
 The document MUST be JSON: a member that is a function, a symbol, a
@@ -166,7 +166,7 @@ An operation is `{ kind, input?, output, errors?, policy?, http?, doc? }`.
 
 | member | required | meaning |
 |---|---|---|
-| `kind` | yes | `"read"` or `"command"`. `"subscribe"` is reserved for the stream binding and is refused (`JC0004`) rather than silently downgraded. |
+| `kind` | yes | `"read"`, `"command"` or `"subscribe"`. A subscribe operation's `output` is its **snapshot** schema and its emissions travel the stream binding (§17–§19). |
 | `input` | no | A JSON Schema whose **effective type is `object`** — `"type": "object"` on the schema itself or on the schema a `$ref` chain reaches (`JC0005`). Its top-level `properties` are the members the HTTP binding places (§4). Absent means the operation takes no input. |
 | `output` | yes | Any JSON Schema, `true` included (`JC0006` when absent). |
 | `errors` | no | `code → { status?, schema? }`. A code matches `^[a-z][a-z0-9-]*$`; `status` is an integer in 100–599 (default **400**); `schema` a JSON Schema for the error's details (`JC0011`). |
@@ -182,17 +182,20 @@ the resolved value and marks it inferred.
 
 | member | values | default | meaning |
 |---|---|---|---|
-| `task` | `switch` \| `exhaust` \| `concat` \| `parallel` | `switch` for a read, `exhaust` for a command | Which task mode a host effect runs the operation in: replace an in-flight attempt, let the first one finish, queue, or run concurrently. |
-| `idempotency` | `none` \| `optional` \| `required` | `none` | Whether a command carries an idempotency key. A **read MUST be `none`** (`JC0014`). |
+| `task` | `switch` \| `exhaust` \| `concat` \| `parallel` | `switch` for a read or a subscribe, `exhaust` for a command | Which task mode a host effect runs the operation in: replace an in-flight attempt, let the first one finish, queue, or run concurrently. A **subscribe MUST be `switch`** (`JC0018`) — a subscription slot is replaced, never queued. |
+| `idempotency` | `none` \| `optional` \| `required` | `none` | Whether a command carries an idempotency key. A **read MUST be `none`** (`JC0014`); a **subscribe MUST be `none`** (`JC0020`). |
 | `revision` | `"input:<json-pointer>"` | absent (`null`) | Where in the input the revision a command asserts lives, as an RFC 6901 pointer after `input:` (`JC0014` on malformed). The operation MUST declare `input`, and the pointer's **first reference token** MUST name a member of `input.properties` (`JC0014` otherwise — "revision points at '/x' but input declares no member 'x'"); deeper tokens are not checked (a member's schema may be a `$ref` or open), and the empty pointer (`"input:"`) addresses the whole input. |
 | `cache` | `none` \| `revision` | `none` | Whether a read's result may be cached by revision. |
 | `limits.maxBodyBytes` | positive integer | `1048576` | The request-body ceiling a server binding enforces. |
 | `errors.details` | `none` \| `paths` \| `full` | `paths` | How much of a validation failure crosses the wire: nothing, instance path + keyword, or the raw validator errors. |
 | `retry` | `{ max: integer ≥ 0, on: [codes] }` | absent (`null`) | Which error codes a client may retry (declared codes, or `JC2xxx` taxonomy codes), and how often beyond the first attempt; a network failure is always retried under a declared `retry`. A **command MUST declare `idempotency: "required"` to carry `retry`** (`JC0014`) — a retried command without a key the server deduplicates on runs twice; a read is idempotent by nature. |
+| `stream` | `{ resume?, heartbeatMs?, maxPatchBytes? }` | `{ resume: "snapshot", heartbeatMs: 15000 }` on a subscribe | The stream policy of a **subscribe** operation (`JC0014` on any other kind): `resume` is `snapshot` \| `replay` (§18's resumption rule), `heartbeatMs` an integer ≥ 1000 (the SSE heartbeat interval; a client treats `2 × heartbeatMs` of silence as `JC2094`), `maxPatchBytes` a positive integer — an emission whose serialized patch exceeds it is replaced by a fresh `snapshot` event (§18). |
 | `audience` | `public` \| `server` | `public` | Who may see the operation. A `server` operation is served and handled like any other, but is **kept out of the public projection** (§12.1) and therefore out of every projection built on it — OpenAPI, TypeScript, Markdown, the AI tools — and out of the revision. |
 
 The compiled `policy` is always
-`{ task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry, audience }`.
+`{ task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry, stream, audience }` —
+`stream` the materialized `{ resume, heartbeatMs, maxPatchBytes }` on a
+subscribe operation and `null` on every other kind.
 
 ### §3.2 `describe()`
 
@@ -218,7 +221,10 @@ The compiled `policy` is always
 `inferred` tells declared from defaulted: `http` is true when the whole
 binding is the canonical one; `in` lists the members whose location the
 compiler chose; the booleans mark defaulted `status`, `media`, `task`,
-`idempotency`, `cache`. Operations appear in document order.
+`idempotency`, `cache`. Operations appear in document order. A subscribe
+operation additionally shows its resolved `stream` policy (`{ resume,
+heartbeatMs, maxPatchBytes }`) and its forced `media`
+(`text/event-stream`).
 
 ## §4 The HTTP binding and member locations
 
@@ -373,7 +379,7 @@ carries the same codes and a test holds them equal.
 | JC0001 | the document is not a well-formed contract object: not an object, `$contract` is not `"0.1"`, `$defs` is not a map of schemas, a member is not a JSON value, or a member threw when read |
 | JC0002 | `operations` is not an object with at least one member, or an operation declaration is not an object |
 | JC0003 | an operation id does not match `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*$` |
-| JC0004 | `kind` is neither `read` nor `command` (`subscribe` is reserved and refused with the reason) |
+| JC0004 | `kind` is none of `read`, `command`, `subscribe` |
 | JC0005 | `input` is not a schema whose effective type is `object` |
 | JC0006 | `output` is absent or not a schema |
 | JC0007 | a `$ref` resolves neither within the document nor against the registered schemas |
@@ -387,8 +393,11 @@ carries the same codes and a test holds them equal.
 | JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped |
 | JC0016 | an operation bound to `GET` or `HEAD` carries a body-located member (a GET body) |
 | JC0017 | an opaque operation (a non-JSON `http.media`) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated (§4.5) |
+| JC0018 | a subscribe operation declares a `policy.task` other than `switch` — a subscription slot is replaced, never queued (§17) |
+| JC0019 | a subscribe operation is bound to a method other than `GET` — a stream is fetched, not sent (§17) |
+| JC0020 | a subscribe operation declares a `policy.idempotency` other than `none` — a subscription registers, it does not commit (§17) |
 
-`JC0018–JC0049` are reserved for further document-level rules and are
+`JC0021–JC0049` are reserved for further document-level rules and are
 appended to this table when they land; `JC0050–JC0069` are the binding-
 declaration and projection compile codes (`JC0060`, the OpenAPI keyword
 policy, is in §12.2's table). `JC1001–JC1049` are host
@@ -396,7 +405,7 @@ programming errors (`ContractHostError`, a thrown `TypeError` with `code`
 and `reason`) and `JC2001–JC2049` the HTTP request-time errors
 (`ContractRuntimeError` in-process, a wire error on the response) — both
 tables are in §7. Later ranges: `JC2050–JC2069` client-side (§10.3),
-`JC2070–JC2089` port/local (§15–§16), `JC2090–JC2109` stream (reserved).
+`JC2070–JC2089` port/local (§15–§16), `JC2090–JC2109` stream (§18).
 
 The three worked examples this document is tested against, complete:
 
@@ -461,10 +470,11 @@ mistake.
 { "status": 200, "headers": { "content-type": "application/json; charset=utf-8", "x-jaren-trace": "…" }, "body": "{…}" }
 ```
 
-The dispatcher is `{ dispatch, capabilities, contract, describe() }`;
+The dispatcher is `{ dispatch, capabilities, contract, describe(),
+close() }` — `close()` ends every live SSE stream (§18.1);
 `capabilities` is `{ name: "http", status: true, headers: true, media: true,
 head, etag: true, idempotency: <ledger present>, validatedOutput:
-<validateOutput === "always">, stream: false, cancel: "signal" }` — a
+<validateOutput === "always">, stream: true, cancel: "signal" }` — a
 declared downgrade (`head: false`, `validatedOutput: false`,
 `idempotency: false`) is reported here, never silent.
 
@@ -553,7 +563,11 @@ is `JC2008`.
    under the schema's own `additionalProperties`. A JSON body's own
    `__proto__` member becomes an own data property, never a prototype.
 8. **Validate** the input with the operation's compiled validator →
-   `JC2006`, `details` by `policy.errors.details` (§7.3).
+   `JC2006`, `details` by `policy.errors.details` (§7.3). A
+   **subscribe** operation branches here: with `accept:
+   text/event-stream` the response is the SSE stream, without it the
+   one-shot snapshot read (§18.1); the steps below never run for it
+   (its `policy.idempotency` is `none` by construction).
 9. **Idempotency** when `policy.idempotency !== "none"` (§8): a missing
    `Idempotency-Key` is `JC2007` under `required` and runs plainly under
    `optional`; otherwise the input is hashed and the ledger claimed.
@@ -666,8 +680,10 @@ wire response:
 | `JC1004` | `dispatch` received a malformed request object |
 | `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation (§10; on `local`/`port` the binding cannot carry it at all — §15, §16) |
 | `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299 |
-| `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare or cannot carry in the app binding, or `namespace`/`statePath` is malformed (§11) |
-| `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16) |
+| `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare, or `namespace`/`statePath` is malformed (§11) |
+| `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect`, `createContractSubscription` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16) |
+| `JC1009` | the stream wire's SSE encoder was handed text the frame cannot carry: a bare carriage return inside `data`, a line terminator inside `event` or `id` (§18) |
+| `JC1010` | `client.subscribe` was asked for an operation that is not a subscribe operation (§19) |
 
 ### §7.4 Headers
 
@@ -832,7 +848,8 @@ operation is reached through `url`).
 
 `capabilities` is `{ name: "http", status: true, headers: true, media:
 true, etag: true, idempotency: true, durableKeys: <storage given>,
-stream: false, cancel: "signal" }` — frozen, the driver rule.
+stream: true, cancel: "signal" }` — frozen, the driver rule; `stream`
+is the `subscribe` half (§19).
 
 ### §10.1 The outcome and the three identities
 
@@ -1033,14 +1050,16 @@ two unversioned contracts are `same-version`.
 
 `contractAppBinding(contract, { namespace = "contract/", statePath =
 "/contract", ops = contract.ids })` (`@jarenjs/contract/app`) returns
-**pure JSON** — `{ slice, actions, schema, effect: "contract" }` — the
-`fsmToApp`/`liveAppBinding` shape: a state slice the host mounts at
-`statePath`, action documents it spreads into its `actions`, and the
+**pure JSON** — `{ slice, actions, subs, schema, effect: "contract",
+subscription: "contract-stream" }` — the `fsmToApp`/`liveAppBinding`
+shape: a state slice the host mounts at `statePath`, action documents
+it spreads into its `actions`, subscription entries it spreads into its
+`subs` (one per subscribe operation, `[]` otherwise — §11.4), and the
 slice's JSON Schema for `validateState`. Neither package imports the
 other; the documents cross as JSON and the task-effect factory
 (`createTaskEffect` from `@jarenjs/app`) crosses as a function the host
 passes to `createContractEffect`. `ops` may name a subset (`JC1007` for
-an operation the contract does not declare or the binding cannot carry).
+an operation the contract does not declare).
 
 ### §11.1 The generated document
 
@@ -1195,6 +1214,63 @@ The runnable version of this composition, driven against a real
 `serveHttp` dispatcher, is [APP-INTEGRATION.md](APP-INTEGRATION.md),
 executed verbatim by the test suite.
 
+### §11.4 Subscribe operations: the generated subscription
+
+A subscribe operation becomes a **subscription**, not a task slot. Its
+slice member is `{ id, status: "idle" | "live" | "error", kind, input,
+value, error, meta, seq }` — `input` is what `start` was dispatched
+with, kept in state so the generated subscription entry can resolve it;
+`value` is the maintained snapshot; `seq` the last applied emission's.
+The generated actions:
+
+- `<ns><op>/start` — guarded on `status !== "live"` (the state-first
+  rule of an exhaust command's start: no second subscription while one
+  is live): increments `id`, sets `status: "live"`, clears
+  `kind`/`error`, stores `$payload` as `input`. It emits **nothing** —
+  the subscription below starts because its `when` sees the liveness.
+- `<ns><op>/stop` — `status: "idle"`; the app's own reconciliation runs
+  the subscription's cleanup (the client's `stop()`, exactly once).
+- `<ns><op>/snapshot` — guarded on `$payload.id` against the slot id;
+  sets `value` and `seq`.
+- `<ns><op>/patch` — guarded on the id **and** `$payload.seq` strictly
+  greater than the slot's; replaces `value` with `$payload.value` and
+  advances `seq`. The payload's `value` is the WHOLE patched document:
+  an action's `patch` member is a literal op list whose members are
+  query expressions — it cannot splice a runtime array of RFC 6902 ops
+  — so the handler applies the emission with `@jarenjs/json/patch`
+  (copy-on-write; structural sharing preserved) and the action replaces.
+- `<ns><op>/error` — guarded on the id; `status: "error"`, the
+  outcome's `kind`/`error`/`meta`.
+- `<ns><op>/reset` — as for tasks: `status "idle"`, `kind`/`error`
+  cleared, everything else kept.
+
+The binding additionally returns `subs` — one entry per subscribe
+operation — and names its handler in `subscription`:
+
+```jsonc
+{ "run": "contract-stream",
+  "when": { "$eq": ["$.contract['data.live'].status", "live"] },
+  "withQuery": { "op": "data.live", "id": "$.contract['data.live'].id",
+                 "input": "$.contract['data.live'].input",
+                 "snapshot": "contract/data.live/snapshot",
+                 "patch": "contract/data.live/patch",
+                 "error": "contract/data.live/error" } }
+```
+
+`withQuery` (not `with`) because the resolved props carry the slot's
+`id` and `input` from state — APP-FORMAT §5.3's restart rule then keys
+the instance by the resolved props by value. The handler is
+`createContractSubscription(client)` (`@jarenjs/contract/app`), a plain
+`(props, dispatch) => cleanup` — no task-effect factory is needed. It
+calls `client.subscribe`, applies each emission host-side, and
+dispatches the named actions with `{ id, … }` payloads; an `onError`
+outcome lands in the error action as-is, and a server `end` lands there
+as a `network`-kind outcome with the channel-closed code (`JC2074`) —
+the stream is gone and the slot says so; reconnection is a fresh
+`start`, never automatic. The slice schema pins the subscribe slot like
+the task slots (`status` to its three states, `input` to the
+operation's input schema or `null`, `seq` to a non-negative integer).
+
 ## §12 Projections
 
 Everything a consumer wants **beside** the runtime is a projection of the
@@ -1332,7 +1408,10 @@ rendered by emit's Markdown target over the **same** type model as
 `@jarenjs/ai`'s `createToolbox().add` takes and WebMCP's `registerTool`
 reads, **without importing that package** (the generated-document rule:
 the shape is a plain object; the test suite registers them into a real
-toolbox). Per public, invokable operation, in document order:
+toolbox). Per public, invokable operation (opaque and subscribe
+operations are skipped by the default set and refused when `ops` names
+one — a tool carries one invoke, not bytes and not a stream), in
+document order:
 
 - `name`: the id with `.` → `_` (injective — an id carries no `_`), or
   `options.name(id)`; every name MUST match OpenAI's
@@ -1505,7 +1584,9 @@ no `negotiate`, no `pending`.
 `invoke(op, input, ctx)` with `ctx = { signal?, attempt? }`:
 
 1. an unknown operation, or an opaque one, throws `JC1005` — non-JSON
-   media does not exist in-process (`capabilities.media: false`);
+   media does not exist in-process (`capabilities.media: false`); so
+   does a subscribe operation — this binding carries no streams
+   (`capabilities.stream: false`), and needs no handler for one;
 2. the input is validated with the operation's compiled validator; a
    refusal is the pre-send `JC2050` outcome (kind `contract`, details
    by `policy.errors.details`) and nothing ran — the same refusal every
@@ -1547,11 +1628,11 @@ Two readings that keep one handler table serving http AND locally:
   feature a binding was asked to carry and cannot, like http without a
   ledger); it carries `capabilities.idempotency: false` so the
   downgrade is declared, never silent.
-- **an opaque operation needs no handler and may still have one.**
-  `serveLocal` exempts opaque operations from the `JC1002` handler
-  requirement (they cannot be invoked here), and accepts a handler
-  table that carries one — so an http server's table is reusable
-  verbatim; the opaque handler is simply never called.
+- **an opaque or subscribe operation needs no handler and may still
+  have one.** `serveLocal` exempts both from the `JC1002` handler
+  requirement (neither can be invoked here), and accepts a handler
+  table that carries them — so an http server's table is reusable
+  verbatim; those handlers are simply never called.
 
 The local codes (the table shared with §16; `PORT_LOCAL_ERRORS` in
 `@jarenjs/contract/local` and `/port` is this table as data):
@@ -1569,9 +1650,13 @@ timeoutMs = 15000, catalog? })` — request/response over anything with
 automatically), a `Worker`, a `BroadcastChannel`, a worker's own
 `self`, or a plain object of that shape. The server prepares the same
 pipeline routes as §7 and refuses the same host mistakes (`JC1001`,
-`JC1002` — opaque operations exempt exactly as in §15); the client is
-the §10 shape minus `url`/`negotiate`/`pending`. Exactly ONE server
-should serve a shared channel — two would both answer every request.
+`JC1002` — opaque operations exempt exactly as in §15; a subscribe
+operation NEEDS its handler, it streams here — §18.2); the client is
+the §10 shape minus `url`/`negotiate`/`pending`, plus `subscribe`
+(§19). A request frame naming a subscribe operation is answered
+`JC2071` like an opaque one — a stream is never a request/response.
+Exactly ONE server should serve a shared channel — two would both
+answer every request.
 
 ### §16.1 Frames
 
@@ -1654,3 +1739,185 @@ as data):
 | `JC2072` | network | `contract/port-timeout` | yes | no answer within `timeoutMs` |
 | `JC2073` | contract | `contract/malformed-frame` | no | a response frame addressed to this client fails the frame grammar |
 | `JC2074` | network | `contract/channel-closed` | no | the channel refused the request frame |
+
+## §17 Subscribe operations
+
+A **subscribe** operation declares a live query: its `output` is the
+**snapshot** schema — the document a subscriber holds — and after the
+snapshot the server streams LIVE-FORMAT emissions `{ patch, seq }`
+(RFC 6902 `add`/`remove`/`replace` only) that the consumer applies to
+it. `input` travels as for a read (path variables → `path`, the rest →
+`query` by default); `errors` are declared as usual and end the stream
+as an `error` event (§18). The compiler enforces the shape the wire
+requires: `policy.task` MUST be `switch` (`JC0018` — a subscription
+slot is replaced, never queued), the binding MUST be `GET` (`JC0019`;
+the canonical binding of a subscribe without `http` is `GET /<op-id>`
+with every member in the query), `policy.idempotency` MUST be `none`
+(`JC0020`), and `http.media` is **forced** to `text/event-stream` — a
+declared conflicting media is `JC0012`, and `describe()` shows the
+forced value. A subscribe operation is never opaque: its events are
+JSON the contract decodes and validates. `policy.stream` (§3.1) is its
+knob set — `resume`, `heartbeatMs`, `maxPatchBytes` — and is refused
+on any other kind.
+
+### §17.1 The handler — a duck-typed LIVE subscription
+
+`handlers[op] = (input, ctx) => Subscription | Promise<Subscription>`
+where
+
+```
+Subscription = {
+  result | snapshot(),        // the current snapshot document; snapshot() preferred when both exist
+  subscribe(cb) → stop,       // cb receives LIVE-FORMAT emissions { patch, seq } or { error }
+  close(),                    // release the registration
+  replay?(seq),               // optional: the emissions after seq, or null/undefined when it cannot
+  mode?,                      // ignored by the binding
+}
+```
+
+— a `@jarenjs/db` `live()` object satisfies it **as returned** (`result`
++ `subscribe` + `close`; it has no `replay`), so a handler is one line:
+`(input) => store.collection('x').live(doc, { externals: input })`. No
+import of `@jarenjs/db` exists anywhere in the package; the shape is
+duck-typed. The handler runs through the same settlement boundary as
+every operation: a `ContractFailure` (or a thrown `ContractRuntimeError`
+with a declared code) is a declared failure, any other throw or hostile
+value is a host fault, and a settled value that does not carry
+`subscribe` + `close` + (`result` or `snapshot()`) is a host fault too.
+On HTTP these pre-stream failures answer as ordinary §7.3 responses
+(declared status, or 500); on `port` they answer as `error` push frames
+(§18). Once the stream is live, the binding reads the snapshot
+(`snapshot()` when present, else `result`), validates it against
+`output` (a failure ends the stream with an `error` event `JC2091` —
+the server broke the contract; the cause goes to `onError`, never the
+wire), forwards each emission verbatim (the binding never mutates a
+patch), and calls `stop()` then `close()` **exactly once** — on peer
+disconnect (`ctx.signal`), on an `unsubscribe`/stream cancel, on server
+close, and after an `error` emission ends the stream.
+
+## §18 The stream wire
+
+### §18.1 HTTP: Server-Sent Events
+
+Request: `GET <path>` with `accept: text/event-stream`. **A client
+without that accept header gets the snapshot as plain JSON** — the same
+operation serves a one-shot read through the ordinary §7 pipeline
+(handler → subscription → snapshot validated → `stop()`/`close()` →
+JSON response), which is also what `invoke` on a subscribe operation
+does; `capabilities.stream: true` says the streaming half exists.
+
+Response: `200`, `content-type: text/event-stream`, `cache-control:
+no-store`, `x-jaren-trace`. Events, in order:
+
+- `snapshot` — `id: <seq>` (the stream's starting seq; `0` for a source
+  that names none), data `{ "value": <snapshot>, "resumed": false }`.
+  The envelope exists because a resume verdict cannot ride *inside* the
+  snapshot value without breaking a closed output schema; `resumed:
+  false` states this snapshot is a fresh document (a refused resume —
+  `JC2095` — looks exactly like this, which is how the client learns).
+- `patch` — `id: <seq>`, data `{ "patch": [...], "seq": n }`: the
+  LIVE-FORMAT emission verbatim.
+- heartbeat comment lines (`:`) every `policy.stream.heartbeatMs`.
+- `error` — data the §7.3 wire error (no `status` member matters here);
+  the stream ends with it.
+- `end` — data `{ "reason": "closed" | "server-shutdown" }`.
+
+`seq` is strictly increasing per stream; a violation is the client's
+`JC2092`. An emission whose serialized patch exceeds
+`policy.stream.maxPatchBytes` is replaced by a fresh `snapshot` event
+at that emission's seq — the consumer swaps its document instead of
+patching it; nothing is dropped.
+
+**Resumption.** A request carrying `Last-Event-ID: <seq>` asks to
+resume. Under `resume: "replay"` the binding asks
+`subscription.replay?.(seq)`; when the handler answers an array of
+emissions, the stream starts with the `patch` events after that seq
+(no snapshot) and continues live. Otherwise — `resume: "snapshot"`, no
+`replay`, or a `replay` that answers `null` — the stream starts with a
+fresh `snapshot` whose data carries `resumed: false` (`JC2095`,
+informational, never an outcome).
+
+`toNodeHandler` writes SSE with `flushHeaders()` + `res.write` and ends
+on close; `toFetchHandler` answers a `ReadableStream` body; both abort
+`ctx.signal` when the peer goes away (`request.signal`, `req` close),
+which runs the exactly-once `stop()`/`close()`. A dispatcher's
+`close()` ends every live SSE stream with `end` (`server-shutdown`)
+before releasing it.
+
+### §18.2 Port: push frames
+
+The §16 frame family gains three shapes (the grammar artifact carries
+them):
+
+```jsonc
+{ "jaren": "contract/0.1", "subscribe": "<clientId>:<seq>", "op": "data.live",
+  "input": { "collection": "notes" }, "lastSeq": 41 }        // client → server; lastSeq? resumes
+{ "jaren": "contract/0.1", "unsubscribe": "<clientId>:<seq>" } // client → server; never answered
+{ "jaren": "contract/0.1", "id": "<clientId>:<seq>", "event": "snapshot",
+  "seq": 0, "data": { "value": { "rows": [] }, "resumed": false } } // server → client push
+```
+
+A push frame's `event` is `snapshot | patch | error | end` with the
+same data shapes as §18.1 (`error` data is the wire error; `end` data
+the reason record); `seq` mirrors the event's seq (`error`/`end` carry
+the last delivered seq). Ids are scoped exactly as §16's request ids,
+so two clients on one channel hold independent subscriptions and an
+`unsubscribe` from one cannot touch the other's. Pre-stream failures —
+unknown or non-subscribe `op` (`JC2071`), invalid input (`JC2006`),
+handler faults (`JC2070`), an invalid snapshot (`JC2091`) — arrive as
+`error` push frames. There is no heartbeat on a port (delivery is
+in-process); `server.close()` pushes `end` (`server-shutdown`) to every
+live subscription before stopping it.
+
+### §18.3 The stream codes
+
+`STREAM_ERRORS` (`@jarenjs/contract/stream`) is the table as data;
+these rows join `CONTRACT_CODES` and the English catalog like every
+other range:
+
+| code | kind | msgid | retryable | when |
+|---|---|---|---|---|
+| `JC2090` | contract | `contract/not-a-stream` | no | the server answered a subscribe request with a non-stream response (client-side) |
+| `JC2091` | contract | `contract/invalid-snapshot` | no | a snapshot fails the output validator — the server broke the contract; sent as the `error` event that ends the stream |
+| `JC2092` | contract | `contract/seq-regression` | no | an event's seq is not strictly greater than the last delivered (client-side) |
+| `JC2093` | contract | `contract/stream-error` | no | the stream ended with a server `error` event whose code the operation does not declare — a **declared** code lands as a `failure` outcome under its own code instead |
+| `JC2094` | network | `contract/heartbeat-missed` | yes | no bytes for `2 × heartbeatMs` (client-side, SSE only) |
+| `JC2095` | — | — | — | a requested resume was refused; informational, carried as `resumed: false` in the fresh snapshot's event data, never an outcome |
+
+`JC2096–JC2109` are reserved for later stream codes. `JC1009` (an SSE
+data string the frame cannot carry) and `JC1010` (`subscribe` of a
+non-subscribe operation) are the stream's host programming errors
+(§7.3's host table).
+
+## §19 The client: `subscribe`
+
+`client.subscribe(op, input, { onSnapshot, onPatch, onError, onEnd,
+signal, lastSeq }) → { stop() }` — on the `http` and `port` clients
+alike (`capabilities.stream: true`); `serveLocal` keeps
+`capabilities.stream: false` and needs no handler for a subscribe
+operation (`invoke` of one throws `JC1005` there). A non-subscribe
+operation is `JC1010`, thrown — the host named the wrong operation.
+
+- `onSnapshot(value, { seq, resumed })` — a fresh, validated snapshot;
+  the consumer replaces its document. `resumed` is `false` exactly as
+  §18.1 defines it.
+- `onPatch({ patch, seq })` — the LIVE emission, **not applied**: the
+  client forwards patches; the app binding (§11.4) and the consumer
+  apply them (`@jarenjs/json/patch`). `seq` is strictly increasing or
+  the stream ends with `JC2092`.
+- `onError(outcome)` — a D6 `ok: false` outcome (`failure` for a
+  declared error event; `network` for a transport failure or a missed
+  heartbeat; `contract` for `JC2090`/`JC2092`/`JC2093`, an invalid
+  snapshot value, or a pre-send input refusal `JC2050`). Its `error`
+  and `meta` carry every member (`status: null` where the wire has
+  none). After `onError` the stream is finished and cleaned up.
+- `onEnd({ reason })` — the server's `end` event; a stream that ends
+  without one is reported as `reason: "closed"`.
+
+Every callback is optional and total for the client: a callback that
+throws does not break the stream machinery. `signal` aborts the
+subscription silently (the caller asked); `stop()` does the same and,
+on `port`, posts the `unsubscribe` frame. `lastSeq` is what a
+reconnect passes (§18's resumption). **Reconnection is not automatic**:
+the host decides — a `subscribe` that ends with a `network` outcome is
+re-entered by calling `subscribe` again with the last delivered seq.

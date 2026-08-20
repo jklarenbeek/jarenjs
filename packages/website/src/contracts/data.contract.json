@@ -151,39 +151,37 @@
       "doc": "The store's explain record for a query document: the SQL pushed down, its parameters, the indexes chosen and the residual (null when fully pushed)."
     },
     "data.live": {
-      "kind": "command",
+      "kind": "subscribe",
       "input": {
         "type": "object",
         "required": ["collection", "document"],
         "properties": {
           "collection": { "$ref": "#/$defs/Collection" },
-          "document": true
+          "document": true,
+          "externals": { "type": "object" }
         }
       },
       "output": {
         "type": "object",
-        "required": ["liveId", "mode", "rows"],
+        "required": ["rows"],
         "properties": {
-          "liveId": { "type": "string" },
-          "mode": { "type": "object" },
           "rows": { "type": "array" }
         }
       },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Register a live query and answer its id, maintenance mode and initial rows. The emissions themselves ride the website's push path beside this contract until the stream binding carries subscriptions."
+      "doc": "Subscribe to a live query: the snapshot is LIVE's result document and every committed write follows as a { patch, seq } emission over the stream binding — RFC 6902 end to end. Unsubscribing is the wire's (the port unsubscribe frame)."
     },
-    "data.live.close": {
-      "kind": "command",
-      "input": {
+    "data.lives": {
+      "kind": "read",
+      "output": {
         "type": "object",
-        "required": ["liveId"],
+        "required": ["count"],
         "properties": {
-          "liveId": { "type": "string" }
+          "count": { "type": "integer", "minimum": 0 }
         }
       },
-      "output": { "type": "boolean" },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Stop a live query by its id. Closing an unknown id is true too — the registration is gone either way."
+      "doc": "The number of live registrations this store currently holds — the studio's status surface, and how a test observes that a departed tab's subscription was released."
     },
     "data.migrate": {
       "kind": "command",

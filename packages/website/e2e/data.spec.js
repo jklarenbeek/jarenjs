@@ -7,12 +7,15 @@
  * inserted, `explain()` shows the pushdown, a migration plans and
  * applies, data SURVIVES a reload (OPFS persistence), a SECOND
  * tab is refused the pool and downgrades to a client that still sees
- * live updates from the owner, and TWO client tabs firing distinct
- * queries over the one shared channel each render exactly their own
- * result — the port binding's client-scoped request ids at work where
- * the old per-tab `r<seq>` ids could cross-settle. The engine parity
- * is proven in Node (test/db/wasm-driver.test.js); this proves the
- * ENVIRONMENT.
+ * live updates from the owner — its live query is a SUBSCRIPTION over
+ * the contract stream binding now, so the patch that reaches it is a
+ * push frame, closing the tab releases the owner-side registration
+ * (the status line's count drops), and TWO client tabs each hold their
+ * own independent subscription while firing distinct queries over the
+ * one shared channel and rendering exactly their own result — the port
+ * binding's client-scoped ids at work where the old per-tab `r<seq>`
+ * ids could cross-settle. The engine parity is proven in Node
+ * (test/db/wasm-driver.test.js); this proves the ENVIRONMENT.
  *
  * OPFS needs a secure context and workers; 127.0.0.1 is secure. The
  * SAH-pool VFS needs NO COOP/COEP headers (that is why the deployed
@@ -109,9 +112,10 @@ test('data survives a reload via OPFS (or is honestly in-memory)', async ({ page
   }
 });
 
-test('a second tab is refused the pool and becomes a live client', async ({ browser }) => {
-  const context = await browser.newContext();
-  const owner = await context.newPage();
+test('a second tab is refused the pool, becomes a live client, and closing it releases its subscription', async ({ page: owner, context }) => {
+  // three live phases (client patch, count up, count down after close):
+  // more than the single-boot budget of the siblings
+  test.slow();
   await gotoData(owner);
   const ownerVfs = (await owner.locator('.data-status .data-vfs').textContent())?.trim();
   test.skip(ownerVfs !== 'opfs-sahpool',
@@ -125,12 +129,27 @@ test('a second tab is refused the pool and becomes a live client', async ({ brow
     .toHaveText('client', READY);
   await expect(client.locator('.data-refusal')).toContainText('JD2061');
 
-  // the owner writes; the client's live query — served over the channel
-  // by the owner's sole connection — sees it
+  // the owner writes; the client's live SUBSCRIPTION — a stream-binding
+  // push frame over the channel from the owner's sole connection — sees
+  // the patch
   await owner.locator('.data-insert-title').fill('cross tab hello');
   await owner.locator('.data-insert-title').blur();
   await expect(client.locator('.data-live-rows'))
     .toContainText('cross tab hello', READY);
+
+  // the owner's own live event refreshed the registration count: its
+  // subscription plus the client's
+  await expect(owner.locator('.data-live-regs')).toContainText('2', READY);
+
+  // closing the client tab stops its subscription (pagehide → the
+  // unsubscribe frame → owner-side stop() + close()); the count is
+  // refreshed by the owner's next live event, so insert until it drops
+  await client.close({ runBeforeUnload: true });
+  await expect(async () => {
+    await owner.locator('.data-insert-title').fill(`after close ${Date.now()}`);
+    await owner.locator('.data-insert-title').blur();
+    await expect(owner.locator('.data-live-regs')).toContainText('1', { timeout: 2_000 });
+  }).toPass(READY);
 
   await context.close();
 });
@@ -154,6 +173,13 @@ test('two client tabs sharing the owner channel never cross-settle', async ({ br
   };
   const a = await openClient();
   const b = await openClient();
+
+  // each client holds its OWN live subscription on the shared channel:
+  // one owner write reaches both panes as their own push frames
+  await owner.locator('.data-insert-title').fill('everyone sees this');
+  await owner.locator('.data-insert-title').blur();
+  await expect(a.locator('.data-live-rows')).toContainText('everyone sees this', READY);
+  await expect(b.locator('.data-live-rows')).toContainText('everyone sees this', READY);
 
   // two DISTINCT queries with distinguishable results, committed in each
   // tab's editor: A matches nothing, B matches every seeded row

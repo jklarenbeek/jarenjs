@@ -222,7 +222,10 @@ export function openLocalClient(contract, handlers, options = {}) {
     const id = contract.ids[i];
     const op = contract.operations[id];
     const handler = Object.hasOwn(handlers, id) ? handlers[id] : null;
-    if (handler === null && !op.http.opaque) {
+    // an opaque operation cannot be invoked here, and a subscribe
+    // operation cannot be streamed here (capabilities.stream is false) —
+    // neither demands a handler, so an HTTP handler table reuses verbatim
+    if (handler === null && !op.http.opaque && op.kind !== 'subscribe') {
       throw host('JC1002', `operation '${id}' has no handler`);
     }
     routes.set(id, prepare(op, handler));
@@ -268,6 +271,9 @@ export function openLocalClient(contract, handlers, options = {}) {
     }
     if (route.raw) {
       throw new ContractHostError('JC1005', `client: '${route.outcome.id}' is an opaque operation (media ${route.op.http.media}); the local binding carries JSON only (capabilities.media is false)`);
+    }
+    if (route.op.kind === 'subscribe') {
+      throw new ContractHostError('JC1005', `client: '${route.outcome.id}' is a subscribe operation; the local binding cannot carry a stream (capabilities.stream is false)`);
     }
     if (ctx === null || typeof ctx !== 'object') throw host('JC1001', 'ctx must be an object');
     const meta = makeMeta(route.outcome.id, ctx.attempt, null);

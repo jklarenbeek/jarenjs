@@ -37,11 +37,17 @@ import { contractCatalogEn } from '../messages.js';
 /**
  * A response as the binding answers it: a status, lowercase header names,
  * and a body that is a string (JSON text), bytes (an opaque operation) or
- * `null` (HEAD, 204, 304).
+ * `null` (HEAD, 204, 304). A streaming response (a subscribe operation
+ * under `accept: text/event-stream`) carries `body: null` plus `stream`:
+ * the adapter writes the headers, then MUST call `stream` exactly once
+ * with its sink — the pump writes SSE text through `sink.write` and
+ * calls `sink.end()` when the stream terminates; the returned function
+ * stops the stream when the consumer cancels.
  * @typedef {Object} HttpResponse
  * @property {number} status
  * @property {Readonly<Record<string, string>>} headers
  * @property {string | Uint8Array | null} body
+ * @property {(sink: { write: (chunk: string) => void, end: () => void }) => (() => void)} [stream]
  */
 
 /**

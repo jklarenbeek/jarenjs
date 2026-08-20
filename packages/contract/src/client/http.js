@@ -27,11 +27,15 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 import { canonicalSha256 } from '@jarenjs/json/canonical';
 import { JarenValidator } from '@jarenjs/validate';
 
+import { createSseEventDecoder } from '@jarenjs/core/text/sse';
+
 import { ContractHostError } from '../errors.js';
 import { compatReason } from '../compat.js';
 import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage } from '../http/wire.js';
+import { createStreamConsumer, STREAM_ERRORS } from '../stream/client.js';
+import { STREAM_MEDIA } from '../stream/sse.js';
 import {
-  CLIENT_ERRORS, prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, clientError,
+  CLIENT_ERRORS, prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, clientError, outcomeError,
 } from './outcome.js';
 
 export { CLIENT_ERRORS };
@@ -101,14 +105,26 @@ export { CLIENT_ERRORS };
  * @property {true} etag
  * @property {true} idempotency
  * @property {boolean} durableKeys - a `storage` was given
- * @property {false} stream
+ * @property {true} stream - `subscribe` carries SSE streams (docs/CONTRACT-FORMAT.md §19)
  * @property {'signal'} cancel
+ */
+
+/**
+ * The options of one `subscribe` call (docs/CONTRACT-FORMAT.md §19).
+ * @typedef {Object} SubscribeOptions
+ * @property {(value: unknown, info: { seq: number, resumed: boolean }) => void} [onSnapshot]
+ * @property {(emission: { patch: unknown[], seq: number }) => void} [onPatch]
+ * @property {(outcome: Outcome) => void} [onError]
+ * @property {(info: { reason: string }) => void} [onEnd]
+ * @property {AbortSignal} [signal] - stops the subscription silently
+ * @property {number} [lastSeq] - the resume seq (what a reconnect passes)
  */
 
 /**
  * The client — the binding-agnostic shape every client binding exposes.
  * @typedef {Object} HttpClient
  * @property {(op: string, input?: unknown, ctx?: InvokeContext) => Promise<Outcome>} invoke
+ * @property {(op: string, input?: unknown, options?: SubscribeOptions) => { stop: () => void }} subscribe
  * @property {(op: string, input?: unknown) => string} url
  * @property {(options?: { signal?: AbortSignal }) => Promise<Negotiation>} negotiate
  * @property {() => Promise<{ op: string, key: string }[]>} pending - the key records a restart must reconcile
@@ -771,6 +787,222 @@ export function openHttpClient(contract, options = {}) {
   }
 
   /**
+   * Subscribe to a subscribe operation's stream (docs/CONTRACT-FORMAT.md
+   * §19): one `GET` with `accept: text/event-stream`, the SSE events
+   * decoded and delivered through the callbacks; snapshots validated
+   * against the output schema, `seq` strictly increasing (`JC2092`),
+   * silence beyond `2 × heartbeatMs` a `JC2094` network outcome.
+   * Reconnection is the caller's: pass the last delivered seq as
+   * `lastSeq`.
+   * @param {string} op
+   * @param {unknown} [input]
+   * @param {SubscribeOptions} [options]
+   * @returns {{ stop: () => void }}
+   * @throws {ContractHostError} `JC1010` for a non-subscribe operation, `JC1008` for a malformed option
+   */
+  function subscribe(op, input, options = {}) {
+    const route = routeOf(op);
+    if (route.op.kind !== 'subscribe') {
+      throw new ContractHostError('JC1010', `client: '${route.id}' is a ${route.op.kind} operation — subscribe carries streams; use invoke`);
+    }
+    if (options === null || typeof options !== 'object') throw host('JC1008', 'subscribe options must be an object');
+    for (const name of ['onSnapshot', 'onPatch', 'onError', 'onEnd']) {
+      const cb = /** @type {any} */ (options)[name];
+      if (cb !== undefined && typeof cb !== 'function') throw host('JC1008', `options.${name} must be a function`);
+    }
+    /** @type {number | null} */
+    let lastSeq = null;
+    if (options.lastSeq !== undefined && options.lastSeq !== null) {
+      if (!Number.isInteger(options.lastSeq) || options.lastSeq < 0) throw host('JC1008', 'options.lastSeq must be a non-negative integer');
+      lastSeq = options.lastSeq;
+    }
+    const signal = options.signal === undefined || options.signal === null ? null : options.signal;
+    const meta = newMeta(route.id, null);
+    const streamPolicy = route.op.policy.stream;
+    const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;
+
+    const controller = new AbortController();
+    const composed = signal === null
+      ? AbortSignal.any([closer.signal, controller.signal])
+      : AbortSignal.any([closer.signal, controller.signal, signal]);
+    /** @type {ReadableStreamDefaultReader<Uint8Array> | null} */
+    let reader = null;
+    /** @type {ReturnType<typeof setTimeout> | 0} */
+    let watchdog = 0;
+
+    const consumer = createStreamConsumer({
+      route: route.outcome,
+      catalog,
+      meta,
+      callbacks: { onSnapshot: options.onSnapshot, onPatch: options.onPatch, onError: options.onError, onEnd: options.onEnd },
+      finish: () => {
+        if (watchdog !== 0) clearTimeout(watchdog);
+        watchdog = 0;
+        if (reader !== null) reader.cancel().catch(() => {});
+      },
+      lastSeq,
+    });
+
+    /** Push the silence watchdog forward: any bytes count as life. */
+    function resetWatchdog() {
+      if (watchdog !== 0) clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        consumer.fail(failedOutcome('network',
+          outcomeError('JC2094', renderMessage(catalog, STREAM_ERRORS.JC2094.msgid, { op: route.id, ms: 2 * heartbeatMs }), null, null, true), meta));
+        controller.abort();
+      }, 2 * heartbeatMs);
+      /** @type {any} */ (watchdog).unref?.();
+    }
+
+    /** @param {import('@jarenjs/core/text/sse').SseEvent} ev */
+    function deliver(ev) {
+      const parsed = ev.id === null ? NaN : Number.parseInt(ev.id, 10);
+      const seq = Number.isFinite(parsed) ? parsed : null;
+      let data;
+      try {
+        data = JSON.parse(ev.data);
+      }
+      catch {
+        data = undefined;
+      }
+      switch (ev.event) {
+        case 'snapshot':
+          consumer.snapshot(seq, data);
+          break;
+        case 'patch':
+          consumer.patch(seq, data);
+          break;
+        case 'error':
+          consumer.error(data);
+          break;
+        case 'end':
+          consumer.end(data);
+          break;
+        // an unknown event name is ignored — SSE's forward compatibility
+      }
+    }
+
+    (async () => {
+      if (closed || (signal !== null && signal.aborted)) {
+        consumer.cancel();
+        return;
+      }
+      // 1. validate before anything is sent — the shared pre-send refusal
+      let value;
+      if (!route.hasInput) {
+        if (input !== undefined && input !== null) {
+          consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'input' }]));
+          return;
+        }
+        value = {};
+      }
+      else {
+        value = inputValue(input);
+        const v = verdict(/** @type {(value: unknown) => any} */ (route.validateInput), value);
+        if (!v.valid) {
+          consumer.fail(invalidInput(route, meta, projectValidationDetails(route.details, v.errors)));
+          return;
+        }
+      }
+      // 2. the request
+      let requestUrl;
+      try {
+        requestUrl = baseUrl + pathOf(route, value);
+      }
+      catch {
+        consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]));
+        return;
+      }
+      /** @type {Record<string, string>} */
+      const requestHeaders = { ...staticHeaders, accept: STREAM_MEDIA };
+      if (lastSeq !== null) requestHeaders['last-event-id'] = String(lastSeq);
+      let response;
+      try {
+        response = await fetchFn(requestUrl, { method: 'GET', headers: requestHeaders, signal: composed });
+      }
+      catch (err) {
+        if (consumer.finished()) return;
+        if (composed.aborted || safeName(err) === 'AbortError') consumer.cancel();
+        else consumer.fail(failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta));
+        return;
+      }
+      // 3. the answer must be a 200 event stream — anything else classifies
+      let status;
+      let contentType = null;
+      try {
+        status = response.status;
+        const h = response.headers;
+        if (h !== null && typeof h === 'object' && typeof h.get === 'function') {
+          contentType = h.get('content-type');
+          const t = h.get('x-jaren-trace');
+          if (typeof t === 'string' && t.length > 0) meta.trace = t;
+        }
+      }
+      catch (err) {
+        if (!consumer.finished()) consumer.fail(failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta));
+        return;
+      }
+      if (!Number.isInteger(status) || status < 200 || status > 299) {
+        let text = null;
+        try {
+          text = await response.text();
+        }
+        catch {
+          text = null;
+        }
+        consumer.fail(assembleOutcome(route.outcome, { status, headers: null, text }, meta, catalog));
+        return;
+      }
+      const body = /** @type {any} */ (response).body;
+      if (typeof contentType !== 'string' || contentType.toLowerCase().indexOf(STREAM_MEDIA) === -1
+        || body === null || body === undefined || typeof body.getReader !== 'function') {
+        consumer.fail(failedOutcome('contract',
+          outcomeError('JC2090', renderMessage(catalog, STREAM_ERRORS.JC2090.msgid, { op: route.id }), status, null, false), meta));
+        return;
+      }
+      // 4. the event loop under the silence watchdog
+      reader = body.getReader();
+      const textDecoder = new TextDecoder();
+      const sse = createSseEventDecoder();
+      resetWatchdog();
+      try {
+        for (;;) {
+          const { done, value: chunk } = await reader.read();
+          if (done) break;
+          if (consumer.finished()) return;
+          resetWatchdog();
+          for (const ev of sse.feed(textDecoder.decode(chunk, { stream: true }))) {
+            deliver(ev);
+            if (consumer.finished()) return;
+          }
+        }
+        for (const ev of sse.end()) {
+          deliver(ev);
+          if (consumer.finished()) return;
+        }
+        // a stream that ends without an end event is reported as closed
+        consumer.end(undefined);
+      }
+      catch (err) {
+        if (consumer.finished()) return;
+        if (composed.aborted || safeName(err) === 'AbortError') consumer.cancel();
+        else consumer.fail(failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta));
+      }
+      finally {
+        if (watchdog !== 0) clearTimeout(watchdog);
+        watchdog = 0;
+      }
+    })();
+
+    return {
+      stop: () => {
+        consumer.cancel();
+        controller.abort();
+      },
+    };
+  }
+
+  /**
    * @param {string} op
    * @param {unknown} [input]
    * @returns {string}
@@ -890,12 +1122,13 @@ export function openHttpClient(contract, options = {}) {
     etag: true,
     idempotency: true,
     durableKeys: storage !== null,
-    stream: false,
+    stream: true,
     cancel: 'signal',
   });
 
   return Object.freeze({
     invoke,
+    subscribe,
     url,
     negotiate,
     pending,

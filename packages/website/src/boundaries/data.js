@@ -6,14 +6,17 @@
  * connection over the header-free OPFS SAH-pool VFS; a SECOND tab is
  * refused by OPFS exclusivity (the coded JD2061) and downgrades to a
  * CLIENT whose requests travel a `BroadcastChannel` to the owner —
- * LIVE-FORMAT §11 made concrete, with the request/response path on the
+ * LIVE-FORMAT §11 made concrete, with the whole protocol on the
  * @jarenjs/contract PORT binding over the studio's own contract
  * document (`../contracts/data.contract.json`). The binding's
  * client-scoped request ids are what make two client tabs on the one
  * shared channel unable to cross-settle, whatever they fire
- * concurrently; live emissions ride the worker's `push`/`clientPush`
- * messages beside the contract frames until the stream binding carries
- * subscriptions.
+ * concurrently; the live query is `client.subscribe` over the stream
+ * binding — the snapshot and every `{ patch, seq }` emission arrive as
+ * push frames, this boundary applies the patches with
+ * `@jarenjs/json/patch` (copy-on-write, the one diff format end to
+ * end), and a departing tab's `pagehide` stops the subscription so the
+ * owner releases the registration.
  *
  * The page stays a stylesheet; JavaScript lives here: the transport,
  * the effects, and the exported view model (the boundary-exports
@@ -22,6 +25,7 @@
  */
 
 import { pickAllowed } from '@jarenjs/core/array';
+import { applyJSONPatch } from '@jarenjs/json/patch';
 import { compileContract } from '@jarenjs/contract';
 import { openPortClient } from '@jarenjs/contract/port';
 
@@ -77,26 +81,13 @@ const SEEDS = [
  * the shared channel (client). `request` unwraps the binding's D6
  * outcome into the value-or-throw shape the effects consume — a
  * declared `db` failure surfaces the store's own code and message from
- * its details.
- * @param {{ onPush: (payload: any) => void,
- *   onStatus: (status: any) => void }} hooks
+ * its details; `subscribe` is the client's stream half, passed through.
  */
-function createTransport(hooks) {
+function createTransport() {
   /** @type {ReturnType<typeof openPortClient> | null} */
   let client = null;
   /** @type {Worker | null} */
   let worker = null;
-  /** @type {BroadcastChannel | null} */
-  let channel = null;
-
-  // live emissions (and the worker's ready note) travel beside the
-  // contract frames; the port client ignores them by shape, and this
-  // listener ignores the contract frames the same way
-  const pushListener = (/** @type {any} */ event) => {
-    const data = event?.data;
-    if (data?.push !== undefined) hooks.onPush(data.push);
-    else if (data?.clientPush !== undefined) hooks.onPush(data.clientPush);
-  };
 
   /** @param {any} outcome */
   const unwrap = (outcome) => {
@@ -110,10 +101,12 @@ function createTransport(hooks) {
 
   const request = async (op, args) => unwrap(await /** @type {NonNullable<typeof client>} */ (client).invoke(op, args));
 
+  /** @param {any} input @param {any} callbacks */
+  const subscribe = (input, callbacks) => /** @type {NonNullable<typeof client>} */ (client).subscribe('data.live', input, callbacks);
+
   const boot = async () => {
     worker = new Worker(new URL('../db-worker.js', import.meta.url),
       { type: 'module' });
-    worker.addEventListener('message', pushListener);
     // the wasm build + first store open is real work: give init room
     client = openPortClient(contract, { channel: worker, timeoutMs: 30_000 });
     const status = await request('data.init', null);
@@ -128,13 +121,11 @@ function createTransport(hooks) {
     client.close();
     worker.terminate();
     worker = null;
-    channel = new BroadcastChannel(CHANNEL);
-    channel.addEventListener('message', pushListener);
-    client = openPortClient(contract, { channel, timeoutMs: 30_000 });
+    client = openPortClient(contract, { channel: new BroadcastChannel(CHANNEL), timeoutMs: 30_000 });
     return status;
   };
 
-  return { boot, request };
+  return { boot, request, subscribe };
 }
 
 /**
@@ -144,8 +135,10 @@ function createTransport(hooks) {
 export function createDataRuntime(_env = {}) {
   /** @type {ReturnType<typeof createTransport> | null} */
   let transport = null;
-  /** @type {string | null} */
-  let liveId = null;
+  /** @type {{ stop: () => void } | null} */
+  let liveSub = null;
+  /** @type {any} */
+  let liveDoc = null;
 
   const parse = (text, what) => {
     try {
@@ -156,18 +149,50 @@ export function createDataRuntime(_env = {}) {
     }
   };
 
+  /**
+   * (Re)subscribe the live pane over the stream binding: the snapshot
+   * replaces the maintained document, each `{ patch, seq }` emission
+   * applies copy-on-write, and after every live event the owner's
+   * registration count is refreshed (the status surface).
+   * @param {string} collection
+   * @param {(name: string, payload?: any) => void} dispatch
+   */
+  const subscribeLive = (collection, dispatch) => {
+    liveSub?.stop();
+    const refreshRegistrations = () => {
+      transport?.request('data.lives', null)
+        .then((lives) => dispatch('data/lives', { count: lives.count }))
+        .catch(() => {});
+    };
+    liveSub = /** @type {NonNullable<typeof transport>} */ (transport).subscribe(
+      { collection, document: LIVE_QUERY },
+      {
+        onSnapshot: (/** @type {any} */ value) => {
+          liveDoc = value;
+          dispatch('data/live', { rows: value.rows });
+          refreshRegistrations();
+        },
+        onPatch: (/** @type {{ patch: any[], seq: number }} */ emission) => {
+          liveDoc = applyJSONPatch(liveDoc, emission.patch);
+          dispatch('data/live-event', { rows: liveDoc.rows, seq: emission.seq });
+          refreshRegistrations();
+        },
+        onError: (/** @type {any} */ outcome) =>
+          dispatch('data/error', { message: outcome.error.message }),
+        onEnd: (/** @type {{ reason: string }} */ info) =>
+          dispatch('data/error', { message: `live stream ended (${info.reason})` }),
+      });
+  };
+
+  // a departing tab releases its subscription so the owner's
+  // registration is not leaked (the wire's unsubscribe frame)
+  if (typeof addEventListener === 'function') {
+    addEventListener('pagehide', () => liveSub?.stop());
+  }
+
   const effects = {
     'data-boot': (_props, dispatch) => {
-      transport = createTransport({
-        onPush: (payload) => {
-          if (payload.liveId !== liveId) return;
-          dispatch('data/live-event', {
-            rows: payload.event.rows, seq: payload.event.seq ?? null,
-            error: payload.event.error?.message ?? null,
-          });
-        },
-        onStatus: () => {},
-      });
+      transport = createTransport();
       // seed the editor panes with the starting documents
       dispatch('data/seed', {
         modelText: JSON.stringify(DATA_MODEL, null, 2),
@@ -187,10 +212,7 @@ export function createDataRuntime(_env = {}) {
                 { collection: 'notes', doc: seedDoc }).catch(() => {});
             }
           }
-          const live = await transport.request('data.live',
-            { collection: 'notes', document: LIVE_QUERY });
-          liveId = live.liveId;
-          dispatch('data/live', { mode: live.mode, rows: live.rows });
+          subscribeLive('notes', dispatch);
           const rows = await transport.request('data.rows', { collection: 'notes' });
           dispatch('data/rows', { rows });
         })
@@ -203,12 +225,9 @@ export function createDataRuntime(_env = {}) {
         return;
       }
       transport?.request('data.open', { model: model.value, reset: true })
-        .then(async (opened) => {
+        .then((opened) => {
           dispatch('data/opened', opened);
-          const live = await transport.request('data.live',
-            { collection: Object.keys(model.value.collections)[0], document: LIVE_QUERY });
-          liveId = live.liveId;
-          dispatch('data/live', { mode: live.mode, rows: live.rows });
+          subscribeLive(Object.keys(model.value.collections)[0], dispatch);
         })
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
@@ -317,8 +336,8 @@ export function dataViewModel(state) {
         : JSON.stringify(data.explain.residual.reasons?.map((reason) => reason.construct)),
     },
     live: data.live,
-    liveStrategy: data.live.mode?.strategy ?? '—',
     liveSummary: `${data.live.rows.length} rows, seq ${data.live.seq ?? 0}`,
+    liveRegs: data.live.regs === null ? '—' : String(data.live.regs),
     liveJson: JSON.stringify(data.live.rows, null, 1),
     insertDraft: data.insertDraft,
     migration: data.migration,

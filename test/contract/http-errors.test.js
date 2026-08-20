@@ -17,6 +17,7 @@ import { serveHttp, HTTP_ERRORS } from '@jarenjs/contract/http';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { CLIENT_ERRORS } from '@jarenjs/contract/client';
 import { PORT_LOCAL_ERRORS } from '@jarenjs/contract/port';
+import { STREAM_ERRORS } from '@jarenjs/contract/stream';
 import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
@@ -224,7 +225,8 @@ describe('the three tables agree', () => {
     msgids.add('contract/handler-error');
     for (const row of Object.values(CLIENT_ERRORS)) msgids.add(row.msgid);
     for (const row of Object.values(PORT_LOCAL_ERRORS)) msgids.add(row.msgid);
-    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...msgids].sort(), 'the catalog has exactly the taxonomy msgids + handler-error + the client and port/local msgids');
+    for (const row of Object.values(STREAM_ERRORS)) msgids.add(row.msgid);
+    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...msgids].sort(), 'the catalog has exactly the taxonomy msgids + handler-error + the client, port/local and stream msgids');
     const httpCodes = Object.keys(CONTRACT_CODES).filter((c) => /^JC20[0-4]\d$/.test(c));
     assert.deepStrictEqual(httpCodes.sort(), Object.keys(HTTP_ERRORS).sort(), 'every JC2001–JC2049 of the code table is a taxonomy row');
   });

@@ -69,6 +69,41 @@ export function toFetchHandler(dispatcher) {
     const response = await dispatcher.dispatch({
       method, url: url.pathname + url.search, headers, body, signal: request.signal,
     });
+    if (typeof response.stream === 'function') {
+      // an SSE response: the pump writes into a ReadableStream; a
+      // consumer cancel stops the subscription (the request signal
+      // covers the disconnect path too)
+      const pump = response.stream;
+      const encoder = new TextEncoder();
+      /** @type {(() => void) | null} */
+      let stop = null;
+      const streamBody = new ReadableStream({
+        start(controller) {
+          stop = pump({
+            write: (chunk) => {
+              try {
+                controller.enqueue(encoder.encode(chunk));
+              }
+              catch {
+                // a closed stream drops the write; the abort path stops the pump
+              }
+            },
+            end: () => {
+              try {
+                controller.close();
+              }
+              catch {
+                // already closed
+              }
+            },
+          });
+        },
+        cancel() {
+          if (stop !== null) stop();
+        },
+      });
+      return new Response(streamBody, { status: response.status, headers: response.headers });
+    }
     return new Response(/** @type {BodyInit | null} */ (response.body), { status: response.status, headers: response.headers });
   };
 }

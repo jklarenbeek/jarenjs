@@ -176,7 +176,7 @@ describe('jaren-contract diff — the compatibility gate', () => {
     assert.match(badClass.stderr, /not a change class/);
 
     const refused = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json'],
-      withV2((v2) => { v2.operations['product.save'].kind = 'subscribe'; }));
+      withV2((v2) => { v2.operations['product.save'].kind = 'write'; }));
     assert.strictEqual(refused.status, 2);
     assert.match(refused.stderr, /JC0004/);
   });

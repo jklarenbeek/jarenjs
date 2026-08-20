@@ -176,7 +176,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       rows: [],                // the whole collection, last read
       results: [],             // the last query() result
       explain: null,           // the last explain() { sql, params, indexes, residual }
-      live: { mode: null, rows: [], seq: null },
+      live: { rows: [], seq: null, regs: null },
       // the insert field's buffer. A controlled input whose value is not
       // published per keystroke is erased by the next render, and this
       // page renders on every live-query event — so the title had to

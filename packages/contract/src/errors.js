@@ -35,7 +35,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC0001: 'the document is not a well-formed contract object: not an object, $contract is not "0.1", $defs is not a map of schemas, a member is not a JSON value, or a member threw when read',
   JC0002: 'operations is not an object with at least one member',
   JC0003: 'an operation id is not a dotted lowercase identifier',
-  JC0004: 'kind is neither read nor command (subscribe is not part of format 0.1)',
+  JC0004: 'kind is none of read, command, subscribe',
   JC0005: 'input is not a schema whose effective type is object',
   JC0006: 'output is absent or not a schema',
   JC0007: 'a $ref resolves neither within the document nor against the registered schemas',
@@ -49,6 +49,9 @@ export const CONTRACT_CODES = Object.freeze({
   JC0015: 'id, version, compat or an operation doc is mistyped',
   JC0016: 'an operation bound to GET or HEAD carries a body-located member (a GET body)',
   JC0017: 'an opaque operation (a non-JSON http.media) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated',
+  JC0018: 'a subscribe operation declares a policy.task other than switch — a subscription slot is replaced, never queued',
+  JC0019: 'a subscribe operation is bound to a method other than GET — a stream is fetched, not sent',
+  JC0020: 'a subscribe operation declares a policy.idempotency other than none — a subscription registers, it does not commit',
   // ——— projection compile (ContractCompileError, docPath into the contract document) ———
   JC0060: 'the OpenAPI projection met a schema keyword it cannot map honestly: a boolean required (draft-04 style) or a same-document $ref that lands outside $defs (both dropped and reported under lenient), or a components member inside a schema',
   JC0061: 'the public projection is not canonicalizable, so no revision exists — a string with an unpaired surrogate, say; docPath points at the offending value inside the projection',
@@ -59,8 +62,10 @@ export const CONTRACT_CODES = Object.freeze({
   JC1004: 'dispatch received a malformed request object (method or url not a string, headers not an object, body not a string, Uint8Array or null)',
   JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.url on http; the status-less bindings cannot carry it at all)',
   JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299',
-  JC1007: 'contractAppBinding: ops names an operation the contract does not declare or one the binding cannot carry (a subscribe operation until the stream binding lands), or namespace/statePath is malformed',
-  JC1008: 'openHttpClient, openPortClient, client.url, createContractEffect or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
+  JC1007: 'contractAppBinding: ops names an operation the contract does not declare, or namespace/statePath is malformed',
+  JC1008: 'openHttpClient, openPortClient, client.url, createContractEffect, createContractSubscription or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
+  JC1009: 'encodeSseEvent (the stream wire): an event, id or data string the SSE frame cannot carry — a bare carriage return inside data, a line terminator inside event or id',
+  JC1010: 'client.subscribe was asked for an operation that is not a subscribe operation (invoke carries reads and commands; subscribe carries streams)',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',
@@ -93,6 +98,13 @@ export const CONTRACT_CODES = Object.freeze({
   JC2072: 'a port request got no answer within timeoutMs (kind network, retryable)',
   JC2073: 'a response frame addressed to this client does not match the frame grammar (kind contract)',
   JC2074: 'the channel refused the request frame — closed or detached (kind network)',
+  // ——— stream binding (outcomes of subscribe, or wire error events; never thrown) ———
+  JC2090: 'the server answered a subscribe request with a non-stream response (kind contract)',
+  JC2091: 'a snapshot fails the operation\'s output validator — the server broke the contract; the stream ends with an error event carrying this code',
+  JC2092: 'a stream event\'s seq is not strictly greater than the last one delivered (kind contract, client-side)',
+  JC2093: 'the stream ended with a server error event whose code the operation does not declare (kind contract; a declared code is a failure outcome under its own code)',
+  JC2094: 'the stream went silent for twice policy.stream.heartbeatMs (kind network, client-side)',
+  JC2095: 'a requested resume was refused — informational, carried as resumed:false in the fresh snapshot\'s event data, never an outcome',
 });
 
 /**

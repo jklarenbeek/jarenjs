@@ -172,17 +172,23 @@ delete it or fix it.
 
 ## @jarenjs/contract
 
-- [ ] **The `stream` binding and the `subscribe` kind** — the remaining
-  phase-2 binding (`local` and `port` shipped, CONTRACT-FORMAT.md
-  §15–§16, with the website's db-owner protocol re-homed on `port`):
-  `subscribe` operations carrying LIVE-FORMAT `{ patch, seq }` emissions
-  as SSE over http and as push messages over the port framing, with
-  `Last-Event-ID` resumption and a generated patch action — `subscribe`
-  is refused with `JC0004`, and the website's live emissions ride its
-  own `push`/`clientPush` messages beside the contract frames, until
-  then. The binding contract it must satisfy — a frozen `capabilities`
-  table that says what it cannot carry, D6 outcomes with no member
-  omitted — is already normative in CONTRACT-FORMAT.md §5/§10.1.
+- [ ] **Stream reconnection stays the host's hand** — the `stream`
+  binding shipped (CONTRACT-FORMAT.md §17–§19: the `subscribe` kind,
+  LIVE-FORMAT `{ patch, seq }` emissions as SSE over http and push
+  frames over port, `Last-Event-ID`/`lastSeq` resumption, the generated
+  subscription in the app binding, the website's live pane re-homed on
+  it), but a stream that ends with a `network` outcome is re-entered
+  only by the host calling `subscribe` again with the last delivered
+  seq. An automatic reconnect policy (backoff, resume, give-up) is the
+  open decision — the `lastSeq` option is the hook it would use.
+- [ ] **Query-located object members do not survive the HTTP wire** —
+  the transport coercion is deliberately scalar-only (query strings,
+  form fields), so a `subscribe`/`read` input member typed `object`/
+  `array` round-trips over `port`/`local` but arrives as its JSON text
+  in a query string over http. Whether the transport should JSON-decode
+  a member whose declared type is non-scalar (a D3 extension) is open;
+  until then such operations belong on the JSON-framed bindings or key
+  their stream by scalars.
 - [ ] **The schema-driven serializer stays unbuilt — measured, not
   assumed.** The scheduling criterion was: build it only if serialization
   is ≥ 25% of the per-request cost on the committed dispatch table. The

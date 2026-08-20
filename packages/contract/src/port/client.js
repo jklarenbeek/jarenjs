@@ -27,11 +27,12 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError } from '../errors.js';
 import { validateOperationInput, PORT_LOCAL_ERRORS } from '../pipeline.js';
-import { renderMessage } from '../http/wire.js';
+import { renderMessage, projectValidationDetails, verdict } from '../http/wire.js';
+import { createStreamConsumer } from '../stream/client.js';
 import {
   prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, outcomeError, clientError,
 } from '../client/outcome.js';
-import { requestFrame, cancelFrame, isContractFrame, attach, isChannel } from './frame.js';
+import { requestFrame, cancelFrame, subscribeFrame, unsubscribeFrame, isContractFrame, attach, isChannel } from './frame.js';
 
 export { PORT_LOCAL_ERRORS };
 
@@ -69,14 +70,28 @@ export { PORT_LOCAL_ERRORS };
  * @property {false} media
  * @property {false} etag
  * @property {false} idempotency
- * @property {false} stream
+ * @property {true} stream - `subscribe` carries push-frame streams (docs/CONTRACT-FORMAT.md §18.2)
  * @property {'message'} cancel
+ */
+
+/**
+ * The options of one `subscribe` call (docs/CONTRACT-FORMAT.md §19).
+ * There is no heartbeat on a port — delivery is in-process — so no
+ * silence watchdog runs here.
+ * @typedef {Object} PortSubscribeOptions
+ * @property {(value: unknown, info: { seq: number, resumed: boolean }) => void} [onSnapshot]
+ * @property {(emission: { patch: unknown[], seq: number }) => void} [onPatch]
+ * @property {(outcome: Outcome) => void} [onError]
+ * @property {(info: { reason: string }) => void} [onEnd]
+ * @property {AbortSignal} [signal] - stops the subscription silently
+ * @property {number} [lastSeq] - the resume seq (what a reconnect passes)
  */
 
 /**
  * The port client — the binding-agnostic client shape over a channel.
  * @typedef {Object} PortClient
  * @property {(op: string, input?: unknown, ctx?: PortInvokeContext) => Promise<Outcome>} invoke
+ * @property {(op: string, input?: unknown, options?: PortSubscribeOptions) => { stop: () => void }} subscribe
  * @property {PortClientCapabilities} capabilities
  * @property {Contract} contract
  * @property {() => any} describe
@@ -176,6 +191,8 @@ export function openPortClient(contract, options) {
   let seq = 0;
   /** @type {Map<string, Pending>} */
   const pending = new Map();
+  /** @type {Map<string, ReturnType<typeof createStreamConsumer>>} */
+  const streams = new Map();
   let closed = false;
 
   /**
@@ -226,6 +243,28 @@ export function openPortClient(contract, options) {
     if (typeof f.id !== 'string' || !f.id.startsWith(prefix)) return;
     // our own request frame, echoed by a loopback channel: not a response
     if (typeof f.op === 'string') return;
+    // a push frame: one stream event for a subscription this client holds
+    if (typeof f.event === 'string') {
+      const consumer = streams.get(f.id);
+      if (consumer === undefined) return;
+      const at = typeof f.seq === 'number' && Number.isFinite(f.seq) ? f.seq : null;
+      switch (f.event) {
+        case 'snapshot':
+          consumer.snapshot(at, f.data);
+          break;
+        case 'patch':
+          consumer.patch(at, f.data);
+          break;
+        case 'error':
+          consumer.error(f.data);
+          break;
+        case 'end':
+          consumer.end(f.data);
+          break;
+        // an unknown event name is ignored — the wire's forward compatibility
+      }
+      return;
+    }
     const entry = take(f.id);
     if (entry === undefined) return;
     const { route, meta } = entry;
@@ -274,6 +313,9 @@ export function openPortClient(contract, options) {
     }
     if (route.raw) {
       throw new ContractHostError('JC1005', `client: '${route.op.id}' is an opaque operation (media ${route.op.http.media}); the port binding carries JSON only (capabilities.media is false)`);
+    }
+    if (route.op.kind === 'subscribe') {
+      throw new ContractHostError('JC1005', `client: '${route.op.id}' is a subscribe operation — a port carries it as a stream; use client.subscribe`);
     }
     if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
     const meta = makeMeta(route.op.id, ctx.attempt, null);
@@ -338,6 +380,108 @@ export function openPortClient(contract, options) {
     });
   }
 
+  /**
+   * Subscribe to a subscribe operation's stream (docs/CONTRACT-FORMAT.md
+   * §19): one subscribe frame, the push frames delivered through the
+   * callbacks; snapshots validated against the output schema, `seq`
+   * strictly increasing (`JC2092`). `stop()` posts the unsubscribe
+   * frame; there is no heartbeat on a port. Reconnection is the
+   * caller's: pass the last delivered seq as `lastSeq`.
+   * @param {string} op
+   * @param {unknown} [input]
+   * @param {PortSubscribeOptions} [options]
+   * @returns {{ stop: () => void }}
+   * @throws {ContractHostError} `JC1010` for a non-subscribe operation, `JC1008` for a malformed option
+   */
+  function subscribe(op, input, options = {}) {
+    const route = routes.get(op);
+    if (route === undefined) {
+      throw new ContractHostError('JC1005', `client: '${String(op)}' is not an operation of the contract`);
+    }
+    if (route.op.kind !== 'subscribe') {
+      throw new ContractHostError('JC1010', `client: '${route.op.id}' is a ${route.op.kind} operation — subscribe carries streams; use invoke`);
+    }
+    if (options === null || typeof options !== 'object') throw host('JC1008', 'subscribe options must be an object');
+    for (const name of ['onSnapshot', 'onPatch', 'onError', 'onEnd']) {
+      const cb = /** @type {any} */ (options)[name];
+      if (cb !== undefined && typeof cb !== 'function') throw host('JC1008', `options.${name} must be a function`);
+    }
+    /** @type {number | null} */
+    let lastSeq = null;
+    if (options.lastSeq !== undefined && options.lastSeq !== null) {
+      if (!Number.isInteger(options.lastSeq) || options.lastSeq < 0) throw host('JC1008', 'options.lastSeq must be a non-negative integer');
+      lastSeq = options.lastSeq;
+    }
+    const signal = options.signal === undefined || options.signal === null ? null : options.signal;
+    const meta = makeMeta(route.op.id, null, null);
+    const id = prefix + (++seq);
+
+    /** @type {() => void} */
+    let removeAbort = () => {};
+    const consumer = createStreamConsumer({
+      route: route.outcome,
+      catalog,
+      meta,
+      callbacks: { onSnapshot: options.onSnapshot, onPatch: options.onPatch, onError: options.onError, onEnd: options.onEnd },
+      finish: () => {
+        streams.delete(id);
+        removeAbort();
+      },
+      lastSeq,
+    });
+
+    const stop = () => {
+      const held = streams.has(id);
+      consumer.cancel();
+      if (held) {
+        try {
+          channel.postMessage(unsubscribeFrame(id));
+        }
+        catch {
+          // a channel that cannot carry the unsubscribe changes nothing
+        }
+      }
+    };
+
+    if (closed || (signal !== null && signal.aborted)) {
+      queueMicrotask(() => consumer.cancel());
+      return { stop };
+    }
+
+    // validate before anything is posted — the shared pre-send refusal
+    let value;
+    let refusal = null;
+    if (!route.hasInput) {
+      if (input !== undefined && input !== null) refusal = [{ path: '', keyword: 'input' }];
+      value = null;
+    }
+    else {
+      value = input === undefined || input === null ? {} : input;
+      const v = verdict(/** @type {(value: unknown) => any} */ (route.validateInput), value);
+      if (!v.valid) refusal = projectValidationDetails(route.details, v.errors);
+    }
+    if (refusal !== null) {
+      const outcome = failedOutcome('contract', clientError(catalog, 'JC2050', { op: route.op.id }, null, refusal), meta);
+      queueMicrotask(() => consumer.fail(outcome));
+      return { stop };
+    }
+
+    streams.set(id, consumer);
+    if (signal !== null) {
+      const onAbort = () => stop();
+      signal.addEventListener('abort', onAbort, { once: true });
+      removeAbort = () => signal.removeEventListener('abort', onAbort);
+    }
+    try {
+      channel.postMessage(subscribeFrame(id, route.op.id, value, lastSeq));
+    }
+    catch {
+      const outcome = bindingOutcome('network', 'JC2074', { op: route.op.id }, meta);
+      queueMicrotask(() => consumer.fail(outcome));
+    }
+    return { stop };
+  }
+
   /** @type {PortClientCapabilities} */
   const capabilities = Object.freeze({
     name: 'port',
@@ -346,12 +490,13 @@ export function openPortClient(contract, options) {
     media: false,
     etag: false,
     idempotency: false,
-    stream: false,
+    stream: true,
     cancel: 'message',
   });
 
   return Object.freeze({
     invoke,
+    subscribe,
     capabilities,
     contract,
     describe: () => contract.describe(),
@@ -366,6 +511,8 @@ export function openPortClient(contract, options) {
         entry.cleanup();
         entry.resolve(cancelled(entry.route, entry.meta));
       }
+      for (const consumer of [...streams.values()]) consumer.cancel();
+      streams.clear();
     },
   });
 }

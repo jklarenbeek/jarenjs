@@ -32,7 +32,7 @@ const load = (/** @type {string} */ rel) => JSON.parse(readFileSync(new URL(rel,
 function blocks() {
   const md = readFileSync(DOC, 'utf8');
   const found = [...md.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]));
-  assert.strictEqual(found.length, 2, 'APP-INTEGRATION.md carries exactly two json blocks: the contract and the app document');
+  assert.strictEqual(found.length, 3, 'APP-INTEGRATION.md carries exactly three json blocks: the contract, the app document, and the live contract (run by app-subscription.test.js)');
   return { contractDoc: found[0], appDoc: found[1] };
 }
 

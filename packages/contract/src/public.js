@@ -13,7 +13,7 @@
  * revision is the SHA-256 of the canonical bytes of this document): root
  * `$contract, id, version, compat, $defs, operations`; operation `kind,
  * input, output, errors, policy, http, doc`; policy `task, idempotency,
- * revision, cache, retry, audience`; http `method, path, in, body, status,
+ * revision, cache, retry, stream, audience`; http `method, path, in, body, status,
  * media`; error `status, schema`; operations in document order; `$defs` in
  * first-reference order. Defaults are materialized (the projection says
  * what the binding DOES, not what the author typed), so two documents
@@ -100,6 +100,11 @@ function publicPolicy(op) {
   if (p.revision !== null) policy.revision = p.revision;
   policy.cache = p.cache;
   if (p.retry !== null) policy.retry = { max: p.retry.max, on: p.retry.on.slice() };
+  if (p.stream !== null) {
+    policy.stream = p.stream.maxPatchBytes === null
+      ? { resume: p.stream.resume, heartbeatMs: p.stream.heartbeatMs }
+      : { resume: p.stream.resume, heartbeatMs: p.stream.heartbeatMs, maxPatchBytes: p.stream.maxPatchBytes };
+  }
   policy.audience = p.audience;
   return policy;
 }

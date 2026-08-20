@@ -105,6 +105,7 @@ describe('the jaren-contract schema artifact', () => {
     const validate = compileGrammar(schema);
     assert.strictEqual(validate({ $contract: '0.1', operations: { a: { kind: 'command', output: true } } }), true);
     assert.strictEqual(validate({ $contract: '0.1', operations: { a: { kind: 'read', output: false, http: { method: 'GET', path: '/' } } } }), true);
+    assert.strictEqual(validate({ $contract: '0.1', operations: { a: { kind: 'subscribe', output: true, policy: { stream: { resume: 'replay', heartbeatMs: 2000, maxPatchBytes: 65536 } } } } }), true);
   });
 
   /**
@@ -126,7 +127,9 @@ describe('the jaren-contract schema artifact', () => {
     ['JC0003', { $contract: '0.1', operations: { 'a-b': READ } }],
     ['JC0004', one({ output: true })],
     ['JC0004', one({ kind: 'write', output: true })],
-    ['JC0004', one({ kind: 'subscribe', output: true })],
+    ['JC0013', one({ kind: 'subscribe', output: true, policy: { stream: { pace: 5 } } })],
+    ['JC0014', one({ kind: 'subscribe', output: true, policy: { stream: { resume: 'rewind' } } })],
+    ['JC0014', one({ kind: 'subscribe', output: true, policy: { stream: { heartbeatMs: 500 } } })],
     ['JC0005', one({ kind: 'read', input: true, output: true })],
     ['JC0005', one({ kind: 'read', input: 'x', output: true })],
     ['JC0006', one({ kind: 'read' })],

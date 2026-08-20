@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://jarenjs.dev/schemas/jaren-contract-port/0.1/draft-07",
   "title": "Jaren contract port frame 0.1",
-  "description": "The frame grammar of the port binding (packages/contract/docs/CONTRACT-FORMAT.md §16): every message the binding puts on a MessagePort, Worker or BroadcastChannel is one of these three JSON-safe plain objects, marked jaren: \"contract/0.1\" so contract traffic is distinguishable by shape from anything else sharing the channel. A request id is \"<clientId>:<seq>\" — the client id unique per client instance — so two clients on one channel can never cross-settle; the request members attempt and key are reserved and ignored by servers of this version.",
+  "description": "The frame grammar of the port binding (packages/contract/docs/CONTRACT-FORMAT.md §16): every message the binding puts on a MessagePort, Worker or BroadcastChannel is one of these six JSON-safe plain objects (request/response/cancel, and the stream family: subscribe/unsubscribe from a client, push events from a server), marked jaren: \"contract/0.1\" so contract traffic is distinguishable by shape from anything else sharing the channel. A request id is \"<clientId>:<seq>\" — the client id unique per client instance — so two clients on one channel can never cross-settle; the request members attempt and key are reserved and ignored by servers of this version.",
   "oneOf": [
     {
       "$ref": "#/definitions/request"
@@ -12,6 +12,15 @@
     },
     {
       "$ref": "#/definitions/cancel"
+    },
+    {
+      "$ref": "#/definitions/subscribe"
+    },
+    {
+      "$ref": "#/definitions/unsubscribe"
+    },
+    {
+      "$ref": "#/definitions/push"
     }
   ],
   "definitions": {
@@ -145,6 +154,86 @@
         "cancel": {
           "$ref": "#/definitions/id"
         }
+      },
+      "additionalProperties": false
+    },
+    "subscribe": {
+      "description": "A client's subscription of one subscribe operation: opens a stream under the id. input is the whole input object, or null for an input-less operation; lastSeq, when present, asks to resume after that seq.",
+      "type": "object",
+      "required": [
+        "jaren",
+        "subscribe",
+        "op",
+        "input"
+      ],
+      "properties": {
+        "jaren": {
+          "$ref": "#/definitions/marker"
+        },
+        "subscribe": {
+          "$ref": "#/definitions/id"
+        },
+        "op": {
+          "description": "The operation id, as declared in the contract.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$"
+        },
+        "input": true,
+        "lastSeq": {
+          "description": "The last seq this client delivered; the server replays after it or answers a fresh snapshot with resumed: false.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "unsubscribe": {
+      "description": "A client's release of one stream id. Never answered.",
+      "type": "object",
+      "required": [
+        "jaren",
+        "unsubscribe"
+      ],
+      "properties": {
+        "jaren": {
+          "$ref": "#/definitions/marker"
+        },
+        "unsubscribe": {
+          "$ref": "#/definitions/id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "push": {
+      "description": "A server's stream event for one subscription id: snapshot data is { value, resumed }, patch data the LIVE emission { patch, seq }, error data the wire error record, end data { reason }. seq is the event's seq; error and end carry the last delivered one.",
+      "type": "object",
+      "required": [
+        "jaren",
+        "id",
+        "event",
+        "seq",
+        "data"
+      ],
+      "properties": {
+        "jaren": {
+          "$ref": "#/definitions/marker"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "event": {
+          "enum": [
+            "snapshot",
+            "patch",
+            "error",
+            "end"
+          ]
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "data": true
       },
       "additionalProperties": false
     }

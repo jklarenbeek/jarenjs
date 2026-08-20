@@ -61,10 +61,11 @@
       "type": "object",
       "properties": {
         "kind": {
-          "description": "'read' or 'command'; 'subscribe' is reserved for a later format version and refused by the compiler.",
+          "description": "'read', 'command' or 'subscribe' — a subscribe operation's snapshot and { patch, seq } emissions travel the stream binding (SSE over http, push frames over port); the compiler forces its binding to GET + text/event-stream.",
           "enum": [
             "read",
-            "command"
+            "command",
+            "subscribe"
           ]
         },
         "input": {
@@ -197,6 +198,27 @@
             "max",
             "on"
           ],
+          "additionalProperties": false
+        },
+        "stream": {
+          "description": "The stream policy of a subscribe operation (refused on any other kind): resume snapshot|replay (default snapshot), heartbeatMs ≥ 1000 (default 15000), maxPatchBytes a positive integer.",
+          "type": "object",
+          "properties": {
+            "resume": {
+              "enum": [
+                "snapshot",
+                "replay"
+              ]
+            },
+            "heartbeatMs": {
+              "type": "integer",
+              "minimum": 1000
+            },
+            "maxPatchBytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
           "additionalProperties": false
         },
         "audience": {

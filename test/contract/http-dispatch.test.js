@@ -23,6 +23,7 @@ import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH } from '@jarenjs/contract/http'
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { CLIENT_ERRORS } from '@jarenjs/contract/client';
 import { PORT_LOCAL_ERRORS } from '@jarenjs/contract/port';
+import { STREAM_ERRORS } from '@jarenjs/contract/stream';
 import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
@@ -43,7 +44,7 @@ describe('serveHttp — construction', () => {
     assert.strictEqual(Object.isFrozen(server.capabilities), true);
     assert.deepStrictEqual(server.capabilities, {
       name: 'http', status: true, headers: true, media: true, head: true, etag: true,
-      idempotency: true, validatedOutput: true, stream: false, cancel: 'signal',
+      idempotency: true, validatedOutput: true, stream: true, cancel: 'signal',
     });
     assert.strictEqual(server.contract, shop);
     assert.deepStrictEqual(server.describe(), shop.describe());
@@ -613,7 +614,8 @@ describe('the English catalog', () => {
     assert.strictEqual(contractCatalogEn['contract/handler-error']({ op: 'a.b', code: 'conflict' }), 'operation a.b failed with conflict');
     const clientMsgids = Object.values(CLIENT_ERRORS).map((r) => r.msgid);
     const portLocalMsgids = Object.values(PORT_LOCAL_ERRORS).map((r) => r.msgid);
-    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids, ...portLocalMsgids].sort());
+    const streamMsgids = Object.values(STREAM_ERRORS).map((r) => r.msgid);
+    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids, ...portLocalMsgids, ...streamMsgids].sort());
     assert.strictEqual(Object.isFrozen(contractMessagesEn), true);
     assert.strictEqual(Object.isFrozen(contractCatalogEn), true);
     // the parameters are trusted artifacts or protocol facts only: op ids, limits, media, method lists,

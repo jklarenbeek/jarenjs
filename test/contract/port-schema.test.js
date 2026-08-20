@@ -45,6 +45,14 @@ describe('the jaren-contract-port schema artifact', () => {
     ['a declared-error response', { jaren: 'contract/0.1', id: 'c0ffee:1', ok: false, error: { code: 'conflict', message: 'm', details: { current: 1 }, retryable: false }, trace: 't-1' }],
     ['a taxonomy-error response', { jaren: 'contract/0.1', id: 'c0ffee:1', ok: false, error: { code: 'JC2071', message: 'm', retryable: false }, trace: 't-1' }],
     ['a cancel', { jaren: 'contract/0.1', cancel: 'c0ffee:1' }],
+    ['a subscribe', { jaren: 'contract/0.1', subscribe: 'c0ffee:4', op: 'data.live', input: { collection: 'notes' } }],
+    ['an input-less subscribe', { jaren: 'contract/0.1', subscribe: 'c0ffee:5', op: 'feed', input: null }],
+    ['a resuming subscribe', { jaren: 'contract/0.1', subscribe: 'c0ffee:6', op: 'data.live', input: null, lastSeq: 41 }],
+    ['an unsubscribe', { jaren: 'contract/0.1', unsubscribe: 'c0ffee:4' }],
+    ['a snapshot push', { jaren: 'contract/0.1', id: 'c0ffee:4', event: 'snapshot', seq: 0, data: { value: { rows: [] }, resumed: false } }],
+    ['a patch push', { jaren: 'contract/0.1', id: 'c0ffee:4', event: 'patch', seq: 7, data: { patch: [{ op: 'add', path: '/rows/-', value: {} }], seq: 7 } }],
+    ['an error push', { jaren: 'contract/0.1', id: 'c0ffee:4', event: 'error', seq: 7, data: { code: 'JC2091', message: 'm', requestId: 't', retryable: false } }],
+    ['an end push', { jaren: 'contract/0.1', id: 'c0ffee:4', event: 'end', seq: 7, data: { reason: 'server-shutdown' } }],
   ];
 
   const negatives = [
@@ -67,6 +75,14 @@ describe('the jaren-contract-port schema artifact', () => {
     ['an uppercase declared code', { jaren: 'contract/0.1', id: 'c:1', ok: false, error: { code: 'Conflict', message: 'm' }, trace: 't' }],
     ['a cancel of an unscoped id', { jaren: 'contract/0.1', cancel: 'r1' }],
     ['a cancel with extras', { jaren: 'contract/0.1', cancel: 'c:1', id: 'c:1' }],
+    ['a subscribe of an unscoped id', { jaren: 'contract/0.1', subscribe: 'r1', op: 'a', input: null }],
+    ['a subscribe without input', { jaren: 'contract/0.1', subscribe: 'c:1', op: 'a' }],
+    ['a subscribe with a fractional lastSeq', { jaren: 'contract/0.1', subscribe: 'c:1', op: 'a', input: null, lastSeq: 1.5 }],
+    ['an unsubscribe with extras', { jaren: 'contract/0.1', unsubscribe: 'c:1', op: 'a' }],
+    ['a push of an unknown event', { jaren: 'contract/0.1', id: 'c:1', event: 'poke', seq: 0, data: null }],
+    ['a push without seq', { jaren: 'contract/0.1', id: 'c:1', event: 'patch', data: { patch: [], seq: 1 } }],
+    ['a push without data', { jaren: 'contract/0.1', id: 'c:1', event: 'end', seq: 1 }],
+    ['a push with a negative seq', { jaren: 'contract/0.1', id: 'c:1', event: 'patch', seq: -1, data: {} }],
     ['the website ping', { ping: 'token' }],
   ];
 

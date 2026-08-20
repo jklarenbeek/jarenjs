@@ -96,7 +96,7 @@ describe('compileContract — the shop example', () => {
     assert.strictEqual(op.doc, null);
     assert.deepStrictEqual(op.policy, {
       task: 'exhaust', idempotency: 'required', revision: 'input:/revision', cache: 'none',
-      limits: { maxBodyBytes: 1048576 }, errors: { details: 'paths' }, retry: { max: 2, on: ['not-found'] },
+      limits: { maxBodyBytes: 1048576 }, errors: { details: 'paths' }, retry: { max: 2, on: ['not-found'] }, stream: null,
       audience: 'public',
     });
     assert.deepStrictEqual(Object.keys(op.errors), ['conflict', 'not-found']);
@@ -137,7 +137,7 @@ describe('compileContract — the shop example', () => {
     assert.strictEqual(op.input?.transport, null, 'nothing travels as a string');
     assert.deepStrictEqual(op.policy, {
       task: 'exhaust', idempotency: 'optional', revision: null, cache: 'none',
-      limits: { maxBodyBytes: 4096 }, errors: { details: 'full' }, retry: null,
+      limits: { maxBodyBytes: 4096 }, errors: { details: 'full' }, retry: null, stream: null,
       audience: 'public',
     });
     assert.deepStrictEqual(contract.operations['product.save'].policy.retry, { max: 2, on: ['not-found'] });
@@ -361,7 +361,7 @@ describe('compileContract — every rule has its code and docPath', () => {
   it('JC0004 — kind', () => {
     refuses(one({ output: true, http: { method: 'GET', path: '/a' } }), 'JC0004', '/operations/a/kind');
     refuses(one({ kind: 'write', output: true }), 'JC0004', '/operations/a/kind');
-    refuses(one({ kind: 'subscribe', output: true }), 'JC0004', '/operations/a/kind', /subscribe.*stream binding/);
+    assert.doesNotThrow(() => compileContract(one({ kind: 'subscribe', output: true })));
   });
 
   it('JC0005 — input', () => {

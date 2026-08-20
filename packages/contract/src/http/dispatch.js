@@ -26,9 +26,12 @@ import { canonicalSha256, JsonCanonicalizeError } from '@jarenjs/json/canonical'
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace } from '../pipeline.js';
 import {
-  HTTP_ERRORS, JSON_CONTENT_TYPE,
+  isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
+} from '../stream/server.js';
+import {
+  HTTP_ERRORS, JSON_CONTENT_TYPE, JSON_MEDIA,
   renderMessage, declaredMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
-  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse,
+  entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse, verdict,
 } from './wire.js';
 
 /**
@@ -90,6 +93,7 @@ import {
  * @property {CompiledOperation} op
  * @property {Handler | null} handler - `null` on a partial server
  * @property {boolean} raw - opaque: the handler is raw
+ * @property {boolean} stream - a subscribe operation: the handler answers a subscription
  * @property {number} maxBody
  * @property {string} media
  * @property {boolean} hasBody - any body-located member, or a whole-body member
@@ -127,6 +131,8 @@ import {
  * @property {Catalog | null} catalog
  * @property {() => number} now
  * @property {{ text: string | null }} described - the memoized well-known body
+ * @property {Set<(reason: string | null) => void>} streams - the live SSE
+ *   streams' stoppers; the dispatcher's `close()` ends them all
  */
 
 /** The strict decoder of a JSON body given as bytes. */
@@ -492,6 +498,12 @@ function run(server, request) {
     return refuse(server, 'JC2006', trace, { op: op.id }, invalid.details, null, null);
   }
 
+  // ——— subscribe: the stream branch (§17–§18), or the one-shot read ———
+  if (route.stream) {
+    Object.freeze(ctx);
+    return subscribeBranch(server, route, ctx, assembled, trace, headers, armed, isHead, ifMatch, ifNoneMatch);
+  }
+
   // ——— 9. idempotency ———
   if (route.idempotency !== 'none') {
     const key = headerValue(headers, 'idempotency-key');
@@ -534,6 +546,187 @@ function wellKnown(server, method, trace) {
     observe(server, err, null);
     return respond();
   });
+}
+
+//#endregion
+
+//#region the stream branch
+
+/**
+ * A subscribe operation, settled: the handler answers the duck-typed
+ * subscription (§17.1); a declared failure or a host fault is an
+ * ordinary §7.3 response BEFORE any stream starts. With `accept:
+ * text/event-stream` the response streams SSE; without it (or under
+ * HEAD) the snapshot answers as plain JSON — the one-shot read.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} ctx - frozen
+ * @param {any} input
+ * @param {string} trace
+ * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @param {Armed} armed
+ * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
+ * @returns {Promise<HttpResponse>}
+ */
+function subscribeBranch(server, route, ctx, input, trace, headers, armed, isHead, ifMatch, ifNoneMatch) {
+  const accept = headerValue(headers, 'accept');
+  const wantsStream = !isHead && accept !== undefined && accept.toLowerCase().indexOf(STREAM_MEDIA) !== -1;
+  return settleOperation(route, input, ctx, false).then((result) => {
+    if (result.kind === 'failure') return declaredFailure(server, route, ctx, result, trace, armed);
+    if (result.kind === 'contract') {
+      if (result.cause !== undefined) observe(server, result.cause, ctx);
+      armed.outcome = 2;
+      return refuse(server, result.code, trace, { op: route.op.id }, result.details, null, ctx);
+    }
+    const sub = result.value;
+    if (!isSubscriptionLike(sub)) {
+      observe(server, new TypeError(`the handler of subscribe operation '${route.op.id}' did not answer a subscription ({ result | snapshot(), subscribe, close })`), ctx);
+      armed.outcome = 2;
+      return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
+    }
+    if (!wantsStream) return oneShotSnapshot(server, route, ctx, sub, trace, armed, isHead, ifMatch, ifNoneMatch);
+    return sseResponse(server, route, ctx, sub, trace, headers);
+  });
+}
+
+/**
+ * The one-shot read of a subscribe operation: the snapshot, validated,
+ * released, answered through the ordinary §7 serializer.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} ctx
+ * @param {import('../stream/server.js').SubscriptionLike} sub
+ * @param {string} trace
+ * @param {Armed} armed
+ * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
+ * @returns {HttpResponse}
+ */
+function oneShotSnapshot(server, route, ctx, sub, trace, armed, isHead, ifMatch, ifNoneMatch) {
+  let value;
+  let thrown;
+  try {
+    value = typeof sub.snapshot === 'function' ? sub.snapshot() : sub.result;
+  }
+  catch (err) {
+    thrown = err === undefined ? new Error('the snapshot accessor threw') : err;
+  }
+  try {
+    sub.close();
+  }
+  catch (err) {
+    observe(server, err, ctx);
+  }
+  if (thrown !== undefined) {
+    observe(server, thrown, ctx);
+    armed.outcome = 2;
+    return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+  }
+  if (server.validateOutput) {
+    const v = verdict(route.validateOutput, value);
+    if (!v.valid) {
+      observe(server, v.thrown !== undefined ? v.thrown : v.errors, ctx);
+      armed.outcome = 2;
+      return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
+    }
+  }
+  // the one-shot answer is plain JSON — the operation's media names the
+  // stream envelope, which this response is not
+  return finishValue(server, { ...route, media: JSON_MEDIA }, ctx, value, trace, armed, isHead, ifMatch, ifNoneMatch);
+}
+
+/**
+ * The SSE response of a live subscription: `200 text/event-stream` with
+ * the pump behind `stream`. The pump runs the carrier-neutral
+ * subscription runner — snapshot/patch/error/end land as SSE events, a
+ * heartbeat comment line goes out every `policy.stream.heartbeatMs`,
+ * the peer's abort (`ctx.signal`) stops silently, and the dispatcher's
+ * `close()` ends with `server-shutdown`.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} ctx
+ * @param {import('../stream/server.js').SubscriptionLike} sub
+ * @param {string} trace
+ * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @returns {HttpResponse}
+ */
+function sseResponse(server, route, ctx, sub, trace, headers) {
+  const lastRaw = headerValue(headers, 'last-event-id');
+  let lastSeq = null;
+  if (lastRaw !== undefined) {
+    const n = Number.parseInt(lastRaw, 10);
+    if (Number.isFinite(n) && n >= 0) lastSeq = n;
+  }
+  const streamPolicy = route.op.policy.stream;
+  const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;
+
+  /** @type {NonNullable<HttpResponse['stream']>} */
+  const stream = (sink) => {
+    const timer = setInterval(() => {
+      try {
+        sink.write(HEARTBEAT_LINE);
+      }
+      catch {
+        // a dead sink is ended by the abort path
+      }
+    }, heartbeatMs);
+    if (timer !== null && typeof (/** @type {any} */ (timer)).unref === 'function') /** @type {any} */ (timer).unref();
+
+    /** @param {string} event @param {number | null} seq @param {unknown} data */
+    const write = (event, seq, data) => {
+      try {
+        sink.write(encodeStreamEvent(event, seq, data));
+      }
+      catch (err) {
+        observe(server, err, ctx);
+      }
+    };
+    // registered BEFORE the runner starts, so a stream that fails during
+    // construction removes itself and never lingers in the set
+    /** @type {{ stop: (reason: string | null) => void } | null} */
+    let runner = null;
+    /** @type {(reason: string | null) => void} */
+    const stopper = (reason) => {
+      if (runner !== null) runner.stop(reason);
+    };
+    server.streams.add(stopper);
+    runner = runSubscription(route, sub, {
+      snapshot: (seq, value, resumed) => write('snapshot', seq, { value, resumed }),
+      patch: (seq, emission) => write('patch', seq, emission),
+      error: (intent, cause) => {
+        observe(server, cause, ctx);
+        const code = intent === 'invalid-snapshot' ? 'JC2091' : 'JC2008';
+        const msgid = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091.msgid : HTTP_ERRORS.JC2008.msgid;
+        write('error', null, { code, message: renderMessage(server.catalog, msgid, { op: route.op.id }), requestId: trace, retryable: false });
+      },
+      end: (reason) => write('end', null, { reason }),
+      done: () => {
+        clearInterval(timer);
+        server.streams.delete(stopper);
+        try {
+          sink.end();
+        }
+        catch {
+          // the sink may already be gone
+        }
+      },
+    }, { lastSeq, validate: server.validateOutput });
+    if (ctx.signal !== null) {
+      if (ctx.signal.aborted) stopper(null);
+      else ctx.signal.addEventListener('abort', () => stopper(null), { once: true });
+    }
+    return () => stopper(null);
+  };
+
+  return {
+    status: 200,
+    headers: { 'content-type': STREAM_MEDIA, 'cache-control': 'no-store', 'x-jaren-trace': trace },
+    body: null,
+    stream,
+  };
 }
 
 //#endregion

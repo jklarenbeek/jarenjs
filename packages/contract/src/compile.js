@@ -40,17 +40,19 @@ const CONTRACT_VERSION = '0.1';
 
 const ROOT_MEMBERS = new Set(['$contract', 'id', 'version', 'compat', '$defs', 'operations']);
 const OP_MEMBERS = new Set(['kind', 'input', 'output', 'errors', 'policy', 'http', 'doc']);
-const POLICY_MEMBERS = new Set(['task', 'idempotency', 'revision', 'cache', 'limits', 'errors', 'retry', 'audience']);
+const POLICY_MEMBERS = new Set(['task', 'idempotency', 'revision', 'cache', 'limits', 'errors', 'retry', 'stream', 'audience']);
 const LIMITS_MEMBERS = new Set(['maxBodyBytes']);
+const STREAM_MEMBERS = new Set(['resume', 'heartbeatMs', 'maxPatchBytes']);
 const POLICY_ERRORS_MEMBERS = new Set(['details']);
 const RETRY_MEMBERS = new Set(['max', 'on']);
 const HTTP_MEMBERS = new Set(['method', 'path', 'in', 'body', 'status', 'media']);
 const ERROR_DECL_MEMBERS = new Set(['status', 'schema']);
 
-const KINDS = Object.freeze(['read', 'command']);
+const KINDS = Object.freeze(['read', 'command', 'subscribe']);
 const TASKS = Object.freeze(['switch', 'exhaust', 'concat', 'parallel']);
 const IDEMPOTENCY = Object.freeze(['none', 'optional', 'required']);
 const CACHE = Object.freeze(['none', 'revision']);
+const RESUME = Object.freeze(['snapshot', 'replay']);
 const DETAILS = Object.freeze(['none', 'paths', 'full']);
 const AUDIENCES = Object.freeze(['public', 'server']);
 const METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
@@ -58,8 +60,10 @@ const LOCATIONS = Object.freeze(['path', 'query', 'header', 'body']);
 
 const DEFAULT_MAX_BODY_BYTES = 1048576;
 const DEFAULT_MEDIA = 'application/json';
+const STREAM_MEDIA = 'text/event-stream';
 const DEFAULT_STATUS = 200;
 const DEFAULT_ERROR_STATUS = 400;
+const DEFAULT_HEARTBEAT_MS = 15000;
 
 /** The contract `id`: an identifier that may carry hyphens. */
 const CONTRACT_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
@@ -417,6 +421,8 @@ function checkRefs(node, docPath, scope, isRoot) {
  * @property {{ maxBodyBytes: number }} limits
  * @property {{ details: 'none' | 'paths' | 'full' }} errors
  * @property {{ max: number, on: readonly string[] } | null} retry
+ * @property {{ resume: 'snapshot' | 'replay', heartbeatMs: number, maxPatchBytes: number | null } | null} stream
+ *   - the stream policy of a subscribe operation, defaults materialized; `null` on every other kind
  * @property {'public' | 'server'} audience - who may see the operation: `server`
  *   keeps it out of the public projection and every projection built on it
  */
@@ -442,7 +448,7 @@ function checkRefs(node, docPath, scope, isRoot) {
 /**
  * @typedef {Object} CompiledOperation
  * @property {string} id
- * @property {'read' | 'command'} kind
+ * @property {'read' | 'command' | 'subscribe'} kind
  * @property {string | null} doc
  * @property {CompiledInput | null} input
  * @property {CompiledOutput} output
@@ -579,7 +585,7 @@ function checkErrors(errors, base, scope) {
 /**
  * Validate `policy` and return it with every default materialized.
  * @param {any} policy
- * @param {'read' | 'command'} kind
+ * @param {'read' | 'command' | 'subscribe'} kind
  * @param {readonly string[] | null} inputMembers - the input's declared property names, `null` when the operation declares no input
  * @param {string} base - `/operations/<id>/policy`
  * @returns {CompiledPolicy}
@@ -591,13 +597,18 @@ function checkPolicy(policy, kind, inputMembers, base) {
   for (let i = 0; i < members.length; i++) {
     if (!POLICY_MEMBERS.has(members[i])) {
       throw refuse('JC0013',
-        `unknown policy member '${members[i]}' — the policy vocabulary is closed (task, idempotency, revision, cache, limits, errors, retry, audience)`,
+        `unknown policy member '${members[i]}' — the policy vocabulary is closed (task, idempotency, revision, cache, limits, errors, retry, stream, audience)`,
         at(base, members[i]));
     }
   }
-  const task = p.task === undefined ? (kind === 'read' ? 'switch' : 'exhaust') : p.task;
+  const task = p.task === undefined ? (kind === 'command' ? 'exhaust' : 'switch') : p.task;
   if (!TASKS.includes(task)) {
     throw refuse('JC0014', `policy.task must be one of switch, exhaust, concat, parallel`, at(base, 'task'));
+  }
+  if (kind === 'subscribe' && task !== 'switch') {
+    throw refuse('JC0018',
+      "a subscribe operation's policy.task must be switch (or absent) — a subscription slot is replaced, never queued",
+      at(base, 'task'));
   }
   const idempotency = p.idempotency === undefined ? 'none' : p.idempotency;
   if (!IDEMPOTENCY.includes(idempotency)) {
@@ -605,6 +616,11 @@ function checkPolicy(policy, kind, inputMembers, base) {
   }
   if (kind === 'read' && idempotency !== 'none') {
     throw refuse('JC0014', 'a read operation is idempotent by nature; policy.idempotency must be none (or absent)', at(base, 'idempotency'));
+  }
+  if (kind === 'subscribe' && idempotency !== 'none') {
+    throw refuse('JC0020',
+      "a subscribe operation's policy.idempotency must be none (or absent) — a subscription registers, it does not commit",
+      at(base, 'idempotency'));
   }
   let revision = null;
   if (p.revision !== undefined) {
@@ -694,11 +710,46 @@ function checkPolicy(policy, kind, inputMembers, base) {
     }
     retry = { max: p.retry.max, on: p.retry.on.slice() };
   }
+  /** @type {CompiledPolicy['stream']} */
+  let stream = null;
+  if (p.stream !== undefined && kind !== 'subscribe') {
+    throw refuse('JC0014', 'policy.stream applies to subscribe operations only', at(base, 'stream'));
+  }
+  if (kind === 'subscribe') {
+    const sp = at(base, 'stream');
+    const s = p.stream === undefined ? {} : p.stream;
+    if (!isJsonObject(s)) throw refuse('JC0014', 'policy.stream must be an object { resume?, heartbeatMs?, maxPatchBytes? }', sp);
+    const sm = Object.keys(s);
+    for (let i = 0; i < sm.length; i++) {
+      if (!STREAM_MEMBERS.has(sm[i])) {
+        throw refuse('JC0013', `unknown stream member '${sm[i]}' — policy.stream is { resume?, heartbeatMs?, maxPatchBytes? }`, at(sp, sm[i]));
+      }
+    }
+    const resume = s.resume === undefined ? 'snapshot' : s.resume;
+    if (!RESUME.includes(resume)) {
+      throw refuse('JC0014', 'policy.stream.resume must be one of snapshot, replay', at(sp, 'resume'));
+    }
+    let heartbeatMs = DEFAULT_HEARTBEAT_MS;
+    if (s.heartbeatMs !== undefined) {
+      if (!Number.isInteger(s.heartbeatMs) || s.heartbeatMs < 1000) {
+        throw refuse('JC0014', 'policy.stream.heartbeatMs must be an integer ≥ 1000', at(sp, 'heartbeatMs'));
+      }
+      heartbeatMs = s.heartbeatMs;
+    }
+    let maxPatchBytes = null;
+    if (s.maxPatchBytes !== undefined) {
+      if (!Number.isInteger(s.maxPatchBytes) || s.maxPatchBytes <= 0) {
+        throw refuse('JC0014', 'policy.stream.maxPatchBytes must be a positive integer', at(sp, 'maxPatchBytes'));
+      }
+      maxPatchBytes = s.maxPatchBytes;
+    }
+    stream = { resume, heartbeatMs, maxPatchBytes };
+  }
   const audience = p.audience === undefined ? 'public' : p.audience;
   if (!AUDIENCES.includes(audience)) {
     throw refuse('JC0014', 'policy.audience must be one of public, server', at(base, 'audience'));
   }
-  return { task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry, audience };
+  return { task, idempotency, revision, cache, limits: { maxBodyBytes }, errors: { details }, retry, stream, audience };
 }
 
 /**
@@ -710,7 +761,7 @@ function checkPolicy(policy, kind, inputMembers, base) {
  * compiled http and the location table by member.
  * @param {any} http
  * @param {string} id
- * @param {'read' | 'command'} kind
+ * @param {'read' | 'command' | 'subscribe'} kind
  * @param {readonly string[]} members - the input's declared property names
  * @param {string} base - `/operations/<id>/http`
  * @returns {CompiledHttp}
@@ -720,6 +771,15 @@ function checkHttp(http, id, kind, members, base) {
   const locations = {};
   if (http === undefined) {
     const template = parsePathTemplate(`/${id}`);
+    if (kind === 'subscribe') {
+      // the canonical subscribe binding: GET /<op-id>, every member in
+      // the query (input travels as for a read), the stream media
+      for (let i = 0; i < members.length; i++) setObjectMember(locations, members[i], 'query');
+      return {
+        method: 'GET', path: template.path, template, variables: template.variables,
+        in: locations, body: null, status: DEFAULT_STATUS, media: STREAM_MEDIA, opaque: false,
+      };
+    }
     for (let i = 0; i < members.length; i++) setObjectMember(locations, members[i], 'body');
     return {
       method: 'POST', path: template.path, template, variables: template.variables,
@@ -741,6 +801,11 @@ function checkHttp(http, id, kind, members, base) {
       at(base, 'method'));
   }
   const method = http.method;
+  if (kind === 'subscribe' && method !== 'GET') {
+    throw refuse('JC0019',
+      `a subscribe operation must be bound to GET (a stream is fetched, not sent), got ${method}`,
+      at(base, 'method'));
+  }
   let status = DEFAULT_STATUS;
   if (http.status !== undefined) {
     if (!Number.isInteger(http.status) || http.status < 200 || http.status > 299) {
@@ -748,10 +813,15 @@ function checkHttp(http, id, kind, members, base) {
     }
     status = http.status;
   }
-  let media = DEFAULT_MEDIA;
+  let media = kind === 'subscribe' ? STREAM_MEDIA : DEFAULT_MEDIA;
   if (http.media !== undefined) {
     if (typeof http.media !== 'string' || !MEDIA_TYPE.test(http.media)) {
       throw refuse('JC0012', 'http.media must be a media type string (type/subtype)', at(base, 'media'));
+    }
+    if (kind === 'subscribe' && http.media !== STREAM_MEDIA) {
+      // forced, never silently overridden: a declared conflicting media
+      // would be a behavior the binding cannot honor
+      throw refuse('JC0012', `a subscribe operation's http.media is ${STREAM_MEDIA} (leave it absent — the binding forces it)`, at(base, 'media'));
     }
     media = http.media;
   }
@@ -800,7 +870,7 @@ function checkHttp(http, id, kind, members, base) {
       throw refuse('JC0009', `'${m}' is the http.body member and cannot travel as ${loc}`, path);
     }
   }
-  const defaultLocation = kind === 'read' ? 'query' : 'body';
+  const defaultLocation = kind === 'command' ? 'body' : 'query';
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
     /** @type {'path' | 'query' | 'header' | 'body'} */
@@ -826,7 +896,9 @@ function checkHttp(http, id, kind, members, base) {
       }
     }
   }
-  const opaque = !isJsonMedia(media);
+  // a subscribe operation's media is the stream envelope, not an opaque
+  // body: its events are JSON the contract decodes and validates
+  const opaque = kind !== 'subscribe' && !isJsonMedia(media);
   if (opaque) {
     // an opaque body is bytes the contract never decodes (§4.5): a
     // body-located member could never be validated, so the transport
@@ -894,7 +966,7 @@ export function compileContract(doc, options = {}) {
   const shapes = new Set();
   /** @type {string[]} */
   const ids = [];
-  /** @type {{ id: string, kind: 'read' | 'command', doc: string | null, input: any, inputEffective: any, members: string[], output: any, errors: { code: string, status: number, schema: any }[], policy: CompiledPolicy, http: CompiledHttp }[]} */
+  /** @type {{ id: string, kind: 'read' | 'command' | 'subscribe', doc: string | null, input: any, inputEffective: any, members: string[], output: any, errors: { code: string, status: number, schema: any }[], policy: CompiledPolicy, http: CompiledHttp }[]} */
   const parsed = [];
   const opIds = Object.keys(src.operations);
   for (let n = 0; n < opIds.length; n++) {
@@ -913,15 +985,10 @@ export function compileContract(doc, options = {}) {
           at(base, om[i]));
       }
     }
-    if (op.kind === 'subscribe') {
-      throw refuse('JC0004',
-        "kind 'subscribe' is reserved: format 0.1 has no stream binding to carry a subscription, so it is refused rather than silently downgraded to a read",
-        at(base, 'kind'));
-    }
     if (!KINDS.includes(op.kind)) {
-      throw refuse('JC0004', "kind must be 'read' or 'command'", at(base, 'kind'));
+      throw refuse('JC0004', "kind must be 'read', 'command' or 'subscribe'", at(base, 'kind'));
     }
-    /** @type {'read' | 'command'} */
+    /** @type {'read' | 'command' | 'subscribe'} */
     const kind = op.kind;
     if (op.doc !== undefined && typeof op.doc !== 'string') {
       throw refuse('JC0015', 'doc must be a string', at(base, 'doc'));

@@ -2,11 +2,26 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarenjs.dev/schemas/jaren-contract-port/0.1",
   "title": "Jaren contract port frame 0.1",
-  "description": "The frame grammar of the port binding (packages/contract/docs/CONTRACT-FORMAT.md §16): every message the binding puts on a MessagePort, Worker or BroadcastChannel is one of these three JSON-safe plain objects, marked jaren: \"contract/0.1\" so contract traffic is distinguishable by shape from anything else sharing the channel. A request id is \"<clientId>:<seq>\" — the client id unique per client instance — so two clients on one channel can never cross-settle; the request members attempt and key are reserved and ignored by servers of this version.",
+  "description": "The frame grammar of the port binding (packages/contract/docs/CONTRACT-FORMAT.md §16): every message the binding puts on a MessagePort, Worker or BroadcastChannel is one of these six JSON-safe plain objects (request/response/cancel, and the stream family: subscribe/unsubscribe from a client, push events from a server), marked jaren: \"contract/0.1\" so contract traffic is distinguishable by shape from anything else sharing the channel. A request id is \"<clientId>:<seq>\" — the client id unique per client instance — so two clients on one channel can never cross-settle; the request members attempt and key are reserved and ignored by servers of this version.",
   "oneOf": [
-    { "$ref": "#/$defs/request" },
-    { "$ref": "#/$defs/response" },
-    { "$ref": "#/$defs/cancel" }
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/cancel"
+    },
+    {
+      "$ref": "#/$defs/subscribe"
+    },
+    {
+      "$ref": "#/$defs/unsubscribe"
+    },
+    {
+      "$ref": "#/$defs/push"
+    }
   ],
   "$defs": {
     "marker": {
@@ -21,10 +36,19 @@
     "request": {
       "description": "A client's request: one operation invocation. input is the whole input object, or null for an input-less operation.",
       "type": "object",
-      "required": ["jaren", "id", "op", "input"],
+      "required": [
+        "jaren",
+        "id",
+        "op",
+        "input"
+      ],
       "properties": {
-        "jaren": { "$ref": "#/$defs/marker" },
-        "id": { "$ref": "#/$defs/id" },
+        "jaren": {
+          "$ref": "#/$defs/marker"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
         "op": {
           "description": "The operation id, as declared in the contract.",
           "type": "string",
@@ -42,13 +66,26 @@
     "response": {
       "description": "A server's answer to one request id, success or error, always carrying the server trace.",
       "type": "object",
-      "required": ["jaren", "id", "ok", "trace"],
+      "required": [
+        "jaren",
+        "id",
+        "ok",
+        "trace"
+      ],
       "properties": {
-        "jaren": { "$ref": "#/$defs/marker" },
-        "id": { "$ref": "#/$defs/id" },
-        "ok": { "type": "boolean" },
+        "jaren": {
+          "$ref": "#/$defs/marker"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "ok": {
+          "type": "boolean"
+        },
         "value": true,
-        "error": { "$ref": "#/$defs/error" },
+        "error": {
+          "$ref": "#/$defs/error"
+        },
         "trace": {
           "description": "The server's per-request trace id (meta.trace on the client).",
           "type": "string",
@@ -56,33 +93,147 @@
         }
       },
       "oneOf": [
-        { "required": ["value"], "properties": { "ok": { "const": true }, "error": false } },
-        { "required": ["error"], "properties": { "ok": { "const": false }, "value": false } }
+        {
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "error": false
+          }
+        },
+        {
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "value": false
+          }
+        }
       ],
       "additionalProperties": false
     },
     "error": {
       "description": "The error envelope of a failed response: a declared error code (lowercase) or a JC2xxx taxonomy/binding code; details present only when the failure carries some.",
       "type": "object",
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
         "code": {
           "type": "string",
           "pattern": "^([a-z][a-z0-9-]*|JC[0-9]{4})$"
         },
-        "message": { "type": "string" },
+        "message": {
+          "type": "string"
+        },
         "details": true,
-        "retryable": { "type": "boolean" }
+        "retryable": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "cancel": {
       "description": "A client's cancellation of one request id: aborts the server-side signal. An optimization — the id scoping is the guarantee — and never answered.",
       "type": "object",
-      "required": ["jaren", "cancel"],
+      "required": [
+        "jaren",
+        "cancel"
+      ],
       "properties": {
-        "jaren": { "$ref": "#/$defs/marker" },
-        "cancel": { "$ref": "#/$defs/id" }
+        "jaren": {
+          "$ref": "#/$defs/marker"
+        },
+        "cancel": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "subscribe": {
+      "description": "A client's subscription of one subscribe operation: opens a stream under the id. input is the whole input object, or null for an input-less operation; lastSeq, when present, asks to resume after that seq.",
+      "type": "object",
+      "required": [
+        "jaren",
+        "subscribe",
+        "op",
+        "input"
+      ],
+      "properties": {
+        "jaren": {
+          "$ref": "#/$defs/marker"
+        },
+        "subscribe": {
+          "$ref": "#/$defs/id"
+        },
+        "op": {
+          "description": "The operation id, as declared in the contract.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$"
+        },
+        "input": true,
+        "lastSeq": {
+          "description": "The last seq this client delivered; the server replays after it or answers a fresh snapshot with resumed: false.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "unsubscribe": {
+      "description": "A client's release of one stream id. Never answered.",
+      "type": "object",
+      "required": [
+        "jaren",
+        "unsubscribe"
+      ],
+      "properties": {
+        "jaren": {
+          "$ref": "#/$defs/marker"
+        },
+        "unsubscribe": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "push": {
+      "description": "A server's stream event for one subscription id: snapshot data is { value, resumed }, patch data the LIVE emission { patch, seq }, error data the wire error record, end data { reason }. seq is the event's seq; error and end carry the last delivered one.",
+      "type": "object",
+      "required": [
+        "jaren",
+        "id",
+        "event",
+        "seq",
+        "data"
+      ],
+      "properties": {
+        "jaren": {
+          "$ref": "#/$defs/marker"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "event": {
+          "enum": [
+            "snapshot",
+            "patch",
+            "error",
+            "end"
+          ]
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "data": true
       },
       "additionalProperties": false
     }

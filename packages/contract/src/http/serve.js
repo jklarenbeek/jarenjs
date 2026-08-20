@@ -73,7 +73,7 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
  * @property {true} etag - entity tags and conditionals are honored
  * @property {boolean} idempotency - a ledger is present
  * @property {boolean} validatedOutput - the output validator runs
- * @property {false} stream - no subscription carriage yet
+ * @property {true} stream - subscribe operations stream as SSE (docs/CONTRACT-FORMAT.md §18.1)
  * @property {'signal'} cancel - cancellation reaches the handler as `ctx.signal`
  */
 
@@ -84,6 +84,9 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
  * @property {HttpCapabilities} capabilities
  * @property {Contract} contract
  * @property {() => any} describe
+ * @property {() => void} close - ends every live SSE stream with an `end`
+ *   event (`server-shutdown`) and releases its subscription; requests in
+ *   flight are unaffected
  */
 
 /**
@@ -154,6 +157,7 @@ function prepare(op, handler) {
     op,
     handler,
     raw: http.opaque,
+    stream: op.kind === 'subscribe',
     maxBody: op.policy.limits.maxBodyBytes,
     media: http.media,
     hasBody,
@@ -267,6 +271,7 @@ export function serveHttp(contract, handlers, options = {}) {
     catalog: options.catalog === undefined ? null : compileMessageCatalog(options.catalog),
     now: options.now === undefined ? Date.now : options.now,
     described: { text: null },
+    streams: new Set(),
   };
 
   /** @type {HttpCapabilities} */
@@ -279,7 +284,7 @@ export function serveHttp(contract, handlers, options = {}) {
     etag: true,
     idempotency: ledger !== null,
     validatedOutput: server.validateOutput,
-    stream: false,
+    stream: true,
     cancel: 'signal',
   });
 
@@ -288,5 +293,9 @@ export function serveHttp(contract, handlers, options = {}) {
     capabilities,
     contract,
     describe: () => contract.describe(),
+    close: () => {
+      // each stopper removes itself from the set as it ends
+      for (const stop of [...server.streams]) stop('server-shutdown');
+    },
   });
 }

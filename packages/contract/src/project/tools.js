@@ -42,7 +42,8 @@ import { bundleSameDocument } from '../bundle.js';
 /**
  * @typedef {Object} ContractToolsOptions
  * @property {readonly string[]} [ops] - the operations to expose (default:
- *   every public, non-opaque operation); an opaque or unknown id is refused
+ *   every public, non-opaque, non-subscribe operation); an opaque,
+ *   subscribe or unknown id is refused
  * @property {(id: string) => string} [name] - the tool name of an
  *   operation (default: the id with `.` → `_`); must satisfy OpenAI's
  *   `^[a-zA-Z0-9_-]{1,64}$` and be distinct per operation
@@ -106,6 +107,13 @@ export function contractTools(contract, client, options = {}) {
       // an explicit ops entry named it; the default set never includes one
       if (options.ops !== undefined) {
         throw new ContractHostError('JC1008', `contractTools: '${op.id}' is an opaque operation (media ${op.http.media}) — a tool carries JSON; reach it through client.url`);
+      }
+      continue;
+    }
+    if (op.kind === 'subscribe') {
+      // a tool call is one invoke; a stream has no tool shape
+      if (options.ops !== undefined) {
+        throw new ContractHostError('JC1008', `contractTools: '${op.id}' is a subscribe operation — a tool carries one invoke, not a stream`);
       }
       continue;
     }

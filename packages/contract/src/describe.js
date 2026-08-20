@@ -28,6 +28,8 @@ import { peekRevision } from './revision.js';
  * @property {string} task
  * @property {string} idempotency
  * @property {string} cache
+ * @property {{ resume: string, heartbeatMs: number, maxPatchBytes: number | null }} [stream]
+ *   - the resolved stream policy; present exactly on subscribe operations
  * @property {{ http: boolean, status: boolean, media: boolean, in: readonly string[], task: boolean, idempotency: boolean, cache: boolean }} inferred
  *   which of the above the compiler defaulted: `http` when the whole
  *   binding is the canonical `POST /<id>`, `in` listing the members whose
@@ -84,6 +86,7 @@ export function describeContract(contract) {
       task: op.policy.task,
       idempotency: op.policy.idempotency,
       cache: op.policy.cache,
+      ...(op.policy.stream !== null ? { stream: { ...op.policy.stream } } : {}),
       inferred: {
         http: http === undefined,
         status: http === undefined || http.status === undefined,

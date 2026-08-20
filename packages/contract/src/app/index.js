@@ -12,12 +12,15 @@
 
 export { contractAppBinding } from './binding.js';
 export { createContractEffect } from './effect.js';
+export { createContractSubscription } from './subscription.js';
 
 /**
  * @typedef {import('./binding.js').ContractAppBinding} ContractAppBinding
  * @typedef {import('./binding.js').ContractAppBindingOptions} ContractAppBindingOptions
  * @typedef {import('./binding.js').TaskSlot} TaskSlot
+ * @typedef {import('./binding.js').StreamSlot} StreamSlot
  * @typedef {import('./effect.js').ContractEffect} ContractEffect
  * @typedef {import('./effect.js').ContractEffectOptions} ContractEffectOptions
  * @typedef {import('./effect.js').ClientLike} ClientLike
+ * @typedef {import('./subscription.js').StreamClientLike} StreamClientLike
  */

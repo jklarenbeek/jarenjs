@@ -126,11 +126,11 @@ describe('servePort + openPortClient over a MessageChannel', () => {
     const c = track(openPortClient(shop, { channel: client }));
     assert.deepStrictEqual(s.capabilities, {
       name: 'port', status: false, headers: false, media: false, etag: false,
-      idempotency: false, validatedOutput: true, stream: false, cancel: 'message',
+      idempotency: false, validatedOutput: true, stream: true, cancel: 'message',
     });
     assert.deepStrictEqual(c.capabilities, {
       name: 'port', status: false, headers: false, media: false, etag: false,
-      idempotency: false, stream: false, cancel: 'message',
+      idempotency: false, stream: true, cancel: 'message',
     });
     assert.strictEqual(Object.isFrozen(s.capabilities) && Object.isFrozen(c.capabilities), true);
     assert.strictEqual(c.contract, shop);

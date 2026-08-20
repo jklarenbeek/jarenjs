@@ -24,8 +24,9 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS } from '../pipeline.js';
+import { isSubscriptionLike, runSubscription, STREAM_ERRORS } from '../stream/server.js';
 import { HTTP_ERRORS, renderMessage, declaredMessage } from '../http/wire.js';
-import { isContractFrame, valueFrame, errorFrame, attach, isChannel } from './frame.js';
+import { isContractFrame, valueFrame, errorFrame, pushFrame, attach, isChannel } from './frame.js';
 
 export { openPortClient } from './client.js';
 export { FRAME_MARKER, isContractFrame } from './frame.js';
@@ -66,7 +67,7 @@ export { PORT_LOCAL_ERRORS };
  * @property {false} etag
  * @property {false} idempotency
  * @property {boolean} validatedOutput
- * @property {false} stream
+ * @property {true} stream - subscribe operations stream as push frames (docs/CONTRACT-FORMAT.md §18.2)
  * @property {'message'} cancel
  */
 
@@ -76,7 +77,8 @@ export { PORT_LOCAL_ERRORS };
  * @property {PortServerCapabilities} capabilities
  * @property {Contract} contract
  * @property {() => any} describe
- * @property {() => void} close - detaches the listener and aborts every in-flight request
+ * @property {() => void} close - ends every live stream with `end`
+ *   (`server-shutdown`), detaches the listener and aborts every in-flight request
  */
 
 /** The frozen empty header table every port handler context carries. */
@@ -92,16 +94,23 @@ function host(code, reason) {
 }
 
 /**
+ * One served operation: the neutral pipeline route plus whether it is a
+ * subscribe operation (a stream, never a request/response).
+ * @typedef {PipelineRoute & { stream: boolean }} PortRoute
+ */
+
+/**
  * The pipeline route of one served operation.
  * @param {CompiledOperation} op
  * @param {Handler | null} handler
- * @returns {PipelineRoute}
+ * @returns {PortRoute}
  */
 function prepare(op, handler) {
   return Object.freeze({
     op,
     handler,
     raw: op.http.opaque,
+    stream: op.kind === 'subscribe',
     validateInput: op.input === null ? null : op.input.validate,
     validateOutput: op.output.validate,
     details: op.policy.errors.details,
@@ -166,7 +175,7 @@ export function servePort(contract, handlers, options) {
   const catalog = options.catalog === undefined ? null : compileMessageCatalog(options.catalog);
   const validate = validateOutput === 'always';
 
-  /** @type {Map<string, PipelineRoute>} */
+  /** @type {Map<string, PortRoute>} */
   const routes = new Map();
   for (let i = 0; i < contract.ids.length; i++) {
     const id = contract.ids[i];
@@ -220,7 +229,9 @@ export function servePort(contract, handlers, options) {
   function serveRequest(id, op, input) {
     const trace = safeTrace(traceGen);
     const route = typeof op === 'string' ? routes.get(op) : undefined;
-    if (route === undefined || route.raw) {
+    // a subscribe operation is a stream, never a request/response —
+    // asked as one, it is "not served on this channel" like an opaque
+    if (route === undefined || route.raw || route.stream) {
       // never echo what the frame asked for — it is the request's own value
       post(errorFrame(id, 'JC2071', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2071.msgid, {}), undefined, false, trace), null);
       return;
@@ -260,6 +271,112 @@ export function servePort(contract, handlers, options) {
     });
   }
 
+  /**
+   * The live streams by id. An entry exists from the subscribe frame
+   * on, so an unsubscribe that races the handler's settlement still
+   * lands: `stop` is re-pointed at the runner once it exists.
+   * @type {Map<string, { stopped: boolean, stop: (reason: string | null) => void }>}
+   */
+  const streams = new Map();
+
+  /**
+   * An error push frame's data: the wire error record (§7.3's body
+   * without a status; `details` only when present).
+   * @param {string} code
+   * @param {string} message
+   * @param {string} trace
+   * @param {unknown} details
+   * @param {boolean} retryable
+   */
+  function wireError(code, message, trace, details, retryable) {
+    return details === undefined
+      ? { code, message, requestId: trace, retryable }
+      : { code, message, requestId: trace, details, retryable };
+  }
+
+  /**
+   * One subscribe frame: open the stream (docs/CONTRACT-FORMAT.md
+   * §18.2). Pre-stream failures — unknown or non-subscribe op, invalid
+   * input, a handler fault, an invalid snapshot — arrive as `error`
+   * push frames; then the carrier-neutral runner forwards the
+   * subscription's events as push frames until the stream ends.
+   * @param {string} id
+   * @param {unknown} op
+   * @param {unknown} input
+   * @param {unknown} lastSeqRaw
+   */
+  function serveSubscribe(id, op, input, lastSeqRaw) {
+    const trace = safeTrace(traceGen);
+    const route = typeof op === 'string' ? routes.get(op) : undefined;
+    if (route === undefined || !route.stream) {
+      post(pushFrame(id, 'error', 0, wireError('JC2071', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2071.msgid, {}), trace, undefined, false)), null);
+      return;
+    }
+    const opId = route.op.id;
+    const value = route.validateInput === null ? null : input === undefined ? null : input;
+    const invalid = validateOperationInput(route, value);
+    if (invalid !== null && invalid.kind === 'contract') {
+      if (invalid.cause !== undefined) observe(invalid.cause, { op: opId, trace });
+      post(pushFrame(id, 'error', 0, wireError('JC2006', renderMessage(catalog, HTTP_ERRORS.JC2006.msgid, { op: opId }), trace, invalid.details, false)), { op: opId, trace });
+      return;
+    }
+    const lastSeq = Number.isInteger(lastSeqRaw) && /** @type {number} */ (lastSeqRaw) >= 0 ? /** @type {number} */ (lastSeqRaw) : null;
+    const entry = { stopped: false, stop: /** @type {(reason: string | null) => void} */ (() => { entry.stopped = true; }) };
+    streams.set(id, entry);
+    const controller = new AbortController();
+    const ctx = Object.freeze({
+      op: route.op, trace, signal: controller.signal, params: null, headers: NO_HEADERS,
+      fail: ContractFailure, idempotency: null,
+    });
+    const pushCtx = { op: opId, trace };
+    settleOperation(route, value, ctx, false).then((result) => {
+      if (closed || entry.stopped) {
+        streams.delete(id);
+        // the settlement may still hold a live subscription — release it
+        if (result.kind === 'value' && isSubscriptionLike(result.value)) {
+          try {
+            result.value.close();
+          }
+          catch {
+            // a throwing close changes nothing for a gone client
+          }
+        }
+        return;
+      }
+      if (result.kind === 'failure') {
+        streams.delete(id);
+        post(pushFrame(id, 'error', 0, wireError(result.code, declaredMessage(catalog, opId, result.code, result.params), trace, result.details, result.retryable)), pushCtx);
+        return;
+      }
+      if (result.kind === 'contract') {
+        streams.delete(id);
+        if (result.cause !== undefined) observe(result.cause, pushCtx);
+        post(pushFrame(id, 'error', 0, wireError('JC2070', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), trace, undefined, false)), pushCtx);
+        return;
+      }
+      const sub = result.value;
+      if (!isSubscriptionLike(sub)) {
+        streams.delete(id);
+        observe(new TypeError(`the handler of subscribe operation '${opId}' did not answer a subscription ({ result | snapshot(), subscribe, close })`), pushCtx);
+        post(pushFrame(id, 'error', 0, wireError('JC2070', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), trace, undefined, false)), pushCtx);
+        return;
+      }
+      const runner = runSubscription(route, sub, {
+        snapshot: (seq, snapValue, resumed) => post(pushFrame(id, 'snapshot', seq, { value: snapValue, resumed }), pushCtx),
+        patch: (seq, emission) => post(pushFrame(id, 'patch', seq, emission), pushCtx),
+        error: (intent, cause, seq) => {
+          observe(cause, pushCtx);
+          const code = intent === 'invalid-snapshot' ? 'JC2091' : 'JC2070';
+          const msgid = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091.msgid : PORT_LOCAL_ERRORS.JC2070.msgid;
+          post(pushFrame(id, 'error', seq, wireError(code, renderMessage(catalog, msgid, { op: opId }), trace, undefined, false)), pushCtx);
+        },
+        end: (reason, seq) => post(pushFrame(id, 'end', seq, { reason }), pushCtx),
+        done: () => streams.delete(id),
+      }, { lastSeq, validate });
+      entry.stop = (reason) => runner.stop(reason);
+    });
+  }
+
   /** @param {any} event */
   function listener(event) {
     const frame = event === null || typeof event !== 'object' ? undefined : event.data;
@@ -270,8 +387,22 @@ export function servePort(contract, handlers, options) {
       if (controller !== undefined) controller.abort();
       return;
     }
-    // a response frame on a shared channel is another server's answer
-    if (Object.hasOwn(f, 'ok')) return;
+    if (Object.hasOwn(f, 'subscribe')) {
+      if (typeof f.subscribe === 'string' && f.subscribe.length > 0 && !streams.has(f.subscribe)) {
+        serveSubscribe(f.subscribe, f.op, f.input, f.lastSeq);
+      }
+      return;
+    }
+    if (Object.hasOwn(f, 'unsubscribe')) {
+      const entry = typeof f.unsubscribe === 'string' ? streams.get(f.unsubscribe) : undefined;
+      if (entry !== undefined) {
+        streams.delete(f.unsubscribe);
+        entry.stop(null);
+      }
+      return;
+    }
+    // a response or push frame on a shared channel is another server's answer
+    if (Object.hasOwn(f, 'ok') || Object.hasOwn(f, 'event')) return;
     // without a string id there is nothing to address an answer to
     if (typeof f.id !== 'string' || f.id.length === 0) return;
     serveRequest(f.id, f.op, f.input);
@@ -288,7 +419,7 @@ export function servePort(contract, handlers, options) {
     etag: false,
     idempotency: false,
     validatedOutput: validate,
-    stream: false,
+    stream: true,
     cancel: 'message',
   });
 
@@ -298,6 +429,10 @@ export function servePort(contract, handlers, options) {
     describe: () => contract.describe(),
     close: () => {
       if (closed) return;
+      // every live stream ends with server-shutdown BEFORE the channel
+      // detaches, so the clients hear it
+      for (const entry of [...streams.values()]) entry.stop('server-shutdown');
+      streams.clear();
       closed = true;
       detach();
       for (const controller of active.values()) controller.abort();

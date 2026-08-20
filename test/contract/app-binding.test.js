@@ -214,9 +214,12 @@ describe('contractAppBinding — the generated documents', () => {
     assert.throws(() => contractAppBinding(shop, { statePath: '/a.b' }), (/** @type {any} */ e) => e.code === 'JC1007');
     assert.throws(() => contractAppBinding(shop, { namespace: /** @type {any} */ (1) }), (/** @type {any} */ e) => e.code === 'JC1007');
     assert.throws(() => contractAppBinding(/** @type {any} */ ({})), (/** @type {any} */ e) => e.code === 'JC1007');
-    // a subscribe operation cannot exist in a compiled 0.1 contract; a hand-built one is refused as uncarriable
-    const fake = { ids: ['s'], operations: { s: { kind: 'subscribe', output: { schema: true } } }, $defs: {}, id: null };
-    assert.throws(() => contractAppBinding(/** @type {any} */ (fake)), (/** @type {any} */ e) => e.code === 'JC1007' && /subscribe/.test(e.message));
+    // a subscribe operation is carried too: its slot, actions and subs
+    // entry are the app-subscription tests' subject; here only the shape
+    const live = contractAppBinding(compileContract({ $contract: '0.1', operations: { feed: { kind: 'subscribe', output: true } } }));
+    assert.deepStrictEqual(Object.keys(live.actions), ['contract/feed/start', 'contract/feed/stop', 'contract/feed/snapshot', 'contract/feed/patch', 'contract/feed/error', 'contract/feed/reset']);
+    assert.strictEqual(live.subs.length, 1);
+    assert.strictEqual(live.subscription, 'contract-stream');
   });
 });
 

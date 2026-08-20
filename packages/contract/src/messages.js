@@ -57,6 +57,11 @@ export const contractMessagesEn = Object.freeze({
   'contract/port-timeout': 'operation {op} got no answer on the channel within {ms}ms',
   'contract/malformed-frame': 'the response frame of operation {op} is malformed',
   'contract/channel-closed': 'the channel of operation {op} is closed',
+  'contract/not-a-stream': 'the server answered the subscription of operation {op} with a non-stream response',
+  'contract/invalid-snapshot': 'operation {op} produced a snapshot that violates its contract',
+  'contract/seq-regression': 'the stream of operation {op} violated its seq order',
+  'contract/stream-error': 'the stream of operation {op} ended with a server error ({code})',
+  'contract/heartbeat-missed': 'the stream of operation {op} went silent for {ms}ms',
 });
 
 /** The compiled English catalog (module-level singleton). */

@@ -267,7 +267,9 @@ import { openLocalClient, serveLocal, PORT_LOCAL_ERRORS } from '@jarenjs/contrac
 import type { LocalClient } from '@jarenjs/contract/local';
 import { servePort, openPortClient, FRAME_MARKER } from '@jarenjs/contract/port';
 import type { PortServer, ChannelLike } from '@jarenjs/contract/port';
-import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
+import { contractAppBinding, createContractEffect, createContractSubscription } from '@jarenjs/contract/app';
+import { runSubscription, isSubscriptionLike, STREAM_ERRORS, STREAM_EVENTS, encodeStreamEvent } from '@jarenjs/contract/stream';
+import type { SubscriptionLike, StreamHooks } from '@jarenjs/contract/stream';
 import { publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools } from '@jarenjs/contract/project';
 import type { OpenApiResult, ToolDefinition } from '@jarenjs/contract/project';
 const contract = compileContract({
@@ -278,6 +280,11 @@ const contract = compileContract({
       input: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } },
       output: { type: 'object' },
       http: { method: 'GET', path: '/things/{id}' },
+    },
+    'thing.feed': {
+      kind: 'subscribe',
+      output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+      policy: { stream: { resume: 'replay', heartbeatMs: 2000 } },
     },
   },
 });
@@ -296,8 +303,13 @@ void (ContractCompileError.name === 'ContractCompileError' && ContractRuntimeErr
 void contract.allowed('/things/12');
 const failure = ContractFailure('gone', { id: 1 }, { at: 1 }, { retryable: false });
 void [failure.code, isContractFailure(failure), ContractHostError.name, contractMessagesEn['contract/not-found'], contractCatalogEn];
+const feed: SubscriptionLike = { result: { rows: [] }, subscribe: () => () => {}, close: () => {} };
+void [isSubscriptionLike(feed), runSubscription, STREAM_ERRORS.JC2094.retryable, STREAM_EVENTS.length, encodeStreamEvent('end', 1, { reason: 'closed' })];
+const hooks: StreamHooks | null = null;
+void hooks;
 const server = serveHttp(contract, {
   'thing.get': (input: any, ctx: RequestContext) => { ctx.etag('t1'); return input === null ? ctx.fail('gone') : { id: input.id, trace: ctx.trace }; },
+  'thing.feed': () => feed,
 }, { ledger: createMemoryLedger(), head: true, validateOutput: 'always', onError: (err: unknown) => void err });
 const responded: Promise<HttpResponse> = server.dispatch({ method: 'GET', url: '/things/12', headers: {}, body: null });
 void [responded, server.capabilities.idempotency, server.capabilities.stream, server.contract.ids, server.describe(), HTTP_ERRORS.JC2001.status, WELL_KNOWN_PATH];
@@ -312,13 +324,19 @@ void [outcome, client.url('thing.get', { id: 1 }), client.negotiate(), client.pe
 const local: LocalClient = openLocalClient(contract, { 'thing.get': (input: any) => ({ id: input.id }) }, { validateOutput: 'always' });
 void [serveLocal === openLocalClient, local.capabilities.status === false, local.capabilities.cancel, local.invoke('thing.get', { id: 1 }, { attempt: 2 }), local.close];
 const channel: ChannelLike = { postMessage: (m: unknown) => void m, addEventListener: () => {}, removeEventListener: () => {} };
-const ported: PortServer = servePort(contract, { 'thing.get': (input: any) => ({ id: input.id }) }, { channel });
+const ported: PortServer = servePort(contract, { 'thing.get': (input: any) => ({ id: input.id }), 'thing.feed': () => feed }, { channel });
 void [ported.capabilities.cancel === 'message', ported.close, FRAME_MARKER === 'contract/0.1', PORT_LOCAL_ERRORS.JC2072.retryable];
 const portClient = openPortClient(contract, { channel, timeoutMs: 50 });
 const portOutcome: Promise<Outcome> = portClient.invoke('thing.get', { id: 1 });
-void [portOutcome, portClient.capabilities.status === false, portClient.close];
+void [portOutcome, portClient.capabilities.status === false, portClient.capabilities.stream === true, portClient.close];
+const portStream = portClient.subscribe('thing.feed', null, { onSnapshot: (value, info) => void [value, info.seq, info.resumed], onEnd: (e) => void e.reason });
+void portStream.stop;
+const httpStream = client.subscribe('thing.feed', null, { onPatch: (emission) => void [emission.patch, emission.seq], lastSeq: 4 });
+void httpStream.stop;
 const binding = contractAppBinding(contract, { namespace: 'api/', statePath: '/api' });
-void [binding.slice['thing.get'].status, binding.actions['api/thing.get/start'], binding.schema, binding.effect];
+void [binding.slice['thing.get'].status, binding.actions['api/thing.get/start'], binding.subs.length, binding.schema, binding.effect, binding.subscription];
+const streamHandler = createContractSubscription(portClient);
+void streamHandler;
 const effect = createContractEffect(client, { createTaskEffect: (run, opts) => Object.assign((p: any, d: any) => void [run, opts, p, d], { cancel() {}, cancelAll() {}, dispose() {} }) });
 void [effect.cancel, effect.dispose];
 const projected = publicProjection(contract);

@@ -456,8 +456,10 @@ export const ACTIONS = {
     ],
   },
   'data/live': {
-    patch: [{ op: 'replace', path: '/data/live',
-      value: { mode: '$payload.mode', rows: '$payload.rows', seq: null } }],
+    patch: [
+      { op: 'replace', path: '/data/live/rows', value: '$payload.rows' },
+      { op: 'replace', path: '/data/live/seq', value: null },
+    ],
   },
   'data/live-event': {
     patch: [
@@ -465,6 +467,10 @@ export const ACTIONS = {
       { op: 'replace', path: '/data/live/seq', value: '$payload.seq' },
     ],
   },
+  // the owner's live-registration count (data.lives), refreshed by the
+  // boundary after each of its own live events — how a departed tab's
+  // released subscription becomes visible
+  'data/lives': { patch: [{ op: 'replace', path: '/data/live/regs', value: '$payload.count' }] },
   'data/migrated': { patch: [{ op: 'replace', path: '/data/migration', value: '$payload.report' }] },
   'data/error': { patch: [{ op: 'replace', path: '/data/error', value: '$payload.message' }] },
 
