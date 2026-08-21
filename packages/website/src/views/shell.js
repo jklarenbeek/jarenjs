@@ -40,6 +40,9 @@ const footer =
   ['footer', { class: 'footer' },
     ['div', { class: 'container footer-inner' },
       ['p', {}, 'MIT licensed. Built with the Jaren suite itself: this page is a JSLT stylesheet over one JSON state document.'],
+      // which revision produced this page, from the file the build
+      // generated — absent (and rendering nothing) until it arrives
+      { $apply: '$.ui.build' },
       ['nav', { class: 'footer-links' },
         ['a', { href: 'https://github.com/jklarenbeek/jarenjs' }, 'GitHub'],
         ['a', { href: 'https://www.npmjs.com/package/@jarenjs/validate' }, 'npm'],
@@ -93,6 +96,11 @@ export const SHELL_RULES = [
       // the AI assistant slide-out: present on every page
       { $apply: ['$.ui.assistant', 'assistant'] },
     ],
+  },
+  // the footer's build provenance
+  {
+    match: '$.ui.build',
+    body: ['p', { class: 'footer-build', title: '$.title' }, '$.text'],
   },
   // the standalone Home link (before the dropdown groups)
   {

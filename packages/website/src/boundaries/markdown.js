@@ -9,13 +9,33 @@
  * The mermaid plugin is compiled in so fenced ```mermaid diagrams in
  * fetched READMEs render to inline SVG through @jarenjs/mermaid (the
  * engine dogfooding itself on the live site).
+ *
+ * It is also the one home for repository URL building: the raw and
+ * human-facing bases, the README address for a workspace directory, and
+ * the link rewriter that resolves a fetched document's own relative
+ * links against them.
  */
 
 import { createMdComponent } from '@jarenjs/md/component';
 import { highlightPlugin } from '@jarenjs/md/plugins';
 import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
 
-import { RAW, REPO } from '../content/packages.js';
+/** The raw-content base every README (and README-relative doc) loads from. */
+export const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+
+/** The human-facing GitHub base for repo paths that are not Markdown. */
+export const REPO = 'https://github.com/jklarenbeek/jarenjs';
+
+/**
+ * A workspace directory's README, as a raw URL. Every repo document the
+ * site opens is addressed through here or through the link rewriter
+ * below — one place builds these URLs, so the docs rail, a rewritten
+ * in-document link and the dialog's trail cannot disagree about where a
+ * README lives.
+ * @param {string} dir - Repo-relative workspace directory.
+ * @returns {string}
+ */
+export const readmeUrl = (dir) => `${RAW}/${dir}/README.md`;
 
 // theme 'host': diagram cssVars reference the site tokens, so memoized
 // SVGs follow light/dark live (docs/DESIGN.md §7)

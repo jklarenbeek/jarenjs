@@ -200,4 +200,40 @@ test.describe('the README dialog over stubbed documents', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('the docs rail is the build\'s package census — a new workspace opens its own README', async ({ page }) => {
+    const errors = trackPageErrors(page);
+    const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
+    /** @type {string[]} */
+    const asked = [];
+    await page.route('https://raw.githubusercontent.com/**', (route) => {
+      asked.push(route.request().url());
+      return route.fulfill({
+        status: 200, contentType: 'text/plain', body: '# @jarenjs/contract\n\nOperation contracts.\n',
+      });
+    });
+
+    await page.goto('/#/docs');
+    // the census the build generated from the workspace manifests: the
+    // three newest workspaces are on the page without anyone listing them
+    for (const name of ['@jarenjs/contract', '@jarenjs/studio', '@jarenjs/play']) {
+      await expect(page.locator('.readme-btn', { hasText: name })).toBeVisible();
+    }
+    const buttons = await page.locator('.readme-btn').count();
+    // relative to the page: the deploy base is the site's, not this test's
+    const census = await page.evaluate(() => fetch('site/packages.json').then((r) => r.json()));
+    expect(buttons, 'one button per published workspace').toBe(census.packages.length);
+
+    await page.locator('.readme-btn', { hasText: '@jarenjs/contract' }).click();
+    const dialog = page.locator('.md-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.md-dialog-title')).toHaveText('@jarenjs/contract');
+    await expect(dialog.locator('article.md')).toContainText('Operation contracts');
+    // the URL comes from the census entry's directory, not from a list
+    expect(asked).toContain(`${RAW}/packages/contract/README.md`);
+
+    // and the footer says which revision produced the page it is on
+    await expect(page.locator('.footer-build')).toHaveText(/^v\d+\.\d+\.\d+ · [0-9a-f]{7} · built \d{4}-\d{2}-\d{2}$/);
+    expect(errors).toEqual([]);
+  });
 });

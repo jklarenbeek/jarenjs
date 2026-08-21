@@ -226,6 +226,8 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
   color: var(--muted); font-size: 0.85rem;
 }
 .footer-links { display: flex; gap: var(--space-5); }
+/* the build provenance: a version and a revision, so the code face */
+.footer-build { font-family: var(--mono); font-size: 0.8rem; }
 
 /* hero */
 .hero { padding-block: var(--space-14) var(--space-4); }

@@ -111,5 +111,7 @@ harness/
 test-results/
 playwright-report/
 
-# generated on every website build from the git revision (scripts/generate-build-info.js)
+# generated on every website build from the git revision and the workspace
+# manifests (scripts/generate-build-info.js, scripts/generate-site-data.js)
 packages/website/public/build.json
+packages/website/public/site/

@@ -2,12 +2,13 @@
    - navigation requests: network-first, falling back to the cached shell
    - precached statics (manifest, icons, fonts): cache-first
    - hashed assets (/assets/): cache-first (immutable by construction)
-   - benchmark data: stale-while-revalidate
+   - generated data (benchmarks, the package census, the build
+     provenance): stale-while-revalidate
    Every cache.put is gated on response.ok: a 404/502 must never be
    cached forever, and a bad navigation response must never replace the
    shell. */
 
-const CACHE = 'jaren-website-v19';
+const CACHE = 'jaren-website-v20';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 
 /* Precached at install AND served by the fetch handler's cache-first
@@ -69,7 +70,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.includes('/benchmarks/')) {
+  /* Everything the build generates about this repository: the benchmark
+     files, the package census the docs rail renders and the build
+     provenance the footer prints. Fresh whenever the network answers,
+     and still there when it does not — the docs page must not lose its
+     package list offline. */
+  if (url.pathname.includes('/benchmarks/') || url.pathname.includes('/site/')
+    || url.pathname.endsWith('/build.json')) {
     event.respondWith(
       caches.match(request).then((hit) => {
         const refresh = fetch(request)

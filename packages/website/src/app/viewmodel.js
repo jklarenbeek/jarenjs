@@ -11,8 +11,7 @@ import { deriveSuite, SUITES } from '../boundaries/bench.js';
 import { formViewFor } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
-import { PACKAGES } from '../content/packages.js';
-import { md, mdArticle, rewriteReadmeLinks } from '../boundaries/markdown.js';
+import { md, mdArticle, rewriteReadmeLinks, readmeUrl } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
@@ -52,7 +51,7 @@ const NAV_GROUPS = [
 const HOME_ENGINE_SUITE = {
   validate: 'validate', path: 'jsonpath', pointer: 'jsonpointer', patch: 'jsonpatch',
   query: 'jsonquery', jslt: 'jslt', josl: 'toml', csv: 'csv', charts: 'charts',
-  markdown: 'markdown', mermaid: 'mermaid',
+  markdown: 'markdown', mermaid: 'mermaid', contract: 'contract',
 };
 
 /**
@@ -115,7 +114,10 @@ export function viewModel(state) {
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);
   if (page === 'game') ui.game = gamePageViewModel(state.game);
   if (page === 'data') ui.data = dataViewModel(state);
-  if (page === 'docs') ui.docs = docsPage(state.route.params.s);
+  if (page === 'docs') {
+    ui.docs = docsPage(state.route.params.s,
+      state.site.data.packages, state.site.status.packages);
+  }
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
 
   // The README dialog is a global overlay (any page can open it): it
@@ -127,8 +129,34 @@ export function viewModel(state) {
   // The AI assistant is a global slide-out on every page.
   ui.assistant = assistantView(state.ai);
 
+  // The footer's provenance line, likewise global — but only once the
+  // generated file has landed: a page that cannot say which revision it
+  // is says nothing rather than guessing.
+  const build = state.site.data.build;
+  if (build !== undefined) ui.build = buildLine(build);
+
   return { ...state, ui };
 }
+
+/**
+ * The footer's one line of build provenance, from the file the build
+ * generated: which version, which revision, and the date of the commit
+ * it was built from (not the build's own clock). A checkout with no git
+ * has no revision to name and the line simply omits it. The title
+ * carries the build-environment facts — the runtime and machine — and
+ * says when the bundle carried uncommitted work, because "v0.38.0"
+ * alone would claim a revision the reader could not reproduce.
+ */
+const buildLine = memo1((build) => {
+  const parts = [`v${build.version}`];
+  if (typeof build.commit === 'string') parts.push(build.commit.slice(0, 7));
+  parts.push(`built ${String(build.built).slice(0, 10)}`);
+  return {
+    text: parts.join(' · '),
+    title: `Built on ${build.node} (${build.platform})`
+      + (build.reproducible ? '' : ' from a modified working tree'),
+  };
+});
 
 const assistantView = memo1((ai) => {
   const s = ai.settings;
@@ -274,7 +302,7 @@ const ideModel = memo1((name, names, shared) => ({
   names: names.map((n) => ({ name: n })),
 }));
 
-const docsPage = memo1((param) => {
+const docsPage = memo1((param, census, status) => {
   const current = param ?? DOCS_SECTIONS[0].id;
   const section = DOCS_SECTIONS.find((s) => s.id === current) ?? DOCS_SECTIONS[0];
   return {
@@ -285,6 +313,34 @@ const docsPage = memo1((param) => {
       href: `#/docs?s=${s.id}`,
     })),
     section: { title: section.title, blocks: section.blocks },
-    packages: PACKAGES,
+    ...readmeRail(census, status),
   };
 });
+
+/**
+ * The README rail: one button per PUBLISHED workspace, from the census
+ * the build derives from the workspace manifests. The site keeps no list
+ * of its own, because a hand-kept copy drifts from the repository it
+ * describes — so until the census lands the rail says what it is waiting
+ * for, exactly as the benchmarks page does with its data.
+ * @param {any} census - The generated census, or undefined.
+ * @param {string | undefined} status
+ */
+function readmeRail(census, status) {
+  if (census === undefined) {
+    return {
+      packages: [],
+      note: status === 'error'
+        ? callout('Package list unavailable',
+          'The package census could not be loaded. The site build generates it from the workspace manifests.')
+        : callout('Loading…', 'Fetching the package census.'),
+    };
+  }
+  return {
+    packages: census.packages.map((entry) => ({
+      name: entry.name,
+      blurb: entry.description,
+      url: readmeUrl(entry.dir),
+    })),
+  };
+}

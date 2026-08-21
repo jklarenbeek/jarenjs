@@ -258,7 +258,7 @@ describe('website boundaries — the chart renderer (the play seam)', function (
   });
 
   it('a `stream` definition routes its own records through the adapter — never an empty chart', function () {
-    // regression (TODO_SITE_01 Q1): the events buffered by the parse were
+    // regression: the events buffered by the parse were
     // discarded and dataFor received a DIFFERENT empty array, so any
     // stream-member definition rendered an empty chart with real timings
     const definition = {

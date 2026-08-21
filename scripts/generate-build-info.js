@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 //@ts-check
 /**
- * Build provenance for the website: which repo version, which runtime,
- * which commit produced the deployed bundle.
+ * Build provenance for the website: which repo version, which commit and
+ * which runtime produced the deployed bundle.
  *
  * This is deliberately NOT written into `public/benchmarks/meta.json`.
  * That file's `node`/`cpu`/`platform`/`version`/`generated` members are
@@ -14,47 +14,66 @@
  * "measured at 0.27.2 on Node v22, built at 0.30.9 on Node v24" — the
  * gap becomes visible instead of silently plausible.
  *
- * The timestamp is the COMMIT date, not the wall clock, so the same
- * commit always produces byte-identical output: a rebuild is
- * reproducible, and the built site addresses to the same content hash.
- * Only a checkout with no git available falls back to the clock, and
- * says so.
+ * The timestamp is the COMMIT date, not the wall clock: on a given
+ * runtime, the same commit always produces byte-identical output, so a
+ * rebuild is reproducible and the built site addresses to the same
+ * content hash. `node` and `platform` are BUILD-ENVIRONMENT facts and
+ * they do vary between machines — they are recorded because a bundle's
+ * behavior can depend on the toolchain that produced it, and the
+ * reproducibility claim above is the one that holds per runtime, not
+ * across all of them.
+ *
+ * `reproducible` therefore means exactly this: the output is tied to a
+ * commit AND the working tree matches it. A dirty tree ships code that
+ * is in the bundle but not in the revision the bundle names, and there
+ * is no rebuilding that from the commit alone.
  */
 
-import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { headCommit, isDirty } from './lib/git.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const OUT = join(ROOT, 'packages/website/public/build.json');
 
-/** A git fact, or null when git is unavailable (a tarball checkout). */
-function git(...args) {
-  try {
-    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  }
-  catch {
-    return null;
-  }
+/**
+ * @typedef {Object} BuildInfo
+ * @property {string} version - The repo version this bundle was built from.
+ * @property {string | null} commit - The HEAD commit, or null without git.
+ * @property {string} built - The commit date; the clock only when there is
+ *   no commit to date the build by.
+ * @property {boolean} reproducible - Committed revision + clean tree.
+ * @property {string} node - The runtime that ran the build.
+ * @property {string} platform - The machine that ran the build.
+ */
+
+/**
+ * Read the build provenance.
+ * @returns {BuildInfo}
+ */
+export function buildInfo() {
+  const version = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+  const { commit, committed } = headCommit();
+  return {
+    version,
+    commit,
+    // null `commit` means the build could not be tied to a revision, so the
+    // clock is the only answer available — recorded as such, never as if it
+    // were reproducible
+    built: committed ?? new Date().toISOString(),
+    // `isDirty()` answers null when git cannot say, which is not "clean"
+    reproducible: committed !== null && isDirty() === false,
+    node: process.version,
+    platform: `${process.platform} ${process.arch}`,
+  };
 }
 
-const version = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
-const commit = git('rev-parse', 'HEAD');
-const committed = git('log', '-1', '--format=%cI');
-
-const info = {
-  version,
-  commit,
-  // null `commit` means the build could not be tied to a revision, so the
-  // clock is the only answer available — recorded as such, never as if it
-  // were reproducible
-  built: committed ?? new Date().toISOString(),
-  reproducible: committed !== null,
-  node: process.version,
-  platform: `${process.platform} ${process.arch}`,
-};
-
-mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT, `${JSON.stringify(info, null, 2)}\n`);
-console.log(`build.json: ${version} @ ${commit === null ? '(no git)' : commit.slice(0, 7)} on ${process.version}`);
+if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const info = buildInfo();
+  mkdirSync(dirname(OUT), { recursive: true });
+  writeFileSync(OUT, `${JSON.stringify(info, null, 2)}\n`);
+  console.log(`build.json: ${info.version} @ ${info.commit === null ? '(no git)' : info.commit.slice(0, 7)}`
+    + ` on ${info.node}${info.reproducible ? '' : ' (not reproducible: dirty tree or no git)'}`);
+}

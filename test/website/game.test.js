@@ -85,7 +85,7 @@ describe('website — the adventure game', function () {
   });
 
   it('the megaphone chain pays off: pepper on the megaphone solves the signposted puzzle', function () {
-    // regression (TODO_SITE_01 Q8a): Marina's clue and the crate note both
+    // regression: Marina's clue and the crate note both
     // pointed at the megaphone, but no puzzle targeted it — a dead end
     // against the header's "no dead ends"
     const app = mountGame();
@@ -101,7 +101,7 @@ describe('website — the adventure game', function () {
   });
 
   it('the content vocabulary is honest by enumeration: no dead ends, no phantom rewards', function () {
-    // regression (TODO_SITE_01 Q8b/c): crate.reward was 'pepper_hint' (not
+    // regression: crate.reward was 'pepper_hint' (not
     // an ITEMS key — silently dropped by both consumers) and ITEMS.form
     // was obtainable by nothing (the gag counts /game/forms, not inventory)
     for (const p of Object.values(PUZZLES)) {

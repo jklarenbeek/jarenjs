@@ -227,7 +227,7 @@ describe('website — the Play playground (#/play)', () => {
   });
 
   it('switching examples in form mode drops the stale buffer — one form edit mirrors the NEW data', () => {
-    // regression (TODO_SITE_01 Q2): `play/loaded` did not reset the form
+    // regression: `play/loaded` did not reset the form
     // buffer its twin `play/loaded-session` resets, so the first form edit
     // after switching examples mirrored the OLD example's data over the new
     const { app, container } = mountSite();

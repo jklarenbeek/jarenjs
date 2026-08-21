@@ -181,7 +181,7 @@ describe('binance connection lifecycle (stub socket)', function () {
   });
 
   it('leaving the page sinks the closed state — never a dead chart labeled live', function () {
-    // regression (TODO_SITE_01 Q4): binancePageSync(false) stopped the
+    // regression: binancePageSync(false) stopped the
     // socket but dispatched nothing, so state.chartsLive kept the last
     // painted nodes — a return visit showed a frozen chart labeled `live`
     // with no Go-live control

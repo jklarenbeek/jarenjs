@@ -17,6 +17,18 @@ import { SUITES } from '../boundaries/bench.js';
  * a no-such-suite callout instead. */
 const KNOWN_SUITE = { $or: SUITES.map((s) => ({ $eq: ['$payload.params.suite', s.key] })) };
 
+/** The pages whose cards carry measured headlines from `meta.json`. */
+const MEASURED_PAGE = { $or: [
+  { $eq: ['$payload.page', 'benchmarks'] },
+  { $eq: ['$payload.page', 'home'] },
+] };
+
+/** The pages that render the package census. */
+const CENSUS_PAGE = { $or: [
+  { $eq: ['$payload.page', 'docs'] },
+  { $eq: ['$payload.page', 'home'] },
+] };
+
 export const ACTIONS = {
   // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
   ...calcActions,
@@ -24,40 +36,53 @@ export const ACTIONS = {
   // the adventure game: scene/go-* (flow-engine navigation) + game/* verbs
   ...GAME_ACTIONS,
 
-  // hash changed: store the parsed route and fetch what the page needs
-  // (the fetch-bench handler dedupes, so repeat visits are free)
+  // hash changed: store the parsed route and fetch what the page needs.
+  // Both fetch handlers dedupe, so repeat visits are free — and a
+  // `$if` whose condition is false contributes no element, which is what
+  // makes this one flat list instead of nested branches.
   'route/set': {
     patch: [
       { op: 'replace', path: '/route', value: '$payload' },
       { op: 'replace', path: '/menu', value: false },
       { op: 'replace', path: '/navOpen', value: null },
     ],
-    effects: {
-      $if: [
-        // the home page shows measured headlines on its engine cards,
-        // so it needs the same meta.json the benchmarks overview reads
-        { $or: [
-          { $eq: ['$payload.page', 'benchmarks'] },
-          { $eq: ['$payload.page', 'home'] },
-        ] },
-        [
-          { run: 'fetch-bench', with: { name: 'meta' } },
+    effects: [
+      // the footer prints the build's provenance on every page, so the
+      // reader lands on a page that can already say what produced it
+      { run: 'fetch-site', with: { name: 'build' } },
+      { $if: [CENSUS_PAGE, { run: 'fetch-site', with: { name: 'packages' } }] },
+      // the home page shows measured headlines on its engine cards, so
+      // it needs the same meta.json the benchmarks overview reads
+      { $if: [MEASURED_PAGE, { run: 'fetch-bench', with: { name: 'meta' } }] },
+      {
+        $if: [
           {
-            $if: [
-              {
-                $and: [
-                  { $exists: '$payload.params.suite' },
-                  { $ne: ['$payload.params.suite', 'overview'] },
-                  KNOWN_SUITE,
-                ],
-              },
-              { run: 'fetch-bench', with: { name: '$payload.params.suite' } },
+            $and: [
+              MEASURED_PAGE,
+              { $exists: '$payload.params.suite' },
+              { $ne: ['$payload.params.suite', 'overview'] },
+              KNOWN_SUITE,
             ],
           },
+          { run: 'fetch-bench', with: { name: '$payload.params.suite' } },
         ],
-        [],
-      ],
-    },
+      },
+    ],
+  },
+
+  'site/status': {
+    patch: [{
+      op: 'add',
+      path: { $concat: ['/site/status/', '$payload.name'] },
+      value: '$payload.status',
+    }],
+  },
+
+  'site/loaded': {
+    patch: [
+      { op: 'add', path: { $concat: ['/site/data/', '$payload.name'] }, value: '$payload.data' },
+      { op: 'add', path: { $concat: ['/site/status/', '$payload.name'] }, value: 'ready' },
+    ],
   },
 
   'bench/status': {

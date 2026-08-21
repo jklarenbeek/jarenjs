@@ -7,8 +7,9 @@
   "author": "joham",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
-    "build": "node ../../scripts/generate-build-info.js && vite build",
+    "dev": "npm run site:data && vite",
+    "build": "npm run site:data && vite build",
+    "site:data": "node ../../scripts/generate-build-info.js && node ../../scripts/generate-site-data.js",
     "preview": "vite preview",
     "lint": "eslint src",
     "benchmark:generate": "cd ../.. && node benchmark/website-data.js --iterations 1000",

@@ -13,6 +13,8 @@ import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';
 
 const BASE = import.meta.env.BASE_URL;
+/** The build-generated site data, by the name the app asks for it under. */
+const SITE_FILES = { packages: 'site/packages.json', build: 'build.json' };
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
 const AI_KEY = 'jaren-ai';
@@ -63,6 +65,16 @@ const app = createSiteApp({
     fetch(`${BASE}benchmarks/${encodeURIComponent(name)}.json`).then((response) => (
       response.ok ? response.json() : Promise.reject(new Error(String(response.status)))
     )),
+  // what the build generated about the repository itself. The names are
+  // the site's, not the deployment's — a path lives here, beside the
+  // benchmark route above, and never in the state document
+  fetchSite: (name) => {
+    const file = SITE_FILES[name];
+    if (file === undefined) return Promise.reject(new Error(`unknown site artifact '${name}'`));
+    return fetch(`${BASE}${file}`).then((response) => (
+      response.ok ? response.json() : Promise.reject(new Error(String(response.status)))
+    ));
+  },
   fetchText: (url) =>
     fetch(url).then((response) => (
       response.ok

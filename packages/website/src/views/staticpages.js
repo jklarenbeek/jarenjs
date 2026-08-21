@@ -25,7 +25,12 @@ export const STATIC_RULES = [
         ['section', { class: 'docs-packages' },
           ['h2', { class: 'docs-nav-heading' }, 'Package READMEs'],
           ['p', { class: 'docs-nav-note' }, 'Read any package’s README, rendered live by @jarenjs/md.'],
-          ['div', { class: 'docs-readmes' }, [{ $apply: '$.packages[*]' }]],
+          // the list is the build's package census: `note` exists only
+          // while it is missing, `packages` only once it is here
+          ['div', { class: 'docs-readmes' },
+            { $apply: ['$.note', 'ui'] },
+            [{ $apply: '$.packages[*]' }],
+          ],
         ],
       ],
       ['article', { class: 'docs-article' },

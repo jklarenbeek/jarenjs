@@ -7,7 +7,15 @@ import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { viewModel } from '../../packages/website/src/app/viewmodel.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
+import { buildSiteData } from '../../scripts/generate-site-data.js';
+import { buildInfo } from '../../scripts/generate-build-info.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
+
+/** What the build generates about this repository, as the browser gets
+ * it: the REAL census and the REAL provenance rather than a fixture, so
+ * the docs rail and the footer are asserted against the repository they
+ * describe. Read once — every mount serves the same two documents. */
+const SITE_DATA = { packages: buildSiteData(), build: buildInfo() };
 
 /** Fixture benchmark payloads, shaped like website-data.js output. */
 const FIXTURES = {
@@ -28,7 +36,8 @@ const FIXTURES = {
 };
 
 /** A full headless site over the stub DOM with a controllable route. */
-function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelContext, fetchText } = {}) {
+function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelContext, fetchText,
+  siteData = SITE_DATA } = {}) {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
@@ -43,6 +52,9 @@ function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelConte
     debounceMs: 0,
     fetchJson: (name) => (name in fixtures
       ? Promise.resolve(fixtures[name])
+      : Promise.reject(new Error('404'))),
+    fetchSite: siteData === null ? undefined : (name) => (name in siteData
+      ? Promise.resolve(siteData[name])
       : Promise.reject(new Error('404'))),
     fetchText,
     applyTheme: (t) => themes.push(t),
@@ -61,6 +73,14 @@ function mountSite({ fixtures = FIXTURES, hash = '#/', stored = null, modelConte
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Arrive on the docs page AND let the package census land: the README
+ * rail is derived from the fetched census, so it exists one turn after
+ * the route rather than with it. */
+async function openDocs(go) {
+  go('#/docs');
+  await tick();
+}
 
 function find(node, pred) {
   if (pred(node)) return node;
@@ -83,6 +103,26 @@ describe('website — the site as one app document', function () {
     assert.strictEqual(cards, HOME_CONTENT.engines.length);
     assert.match(html, new RegExp(`One stack, ${cards} engines`));
     assert.match(html, /nav-link active/);
+    // the suite's operation contracts are one of the engines the page
+    // advertises, and the count above follows the document
+    assert.match(html, /<h3>Contract<\/h3>/);
+  });
+
+  it('an engine card whose suite has a headline shows the MEASURED line, loss included', async function () {
+    const headline = {
+      key: 'contract', label: 'Contract dispatch', ratio: 0.2775,
+      rival: 'a hand-composed router', conformance: null,
+    };
+    const { container } = mountSite({
+      fixtures: { ...FIXTURES, meta: { ...FIXTURES.meta, headlines: [headline] } },
+    });
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /3\.6× slower than a hand-composed router/,
+      'a sub-parity ratio is published in the direction it measures');
+    const authored = HOME_CONTENT.engines.find((e) => e.key === 'contract');
+    assert.doesNotMatch(html, new RegExp(authored.perf.slice(0, 24)),
+      'the authored line is the pre-arrival fallback, not a second published figure');
   });
 
   it('routes by hash: pages are modes, tabs are links', function () {
@@ -181,7 +221,7 @@ describe('website — the site as one app document', function () {
   });
 
   it('benchmarks: an unknown ?suite= shows the overview + callout — never a hang or a bad patch', async function () {
-    // regression (TODO_SITE_01 Q5): route/set passed ?suite= unvalidated
+    // regression: route/set passed ?suite= unvalidated
     // into fetch-bench; a name with a '/' broke the '/benchStatus/…' status
     // pointer (JP2001) and the page hung on "Loading…" forever. mountSite
     // rethrows app errors, so a failing patch would throw right here.
@@ -203,7 +243,7 @@ describe('website — the site as one app document', function () {
   });
 
   it('benchmarks: the suite nodes memo survives unrelated transitions (fresh state roots)', async function () {
-    // regression (TODO_SITE_01 Q6): benchNodes was keyed on the state ROOT,
+    // regression: benchNodes was keyed on the state ROOT,
     // fresh every transition, so every unrelated dispatch rebuilt the table
     const { app, go } = mountSite();
     go('#/benchmarks?suite=jsonpointer');
@@ -333,9 +373,9 @@ describe('website — the site as one app document', function () {
       'the entire home page subtree is === — the DOM patcher skips it in O(1)');
   });
 
-  it('docs page lists package README buttons', function () {
+  it('docs page lists a README button per PUBLISHED workspace, from the census', async function () {
     const { container, go } = mountSite();
-    go('#/docs');
+    await openDocs(go);
     const html = serialize(container);
     assert.match(html, /Package READMEs/);
     assert.match(html, /class="readme-btn"[^>]*>@jarenjs\/forms/);
@@ -343,10 +383,43 @@ describe('website — the site as one app document', function () {
     assert.match(html, /@jarenjs\/flow/, 'every published package is readable here, flow included');
     assert.match(html, /@jarenjs\/linq/, 'the data pair is readable here too');
     assert.match(html, /@jarenjs\/db/);
+    // the three newest workspaces are the ones the hand-kept list missed
+    assert.match(html, /@jarenjs\/contract/);
+    assert.match(html, /@jarenjs\/studio/);
+    assert.match(html, /@jarenjs\/play/);
+    assert.doesNotMatch(html, /@jarenjs\/website/, 'a private workspace is not a published package');
+    const buttons = (html.match(/class="readme-btn"/g) ?? []).length;
+    assert.strictEqual(buttons, SITE_DATA.packages.packages.length,
+      'the rail is the census — one button per public workspace, no more, no fewer');
     // the docs sections cover flow and the data pair too
     assert.match(html, /Flow — executable workflows/);
     assert.match(html, /LINQ — chains to query documents/);
     assert.match(html, /Data — documents in SQLite/);
+  });
+
+  it('says what it is waiting for, and what failed, instead of an empty rail', async function () {
+    const loading = mountSite({ siteData: {} });   // fetch pending → never resolves for 'packages'
+    loading.go('#/docs');
+    assert.match(serialize(loading.container), /Fetching the package census/);
+    await tick();
+    assert.match(serialize(loading.container), /Package list unavailable/,
+      'a failed census fetch says so where the list would be');
+
+    const hostless = mountSite({ siteData: null }); // a host with no site-data capability
+    await openDocs(hostless.go);
+    assert.match(serialize(hostless.container), /Package list unavailable/);
+  });
+
+  it('the footer prints the build provenance from the generated file', async function () {
+    const { container, go } = mountSite();
+    await openDocs(go);
+    const info = SITE_DATA.build;
+    const line = serialize(container).match(/class="footer-build"[^>]*>([^<]+)</);
+    assert.notStrictEqual(line, null, 'the footer carries the provenance line');
+    assert.strictEqual(line[1],
+      `v${info.version} · ${info.commit.slice(0, 7)} · built ${info.built.slice(0, 10)}`);
+    assert.match(serialize(container), /title="Built on v\d+[^"]*"/,
+      'the runtime it was built on is a build-environment fact, kept out of the line itself');
   });
 
   it('opens a README in the dialog, rendered by @jarenjs/md', async function () {
@@ -355,7 +428,7 @@ describe('website — the site as one app document', function () {
     const { container, go } = mountSite({
       fetchText: (url) => { urls.push(url); return Promise.resolve(README); },
     });
-    go('#/docs');
+    await openDocs(go);
     const button = find(container, (n) =>
       n.tagName === 'button' && n.attributes?.get('class') === 'readme-btn'
       && n.childNodes?.[0]?.nodeValue === '@jarenjs/core');
@@ -387,7 +460,7 @@ describe('website — the site as one app document', function () {
     const { container, go } = mountSite({
       fetchText: () => Promise.reject(new Error('404 Not Found')),
     });
-    go('#/docs');
+    await openDocs(go);
     const btn = find(container, (n) =>
       n.tagName === 'button' && n.attributes?.get('class') === 'readme-btn');
     fire(btn, 'click');
@@ -401,7 +474,7 @@ describe('website — the site as one app document', function () {
     const { container, go } = mountSite({
       fetchText: () => Promise.resolve('# Hi\n'),
     });
-    go('#/docs');
+    await openDocs(go);
     fire(find(container, (n) => n.attributes?.get('class') === 'readme-btn'), 'click');
     await tick();
     assert.match(serialize(container), /md-dialog-backdrop/);
@@ -437,7 +510,7 @@ describe('website — the site as one app document', function () {
           : Promise.reject(new Error('404'));
       },
     });
-    site.go('#/docs');
+    await openDocs(site.go);
     fire(find(site.container, (n) => n.tagName === 'button'
       && n.childNodes?.[0]?.nodeValue === '@jarenjs/core'), 'click');
     await tick();

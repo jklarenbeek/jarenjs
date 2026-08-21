@@ -83,7 +83,7 @@ describe('website — the Flow studio', function () {
   });
 
   it('add → delete → add mints unique ids: no node replaced, no duplicate state', function () {
-    // regression (TODO_SITE_01 Q3): both add actions minted `'n'/'s' +
+    // regression: both add actions minted `'n'/'s' +
     // (count + 1)` — after a delete that id may exist, so the nodes-object
     // add REPLACED the user's node and the states add appended a duplicate
     const { app } = mountSite();

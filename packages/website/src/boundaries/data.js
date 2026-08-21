@@ -184,10 +184,21 @@ export function createDataRuntime(_env = {}) {
       });
   };
 
-  // a departing tab releases its subscription so the owner's
-  // registration is not leaked (the wire's unsubscribe frame)
+  // A departing tab releases its subscription so the owner's
+  // registration is not leaked (the wire's unsubscribe frame). BOTH
+  // teardown events are listened for because the engines disagree about
+  // which one a closing tab gets: Firefox delivers `beforeunload` and no
+  // `pagehide` at all, so a `pagehide`-only release leaks the owner's
+  // registration forever there — the count never comes back down and
+  // the store keeps feeding a subscription nobody reads. `stop()` is
+  // idempotent on both sides (the client marks the stream stopped, the
+  // owner's wrapper decrements once), so being told twice costs
+  // nothing. The listener never calls `preventDefault`, so it cannot
+  // raise the browser's "leave site?" prompt.
   if (typeof addEventListener === 'function') {
-    addEventListener('pagehide', () => liveSub?.stop());
+    const release = () => liveSub?.stop();
+    addEventListener('pagehide', release);
+    addEventListener('beforeunload', release);
   }
 
   const effects = {

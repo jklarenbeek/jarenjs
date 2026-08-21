@@ -1,8 +1,7 @@
 //@ts-check
 /**
- * The service worker, proven in Node (TODO_SITE_01 Q7): sw.js runs in a
- * vm sandbox against a fake cache + fetch, so the two repaired contracts
- * hold without a browser —
+ * The service worker, proven in Node: sw.js runs in a vm sandbox against
+ * a fake cache + fetch, so its two contracts hold without a browser —
  *  (a) every URL the install handler precaches is served by a fetch
  *      branch (the old worker precached fonts and root statics no branch
  *      ever matched, so they died offline), and
@@ -101,6 +100,7 @@ describe('website — the service worker (Node vm harness)', function () {
     await dispatchFetch(bad.listeners, SCOPE, 'navigate');
     await dispatchFetch(bad.listeners, `${SCOPE}assets/index-abc123.js`);
     await dispatchFetch(bad.listeners, `${SCOPE}benchmarks/meta.json`);
+    await dispatchFetch(bad.listeners, `${SCOPE}site/packages.json`);
     assert.deepStrictEqual(bad.puts, [], 'all three put sites are gated on response.ok');
     assert.strictEqual(bad.store.get(SCOPE).body, `precached:${SCOPE}`,
       'the cached shell survived the bad navigation response');
@@ -110,8 +110,11 @@ describe('website — the service worker (Node vm harness)', function () {
     await dispatchFetch(good.listeners, SCOPE, 'navigate');
     await dispatchFetch(good.listeners, `${SCOPE}assets/index-abc123.js`);
     await dispatchFetch(good.listeners, `${SCOPE}benchmarks/meta.json`);
+    await dispatchFetch(good.listeners, `${SCOPE}site/packages.json`);
+    await dispatchFetch(good.listeners, `${SCOPE}build.json`);
     assert.deepStrictEqual(good.puts.map((p) => p.key), [
       SCOPE, `${SCOPE}assets/index-abc123.js`, `${SCOPE}benchmarks/meta.json`,
-    ], 'ok responses cache at all three sites');
+      `${SCOPE}site/packages.json`, `${SCOPE}build.json`,
+    ], 'ok responses cache at every generated-data site, so the docs rail survives offline');
   });
 });

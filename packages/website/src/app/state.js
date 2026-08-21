@@ -33,6 +33,15 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     bench: {},        // file name -> parsed benchmark JSON
     benchStatus: {},  // file name -> 'loading' | 'ready' | 'error'
     benchUi: { search: '', limit: 40 },
+
+    // what the build generated ABOUT this repository, fetched like the
+    // benchmark files: `packages` is the census the docs rail renders
+    // (the published workspaces, derived from their manifests) and
+    // `build` is the provenance the footer prints. Both are absent until
+    // their fetch lands, so every surface reading them renders its own
+    // honest waiting state rather than a stale hand-written answer.
+    site: { data: {}, status: {} },
+
     chartsLive: null,            // /charts page live-feed render nodes
     ide: { name: '', names: ideNames, shared: null },
 

@@ -50,6 +50,10 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * @property {(flush: () => void) => void} [schedule] - Render scheduler.
  * @property {string} [initialTheme] - 'light' | 'dark'.
  * @property {(name: string) => Promise<any>} fetchJson - Benchmark file loader.
+ * @property {(name: string) => Promise<any>} [fetchSite] - Loader for the
+ *   data the build generated about this repository ('packages' — the
+ *   workspace census; 'build' — the build provenance). Omit it and the
+ *   surfaces reading them say so instead of showing a stale answer.
  * @property {(url: string) => Promise<string>} [fetchText] - Raw-text
  *   loader for package READMEs (the dialog); omit for no-network hosts.
  * @property {(theme: string) => void} [applyTheme]
@@ -129,6 +133,8 @@ export function createSiteApp(env) {
 
   /** effect-handler dedupe: each benchmark file is fetched once */
   const requested = new Set();
+  /** the same, for the build-generated site data (its own key space) */
+  const requestedSite = new Set();
   /** @type {any} */
   let app = null;
   // the data studio's owner-worker runtime (its boot sub lives in the
@@ -182,6 +188,26 @@ export function createSiteApp(env) {
         .catch(() => {
           requested.delete(props.name);
           dispatch('bench/status', { name: props.name, status: 'error' });
+        });
+    },
+    // the build's own answers about this repository (the package census,
+    // the build provenance): fetched once each, exactly like the
+    // benchmark files, and a host without the capability reports the
+    // same 'error' status as a failed fetch — the surfaces then show
+    // what they could not load instead of nothing
+    'fetch-site': (props, dispatch) => {
+      if (requestedSite.has(props.name)) return;
+      requestedSite.add(props.name);
+      if (env.fetchSite === undefined) {
+        dispatch('site/status', { name: props.name, status: 'error' });
+        return;
+      }
+      dispatch('site/status', { name: props.name, status: 'loading' });
+      env.fetchSite(props.name)
+        .then((data) => dispatch('site/loaded', { name: props.name, data }))
+        .catch(() => {
+          requestedSite.delete(props.name);
+          dispatch('site/status', { name: props.name, status: 'error' });
         });
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
