@@ -82,6 +82,44 @@ describe('website — the Flow studio', function () {
     assert.match(byDataId(container, 'draft').getAttribute('class'), /mm-selected/);
   });
 
+  it('add → delete → add mints unique ids: no node replaced, no duplicate state', function () {
+    // regression (TODO_SITE_01 Q3): both add actions minted `'n'/'s' +
+    // (count + 1)` — after a delete that id may exist, so the nodes-object
+    // add REPLACED the user's node and the states add appended a duplicate
+    const { app } = mountSite();
+
+    // dag: n1..n3, delete n2 → count is 2, a count-based mint collides with n3
+    app.dispatch('flow/load', { kind: 'dag', doc: {
+      $dag: '0.1',
+      nodes: {
+        n1: { kind: 'task', run: 'n1' },
+        n2: { kind: 'task', run: 'n2' },
+        n3: { kind: 'task', run: 'mine' },
+      },
+      edges: [],
+    }, runContext: null, dagInput: '' });
+    app.dispatch('flow/pick', { type: 'node', id: 'n2', path: '/nodes/n2' });
+    app.dispatch('flow/delete');
+    app.dispatch('flow/add-node');
+    const nodes = flowState(app).doc.nodes;
+    assert.strictEqual(Object.keys(nodes).length, 3, '2 remaining + 1 added = 3 distinct keys');
+    assert.deepStrictEqual(nodes.n3, { kind: 'task', run: 'mine' }, 'the existing node kept its members');
+    assert.deepStrictEqual(nodes.n4, { kind: 'task', run: 'n4' }, 'the mint skipped the taken id');
+    assert.deepStrictEqual(flowState(app).selection, { type: 'node', id: 'n4', path: '/nodes/n4' });
+
+    // fsm: s1..s3, delete s2 → a count-based mint would append a DUPLICATE s3
+    app.dispatch('flow/load', { kind: 'fsm', doc: {
+      $fsm: '0.1', initial: 's1', states: ['s1', 's2', 's3'], transitions: [],
+    }, runContext: null, dagInput: '' });
+    app.dispatch('flow/pick', { type: 'state', id: 's2', path: '/states/1' });
+    app.dispatch('flow/delete');
+    app.dispatch('flow/add-state');
+    const states = flowState(app).doc.states;
+    assert.strictEqual(new Set(states).size, states.length, 'state ids stay unique (set-size)');
+    assert.deepStrictEqual(states, ['s1', 's3', 's4']);
+    assert.deepStrictEqual(flowState(app).selection, { type: 'state', id: 's4', path: '/states/2' });
+  });
+
   it('add state → connect (click-click) → delete cascades; undo/redo round-trips', function () {
     const { app, container } = mountSite();
     app.dispatch('flow/load', { kind: 'fsm', doc: PLAIN_FSM, runContext: null, dagInput: '' });

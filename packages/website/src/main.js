@@ -60,7 +60,7 @@ const app = createSiteApp({
   document,
   initialTheme: theme,
   fetchJson: (name) =>
-    fetch(`${BASE}benchmarks/${name}.json`).then((response) => (
+    fetch(`${BASE}benchmarks/${encodeURIComponent(name)}.json`).then((response) => (
       response.ok ? response.json() : Promise.reject(new Error(String(response.status)))
     )),
   fetchText: (url) =>

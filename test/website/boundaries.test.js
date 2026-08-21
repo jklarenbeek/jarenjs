@@ -13,6 +13,10 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
+import { createJsonxStreamReader } from '@jarenjs/josl';
+import { compileChart } from '@jarenjs/charts';
+import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
+
 import { runQuery, runJslt, operatorRegistry } from '../../packages/website/src/boundaries/engines.js';
 import { runValidation } from '../../packages/website/src/boundaries/validator.js';
 import { deriveSuite } from '../../packages/website/src/boundaries/bench.js';
@@ -251,6 +255,38 @@ describe('website boundaries — the chart renderer (the play seam)', function (
   it('renders a JOSL definition through the streaming reader', function () {
     const out = chartRenderer('type = "pie"\ntitle = "T"\n[[slices]]\nlabel = "a"\nvalue = 1\n', { format: 'josl' });
     assert.ok(Array.isArray(out.vnode) && out.vnode[0] === 'svg');
+  });
+
+  it('a `stream` definition routes its own records through the adapter — never an empty chart', function () {
+    // regression (TODO_SITE_01 Q1): the events buffered by the parse were
+    // discarded and dataFor received a DIFFERENT empty array, so any
+    // stream-member definition rendered an empty chart with real timings
+    const definition = {
+      type: 'line', title: 'S',
+      stream: { recordPath: ['records'], xField: 'x', yField: 'y' },
+      records: [{ x: 1, y: 10 }, { x: 2, y: 20 }, { x: 3, y: 30 }],
+    };
+    const source = JSON.stringify(definition);
+    const out = chartRenderer(source, { format: 'json' });
+
+    // the expected data: the SAME events replayed through the adapter
+    const adapter = createStreamAdapter('line', definition.stream);
+    const reader = createJsonxStreamReader({ mode: 'json', onEvent: (e) => adapter.onEvent(e) });
+    reader.feed(source);
+    reader.end();
+    adapter.endDocument();
+    const data = adapter.getData();
+    assert.strictEqual(data.series.length, 1, 'one series accumulated');
+    assert.deepStrictEqual(data.series[0].points,
+      [{ x: 1, y: 10 }, { x: 2, y: 20 }, { x: 3, y: 30 }], 'exactly the three records, exact x/y');
+
+    // the rendered chart is the chart OF those three points…
+    assert.deepStrictEqual(out.vnode, compileChart(definition, data, { theme: 'host' }).toVnode());
+    // …and visibly not the empty-events rendering the bug produced
+    const starved = createStreamAdapter('line', definition.stream);
+    starved.endDocument();
+    assert.notDeepStrictEqual(out.vnode,
+      compileChart(definition, starved.getData(), { theme: 'host' }).toVnode());
   });
 
   it('throws on a schema violation or a parse failure (play lands the honest error Result)', function () {

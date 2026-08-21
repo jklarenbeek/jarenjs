@@ -13,6 +13,9 @@ import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createGameRuntime } from '../../packages/website/src/boundaries/game.js';
+import {
+  PUZZLES, ITEMS, SCENERY, CHARACTERS, DIALOGUE,
+} from '../../packages/website/src/content/gameContent.js';
 import { createStubHost } from '../view/dom.stub.js';
 
 /** A headless site parked on #/game. */
@@ -79,6 +82,56 @@ describe('website — the adventure game', function () {
     app.dispatch('game/verb', 'give'); app.dispatch('game/inv', 'brineglaze'); app.dispatch('game/hotspot', 'miles');
     assert.ok(g().inv.includes('recipe'), 'Miles rewards the recipe');
     assert.strictEqual(g().won, true, 'the adventure completes');
+  });
+
+  it('the megaphone chain pays off: pepper on the megaphone solves the signposted puzzle', function () {
+    // regression (TODO_SITE_01 Q8a): Marina's clue and the crate note both
+    // pointed at the megaphone, but no puzzle targeted it — a dead end
+    // against the header's "no dead ends"
+    const app = mountGame();
+    app.dispatch('game/start');
+    const g = () => app.getState().game;
+    app.dispatch('game/go', 'market');
+    app.dispatch('game/verb', 'take'); app.dispatch('game/hotspot', 'pepper');
+    assert.ok(g().inv.includes('pepper'), 'the pepper the crate note points at');
+    app.dispatch('game/go', 'galleon');
+    app.dispatch('game/verb', 'use'); app.dispatch('game/inv', 'pepper'); app.dispatch('game/hotspot', 'megaphone');
+    assert.strictEqual(g().flags.solved_megaphone, true, 'the megaphone puzzle solves');
+    assert.match(JSON.stringify(g().log), /clarity/, 'the done line pays the gag off');
+  });
+
+  it('the content vocabulary is honest by enumeration: no dead ends, no phantom rewards', function () {
+    // regression (TODO_SITE_01 Q8b/c): crate.reward was 'pepper_hint' (not
+    // an ITEMS key — silently dropped by both consumers) and ITEMS.form
+    // was obtainable by nothing (the gag counts /game/forms, not inventory)
+    for (const p of Object.values(PUZZLES)) {
+      assert.ok(ITEMS[p.solve.item], `${p.id}: the solve item exists`);
+      assert.ok(SCENERY[p.solve.target] || CHARACTERS[p.solve.target] || ITEMS[p.solve.target],
+        `${p.id}: the solve target exists`);
+      if (p.reward !== undefined) {
+        assert.ok(ITEMS[p.reward], `${p.id}: reward '${p.reward}' is an ITEMS key (the honest vocabulary)`);
+      }
+    }
+    // every dialogue clue walks to a puzzle that exists (clue_<puzzle id>)
+    let clues = 0;
+    for (const tree of Object.values(DIALOGUE)) {
+      for (const node of Object.values(tree.nodes)) {
+        if (typeof node.give === 'string' && node.give.startsWith('clue_')) {
+          clues += 1;
+          assert.ok(PUZZLES[node.give.slice('clue_'.length)] !== undefined,
+            `${node.give} signposts a puzzle that exists`);
+        }
+      }
+    }
+    assert.ok(clues >= 3, 'the crate, glaze and megaphone clues are all walked');
+    // every item is obtainable: placed in the world, a combine result, or a reward
+    const rewards = new Set(Object.values(PUZZLES).map((p) => p.reward));
+    const combined = new Set(Object.values(ITEMS).flatMap((i) => Object.values(i.combine ?? {})));
+    for (const item of Object.values(ITEMS)) {
+      assert.ok(item.at !== undefined || combined.has(item.id) || rewards.has(item.id),
+        `${item.id} is obtainable by something`);
+    }
+    assert.ok(!('form' in ITEMS), 'the unobtainable form item is gone');
   });
 
   it('dialogue opens a tree and an option reveals the crate clue', function () {

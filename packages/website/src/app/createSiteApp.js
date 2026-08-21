@@ -53,6 +53,19 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * @property {(url: string) => Promise<string>} [fetchText] - Raw-text
  *   loader for package READMEs (the dialog); omit for no-network hosts.
  * @property {(theme: string) => void} [applyTheme]
+ * @property {(on: boolean) => void} [lockScroll] - Lock the page scroll
+ *   behind the README dialog; omit for headless hosts.
+ * @property {(id: string) => void} [scrollToAnchor] - Scroll an in-page
+ *   heading (a rendered document's anchor link) into view; omit for
+ *   headless hosts.
+ * @property {() => void} [revealActiveTab] - Per committed frame: keep
+ *   the active tab/section of the mobile scroll strips in view; omit
+ *   for headless hosts.
+ * @property {{ read: () => string | null, write: (s: string) => void }} [gameSave]
+ *   The adventure game's save slot — a raw JSONX string (the game
+ *   serializes itself); omit and saving degrades gracefully.
+ * @property {typeof fetch} [ratesFetch] - fetch for the calculator's
+ *   live currency rates; omit and the static fallback rates serve.
  * @property {(cb: (route: any) => void) => (() => void) | void} [listenHash]
  *   Must call `cb` once immediately with the current route, then on
  *   every change; returns a cleanup.
@@ -180,6 +193,25 @@ export function createSiteApp(env) {
     'scroll-to-anchor': (props) => env.scrollToAnchor?.(String(props.id ?? '')),
     'binance-toggle': (props, dispatch) =>
       binanceToggle((action, payload) => dispatch(action, payload)),
+    // the Flow palette's id mint: uniqueness needs a scan over the
+    // EXISTING ids (a count-based mint collides after a delete), which is
+    // JS — compute here, then dispatch the plain patch (see project-add)
+    'flow-mint': (props, dispatch) => {
+      const doc = app.getState().flow.doc;
+      if (doc === null || doc === undefined) return;
+      if (props.kind === 'state') {
+        const ids = new Set((doc.states ?? [])
+          .map((s) => (typeof s === 'string' ? s : s.id)));
+        let k = ids.size + 1;
+        while (ids.has(`s${k}`)) k += 1;
+        dispatch('flow/state-minted', `s${k}`);
+        return;
+      }
+      const nodes = doc.nodes ?? {};
+      let k = Object.keys(nodes).length + 1;
+      while (`n${k}` in nodes) k += 1;
+      dispatch('flow/node-minted', `n${k}`);
+    },
     // the IDE store (the Project IDE's Save/Load/Share bar). Two legacy
     // kinds may still be in a user's storage: an engine experiment from the
     // retired playground translates into a play session, and a Studio

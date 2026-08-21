@@ -226,6 +226,31 @@ describe('website — the Play playground (#/play)', () => {
     assert.strictEqual(after.result.ok, true, 'the edit re-validated live');
   });
 
+  it('switching examples in form mode drops the stale buffer — one form edit mirrors the NEW data', () => {
+    // regression (TODO_SITE_01 Q2): `play/loaded` did not reset the form
+    // buffer its twin `play/loaded-session` resets, so the first form edit
+    // after switching examples mirrored the OLD example's data over the new
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'User'), 'click', {});
+    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+    assert.strictEqual(app.getState().play.dataValue?.name, 'Ada', 'the old example is in the buffer');
+
+    // switch examples WHILE in form mode
+    fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});
+    const s = app.getState().play;
+    assert.strictEqual(s.dataView, 'json', 'the pane resets to JSON on load');
+    assert.strictEqual(s.dataValue, null, 'the stale structured buffer is dropped');
+
+    // re-enter form mode and make ONE edit: the data pane is the NEW
+    // example's data with exactly that edit — never the old buffer
+    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+    const formEl = find(playRoot(container), (n) => (n.getAttribute?.('class') ?? '').split(' ').includes('jplay-form'));
+    const textInput = find(formEl, (n) => n.tagName === 'input' && (n.getAttribute?.('type') ?? 'text') === 'text');
+    fire(textInput, 'input', { target: { value: 'Zed' } });
+    assert.deepStrictEqual(JSON.parse(app.getState().play.data.data),
+      { name: 'Zed', email: 'not-an-email', age: 7 });
+  });
+
   it('the locale option localizes the validation messages', () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});

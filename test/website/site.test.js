@@ -4,6 +4,7 @@ import * as assert from 'node:assert';
 
 import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
+import { viewModel } from '../../packages/website/src/app/viewmodel.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
@@ -177,6 +178,42 @@ describe('website — the site as one app document', function () {
     go('#/benchmarks');
     await tick();
     assert.match(serialize(container), /Data unavailable/);
+  });
+
+  it('benchmarks: an unknown ?suite= shows the overview + callout — never a hang or a bad patch', async function () {
+    // regression (TODO_SITE_01 Q5): route/set passed ?suite= unvalidated
+    // into fetch-bench; a name with a '/' broke the '/benchStatus/…' status
+    // pointer (JP2001) and the page hung on "Loading…" forever. mountSite
+    // rethrows app errors, so a failing patch would throw right here.
+    const { app, container, go } = mountSite();
+    go('#/benchmarks?suite=a/b');
+    await tick();
+    assert.deepStrictEqual(Object.keys(app.getState().benchStatus), ['meta'],
+      'the gate never fetched the unknown suite — no status entry, no error');
+    let html = serialize(container);
+    assert.match(html, /No such suite/, 'the callout is visible');
+    assert.match(html, /a\/b/, 'and it names the bad suite');
+
+    go('#/benchmarks?suite=zzz');
+    await tick();
+    assert.deepStrictEqual(Object.keys(app.getState().benchStatus), ['meta']);
+    html = serialize(container);
+    assert.match(html, /No such suite/);
+    assert.match(html, /Test CPU/, 'the overview renders behind the callout');
+  });
+
+  it('benchmarks: the suite nodes memo survives unrelated transitions (fresh state roots)', async function () {
+    // regression (TODO_SITE_01 Q6): benchNodes was keyed on the state ROOT,
+    // fresh every transition, so every unrelated dispatch rebuilt the table
+    const { app, go } = mountSite();
+    go('#/benchmarks?suite=jsonpointer');
+    await tick();
+    const nodesOf = (state) => viewModel(state).ui.bench.nodes;
+    const before = nodesOf(app.getState());
+    app.dispatch('nav/toggle', 'engines'); // unrelated: a fresh root, same bench slices
+    assert.notStrictEqual(app.getState().navOpen, null, 'the transition really happened');
+    assert.strictEqual(nodesOf(app.getState()), before,
+      'same logical bench state → the same nodes by reference (memo hit)');
   });
 
   it('SSR: any route renders to an HTML string headless', function () {

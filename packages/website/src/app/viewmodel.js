@@ -24,6 +24,7 @@ import { playComponent } from '../boundaries/play.js';
 import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
 import { formatRatio, memo1 } from '../lib/format.js';
+import { callout } from '../lib/nodes.js';
 
 // the nav is grouped into three dropdown menus by what each surface IS:
 // stateless ENGINES you tinker with, stateful STUDIOS you compose in, and
@@ -234,8 +235,16 @@ const benchTabs = memo1((suite) => SUITES.map((s) => ({
   href: `#/benchmarks?suite=${s.key}`,
 })));
 
-const benchNodes = memo1((suite, data, status, benchUi, state) =>
-  deriveSuite(state, suite));
+// keyed on the slices deriveSuite actually reads — never the state
+// root, which is fresh every transition and would defeat the memo
+const benchNodes = memo1((suite, data, status, benchUi, unknown) => {
+  const need = suite === 'overview' ? 'meta' : suite;
+  const nodes = deriveSuite({ bench: { [need]: data }, benchStatus: { [need]: status }, benchUi }, suite);
+  return unknown === null ? nodes : [
+    callout('No such suite', `There is no benchmark suite named '${unknown}' — showing the overview instead.`),
+    ...nodes,
+  ];
+});
 
 const composeBench = memo1((suites, nodes) => ({ suites, nodes }));
 
@@ -246,11 +255,16 @@ const composeChartsPage = memo1((live) => ({
 }));
 
 function benchPage(state) {
-  const suite = state.route.params.suite ?? 'overview';
+  // an unknown ?suite= shows the overview plus an honest callout (the
+  // route/set gate never fetched for it, so nothing is loading either)
+  const requested = state.route.params.suite ?? 'overview';
+  const known = SUITES.some((s) => s.key === requested);
+  const suite = known ? requested : 'overview';
   const need = suite === 'overview' ? 'meta' : suite;
   return composeBench(
     benchTabs(suite),
-    benchNodes(suite, state.bench[need], state.benchStatus[need], state.benchUi, state));
+    benchNodes(suite, state.bench[need], state.benchStatus[need], state.benchUi,
+      known ? null : requested));
 }
 
 /** The Project IDE-bar model (name field, share status, saved chips). */

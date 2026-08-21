@@ -14,7 +14,7 @@ export const STATIC_RULES = [
       // it is `display: contents`, so its two halves become grid items in
       // their own right and the README list can be ordered BELOW the
       // article — reading the docs on a phone used to mean scrolling past
-      // twenty package buttons first.
+      // the package list first.
       ['div', { class: 'docs-side' },
         ['nav', { class: 'docs-nav' },
           ['h1', {}, 'Docs'],

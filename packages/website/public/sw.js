@@ -1,26 +1,43 @@
 /* The jarenjs website service worker: offline-capable playground.
    - navigation requests: network-first, falling back to the cached shell
+   - precached statics (manifest, icons, fonts): cache-first
    - hashed assets (/assets/): cache-first (immutable by construction)
-   - benchmark data: stale-while-revalidate */
+   - benchmark data: stale-while-revalidate
+   Every cache.put is gated on response.ok: a 404/502 must never be
+   cached forever, and a bad navigation response must never replace the
+   shell. */
 
-const CACHE = 'jaren-website-v18';
+const CACHE = 'jaren-website-v19';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
+
+/* Precached at install AND served by the fetch handler's cache-first
+   branch below — a precache no branch serves is unreachable (the fonts
+   are requested by the built CSS as `${BASE}fonts/*.woff2`). */
+const PRECACHE = [
+  BASE,
+  `${BASE}manifest.webmanifest`,
+  `${BASE}jaren.svg`,
+  `${BASE}icon-192.png`,
+  `${BASE}icon-512.png`,
+  `${BASE}fonts/inter-latin-400-normal.woff2`,
+  `${BASE}fonts/inter-latin-600-normal.woff2`,
+  `${BASE}fonts/inter-latin-700-normal.woff2`,
+  `${BASE}fonts/jetbrains-mono-latin-400-normal.woff2`,
+  `${BASE}fonts/jetbrains-mono-latin-700-normal.woff2`,
+];
+
+const putOk = (key, response) => {
+  if (response.ok) {
+    const copy = response.clone();
+    caches.open(CACHE).then((cache) => cache.put(key, copy));
+  }
+  return response;
+};
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE)
-      .then((cache) => cache.addAll([
-        BASE,
-        `${BASE}manifest.webmanifest`,
-        `${BASE}jaren.svg`,
-        `${BASE}icon-192.png`,
-        `${BASE}icon-512.png`,
-        `${BASE}fonts/inter-latin-400-normal.woff2`,
-        `${BASE}fonts/inter-latin-600-normal.woff2`,
-        `${BASE}fonts/inter-latin-700-normal.woff2`,
-        `${BASE}fonts/jetbrains-mono-latin-400-normal.woff2`,
-        `${BASE}fonts/jetbrains-mono-latin-700-normal.woff2`,
-      ]))
+      .then((cache) => cache.addAll(PRECACHE))
       .then(() => self.skipWaiting()));
 });
 
@@ -38,34 +55,26 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(BASE, copy));
-          return response;
-        })
+        .then((response) => putOk(BASE, response))
         .catch(() => caches.match(BASE)));
     return;
   }
 
   const url = new URL(request.url);
-  if (url.pathname.includes('/assets/')) {
+  if (PRECACHE.includes(request.url) || url.pathname.includes('/fonts/')
+    || url.pathname.includes('/assets/')) {
     event.respondWith(
-      caches.match(request).then((hit) => hit ?? fetch(request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(request, copy));
-        return response;
-      })));
+      caches.match(request).then((hit) => hit
+        ?? fetch(request).then((response) => putOk(request, response))));
     return;
   }
 
   if (url.pathname.includes('/benchmarks/')) {
     event.respondWith(
       caches.match(request).then((hit) => {
-        const refresh = fetch(request).then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        }).catch(() => hit);
+        const refresh = fetch(request)
+          .then((response) => putOk(request, response))
+          .catch(() => hit);
         return hit ?? refresh;
       }));
   }

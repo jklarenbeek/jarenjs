@@ -9,6 +9,13 @@
 
 import { calcActions } from '@jarenjs/calc/component';
 import { GAME_ACTIONS } from '../boundaries/game.js';
+import { SUITES } from '../boundaries/bench.js';
+
+/** `?suite=` membership, derived from the one SUITES list: an unknown
+ * name must not reach `fetch-bench` (its status pointer cannot hold a
+ * `/`, and the fetch would 404) — the viewModel shows the overview plus
+ * a no-such-suite callout instead. */
+const KNOWN_SUITE = { $or: SUITES.map((s) => ({ $eq: ['$payload.params.suite', s.key] })) };
 
 export const ACTIONS = {
   // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
@@ -41,6 +48,7 @@ export const ACTIONS = {
                 $and: [
                   { $exists: '$payload.params.suite' },
                   { $ne: ['$payload.params.suite', 'overview'] },
+                  KNOWN_SUITE,
                 ],
               },
               { run: 'fetch-bench', with: { name: '$payload.params.suite' } },
@@ -294,6 +302,11 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/panel', value: null },
       { op: 'replace', path: '/play/deep', value: false },
       { op: 'replace', path: '/play/deepPick', value: null },
+      // the structured form buffer belongs to the example it was parsed
+      // from — keep it and the first form edit mirrors the OLD buffer
+      // over the new example's data pane (loaded-session resets the same)
+      { op: 'replace', path: '/play/dataView', value: 'json' },
+      { op: 'replace', path: '/play/dataValue', value: null },
       // on a phone, picking an example answers immediately: show its result
       // (desktop shows every pane, so this is invisible there)
       { op: 'replace', path: '/play/mobilePane', value: 'result' },
@@ -810,32 +823,38 @@ export const ACTIONS = {
   },
   'flow/connect-cancel': { patch: [{ op: 'replace', path: '/flow/connect', value: null }] },
 
-  'flow/add-state': {
+  // Adding mints the new id in a JS effect (`flow-mint`): a count-based
+  // `'s' + (count + 1)` id may already exist after a delete — on the nodes
+  // object an add would then REPLACE the user's node, and on the states
+  // array it would append a duplicate id. The *-minted actions receive
+  // the uniqueness-scanned id via payload and stay plain patches.
+  'flow/add-state': { effects: [{ run: 'flow-mint', with: { kind: 'state' } }] },
+  'flow/add-node': { effects: [{ run: 'flow-mint', with: { kind: 'node' } }] },
+
+  'flow/state-minted': {
     patch: [
       { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
       { op: 'replace', path: '/flow/history/future', value: [] },
-      { op: 'add', path: '/flow/doc/states/-',
-        value: { $concat: ['s', { $string: { $add: [{ $count: '$.flow.doc.states[*]' }, 1] } }] } },
+      { op: 'add', path: '/flow/doc/states/-', value: '$payload' },
       { op: 'replace', path: '/flow/selection', value: {
         type: 'state',
-        id: { $concat: ['s', { $string: { $add: [{ $count: '$.flow.doc.states[*]' }, 1] } }] },
+        id: '$payload',
         path: { $concat: ['/states/', { $string: { $count: '$.flow.doc.states[*]' } }] },
       } },
     ],
   },
 
-  'flow/add-node': {
+  'flow/node-minted': {
     patch: [
       { op: 'add', path: '/flow/history/past/-', value: '$.flow.doc' },
       { op: 'replace', path: '/flow/history/future', value: [] },
       { op: 'add',
-        path: { $concat: ['/flow/doc/nodes/n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] },
-        value: { kind: 'task',
-          run: { $concat: ['n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] } } },
+        path: { $concat: ['/flow/doc/nodes/', '$payload'] },
+        value: { kind: 'task', run: '$payload' } },
       { op: 'replace', path: '/flow/selection', value: {
         type: 'node',
-        id: { $concat: ['n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] },
-        path: { $concat: ['/nodes/n', { $string: { $add: [{ $count: '$.flow.doc.nodes[*]' }, 1] } }] },
+        id: '$payload',
+        path: { $concat: ['/nodes/', '$payload'] },
       } },
     ],
   },

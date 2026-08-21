@@ -105,7 +105,6 @@ export const ITEMS = {
   // derived items (created by combining) — not placed in the world
   seawater: { id: 'seawater', name: 'bottle of seawater', portable: true, examine: 'Genuine sea, now bottled. Sloshes judgmentally.', combine: { crackers: 'brineglaze' } },
   brineglaze: { id: 'brineglaze', name: 'brine-glazed biscuits', portable: true, examine: 'Biscuits, softened into something a tooth could love. Miles would weep.' },
-  form: { id: 'form', name: 'admiralty form (in triplicate)', portable: true, examine: 'A multi-part form "for the admiralty records." You will never need to submit it. You will be given more.' },
   recipe: { id: 'recipe', name: 'the legendary recipe', portable: true, examine: 'The recipe for the World\'s Most Delicious Sea-Sandwich. Step one is simply "believe".' },
 };
 
@@ -126,8 +125,15 @@ export const PUZZLES = {
     id: 'crate', at: 'wharf',
     clue: "Gullbert grunts: “Rust… eats iron. Iron… fears the north.”",
     solve: { verb: 'use', item: 'compass', target: 'crate' },
-    reward: 'pepper_hint',
+    // no reward item: the prize is the note in `done` (a `reward` must
+    // be an ITEMS key — the consumers give it to the player)
     done: 'You press the magnetized compass to the padlock. The magnetism cancels with a sulky *clunk* and the crate yawns open — inside, a note: "the pepper likes the market."',
+  },
+  megaphone: {
+    id: 'megaphone', at: 'galleon',
+    clue: 'Dr. Barnacle hums: “Tuning is not done by ear, child. It is done by *palate*. Give the static something with a kick.”',
+    solve: { verb: 'use', item: 'pepper', target: 'megaphone' },
+    done: 'You wedge the spicy pepper into the megaphone’s workings. The static coughs, sneezes once — magnificently — and resolves into glorious brass-band clarity. Crumble salutes, misty-eyed: "Now THAT is seasoning with authority. Docking rights… negotiable."',
   },
   glaze: {
     id: 'glaze', at: 'diner',
@@ -172,7 +178,7 @@ export const DIALOGUE = {
         { text: '"Tell me about flavor."', to: 'r2' },
         { text: '(Leave)', to: null },
       ] },
-      r1: { text: 'Barnacle: "Tuning is not done by ear, child. It is done by *palate*. Give the static something with a kick." ', give: 'clue_radio', options: [{ text: '"...Pepper?"', to: null }] },
+      r1: { text: 'Barnacle: "Tuning is not done by ear, child. It is done by *palate*. Give the static something with a kick." ', give: 'clue_megaphone', options: [{ text: '"...Pepper?"', to: null }] },
       r2: { text: 'Barnacle: "Flavor is merely regret, seasoned. Now run along; you’re oxidizing." ', options: [{ text: '(Leave, faintly insulted)', to: null }] },
     },
   },

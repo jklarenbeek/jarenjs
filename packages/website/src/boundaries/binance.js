@@ -233,11 +233,19 @@ export function binanceToggle(dispatch) {
 /**
  * Route hook for the /charts page: closes the socket when the page is
  * left. Never starts a connection — only the explicit toggle does.
+ * The closed state is SUNK into the app (a stop alone would leave the
+ * last painted nodes labeled `live` with no Go-live control on a
+ * return visit).
  * @param {boolean} isActive
  */
 export function binancePageSync(isActive) {
   if (session !== null && !isActive) {
+    const { feed, dispatch } = session;
     stopBinance();
+    sink(dispatch, [
+      ...binanceNodes(feed, 'closed', 'you left the page'),
+      ...binanceInvitation(),
+    ]);
   }
 }
 

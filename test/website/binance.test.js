@@ -180,6 +180,31 @@ describe('binance connection lifecycle (stub socket)', function () {
     assert.strictEqual(sockets[0].closed, true);
   });
 
+  it('leaving the page sinks the closed state — never a dead chart labeled live', function () {
+    // regression (TODO_SITE_01 Q4): binancePageSync(false) stopped the
+    // socket but dispatched nothing, so state.chartsLive kept the last
+    // painted nodes — a return visit showed a frozen chart labeled `live`
+    // with no Go-live control
+    install();
+    const dispatched = [];
+    const dispatch = (action, payload) => dispatched.push([action, payload]);
+    binanceToggle(dispatch);
+    sockets[0].onopen();
+    sockets[0].onmessage({ data: MINITICKER('BTCUSDT', 1000, 64000) });
+    binancePageSync(false);
+    assert.strictEqual(binanceLiveActive(), false);
+
+    const [action, nodes] = dispatched.at(-1);
+    assert.strictEqual(action, 'charts-live/set', 'the closed state is SUNK into the app');
+    const status = nodes.find((n) => n.kind === 'cards').items[0];
+    assert.strictEqual(status.value, 'closed', 'the status card tells the truth');
+    assert.match(status.note, /left the page/);
+    const goLive = nodes.find((n) => n.kind === 'more');
+    assert.ok(goLive, 'a Go-live node is present for the return visit');
+    assert.strictEqual(goLive.action, 'charts-live/toggle');
+    assert.match(goLive.label, /Go live/);
+  });
+
   it('toggle again stops an open session', function () {
     install();
     const dispatched = [];
