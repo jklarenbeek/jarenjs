@@ -13,7 +13,7 @@ EngineDescriptor = {
   lead?:       string,        // one line describing the engine
   sourcePanes: EnginePane[],  // the engine INPUT (usually one)
   dataPanes:   EnginePane[],  // the JSON it runs against (may be empty)
-  run:         (source, data) => PlayResult,
+  run:         (source, data) => PlayResult | Promise<PlayResult>,
 }
 EnginePane = { key: string, label: string, control?: 'code' | 'text' }
 ```
@@ -27,6 +27,13 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
 - `run(source, data)` is PURE and NEVER throws: it wraps the real shipped
   compiler and returns a `PlayResult`. `source` / `data` are maps keyed
   by the pane `key`s, holding the raw text.
+- Most engines answer synchronously. An engine whose run resolves real
+  promises (the contract engine's dispatch panel invokes a local client)
+  answers a **thenable** `PlayResult`; `runExample` passes it through
+  under the same never-throw contract — a rejection settles into an
+  error Result, so `await Promise.resolve(runExample(…))` is total for
+  every engine. A host that renders live must drop a settled result an
+  even newer run superseded (the website keys runs by a sequence).
 
 ## §2 The result
 

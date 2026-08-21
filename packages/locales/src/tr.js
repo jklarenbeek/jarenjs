@@ -56,8 +56,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The Turkish catalog. Covers every key of validate's `messagesEn`,
- * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and
- * the `JQ2xxx` codes reachable through `$query`.
+ * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const tr = {
@@ -124,5 +125,43 @@ export const tr = {
   'x-form/assert': 'Geçersiz değer',
   'form/addItem': 'Öğe ekle',
   'form/removeItem': 'Öğeyi kaldır',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'isteğin yöntemi ve yoluyla eşleşen bir işlem yok',
+  'contract/method-not-allowed': 'bu yol başka yöntemler altında sunuluyor: {allow}',
+  'contract/body-too-large': '{op} işleminin istek gövdesi {limit} baytlık sınırını aşıyor',
+  'contract/unsupported-media': '{op} işlemi yalnızca {media} gövdeleri kabul eder',
+  'contract/malformed-json': '{op} işleminin istek gövdesi geçerli JSON değil',
+  'contract/invalid-input': '{op} işleminin girdisi geçersiz',
+  'contract/idempotency-key-required': '{op} işlemi bir Idempotency-Key üst bilgisi gerektirir',
+  'contract/handler-failed': '{op} işlemi başarısız oldu',
+  'contract/idempotency-conflict': '{op} işleminin Idempotency-Key değeri daha önceki bir istekle çakışıyor ({kind})',
+  'contract/invalid-output': '{op} işlemi sözleşmesini ihlal eden bir yanıt üretti',
+  'contract/malformed-path': 'istek yolu hatalı bir yüzde kaçış dizisi içeriyor',
+  'contract/malformed-query': 'sorgu dizesi çözümlenemiyor',
+  'contract/not-implemented': '{op} işlemi bu sunucuda uygulanmamış',
+  'contract/precondition-failed': '{op} işleminin If-Match ön koşulu sağlanamadı',
+  'contract/invalid-header': '{op} işleminin {header} üst bilgisi geçersiz',
+  'contract/handler-error': '{op} işlemi {code} ile başarısız oldu',
+  'contract/client-invalid-input': '{op} işleminin girdisi geçersiz; hiçbir şey gönderilmedi',
+  'contract/network': '{op} isteği tamamlanmadı ({name})',
+  'contract/cancelled': '{op} işleminin isteği iptal edildi',
+  'contract/invalid-response': '{op} işleminin yanıtı sözleşmesini ihlal ediyor',
+  'contract/key-storage-failed': '{op} işleminin idempotens anahtarı saklanamadı; hiçbir şey gönderilmedi',
+  'contract/undeclared-response': '{op} işlemi bildirilmemiş bir yanıt döndürdü (durum {status})',
+  'contract/not-a-contract': 'sunucu, well-known yolunda {id} sözleşmesini tanımlamıyor',
+  'contract/incompatible': 'sunucu {id} sözleşmesinin {server} sürümünü, bu istemci {client} sürümünü konuşuyor ve iki taraf da diğerini uyumlu ilan etmiyor',
+  'contract/host-failed': '{op} işlemi bir sonuç üretilmeden önce ana bilgisayarda başarısız oldu',
+  'contract/local-handler-failed': '{op} işlemi sunan ana bilgisayarda başarısız oldu',
+  'contract/unknown-operation': 'istek bu kanalda sunulan hiçbir işlemi adlandırmıyor',
+  'contract/port-timeout': '{op} işlemi kanalda {ms} ms içinde yanıt alamadı',
+  'contract/malformed-frame': '{op} işleminin yanıt çerçevesi hatalı',
+  'contract/channel-closed': '{op} işleminin kanalı kapalı',
+  'contract/not-a-stream': 'sunucu {op} işleminin aboneliğine akış olmayan bir yanıtla karşılık verdi',
+  'contract/invalid-snapshot': '{op} işlemi sözleşmesini ihlal eden bir anlık görüntü üretti',
+  'contract/seq-regression': '{op} işleminin akışı seq sırasını ihlal etti',
+  'contract/stream-error': '{op} işleminin akışı bir sunucu hatasıyla sona erdi ({code})',
+  'contract/heartbeat-missed': '{op} işleminin akışı {ms} ms boyunca sessiz kaldı',
   //#endregion
 };

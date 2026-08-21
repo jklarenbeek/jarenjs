@@ -26,12 +26,13 @@ import { validateFile } from './validate.js';
 
 /** Kinds that are runnable artifacts on their own (vs. `state`/`data`
  * inputs). */
-const RUNNABLE = new Set(['app', 'jslt', 'query', 'schema', 'fsm', 'dag', 'model']);
+const RUNNABLE = new Set(['app', 'jslt', 'query', 'schema', 'fsm', 'dag', 'model', 'contract']);
 
 /** A human role per kind, for the file rail's legibility. */
 const ROLE = Object.freeze({
   app: 'application', jslt: 'transform', query: 'query', state: 'state',
   data: 'data', schema: 'schema', fsm: 'state machine', dag: 'dataflow', model: 'data store',
+  contract: 'contract',
 });
 
 /**

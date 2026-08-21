@@ -59,8 +59,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The French catalog. Covers every key of validate's `messagesEn`, every
- * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and the
- * `JQ2xxx` codes reachable through `$query`.
+ * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const fr = {
@@ -127,5 +128,43 @@ export const fr = {
   'x-form/assert': 'Valeur invalide',
   'form/addItem': 'Ajouter un élément',
   "form/removeItem": "Supprimer l'élément",
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'aucune opération ne correspond à la méthode et au chemin de la requête',
+  'contract/method-not-allowed': "le chemin est servi sous d'autres méthodes : {allow}",
+  'contract/body-too-large': "le corps de la requête de l'opération {op} dépasse sa limite de {limit} octets",
+  'contract/unsupported-media': "l'opération {op} n'accepte que des corps {media}",
+  'contract/malformed-json': "le corps de la requête de l'opération {op} n'est pas du JSON valide",
+  'contract/invalid-input': "l'entrée de l'opération {op} est invalide",
+  'contract/idempotency-key-required': "l'opération {op} exige un en-tête Idempotency-Key",
+  'contract/handler-failed': "l'opération {op} a échoué",
+  'contract/idempotency-conflict': "la clé Idempotency-Key de l'opération {op} est en conflit avec une requête antérieure ({kind})",
+  'contract/invalid-output': "l'opération {op} a produit une réponse qui viole son contrat",
+  'contract/malformed-path': "le chemin de la requête contient une séquence d'échappement pour cent malformée",
+  'contract/malformed-query': "la chaîne de requête n'est pas décodable",
+  'contract/not-implemented': "l'opération {op} n'est pas implémentée sur ce serveur",
+  'contract/precondition-failed': "la précondition If-Match de l'opération {op} a échoué",
+  'contract/invalid-header': "l'en-tête {header} de l'opération {op} est invalide",
+  'contract/handler-error': "l'opération {op} a échoué avec {code}",
+  'contract/client-invalid-input': "l'entrée de l'opération {op} est invalide ; rien n'a été envoyé",
+  'contract/network': "la requête de {op} ne s'est pas terminée ({name})",
+  'contract/cancelled': "la requête de l'opération {op} a été annulée",
+  'contract/invalid-response': "la réponse de l'opération {op} viole son contrat",
+  'contract/key-storage-failed': "la clé d'idempotence de l'opération {op} n'a pas pu être enregistrée ; rien n'a été envoyé",
+  'contract/undeclared-response': "l'opération {op} a renvoyé une réponse non déclarée (statut {status})",
+  'contract/not-a-contract': 'le serveur ne décrit pas le contrat {id} à son chemin well-known',
+  'contract/incompatible': "le serveur parle la version {server} du contrat {id} ; ce client parle {client} et aucune des deux extrémités ne déclare l'autre compatible",
+  'contract/host-failed': "l'opération {op} a échoué dans l'hôte avant qu'un résultat ne soit produit",
+  'contract/local-handler-failed': "l'opération {op} a échoué dans l'hôte qui la sert",
+  'contract/unknown-operation': 'la requête ne nomme aucune opération servie sur ce canal',
+  'contract/port-timeout': "l'opération {op} n'a reçu aucune réponse sur le canal en {ms} ms",
+  'contract/malformed-frame': "la trame de réponse de l'opération {op} est malformée",
+  'contract/channel-closed': "le canal de l'opération {op} est fermé",
+  'contract/not-a-stream': "le serveur a répondu à l'abonnement de l'opération {op} par une réponse qui n'est pas un flux",
+  'contract/invalid-snapshot': "l'opération {op} a produit un instantané qui viole son contrat",
+  'contract/seq-regression': "le flux de l'opération {op} a violé l'ordre de ses seq",
+  'contract/stream-error': "le flux de l'opération {op} s'est terminé par une erreur serveur ({code})",
+  'contract/heartbeat-missed': "le flux de l'opération {op} est resté silencieux pendant {ms} ms",
   //#endregion
 };

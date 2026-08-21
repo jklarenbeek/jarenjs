@@ -3,9 +3,11 @@
  * @file The wire-error taxonomy: every `JC2001–JC2015` row answers its
  * status and code with `requestId === x-jaren-trace`, `cache-control:
  * no-store` and the row's `retryable`; `details` follows
- * `policy.errors.details` (`none` / `paths` / `full`); and the three
- * tables agree — CONTRACT-FORMAT.md §7's taxonomy, `CONTRACT_CODES` +
- * `HTTP_ERRORS`, and the English catalog's keys.
+ * `policy.errors.details` (`none` / `paths` / `full`); and the four
+ * sets agree — CONTRACT-FORMAT.md §7's taxonomy, `CONTRACT_CODES` +
+ * `HTTP_ERRORS`, the English catalog's keys, and the 11
+ * `@jarenjs/locales` packs (a test-side import; the packs themselves
+ * import nothing from this package — key parity is what binds them).
  */
 
 import { describe, it } from 'node:test';
@@ -18,6 +20,7 @@ import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { CLIENT_ERRORS } from '@jarenjs/contract/client';
 import { PORT_LOCAL_ERRORS } from '@jarenjs/contract/port';
 import { STREAM_ERRORS } from '@jarenjs/contract/stream';
+import { nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar } from '@jarenjs/locales';
 import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
@@ -208,7 +211,7 @@ function docTaxonomy() {
   return rows;
 }
 
-describe('the three tables agree', () => {
+describe('the four sets agree', () => {
   it('CONTRACT-FORMAT.md §7 taxonomy ⇔ HTTP_ERRORS ⇔ CONTRACT_CODES ⇔ contractMessagesEn keys', () => {
     const doc = docTaxonomy();
     assert.deepStrictEqual(Object.keys(doc).sort(), Object.keys(HTTP_ERRORS).sort(), 'the doc lists exactly the http codes');
@@ -229,5 +232,14 @@ describe('the three tables agree', () => {
     assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...msgids].sort(), 'the catalog has exactly the taxonomy msgids + handler-error + the client, port/local and stream msgids');
     const httpCodes = Object.keys(CONTRACT_CODES).filter((c) => /^JC20[0-4]\d$/.test(c));
     assert.deepStrictEqual(httpCodes.sort(), Object.keys(HTTP_ERRORS).sort(), 'every JC2001–JC2049 of the code table is a taxonomy row');
+  });
+
+  it('every contract/* msgid of the English catalog is in all 11 locale packs', () => {
+    const packs = { nl, fr, es, pt, de, ja, ko, 'zh-tw': zhTW, ru, tr, ar };
+    for (const [code, pack] of Object.entries(packs)) {
+      for (const msgid of Object.keys(contractMessagesEn)) {
+        assert.ok(Object.hasOwn(pack, msgid), `${code} is missing '${msgid}'`);
+      }
+    }
   });
 });

@@ -56,4 +56,7 @@ export function errorLine(content) {
 export const KIND_BADGE = Object.freeze({
   app: 'view', jslt: 'view', query: 'query', state: 'json',
   data: 'json', schema: 'json', model: 'model', fsm: 'flow', dag: 'flow',
+  // the model family: documents that declare a schema-backed surface —
+  // the badge palette is a closed five-hue set (studio.css header)
+  contract: 'model',
 });

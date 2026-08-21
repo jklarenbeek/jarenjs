@@ -87,8 +87,12 @@ function compareLimit(p) {
 
 /**
  * The Arabic catalog. Covers every key of validate's `messagesEn`,
- * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and
- * the `JQ2xxx` codes reachable through `$query`.
+ * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn` — the
+ * contract entries wrap their Latin protocol values (operation ids,
+ * media types, error codes) in first-strong isolates (U+2068 FSI …
+ * U+2069 PDI) so a Latin run cannot reorder the RTL sentence around it.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const ar = {
@@ -155,5 +159,43 @@ export const ar = {
   'x-form/assert': 'قيمة غير صالحة',
   'form/addItem': 'إضافة عنصر',
   'form/removeItem': 'إزالة عنصر',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'لا توجد عملية تطابق طريقة الطلب ومساره',
+  'contract/method-not-allowed': 'يُخدم هذا المسار بطرق أخرى: ⁨{allow}⁩',
+  'contract/body-too-large': 'يتجاوز متن طلب العملية ⁨{op}⁩ حدّها البالغ {limit} بايت',
+  'contract/unsupported-media': 'لا تقبل العملية ⁨{op}⁩ سوى متون ⁨{media}⁩',
+  'contract/malformed-json': 'متن طلب العملية ⁨{op}⁩ ليس JSON صالحًا',
+  'contract/invalid-input': 'مدخلات العملية ⁨{op}⁩ غير صالحة',
+  'contract/idempotency-key-required': 'تتطلب العملية ⁨{op}⁩ ترويسة Idempotency-Key',
+  'contract/handler-failed': 'فشلت العملية ⁨{op}⁩',
+  'contract/idempotency-conflict': 'يتعارض Idempotency-Key الخاص بالعملية ⁨{op}⁩ مع طلب سابق (⁨{kind}⁩)',
+  'contract/invalid-output': 'أنتجت العملية ⁨{op}⁩ استجابة تخالف عقدها',
+  'contract/malformed-path': 'يحتوي مسار الطلب على تسلسل هروب نسبة مئوية مشوّه',
+  'contract/malformed-query': 'تعذر فك ترميز سلسلة الاستعلام',
+  'contract/not-implemented': 'العملية ⁨{op}⁩ غير منفّذة على هذا الخادم',
+  'contract/precondition-failed': 'أخفق الشرط المسبق If-Match للعملية ⁨{op}⁩',
+  'contract/invalid-header': 'ترويسة ⁨{header}⁩ للعملية ⁨{op}⁩ غير صالحة',
+  'contract/handler-error': 'فشلت العملية ⁨{op}⁩ بالخطأ ⁨{code}⁩',
+  'contract/client-invalid-input': 'مدخلات العملية ⁨{op}⁩ غير صالحة؛ لم يُرسل أي شيء',
+  'contract/network': 'لم يكتمل طلب ⁨{op}⁩ (⁨{name}⁩)',
+  'contract/cancelled': 'أُلغي طلب العملية ⁨{op}⁩',
+  'contract/invalid-response': 'استجابة العملية ⁨{op}⁩ تخالف عقدها',
+  'contract/key-storage-failed': 'تعذر تخزين مفتاح تكرارية العملية ⁨{op}⁩؛ لم يُرسل أي شيء',
+  'contract/undeclared-response': 'أجابت العملية ⁨{op}⁩ باستجابة غير معلنة (الحالة {status})',
+  'contract/not-a-contract': 'لا يصف الخادم العقد ⁨{id}⁩ في مساره المعروف (well-known)',
+  'contract/incompatible': 'يتحدث الخادم الإصدار ⁨{server}⁩ من العقد ⁨{id}⁩؛ ويتحدث هذا العميل ⁨{client}⁩، ولا يعلن أي طرف توافق الآخر',
+  'contract/host-failed': 'فشلت العملية ⁨{op}⁩ في المضيف قبل إنتاج أي نتيجة',
+  'contract/local-handler-failed': 'فشلت العملية ⁨{op}⁩ في المضيف المقدّم للخدمة',
+  'contract/unknown-operation': 'لا يسمّي الطلب أي عملية مقدّمة على هذه القناة',
+  'contract/port-timeout': 'لم تتلقَّ العملية ⁨{op}⁩ أي إجابة على القناة خلال {ms} مللي ثانية',
+  'contract/malformed-frame': 'إطار استجابة العملية ⁨{op}⁩ مشوّه',
+  'contract/channel-closed': 'قناة العملية ⁨{op}⁩ مغلقة',
+  'contract/not-a-stream': 'أجاب الخادم على اشتراك العملية ⁨{op}⁩ باستجابة ليست دفقًا',
+  'contract/invalid-snapshot': 'أنتجت العملية ⁨{op}⁩ لقطة تخالف عقدها',
+  'contract/seq-regression': 'خالف دفق العملية ⁨{op}⁩ ترتيب seq الخاص به',
+  'contract/stream-error': 'انتهى دفق العملية ⁨{op}⁩ بخطأ من الخادم (⁨{code}⁩)',
+  'contract/heartbeat-missed': 'ظل دفق العملية ⁨{op}⁩ صامتًا لمدة {ms} مللي ثانية',
   //#endregion
 };

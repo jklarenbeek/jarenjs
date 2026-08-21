@@ -20,9 +20,9 @@ const sample = () => ({
 });
 
 describe('the closed vocabulary + defaults', () => {
-  it('exports the nine kinds and the frozen layout default', () => {
+  it('exports the ten kinds and the frozen layout default', () => {
     assert.deepStrictEqual([...KINDS].sort(),
-      ['app', 'data', 'dag', 'fsm', 'jslt', 'model', 'query', 'schema', 'state'].sort());
+      ['app', 'contract', 'data', 'dag', 'fsm', 'jslt', 'model', 'query', 'schema', 'state'].sort());
     assert.deepStrictEqual(LAYOUT_DEFAULT, { mode: 'classic', ratio: 0.5, autorun: true });
     assert.throws(() => { /** @type {any} */ (LAYOUT_DEFAULT).mode = 'x'; }, TypeError);
   });

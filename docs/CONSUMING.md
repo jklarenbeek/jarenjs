@@ -81,6 +81,14 @@ suffice — the first three are required, the rest only when their row says so:
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
 | `@jarenjs/contract` | Only if two ends exchange operations over a wire. Closure: `core`, `json`, `validate` — plus `emit`, reached only from its `./project` subpath (projections), so a bundle that never projects never carries it. Ships the `jaren-contract` CLI (projections, `--check`, `diff --fail-on breaking`) |
 
+Which contract subpath needs what: `.` and every binding and runtime
+subpath — `./http`, `./fetch`, `./node`, `./client`, `./app`, `./local`,
+`./port`, `./stream`, `./ledger`, `./diff` — need only `core` + `json` +
+`validate`; `./project` (the OpenAPI/TypeScript/Markdown/tools
+projections) and the `jaren-contract` CLI additionally need `emit`. The
+tree-shaking gate holds this: a bundle that never imports `./project`
+carries no emit code.
+
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
 `play`, `josl`, `ai`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.

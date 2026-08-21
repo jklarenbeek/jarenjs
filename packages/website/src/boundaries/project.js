@@ -25,10 +25,13 @@ import { contentKey } from '@jarenjs/core/object';
 import { createSplitterWidget } from '@jarenjs/app';
 import { createStudioComponent } from '@jarenjs/studio/component';
 
+import { compileContract } from '@jarenjs/contract';
+import { toOpenApi } from '@jarenjs/contract/project';
+
 import { loadStudioDocument } from './studio.js';
 import { operatorRegistry, runQuery, runJslt } from './engines.js';
 import { runValidation } from './validator.js';
-import { errorMessage, cards, error } from '../lib/nodes.js';
+import { errorMessage, cards, error, code } from '../lib/nodes.js';
 import { formatMsUnscaled } from '../lib/format.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
@@ -129,7 +132,44 @@ export function runProjectFile(slice, name) {
   if (file.kind === 'query') return { nodes: runQuery({ query: file.text, data: dataText, externals: '' }) };
   if (file.kind === 'jslt') return { nodes: runJslt({ stylesheet: file.text, data: dataText }) };
   if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText) };
+  if (file.kind === 'contract') return { nodes: contractNodes(file.text) };
   return null;
+}
+
+/**
+ * A `contract` file's stage: compile it and show the projections a
+ * consumer reads — `describe()` (resolved bindings + policy) and the
+ * OpenAPI 3.1 document. A compile refusal renders as the coded error
+ * node with its `JC00xx` and docPath (the same diagnosis the file rail
+ * shows), never a throw.
+ * @param {string} text - the contract file's text
+ */
+function contractNodes(text) {
+  let doc;
+  try { doc = JSON.parse(text); }
+  catch (err) { return [error({ message: errorMessage(err) }, 'Invalid JSON')]; }
+  let contract;
+  try { contract = compileContract(doc); }
+  catch (err) { return [error(/** @type {any} */ (err), 'Contract refusal')]; }
+  const description = contract.describe();
+  // lenient: a keyword the OpenAPI dialect cannot carry is dropped and
+  // COUNTED (the card says so) instead of refusing the whole pane — the
+  // strict mode is the CLI's job, the stage's job is to show the file
+  const openapi = toOpenApi(contract, {
+    lenient: true,
+    info: {
+      title: typeof doc.id === 'string' ? doc.id : 'contract',
+      version: typeof doc.version === 'string' ? doc.version : '0',
+    },
+  });
+  return [
+    cards([
+      { title: 'Operations', value: String(description.operations.length) },
+      ...(openapi.dropped.length > 0 ? [{ title: 'OpenAPI dropped', value: String(openapi.dropped.length) }] : []),
+    ]),
+    code('describe()', JSON.stringify(description, null, 2)),
+    code('OpenAPI 3.1', JSON.stringify(openapi.document, null, 2)),
+  ];
 }
 
 /** Validate a data file against a schema file and render the report on

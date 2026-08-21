@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.37.1",
+  "version": "0.37.2",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -47,7 +47,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.37.1",
-    "@jarenjs/json": "^0.37.1"
+    "@jarenjs/core": "^0.37.2",
+    "@jarenjs/json": "^0.37.2"
   }
 }

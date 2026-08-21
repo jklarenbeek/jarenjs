@@ -270,6 +270,7 @@ import type { PortServer, ChannelLike } from '@jarenjs/contract/port';
 import { contractAppBinding, createContractEffect, createContractSubscription } from '@jarenjs/contract/app';
 import { runSubscription, isSubscriptionLike, STREAM_ERRORS, STREAM_EVENTS, encodeStreamEvent } from '@jarenjs/contract/stream';
 import type { SubscriptionLike, StreamHooks } from '@jarenjs/contract/stream';
+import { diffContracts, isCompatible, compatReason } from '@jarenjs/contract/diff';
 import { publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools } from '@jarenjs/contract/project';
 import type { OpenApiResult, ToolDefinition } from '@jarenjs/contract/project';
 const contract = compileContract({
@@ -341,6 +342,9 @@ const effect = createContractEffect(client, { createTaskEffect: (run, opts) => O
 void [effect.cancel, effect.dispose];
 const projected = publicProjection(contract);
 void compileContract(projected);
+const changes = diffContracts(projected, projected);
+void [changes.breaking.length, changes.additive.length, changes.neutral.length, changes.unknown.length,
+  isCompatible(projected, projected), compatReason(projected, projected)];
 const openapi: OpenApiResult = toOpenApi(contract, { info: { title: 'Things', version: '1' } });
 void [openapi.document, openapi.dropped.length];
 void [toTypeScript(contract).length, toMarkdown(contract).length];

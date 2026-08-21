@@ -22,6 +22,7 @@ import {
   localizeErrors,
 } from '@jarenjs/validate';
 import { formsMessagesEn } from '@jarenjs/forms';
+import { contractMessagesEn } from '@jarenjs/contract';
 
 /** Representative params per message key, for renders and the sweep. */
 const SAMPLE_PARAMS = {
@@ -77,6 +78,43 @@ const SAMPLE_PARAMS = {
   // form chrome takes no params: the accessible names of the array buttons
   'form/addItem': {},
   'form/removeItem': {},
+  // the contract wire errors: params are protocol facts, never request
+  // content (operation ids, declared limits, media types, header names)
+  'contract/not-found': {},
+  'contract/method-not-allowed': { allow: 'GET, PUT' },
+  'contract/body-too-large': { op: 'product.save', limit: 1048576 },
+  'contract/unsupported-media': { op: 'product.save', media: 'application/json' },
+  'contract/malformed-json': { op: 'product.save' },
+  'contract/invalid-input': { op: 'product.save' },
+  'contract/idempotency-key-required': { op: 'product.save' },
+  'contract/handler-failed': { op: 'product.save' },
+  'contract/idempotency-conflict': { op: 'product.save', kind: 'in-flight' },
+  'contract/invalid-output': { op: 'catalog.load' },
+  'contract/malformed-path': {},
+  'contract/malformed-query': {},
+  'contract/not-implemented': { op: 'catalog.load' },
+  'contract/precondition-failed': { op: 'product.save' },
+  'contract/invalid-header': { op: 'catalog.load', header: 'x-shop-tenant' },
+  'contract/handler-error': { op: 'product.save', code: 'conflict' },
+  'contract/client-invalid-input': { op: 'product.save' },
+  'contract/network': { op: 'catalog.load', name: 'TypeError' },
+  'contract/cancelled': { op: 'catalog.load' },
+  'contract/invalid-response': { op: 'catalog.load' },
+  'contract/key-storage-failed': { op: 'product.save' },
+  'contract/undeclared-response': { op: 'catalog.load', status: 418 },
+  'contract/not-a-contract': { id: 'shop' },
+  'contract/incompatible': { id: 'shop', server: '5', client: '3' },
+  'contract/host-failed': { op: 'catalog.load' },
+  'contract/local-handler-failed': { op: 'catalog.load' },
+  'contract/unknown-operation': {},
+  'contract/port-timeout': { op: 'data.rows', ms: 15000 },
+  'contract/malformed-frame': { op: 'data.rows' },
+  'contract/channel-closed': { op: 'data.rows' },
+  'contract/not-a-stream': { op: 'catalog.live' },
+  'contract/invalid-snapshot': { op: 'catalog.live' },
+  'contract/seq-regression': { op: 'catalog.live' },
+  'contract/stream-error': { op: 'catalog.live', code: 'server-shutdown' },
+  'contract/heartbeat-missed': { op: 'catalog.live', ms: 30000 },
 };
 
 /**
@@ -204,6 +242,9 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
         }
         for (const key of Object.keys(formsMessagesEn)) {
           assert.ok(keys.has(key), `${code} is missing forms key '${key}'`);
+        }
+        for (const key of Object.keys(contractMessagesEn)) {
+          assert.ok(keys.has(key), `${code} is missing contract key '${key}'`);
         }
         assert.ok(keys.has('x-form/assert'));
       });

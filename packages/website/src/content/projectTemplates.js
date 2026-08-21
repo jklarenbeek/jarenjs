@@ -132,6 +132,16 @@ const SKELETONS = {
   state: '{}',
   data: '{}',
   schema: JSON.stringify({ type: 'object' }, null, 2),
+  contract: JSON.stringify({
+    $contract: '0.1',
+    operations: {
+      'echo.say': {
+        kind: 'command',
+        input: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } },
+        output: true,
+      },
+    },
+  }, null, 2),
 };
 
 /** The kinds a user may add a fresh file of. DERIVED from the skeleton

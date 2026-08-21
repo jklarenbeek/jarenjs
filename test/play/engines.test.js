@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { runExample } from '@jarenjs/play';
+import { runExample, EXAMPLES } from '@jarenjs/play';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
@@ -329,5 +329,56 @@ describe('@jarenjs/play — an error says WHERE (PLAY-FORMAT §2)', () => {
       assert.strictEqual(r.ok, false);
       for (const [k, v] of Object.entries(r.error)) assert.notStrictEqual(v, undefined, `${k} is stated, not undefined`);
     }
+  });
+});
+
+describe('@jarenjs/play — the contract engine (the one async run)', () => {
+  const shop = EXAMPLES.find((/** @type {any} */ e) => e.id === 'contract-shop');
+
+  it('renders its four panels for the shop example: describe / OpenAPI / TypeScript / dispatch', async () => {
+    const r = await Promise.resolve(runExample('contract', shop.source, shop.datasets[0].data));
+    assert.strictEqual(r.ok, true, r.error?.message);
+    assert.deepStrictEqual(r.panels.map((p) => p.id), ['describe', 'openapi', 'types', 'dispatch']);
+    assert.match(r.panels[0].text, /"catalog\.load"/);
+    assert.match(r.panels[1].text, /"openapi": "3\.1/);
+    assert.match(r.panels[2].text, /Outcome/);
+    // the dispatch panel resolves a real local-client outcome for the echo
+    const outcome = JSON.parse(r.panels[3].text);
+    assert.strictEqual(outcome.ok, true);
+    assert.deepStrictEqual(outcome.value.product, { id: 7, name: 'Duck', price: 9.99 });
+  });
+
+  it('an invalid dispatch input is the pre-send refusal outcome, not an engine failure', async () => {
+    const r = await Promise.resolve(runExample('contract', shop.source, shop.datasets[1].data));
+    assert.strictEqual(r.ok, true);
+    const outcome = JSON.parse(r.panels.find((p) => p.id === 'dispatch').text);
+    assert.deepStrictEqual([outcome.ok, outcome.kind, outcome.error.code], [false, 'contract', 'JC2050']);
+  });
+
+  it('an empty dispatch pane answers the hint note; an unknown op answers the host error as a note', async () => {
+    const empty = await Promise.resolve(runExample('contract', shop.source, { call: '' }));
+    assert.strictEqual(empty.panels.find((p) => p.id === 'dispatch').kind, 'note');
+    const unknown = await Promise.resolve(runExample('contract', shop.source, { call: '{"op":"nope.op","input":{}}' }));
+    assert.strictEqual(unknown.ok, true, 'a host mistake never fails the run');
+    const panel = unknown.panels.find((p) => p.id === 'dispatch');
+    assert.deepStrictEqual([panel.kind, panel.tone], ['note', 'warn']);
+  });
+
+  it('a rejecting async run settles into an error Result — the never-throw contract holds for thenables', async () => {
+    // a hostile source object whose pane accessor throws: the async run
+    // body rejects before its own guards, and runExample maps the
+    // rejection into the same error Result a sync throw yields
+    const hostile = { get document() { throw new Error('hostile accessor'); } };
+    const r = await Promise.resolve(runExample('contract', /** @type {any} */ (hostile), { call: '' }));
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error.message, /hostile accessor/);
+  });
+
+  it('a broken document refuses with its JC00xx code and docPath into the document pane', async () => {
+    const broken = EXAMPLES.find((/** @type {any} */ e) => e.id === 'contract-broken');
+    const r = await Promise.resolve(runExample('contract', broken.source, { call: '' }));
+    assert.strictEqual(r.ok, false);
+    assert.match(String(r.error.code), /^JC00\d\d$/);
+    assert.deepStrictEqual([r.error.pane, r.error.path], ['document', '/operations/catalog.load/output']);
   });
 });

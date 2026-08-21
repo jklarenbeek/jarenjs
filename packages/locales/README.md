@@ -1,8 +1,9 @@
 # @jarenjs/locales
 
 Locale packs (message catalogs) for the error messages of
-[`@jarenjs/validate`](../validate/README.md) and
-[`@jarenjs/forms`](../forms/README.md).
+[`@jarenjs/validate`](../validate/README.md),
+[`@jarenjs/forms`](../forms/README.md) and
+[`@jarenjs/contract`](../contract/README.md).
 
 Jaren validators and form checks never bake prose into the hot path: every
 failure carries a stable message key (`msgid`) plus raw structured
@@ -66,7 +67,8 @@ export const xx = {
 Rules of the road:
 
 1. **Key parity.** Cover every key of validate's `messagesEn`, every
-   `form/*` key of forms' `formsMessagesEn`, plus `x-form/assert` and the
+   `form/*` key of forms' `formsMessagesEn`, every `contract/*` wire-error
+   key of contract's `contractMessagesEn`, plus `x-form/assert` and the
    `JQ2xxx` query runtime codes. The repo enforces this with tests
    (`test/locales/`); missing keys silently fall back to English.
 2. **Never depend on a consumer.** A pack must stay importable without

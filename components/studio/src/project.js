@@ -15,6 +15,7 @@ import { StudioError } from './errors.js';
 /** The closed set of file kinds (matches the schema `kind` enum). */
 export const KINDS = Object.freeze([
   'app', 'jslt', 'query', 'state', 'data', 'schema', 'fsm', 'dag', 'model',
+  'contract',
 ]);
 
 /** The default IDE layout — the frozen `{ mode, ratio, autorun }` shape

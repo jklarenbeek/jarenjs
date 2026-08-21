@@ -120,6 +120,21 @@ describe('website — the Play playground (#/play)', () => {
     assert.strictEqual(app.getState().play.result.ok, false, 'strict TOML rejects the null extension');
   });
 
+  it('the contract engine (the one ASYNC run) settles its thenable result onto the stage', async () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'A shop contract'), 'click', {});
+    const s = app.getState().play;
+    assert.strictEqual(s.engine, 'contract');
+    // the run resolves a real local-client dispatch, so the result lands
+    // a microtask later — the site dispatches it when it settles
+    for (let i = 0; i < 24 && app.getState().play.result === null; i++) await Promise.resolve();
+    const result = app.getState().play.result;
+    assert.strictEqual(result.ok, true, result?.error?.message);
+    assert.deepStrictEqual(result.panels.map((p) => p.id), ['describe', 'openapi', 'types', 'dispatch']);
+    const outcome = JSON.parse(result.panels.find((p) => p.id === 'dispatch').text);
+    assert.strictEqual(outcome.ok, true, 'the echo dispatch resolved through the local binding');
+  });
+
   it('a visual engine (mermaid) renders an SVG vnode on the stage via the host renderer', () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'Flowchart'), 'click', {});

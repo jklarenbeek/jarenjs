@@ -334,12 +334,12 @@ export function createSiteToolbox(env) {
 
   toolbox.add({
     name: 'jaren_project_write',
-    description: 'Create or replace ONE file in the Studio project and open it, so the user watches it land. `kind` is required for a new file (app / jslt / query / schema / state / data) and optional when replacing. The file is validated against its OWN kind\'s grammar first — an invalid write is rejected and the current file is left alone, with the coded errors returned to repair. A runnable file (jslt / query / schema) is also RUN against the project\'s data file and its result comes back. Use this for every non-app file; use jaren_studio_write for a whole app document.',
+    description: 'Create or replace ONE file in the Studio project and open it, so the user watches it land. `kind` is required for a new file (app / jslt / query / schema / state / data / contract) and optional when replacing. The file is validated against its OWN kind\'s grammar first — an invalid write is rejected and the current file is left alone, with the coded errors returned to repair. A runnable file (jslt / query / schema / contract) is also RUN against the project\'s data file and its result comes back (a contract file renders its describe() and OpenAPI projections). Use this for every non-app file; use jaren_studio_write for a whole app document.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', minLength: 1 },
-        kind: { enum: ['app', 'jslt', 'query', 'schema', 'state', 'data'] },
+        kind: { enum: ['app', 'jslt', 'query', 'schema', 'state', 'data', 'contract'] },
         text: { type: 'string' },
       },
       required: ['name', 'text'],
@@ -351,7 +351,7 @@ export function createSiteToolbox(env) {
       const existing = (slice.files ?? []).find((f) => f.name === input.name);
       const kind = input.kind ?? existing?.kind;
       if (kind === undefined) {
-        return { error: `'${input.name}' is a new file, so it needs a kind (app / jslt / query / schema / state / data)` };
+        return { error: `'${input.name}' is a new file, so it needs a kind (app / jslt / query / schema / state / data / contract)` };
       }
       const candidate = { name: input.name, kind, text: input.text };
       const verdict = projectComponent.validateFile(candidate);

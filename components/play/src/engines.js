@@ -18,6 +18,9 @@ import { parseXQuery } from '@jarenjs/json/xquery';
 import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
 import { parseCsvDocument, stringifyCsv, sniffCsvDialect } from '@jarenjs/josl/csv';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
+import { compileContract } from '@jarenjs/contract';
+import { openLocalClient } from '@jarenjs/contract/local';
+import { toOpenApi, toTypeScript } from '@jarenjs/contract/project';
 import { formatMs } from './format.js';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -553,6 +556,74 @@ export const ENGINE_LIST = [
       catch (err) { return fail(msg(err), code(err), locate(err, 'source')); }
       const t1 = now();
       return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
+    },
+  },
+  {
+    // the one ASYNC engine: the dispatch panel resolves a real client
+    // outcome, so run() returns a Promise — runExample and the hosts
+    // pass a thenable Result through (PLAY-FORMAT §2)
+    id: 'contract', label: 'Contract', lead: 'A $contract document — operations two ends may exchange, compiled, projected and dispatched in-process.',
+    sourcePanes: [{ key: 'document', label: '$contract document', control: 'code' }],
+    dataPanes: [{ key: 'call', label: 'Dispatch — { "op", "input" }' }],
+    async run(source, data) {
+      const d = parseJson(source.document, 'document'); if (d.error) return failParse(d);
+      let contract; const t0 = now();
+      // a compile refusal is the engine's lesson: a stable JC00xx code
+      // with the JSON Pointer of the member at fault
+      try { contract = compileContract(d.value); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'document')); }
+      const t1 = now();
+      let openapi, types;
+      try {
+        openapi = toOpenApi(contract, {
+          info: {
+            title: typeof d.value?.id === 'string' ? d.value.id : 'contract',
+            version: typeof d.value?.version === 'string' ? d.value.version : '0',
+          },
+        });
+        types = toTypeScript(contract);
+      }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'document')); }
+      // the dispatch pane: an op + input run against trivial echo
+      // handlers over the local binding — the whole pipeline with no
+      // network. Output validation is DECLARED off (a capability the
+      // binding states), so any echo crosses; input validation still
+      // refuses a bad input with its outcome, which is the lesson.
+      /** @type {import('./index.js').Panel} */
+      let dispatch = {
+        id: 'dispatch', label: 'Dispatch', kind: 'note', tone: 'info',
+        text: 'Type { "op": "<operation id>", "input": { … } } in the Dispatch pane to run an operation against echo handlers (validateOutput declared \'never\').',
+      };
+      if (String(data.call ?? '').trim() !== '') {
+        const call = parseJson(data.call, 'call'); if (call.error) return failParse(call);
+        const op = call.value !== null && typeof call.value === 'object' ? call.value.op : undefined;
+        if (typeof op !== 'string') {
+          dispatch = { id: 'dispatch', label: 'Dispatch', kind: 'note', tone: 'warn', text: 'the call must be an object naming an "op" (and optionally an "input")' };
+        }
+        else {
+          /** @type {Record<string, (input: any) => any>} */
+          const handlers = {};
+          for (const id of Object.keys(contract.operations)) handlers[id] = (input) => input;
+          const client = openLocalClient(contract, handlers, { validateOutput: 'never' });
+          try {
+            const outcome = await client.invoke(op, call.value.input ?? {});
+            dispatch = { id: 'dispatch', label: 'Dispatch (echo)', kind: 'code', text: fmt(outcome) };
+          }
+          catch (err) {
+            // a host mistake (JC1005: unknown, opaque or subscribe
+            // operation) is the panel's answer, not an engine failure
+            dispatch = { id: 'dispatch', label: 'Dispatch', kind: 'note', tone: 'warn', text: msg(err) };
+          }
+          finally { client.close(); }
+        }
+      }
+      const t2 = now();
+      return okPanels([
+        { id: 'describe', label: 'describe()', kind: 'code', text: fmt(contract.describe()) },
+        { id: 'openapi', label: 'OpenAPI', kind: 'code', text: fmt(openapi.document) },
+        { id: 'types', label: 'TypeScript', kind: 'code', text: types },
+        dispatch,
+      ], t1 - t0, t2 - t1);
     },
   },
   // ——— the visual engines: descriptor + examples here, rendering delegated ———

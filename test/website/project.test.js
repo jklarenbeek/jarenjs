@@ -160,6 +160,31 @@ describe('transform file kinds run live on the stage (the playground fold)', () 
     assert.match(serialize(container), /Invalid/, 'bad data reports invalid with errors');
   });
 
+  it('a contract file renders its describe() and OpenAPI projections; a broken one docks its JC code + docPath', () => {
+    const { app, container } = mountSite();
+    const contractText = JSON.stringify({
+      $contract: '0.1', id: 'shop',
+      operations: { 'catalog.load': { kind: 'read', output: true, http: { method: 'GET', path: '/api/catalog' } } },
+    });
+    const files = [{ name: 'shop.contract', kind: 'contract', text: contractText }];
+    app.dispatch('project/files-set', { files, active: 'shop.contract' });
+    app.dispatch('project/active', 'shop.contract');
+    const result = app.getState().project.results['shop.contract'];
+    assert.ok(result && Array.isArray(result.nodes), 'the contract projections ran and stored render nodes');
+    const html = serialize(container);
+    assert.match(html, /describe\(\)/, 'the describe() pane renders on the stage');
+    assert.match(html, /OpenAPI 3\.1/, 'the OpenAPI pane renders on the stage');
+
+    // break the document (no output): the rail docks the coded refusal
+    const editor = find(container, (n) => n.tagName === 'textarea');
+    fire(editor, 'change', { target: { value: JSON.stringify({
+      $contract: '0.1',
+      operations: { 'catalog.load': { kind: 'read', http: { method: 'GET', path: '/api/catalog' } } },
+    }) } });
+    assert.match(serialize(container), /JC00\d\d/, 'the JC code shows in the error strip');
+    assert.match(serialize(container), /\/operations\/catalog\.load\/output/, 'with its docPath');
+  });
+
   it('editing a transform re-runs it, and Run re-runs on demand', () => {
     const { app, container } = mountSite();
     app.dispatch('project/template', 'finance');

@@ -59,8 +59,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The Portuguese catalog. Covers every key of validate's `messagesEn`,
- * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and
- * the `JQ2xxx` codes reachable through `$query`.
+ * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const pt = {
@@ -127,5 +128,43 @@ export const pt = {
   'x-form/assert': 'Valor inválido',
   'form/addItem': 'Adicionar item',
   'form/removeItem': 'Remover item',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'nenhuma operação corresponde ao método e ao caminho da solicitação',
+  'contract/method-not-allowed': 'o caminho é servido sob outros métodos: {allow}',
+  'contract/body-too-large': 'o corpo da solicitação da operação {op} excede seu limite de {limit} bytes',
+  'contract/unsupported-media': 'a operação {op} aceita apenas corpos {media}',
+  'contract/malformed-json': 'o corpo da solicitação da operação {op} não é JSON válido',
+  'contract/invalid-input': 'a entrada da operação {op} é inválida',
+  'contract/idempotency-key-required': 'a operação {op} exige um cabeçalho Idempotency-Key',
+  'contract/handler-failed': 'a operação {op} falhou',
+  'contract/idempotency-conflict': 'a Idempotency-Key da operação {op} conflita com uma solicitação anterior ({kind})',
+  'contract/invalid-output': 'a operação {op} produziu uma resposta que viola seu contrato',
+  'contract/malformed-path': 'o caminho da solicitação contém um escape percentual malformado',
+  'contract/malformed-query': 'a cadeia de consulta não é decodificável',
+  'contract/not-implemented': 'a operação {op} não está implementada neste servidor',
+  'contract/precondition-failed': 'a pré-condição If-Match da operação {op} falhou',
+  'contract/invalid-header': 'o cabeçalho {header} da operação {op} é inválido',
+  'contract/handler-error': 'a operação {op} falhou com {code}',
+  'contract/client-invalid-input': 'a entrada da operação {op} é inválida; nada foi enviado',
+  'contract/network': 'a solicitação de {op} não foi concluída ({name})',
+  'contract/cancelled': 'a solicitação da operação {op} foi cancelada',
+  'contract/invalid-response': 'a resposta da operação {op} viola seu contrato',
+  'contract/key-storage-failed': 'a chave de idempotência da operação {op} não pôde ser armazenada; nada foi enviado',
+  'contract/undeclared-response': 'a operação {op} respondeu com uma resposta não declarada (status {status})',
+  'contract/not-a-contract': 'o servidor não descreve o contrato {id} em seu caminho well-known',
+  'contract/incompatible': 'o servidor fala a versão {server} do contrato {id}; este cliente fala {client} e nenhuma das extremidades declara a outra compatível',
+  'contract/host-failed': 'a operação {op} falhou no host antes de um resultado ser produzido',
+  'contract/local-handler-failed': 'a operação {op} falhou no host que a serve',
+  'contract/unknown-operation': 'a solicitação não nomeia nenhuma operação servida neste canal',
+  'contract/port-timeout': 'a operação {op} não obteve resposta no canal em {ms} ms',
+  'contract/malformed-frame': 'o quadro de resposta da operação {op} está malformado',
+  'contract/channel-closed': 'o canal da operação {op} está fechado',
+  'contract/not-a-stream': 'o servidor respondeu à assinatura da operação {op} com uma resposta que não é um fluxo',
+  'contract/invalid-snapshot': 'a operação {op} produziu um instantâneo que viola seu contrato',
+  'contract/seq-regression': 'o fluxo da operação {op} violou a ordem de seus seq',
+  'contract/stream-error': 'o fluxo da operação {op} terminou com um erro do servidor ({code})',
+  'contract/heartbeat-missed': 'o fluxo da operação {op} ficou em silêncio por {ms} ms',
   //#endregion
 };

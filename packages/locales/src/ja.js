@@ -54,8 +54,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The Japanese catalog. Covers every key of validate's `messagesEn`,
- * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and
- * the `JQ2xxx` codes reachable through `$query`.
+ * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const ja = {
@@ -122,5 +123,43 @@ export const ja = {
   'x-form/assert': '無効な値です',
   'form/addItem': '項目を追加',
   'form/removeItem': '項目を削除',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'リクエストのメソッドとパスに一致する操作がありません',
+  'contract/method-not-allowed': 'このパスは別のメソッドで提供されています: {allow}',
+  'contract/body-too-large': '操作 {op} のリクエストボディが {limit} バイトの上限を超えています',
+  'contract/unsupported-media': '操作 {op} は {media} のボディのみ受け付けます',
+  'contract/malformed-json': '操作 {op} のリクエストボディは有効な JSON ではありません',
+  'contract/invalid-input': '操作 {op} の入力が無効です',
+  'contract/idempotency-key-required': '操作 {op} には Idempotency-Key ヘッダーが必要です',
+  'contract/handler-failed': '操作 {op} が失敗しました',
+  'contract/idempotency-conflict': '操作 {op} の Idempotency-Key が以前のリクエストと競合しています ({kind})',
+  'contract/invalid-output': '操作 {op} が契約に違反するレスポンスを生成しました',
+  'contract/malformed-path': 'リクエストパスに不正なパーセントエスケープが含まれています',
+  'contract/malformed-query': 'クエリ文字列をデコードできません',
+  'contract/not-implemented': '操作 {op} はこのサーバーでは実装されていません',
+  'contract/precondition-failed': '操作 {op} の If-Match 前提条件が満たされませんでした',
+  'contract/invalid-header': '操作 {op} の {header} ヘッダーが無効です',
+  'contract/handler-error': '操作 {op} が {code} で失敗しました',
+  'contract/client-invalid-input': '操作 {op} の入力が無効です。何も送信されませんでした',
+  'contract/network': '{op} のリクエストは完了しませんでした ({name})',
+  'contract/cancelled': '操作 {op} のリクエストはキャンセルされました',
+  'contract/invalid-response': '操作 {op} のレスポンスは契約に違反しています',
+  'contract/key-storage-failed': '操作 {op} の冪等キーを保存できませんでした。何も送信されませんでした',
+  'contract/undeclared-response': '操作 {op} が宣言されていないレスポンスを返しました (ステータス {status})',
+  'contract/not-a-contract': 'サーバーは well-known パスで契約 {id} を記述していません',
+  'contract/incompatible': 'サーバーは契約 {id} のバージョン {server} を話し、このクライアントは {client} を話しますが、どちらの側も相手を互換と宣言していません',
+  'contract/host-failed': '操作 {op} は結果が生成される前にホスト内で失敗しました',
+  'contract/local-handler-failed': '操作 {op} は提供側ホスト内で失敗しました',
+  'contract/unknown-operation': 'リクエストはこのチャネルで提供されている操作を指名していません',
+  'contract/port-timeout': '操作 {op} は {ms} ミリ秒以内にチャネル上で応答を得られませんでした',
+  'contract/malformed-frame': '操作 {op} のレスポンスフレームが不正です',
+  'contract/channel-closed': '操作 {op} のチャネルは閉じられています',
+  'contract/not-a-stream': 'サーバーは操作 {op} の購読にストリームでないレスポンスで応答しました',
+  'contract/invalid-snapshot': '操作 {op} が契約に違反するスナップショットを生成しました',
+  'contract/seq-regression': '操作 {op} のストリームが seq の順序に違反しました',
+  'contract/stream-error': '操作 {op} のストリームはサーバーエラーで終了しました ({code})',
+  'contract/heartbeat-missed': '操作 {op} のストリームが {ms} ミリ秒間沈黙しました',
   //#endregion
 };

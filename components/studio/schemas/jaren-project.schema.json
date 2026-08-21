@@ -28,7 +28,7 @@
         "name": { "type": "string", "minLength": 1 },
         "kind": {
           "description": "The file's grammar/role; its `text` is validated against this kind, not the envelope.",
-          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model"]
+          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model", "contract"]
         },
         "text": { "type": "string" }
       }

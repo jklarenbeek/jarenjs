@@ -36,12 +36,17 @@ describe('@jarenjs/play — the example library', () => {
     assert.strictEqual(new Set(EXAMPLES.map((e) => e.id)).size, EXAMPLES.length, 'ids are unique');
   });
 
-  it('every example runs GREEN over each of its datasets (operators + its option config)', () => {
+  it('every example runs GREEN over each of its datasets (operators + its option config)', async () => {
     for (const ex of EXAMPLES) {
+      // the broken-on-purpose contract example refuses to compile — that
+      // IS its lesson (a JC00xx with a docPath), asserted in its own test
+      if (ex.id === 'contract-broken') continue;
       // a source-only example runs once against no data
       const runs = ex.datasets.length > 0 ? ex.datasets : [{ label: '—', data: {} }];
       for (const ds of runs) {
-        const r = runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config, renderers, validate });
+        // the contract engine is the one async run — awaiting a plain
+        // Result is a no-op, so every example goes through one await
+        const r = await Promise.resolve(runExample(ex.engine, ex.source, ds.data, { operators: ops, config: ex.config, renderers, validate }));
         assert.strictEqual(r.ok, true, `${ex.id} / ${ds.label}: ${r.error?.message}`);
         // a visual engine yields a rendered `view` vnode; every other engine
         // yields at least one non-empty text (or table) panel

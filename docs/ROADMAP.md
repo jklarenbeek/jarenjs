@@ -194,13 +194,13 @@ delete it or fix it.
   is ≥ 25% of the per-request cost on the committed dispatch table. The
   measured share (`benchmark/contract.js`, the in-process table's
   heaviest row — the 5×4-body PUT)
-  is <!--bm:contract.serialization.share-->12.5%<!--/bm--> of the whole
+  is <!--bm:contract.serialization.share-->11.6%<!--/bm--> of the whole
   jaren request, so a perfect serializer that cost nothing
   would move the pipeline by about a tenth. Not scheduled. Revisit only
   if a consumer's real payloads push the share past the criterion — the
   suite prints the share on every run, so the number stays checkable.
   (The larger measured lever is output validation,
-  at <!--bm:contract.validateOutput.share-->25%<!--/bm--> of the same row;
+  at <!--bm:contract.validateOutput.share-->29%<!--/bm--> of the same row;
   it is a correctness feature, declared off per server with
   `validateOutput: 'never'`, whose cost the benchmark's fourth column
   keeps visible.)
@@ -208,9 +208,23 @@ delete it or fix it.
   private to `packages/contract/src/path.js` by design; it moves to
   `@jarenjs/core` the moment a second consumer appears (the one-
   implementation rule), not before.
-- [ ] **Locale packs for the `contract/*` msgids** — English ships
-  in-package; the 11 `@jarenjs/locales` packs gain the wire-error catalog
-  in the campaign close-out, where the parity tests enforce them.
+- [ ] **A declared-failure door on stream emissions** — re-homing a
+  `@jarenjs/db` `live()` on a subscribe output drops the store's own
+  coded error from the wire: an `{ error }` emission crosses as the
+  generic stream host-fault event (`JC2093`), coarser than the coded
+  error the old page-side push path carried. A way for a subscribe
+  operation to declare error shapes its emissions may carry — the
+  `errors` map applied to the stream's `error` event — would restore
+  the fidelity; undesigned, and it touches the SSE event grammar
+  (CONTRACT-FORMAT.md §18), so it is an order-sized decision.
+- [ ] **The cross-tab e2e in WebKit awaits an OPFS-capable build** —
+  the db-owner protocol's cross-tab tests (the second-tab read and the
+  port binding's cross-settle proof) pass for real in Chromium and
+  Firefox and skip by their own guard in WebKit: Playwright's WebKit
+  builds on this harness expose no OPFS at all
+  (`navigator.storage.getDirectory` is undefined in page and worker).
+  The tests are written; the gate closes by itself the moment a
+  Playwright WebKit build ships OPFS — re-check on Playwright upgrades.
 
 ## @jarenjs/forms
 
@@ -351,7 +365,7 @@ stateless, no worker, no live subscription, no side channel. That is why flow
 and the document store are studio file kinds instead, and why adding an engine
 costs a descriptor plus examples and no UI code at all.
 
-- [ ] **Engines the rule admits and the registry lacks** — fourteen ship.
+- [ ] **Engines the rule admits and the registry lacks** — fifteen ship.
   `@jarenjs/linq` (a fluent chain compiles to a query document), `@jarenjs/emit`
   (a schema compiles to TypeScript), JSONX as an *input* dialect rather than
   only an output, and the `@jarenjs/core` kernels the query operators already
@@ -386,14 +400,15 @@ costs a descriptor plus examples and no UI code at all.
 
 The multi-file project IDE behind `#/project`. A `jaren-project` is a thin
 envelope over typed files (`app`, `jslt`, `query`, `schema`, `state`, `data`,
-`fsm`, `dag`, `model`), each validated against its own grammar rather than one
-composed mega-schema. Two of those kinds still have no editor beyond a
-textarea, which is what the first two entries are about.
+`contract`, `fsm`, `dag`, `model`), each validated against its own grammar
+rather than one composed mega-schema. Two of those kinds still have no editor
+beyond a textarea, which is what the first two entries are about.
 
-- [ ] **`fsm`/`dag`/`model` are validate-only kinds** — `KINDS` lists all nine
-  and `validateFile` checks all nine, but these three have no editor, no runner
+- [ ] **`fsm`/`dag`/`model` are validate-only kinds** — `KINDS` lists all ten
+  and `validateFile` checks all ten, but these three have no editor, no runner
   and no way in. `deriveStage` returns an inert "edit it as text meanwhile"
-  note; `runProjectFile` whitelists `query`/`jslt`/`schema` only; and four
+  note; `runProjectFile` whitelists `query`/`jslt`/`schema`/`contract` only;
+  and four
   independent gates refuse to create one — the add-file `<select>`,
   `ADDABLE_KINDS`, the `SKELETONS` table (a missing skeleton makes
   `project-add` bail silently) and the assistant tool's `kind` enum. Today such

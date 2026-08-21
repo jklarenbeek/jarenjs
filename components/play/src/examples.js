@@ -543,4 +543,46 @@ is a fixed point.
       name: { type: 'string', minLength: 2 }, email: { type: 'string', format: 'email' }, age: { type: 'integer', minimum: 13 },
     }, required: ['name', 'email'] }) },
     datasets: [{ label: 'invalid', data: { data: j({ name: 'A', email: 'not-an-email', age: 7 }) } }] },
+
+  // ——— Contract ($contract document → describe / OpenAPI / TypeScript / dispatch) ———
+  { id: 'contract-shop', label: 'A shop contract', engine: 'contract',
+    source: { document: j({ $contract: '0.1', id: 'shop', version: '1',
+      $defs: { Product: { type: 'object', required: ['id', 'name', 'price'], properties: {
+        id: { type: 'integer' }, name: { type: 'string', minLength: 1 }, price: { type: 'number', minimum: 0 } } } },
+      operations: {
+        'catalog.load': { kind: 'read',
+          input: { type: 'object', properties: { since: { type: 'string', format: 'date-time' } } },
+          output: { type: 'array', items: { $ref: '#/$defs/Product' } },
+          http: { method: 'GET', path: '/api/catalog' },
+          doc: 'The whole catalog.' },
+        'product.save': { kind: 'command',
+          input: { type: 'object', required: ['id', 'product'], properties: {
+            id: { type: 'integer' }, product: { $ref: '#/$defs/Product' } } },
+          output: { $ref: '#/$defs/Product' },
+          errors: { conflict: { status: 409 } },
+          policy: { idempotency: 'optional' },
+          http: { method: 'PUT', path: '/api/products/{id}' } },
+      } }) },
+    datasets: [
+      { label: 'a valid save', data: { call: j({ op: 'product.save', input: { id: 7, product: { id: 7, name: 'Duck', price: 9.99 } } }) } },
+      { label: 'an invalid input', data: { call: j({ op: 'product.save', input: { id: 'seven' } }) } },
+      { label: 'no dispatch', data: { call: '' } },
+    ] },
+  { id: 'contract-minimal', label: 'One operation, no http', engine: 'contract',
+    source: { document: j({ $contract: '0.1', id: 'echo', operations: {
+      'echo.say': { kind: 'command',
+        input: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } },
+        output: true,
+        doc: 'No http member: the binding defaults to POST /echo.say.' },
+    } }) },
+    datasets: [{ label: 'say something', data: { call: j({ op: 'echo.say', input: { text: 'hello' } }) } }] },
+  { id: 'contract-broken', label: 'A refusal, with its docPath', engine: 'contract',
+    source: { document: j({ $contract: '0.1', id: 'broken', operations: {
+      'catalog.load': { kind: 'read',
+        input: { type: 'object', properties: { since: { type: 'string' } } },
+        // no output member: JC00xx at compile, never at request time —
+        // the error names /operations/catalog.load with its code
+        http: { method: 'GET', path: '/api/catalog' } },
+    } }) },
+    datasets: [{ label: 'nothing to dispatch', data: { call: '' } }] },
 ];

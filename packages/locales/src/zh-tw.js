@@ -57,8 +57,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The zh-TW catalog. Covers every key of validate's `messagesEn`,
- * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and
- * the `JQ2xxx` codes reachable through `$query`.
+ * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const zhTW = {
@@ -125,5 +126,43 @@ export const zhTW = {
   'x-form/assert': '無效的值',
   'form/addItem': '新增項目',
   'form/removeItem': '移除項目',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': '沒有任何操作符合請求的方法與路徑',
+  'contract/method-not-allowed': '此路徑由其他方法提供:{allow}',
+  'contract/body-too-large': '操作 {op} 的請求主體超過其 {limit} 位元組上限',
+  'contract/unsupported-media': '操作 {op} 僅接受 {media} 主體',
+  'contract/malformed-json': '操作 {op} 的請求主體不是有效的 JSON',
+  'contract/invalid-input': '操作 {op} 的輸入無效',
+  'contract/idempotency-key-required': '操作 {op} 需要 Idempotency-Key 標頭',
+  'contract/handler-failed': '操作 {op} 失敗',
+  'contract/idempotency-conflict': '操作 {op} 的 Idempotency-Key 與先前的請求衝突({kind})',
+  'contract/invalid-output': '操作 {op} 產生了違反其契約的回應',
+  'contract/malformed-path': '請求路徑含有格式錯誤的百分比逸出序列',
+  'contract/malformed-query': '查詢字串無法解碼',
+  'contract/not-implemented': '操作 {op} 未在此伺服器上實作',
+  'contract/precondition-failed': '操作 {op} 的 If-Match 前置條件失敗',
+  'contract/invalid-header': '操作 {op} 的 {header} 標頭無效',
+  'contract/handler-error': '操作 {op} 以 {code} 失敗',
+  'contract/client-invalid-input': '操作 {op} 的輸入無效;未傳送任何內容',
+  'contract/network': '{op} 的請求未完成({name})',
+  'contract/cancelled': '操作 {op} 的請求已取消',
+  'contract/invalid-response': '操作 {op} 的回應違反其契約',
+  'contract/key-storage-failed': '操作 {op} 的冪等鍵無法儲存;未傳送任何內容',
+  'contract/undeclared-response': '操作 {op} 回覆了未宣告的回應(狀態 {status})',
+  'contract/not-a-contract': '伺服器未在其 well-known 路徑描述契約 {id}',
+  'contract/incompatible': '伺服器使用契約 {id} 的版本 {server},此用戶端使用 {client},且雙方都未宣告對方相容',
+  'contract/host-failed': '操作 {op} 在產生結果之前於主機中失敗',
+  'contract/local-handler-failed': '操作 {op} 在提供服務的主機中失敗',
+  'contract/unknown-operation': '請求未指名此通道上提供的任何操作',
+  'contract/port-timeout': '操作 {op} 在 {ms} 毫秒內未在通道上獲得回應',
+  'contract/malformed-frame': '操作 {op} 的回應框架格式錯誤',
+  'contract/channel-closed': '操作 {op} 的通道已關閉',
+  'contract/not-a-stream': '伺服器以非串流回應回覆操作 {op} 的訂閱',
+  'contract/invalid-snapshot': '操作 {op} 產生了違反其契約的快照',
+  'contract/seq-regression': '操作 {op} 的串流違反了其 seq 順序',
+  'contract/stream-error': '操作 {op} 的串流以伺服器錯誤結束({code})',
+  'contract/heartbeat-missed': '操作 {op} 的串流沉默了 {ms} 毫秒',
   //#endregion
 };

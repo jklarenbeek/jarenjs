@@ -13,6 +13,9 @@
  *               real error comes back as its own coded `JQ`/`JT` code with
  *               a docPath — the closed grammar would reject the operators;
  *  - `fsm` / `dag` / `model` → their published grammar (structural);
+ *  - `contract` → COMPILED by `compileContract`, so a refusal comes back
+ *               as its stable `JC00xx` code with the docPath of the
+ *               member at fault — richer than the grammar alone;
  *  - `schema` → compiled as a JSON Schema (is it well-formed?);
  *  - `state` / `data` → any JSON (structural only).
  *
@@ -27,6 +30,7 @@ import { compileJsonQuery } from '@jarenjs/json';
 import {
   compileJsltStylesheet, createJsltRegistry, mathPack, financePack, statsPack,
 } from '@jarenjs/json/jslt';
+import { compileContract } from '@jarenjs/contract';
 
 import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
@@ -178,6 +182,8 @@ function validateFileUncached(file, options = {}) {
       return schemaResult(kind, validateDag(doc));
     case 'model':
       return schemaResult(kind, validateModel(doc));
+    case 'contract':
+      return compileResult(kind, () => compileContract(doc));
     case 'schema':
       // a JSON Schema is a boolean or an object; anything else is not a
       // schema at all (the compiler is otherwise lenient about a schema's

@@ -37,10 +37,12 @@ function deriveStage(project, activeMeta, results, revision, committed) {
     // here it is the data: the assembled document + the reboot revision
     return { kind: 'app', mount: { doc: artifact.doc, revision } };
   }
-  if (activeMeta.kind === 'jslt' || activeMeta.kind === 'query' || activeMeta.kind === 'schema') {
-    // the host runs the file (a transform, or a schema validating the data
-    // file) and stores its render nodes; the stage renders them in `ui`
-    // mode, or a hint until the first run lands
+  if (activeMeta.kind === 'jslt' || activeMeta.kind === 'query' || activeMeta.kind === 'schema'
+    || activeMeta.kind === 'contract') {
+    // the host runs the file (a transform, a schema validating the data
+    // file, or a contract's describe()/OpenAPI projections) and stores
+    // its render nodes; the stage renders them in `ui` mode, or a hint
+    // until the first run lands
     const result = results[activeMeta.name] ?? null;
     return { kind: 'result', ran: result !== null, nodes: result?.nodes ?? [] };
   }

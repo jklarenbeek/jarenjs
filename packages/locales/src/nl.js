@@ -58,8 +58,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The Dutch catalog. Covers every key of validate's `messagesEn`, every
- * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and the
- * `JQ2xxx` codes reachable through `$query`.
+ * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const nl = {
@@ -126,5 +127,43 @@ export const nl = {
   'x-form/assert': 'Ongeldige waarde',
   'form/addItem': 'Item toevoegen',
   'form/removeItem': 'Item verwijderen',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'geen enkele operatie komt overeen met de methode en het pad van het verzoek',
+  'contract/method-not-allowed': 'het pad wordt onder andere methoden bediend: {allow}',
+  'contract/body-too-large': 'de verzoekbody van operatie {op} overschrijdt de limiet van {limit} bytes',
+  'contract/unsupported-media': "operatie {op} accepteert alleen {media}-body's",
+  'contract/malformed-json': 'de verzoekbody van operatie {op} is geen geldige JSON',
+  'contract/invalid-input': 'de invoer van operatie {op} is ongeldig',
+  'contract/idempotency-key-required': 'operatie {op} vereist een Idempotency-Key-header',
+  'contract/handler-failed': 'operatie {op} is mislukt',
+  'contract/idempotency-conflict': 'de Idempotency-Key van operatie {op} conflicteert met een eerder verzoek ({kind})',
+  'contract/invalid-output': 'operatie {op} heeft een antwoord geproduceerd dat het contract schendt',
+  'contract/malformed-path': 'het verzoekpad bevat een misvormde procent-escape',
+  'contract/malformed-query': 'de querystring is niet te decoderen',
+  'contract/not-implemented': 'operatie {op} is niet geïmplementeerd op deze server',
+  'contract/precondition-failed': 'de If-Match-voorwaarde van operatie {op} is niet vervuld',
+  'contract/invalid-header': 'de {header}-header van operatie {op} is ongeldig',
+  'contract/handler-error': 'operatie {op} is mislukt met {code}',
+  'contract/client-invalid-input': 'de invoer van operatie {op} is ongeldig; er is niets verzonden',
+  'contract/network': 'het verzoek van {op} is niet voltooid ({name})',
+  'contract/cancelled': 'het verzoek van operatie {op} is geannuleerd',
+  'contract/invalid-response': 'het antwoord van operatie {op} schendt het contract',
+  'contract/key-storage-failed': 'de idempotentiesleutel van operatie {op} kon niet worden opgeslagen; er is niets verzonden',
+  'contract/undeclared-response': 'operatie {op} antwoordde met een niet-gedeclareerd antwoord (status {status})',
+  'contract/not-a-contract': 'de server beschrijft contract {id} niet op zijn well-known-pad',
+  'contract/incompatible': 'de server spreekt versie {server} van contract {id}; deze client spreekt {client} en geen van beide einden verklaart de ander compatibel',
+  'contract/host-failed': 'operatie {op} is mislukt in de host voordat een uitkomst werd geproduceerd',
+  'contract/local-handler-failed': 'operatie {op} is mislukt in de bedienende host',
+  'contract/unknown-operation': 'het verzoek noemt geen operatie die op dit kanaal wordt bediend',
+  'contract/port-timeout': 'operatie {op} kreeg binnen {ms} ms geen antwoord op het kanaal',
+  'contract/malformed-frame': 'het antwoordframe van operatie {op} is misvormd',
+  'contract/channel-closed': 'het kanaal van operatie {op} is gesloten',
+  'contract/not-a-stream': 'de server beantwoordde het abonnement van operatie {op} met een antwoord dat geen stream is',
+  'contract/invalid-snapshot': 'operatie {op} heeft een momentopname geproduceerd die het contract schendt',
+  'contract/seq-regression': 'de stream van operatie {op} heeft de seq-volgorde geschonden',
+  'contract/stream-error': 'de stream van operatie {op} is geëindigd met een serverfout ({code})',
+  'contract/heartbeat-missed': 'de stream van operatie {op} is {ms} ms stil gebleven',
   //#endregion
 };

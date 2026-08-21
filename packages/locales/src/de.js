@@ -59,8 +59,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The German catalog. Covers every key of validate's `messagesEn`, every
- * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and the
- * `JQ2xxx` codes reachable through `$query`.
+ * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const de = {
@@ -127,5 +128,43 @@ export const de = {
   'x-form/assert': 'Ungültiger Wert',
   'form/addItem': 'Element hinzufügen',
   'form/removeItem': 'Element entfernen',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'keine Operation entspricht Methode und Pfad der Anfrage',
+  'contract/method-not-allowed': 'der Pfad wird unter anderen Methoden bedient: {allow}',
+  'contract/body-too-large': 'der Anfragekörper der Operation {op} überschreitet sein Limit von {limit} Bytes',
+  'contract/unsupported-media': 'die Operation {op} akzeptiert nur {media}-Körper',
+  'contract/malformed-json': 'der Anfragekörper der Operation {op} ist kein gültiges JSON',
+  'contract/invalid-input': 'die Eingabe der Operation {op} ist ungültig',
+  'contract/idempotency-key-required': 'die Operation {op} erfordert einen Idempotency-Key-Header',
+  'contract/handler-failed': 'die Operation {op} ist fehlgeschlagen',
+  'contract/idempotency-conflict': 'der Idempotency-Key der Operation {op} steht im Konflikt mit einer früheren Anfrage ({kind})',
+  'contract/invalid-output': 'die Operation {op} hat eine Antwort erzeugt, die ihren Vertrag verletzt',
+  'contract/malformed-path': 'der Anfragepfad enthält eine fehlerhafte Prozent-Escape-Sequenz',
+  'contract/malformed-query': 'der Query-String ist nicht dekodierbar',
+  'contract/not-implemented': 'die Operation {op} ist auf diesem Server nicht implementiert',
+  'contract/precondition-failed': 'die If-Match-Vorbedingung der Operation {op} ist fehlgeschlagen',
+  'contract/invalid-header': 'der {header}-Header der Operation {op} ist ungültig',
+  'contract/handler-error': 'die Operation {op} ist mit {code} fehlgeschlagen',
+  'contract/client-invalid-input': 'die Eingabe der Operation {op} ist ungültig; nichts wurde gesendet',
+  'contract/network': 'die Anfrage von {op} wurde nicht abgeschlossen ({name})',
+  'contract/cancelled': 'die Anfrage der Operation {op} wurde abgebrochen',
+  'contract/invalid-response': 'die Antwort der Operation {op} verletzt ihren Vertrag',
+  'contract/key-storage-failed': 'der Idempotenzschlüssel der Operation {op} konnte nicht gespeichert werden; nichts wurde gesendet',
+  'contract/undeclared-response': 'die Operation {op} hat mit einer nicht deklarierten Antwort geantwortet (Status {status})',
+  'contract/not-a-contract': 'der Server beschreibt den Vertrag {id} an seinem Well-known-Pfad nicht',
+  'contract/incompatible': 'der Server spricht Version {server} des Vertrags {id}; dieser Client spricht {client}, und keine Seite erklärt die andere für kompatibel',
+  'contract/host-failed': 'die Operation {op} ist im Host fehlgeschlagen, bevor ein Ergebnis erzeugt wurde',
+  'contract/local-handler-failed': 'die Operation {op} ist im bedienenden Host fehlgeschlagen',
+  'contract/unknown-operation': 'die Anfrage nennt keine auf diesem Kanal bediente Operation',
+  'contract/port-timeout': 'die Operation {op} erhielt innerhalb von {ms} ms keine Antwort auf dem Kanal',
+  'contract/malformed-frame': 'der Antwortrahmen der Operation {op} ist fehlerhaft',
+  'contract/channel-closed': 'der Kanal der Operation {op} ist geschlossen',
+  'contract/not-a-stream': 'der Server hat das Abonnement der Operation {op} mit einer Antwort beantwortet, die kein Stream ist',
+  'contract/invalid-snapshot': 'die Operation {op} hat einen Schnappschuss erzeugt, der ihren Vertrag verletzt',
+  'contract/seq-regression': 'der Stream der Operation {op} hat seine seq-Reihenfolge verletzt',
+  'contract/stream-error': 'der Stream der Operation {op} endete mit einem Serverfehler ({code})',
+  'contract/heartbeat-missed': 'der Stream der Operation {op} blieb {ms} ms lang still',
   //#endregion
 };

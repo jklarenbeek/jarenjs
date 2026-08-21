@@ -25,7 +25,8 @@ This package ships in two layers, the suite's convention:
   host registers the DOM-touching islands — the live nested-app stage
   (hot-update via `app.setState`) and the drag splitter — which are
   browser-verified. Mounted live at the website's `#/project`, where `app`
-  files boot, `jslt`/`query` files run against a data file, and files are
+  files boot, `jslt`/`query` files run against a data file, `contract`
+  files render their `describe()`/OpenAPI projections, and files are
   added, renamed, deleted and opened from templates.
 
 ## The project document

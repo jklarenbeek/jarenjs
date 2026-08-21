@@ -57,9 +57,34 @@ they claim:
 - **The non-mutation guarantees.** Compiled validators do not modify their
   input; JSON Patch, the query write operations and the normalizer are
   copy-on-write. A path that mutates a caller's document is in scope.
+- **Hostile requests against a served contract.** `@jarenjs/contract`
+  treats the contract document, the handlers and the app documents as
+  trusted artifacts and **every request as hostile**, on every binding
+  (`http`, `local`, `port`, `stream`). The claims, each one a tested
+  property: the declared body-size limit is enforced before the body is
+  read (413); decoded path/query/header values are assembled through a
+  prototype-safe setter (no `__proto__` write); only headers the
+  operation declares are read; malformed JSON, oversize and unsupported
+  media settle into their coded responses; every request-time path
+  **settles totally** — a hostile handler value, a throwing accessor or a
+  rejected promise never escapes as an unhandled rejection; and no
+  request value is echoed into an error message — validation details
+  cross a binding only under the operation's declared
+  `policy.errors.details` level (the default sends paths and keywords,
+  never values). A request that crashes the server, bypasses a declared
+  limit, writes a prototype, or leaks a request value through an error
+  is a vulnerability worth reporting.
 
 ## What is not in scope
 
+- **What `@jarenjs/contract` deliberately does not do**: authentication
+  and authorization (the host's — compose them in front of the handler
+  table), transport encryption (TLS belongs to the server or proxy that
+  terminates the socket), and replay protection beyond idempotency keys
+  (an `Idempotency-Key` deduplicates a declared command through the
+  host's ledger; it is not a nonce scheme and does not authenticate the
+  sender). Reports that amount to "the contract layer did not
+  authenticate the caller" are out of scope by design.
 - Denial of service from a schema, query or document you authored yourself
   and then fed to your own service. Jaren compiles what you give it; bounding
   *your* inputs is your application's job, and the execution limits are the

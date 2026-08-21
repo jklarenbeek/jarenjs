@@ -98,7 +98,11 @@ import { EXAMPLE_LIST } from './examples.js';
  * @property {EnginePane[]} sourcePanes - the engine INPUT pane(s)
  * @property {EnginePane[]} dataPanes - the JSON it runs against (may be [])
  * @property {OptionPane[]} [optionPanes] - live mode selects (may be absent)
- * @property {(source: Record<string, string>, data: Record<string, string>, options?: RunOptions) => PlayResult} run
+ * @property {(source: Record<string, string>, data: Record<string, string>, options?: RunOptions) => PlayResult | Promise<PlayResult>} run
+ *   most engines answer synchronously; an engine whose run resolves real
+ *   promises (the contract engine's dispatch panel) answers a thenable
+ *   Result, which `runExample` passes through with the same never-throw
+ *   contract (a rejection settles into an error Result)
  */
 
 /**
@@ -162,23 +166,31 @@ function withConfig(engine, options) {
 
 /**
  * Run one engine over a source + data. An unknown engine (or a throwing
- * runner) yields an error Result — this never throws.
+ * runner) yields an error Result — this never throws. A synchronous
+ * engine answers a Result; an async engine (the contract dispatch)
+ * answers a Promise of one that never rejects — a host that must know
+ * which awaits `Promise.resolve(runExample(…))`.
  * @param {string} engineId
  * @param {Record<string, string>} source
  * @param {Record<string, string>} data
  * @param {RunOptions} [options] - operators (query/jslt), the option-pane
  *   config, and host renderers (markdown/mermaid/charts)
- * @returns {PlayResult}
+ * @returns {PlayResult | Promise<PlayResult>}
  */
 export function runExample(engineId, source, data, options = {}) {
   const engine = ENGINES[engineId];
   if (engine === undefined) {
     return { ok: false, timing: null, error: { message: `unknown engine: ${engineId}` }, panels: [] };
   }
+  const failed = (/** @type {unknown} */ err) =>
+    /** @type {PlayResult} */ ({ ok: false, timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) }, panels: [] });
   try {
-    return engine.run(source ?? {}, data ?? {}, withConfig(engine, options));
+    const result = engine.run(source ?? {}, data ?? {}, withConfig(engine, options));
+    return result !== null && typeof result === 'object' && typeof (/** @type {any} */ (result).then) === 'function'
+      ? /** @type {Promise<PlayResult>} */ (result).then((r) => r, failed)
+      : result;
   }
   catch (err) {
-    return { ok: false, timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) }, panels: [] };
+    return failed(err);
   }
 }

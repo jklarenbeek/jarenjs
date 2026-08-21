@@ -58,6 +58,24 @@ describe('projectViewModel', () => {
     assert.strictEqual(vm.problems.find((p) => p.file === 'bad.query').code, 'JQ0002');
   });
 
+  it('a broken contract file surfaces its JC00xx and docPath in the rail strip; the stage is the projection result', () => {
+    const files = [
+      { name: 'shop.contract', kind: 'contract', text: JSON.stringify({
+        $contract: '0.1',
+        operations: { 'catalog.load': { kind: 'read', http: { method: 'GET', path: '/api/catalog' } } },
+      }) },
+    ];
+    const vm = projectViewModel(state({ files, active: 'shop.contract' }));
+    assert.strictEqual(vm.rail[0].badge, 'model');
+    assert.strictEqual(vm.rail[0].valid, false);
+    const problem = vm.problems.find((p) => p.file === 'shop.contract');
+    assert.match(problem.code, /^JC00\d\d$/);
+    assert.strictEqual(problem.docPath, '/operations/catalog.load/output');
+    // the host runs the projections (describe / OpenAPI) into results;
+    // the stage renders them as a result like a transform's
+    assert.strictEqual(vm.stage.kind, 'result');
+  });
+
   it('the stage follows the active kind: query→result, data→inert, app→mount', () => {
     assert.strictEqual(projectViewModel(state({ active: 'stats.query' })).stage.kind, 'result');
     assert.strictEqual(projectViewModel(state({ active: 'seed.data' })).stage.kind, 'inert');

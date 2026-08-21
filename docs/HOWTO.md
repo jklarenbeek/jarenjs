@@ -847,6 +847,15 @@ app.patch('/users/:id', validate('updateUser'), (req, res) => {
 });
 ```
 
+> **Or declare it once.** The hand-written half of this example — route
+> strings, per-route validators, the 400 shape — is exactly the layer
+> [`@jarenjs/contract`](../packages/contract/README.md) supplies from one
+> `$contract` document: compiled per-operation validators, a path
+> matcher, a total dispatch pipeline with coded wire errors, a client
+> that resolves JSON outcomes, and OpenAPI/TypeScript/docs as
+> projections. The Express wiring above stays a three-line adapter
+> recipe there.
+
 ---
 
 ## More Examples

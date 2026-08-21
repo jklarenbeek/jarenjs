@@ -87,6 +87,7 @@ const shell = {
         ['option', { value: 'state' }, 'state'],
         ['option', { value: 'data' }, 'data'],
         ['option', { value: 'schema' }, 'schema'],
+        ['option', { value: 'contract' }, 'contract'],
       ],
       [{ $apply: '$.rail[*]' }]],
     // ——— editor ———

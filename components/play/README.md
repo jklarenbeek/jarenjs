@@ -3,8 +3,8 @@
 **A JSON-engine playground — understand an engine before you compose it.**
 
 Pick an engine (JSONPath, JSON Pointer, JSON Patch, `$query`, JSLT,
-markdown, mermaid, …), feed it a source input and one or more datasets from
-a curated example library, and watch it run. Where `@jarenjs/studio` is for
+markdown, mermaid, a `$contract` document, …), feed it a source input and
+one or more datasets from a curated example library, and watch it run. Where `@jarenjs/studio` is for
 building an application out of many files, `@jarenjs/play` is for
 learning one engine standalone — a reference bench you experiment on first.
 

@@ -69,8 +69,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The Russian catalog. Covers every key of validate's `messagesEn`,
- * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and
- * the `JQ2xxx` codes reachable through `$query`.
+ * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const ru = {
@@ -137,5 +138,43 @@ export const ru = {
   'x-form/assert': 'Недопустимое значение',
   'form/addItem': 'Добавить элемент',
   'form/removeItem': 'Удалить элемент',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'ни одна операция не соответствует методу и пути запроса',
+  'contract/method-not-allowed': 'путь обслуживается другими методами: {allow}',
+  'contract/body-too-large': 'тело запроса операции {op} превышает её лимит в {limit} байт',
+  'contract/unsupported-media': 'операция {op} принимает только тела {media}',
+  'contract/malformed-json': 'тело запроса операции {op} не является корректным JSON',
+  'contract/invalid-input': 'входные данные операции {op} недопустимы',
+  'contract/idempotency-key-required': 'операция {op} требует заголовок Idempotency-Key',
+  'contract/handler-failed': 'операция {op} завершилась с ошибкой',
+  'contract/idempotency-conflict': 'Idempotency-Key операции {op} конфликтует с более ранним запросом ({kind})',
+  'contract/invalid-output': 'операция {op} вернула ответ, нарушающий её контракт',
+  'contract/malformed-path': 'путь запроса содержит некорректную процентную escape-последовательность',
+  'contract/malformed-query': 'строка запроса не декодируется',
+  'contract/not-implemented': 'операция {op} не реализована на этом сервере',
+  'contract/precondition-failed': 'предусловие If-Match операции {op} не выполнено',
+  'contract/invalid-header': 'заголовок {header} операции {op} недопустим',
+  'contract/handler-error': 'операция {op} завершилась с ошибкой {code}',
+  'contract/client-invalid-input': 'входные данные операции {op} недопустимы; ничего не было отправлено',
+  'contract/network': 'запрос операции {op} не завершился ({name})',
+  'contract/cancelled': 'запрос операции {op} был отменён',
+  'contract/invalid-response': 'ответ операции {op} нарушает её контракт',
+  'contract/key-storage-failed': 'ключ идемпотентности операции {op} не удалось сохранить; ничего не было отправлено',
+  'contract/undeclared-response': 'операция {op} вернула незадекларированный ответ (статус {status})',
+  'contract/not-a-contract': 'сервер не описывает контракт {id} по своему well-known-пути',
+  'contract/incompatible': 'сервер использует версию {server} контракта {id}; этот клиент использует {client}, и ни одна сторона не объявляет другую совместимой',
+  'contract/host-failed': 'операция {op} завершилась с ошибкой в хосте до получения результата',
+  'contract/local-handler-failed': 'операция {op} завершилась с ошибкой в обслуживающем хосте',
+  'contract/unknown-operation': 'запрос не называет ни одной операции, обслуживаемой на этом канале',
+  'contract/port-timeout': 'операция {op} не получила ответа на канале за {ms} мс',
+  'contract/malformed-frame': 'кадр ответа операции {op} некорректен',
+  'contract/channel-closed': 'канал операции {op} закрыт',
+  'contract/not-a-stream': 'сервер ответил на подписку операции {op} ответом, не являющимся потоком',
+  'contract/invalid-snapshot': 'операция {op} вернула снимок, нарушающий её контракт',
+  'contract/seq-regression': 'поток операции {op} нарушил порядок своих seq',
+  'contract/stream-error': 'поток операции {op} завершился ошибкой сервера ({code})',
+  'contract/heartbeat-missed': 'поток операции {op} молчал {ms} мс',
   //#endregion
 };

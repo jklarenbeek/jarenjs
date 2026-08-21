@@ -254,8 +254,9 @@ export function createSiteApp(env) {
     'project-run': (props, dispatch) => {
       const state = app.getState().project;
       const active = state.files.find((f) => f.name === state.active);
-      // a transform / schema file re-runs; an app file force-restarts
-      if (active !== undefined && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema')) {
+      // a transform / schema / contract file re-runs; an app file force-restarts
+      if (active !== undefined && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema'
+        || active.kind === 'contract')) {
         dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
         return;
       }
@@ -533,17 +534,31 @@ function wireBoundaries(app, debounceMs, navigate) {
     if (state.project === undefined) return;
     const active = state.project.active;
     const file = state.project.files.find((f) => f.name === active);
-    if (file !== undefined && (file.kind === 'query' || file.kind === 'jslt' || file.kind === 'schema')) {
+    if (file !== undefined && (file.kind === 'query' || file.kind === 'jslt' || file.kind === 'schema'
+      || file.kind === 'contract')) {
       app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
     }
   };
   // the Play playground's live run: the active engine over the current
   // source + data (registered operators threaded in the boundary). Never
-  // throws — a bad edit lands as an error result, not a crash.
+  // throws — a bad edit lands as an error result, not a crash. An async
+  // engine (the contract dispatch) answers a thenable Result; the run
+  // sequence guard drops a settled result an even newer run superseded,
+  // so a slow older dispatch can never overwrite a fresher one.
+  let playRunSeq = 0;
   const runPlayLive = () => {
     const state = app.getState();
     if (state.play === undefined) return;
-    app.dispatch('play/result', runPlay(state.play));
+    const result = runPlay(state.play);
+    const seq = ++playRunSeq;
+    if (result !== null && typeof result === 'object' && typeof (/** @type {any} */ (result).then) === 'function') {
+      /** @type {Promise<any>} */ (result).then((settled) => {
+        if (seq === playRunSeq) app.dispatch('play/result', settled);
+      });
+    }
+    else {
+      app.dispatch('play/result', result);
+    }
   };
   /** @type {Map<string, any>} */
   const timers = new Map();

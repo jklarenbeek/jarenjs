@@ -91,6 +91,27 @@ describe('schema / fsm / dag / model — their own grammar', () => {
   });
 });
 
+describe('contract — compiled, a refusal is its JC00xx with a docPath', () => {
+  it('a valid $contract document compiles green', () => {
+    const r = validateFile(file('contract', {
+      $contract: '0.1',
+      operations: {
+        'catalog.load': { kind: 'read', output: true, http: { method: 'GET', path: '/api/catalog' } },
+      },
+    }));
+    assert.deepStrictEqual([r.valid, r.kind], [true, 'contract']);
+  });
+  it('a broken one answers the stable code and the JSON Pointer of the member at fault', () => {
+    const r = validateFile(file('contract', {
+      $contract: '0.1',
+      operations: { 'catalog.load': { kind: 'read', http: { method: 'GET', path: '/api/catalog' } } },
+    }));
+    assert.strictEqual(r.valid, false);
+    assert.match(String(r.errors[0].code), /^JC00\d\d$/);
+    assert.strictEqual(r.errors[0].docPath, '/operations/catalog.load/output');
+  });
+});
+
 describe('memoized on file identity', () => {
   it('re-validating the SAME object is cached; a fresh object re-checks', () => {
     const f = file('app', {

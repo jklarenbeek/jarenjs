@@ -29,8 +29,10 @@ changed between two versions — breaking, additive, neutral or honestly
 --fail-on breaking` as the CI gate. A `subscribe` operation streams a
 `@jarenjs/db` `live()`-shaped subscription — the snapshot, then
 LIVE-FORMAT `{ patch, seq }` emissions — as Server-Sent Events over
-http and as push frames over port, resumable by seq. Still coming in
-this line: the locale packs for the wire errors.
+http and as push frames over port, resumable by seq. Every wire error
+speaks twelve languages: the `contract/*` message catalog ships English
+in-package and all eleven `@jarenjs/locales` packs carry it, key for
+key, enforced by the repository's parity tests.
 
 Zero dependencies outside the suite: `@jarenjs/core`, `@jarenjs/json`,
 `@jarenjs/validate`, and — reached only from the `./project` subpath, so
@@ -416,29 +418,64 @@ benchmark-figure gate so no number here is typed by hand:
 
 - **Route match**: the compiled matcher resolves the probe mix —
   static hot paths, variables, the static-beats-variable case, a miss —
-  at <!--bm:contract.match.vs-fmw-->170 ns per lookup vs find-my-way's 180 ns<!--/bm-->;
+  at <!--bm:contract.match.vs-fmw-->172 ns per lookup vs find-my-way's 180 ns<!--/bm-->;
   hono's TrieRouter is <!--bm:contract.match.vs-hono-->1.8x<!--/bm--> behind, and its RegExpRouter refuses this
   route table outright (a static path registered after a param sibling).
 - **Dispatch, in-process**: the whole pipeline (route, decode, validate
   input, handler, validate output,
-  serialize) is <!--bm:contract.dispatch.vs-fastify-->2.8–15.5x<!--/bm-->
+  serialize) is <!--bm:contract.dispatch.vs-fastify-->2.8–15.1x<!--/bm-->
   faster than Fastify driven through its own `inject` — a number that
   includes Fastify's mock-stream harness, which is why the next row
   exists.
 - **The honest loss**: the bare pieces Fastify composes — find-my-way +
   Ajv + fast-json-stringify, called directly with no harness and no
   response validation
-  — are <!--bm:contract.dispatch.losses-->2.1–2.4x<!--/bm--> faster than
-  this pipeline. That is the measured price of a total
-  dispatch (every hostile input settles into a coded response) that also
-  proves the server kept its own contract before a byte leaves. Over a
-  real loopback socket the two stacks are level: the socket dominates
-  both.
+  — are <!--bm:contract.dispatch.losses-->2.4–7.5x<!--/bm--> faster than
+  this pipeline. The wide end of that band is the bare `{ok:true}`
+  route, where the rival's compiled serializer answers in ~200 ns and
+  there is almost no work to amortize the pipeline against; on the
+  request shapes with real bodies and validation the loss sits at the
+  narrow end. That is the measured price of a total dispatch (every
+  hostile input settles into a coded response) that also proves the
+  server kept its own contract before a byte leaves. Over a real
+  loopback socket the two stacks are level: the socket dominates both.
 - **Revision**: computing it
-  costs <!--bm:contract.revision.ms-->1.9 ms<!--/bm--> for the 123-operation
+  costs <!--bm:contract.revision.ms-->1.4 ms<!--/bm--> for the 123-operation
   contract, once per process.
 
-## What is here, and what is coming
+## What it is not
+
+Boundaries, stated as plainly as the capabilities — each one a
+deliberate decision, not a gap:
+
+- **Not a server framework.** No process manager, no middleware stack,
+  no plugin system, no logger. The server binding is a pure dispatch
+  pipeline over plain request/response objects; bring `node:http`,
+  `Bun.serve`, or any framework through the ≤15-line adapter recipes
+  above.
+- **No authentication or authorization.** A request that reaches the
+  pipeline is dispatched by route alone. Compose auth in front of the
+  handler table (the adapter seam is where a host's middleware already
+  runs) — the contract declares what may be said, not who may say it.
+- **No transport encryption.** TLS belongs to the server or proxy that
+  terminates the socket.
+- **No replay protection beyond idempotency keys.** `Idempotency-Key`
+  deduplicates a declared command through the host's ledger; it is not
+  a nonce scheme and does not authenticate the sender.
+- **Bytes are not JSON.** A non-JSON `media` marks an operation opaque:
+  routed and matched, path and query still decoded and validated, the
+  body handed over raw and never modeled. Images and OAuth redirects
+  are host paths, not JSON operations.
+- **No replication or durability.** The ledger and the command
+  lifecycle ship as JSON documents (`$model`, `$fsm`) a host may open
+  with `@jarenjs/db`; the in-memory ledger is for tests and
+  single-process hosts. Durability is the host's.
+- **No automatic reconnect.** A stream that ends with a `network`
+  outcome is re-entered by the host calling `subscribe` again with the
+  last delivered seq (`lastSeq` is the hook); the backoff/resume/give-up
+  policy is the open decision tracked in the repository ROADMAP.
+
+## What is here
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
 `describe()`, the `JC0001–JC0017` compile errors; the HTTP server binding
@@ -458,5 +495,5 @@ request ids); the `subscribe` kind with the `stream` binding
 (`client.subscribe` over SSE and port push frames carrying LIVE-FORMAT
 patches, `JC2090–JC2095`, the generated app subscription with
 `createContractSubscription`, and the one SSE codec of the suite in
-`@jarenjs/core/text/sse`). Coming in this line: the locale packs for
-the wire errors.
+`@jarenjs/core/text/sse`); and the `contract/*` locale packs in all
+eleven `@jarenjs/locales` languages, key parity enforced by test.

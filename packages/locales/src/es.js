@@ -59,8 +59,9 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 
 /**
  * The Spanish catalog. Covers every key of validate's `messagesEn`, every
- * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, and the
- * `JQ2xxx` codes reachable through `$query`.
+ * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
+ * `JQ2xxx` codes reachable through `$query`, and every `contract/*`
+ * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const es = {
@@ -127,5 +128,43 @@ export const es = {
   'x-form/assert': 'Valor no válido',
   'form/addItem': 'Añadir elemento',
   'form/removeItem': 'Eliminar elemento',
+  //#endregion
+
+  //#region @jarenjs/contract (wire-error voice)
+  'contract/not-found': 'ninguna operación coincide con el método y la ruta de la solicitud',
+  'contract/method-not-allowed': 'la ruta se sirve bajo otros métodos: {allow}',
+  'contract/body-too-large': 'el cuerpo de la solicitud de la operación {op} supera su límite de {limit} bytes',
+  'contract/unsupported-media': 'la operación {op} solo acepta cuerpos {media}',
+  'contract/malformed-json': 'el cuerpo de la solicitud de la operación {op} no es JSON válido',
+  'contract/invalid-input': 'la entrada de la operación {op} no es válida',
+  'contract/idempotency-key-required': 'la operación {op} requiere una cabecera Idempotency-Key',
+  'contract/handler-failed': 'la operación {op} falló',
+  'contract/idempotency-conflict': 'la Idempotency-Key de la operación {op} entra en conflicto con una solicitud anterior ({kind})',
+  'contract/invalid-output': 'la operación {op} produjo una respuesta que viola su contrato',
+  'contract/malformed-path': 'la ruta de la solicitud contiene un escape porcentual mal formado',
+  'contract/malformed-query': 'la cadena de consulta no se puede descodificar',
+  'contract/not-implemented': 'la operación {op} no está implementada en este servidor',
+  'contract/precondition-failed': 'la precondición If-Match de la operación {op} falló',
+  'contract/invalid-header': 'la cabecera {header} de la operación {op} no es válida',
+  'contract/handler-error': 'la operación {op} falló con {code}',
+  'contract/client-invalid-input': 'la entrada de la operación {op} no es válida; no se envió nada',
+  'contract/network': 'la solicitud de {op} no se completó ({name})',
+  'contract/cancelled': 'la solicitud de la operación {op} fue cancelada',
+  'contract/invalid-response': 'la respuesta de la operación {op} viola su contrato',
+  'contract/key-storage-failed': 'la clave de idempotencia de la operación {op} no pudo almacenarse; no se envió nada',
+  'contract/undeclared-response': 'la operación {op} respondió con una respuesta no declarada (estado {status})',
+  'contract/not-a-contract': 'el servidor no describe el contrato {id} en su ruta well-known',
+  'contract/incompatible': 'el servidor habla la versión {server} del contrato {id}; este cliente habla {client} y ningún extremo declara compatible al otro',
+  'contract/host-failed': 'la operación {op} falló en el host antes de producirse un resultado',
+  'contract/local-handler-failed': 'la operación {op} falló en el host que la sirve',
+  'contract/unknown-operation': 'la solicitud no nombra ninguna operación servida en este canal',
+  'contract/port-timeout': 'la operación {op} no obtuvo respuesta en el canal en {ms} ms',
+  'contract/malformed-frame': 'la trama de respuesta de la operación {op} está mal formada',
+  'contract/channel-closed': 'el canal de la operación {op} está cerrado',
+  'contract/not-a-stream': 'el servidor respondió a la suscripción de la operación {op} con una respuesta que no es un flujo',
+  'contract/invalid-snapshot': 'la operación {op} produjo una instantánea que viola su contrato',
+  'contract/seq-regression': 'el flujo de la operación {op} violó el orden de sus seq',
+  'contract/stream-error': 'el flujo de la operación {op} terminó con un error del servidor ({code})',
+  'contract/heartbeat-missed': 'el flujo de la operación {op} quedó en silencio durante {ms} ms',
   //#endregion
 };

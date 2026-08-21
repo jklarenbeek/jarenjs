@@ -31,7 +31,8 @@ const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
   'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
   'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one',
   'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five', 'twenty-six',
-  'twenty-seven', 'twenty-eight', 'twenty-nine', 'thirty', 'thirty-one'];
+  'twenty-seven', 'twenty-eight', 'twenty-nine', 'thirty', 'thirty-one',
+  'thirty-two', 'thirty-three', 'thirty-four', 'thirty-five'];
 
 /** The count a sentence states, read back as a number (-1 when absent). */
 function statedCount(text, before, after) {
