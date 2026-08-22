@@ -955,7 +955,7 @@ Map<string, ValidationObject> {
 
 When schemas have `$id` that changes the base URI:
 
-```json
+```jsonc
 {
   "$id": "http://example.com/schema",
   "$defs": {

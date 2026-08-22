@@ -34,8 +34,11 @@ the next session does not repeat it.>
 
 ## Test & benchmark output
 
-<The gate results, pasted: test counts per suite touched, lint result,
-coverage-audit summary, and any benchmark numbers the acceptance names.>
+<The gate results, pasted, one line or row per stage of `npm run site:gate`:
+lint result, test counts, the build, the coverage-audit summary, the figure
+count, the document and design sweeps, the browser matrix — plus any
+benchmark numbers the acceptance names, and the packaging pair if exports
+moved. Numbers, never "all green".>
 
 ## Open issues
 

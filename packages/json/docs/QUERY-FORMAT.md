@@ -211,7 +211,7 @@ evaluation, use `$const` (§3.5.1); to bind one without iteration, use `$let`
 
 #### 3.5.1 `$const` — quote
 
-```json
+```jsonc
 { "$const": v }
 ```
 
@@ -227,7 +227,7 @@ constructs `{ "template": { "$for": "kept verbatim", "price": null }, "label": "
 
 #### 3.5.2 `$map` — general map constructor
 
-```json
+```jsonc
 { "$map": [[keyExpr, valueExpr], ...] }
 ```
 
@@ -270,7 +270,7 @@ A query document is either:
    bare scalar; or
 2. the **version envelope** phrase:
 
-   ```json
+   ```jsonc
    { "$query": "0.1", "$expr": <expression> }
    ```
 
@@ -409,7 +409,7 @@ clause (§6.9), in which case it evaluates to the final accumulator and
 
 ### 6.2 `$for` — iteration bindings
 
-```json
+```jsonc
 "$for": { name: source, ... }
 ```
 
@@ -438,7 +438,7 @@ may reference variables bound earlier in the same `$for` object.
 **Extended binding form** — a source written as an object with an `$in`
 member iterates `$in` like a plain source, with options:
 
-```json
+```jsonc
 { "$in": expr, "$at": "posName" }
 ```
 
@@ -456,7 +456,7 @@ the `$window` family — are §6.10.
 
 ### 6.3 `$let` — sequence bindings
 
-```json
+```jsonc
 "$let": { name: expr, ... }
 ```
 
@@ -474,7 +474,7 @@ ordinary shadowing and is allowed.
 
 ### 6.4 `$where` — tuple filter
 
-```json
+```jsonc
 "$where": expr
 ```
 
@@ -484,7 +484,7 @@ true. Cross-variable predicates (joins) belong here, not in path filters
 
 ### 6.5 `$groupby` — grouping
 
-```json
+```jsonc
 "$groupby": { name: keyExpr, ... }
 ```
 
@@ -522,7 +522,7 @@ that genre's books.
 
 ### 6.6 `$orderby` — ordering
 
-```json
+```jsonc
 "$orderby": keySpec
 "$orderby": [keySpec, ...]
 ```
@@ -530,7 +530,7 @@ that genre's books.
 A *keySpec* is either an expression (shorthand for ascending, empty-least) or
 the explicit form
 
-```json
+```jsonc
 { "$key": expr, "$dir": "asc" | "desc", "$empty": "least" | "greatest",
   "$collation": "name" }
 ```
@@ -573,7 +573,7 @@ saved rule declares the collations it needs.
 
 ### 6.7 `$count` — tuple numbering
 
-```json
+```jsonc
 "$count": "name"
 ```
 
@@ -589,7 +589,7 @@ one key.
 
 ### 6.8 `$as` — schema assertions on bindings
 
-```json
+```jsonc
 "$as": { name: schema, ... }
 ```
 
@@ -625,7 +625,7 @@ instead.
 
 ### 6.9 `$fold` — the accumulator clause
 
-```json
+```jsonc
 "$fold": { name: initExpr }
 ```
 
@@ -682,7 +682,7 @@ Two further options of the extended `$for` binding form (§6.2).
 would yield no tuple at all, the clause emits exactly **one** tuple with the
 variable bound to the **empty sequence**, so the enclosing tuple survives.
 
-```json
+```jsonc
 { "$in": expr, "$allowing-empty": true }
 ```
 
@@ -711,7 +711,7 @@ because an empty member value omits the member (§3.4).
 **Windows** iterate consecutive *runs* of the item stream instead of single
 items:
 
-```json
+```jsonc
 { "$in": expr, "$window": "tumbling" | "sliding", "$size": n, "$step": m, "$at": "w" }
 ```
 
@@ -745,7 +745,7 @@ two if the stream does not divide evenly.
 
 ## 7. Quantifier phrases
 
-```json
+```jsonc
 { "$some":  { name: expr, ... }, "$satisfies": expr }
 { "$every": { name: expr, ... }, "$satisfies": expr }
 ```

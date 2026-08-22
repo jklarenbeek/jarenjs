@@ -25,10 +25,12 @@ Function`, ESM everywhere, JSDoc on exports, match surrounding style.
    checklist. The checklist is the definition of done — nothing more,
    nothing less.
 4. Prove it green before you call it done, from the repo root:
-   `npm run lint` (zero errors, zero warnings), `npm test` (all
-   packages), `npm run website:build`, and `npm run benchmark:coverage`
-   (every dead-code finding resolved). A work order whose checklist
-   names further gates includes those too.
+   **`npm run site:gate`** — one command, eight stages, fail-fast (lint,
+   test, website:build, benchmark:coverage, docs:check, test:documents,
+   test:design, test:browser), each by exit code, spelled out in
+   `CONVENTIONS.md` §2. Add `npm run test:packed` and
+   `npm run test:tree-shaking` when exports moved, and any further gate
+   your work order's checklist names.
 5. Write the session record (`templates/session-record.md`) after the
    work is green — its Handoff section carries what a next session must
    know — under the gitignored name `CONVENTIONS.md` §3 fixes

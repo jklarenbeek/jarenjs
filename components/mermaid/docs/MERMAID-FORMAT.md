@@ -32,7 +32,7 @@ approximation over a headless text-metrics table (no `getBBox`). See
 
 Every parse returns a fresh, never-mutated object:
 
-```json
+```jsonc
 { "$mermaid": "0.1",
   "diagram": "flowchart",
   "config":  { "theme": "default", "flowchart": { "curve": "basis" } },

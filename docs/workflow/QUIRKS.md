@@ -46,9 +46,9 @@ go to review comments or the ROADMAP. A quirk has a concrete input and a wrong o
 commit or stash. A quirk hunt produces many small, unrelated fixes; it must be one reviewable
 diff against a known commit, or nobody can tell a fix from in-flight work.
 
-Then run the gates once and record the baseline: `npm test` (counts), `npm run lint`,
-`npm run benchmark:coverage`. Findings from a red suite are unreliable, and the closing report
-puts the final counts next to these.
+Then run the gates once and record the baseline: `npm run site:gate` (CONVENTIONS §2 — the
+counts that matter are `npm test`'s and the dead-code audit's). Findings from a red suite are
+unreliable, and the closing report puts the final counts next to these.
 
 ## The ritual, in order
 
@@ -201,11 +201,11 @@ suite and its siblings.
 
 ## Definition of done
 
-`npm run lint` at zero errors and zero warnings; `npm test` green across all packages **with the
-new regression tests counted in the report**; `npm run website:build` succeeds;
-`npm run benchmark:coverage` with every dead-code finding resolved (a quirk fix that removes a
-dead flag often removes a dead branch — re-run it); the three-list report written; every doc the
-fixes touched repaired; no scratch planning file created.
+`npm run site:gate` green end to end (CONVENTIONS §2): lint at zero errors and zero warnings,
+`npm test` across all packages **with the new regression tests counted in the report**, and the
+dead-code audit with every finding resolved — a quirk fix that removes a dead flag often removes
+a dead branch, so that stage earns its re-run more than any other here. Then: the three-list
+report written; every doc the fixes touched repaired; no scratch planning file created.
 
 ## Acceptance checklist
 

@@ -276,6 +276,29 @@ createApp(appDoc, {
   source string (or the same parsed document) returns the same vnode
   reference, so the view patcher skips an unchanged article in O(1) —
   the derivation contract `@jarenjs/app` viewModels rely on.
+- `md.view(sourceOrDoc, policy)` renders that one call under a
+  **rendering policy**, for a host whose documents do not all come from
+  the same place. Heading ids are the live case: ids are a page's
+  namespace, so markdown the host authored may mint them bare while
+  markdown from anywhere else renders with a `slugPrefix` —
+
+  ```js
+  const TRUSTED = { slugPrefix: '' };                    // your own documents
+  const UNTRUSTED = { slugPrefix: 'user-content-' };     // everyone else's
+
+  md.view(readme, TRUSTED);          // id="setup"
+  md.view(reply, UNTRUSTED);         // id="user-content-setup"
+  ```
+
+  A policy may name `headingIds`, `slugPrefix`, `headingAnchors`,
+  `footnotesLabel`, `html` and `keyed` — the options that shape the
+  emitted vnode; anything else (`plugins`, `sanitizeUrl` — construction-
+  time decisions, and `plugins` changes the *parse*) is **refused**, not
+  ignored. The projection is memoized per source **and** policy, so
+  alternating provenances cannot thrash the cache and each stays
+  reference-stable; the parse and the hydratable index are shared, which
+  is why this is one component and not two. A call that names no policy
+  renders under the construction-time options, unchanged.
 - `md.effects['md-load']` resolves any URL through the loader (cache,
   abort, streaming) and dispatches the plain `MdDocument` as the
   action payload; `md-parse` does the same for an in-state source
@@ -416,7 +439,13 @@ as markup or as a live URL.
 
 `options.sanitizeUrl` — `(url) => string | null` — replaces the URL policy
 wholesale when a host needs a custom scheme in trusted content. It is the
-whole guard, so widen it deliberately. Plugin `render` functions shadow the
+whole guard, so widen it deliberately.
+
+Heading ids are the other half of the same question, and it is settled per
+*document* rather than per emitter: a host that renders its own documents
+beside documents it did not author passes the rendering policy to
+`md.view(source, policy)` (above), so untrusted text gets a `slugPrefix`
+and the host's own documents do not. Plugin `render` functions shadow the
 core emitter and own the rule for URLs they emit; `ctx.sanitizeUrl` is the
 active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.md) §4.3).
 

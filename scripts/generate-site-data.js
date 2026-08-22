@@ -293,10 +293,29 @@ export function buildSiteContent(root = ROOT) {
   const { commit, committed } = headCommit();
   /** @type {ContentEntry[]} */
   const packages = [];
+  /** Which workspace claimed each engine key, so the second claimant is
+   * named alongside the first. */
+  /** @type {Map<string, string>} */
+  const claimed = new Map();
   for (const dir of workspaceDirs(root)) {
     const manifest = JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'));
     if (manifest.private === true) continue;
-    packages.push(collectSiteDocument(dir, manifest, root));
+    const entry = collectSiteDocument(dir, manifest, root);
+    // An engine key is a name in a namespace twenty-two independently
+    // committed documents share, and every lookup over the collected
+    // engines resolves it to the FIRST match — so a second claimant does
+    // not render as a conflict, it renders as a duplicate card whose
+    // measured line silently belongs to the other package. Nothing else
+    // referees that namespace: the collector does.
+    for (const engine of entry.engines) {
+      const first = claimed.get(engine.key);
+      if (first !== undefined) {
+        throw refuse(dir, `claims the engine key '${engine.key}', which ${first} already claims`,
+          'An engine key names one engine across the whole site. Rename one of them.');
+      }
+      claimed.set(engine.key, entry.name);
+    }
+    packages.push(entry);
   }
   return { generated: committed, commit, packages };
 }

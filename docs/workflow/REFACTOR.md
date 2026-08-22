@@ -125,9 +125,11 @@ hold its invariants, and every pass sweeps for drift:
    the two radius tokens, `.page` never regains the `padding` shorthand, host stylesheet
    overrides use the doubled selector, and SVG components theme through the two-layer /
    host-linked `createTheme` architecture — all as specified in `DESIGN.md`.
-2. **Sweep for branding drift.** Run the banned-hue grep from `DESIGN.md` §10 over the
-   source tree and the built `dist/` — the brand is blue; **no pink, no purple, anywhere**
-   (UI chrome, syntax palettes, diagram themes, chart palettes). Zero hits required.
+2. **Sweep for branding drift.** `npm run test:design` scans the site's source **and** its
+   built `dist/` for the banned hues — the brand is blue; **no pink, no purple, anywhere**
+   (UI chrome, syntax palettes, diagram themes, chart palettes). Zero hits required, and the
+   list of hues lives in the script, never in a document. Build first: a hue can arrive
+   through a dependency's stylesheet and never appear in a file this repository wrote.
 3. **Code and DESIGN.md must not diverge.** When they disagree, decide which one is right:
    repair the code toward the document, unless the code embodies a deliberate, newer design
    decision — then update `DESIGN.md` in the same pass and say so in the summary. Never
@@ -227,23 +229,25 @@ logical parent.
 
 - [ ] Started from a **clean working tree** (`git status --porcelain` empty), so the whole
       refactor is a single reviewable diff against the previous commit.
-- [ ] `npm run lint` clean at **zero errors and zero warnings**, with findings fixed at the
-      source (no new disables/downgrades without a justified false positive); `npm test` green
-      across ALL packages, with **no expected-value/fixture edits** (import-path updates for
-      moved symbols are fine); `npm run website:build` succeeds; `npm run test:tree-shaking`
-      passes.
+- [ ] **`npm run site:gate` green** (CONVENTIONS §2, all eight stages by exit code), with
+      lint at **zero errors and zero warnings** fixed at the source (no new
+      disables/downgrades without a justified false positive) and `npm test` green across ALL
+      packages with **no expected-value/fixture edits** (import-path updates for moved symbols
+      are fine); `npm run test:tree-shaking` and `npm run test:packed` too, since a refactor
+      that moves symbols moves exports.
 - [ ] **`DESIGN.md` conformance holds**: touched visual code uses the token vocabulary, spacing
-      scale and theming architecture; the banned-hue sweep (no pink/purple) over source and
-      built `dist/` returns zero hits; code and `DESIGN.md` end the pass in agreement (the
-      document updated in-pass if a deliberate design decision superseded it).
+      scale and theming architecture; `npm run test:design` returns zero hits over source and
+      built `dist/`; code and `DESIGN.md` end the pass in agreement (the document updated
+      in-pass if a deliberate design decision superseded it).
 - [ ] Every duplicate collapsed to ONE implementation in its logical parent (pure → `core`,
       view → `@jarenjs/view/helpers`, app → `@jarenjs/app`); each former copy deleted and
       re-imported; the most general accurate name chosen and propagated to all dependents.
 - [ ] Zero-dep and the one-way dependency arrow preserved; the two-layer component rule holds;
       **no circular dependencies**; export maps/barrels/`files`/`sideEffects` updated.
-- [ ] `npm run benchmark:coverage` (dead-code audit) run on a green suite; every FULLY DEAD FILE
-      and DEAD FUNCTION finding resolved — removed, or covered by a new test — with any
-      deliberate "keep" (a true entry point) justified and, ideally, excluded from the audit.
+- [ ] `npm run benchmark:coverage` (dead-code audit, stage 4 of the gate) run on a green suite;
+      every FULLY DEAD FILE and DEAD FUNCTION finding resolved — removed, or covered by a new
+      test — with any deliberate "keep" (a true entry point) justified and, ideally, excluded
+      from the audit.
 - [ ] No committed code/comment/doc references any gitignored file (CONVENTIONS §4); every
       prior such reference rewritten to state its real intent; no named work unit flattened into
       a hollow word.

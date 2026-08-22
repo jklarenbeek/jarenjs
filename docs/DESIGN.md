@@ -339,7 +339,14 @@ A visual pass is verified the way the original audit was made:
   under an emulated `reduce` every surface carries its final state on first paint with
   `animation-name: none` and a zero transition — `packages/website/e2e/motion.spec.js`,
   across all three engines;
-- grep the built `dist/` for banned hues (the historical offenders):
-  `5646d6|473bce|7f75f0|4f46e5|db2777|f472b6|ECECFF|9370DB|a626a4|c678dd|b07aa1|ff9da7|hsl(245`
-  — zero hits required;
+- **the banned hues of §1 are a script**, not a command copied out of this page:
+  `npm run test:design` scans the site's source **and** its built `dist/` for the
+  historical offenders and exits non-zero on any hit, naming the file and the byte
+  offset. The list of hues lives in `scripts/check-site-design.js` and nowhere else —
+  a value written twice is a value that drifts — and a test asserts this document does
+  not carry a copy of it. Build first (`npm run website:build`): a hue can arrive
+  through a dependency's stylesheet and never appear in a file this repository wrote;
 - `npm run lint`, `npm test`, and the dead-code audit stay green like any other change.
+
+All of the above (plus the browser matrix) run together as `npm run site:gate`, which is
+the one command a visual change must end green on.

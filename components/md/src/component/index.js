@@ -20,9 +20,11 @@
  * ARCHITECTURE.md §"Engine and component".
  */
 
+import { createBoundedCache } from '@jarenjs/core/cache';
 import { createProjectionMemo } from '@jarenjs/view/helpers';
 import { buildPluginTables } from '../parser.js';
 import { compileMarkdown } from '../compiler.js';
+import { mdToVnode } from '../to-vnode.js';
 import { loadMarkdown } from '../loader.js';
 import { walkAst } from '../ast.js';
 import { hashContent } from '../utils.js';
@@ -39,14 +41,38 @@ import { highlightPlugin } from '../plugins/highlight.js';
  *   fetch?: typeof globalThis.fetch,
  *   cache?: any,
  *   memoLimit?: number,
+ *   policyLimit?: number,
  *   onHydrateError?: (err: any) => void,
  * }} MdComponentOptions
+ */
+/**
+ * The rendering policy a single `view()` call may name, for a host that
+ * renders documents of different PROVENANCE through one component. Only
+ * the options that shape the emitted vnode belong here — the parse is
+ * provenance-independent, and `plugins`/`sanitizeUrl` are the
+ * construction-time decisions a per-call override would quietly undo.
+ *
+ * The live case is heading ids: repo-authored Markdown is trusted with
+ * the ids it mints, and text from anywhere else must not mint bare ids
+ * into a page that owns ids of its own — so it renders with a
+ * `slugPrefix`. Footnote ids already default to `user-content-`
+ * (MD-FORMAT §4.6) and are unaffected.
+ *
+ * @typedef {object} MdRenderPolicy
+ * @property {boolean} [headingIds] mint an `id` on every heading
+ * @property {string} [slugPrefix] prepended to every emitted heading id
+ *   and to the anchor href beside it (`''` opts out)
+ * @property {boolean} [headingAnchors] emit the copy-a-link anchor
+ * @property {string} [footnotesLabel] the footnote section's heading
+ * @property {'skip'|'text'} [html] what to do with raw HTML
+ * @property {boolean} [keyed] emit patcher keys on block children
  */
 /**
  * The component bundle.
  * @typedef {object} MdComponent
  * @property {any[]} plugins the compiled-in plugin set
- * @property {(sourceOrDoc: any) => any} view memoized vnode projection
+ * @property {(sourceOrDoc: any, policy?: MdRenderPolicy) => any} view
+ *   memoized vnode projection, per source AND policy
  * @property {(source: string) => CompiledMd} compile memoized compile
  * @property {Record<string, (props: any, dispatch: any) => any>} effects
  *   `md-load` and `md-parse` for `createApp({ effects })`
@@ -98,7 +124,7 @@ export function createMdComponent(options = {}) {
     });
   };
 
-  const { compile, view } = createProjectionMemo({
+  const { compile, view: viewDefault } = createProjectionMemo({
     memoLimit,
     compile: (source) => {
       const compiled = compileMarkdown(source, compileOptions);
@@ -112,6 +138,63 @@ export function createMdComponent(options = {}) {
       return vnode;
     },
   });
+
+  // One projection memo per named policy, on top of the one compile
+  // memo above: parsing is provenance-independent, so a second policy
+  // costs a second vnode and nothing else. Bounded because a caller
+  // that mints a policy per call would otherwise retain every variant
+  // it ever rendered; a host names two or three provenances, not
+  // hundreds.
+  /** @type {import('@jarenjs/core/cache').BoundedCache<string, any>} */
+  const variants = createBoundedCache(options.policyLimit ?? 8);
+
+  /**
+   * The projection memo for one policy. Reference stability is the whole
+   * contract, so the vnode is cached against the compiled document the
+   * shared memo already returns — `mdToVnode` is called once per
+   * (document, policy), never once per render.
+   * @param {MdRenderPolicy} policy
+   */
+  const buildVariant = (policy) => {
+    const renderOptions = {
+      plugins: compileOptions.plugins,
+      html: compileOptions.html,
+      sanitizeUrl: compileOptions.sanitizeUrl,
+      headingIds: compileOptions.headingIds,
+      slugPrefix: compileOptions.slugPrefix,
+      headingAnchors: compileOptions.headingAnchors,
+      footnotesLabel: compileOptions.footnotesLabel,
+      keyed: compileOptions.keyed,
+      ...policy,
+    };
+    /** @type {WeakMap<any, any>} compiled document → its vnode */
+    const vnodes = new WeakMap();
+    const project = (/** @type {any} */ compiled) => {
+      let vnode = vnodes.get(compiled);
+      if (vnode === undefined) {
+        vnode = mdToVnode(compiled, renderOptions);
+        vnodes.set(compiled, vnode);
+      }
+      return vnode;
+    };
+    return createProjectionMemo({
+      memoLimit,
+      compile,
+      toVnode: project,
+      docToVnode: (doc) => {
+        indexHydratable(doc);
+        return project(compileMarkdown(doc, compileOptions));
+      },
+    });
+  };
+
+  /** @type {MdComponent['view']} */
+  const view = (sourceOrDoc, policy) => {
+    if (policy === undefined || policy === null) return viewDefault(sourceOrDoc);
+    const key = policyKey(policy);
+    if (key === '') return viewDefault(sourceOrDoc);
+    return variants.getOrCreate(key, () => buildVariant(policy)).view(sourceOrDoc);
+  };
 
   /** @type {MdComponent} */
   const component = {
@@ -181,6 +264,38 @@ export function createMdComponent(options = {}) {
     },
   };
   return component;
+}
+
+/**
+ * The option names a per-call {@link MdRenderPolicy} may carry. Anything
+ * else is refused rather than ignored: a policy naming `plugins` would
+ * silently render under the construction-time set, which is exactly the
+ * kind of quiet disagreement the per-call policy exists to end.
+ */
+const POLICY_OPTIONS = new Set([
+  'headingIds', 'slugPrefix', 'headingAnchors', 'footnotesLabel', 'html', 'keyed',
+]);
+
+/**
+ * A policy's cache key: its members in name order, so two spellings of
+ * the same policy share one memo. An empty key means the policy named
+ * nothing and the construction-time defaults answer it.
+ * @param {MdRenderPolicy} policy
+ * @returns {string}
+ * @throws {TypeError} when the policy names an option it may not set.
+ */
+function policyKey(policy) {
+  let key = '';
+  for (const name of Object.keys(policy).sort()) {
+    if (!POLICY_OPTIONS.has(name)) {
+      throw new TypeError(`md view policy: '${name}' is not a rendering option `
+        + `(${[...POLICY_OPTIONS].join(', ')})`);
+    }
+    const value = /** @type {any} */ (policy)[name];
+    if (value === undefined) continue;
+    key += `${name}=${JSON.stringify(value)};`;
+  }
+  return key;
 }
 
 /**

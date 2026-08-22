@@ -24,9 +24,9 @@ Jaren scores **<!--bm:validate.conformance-->1164 of 1166<!--/bm-->** on the off
 
 These runs exercise `@jarenjs/formats` and `@jarenjs/refs` too: the optional format suites are included, and every draft's bundled meta-schemas are in play. `unevaluatedProperties`/`unevaluatedItems` checks that sibling keywords make unreachable are compiled away entirely, so the `unevaluated*` outliers that once dragged the 2020-12 totals to a near-tie are gone; per-test medians favor Jaren in all three drafts.
 
-### @jarenjs/json — four compiled engines, five benchmarks
+### @jarenjs/json — <!--bm:json.engines-->6<!--/bm--> compiled engines, <!--bm:json.suites-->5<!--/bm--> benchmarks
 
-- **JSONPath** (`npm run benchmark:jsonpath`, `:profile`): **all 703 tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass (normalized paths included; json-p3 also passes 703). Performance vs [json-p3](https://www.npmjs.com/package/json-p3): **<!--bm:jsonpath.ctsRatio-->8.8<!--/bm-->x faster across the CTS queries**, as the geometric mean of the per-query ratios (<!--bm:jsonpath.ctsTimes-->109 ns vs 0.966 µs<!--/bm--> per query, the same summary over the same rows), and 4.9x (singular) to 81.8x (descendant `$..value`) on the synthetic 1000-item scenarios.
+- **JSONPath** (`npm run benchmark:jsonpath`, `:profile`): **<!--bm:jsonpath.ctsPass-->all 703<!--/bm--> tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass (normalized paths included; json-p3 scores <!--bm:jsonpath.ctsRival-->all 703<!--/bm-->). Performance vs [json-p3](https://www.npmjs.com/package/json-p3): **<!--bm:jsonpath.ctsRatio-->8.8<!--/bm-->x faster across the CTS queries**, as the geometric mean of the per-query ratios (<!--bm:jsonpath.ctsTimes-->109 ns vs 0.966 µs<!--/bm--> per query, the same summary over the same rows), and 4.9x (singular) to 81.8x (descendant `$..value`) on the synthetic 1000-item scenarios.
 - **JSON Pointer** (`npm run benchmark:jsonpointer`): compiled getters resolve absolute pointers **12–16x faster** than the interpretive resolver they replaced and relative pointers (the `$data` hot path) **4–16x faster**, beating the `jsonpointer` npm package on every scenario (escaped keys by an order of magnitude).
 - **Jaren JSON Query** (`npm run benchmark:jsonquery:profile`): **14–215x faster** than [fontoxpath](https://www.npmjs.com/package/fontoxpath) (XQuery 3.1 in JavaScript) and **10–63x faster** than [jsonata](https://www.npmjs.com/package/jsonata) across the scenario matrix (filter, join, group, reshape at 4 → 10,000 books); compiles a query in <!--bm:jsonquery.compile-->39 µs — 13.8x faster than fontoxpath, 2.8x faster than jsonata<!--/bm-->.
 - **JSLT** (`npm run benchmark:jslt:profile`): the identity transform returns the input reference in **24–81 ns** regardless of document size (proof-of-no-change sharing; native JS and JSONata deep-copy in milliseconds), and every expressible transformation beats JSONata's transform operator by **6.6–45x**. Hand-written per-scenario JavaScript remains 3.4–143x faster than the generic dispatcher — the honestly measured cost of the abstraction.
@@ -109,7 +109,7 @@ Programming is like sex.
 One mistake and you have to support it for the rest of your life.
 ```
 
-The monorepo is organized as a dependency chain — each package builds on the ones before it, and each has its own README and, where the internals warrant it, an ARCHITECTURE document:
+The monorepo is organized as a dependency chain of <!--bm:packages.count-->22<!--/bm--> published packages — each builds on the ones before it, and each has its own README and, where the internals warrant it, an ARCHITECTURE document:
 
 | Package | What it is | Docs |
 |---|---|---|

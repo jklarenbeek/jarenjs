@@ -305,7 +305,10 @@ this package's conformance score at odds with the documents it produces.
 
 `mdToVnode` implements this as `headingIds`, `slugPrefix` and
 `headingAnchors`; the slug transform itself is `slugify` from
-`@jarenjs/core/string`, the suite's only one.
+`@jarenjs/core/string`, the suite's only one. A host whose documents do
+not all share one provenance names the prefix per render rather than per
+emitter — the visual component takes the rendering policy as `view()`'s
+second argument (README §"The visual component").
 
 ### 4.6 Footnotes (normative)
 

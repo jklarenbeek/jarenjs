@@ -109,30 +109,33 @@ pin a reviewed tag and upgrade deliberately; the recipe is in
 
 ## Prepare a release
 
-All public workspaces use one version. Increment them and their internal dependency ranges together:
+All public workspaces use one version. One command increments them and their internal dependency ranges together, syncs the lockfile and re-verifies the build:
 
 ```bash
-npm run version:patch
-# or: npm run version:minor
-# or: npm run version:major
+npm run release:bump            # patch
+# or: npm run release:bump -- minor
+# or: npm run release:bump -- major
 ```
 
-Review and commit the resulting manifest changes. The release gate runs lint, all tests, all builds, a TypeScript consumer check, a tree-shaking check, and npm tarball dry runs:
+It **refuses under an npm that is not the `packageManager` pin** before it writes anything — see the lockfile note below for why that is the first thing it checks — then runs `scripts/version-packages.js`, `npm install`, `npm run test:lock` and `npm run build`. (The bare `npm run version:patch|minor|major` still exists and is what it calls; use it only when you deliberately want the manifest edit without the rest.)
+
+Review the resulting manifest changes. The release gate is every gate the working path runs ([`CONVENTIONS.md`](CONVENTIONS.md) §2 — lint, tests, website build, the dead-code audit, the figure gate, the document gate, the design sweep and the three-engine browser matrix) plus the packaging evidence a release additionally needs: a portable-lock check, a native-toolchain probe, a clean rebuild, a TypeScript consumer check, tree-shaking, packed consumers under Node **and** Bun, a source-consumer fixture, a dependency check and npm tarball dry runs:
 
 ```bash
 npm run release:check
 ```
 
-CI runs this same gate on **Linux and Windows both**, because a
+CI runs the same **packaging** half on **Linux and Windows both**, because a
 Windows-only failure is a release failure — packed-consumer portability,
 glob quoting, newline normalization, `.cmd` shims, drive-letter paths and
 per-platform native packages are all platform classes of defect that a
 Linux-only green hides. A separate `browser` job runs the website's
 Playwright suite in Chromium, Firefox and WebKit, and the source-consumer
-fixture runs on Linux **and Windows**. QT3 conformance and the dead-code
-audit are deliberately *not* part of this gate (they need the `qt3tests`
-submodule and a long coverage pass); they are separate evidence runs, so a
-green CI does not silently imply them.
+fixture runs on Linux **and Windows**. CI does *not* run QT3 conformance or
+the dead-code audit (they need the `qt3tests` submodule and a long coverage
+pass), so a green CI does not imply them — but `release:check` does run the
+dead-code audit, which is the point of running it before publishing rather
+than trusting the CI badge.
 
 **The lockfile is written by one npm.** The root `packageManager` field
 names it (npm 11.12.1). An older npm rewrites `package-lock.json` without

@@ -47,9 +47,9 @@ the expected-vs-actual output.>
 
 - [ ] <Behavioral assertions, each independently checkable — exact test
       names, exact outputs, exact error codes.>
-- [ ] Full gate green (`../CONVENTIONS.md` §2): `npm run lint` 0/0,
-      `npm test`, `npm run website:build`, `npm run benchmark:coverage`
-      0 findings, plus whatever this order names.
+- [ ] Full gate green — `npm run site:gate` (`../CONVENTIONS.md` §2),
+      with the counts from every stage in the record, plus whatever this
+      order names.
 - [ ] Session record written (`TODO_<PROGRAM>_NN_RECORD.md`); router
       ledger updated.
 ```
@@ -58,6 +58,9 @@ the expected-vs-actual output.>
 
 The order below was executed by a fresh session from the bootstrap alone;
 its record is the filled example in [`session-record.md`](session-record.md).
+It is reproduced as written, so its final checklist item names the gate
+commands of its own day — the aggregate `npm run site:gate` above is what
+a new order writes.
 
 ```markdown
 # TODO_EXAMPLE_01 — cover the Retry-After HTTP-date branch of the chat client

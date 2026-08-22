@@ -6,8 +6,19 @@ The jarenjs website — **the site is one JSON app document** running on [`@jare
 npm run dev                  # in this package
 npm run site:data            # regenerate public/site/packages.json + public/build.json
 npm run benchmark:generate   # refresh public/benchmarks/*.json from the benchmark workspace
-npm run deploy               # benchmark:generate + build + gh-pages publish
+npm run deploy               # guard + build + gh-pages publish + verify the live site
+npm run deploy:remeasure     # the same, RE-MEASURING first — the deliberate path
 ```
+
+Publishing is guarded at both ends. `predeploy` refuses to build while the tracked
+`public/benchmarks/*.json` differ from HEAD: a deploy publishes figures derived from
+those files, so they must be the ones a commit carries — the refusal names the two
+commands that resolve it. That is why `deploy` no longer re-measures implicitly;
+re-measuring as part of publishing is `deploy:remeasure`, opt-in by name, and it is the
+only script on the deploy path that runs the benchmarks. `postdeploy` then polls the
+published `build.json` until its commit and version match this checkout, retrying while
+Pages propagates and failing if they never do — because `gh-pages` reporting success
+means the *branch* was pushed, which is not the same as the site being live.
 
 ## What it does
 
@@ -35,17 +46,45 @@ npm run deploy               # benchmark:generate + build + gh-pages publish
 | The site's data plane | `src/contracts/site.contract.json`, `src/boundaries/site.js` | every read of site-owned data — the census, the build provenance, the benchmark meta and suites, the repository documents the dialog renders — resolves through one compiled `$contract` on [`@jarenjs/contract`](../contract)'s local binding with output validation on, so an artifact that drifts from the shape the page declares for it settles as a typed refusal instead of a wrong render |
 | The same grammar at build time | `scripts/lib/site-contract.js` | the generators compile that same document and prove each payload against the output schema of the operation the site reads it through, before the file is written: a shape the browser would refuse never reaches disk, and the run aborts naming the `JC` code, the contract member and every failing path |
 | The document's identity | `src/contracts/site.contract.revision` | one line, `<revision> <class>` — the SHA-256 over the public projection's canonical bytes, and how the change that produced it compares to the one before it. The website suite recomputes both and refuses a document edited without them, so moving the shape of the site's own data plane is a decision, not a diff nobody saw |
+| Package-owned content | `scripts/generate-site-data.js`, `public/site/content.json` | the engine cards and documentation sections are not authored here: each workspace commits a `site.md` — frontmatter against `schemas/site-document.schema.json`, body parsed by [`@jarenjs/md`](../../components/md) — which the build collects in census order. A workspace with no document degrades to a manifest-derived card, so a half-migrated repository renders honestly, and a new package reaches the site in its own commit with zero edits here |
+| One renderer, three provenances | `src/boundaries/markdown.js` | one `@jarenjs/md` component renders repo READMEs, the packages' own site documents and assistant/user text, and each call names which it is: heading ids are minted bare for the repository's own documents and `user-content-` prefixed for everything else, because ids are this page's namespace |
+| Motion | `src/styles.css` (the tokenized layer), `src/lib/motion.js` | three families — a page entrance on route swap, cards rising in on first view, measured headlines counting up — every one behind `prefers-reduced-motion: no-preference`, where `reduce` means instant final states rather than slower motion. The browser half installs from `afterRender` through a host capability and is the only thing on the site that knows an `IntersectionObserver` exists, so the headless render never sees an intermediate value |
 | Styling | `src/styles.css` | hand-rolled CSS, light + dark |
 
 Tests live in `test/website/` at the repository root (`npm run test:website`) and drive the complete site headless — routing, the play surface, the IDE round-trip, WebMCP tool execution, benchmark search against the real generated data, SSR — on the same DOM stub the view package uses.
+
+## Every fact is derived, gated, or pinned
+
+Nothing on this site is a number somebody typed. A figure is one of three things,
+and there is no fourth:
+
+- **derived at runtime** from the generated JSON — every benchmark headline, the
+  compliance scorecards, the suite counts, the contract's live operation table and
+  its 64-hex revision;
+- **generated at build** — the package census from the root manifest's `workspaces`
+  and each workspace's own `package.json`, the build provenance from the HEAD
+  commit, the collected site documents;
+- **hand-written and pinned by a test that fails on drift**, where deriving it would
+  cost bundle for no reader benefit — the binding capability table, the render-node
+  kinds, the suite and section counts, the Node floor, the bundle figures above.
+  `test/website/claims.test.js` holds each against the thing it describes: edit a
+  documented cell without editing the code behind it and it fails; add a capability
+  without documenting it and it fails too.
+
+Authored prose carries voice, never numbers — the site-document grammar refuses a
+digit in a card's `perf` line outright — and a claim that can be neither derived nor
+pinned is removed rather than left standing. Published losses stay published beside
+the wins: the contract benchmark's honest 2.4–7.5× band against a harness-free rival,
+the JSONPath README figure that fell from 23.1× to 8.8× under one derivation, and a
+conformance score of 1164 of 1166 rather than the clean sweep the old counting showed.
 
 Production build: `npm run build` (Vite, no plugins), two chunks. `jaren-*.js` is exactly the twelve packages `vite.config.js` names — core, json, validate, formats, refs, forms, locales, view, app, md, mermaid, calc — and NOT "the whole suite": the seven the site also depends on (ai, charts, contract, flow, josl, play, studio) are unlisted, so they land in `index-*.js` beside the site's own source. The sqlite worker is a lazy chunk of its own and is in neither. Measure, never estimate:
 
 ```bash
 npm run build
-gzip -c dist/assets/index-*.js  | wc -c   # 222,027 — the site + its unchunked packages
-gzip -c dist/assets/jaren-*.js  | wc -c   # 204,351 — the twelve chunked packages
-gzip -c dist/assets/index-*.css | wc -c   #  12,239
+gzip -c dist/assets/index-*.js  | wc -c   # 206,597 — the site + its unchunked packages
+gzip -c dist/assets/jaren-*.js  | wc -c   # 204,357 — the twelve chunked packages
+gzip -c dist/assets/index-*.css | wc -c   #  12,911
 ```
 
 Those three figures are the output of those three lines on the commit that last touched this file; a change to the bundle re-runs them rather than adjusting them.

@@ -12,7 +12,7 @@ import { formViewFor } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { HERO_DEMO } from '../content/hero.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
-import { md, mdArticle, rewriteReadmeLinks, readmeUrl } from '../boundaries/markdown.js';
+import { md, mdArticle, rewriteReadmeLinks, readmeUrl, TRUSTED, UNTRUSTED } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
@@ -305,7 +305,7 @@ const assistantView = memo1((ai) => {
     empty: ai.messages.length === 0,
     messages: ai.messages.map((m) => (m.role === 'user'
       ? { role: 'user', text: m.content }
-      : { role: 'assistant', article: mdArticle(md.view(m.content)) })),
+      : { role: 'assistant', article: mdArticle(md.view(m.content, UNTRUSTED)) })),
     // the reply currently streaming in (plain text: it changes per token)
     streaming: ai.status === 'streaming',
     pending: ai.pending,
@@ -351,7 +351,7 @@ const readmeOverlay = memo1((readme) => ({
   canForward: readme.at < readme.stack.length - 1,
   // repo-relative links inside the article navigate the dialog itself
   article: readme.source !== null
-    ? rewriteReadmeLinks(md.view(readme.source), readme.url)
+    ? rewriteReadmeLinks(md.view(readme.source, TRUSTED), readme.url)
     : null,
 }));
 
@@ -435,7 +435,7 @@ export const docsSections = memo1((content) => {
     .map((/** @type {any} */ entry) => ({
       id: entry.name.replace(/^@jarenjs\//, ''),
       title: entry.card.title,
-      blocks: [article(mdArticle(md.view(entry.docs)))],
+      blocks: [article(mdArticle(md.view(entry.docs, TRUSTED)))],
     }));
   if (owned.length === 0) return DOCS_SECTIONS;
   return [

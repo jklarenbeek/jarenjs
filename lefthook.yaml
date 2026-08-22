@@ -1,6 +1,11 @@
-# Both commands run the repo-wide gate, so they are deliberately unscoped: a
-# per-file `glob` would let a change in one workspace push while breaking a
+# Every command here runs the repo-wide gate, so they are deliberately unscoped:
+# a per-file `glob` would let a change in one workspace push while breaking a
 # consumer in another.
+#
+# What is here is what stays seconds-fast and read-only. The build, the
+# dead-code audit and the browser matrix are minutes each and live in
+# `npm run site:gate`, which is the gate a change ends on — a push must stay
+# cheap enough that nobody is tempted to skip the hook.
 pre-push:
   parallel: true
   commands:
@@ -8,6 +13,10 @@ pre-push:
       run: npm run lint
     tests:
       run: npm run test
+    figures:
+      run: npm run docs:check
+    documents:
+      run: npm run test:documents
 # EXAMPLE USAGE:
 #
 #   Refer for explanation to following link:

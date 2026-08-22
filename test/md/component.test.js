@@ -125,3 +125,101 @@ describe('createMdComponent: hydrate', function () {
     md.hydrate({ querySelectorAll: () => { throw new Error('should not be called'); } });
   });
 });
+
+// The per-call rendering policy: one component, many provenances. A host
+// that renders repo-authored documents beside text from anywhere else
+// cannot pick one id policy for both, and two components are not the
+// answer — hydration runs off one instance's index (asserted below).
+describe('createMdComponent: per-call rendering policy', function () {
+  const SOURCE = '## Setup\n\ntext\n';
+  const UNTRUSTED = { slugPrefix: 'user-content-' };
+
+  it('leaves a call that names no policy on the construction defaults', function () {
+    const md = createMdComponent({ headingIds: true });
+    const plain = md.view(SOURCE);
+    assert.equal(md.view(SOURCE, undefined), plain);
+    assert.equal(md.view(SOURCE, {}), plain);
+    assert.match(renderToString(plain), /id="setup"/);
+  });
+
+  it('mints ids under the policy the call names', function () {
+    const md = createMdComponent({ headingIds: true, headingAnchors: true });
+    const html = renderToString(md.view(SOURCE, UNTRUSTED));
+    assert.match(html, /id="user-content-setup"/);
+    // the anchor beside the heading follows the id, or the copy-a-link
+    // affordance points at a heading that no longer exists
+    assert.match(html, /href="#user-content-setup"/);
+  });
+
+  it('memoizes per source AND policy: two policies, two stable vnodes', function () {
+    const md = createMdComponent({ headingIds: true });
+    const trusted = md.view(SOURCE);
+    const untrusted = md.view(SOURCE, UNTRUSTED);
+    assert.notEqual(trusted, untrusted);
+    // each is a memo HIT on repeat — the O(change) contract holds per
+    // policy, so alternating provenances cannot thrash the cache
+    assert.equal(md.view(SOURCE), trusted);
+    assert.equal(md.view(SOURCE, UNTRUSTED), untrusted);
+    assert.equal(md.view(SOURCE, { slugPrefix: 'user-content-' }), untrusted);
+  });
+
+  it('keys a policy by what it says, not by how it is spelled', function () {
+    const md = createMdComponent({ headingIds: true });
+    const a = md.view(SOURCE, { slugPrefix: 'x-', headingAnchors: false });
+    assert.equal(md.view(SOURCE, { headingAnchors: false, slugPrefix: 'x-' }), a);
+    assert.notEqual(md.view(SOURCE, { slugPrefix: 'y-', headingAnchors: false }), a);
+  });
+
+  it('applies a policy to an already-parsed document too', function () {
+    const md = createMdComponent({ headingIds: true });
+    const doc = parseMarkdown(SOURCE);
+    const untrusted = md.view(doc, UNTRUSTED);
+    assert.match(renderToString(untrusted), /id="user-content-setup"/);
+    assert.equal(md.view(doc, UNTRUSTED), untrusted);
+    assert.notEqual(md.view(doc), untrusted);
+    assert.equal(md.view(null, UNTRUSTED), null);
+  });
+
+  it('refuses an option a policy may not set', function () {
+    const md = createMdComponent();
+    // plugins change the PARSE, so honoring one per call would render a
+    // document against a table it was not parsed with
+    assert.throws(() => md.view(SOURCE, /** @type {any} */ ({ plugins: [] })),
+      /not a rendering option/);
+    assert.throws(() => md.view(SOURCE, /** @type {any} */ ({ sanitizeUrl: () => null })),
+      /not a rendering option/);
+  });
+
+  it('shares one compile across policies', function () {
+    const md = createMdComponent({ headingIds: true });
+    const compiled = md.compile(SOURCE);
+    md.view(SOURCE, UNTRUSTED);
+    assert.equal(md.compile(SOURCE), compiled);
+  });
+
+  it('keeps one hydratable index across mixed-policy renders', async function () {
+    const md = createMdComponent({ plugins: [highlightPlugin(), widgetPlugin] });
+    const source = '```widget\ngraph TD; A-->B\n```\n';
+    // indexed through the POLICY path; the default-policy hydrate must
+    // still find it — one instance, one index
+    md.view(source, UNTRUSTED);
+    const hash = hashContent('graph TD; A-->B\n');
+    const el = {
+      _html: '',
+      set innerHTML(v) { this._html = v; },
+      get innerHTML() { return this._html; },
+      getAttribute: (name) => (name === 'data-md-hydrate' ? 'widget' : hash),
+    };
+    md.hydrate({ querySelectorAll: () => [el] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(el.innerHTML, '<svg>ok</svg>');
+  });
+
+  it('bounds the number of retained policies', function () {
+    const md = createMdComponent({ headingIds: true, policyLimit: 2 });
+    const first = md.view(SOURCE, { slugPrefix: 'a-' });
+    md.view(SOURCE, { slugPrefix: 'b-' });
+    md.view(SOURCE, { slugPrefix: 'c-' }); // evicts 'a-'
+    assert.notEqual(md.view(SOURCE, { slugPrefix: 'a-' }), first);
+  });
+});

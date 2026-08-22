@@ -245,6 +245,15 @@ const saved = await client.invoke('product.save', { id: 12, revision: 3, product
 // — status is null and PRESENT: this binding carries no statuses and says so, never omits the member
 ```
 
+The jaren website runs its whole data plane on this binding: a compiled
+`$contract` declares the reads for its package census, build provenance,
+benchmark artifacts and repository documents, the browser resolves every one
+of them through `openLocalClient` with output validation on, and the build's
+generators prove what they write against the output schema of the operation
+the page will read it through. It is a static site — there is no server to
+talk to — so the contract buys shape rather than transport: a drifted
+artifact settles as a typed refusal instead of a wrong render.
+
 **`port`** is request/response over a `MessagePort`, a `Worker`, a
 `BroadcastChannel` or a worker's own `self` — JSON frames marked
 `jaren: "contract/0.1"` (the grammar ships as

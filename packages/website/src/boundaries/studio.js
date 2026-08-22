@@ -43,7 +43,7 @@ import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 
-import { md, mdArticle } from './markdown.js';
+import { md, mdArticle, UNTRUSTED } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { STUDIO_TEMPLATES } from '../content/appTemplates.js';
 
@@ -155,7 +155,7 @@ function chartVnode(props) {
   }
 }
 
-const markdownVnode = (props) => mdArticle(md.view(String(props?.source ?? '')));
+const markdownVnode = (props) => mdArticle(md.view(String(props?.source ?? ''), UNTRUSTED));
 const mermaidVnode = (props) => mermaid.view(String(props?.source ?? ''));
 
 /**

@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { bake } from '@jarenjs/md';
 
 import { ratioSummary } from '../benchmark/derive.js';
+import { buildSiteContent } from './generate-site-data.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const DATA = join(ROOT, 'packages/website/public/benchmarks');
@@ -47,6 +48,23 @@ const DATA = join(ROOT, 'packages/website/public/benchmarks');
 /** @type {Record<string, any>} */
 const cache = {};
 const data = (name) => (cache[name] ??= JSON.parse(readFileSync(join(DATA, `${name}.json`), 'utf8')));
+
+/**
+ * The package census, read through the ONE builder that enumerates the
+ * workspaces — the same collection the site consumes. A second
+ * enumeration here is how a README comes to name a package count the
+ * repository outgrew, so there is not one.
+ * @type {any}
+ */
+let censusCache;
+const census = () => (censusCache ??= buildSiteContent());
+
+/** One workspace's collected entry, by published name. */
+function workspace(name) {
+  const entry = census().packages.find((/** @type {any} */ p) => p.name === name);
+  if (entry === undefined) throw new Error(`no workspace named ${name} — the census cannot answer a claim about it`);
+  return entry;
+}
 
 //#region formatting — one rounding policy, applied everywhere
 
@@ -76,6 +94,26 @@ function cts() {
     throw new Error('jsonpath.json carries no comparable profile rows — regenerate it before quoting one');
   }
   return summary;
+}
+
+/**
+ * One engine's score on the JSONPath compliance corpus, summed over the
+ * per-group counts `jsonpath.json` carries — `all 703` for a clean
+ * sweep, `698 of 703` for anything less.
+ * @param {string} engine
+ */
+function ctsCompliance(engine) {
+  const { total, groups } = data('jsonpath').compliance;
+  let passed = 0;
+  for (const [name, group] of groups) {
+    const score = group.pass[engine];
+    if (typeof score !== 'number') {
+      throw new Error(`jsonpath.json's '${name}' group has no '${engine}' score `
+        + '— regenerate it before quoting the engine');
+    }
+    passed += score;
+  }
+  return passed === total ? `all ${total}` : `${passed} of ${total}`;
 }
 
 /**
@@ -296,6 +334,18 @@ const FACTS = {
   // came to be published as 23.1x in this file and 8.8x on the site.
   'jsonpath.ctsRatio': () => ratio(cts().ratio),
   'jsonpath.ctsTimes': () => `${ns(cts().mine)} ns vs ${us(cts().rival)} µs`,
+  // the compliance score itself, per engine over the same corpus. "all
+  // 703" is a claim about a total AND about a failure count, so it is
+  // derived from both: a single failing case turns the phrase into
+  // `702 of 703` rather than leaving a sweep in the prose.
+  'jsonpath.ctsPass': () => ctsCompliance('jaren'),
+  'jsonpath.ctsRival': () => ctsCompliance('json-p3'),
+
+  // ——— the census: what the repository publishes, counted once ———
+  'packages.count': () => String(census().packages.length),
+  'json.engines': () => String(workspace('@jarenjs/json').engines.length),
+  'json.suites': () => String(new Set(workspace('@jarenjs/json').engines
+    .map((/** @type {any} */ e) => e.suite).filter((/** @type {any} */ s) => s !== null)).size),
 
   // ——— @jarenjs/json: query compile cost ———
   'jsonquery.compile': () => {

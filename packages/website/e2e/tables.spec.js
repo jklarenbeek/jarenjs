@@ -14,6 +14,19 @@ import { test, expect } from '@playwright/test';
 
 test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
+// Geometry is measured settled. The site's page entrance animates
+// `transform` on `<main>` for 240 ms after every route arrival, and a
+// descendant's `getBoundingClientRect()` runs through that composited
+// transform while it plays — a 44 px control measures 43.99998474121094
+// there, so a touch-target floor fails a fraction of the time and only
+// under load. Nothing in this file is about motion, so it emulates the
+// preference that removes it: under `reduce` the entrance does not exist
+// and every box is final from the first paint. (`test.use({ reducedMotion })`
+// does not reach the page; `emulateMedia` does.)
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 /** Columns narrower than this on a phone are the cramming failure mode. */
 const MIN_COLUMN_PX = 44;
 

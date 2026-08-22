@@ -28,12 +28,13 @@ import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { SUITES } from '../../packages/website/src/boundaries/bench.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
 import { docsSections } from '../../packages/website/src/app/viewmodel.js';
-import { buildSiteContent } from '../../scripts/generate-site-data.js';
+import { buildSiteData, buildSiteContent } from '../../scripts/generate-site-data.js';
 import { UI_RULES } from '../../packages/website/src/views/ui.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const read = (...parts) => readFileSync(join(ROOT, ...parts), 'utf8');
 const SITE_README = read('packages', 'website', 'README.md');
+const ROOT_README = read('README.md');
 
 /** Every block of every docs section, flat. */
 const docsBlocks = () => DOCS_SECTIONS.flatMap((s) => s.blocks);
@@ -253,6 +254,59 @@ describe('the homepage engine cards', function () {
     for (const point of HOME_CONTENT.hero.points) {
       assert.doesNotMatch(point, /[0-9]/, 'the authored hero states no figure');
     }
+  });
+});
+
+//#endregion
+
+//#region the repository's front page states no figure it cannot derive
+
+describe('the root README bakes its load-bearing claims', function () {
+  /** A marker body, as the gate writes it: `<!--bm:key-->…<!--/bm-->`. */
+  const marker = (key) => `<!--bm:${key}-->[^<]*<!--/bm-->`;
+
+  // Each entry is the CLAIM as it must read: the authored words with a
+  // marker wherever a number stands. Replace one of these markers with a
+  // typed figure — the rot every one of them was minted to stop — and
+  // the pattern stops matching.
+  const CLAIMS = [
+    ['the validator conformance score',
+      `Jaren scores \\*\\*${marker('validate.conformance')}\\*\\* on the official`],
+    ['the per-test win count and the success-only multiple',
+      `faster on ${marker('validate.perTestWins')} of the tests both engines pass, `
+      + `and ${marker('validate.vsAjv')}x as fast on the success-only totals`],
+    ['when the quoted suites were measured',
+      `measured on ${marker('benchmarks.measured')}`],
+    ['the JSONPath compliance score, and the rival\'s',
+      `\\*\\*${marker('jsonpath.ctsPass')} tests\\*\\* of the official \\[JSONPath`],
+    ['the rival\'s compliance score',
+      `json-p3 scores ${marker('jsonpath.ctsRival')}`],
+    ['the JSONPath speed summary',
+      `\\*\\*${marker('jsonpath.ctsRatio')}x faster across the CTS queries\\*\\*`],
+    ['what @jarenjs/json publishes',
+      `### @jarenjs/json — ${marker('json.engines')} compiled engines, `
+      + `${marker('json.suites')} benchmarks`],
+    ['how many packages the monorepo publishes',
+      `dependency chain of ${marker('packages.count')} published packages`],
+  ];
+
+  for (const [what, pattern] of CLAIMS) {
+    it(`derives ${what}`, function () {
+      assert.match(ROOT_README, new RegExp(pattern),
+        'this claim must read through its marker: a figure typed over one is a figure '
+        + 'nobody can recompute, and the facts gate can no longer refresh it');
+    });
+  }
+
+  it('publishes exactly the packages the workspace manifests declare', function () {
+    // the same defect the site had before the census: three published
+    // workspaces existed that no list on the front page mentioned
+    const rows = [...ROOT_README.matchAll(/^\| \[`(@jarenjs\/[a-z]+)`\]\(([^)]+)\) \|/gm)];
+    const census = buildSiteData().packages;
+    assert.deepStrictEqual(rows.map((m) => m[1]).sort(), census.map((p) => p.name).sort(),
+      'every public workspace has a row in the package table, and every row is one');
+    assert.deepStrictEqual(rows.map((m) => m[2]).sort(), census.map((p) => p.dir).sort(),
+      'and each row links the directory the manifest actually lives in');
   });
 });
 

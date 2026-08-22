@@ -3,9 +3,14 @@
  * One shared Markdown visual component (`@jarenjs/md/component`) for the
  * whole site. The playground's Markdown tab, the docs-page README dialog
  * and the docs sections the packages own all derive their vnodes through
- * `md.view(...)`, so they share one memo cache: the same source renders
- * to the same reference-equal vnode, which the DOM patcher skips in
- * O(1).
+ * `md.view(...)`, so they share one parse and one hydratable index: the
+ * same source under the same policy renders to the same reference-equal
+ * vnode, which the DOM patcher skips in O(1).
+ *
+ * Each call names the PROVENANCE of what it renders (`TRUSTED` /
+ * `UNTRUSTED` below), because the heading-id question has a different
+ * answer per origin and one component cannot hold both answers at
+ * construction.
  *
  * The mermaid plugin is compiled in so fenced ```mermaid diagrams in
  * fetched READMEs render to inline SVG through @jarenjs/mermaid (the
@@ -59,16 +64,37 @@ export const readmeUrl = (dir) => rawUrl(`${dir}/README.md`);
 // headingIds/headingAnchors: every heading gets a GitHub-compatible `id`
 // and a copy-a-link affordance, so a committed README's own
 // `[see below](#the-section)` links land here exactly as they do on
-// GitHub. No `slugPrefix`: the documents this renders are repo-authored,
-// so an id they mint is one the site chose to trust. That reasoning is
-// what the prefix exists for, and it belongs to the SOURCE, not to this
-// component — a surface rendering markdown from anywhere else must set
-// the prefix rather than inherit the decision made here.
+// GitHub.
 export const md = createMdComponent({
   plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host', interactive: true })],
   headingIds: true,
   headingAnchors: true,
 });
+
+//#region rendering policy per provenance
+// One component renders markdown of three different origins, and the
+// heading-id question has a different answer for each. Ids are a page's
+// namespace: the docs page addresses its own sections by id, so a
+// document that mints bare ids into it is claiming names it does not
+// own. Which documents may is a fact about the SOURCE, not about the
+// renderer — so every call names its provenance and none of them
+// inherits a decision made once at construction.
+//
+// Two components would be the obvious split and the wrong one: hydration
+// runs off one instance's hydratable index, so a second component
+// silently stops hydrating what the first indexed.
+
+/** Repo-authored markdown — committed READMEs and the site documents the
+ * workspaces own. Ids are minted bare, so a committed document's own
+ * `[see below](#the-section)` link lands exactly as it does on GitHub. */
+export const TRUSTED = { slugPrefix: '' };
+
+/** Markdown from anywhere else — an assistant reply, a playground buffer,
+ * a studio project's file. `user-content-` is GitHub's own answer to the
+ * same problem and keeps every id out of the site's namespace; the
+ * headings still get ids, so the document's internal links work. */
+export const UNTRUSTED = { slugPrefix: 'user-content-' };
+//#endregion
 
 //#region README-relative links
 // A fetched README is written for the repository, so its links are

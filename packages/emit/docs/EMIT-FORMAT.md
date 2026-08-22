@@ -88,7 +88,7 @@ compileEmitModel(schema, { extensions: ['x-entity'] })
 
 Every property member whose schema declares a listed keyword gains
 
-```json
+```jsonc
 { "kind": "member", "name": "posts",
   "extensions": { "x-entity": { "relation": { "to": "Post" } } }, … }
 ```

@@ -14,9 +14,10 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { JarenValidator } from '@jarenjs/validate';
 
@@ -25,7 +26,7 @@ import {
   readSiteDocument, derivedCard,
 } from '../../scripts/generate-site-data.js';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
-import { buildInfo } from '../../scripts/generate-build-info.js';
+import { buildInfo, serializeBuildInfo } from '../../scripts/generate-build-info.js';
 import { git, headCommit, isDirty } from '../../scripts/lib/git.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -120,6 +121,13 @@ describe('the build provenance (scripts/generate-build-info.js)', function () {
     const info = buildInfo();
     assert.strictEqual(info.node, process.version);
     assert.strictEqual(info.platform, `${process.platform} ${process.arch}`);
+  });
+
+  it('is byte-identical run over run, like the two artifacts beside it', function () {
+    // the third of the three generators the build runs, and the one whose
+    // timestamp would be the clock if `built` were not the commit date:
+    // a rebuild of one revision has to produce one bundle
+    assert.strictEqual(serializeBuildInfo(buildInfo()), serializeBuildInfo(buildInfo()));
   });
 });
 
@@ -332,6 +340,33 @@ describe('the collected site content', function () {
   it('is byte-identical run over run, like the census beside it', function () {
     assert.strictEqual(serializeSiteContent(buildSiteContent()),
       serializeSiteContent(buildSiteContent()));
+  });
+
+  it('refuses two workspaces claiming one engine key', function () {
+    // the key is a name in a namespace twenty-two independently committed
+    // documents share, and every lookup over the collected engines
+    // resolves it to the FIRST match — so the second claimant would not
+    // render as a conflict but as a duplicate card whose measured line
+    // silently belongs to the other package
+    const root = mkdtempSync(join(tmpdir(), 'jaren-keys-'));
+    writeFileSync(join(root, 'package.json'),
+      JSON.stringify({ name: 'fab', version: '1.0.0', workspaces: ['a', 'b'] }));
+    for (const name of ['a', 'b']) {
+      mkdirSync(join(root, name));
+      writeFileSync(join(root, name, 'package.json'),
+        JSON.stringify({ name: `@jarenjs/${name}`, version: '1.0.0', description: 'A package.' }));
+      writeFileSync(join(root, name, 'site.md'),
+        `---\npackage: "@jarenjs/${name}"\ncard:\n  title: The ${name}\n  blurb: It exists.\n`
+        + 'engines:\n  - key: shared\n    title: Shared\n---\n\nBody.\n');
+    }
+    assert.throws(() => buildSiteContent(root), (/** @type {Error} */ error) => {
+      // the refusal names the second document AND the first claimant, so
+      // the operator does not have to go looking for the other half
+      assert.match(error.message, /b\/site\.md: claims the engine key 'shared'/);
+      assert.match(error.message, /@jarenjs\/a already claims/);
+      return true;
+    });
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('never reaches an npm tarball — site presence is a repo concern', function () {

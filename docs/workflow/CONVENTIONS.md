@@ -38,19 +38,37 @@ this file wins and the playbook is repaired.
 ## 2. The gates
 
 Every pass, order or release ends green from the repo root, by **exit code**,
-never by eyeballing output:
+never by eyeballing output. **`npm run site:gate` is the full gate**: one command
+that runs all eight stages fail-fast, so nobody has to assemble them from memory —
 
-- `npm run lint` — zero errors **and** zero warnings, fixed at the source (no new
-  disables without a justified false positive);
-- `npm test` — all packages, with no expected-value/fixture edits unless the work
-  deliberately changed behavior and says so;
-- `npm run website:build`;
-- `npm run benchmark:coverage` — every dead-code finding resolved (removed,
-  covered, or a justified, ideally excluded, keep);
-- when packaging or exports change: `npm run test:packed`, `npm run
-  test:tree-shaking`; when visual code changes: the `docs/DESIGN.md` conformance
-  sweep including the banned-hue grep over `src` **and** `dist`; when the browser
-  surface changes: `npm run test:browser`.
+1. `npm run lint` — zero errors **and** zero warnings, fixed at the source (no new
+   disables without a justified false positive);
+2. `npm test` — all packages, with no expected-value/fixture edits unless the work
+   deliberately changed behavior and says so;
+3. `npm run website:build`;
+4. `npm run benchmark:coverage` — every dead-code finding resolved (removed,
+   covered, or a justified, ideally excluded, keep);
+5. `npm run docs:check` — every published figure still derives from the committed
+   measurements (`npm run docs:benchmarks` refreshes them; §4.6);
+6. `npm run test:documents` — every ```` ```mermaid ```` fence in the committed
+   Markdown parses through `@jarenjs/mermaid` and every ```` ```json ```` fence
+   parses as JSON (JSON-shaped *notation* is fenced ```` ```jsonc ```` and is not
+   parsed). The diagrams the site embeds in JavaScript content are gated from the
+   other side by `test/website/documents.test.js`;
+7. `npm run test:design` — the `docs/DESIGN.md` §1 banned hues, over the site's
+   source **and** its built `dist/`;
+8. `npm run test:browser` — the three-engine matrix.
+
+Running a subset is a speed convenience for a small change in flight, never the
+basis a change lands on. Two gates sit outside `site:gate` because they answer a
+packaging question rather than a behavior one, and belong to any change that
+touches exports: `npm run test:packed` and `npm run test:tree-shaking`.
+`release:check` runs `site:gate`'s stages plus the packaging ones, so the release
+path cannot skip what the working path runs.
+
+`git push` runs the four seconds-fast ones through lefthook (lint, test,
+`docs:check`, `test:documents`); the minutes-long stages stay out of the hook so a
+push stays cheap enough that nobody is tempted to skip it.
 
 A work order or playbook may name further gates; it may not drop these.
 **Records are numbers, not adjectives** — test counts, lint result, audit
@@ -110,6 +128,12 @@ without counts is not a record.
    refreshes them, it does not retype them.
 7. **Report the loss.** A measurement that comes out worse than a rival's is
    published beside the wins.
+8. **A fenced block claims what it is.** ```` ```json ```` is a value a reader can
+   copy and `JSON.parse`; JSON-shaped *notation* — metavariables (`expr`, `v`),
+   alternation (`"asc" | "desc"`), an elided tail, comments — is ```` ```jsonc ````.
+   ```` ```mermaid ```` is a diagram `@jarenjs/mermaid` can parse. `npm run
+   test:documents` enforces both over every committed Markdown document outside
+   `test/**` (where a fixture's job is sometimes to be malformed).
 
 ## 5. Decisions and authority
 
@@ -127,18 +151,27 @@ without counts is not a record.
 ## 6. Close-out & commit protocol (do NOT deviate)
 
 Only when explicitly asked to commit, in this order, aborting at the first
-failure:
+failure. Every step but the *decision* to release is one command with an exit
+code — a step that exists only as prose is a step that gets skipped:
 
-1. **Prove it green** — the gates in §2, by exit code, including any the work
-   named.
-2. **Bump the version:** `npm run version:patch` (a phase-opening campaign order
-   or a new capability line takes `version:minor`), then `npm install` under the
-   pinned npm (`packageManager` in the root manifest) to sync the lockfile, then
-   `npm run test:lock`, and re-verify the build.
-3. **Deploy the website:** `npm run website:deploy` must finish `Published`
-   (`npm run website:build` + `npx gh-pages -d packages/website/dist` when the
-   tracked benchmark timings must not be regenerated on this machine); verify
-   the live publish, not just the branch push.
+1. **Prove it green:** `npm run site:gate` (§2), plus `npm run test:packed` and
+   `npm run test:tree-shaking` if exports moved.
+2. **Bump the version:** `npm run release:bump` — `patch` by default,
+   `npm run release:bump -- minor` for a phase-opening campaign order or a new
+   capability line. It refuses under an npm that is not the `packageManager` pin
+   (a lockfile written by another npm is one the pinned npm then rejects, in CI
+   rather than here), bumps every manifest and internal range, syncs the
+   lockfile, runs `npm run test:lock` and rebuilds.
+3. **Deploy the website:** `npm run website:deploy` must finish `Published`. It
+   **refuses before building** when the tracked
+   `packages/website/public/benchmarks/*.json` differ from HEAD, because a deploy
+   publishes figures derived from them and those must be the ones a commit
+   carries; the refusal names the two commands that resolve it. Re-measuring as
+   part of publishing is a separate, named act: `npm run deploy:remeasure` from
+   `packages/website` is the only script on the deploy path that regenerates
+   timings. The live publish then verifies **itself** — `postdeploy` polls the
+   published `build.json` until its commit and version match this checkout, and
+   exits non-zero if they never do. The branch push is not the publish.
 4. **Only then commit**, as the repo user, with a **single short one-line
    message** describing the change (`Deduplicated shared helpers into core and
    view`). ONE line: no body, no `Co-authored-by`, no "Generated with", no AI
@@ -147,6 +180,11 @@ failure:
 5. **Tag before pushing:** `git tag v<new-version>`. The version lives only in the
    tag.
 6. **Push with tags:** `git push && git push --tags`.
+
+The order of 2–4 is load-bearing: the bump lands in the working tree, the site is
+built and deployed from it, and only then is the work committed — which is why the
+deployed `build.json` records the revision that HEAD still points at when
+`postdeploy` checks it.
 
 ## 7. Running a program
 

@@ -97,7 +97,7 @@ flowchart BT
 | [`@jarenjs/linq`](../packages/linq) | Fluent chains captured by a recording proxy into plain query documents; deferred sequences, a typed surface, the async boundary, and the provider contract `@jarenjs/db` fulfils without an import edge | [linq ARCHITECTURE](../packages/linq/ARCHITECTURE.md) · [FORMAT](../packages/linq/docs/LINQ-FORMAT.md) |
 | [`@jarenjs/db`](../packages/db) | Documents in SQLite behind driver and dialect seams: model-declared collections, the pushdown planner with honest residuals, the safe execution profile, document migrations | [db ARCHITECTURE](../packages/db/ARCHITECTURE.md) · [MODEL-FORMAT](../packages/db/docs/MODEL-FORMAT.md) · [MIGRATION-FORMAT](../packages/db/docs/MIGRATION-FORMAT.md) |
 | [`@jarenjs/ai`](../packages/ai) | Browser-side AI: one OpenAI-compatible chat client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an SSE decoder, a tool registry whose inputs `@jarenjs/validate` checks before every call, a bounded agent loop, and WebMCP registration — plus the **ledger**: a schema-validated durable goal, evidenced memories, skills and content-addressed slots over an injected storage adapter, so compaction archives a dropped round instead of destroying it and a run survives a closed tab. Above it the **environment** holds a corpus outside the context — the model sees a capped digest and works by naming slots — and the **action language** lets it author a compile-gated program over them: `map` is the only step that calls a model, its fan-out is concurrent and abortable, and a program that does not compile never runs. A `map` piece may itself be a **child agent** over its own prefix-scoped slice — depth-capped at 3, sharing one budget with the whole tree, and recording a serializable trajectory — which is the difference between an assistant and something you hand a job to. Everything heavy arrives through a seam (storage, the query compiler a `select`/`reduce` and retrieval need, the RFC 6902 patch engine a refinement applies); depends only on core and validate | [ai README](../packages/ai/README.md) |
-| [`@jarenjs/website`](../packages/website) | The GitHub Pages site, the Play host, AI assistant and the Studio — a meta-schema-gated host for AI-authored app documents (not part of the library chain) | [website README](../packages/website/README.md) |
+| [`@jarenjs/website`](../packages/website) | The GitHub Pages site: the Play host, the AI assistant and the Studio (a meta-schema-gated host for AI-authored app documents), with its own data plane on a compiled `$contract` and its content collected from a `site.md` each workspace commits (not part of the library chain) | [website README](../packages/website/README.md) |
 
 Two deliberate inversions and one boundary pattern keep the graph acyclic while letting the layers cooperate:
 
@@ -400,7 +400,7 @@ Given schema:
 
 When schemas have `$id` that changes the base URI:
 
-```json
+```jsonc
 {
   "$id": "http://example.com/schema",
   "$defs": {
