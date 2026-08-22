@@ -29,6 +29,9 @@ const CENSUS_PAGE = { $or: [
   { $eq: ['$payload.page', 'home'] },
 ] };
 
+/** The docs page: its draft-support scorecard is the validate run. */
+const DOCS_PAGE = { $eq: ['$payload.page', 'docs'] };
+
 export const ACTIONS = {
   // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
   ...calcActions,
@@ -54,6 +57,9 @@ export const ACTIONS = {
       // the home page shows measured headlines on its engine cards, so
       // it needs the same meta.json the benchmarks overview reads
       { $if: [MEASURED_PAGE, { run: 'fetch-bench', with: { name: 'meta' } }] },
+      // the docs draft-support section publishes the official-suite
+      // scorecard, derived from the run itself rather than transcribed
+      { $if: [DOCS_PAGE, { run: 'fetch-bench', with: { name: 'validate' } }] },
       {
         $if: [
           {

@@ -2,10 +2,13 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
+import { readFileSync } from 'node:fs';
+
 import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { viewModel } from '../../packages/website/src/app/viewmodel.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
+import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { buildSiteData } from '../../scripts/generate-site-data.js';
 import { buildInfo } from '../../scripts/generate-build-info.js';
@@ -702,5 +705,98 @@ describe('website — the /charts page', function () {
     finally {
       delete globalThis.WebSocket;
     }
+  });
+});
+
+describe('website — every published figure is the measured one', function () {
+  /** Headline rows shaped like `meta.json`'s, for the four cards under test. */
+  const HEADLINES = [
+    { key: 'validate', label: 'JSON Schema', ratio: 1.3752, rival: 'Ajv', conformance: '1164 / 1166' },
+    { key: 'orm', label: 'ORM', ratio: 5.6, rival: 'Prisma (graph load)', conformance: '1 statement' },
+    { key: 'view', label: 'View', ratio: 1.744, rival: 'its own no-memo frame', conformance: null },
+    { key: 'flow', label: 'Flow', ratio: 5.6303, rival: 'XState v5', conformance: 'serializable' },
+  ];
+  const measured = () => ({ ...FIXTURES, meta: { ...FIXTURES.meta, headlines: HEADLINES } });
+  const authored = (key) => HOME_CONTENT.engines.find((e) => e.key === key).perf;
+
+  it('the db, view and flow cards read their headline instead of a typed number', async function () {
+    const { container } = mountSite({ fixtures: measured() });
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /1 statement · 5\.6× faster than Prisma \(graph load\)/,
+      'the ORM headline replaces the hand-written Prisma multiple');
+    assert.match(html, /1\.74× faster than its own no-memo frame/,
+      'the view card names what was actually measured, not a remembered React figure');
+    assert.match(html, /serializable · 5\.63× faster than XState v5/);
+    for (const key of ['db', 'view', 'flow']) {
+      assert.doesNotMatch(html, new RegExp(authored(key).slice(0, 24)),
+        `${key}: the authored line is the pre-arrival fallback, not a second published figure`);
+    }
+  });
+
+  it('calls a score "conformance" only where the score is a pass/total pair', async function () {
+    const { container } = mountSite({ fixtures: measured() });
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /1164 \/ 1166 conformance ·/);
+    assert.doesNotMatch(html, /1 statement conformance/,
+      '"1 statement" is what the ORM row scored, and it is not a conformance figure');
+    assert.doesNotMatch(html, /serializable conformance/);
+  });
+
+  it('the hero states the run\'s conformance count, and no round number of its own', async function () {
+    const { container } = mountSite({ fixtures: measured() });
+    await tick();
+    const html = serialize(container);
+    assert.match(html, /1164 of 1166 official JSON-Schema-Test-Suite tests pass/);
+    assert.doesNotMatch(html, /100% of the official/,
+      'the honest count is not 100%, so the page does not say 100%');
+  });
+
+  it('and before the run lands the hero claims no figure at all', function () {
+    const { container } = mountSite({ fixtures: {} });
+    const html = serialize(container);
+    assert.match(html, /The official JSON-Schema-Test-Suite scored on every benchmarked draft/);
+    assert.doesNotMatch(html, /of 1166/, 'nothing is claimed before anything is loaded');
+  });
+
+  describe('the docs draft-support scorecard', function () {
+    /** The real generated run — the same file the benchmarks page reads. */
+    const VALIDATE = JSON.parse(readFileSync(
+      new URL('../../packages/website/public/benchmarks/validate.json', import.meta.url), 'utf8'));
+
+    it('renders the generated numbers, not a transcription of them', async function () {
+      const { container, go } = mountSite({ fixtures: { ...FIXTURES, validate: VALIDATE } });
+      go('#/docs?s=draft-support');
+      assert.match(serialize(container), /Fetching the measured official-suite results/,
+        'the section says what it is waiting for while the run is in flight');
+      await tick();
+      const html = serialize(container);
+      const stats = VALIDATE.summary.engineStats;
+      for (const [draft, jaren] of Object.entries(stats.jaren)) {
+        const ajv = stats.ajv[draft];
+        assert.match(html, new RegExp(`${jaren.passed} / ${jaren.failed} / ${jaren.errors}`),
+          `the ${draft} jaren row is the generated one`);
+        assert.match(html, new RegExp(`${ajv.passed} / ${ajv.failed} / ${ajv.errors}`),
+          `the ${draft} ajv row is the generated one`);
+      }
+      assert.match(html, /431 \/ 2 \/ 0/,
+        'the two failing 2020-12 cases are published, not rounded away');
+    });
+
+    it('says so when the run cannot be loaded', async function () {
+      const { container, go } = mountSite({ fixtures: {} });
+      go('#/docs?s=draft-support');
+      await tick();
+      assert.match(serialize(container), /Measured results unavailable/);
+    });
+
+    it('carries no static table to drift', function () {
+      const section = DOCS_SECTIONS.find((s) => s.id === 'draft-support');
+      assert.ok(section.blocks.some((b) => b.kind === 'measured'),
+        'the scorecard is a derivation slot');
+      assert.ok(!section.blocks.some((b) => b.kind === 'table'),
+        'a hand-written results table in the docs is the defect this replaced');
+    });
   });
 });

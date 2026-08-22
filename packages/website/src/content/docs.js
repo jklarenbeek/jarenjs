@@ -14,7 +14,7 @@ export const DOCS_SECTIONS = [
     blocks: [
       p('Every package is published on npm under the @jarenjs scope, zero-dependency and ESM. Install what you need — the validator pulls in nothing you do not ask for.'),
       code(null, 'npm install @jarenjs/validate\nnpm install @jarenjs/formats   # format keyword validators\nnpm install @jarenjs/json      # pointer, path, patch, query, JSLT\nnpm install @jarenjs/forms     # schema-driven forms\nnpm install @jarenjs/view @jarenjs/app  # UIs as JSON documents'),
-      p('Node 22 or newer; browsers via any bundler. No eval, no new Function: everything is CSP-safe by construction.'),
+      p('Node 24 or newer (the engines field every package publishes); browsers via any bundler. No eval, no new Function: everything is CSP-safe by construction.'),
     ],
   },
   {
@@ -56,12 +56,11 @@ export const DOCS_SECTIONS = [
   {
     id: 'draft-support', title: 'Draft support',
     blocks: [
-      p('draft-06, draft-07, 2019-09 and 2020-12 are fully supported — including annotation-driven unevaluatedProperties/unevaluatedItems, $dynamicRef/$dynamicAnchor and $vocabulary processing. The official test suite is scored on every benchmarked draft, optional format suites included, and each engine is counted over the tests it could run — so a case the rival cannot compile still counts here.'),
-      { kind: 'table', title: 'Official suite results', note: 'passed / failed / errors — see the Benchmarks page for the live numbers', head: ['Draft', 'Jaren', 'Ajv'], rows: [
-        { kind: 'row', strong: true, cells: ['draft-07', '308 / 0 / 0', '294 / 13 / 1'] },
-        { kind: 'row', strong: true, cells: ['2019-09', '425 / 0 / 0', '406 / 15 / 4'] },
-        { kind: 'row', strong: true, cells: ['2020-12', '431 / 2 / 0', '390 / 33 / 10'] },
-      ] },
+      p('draft-06, draft-07, 2019-09 and 2020-12 are supported — including annotation-driven unevaluatedProperties/unevaluatedItems, $dynamicRef/$dynamicAnchor and $vocabulary processing. The official test suite is scored on every benchmarked draft, optional format suites included, and each engine is counted over the tests it could run — so a case the rival cannot compile still counts here.'),
+      // the scorecard is the generated run, not a transcription of it:
+      // the derivation boundary fills this block from the same suite
+      // file the Benchmarks page reads
+      { kind: 'measured', suite: 'validate' },
     ],
   },
   {
@@ -133,7 +132,7 @@ export const DOCS_SECTIONS = [
     blocks: [
       p('The gap a schema-first codebase has where a Zod codebase has z.infer. The observation is small: a JSON Schema is JSON, TypeScript is text, and JTLT is JSON-to-text — so generating a declaration file is a stylesheet, not a new engine. Point jaren-emit at a directory of schemas and get .d.ts files with doc comments, unions, tuples, index signatures and recursive references; --check fails CI when a schema moved and the types did not.'),
       code(null, 'npx jaren-emit --schema ./schemas --out ./src/types'),
-      code(null, "import { emitTypeScript } from '@jarenjs/emit';\nemitTypeScript(schema, { name: 'User' });\n// export interface User { id: string; role?: \"admin\" | \"user\"; }"),
+      code(null, "import { emitTypeScript } from '@jarenjs/emit';\nemitTypeScript(schema, { name: 'User' });\n// export interface User { id: string; role?: \"admin\" | \"user\"; [key: string]: unknown; }\n// the index signature IS the schema: close it with additionalProperties: false and it goes"),
       callout('The cyclic verification', 'What makes generated types trustworthy is that Jaren owns both sides. The same schema becomes a TYPE and a VALIDATOR, and the two must correspond over a corpus of instances: every schema-valid instance must type-check (so the type is never narrower than the schema), every structurally invalid one must not (never wider), and the cases TypeScript genuinely cannot express — minLength, pattern, format — are asserted as widened AND written into the generated file as a comment. Widening silently is the most common way a generated type misleads its reader. A standalone schema-to-TypeScript tool has no validator to disagree with; the suite here is itself checked by breaking the generator on purpose and confirming it fails.'),
       p('Normalization makes a contract\'s input and output shapes differ — a defaulted member is optional for the caller and present afterwards, a coerced one arrives as a transport string. Pass the same normalize options to the generator and it names both sides: Config is what you have after normalizing, ConfigInput is what a caller may hand in. That pair is exactly what a typed contract boundary wants, and a twin appears only where the type actually differs, so one defaulted field does not double every declaration. The switch resolution is imported from the normalizer rather than reimplemented, because a variant that disagrees with it is worse than no variant.'),
       p('Two stages, because a schema graph is not shaped like a declaration file: an analysis pass flattens refs, cycles, composition and anonymous subschemas into a published type model, and a JTLT stylesheet per target renders it. Markdown reference docs ship as a second target — as unlike TypeScript as a target gets, and it needed no change to the model, which is the evidence the split earned its keep.'),
@@ -163,7 +162,7 @@ export const DOCS_SECTIONS = [
       p('Part two is the visual component (@jarenjs/md/component): a memoized view() projection for app viewModels, md-load / md-parse entries for the effect registry, a hydrate pass for plugins like mermaid, and the styles/md.css stylesheet. Play’s Markdown engine on this site is that component, live.'),
       code(null, "import { createMdComponent } from '@jarenjs/md/component';\nconst md = createMdComponent();\ncreateApp(appDoc, {\n  effects: { ...md.effects },\n  viewModel: (state) => ({ ...state, article: md.view(state.source) }),\n});"),
       p('Two emitters, one AST, and neither built on the other: toHtml writes bytes, mdToVnode builds a patchable tree. A vnode has no slot for unescaped author markup, which is what makes it safe for Markdown you did not write; a string does, which is why the raw-HTML corner of CommonMark is reachable through toHtml and only there. Escaping is the default in both; html: \'raw\' is per-call and trusted-input-only.'),
-      code(null, "import { toHtml, bake } from '@jarenjs/md';\ntoHtml(doc);                       // '<h1>Hi</h1>…' — escaped by default\ntoHtml(doc, { html: 'raw' });      // trusted input only\nmdToVnode(doc, { keyed: false });  // SSR: skip the content-hash keys"),
+      code(null, "import { toHtml, mdToVnode } from '@jarenjs/md';\ntoHtml(doc);                       // '<h1>Hi <em>there</em></h1>' — escaped by default\ntoHtml(doc, { html: 'raw' });      // trusted input only\nmdToVnode(doc, { keyed: false });  // SSR: skip the content-hash keys"),
       p('Directives carry a value a machine derives and a human reads. The carrier is an HTML comment, which every markdown renderer drops — so the baked text between the markers is what GitHub, an editor preview and npm show, with no runtime. bake() writes the fresh value back into the source, splicing only the spans between markers, so a re-derivation is a reviewable diff instead of a number that quietly stopped being true. Every measured figure in this repository’s own documents works that way.'),
       p('Measured like every other engine, on two corpora: the Markdown benchmark scores @jarenjs/md against marked, markdown-it and micromark over the official CommonMark spec examples, and over the GFM specification’s five extension sections with every engine’s extensions on (npm run benchmark:markdown). Both jaren rows are published — the string emitter and the vnode emitter — because the difference between them is the safety boundary, not a rounding error. The results are on the Benchmarks page.'),
       {

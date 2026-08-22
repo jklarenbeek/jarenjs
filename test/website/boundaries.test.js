@@ -19,7 +19,7 @@ import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
 import { runQuery, runJslt, operatorRegistry } from '../../packages/website/src/boundaries/engines.js';
 import { runValidation } from '../../packages/website/src/boundaries/validator.js';
-import { deriveSuite } from '../../packages/website/src/boundaries/bench.js';
+import { deriveSuite, draftConformanceTable, SUITES } from '../../packages/website/src/boundaries/bench.js';
 import { chartRenderer } from '../../packages/website/src/boundaries/charts.js';
 
 const loadBench = (name) => JSON.parse(readFileSync(
@@ -447,5 +447,104 @@ describe('website boundaries — the benchmarks overview', function () {
     assert.ok(first.length >= 1, 'the overview carries a summary chart');
     assert.equal(first[0].vnode[1].style['--chart-text'], 'var(--fg, #1f2020)');
     assert.equal(first[0].vnode, second[0].vnode, 'memoized across re-derivations');
+  });
+});
+
+describe('website boundaries — the figures that can show a failure', function () {
+  const UI = { search: '', limit: 40 };
+  const derive = (suite, data) => {
+    const need = suite === 'overview' ? 'meta' : suite;
+    return deriveSuite(
+      { benchStatus: { [need]: 'loaded' }, bench: { [need]: data }, benchUi: UI }, suite);
+  };
+  const cardsOf = (nodes) => nodes.find((n) => n.kind === 'cards').items;
+
+  // The card used to divide the corpus total by itself — 703 / 703 no
+  // matter what the run found. A compliance figure that cannot move is
+  // not a measurement, so it is summed from the per-group rows now.
+  describe('the JSONPath compliance card sums the groups it prints', function () {
+    const suite = (groups) => ({
+      compliance: { total: groups.reduce((n, [, g]) => n + g.total, 0), groups },
+      profile: { rows: [], iterations: 1, compileRow: { engines: { jaren: 1, 'json-p3': 1 } } },
+    });
+
+    it('reads the committed run\'s true figure', function () {
+      const data = loadBench('jsonpath');
+      const expected = data.compliance.groups
+        .reduce((n, [, g]) => n + g.pass.jaren, 0);
+      const card = cardsOf(derive('jsonpath', data))[0];
+      assert.equal(card.value, `${expected} / ${data.compliance.total}`);
+      assert.match(card.note, /json-p3: \d+ \/ \d+/, 'the rival is scored beside it, not folded in');
+    });
+
+    it('shows n-1 / n the moment one group fails', function () {
+      const card = cardsOf(derive('jsonpath', suite([
+        ['basic', { total: 45, pass: { jaren: 45, 'json-p3': 45 } }],
+        ['filter', { total: 186, pass: { jaren: 185, 'json-p3': 186 } }],
+      ])))[0];
+      assert.equal(card.value, '230 / 231', 'one failing group must be visible on the card');
+      assert.match(card.note, /json-p3: 231 \/ 231/,
+        'the rival passing where jaren does not is exactly what the card exists to show');
+    });
+
+    it('says nothing rather than 0 / 0 when the run carries no groups', function () {
+      assert.equal(cardsOf(derive('jsonpath', suite([])))[0].value, '—');
+    });
+  });
+
+  // "20 suites measured" once appeared over a site offering 21 pages:
+  // the note counted the headline rows and named the suite collection.
+  describe('the overview note counts the collection it names', function () {
+    const published = SUITES.filter((s) => s.key !== 'overview').length;
+    const row = (key) => ({
+      key, label: key, ratio: 2, rival: 'a rival', conformance: null,
+      generated: '2026-08-22T10:00:00.000Z', version: '0.39.0',
+    });
+    const note = (n) => cardsOf(derive('overview', {
+      headlines: Array.from({ length: n }, (_, i) => row(`s${i}`)), lastRun: {},
+    }))[0].note;
+
+    it('names the site\'s own suite manifest as the denominator', function () {
+      assert.equal(note(published), `${published} of ${published} suites measured`);
+    });
+
+    it('shows the shortfall when a suite stops publishing a headline', function () {
+      assert.equal(note(published - 1), `${published - 1} of ${published} suites measured`);
+    });
+
+    it('holds against the committed run', function () {
+      const meta = loadBench('meta');
+      assert.equal(cardsOf(derive('overview', meta))[0].note,
+        `${meta.headlines.length} of ${published} suites measured`);
+      assert.equal(meta.headlines.length, published,
+        'every published suite carries a headline');
+    });
+  });
+
+  // The docs page used to transcribe this table. Both surfaces render
+  // the one builder now, so they cannot publish two scores for one run.
+  describe('the official-suite scorecard has one builder', function () {
+    it('labels the drafts the way their specifications do', function () {
+      const table = draftConformanceTable({
+        jaren: { draft7: { passed: 3, failed: 0, errors: 0 } },
+        ajv: { draft7: { passed: 2, failed: 1, errors: 0 } },
+      });
+      assert.deepEqual(table.rows[0].cells, ['draft-07', '3 / 0 / 0', '2 / 1 / 0']);
+    });
+
+    it('is the same table the benchmarks overview renders', function () {
+      const meta = loadBench('meta');
+      const stats = meta.conformance.jsonSchema.engineStats;
+      const inOverview = derive('overview', meta)
+        .find((n) => n.kind === 'table' && n.title.startsWith('JSON Schema conformance'));
+      assert.deepEqual(inOverview.rows, draftConformanceTable(stats).rows);
+    });
+
+    it('scores the validate suite file and the meta summary identically', function () {
+      const fromSuite = draftConformanceTable(loadBench('validate').summary.engineStats);
+      const fromMeta = draftConformanceTable(loadBench('meta').conformance.jsonSchema.engineStats);
+      assert.deepEqual(fromSuite.rows, fromMeta.rows,
+        'the docs read the suite file and the overview reads the summary — one score either way');
+    });
   });
 });

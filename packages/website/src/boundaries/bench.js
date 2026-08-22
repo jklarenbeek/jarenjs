@@ -132,6 +132,41 @@ function provenanceSpan(headlines, pick, compare) {
 const unrecorded = (n) => (n === 0 ? '' : `, ${n} row${n === 1 ? '' : 's'} unrecorded`);
 
 /**
+ * The suites this site publishes a page for — the collection the
+ * overview's note NAMES. Counting the headline rows alone would let the
+ * note say "20 suites measured" over a site that offers 21, which is
+ * exactly how a measured suite once went missing without a trace.
+ */
+const PUBLISHED_SUITES = SUITES.filter((s) => s.key !== 'overview').length;
+
+/** Official-suite draft keys as their specifications name them. */
+const DRAFT_LABELS = { draft7: 'draft-07', 'draft2019-09': '2019-09', 'draft2020-12': '2020-12' };
+
+/**
+ * The official JSON-Schema-Test-Suite scorecard: one row per draft,
+ * `passed / failed / errors` per engine. The benchmarks overview and
+ * the docs draft-support section render THIS builder over the same
+ * generated stats, so the two surfaces cannot publish two scores for
+ * one run.
+ * @param {any} engineStats - `{ jaren: {...}, ajv: {...} }`, keyed by draft.
+ * @returns {any} a table render node
+ */
+export function draftConformanceTable(engineStats) {
+  const drafts = Object.keys(engineStats?.jaren ?? {});
+  return table(
+    'JSON Schema conformance — official test suite',
+    ['Draft', 'Jaren', 'Ajv'],
+    drafts.map((draft) => ({
+      cells: [
+        DRAFT_LABELS[draft] ?? draft,
+        passFail(engineStats.jaren?.[draft]),
+        passFail(engineStats.ajv?.[draft]),
+      ],
+    })),
+    'passed / failed / errors, optional format suites included — each engine counted over the tests it could run');
+}
+
+/**
  * The overview: what every suite measured, in one screen. Each row is
  * DERIVED from that suite's generated data (benchmark/website-data.js
  * `buildHeadlines`), so the summary cannot drift from the detail pages
@@ -146,7 +181,7 @@ function overview(meta) {
   const versions = provenanceSpan(headlines, (h) => h.version, compareVersion);
   const lastRunDate = (lastRun.generated ?? '').slice(0, 10);
   const out = [cards([
-    { title: 'Measured', value: measured.span, note: `${headlines.length} suites measured${unrecorded(measured.unknown)}` },
+    { title: 'Measured', value: measured.span, note: `${headlines.length} of ${PUBLISHED_SUITES} suites measured${unrecorded(measured.unknown)}` },
     { title: 'Machine', value: lastRun.cpu ?? '—', note: lastRun.platform ?? '' },
     {
       title: 'Suite version',
@@ -180,16 +215,7 @@ function overview(meta) {
   }
 
   const stats = meta.conformance?.jsonSchema?.engineStats;
-  if (stats !== undefined && stats !== null) {
-    const drafts = Object.keys(stats.jaren ?? {});
-    out.push(table(
-      'JSON Schema conformance — official test suite',
-      ['Draft', 'Jaren', 'Ajv'],
-      drafts.map((draft) => ({
-        cells: [draft, passFail(stats.jaren?.[draft]), passFail(stats.ajv?.[draft])],
-      })),
-      'passed / failed / errors, optional format suites included'));
-  }
+  if (stats !== undefined && stats !== null) out.push(draftConformanceTable(stats));
   if (meta.qt3 !== undefined && meta.qt3 !== null) {
     const q = meta.qt3;
     out.push(cards([
@@ -317,8 +343,14 @@ function jsonpathRow(r) {
 function jsonpath(data, benchUi) {
   const out = [];
   const groups = data.compliance?.groups ?? [];
+  // Summed from the same per-group rows the table below prints, per
+  // engine: the card used to divide the corpus total by itself, so no
+  // failure could ever move it. A regression now reads n-1 / n here.
+  const total = groups.reduce((n, [, g]) => n + (g.total ?? 0), 0);
+  const passed = (engine) => groups.reduce((n, [, g]) => n + (g.pass?.[engine] ?? 0), 0);
+  const score = (engine) => (groups.length === 0 ? '—' : `${passed(engine)} / ${total}`);
   out.push(cards([
-    { title: 'Compliance', value: `${data.compliance?.total ?? '—'} / ${data.compliance?.total ?? '—'}`, note: 'official RFC 9535 CTS, both engines' },
+    { title: 'Compliance', value: score('jaren'), note: `official RFC 9535 CTS · json-p3: ${score('json-p3')}` },
     { title: 'Compile all selectors', value: formatNs(data.profile?.compileRow?.engines?.jaren), note: `json-p3: ${formatNs(data.profile?.compileRow?.engines?.['json-p3'])}` },
   ]));
   out.push(table('Compliance by group', ['Group', 'Tests', 'Jaren', 'json-p3'],

@@ -7,7 +7,7 @@
  * conditionals in the stylesheet.
  */
 
-import { deriveSuite, SUITES } from '../boundaries/bench.js';
+import { deriveSuite, draftConformanceTable, SUITES } from '../boundaries/bench.js';
 import { formViewFor } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
@@ -47,19 +47,43 @@ const NAV_GROUPS = [
   ] },
 ];
 
-/** Home engine card → the benchmark headline that measures it. */
-const HOME_ENGINE_SUITE = {
+/**
+ * Home engine card → the benchmark headline that measures it. Every
+ * engine whose suite publishes a headline is mapped: an unmapped card
+ * with a measurable suite is how the page kept hand-typed numbers.
+ */
+export const HOME_ENGINE_SUITE = {
   validate: 'validate', path: 'jsonpath', pointer: 'jsonpointer', patch: 'jsonpatch',
   query: 'jsonquery', jslt: 'jslt', josl: 'toml', csv: 'csv', charts: 'charts',
   markdown: 'markdown', mermaid: 'mermaid', contract: 'contract',
+  view: 'view', flow: 'flow', db: 'orm',
 };
 
+/** A pass/total score — the shape that earns the word "conformance". */
+const SCORE = /^\d+ \/ \d+$/;
+
 /**
- * The home content with its performance line taken from the generated
- * benchmark run rather than from prose. A card whose engine has a
- * headline shows that run's measured ratio; everything else — and the
- * whole page before `meta.json` arrives, or if it fails to — keeps the
- * static line, which is why those stay claims that cannot go stale.
+ * One card's measured line: the run's ratio, named in the direction it
+ * fell, behind whatever the suite scored. A headline's `conformance` is
+ * a pass/total pair for the suites with an official corpus and a short
+ * prose note for the rest ("1 statement", "serializable"), so the word
+ * is added only where it is the truth.
+ */
+function perfLine(headline) {
+  const speed = `${formatRatio(headline.ratio)} than ${headline.rival}`;
+  const score = headline.conformance;
+  if (typeof score !== 'string' || score === '') return speed;
+  return SCORE.test(score) ? `${score} conformance · ${speed}` : `${score} · ${speed}`;
+}
+
+/**
+ * The home content with every measurable claim taken from the generated
+ * benchmark run rather than from prose: the hero's conformance bullet
+ * and each mapped card's performance line. A card whose engine has no
+ * headline keeps its authored line — and those carry no figures, so
+ * nothing on this page can be a number that stopped being true. Before
+ * `meta.json` arrives, or if it fails to, the authored document renders
+ * as written.
  * @param {any} state
  * @returns {any}
  */
@@ -69,19 +93,33 @@ function homeContent(state) {
   const byKey = new Map(headlines.map((h) => [h.key, h]));
   return {
     ...HOME_CONTENT,
+    hero: heroWith(HOME_CONTENT.hero, byKey.get('validate')),
     engines: HOME_CONTENT.engines.map((engine) => {
       const headline = byKey.get(HOME_ENGINE_SUITE[engine.key]);
       if (headline === undefined || !Number.isFinite(headline.ratio)) return engine;
       // formatRatio names the direction, so a sub-parity suite reads
       // "2.3× slower than …" rather than the cryptic "0.4× vs …"
-      const speed = `${formatRatio(headline.ratio)} than ${headline.rival}`;
-      return {
-        ...engine,
-        perf: headline.conformance
-          ? `${headline.conformance} conformance · ${speed}`
-          : speed,
-      };
+      return { ...engine, perf: perfLine(headline) };
     }),
+  };
+}
+
+/**
+ * The hero's first bullet is the conformance claim, and it becomes the
+ * measured score once the run lands: the page used to claim a round
+ * 100% the honest count does not support. A headline carrying no
+ * pass/total pair leaves the authored, figure-free line standing.
+ */
+function heroWith(hero, headline) {
+  const score = headline?.conformance;
+  if (typeof score !== 'string' || !SCORE.test(score)) return hero;
+  const [pass, total] = score.split(' / ');
+  return {
+    ...hero,
+    points: [
+      `${pass} of ${total} official JSON-Schema-Test-Suite tests pass, across every benchmarked draft`,
+      ...hero.points.slice(1),
+    ],
   };
 }
 
@@ -116,7 +154,8 @@ export function viewModel(state) {
   if (page === 'data') ui.data = dataViewModel(state);
   if (page === 'docs') {
     ui.docs = docsPage(state.route.params.s,
-      state.site.data.packages, state.site.status.packages);
+      state.site.data.packages, state.site.status.packages,
+      state.bench.validate, state.benchStatus.validate);
   }
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
 
@@ -302,7 +341,7 @@ const ideModel = memo1((name, names, shared) => ({
   names: names.map((n) => ({ name: n })),
 }));
 
-const docsPage = memo1((param, census, status) => {
+const docsPage = memo1((param, census, status, validateRun, validateStatus) => {
   const current = param ?? DOCS_SECTIONS[0].id;
   const section = DOCS_SECTIONS.find((s) => s.id === current) ?? DOCS_SECTIONS[0];
   return {
@@ -312,10 +351,34 @@ const docsPage = memo1((param, census, status) => {
       active: s.id === section.id,
       href: `#/docs?s=${s.id}`,
     })),
-    section: { title: section.title, blocks: section.blocks },
+    section: {
+      title: section.title,
+      blocks: section.blocks.map((b) => (b.kind === 'measured'
+        ? measuredBlock(validateRun, validateStatus)
+        : b)),
+    },
     ...readmeRail(census, status),
   };
 });
+
+/**
+ * A docs block declared `measured` is filled from the generated
+ * benchmark run instead of being authored: the draft-support section
+ * shows the official-suite scorecard through the SAME builder the
+ * benchmarks page uses, so the two pages cannot print two scores for
+ * one run. Until the run lands the section says what it is waiting for.
+ * @param {any} run - The generated validate suite, or undefined.
+ * @param {string | undefined} status
+ */
+function measuredBlock(run, status) {
+  if (run === undefined) {
+    return status === 'error'
+      ? callout('Measured results unavailable',
+        'The JSON Schema benchmark data could not be loaded. Generate it with: npm run benchmark:generate')
+      : callout('Loading…', 'Fetching the measured official-suite results.');
+  }
+  return draftConformanceTable(run.summary?.engineStats);
+}
 
 /**
  * The README rail: one button per PUBLISHED workspace, from the census

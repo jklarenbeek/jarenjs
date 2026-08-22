@@ -29,12 +29,23 @@ npm run deploy               # benchmark:generate + build + gh-pages publish
 | View | `src/views/` | one JSLT envelope; pages are **modes**, dispatched via `$.ui.<page>` nodes that only exist for the active route |
 | Derivations | `src/app/viewmodel.js` | the APP-FORMAT §5.2 boundary: nav, benchmark render-nodes, the play view model, localized errors |
 | Boundaries | `src/boundaries/` | the validator, the play seams, the shared transform runners, benchmark JSON → kind-tagged render nodes, WebMCP |
-| Generic UI | `src/views/ui.js` | one rule per node kind (`cards`/`table`/`callout`/`code`/`error`/`details`/`search`/`more`) renders every data-driven section |
+| Generic UI | `src/views/ui.js` | one rule per node kind (`callout`/`card`/`cards`/`chart`/`code`/`details`/`error`/`more`/`p`/`row`/`search`/`table`) renders every data-driven section |
 | Reactivity | `src/app/createSiteApp.js` | one subscriber on the transition **changed-path feed** re-runs the play engine and the Project IDE — debounced, driven by data |
 | Generated site data | `scripts/generate-site-data.js`, `scripts/generate-build-info.js` | the package census and the build provenance, written into `public/` at build time and fetched by the `fetch-site` effect; both derive their timestamp from the HEAD commit, so a rebuild of one revision is byte-identical |
 | Styling | `src/styles.css` | hand-rolled CSS, light + dark |
 
-Tests live in `test/website/` at the repository root (`npm run test:website`) and drive the complete site headless — routing, the play surface, the IDE round-trip, WebMCP tool execution, benchmark search against the real generated data, SSR — on the same DOM stub the view package uses. Production build: `npm run build` (Vite, no plugins); ~39 kB gzipped site chunk (including all example and docs content) + ~67 kB for the entire Jaren suite.
+Tests live in `test/website/` at the repository root (`npm run test:website`) and drive the complete site headless — routing, the play surface, the IDE round-trip, WebMCP tool execution, benchmark search against the real generated data, SSR — on the same DOM stub the view package uses.
+
+Production build: `npm run build` (Vite, no plugins), two chunks. `jaren-*.js` is exactly the twelve packages `vite.config.js` names — core, json, validate, formats, refs, forms, locales, view, app, md, mermaid, calc — and NOT "the whole suite": the seven the site also depends on (ai, charts, contract, flow, josl, play, studio) are unlisted, so they land in `index-*.js` beside the site's own source. The sqlite worker is a lazy chunk of its own and is in neither. Measure, never estimate:
+
+```bash
+npm run build
+gzip -c dist/assets/index-*.js  | wc -c   # 217,969 — the site + its unchunked packages
+gzip -c dist/assets/jaren-*.js  | wc -c   # 204,351 — the twelve chunked packages
+gzip -c dist/assets/index-*.css | wc -c   #  12,239
+```
+
+Those three figures are the output of those three lines on the commit that last touched this file; a change to the bundle re-runs them rather than adjusting them.
 
 ## Browser tests
 
