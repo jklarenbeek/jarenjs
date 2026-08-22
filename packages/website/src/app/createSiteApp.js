@@ -41,7 +41,7 @@ import {
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
-import { openSiteClient } from '../boundaries/site.js';
+import { openSiteClient, siteContract } from '../boundaries/site.js';
 import { rawPath } from '../boundaries/markdown.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
@@ -260,6 +260,26 @@ export function createSiteApp(env) {
         requestedSite.delete(props.name);
         dispatch('site/status', { name: props.name, status: 'error' });
       });
+    },
+    // the docs page shows the site's own contract: its revision is a
+    // digest over canonical bytes, so it cannot be derived synchronously
+    // — it is computed once and stored beside the fetched site data,
+    // together with the capabilities the RUNNING client publishes, so
+    // the page describes the binding it is actually on
+    'site-contract': (_props, dispatch) => {
+      if (requestedSite.has('contract')) return;
+      requestedSite.add('contract');
+      dispatch('site/status', { name: 'contract', status: 'loading' });
+      siteContract.revision().then(
+        (revision) => dispatch('site/loaded', {
+          name: 'contract',
+          data: { revision, capabilities: { ...site.capabilities } },
+        }),
+        (error) => {
+          requestedSite.delete('contract');
+          report(/** @type {Error} */ (error));
+          dispatch('site/status', { name: 'contract', status: 'error' });
+        });
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
     // the README dialog locks the page scroll behind it; headless

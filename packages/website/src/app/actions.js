@@ -29,7 +29,8 @@ const CENSUS_PAGE = { $or: [
   { $eq: ['$payload.page', 'home'] },
 ] };
 
-/** The docs page: its draft-support scorecard is the validate run. */
+/** The docs page: its draft-support scorecard is the validate run, and
+ * its contract section is the site's own compiled document. */
 const DOCS_PAGE = { $eq: ['$payload.page', 'docs'] };
 
 export const ACTIONS = {
@@ -60,6 +61,9 @@ export const ACTIONS = {
       // the docs draft-support section publishes the official-suite
       // scorecard, derived from the run itself rather than transcribed
       { $if: [DOCS_PAGE, { run: 'fetch-bench', with: { name: 'validate' } }] },
+      // and the contract section renders the site's own compiled
+      // document, whose revision is a digest the page must await
+      { $if: [DOCS_PAGE, { run: 'site-contract' }] },
       {
         $if: [
           {

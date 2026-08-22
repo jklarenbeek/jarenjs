@@ -1,0 +1,16 @@
+# The identity of site.contract.json, pinned.
+#
+# One payload line: <revision> <class>.
+#
+#   revision  the SHA-256, lowercase hex, over the RFC 8785 canonical
+#             bytes of the document's PUBLIC projection. It moves when a
+#             member a reader can observe moves, and only then.
+#   class     how the change that produced this revision compares to the
+#             one before it, by @jarenjs/contract's published rule table:
+#             initial | neutral | additive | breaking | unknown.
+#
+# This file is a pin, not a cache: the website test suite recomputes both
+# values and refuses a document edited without them. The update procedure
+# is written down where the refusal is raised — test/website/site-contract.test.js.
+
+b2e617f55311d5dbc309a8d34ebd5ae57651d8dc1f53cf6240a337ded2713ea9 initial

@@ -22,6 +22,7 @@ import { PROJECT_TEMPLATE_CARDS } from '../content/projectTemplates.js';
 import { playComponent } from '../boundaries/play.js';
 import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
+import { siteContractNodes } from '../boundaries/site.js';
 import { formatRatio, memo1 } from '../lib/format.js';
 import { callout } from '../lib/nodes.js';
 
@@ -155,7 +156,8 @@ export function viewModel(state) {
   if (page === 'docs') {
     ui.docs = docsPage(state.route.params.s,
       state.site.data.packages, state.site.status.packages,
-      state.bench.validate, state.benchStatus.validate);
+      state.bench.validate, state.benchStatus.validate,
+      state.site.data.contract, state.site.status.contract);
   }
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
 
@@ -341,7 +343,7 @@ const ideModel = memo1((name, names, shared) => ({
   names: names.map((n) => ({ name: n })),
 }));
 
-const docsPage = memo1((param, census, status, validateRun, validateStatus) => {
+const docsPage = memo1((param, census, status, validateRun, validateStatus, contractInfo, contractStatus) => {
   const current = param ?? DOCS_SECTIONS[0].id;
   const section = DOCS_SECTIONS.find((s) => s.id === current) ?? DOCS_SECTIONS[0];
   return {
@@ -353,9 +355,14 @@ const docsPage = memo1((param, census, status, validateRun, validateStatus) => {
     })),
     section: {
       title: section.title,
-      blocks: section.blocks.map((b) => (b.kind === 'measured'
-        ? measuredBlock(validateRun, validateStatus)
-        : b)),
+      // a marker block is replaced by nodes derived from something the
+      // repository measured or the site itself runs on; `flatMap`
+      // because such a block can expand into a whole subsection
+      blocks: section.blocks.flatMap((b) => {
+        if (b.kind === 'measured') return measuredBlock(validateRun, validateStatus);
+        if (b.kind === 'site-contract') return siteContractNodes(contractInfo, contractStatus);
+        return b;
+      }),
     },
     ...readmeRail(census, status),
   };

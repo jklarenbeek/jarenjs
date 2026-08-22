@@ -1,6 +1,6 @@
 # @jarenjs/website
 
-The jarenjs website — **the site is one JSON app document** running on [`@jarenjs/app`](../app) and [`@jarenjs/view`](../view). No React, no framework: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, navigation is plain hash links feeding one subscription, and the play validator's generated form renders through the standard forms stylesheet. The site is its own best demo: everything it claims about the suite, it does with the suite — its own data plane included, since every read of site-owned data resolves through a compiled `$contract` document on [`@jarenjs/contract`](../contract)'s local binding.
+The jarenjs website — **the site is one JSON app document** running on [`@jarenjs/app`](../app) and [`@jarenjs/view`](../view). No React, no framework: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, navigation is plain hash links feeding one subscription, and the play validator's generated form renders through the standard forms stylesheet. The site is its own best demo: everything it claims about the suite, it does with the suite — its own data plane included, since every read of site-owned data resolves through a compiled `$contract` document on [`@jarenjs/contract`](../contract)'s local binding — the same document the build's generators validate their output against, whose revision the docs page prints, and whose `describe()` and OpenAPI/TypeScript projections it renders live.
 
 ```bash
 npm run dev                  # in this package
@@ -33,6 +33,8 @@ npm run deploy               # benchmark:generate + build + gh-pages publish
 | Reactivity | `src/app/createSiteApp.js` | one subscriber on the transition **changed-path feed** re-runs the play engine and the Project IDE — debounced, driven by data |
 | Generated site data | `scripts/generate-site-data.js`, `scripts/generate-build-info.js` | the package census and the build provenance, written into `public/` at build time and fetched by the `fetch-site` effect; both derive their timestamp from the HEAD commit, so a rebuild of one revision is byte-identical |
 | The site's data plane | `src/contracts/site.contract.json`, `src/boundaries/site.js` | every read of site-owned data — the census, the build provenance, the benchmark meta and suites, the repository documents the dialog renders — resolves through one compiled `$contract` on [`@jarenjs/contract`](../contract)'s local binding with output validation on, so an artifact that drifts from the shape the page declares for it settles as a typed refusal instead of a wrong render |
+| The same grammar at build time | `scripts/lib/site-contract.js` | the generators compile that same document and prove each payload against the output schema of the operation the site reads it through, before the file is written: a shape the browser would refuse never reaches disk, and the run aborts naming the `JC` code, the contract member and every failing path |
+| The document's identity | `src/contracts/site.contract.revision` | one line, `<revision> <class>` — the SHA-256 over the public projection's canonical bytes, and how the change that produced it compares to the one before it. The website suite recomputes both and refuses a document edited without them, so moving the shape of the site's own data plane is a decision, not a diff nobody saw |
 | Styling | `src/styles.css` | hand-rolled CSS, light + dark |
 
 Tests live in `test/website/` at the repository root (`npm run test:website`) and drive the complete site headless — routing, the play surface, the IDE round-trip, WebMCP tool execution, benchmark search against the real generated data, SSR — on the same DOM stub the view package uses.
@@ -41,7 +43,7 @@ Production build: `npm run build` (Vite, no plugins), two chunks. `jaren-*.js` i
 
 ```bash
 npm run build
-gzip -c dist/assets/index-*.js  | wc -c   # 217,969 — the site + its unchunked packages
+gzip -c dist/assets/index-*.js  | wc -c   # 222,027 — the site + its unchunked packages
 gzip -c dist/assets/jaren-*.js  | wc -c   # 204,351 — the twelve chunked packages
 gzip -c dist/assets/index-*.css | wc -c   #  12,239
 ```

@@ -17,6 +17,11 @@
  * diffed and cannot be cached. A checkout without git carries no
  * revision to name and says so with nulls rather than stamping a wall
  * clock that would break that property.
+ *
+ * Nothing is written that the site could not read: the emit path proves
+ * the census against the output schema of the `site.packages` operation
+ * — the same compiled document the browser reads it through — and
+ * refuses rather than shipping a shape a reader would have to discover.
  */
 
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
@@ -24,6 +29,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { headCommit } from './lib/git.js';
+import { assertSiteOutput } from './lib/site-contract.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const OUT = join(ROOT, 'packages/website/public/site/packages.json');
@@ -70,13 +76,31 @@ export function buildSiteData() {
   return { generated: committed, commit, packages };
 }
 
-/** Serialize the census exactly as the CLI writes it. */
-export const serializeSiteData = (census) => `${JSON.stringify(census, null, 2)}\n`;
+/**
+ * Serialize the census exactly as the CLI writes it — the emit path, so
+ * the contract check cannot be bypassed by a caller that only wanted the
+ * bytes.
+ * @param {SiteCensus} census
+ * @returns {string}
+ * @throws {Error} when the census does not match what `site.packages` declares.
+ */
+export function serializeSiteData(census) {
+  assertSiteOutput('site.packages', census, 'packages/website/public/site/packages.json');
+  return `${JSON.stringify(census, null, 2)}\n`;
+}
 
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const census = buildSiteData();
+  let text;
+  try {
+    text = serializeSiteData(census);
+  }
+  catch (error) {
+    console.error(/** @type {Error} */ (error).message);
+    process.exit(1);
+  }
   mkdirSync(dirname(OUT), { recursive: true });
-  writeFileSync(OUT, serializeSiteData(census));
+  writeFileSync(OUT, text);
   console.log(`site/packages.json: ${census.packages.length} published workspaces`
     + ` @ ${census.commit === null ? '(no git)' : census.commit.slice(0, 7)}`);
 }

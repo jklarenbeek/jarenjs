@@ -27,6 +27,11 @@
  * commit AND the working tree matches it. A dirty tree ships code that
  * is in the bundle but not in the revision the bundle names, and there
  * is no rebuilding that from the commit alone.
+ *
+ * The emit path proves the record against the output schema of the
+ * `site.build` operation before it is written — the same compiled
+ * document the footer reads it through — so the shape the build writes
+ * and the shape the page declares cannot part company.
  */
 
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
@@ -34,6 +39,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { headCommit, isDirty } from './lib/git.js';
+import { assertSiteOutput } from './lib/site-contract.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const OUT = join(ROOT, 'packages/website/public/build.json');
@@ -70,10 +76,31 @@ export function buildInfo() {
   };
 }
 
+/**
+ * Serialize the provenance exactly as the CLI writes it — the emit path,
+ * so the contract check cannot be bypassed by a caller that only wanted
+ * the bytes.
+ * @param {BuildInfo} info
+ * @returns {string}
+ * @throws {Error} when the record does not match what `site.build` declares.
+ */
+export function serializeBuildInfo(info) {
+  assertSiteOutput('site.build', info, 'packages/website/public/build.json');
+  return `${JSON.stringify(info, null, 2)}\n`;
+}
+
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const info = buildInfo();
+  let text;
+  try {
+    text = serializeBuildInfo(info);
+  }
+  catch (error) {
+    console.error(/** @type {Error} */ (error).message);
+    process.exit(1);
+  }
   mkdirSync(dirname(OUT), { recursive: true });
-  writeFileSync(OUT, `${JSON.stringify(info, null, 2)}\n`);
+  writeFileSync(OUT, text);
   console.log(`build.json: ${info.version} @ ${info.commit === null ? '(no git)' : info.commit.slice(0, 7)}`
     + ` on ${info.node}${info.reproducible ? '' : ' (not reproducible: dirty tree or no git)'}`);
 }

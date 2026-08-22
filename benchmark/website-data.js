@@ -32,6 +32,13 @@
  *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
  *   meta.json                           — run metadata, conformance summary, QT3 scorecard
  *
+ * meta.json is the one file here whose shape the website declares: it is
+ * written through `serializeMeta`, which proves the assembled record
+ * against the output schema of the site contract's `bench.meta`
+ * operation before anything reaches disk. The per-suite payloads are
+ * genuinely heterogeneous and the contract types them open, so they are
+ * written as they are assembled.
+ *
  * Usage:
  *   node benchmark/website-data.js                # full run (validator: 1000 iterations)
  *   node benchmark/website-data.js --quick        # fast smoke run (low iterations)
@@ -48,6 +55,7 @@ import { fileURLToPath } from 'url';
 import { Float64, geoMean } from '@jarenjs/core/math';
 
 import { geoMeanRatio } from './derive.js';
+import { assertSiteOutput } from '../scripts/lib/site-contract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -146,10 +154,30 @@ function previousSuite(name) {
 }
 
 function writeJson(name, data) {
+  writeText(name, JSON.stringify(data));
+}
+
+/** Write one already-serialized data file and report its size. */
+function writeText(name, text) {
   const filepath = path.join(OUT_DIR, name);
-  fs.writeFileSync(filepath, JSON.stringify(data));
+  fs.writeFileSync(filepath, text);
   const kb = (fs.statSync(filepath).size / 1024).toFixed(1);
   console.log(`  -> ${path.relative(ROOT, filepath)} (${kb} kB)`);
+}
+
+/**
+ * The assembled overview record, proven against the shape the website
+ * reads it through, then serialized. The generator and the browser
+ * declare that shape in ONE document, so a member added, renamed or
+ * retyped here has to land with the contract change or it never gets
+ * written.
+ * @param {any} meta
+ * @returns {string}
+ * @throws {Error} naming the JC code and every failing path.
+ */
+function serializeMeta(meta) {
+  assertSiteOutput('bench.meta', meta, 'packages/website/public/benchmarks/meta.json');
+  return JSON.stringify(meta);
 }
 
 /** Round to 4 significant digits — enough for any display, half the bytes. */
@@ -1562,7 +1590,7 @@ async function main() {
   }
   meta.headlines = headlines
     .sort((a, b) => SUITE_ORDER.indexOf(a.key) - SUITE_ORDER.indexOf(b.key));
-  writeJson('meta.json', meta);
+  writeText('meta.json', serializeMeta(meta));
 
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\nDone in ${((Date.now() - started) / 1000).toFixed(1)}s.`);
@@ -1572,7 +1600,7 @@ async function main() {
 
 // The pure assembly steps are exported for the drift tests; running the
 // file runs the generator.
-export { parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance, SUITE_ORDER };
+export { parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance, serializeMeta, SUITE_ORDER };
 
 if (process.argv[1] !== undefined
   && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

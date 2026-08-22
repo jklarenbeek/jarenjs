@@ -13,16 +13,29 @@
  * typed `contract`-kind refusal rather than reaching a render. The
  * binding's honest capability set is asserted beside it, because a
  * downgrade the site did not notice would quietly turn that alarm off.
+ *
+ * The same document binds the OTHER end: the generators that write those
+ * artifacts prove their payloads against it before anything reaches
+ * disk, and the document's own identity — its revision and the class of
+ * the last change to it — is pinned beside it, so the shape cannot move
+ * without someone deciding that it should.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 import { compileContract } from '@jarenjs/contract';
+import { diffContracts } from '@jarenjs/contract/diff';
+import { publicProjection } from '@jarenjs/contract/project';
 import {
-  siteContract, openSiteClient, createSiteHandlers, unwrap,
+  siteContract, openSiteClient, createSiteHandlers, unwrap, siteContractNodes,
 } from '../../packages/website/src/boundaries/site.js';
+import { serializeSiteData } from '../../scripts/generate-site-data.js';
+import { serializeBuildInfo } from '../../scripts/generate-build-info.js';
+import { serializeMeta } from '../../benchmark/website-data.js';
+import { git } from '../../scripts/lib/git.js';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, serialize } from '../view/dom.stub.js';
@@ -43,6 +56,26 @@ const ARTIFACTS = {
   build: read('public/build.json'),
   meta: read('public/benchmarks/meta.json'),
 };
+
+const ROOT = new URL('../../', import.meta.url);
+
+/**
+ * Run one expression in a fresh Node process from the repository root:
+ * the emit-path refusals are only worth having if they are FATAL, and
+ * that is a claim about an exit code, not about a thrown value.
+ * @param {string} expression
+ */
+function spawnNode(expression) {
+  try {
+    execFileSync(process.execPath, ['--input-type=module', '-e', expression],
+      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { status: 0, stderr: '' };
+  }
+  catch (error) {
+    const e = /** @type {any} */ (error);
+    return { status: e.status, stderr: String(e.stderr ?? '') };
+  }
+}
 
 /** A client over the committed artifacts plus one fixture document. */
 function openFixtureClient(overrides = {}) {
@@ -260,7 +293,7 @@ describe('the site running on its own contract', function () {
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   /** The whole site headless, over a census this run decides. */
-  function mount(census) {
+  function mount(census, hash = '#/docs') {
     const { document, container } = createStubHost();
     const faults = [];
     /** @type {any} */
@@ -274,7 +307,7 @@ describe('the site running on its own contract', function () {
         ? Promise.resolve(ARTIFACTS.meta)
         : Promise.reject(new Error('404'))),
       fetchSite: (name) => Promise.resolve(name === 'packages' ? census : ARTIFACTS.build),
-      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/docs')); },
+      listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
       navigate: (h) => routeCb(parseHash(h)),
       onError: (error) => faults.push(error),
     });
@@ -286,6 +319,24 @@ describe('the site running on its own contract', function () {
     await tick();
     assert.match(serialize(container), /@jarenjs\/contract/, 'the census reached the rail');
     assert.deepStrictEqual(faults, []);
+  });
+
+  it('puts the live document on the docs page — the operations, the revision, both projections', async function () {
+    const { container, faults } = mount(ARTIFACTS.packages, '#/docs?s=contract');
+    await tick();
+    const html = serialize(container);
+    const revision = await siteContract.revision();
+    assert.match(revision, /^[0-9a-f]{64}$/);
+    assert.ok(html.includes(revision),
+      'the revision the page shows is the one the running contract computes');
+    for (const id of IDS) {
+      assert.ok(html.includes(id), `the operations table names ${id}`);
+    }
+    assert.ok(html.includes('The OpenAPI 3.1 projection of this document'));
+    assert.ok(html.includes('The TypeScript declarations of this document'));
+    assert.ok(html.includes('&quot;openapi&quot;: &quot;3.1.0&quot;')
+      || html.includes('"openapi": "3.1.0"'), 'the projection is the document, rendered');
+    assert.deepStrictEqual(faults, [], 'showing the contract is not a fetch and cannot fail');
   });
 
   it('shows the unavailable state — and reports the JC code — when the census drifts', async function () {
@@ -305,5 +356,197 @@ describe('the site running on its own contract', function () {
     assert.notStrictEqual(reported, undefined, 'the coded refusal is reported');
     assert.match(reported.message, /site\/packages/, 'the report names what could not be read');
     assert.ok(faults.length >= 2, 'and the cause behind it is not swallowed');
+  });
+});
+
+describe('the generators write nothing the site could not read', function () {
+  /** A census the site would refuse: an entry that lost its version. */
+  const brokenCensus = {
+    ...ARTIFACTS.packages,
+    packages: ARTIFACTS.packages.packages.map(({ version: _version, ...rest }) => rest),
+  };
+
+  it('refuses a census whose shape the census operation does not declare', function () {
+    assert.strictEqual(serializeSiteData(ARTIFACTS.packages),
+      `${JSON.stringify(ARTIFACTS.packages, null, 2)}\n`,
+      'the artifact this repository ships passes its own gate');
+    assert.throws(() => serializeSiteData(brokenCensus), (/** @type {Error} */ error) => {
+      assert.match(error.message, /^JC2010: /,
+        'the refusal names the code the contract pipeline raises for exactly this fault');
+      assert.match(error.message, /site\.packages/);
+      assert.match(error.message, /site\.contract\.json\/operations\/site\.packages\/output/,
+        'and the member of the document that refused it');
+      assert.match(error.message, /\/packages\/0 — required/, 'and where in the payload');
+      return true;
+    });
+  });
+
+  it('refuses build provenance the footer\'s operation does not declare', function () {
+    assert.ok(serializeBuildInfo(ARTIFACTS.build).endsWith('\n'));
+    const { reproducible: _reproducible, ...missing } = ARTIFACTS.build;
+    assert.throws(() => serializeBuildInfo(missing), /JC2010: .*site\.build/);
+    assert.throws(() => serializeBuildInfo({ ...ARTIFACTS.build, reproducible: 'yes' }),
+      /JC2010: .*site\.build/, 'a retyped member is a drift too, not a detail');
+  });
+
+  it('refuses a benchmark overview the site\'s reader would refuse', function () {
+    assert.strictEqual(serializeMeta(ARTIFACTS.meta), JSON.stringify(ARTIFACTS.meta));
+    // the exact regression the per-row provenance exists to prevent: a
+    // headline row that carries no account of the run that measured it
+    const stripped = {
+      ...ARTIFACTS.meta,
+      headlines: ARTIFACTS.meta.headlines.map(({ generated: _generated, ...rest }) => rest),
+    };
+    assert.throws(() => serializeMeta(stripped), /JC2010: .*bench\.meta/);
+    assert.throws(() => serializeMeta({ ...ARTIFACTS.meta, extra: true }),
+      /JC2010: .*bench\.meta/, 'the document is closed: an undeclared member never ships');
+  });
+
+  it('makes the refusal fatal — a broken payload aborts the run non-zero', function () {
+    const result = spawnNode(
+      "import('./scripts/generate-site-data.js')"
+      + '.then((m) => m.serializeSiteData({ generated: null, commit: null, packages: [{}] }))');
+    assert.strictEqual(result.status, 1, 'the write is abandoned, not warned about');
+    assert.match(result.stderr, /JC2010/);
+  });
+});
+
+describe('the site contract\'s pinned identity', function () {
+  /**
+   * The pin: one payload line, `<revision> <class>`. Everything above it
+   * is comment.
+   *
+   * TO UPDATE, after deliberately changing site.contract.json:
+   *   1. run `npm run test:website` — the refusals below print both the
+   *      computed revision and the computed change class;
+   *   2. paste them onto the payload line, in the same commit as the
+   *      document change;
+   *   3. if the class is `breaking`, the generators and the browser have
+   *      to ship together: every member of this document runs
+   *      `additionalProperties: false`, so an artifact written by an old
+   *      generator is refused by a new page and the reverse.
+   * The pin is not a cache — nothing reads it at runtime. It exists so
+   * that moving the shape of the site's own data plane is a decision
+   * somebody made rather than a diff nobody saw.
+   */
+  const PIN = new URL('../../packages/website/src/contracts/site.contract.revision', import.meta.url);
+  const CLASSES = ['initial', 'neutral', 'additive', 'breaking', 'unknown'];
+
+  /** The pin's payload line, split. */
+  function pinned() {
+    const lines = readFileSync(PIN, 'utf8').split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '' && !l.startsWith('#'));
+    assert.strictEqual(lines.length, 1, 'the pin carries exactly one payload line');
+    const [revision, changeClass, ...rest] = lines[0].split(/\s+/);
+    assert.deepStrictEqual(rest, [], 'the payload line is <revision> <class> and nothing else');
+    return { revision, changeClass };
+  }
+
+  /**
+   * The class of a diff, worst first — the word the pin must carry.
+   * @param {any} diff
+   */
+  function classOf(diff) {
+    if (diff.breaking.length > 0) return 'breaking';
+    if (diff.unknown.length > 0) return 'unknown';
+    if (diff.additive.length > 0) return 'additive';
+    if (diff.neutral.length > 0) return 'neutral';
+    return 'unchanged';
+  }
+
+  it('pins the revision the compiled document actually has', async function () {
+    const { revision } = pinned();
+    assert.match(revision, /^[0-9a-f]{64}$/, 'a revision is 64 lowercase hex characters');
+    assert.strictEqual(revision, await siteContract.revision(),
+      'the document moved without its pin: paste the revision above onto the pin\'s payload line');
+  });
+
+  it('states the class of the change that produced it', function () {
+    const { changeClass } = pinned();
+    assert.ok(CLASSES.includes(changeClass),
+      `the class is one of ${CLASSES.join(' | ')}, got '${changeClass}'`);
+  });
+
+  it('agrees with what changed since the last committed document', function () {
+    const head = git('show', `HEAD:${'packages/website/src/contracts/site.contract.json'}`);
+    if (head === null) {
+      // a tarball, a shallow checkout, or the document is new: there is
+      // no previous side to diff against, and inventing one would be a
+      // worse answer than saying so
+      return;
+    }
+    const diff = diffContracts(
+      publicProjection(compileContract(JSON.parse(head))),
+      publicProjection(siteContract));
+    const computed = classOf(diff);
+    if (computed === 'unchanged') return;
+    assert.strictEqual(pinned().changeClass, computed,
+      `the working document differs from HEAD as '${computed}' — say so on the pin's payload line`);
+  });
+});
+
+describe('the docs page shows the document it runs on', function () {
+  const CAPABILITIES = {
+    name: 'local', status: false, headers: false, media: false, etag: false,
+    idempotency: false, validatedOutput: true, stream: false, cancel: 'signal',
+  };
+
+  it('renders the operations table, the revision and both projections from the live document', async function () {
+    const revision = await siteContract.revision();
+    const nodes = siteContractNodes({ revision, capabilities: CAPABILITIES }, 'ready');
+    const table = nodes.find((n) => n.kind === 'table');
+    assert.deepStrictEqual(table.head,
+      ['operation', 'kind', 'canonical binding', 'input members', 'declared errors']);
+    assert.deepStrictEqual(table.rows.map((/** @type {any} */ r) => r.cells[0]), IDS,
+      'every operation of the running contract is in the table, in document order');
+    for (const row of table.rows) {
+      assert.strictEqual(row.cells[1], 'read');
+      assert.strictEqual(row.cells[4], 'unavailable');
+    }
+    const hex = nodes.find((n) => n.kind === 'code' && n.title === 'revision()');
+    assert.match(hex.text, /^[0-9a-f]{64}$/, 'the revision renders in full, not truncated');
+    assert.strictEqual(hex.text, revision);
+
+    const summaries = nodes.filter((n) => n.kind === 'details').map((n) => n.summary);
+    assert.deepStrictEqual(summaries, [
+      'The OpenAPI 3.1 projection of this document',
+      'The TypeScript declarations of this document',
+    ]);
+    const [openapi, types] = nodes.filter((n) => n.kind === 'details');
+    const document = JSON.parse(openapi.items[0].text);
+    assert.strictEqual(document.openapi, '3.1.0');
+    assert.strictEqual(document.info.title, 'jaren-site');
+    assert.ok(types.items[0].text.includes('jaren-site'),
+      'the TypeScript projection is the site\'s own contract, not a sample');
+  });
+
+  it('states the capabilities the RUNNING client publishes, not a written-down copy', async function () {
+    const { capabilities } = openSiteClient({});
+    assert.deepStrictEqual({ ...capabilities }, CAPABILITIES,
+      'the docs copy is derived from this object; a binding change must move both');
+    const nodes = siteContractNodes(
+      { revision: await siteContract.revision(), capabilities }, 'ready');
+    const [operations, binding, validation] = nodes.find((n) => n.kind === 'cards').items;
+    assert.strictEqual(operations.value, String(IDS.length));
+    assert.strictEqual(operations.note, 'every one a read');
+    assert.strictEqual(binding.value, 'local');
+    assert.strictEqual(validation.value, 'on');
+    const honest = nodes.find((n) => n.kind === 'callout'
+      && n.title === 'Honestly reduced, not quietly degraded');
+    for (const word of ['status codes', 'headers', 'non-JSON media', 'etags',
+      'idempotency keys', 'streams']) {
+      assert.ok(honest.text.includes(word), `the copy names the ${word} it cannot carry`);
+    }
+  });
+
+  it('says what it is waiting for before the digest settles, and never a wrong hex', function () {
+    for (const [status, title] of [[undefined, 'Computing the revision…'], ['loading', 'Computing the revision…'], ['error', 'Revision unavailable']]) {
+      const nodes = siteContractNodes(undefined, status);
+      assert.strictEqual(nodes.find((n) => n.kind === 'callout').title, title);
+      assert.strictEqual(nodes.find((n) => n.kind === 'code' && n.title === 'revision()'), undefined);
+      assert.ok(nodes.some((n) => n.kind === 'table'),
+        'the document-derived half needs no digest and renders anyway');
+    }
   });
 });

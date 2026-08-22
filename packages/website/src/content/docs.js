@@ -340,6 +340,9 @@ export const DOCS_SECTIONS = [
         { kind: 'row', cells: ['stream (subscribe)', 'SSE, resumable', 'no', 'push frames'] },
       ] },
       p('Everything a consumer wants beside the runtime is a projection of the same compiled document: a browser-safe public subset (itself a valid $contract), OpenAPI 3.1 (validated against the official meta-schema), TypeScript declarations with a typed operation map, Markdown reference docs and AI tool definitions — with a jaren-contract CLI whose --check fails CI the moment an artifact drifts. The contract knows its own identity: revision() is the SHA-256 of the canonical public projection, served at /.well-known/jaren-contract, and diffContracts classifies what changed between two versions as breaking, additive, neutral or honestly unknown, by a published rule table.'),
+      // the docs page renders the site's OWN compiled contract here —
+      // describe(), its revision and its projections, live
+      { kind: 'site-contract' },
       p('What it is not, said plainly: not a server framework (bring your own http server or any framework via the adapters), no authentication or authorization, no transport encryption, no replay protection beyond idempotency keys, and bytes are not JSON — a non-JSON media operation is routed and matched but its body crosses opaque. The measured cost per request is published beside Fastify’s on the Benchmarks page, losses included.'),
       {
         kind: 'callout',
