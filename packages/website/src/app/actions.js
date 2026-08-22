@@ -23,19 +23,13 @@ const MEASURED_PAGE = { $or: [
   { $eq: ['$payload.page', 'home'] },
 ] };
 
-/** The pages that render the package census and the workspaces' own
- * site content — the docs rail and its package sections, the engine
- * cards a package writes for itself. */
-const CENSUS_PAGE = { $or: [
-  { $eq: ['$payload.page', 'docs'] },
-  { $eq: ['$payload.page', 'home'] },
-] };
-
-/** The docs page: its draft-support scorecard is the validate run, and
- * its contract section is the site's own compiled document. */
+/** The docs page: it renders the package census in its rail, every
+ * workspace's own documentation section beside it, a draft-support
+ * scorecard from the validate run, and the site's own compiled document. */
 const DOCS_PAGE = { $eq: ['$payload.page', 'docs'] };
 
-/** The home page: its hero dispatches a real contract operation. */
+/** The home page: it draws its engine grid from the cards half of the
+ * site content, and its hero dispatches a real contract operation. */
 const HOME_PAGE = { $eq: ['$payload.page', 'home'] };
 
 /** The starting input a hero pick names, of the two the state carries.
@@ -75,8 +69,13 @@ export const ACTIONS = {
       // the footer prints the build's provenance on every page, so the
       // reader lands on a page that can already say what produced it
       { run: 'fetch-site', with: { name: 'build' } },
-      { $if: [CENSUS_PAGE, { run: 'fetch-site', with: { name: 'packages' } }] },
-      { $if: [CENSUS_PAGE, { run: 'fetch-site', with: { name: 'content' } }] },
+      { $if: [DOCS_PAGE, { run: 'fetch-site', with: { name: 'packages' } }] },
+      // the documentation bodies are most of what the workspaces publish
+      // about themselves, and only this page renders them; the home grid
+      // reads the same entries WITHOUT them, an artifact an order of
+      // magnitude smaller
+      { $if: [DOCS_PAGE, { run: 'fetch-site', with: { name: 'content' } }] },
+      { $if: [HOME_PAGE, { run: 'fetch-site', with: { name: 'cards' } }] },
       // the home page shows measured headlines on its engine cards, so
       // it needs the same meta.json the benchmarks overview reads
       { $if: [MEASURED_PAGE, { run: 'fetch-bench', with: { name: 'meta' } }] },
@@ -544,6 +543,8 @@ export const ACTIONS = {
     patch: [{ op: 'replace', path: '/data/insertDraft', value: '' }],
     effects: [{ run: 'data-insert', with: { title: '$event.value' } }],
   },
+  // one stored document removed, by the key its own model declares
+  'data/delete': { effects: [{ run: 'data-delete', with: { key: '$payload' } }] },
   'data/migrate': { effects: [{ run: 'data-migrate' }] },
   'data/status': {
     patch: [
@@ -556,6 +557,12 @@ export const ACTIONS = {
   'data/opened': {
     patch: [
       { op: 'replace', path: '/data/status', value: 'ready' },
+      // a reopen may have moved the studio onto another model's first
+      // collection; the boot open stays on the seed model's
+      { op: 'replace', path: '/data/collection',
+        value: { $default: ['$payload.collection', '$.data.collection'] } },
+      { op: 'replace', path: '/data/keyPointer',
+        value: { $default: ['$payload.keyPointer', '$.data.keyPointer'] } },
       { op: 'replace', path: '/data/capture', value: '$payload.capabilities.capture' },
       { op: 'replace', path: '/data/version', value: '$payload.capabilities.version' },
       { op: 'replace', path: '/data/operators',

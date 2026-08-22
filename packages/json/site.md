@@ -203,6 +203,29 @@ const t = jslt.compile([{ match: '$', body: {
 > so the "Registered …" examples run. See JSLT-FORMAT §13 and MODEL-FORMAT
 > §8.1–8.2.
 
+### JTLT text templates
+
+The text sibling of JSLT, and a front-end rather than a second engine:
+`compileJtltStylesheet` desugars a template into an ordinary JSLT stylesheet
+(inspectable as `render.stylesheet`) and serializes what the dispatcher
+produced, so modes, priorities, schema matching and conflict resolution are
+inherited rather than reimplemented. A rule body is a segment list — literal
+text, interpolated query expressions, and `$apply` splices that dispatch into
+other rules.
+
+```json
+[ { "match": "$", "body": ["# Books\n", { "$apply": "$.store.book[*]" }] },
+  { "match": "$.store.book[*]", "body": ["- ", "$.title", " (", "$.price", ")\n"] } ]
+```
+
+The envelope's `output` member picks the serialization method. `text` writes
+every segment raw; `xml` escapes interpolated DATA while literal template
+markup passes through untouched — the XSLT and T4 contract exactly, which is
+what makes one template document able to emit Markdown, XML or SQL DDL from
+schema-matched rules. Unmatched nodes follow XSLT's built-in rules restated
+for JSON: containers apply templates to every child in document order, atoms
+emit their escaped string value.
+
 ### The XQuery front-end
 
 `parseXQuery` reads an XQuery 3.1 text subset and emits a query document — the

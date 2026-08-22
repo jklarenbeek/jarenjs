@@ -316,7 +316,10 @@ must match — mermaid (`components/mermaid/src/theme.js` ↔ the `--mm-*` fallb
   must move together with any accent change.
 - The service worker precaches the app shell, icons, and fonts; **any change to a
   `public/` asset requires bumping the `CACHE` name** in `sw.js` or clients keep the old
-  bytes.
+  bytes. That is a gate, not a thing to remember: `scripts/check-sw-cache.js` compares
+  the changed assets against HEAD's cache name and refuses the deploy that would ship
+  them under it. The generated measurements are exempt — they are served
+  stale-while-revalidate, so a cached copy is replaced rather than kept.
 
 ## 10. Verification method
 

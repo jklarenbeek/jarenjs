@@ -1,7 +1,8 @@
 //@ts-check
 /**
  * @file The site's own data plane: every fetch of site-owned data — the
- * package census, the site content the workspaces own, the build
+ * package census, the site content the workspaces own (whole, or the
+ * cards half a page that shows no documentation needs), the build
  * provenance, the benchmark meta and suite files, and the repository
  * READMEs the docs dialog renders — resolves through one compiled
  * `$contract` document (`../contracts/site.contract.json`) on
@@ -115,6 +116,7 @@ export function createSiteHandlers(env) {
   return {
     'site.packages': (_input, ctx) => json(env.fetchSite, 'packages', ctx),
     'site.content': (_input, ctx) => json(env.fetchSite, 'content', ctx),
+    'site.cards': (_input, ctx) => json(env.fetchSite, 'cards', ctx),
     'site.build': (_input, ctx) => json(env.fetchSite, 'build', ctx),
     'bench.meta': (_input, ctx) => json(env.fetchJson, 'meta', ctx),
     'bench.suite': (input, ctx) => json(env.fetchJson, input.suite, ctx),

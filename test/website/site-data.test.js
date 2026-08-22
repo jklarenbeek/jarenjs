@@ -286,15 +286,15 @@ describe('the collected site content', function () {
     assert.strictEqual(content.packages.length, publicWorkspaces().length);
   });
 
-  it('carries a documentation section for every workspace but the two that chose a card', function () {
-    // a card-only document is a decision the grammar allows, so the ones
-    // that made it are named here: adding a third silently would be the
-    // site quietly losing a section
+  it('carries a documentation section for every published workspace', function () {
+    // a card-only document is a decision the grammar allows, and one no
+    // workspace makes any more; a package that quietly stopped writing a
+    // body would be the site quietly losing a section
     const cardOnly = content.packages
       .filter((/** @type {any} */ e) => e.docs === null)
       .map((/** @type {any} */ e) => e.name);
-    assert.deepStrictEqual(cardOnly, ['@jarenjs/refs', '@jarenjs/locales'],
-      'these two describe themselves on the rail and document themselves in their READMEs');
+    assert.deepStrictEqual(cardOnly, [],
+      'every workspace documents itself on the docs page, in its own words');
   });
 
   it('collects the engine grid from the packages, several from one workspace', function () {

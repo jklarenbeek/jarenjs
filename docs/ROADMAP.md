@@ -840,96 +840,14 @@ rendering, and is a projection *out*, not a CRS system.
 The site is a private workspace, but it is the suite's flagship consumer and its
 open work is repository work like any other.
 
-- [ ] **`bench.suite` publishes an opaque output** — `src/contracts/site.contract.json`
-  declares the per-suite benchmark payload as `true`, because twenty-one suites have
-  twenty-one genuinely different shapes and a pretend schema would be worse than an
-  honest opaque one. Every other operation on that contract validates its output on
-  the read side and on the generator's emit side; this one cannot, so a drifted suite
-  file reaches the page as a wrong render rather than a typed refusal. Tightening it
-  means twenty-one `$defs` and a `$ref` per operation variant — real work, worth doing
-  the next time a suite's shape changes for another reason.
-
-- [ ] **The home page fetches every documentation body to draw the cards** —
-  `public/site/content.json` is one artifact carrying both the engine cards and the
-  twenty-two markdown documentation sections the workspaces commit. The cards are a
-  few hundred bytes; the artifact is ~32 KB gz, and the home page reads all of it.
-  The fix is a second read operation that answers cards only, or fetching the bodies
-  when `#/docs` is reached — either is a change to the site contract and its pin, so
-  it belongs to the next pass that moves that document rather than being smuggled in.
-
-- [ ] **Four workspaces publish less site presence than they could** — the site
-  renders exactly what each workspace's `site.md` declares, so these are now gaps in
-  those packages rather than in the website. `@jarenjs/refs` and `@jarenjs/locales`
-  commit card-only documents (the website never wrote a section for either, and the
-  migration carried the absence across faithfully); JTLT has an engine card and no
-  section of its own, mentioned only inside the JSLT one, though `@jarenjs/json` owns
-  both and could close it with a heading; and `@jarenjs/formats` and `@jarenjs/core`
-  contribute no engine card at all, so the `formats` and `geo` benchmark suites
-  publish measured headlines that no card on the home grid reads. Each is one
-  frontmatter or one heading in the package that owns it.
-
-- [ ] **The service worker's cache name is bumped by hand** — `public/sw.js` holds
-  `CACHE = 'jaren-website-vNN'`, and `docs/DESIGN.md` §9 states the rule in prose:
-  any change to a `public/` asset requires bumping it or clients keep the old bytes.
-  Every other close-out step is now a script with an exit code; this one is still a
-  thing to remember, and the failure it guards against is invisible (a returning
-  reader silently served a stale shell). The honest shape is a gate that compares the
-  cache name against the content of `public/` at HEAD and refuses a deploy that
-  changed an asset without bumping it — the same argument the tracked-measurement
-  guard already makes on the same path.
-
-### The data studio (`#/data`)
-
-Confirmed defects in the site's sqlite-backed studio, each reproduced by reading the
-code that produces it. They sit outside every path the derivation and contract work
-touched, which is why they are recorded rather than fixed in passing.
-
-- [ ] **A real store error is downgraded to a transport refusal, message lost** —
-  `src/db-worker.js`'s `wireError` puts `error.code` straight into the declared `db`
-  failure's `code`, and `data.contract.json` declares that member `["string","null"]`
-  (a `JD` code, or null for an uncoded fault). A `DOMException` carries a **numeric**
-  `code`, so an actual storage fault fails the contract's own output validation and
-  the page shows a `JC2070` shape refusal with the store's message gone — the one
-  case where the message mattered most.
-
-- [ ] **`liveCount` is zeroed under live subscribers** — `open()` and the migration's
-  `finally` block both set `state.liveCount = 0` while registrations are still held.
-  After a re-open the count under-reports forever, and a later release can drive it
-  negative, at which point the `data.lives` output fails validation and the displayed
-  count freezes at its last good value. The count is the studio's only visible
-  evidence that the live layer is working, so a frozen one reads as a healthy one.
-
-- [ ] **A migration that fails still advances the model, and nothing resubscribes** —
-  the `finally` in the migrate path assigns `state.model = args.to` whether or not
-  `migrate()` threw, so a refused migration leaves the worker believing it applied.
-  Independently, no live registration is re-established after any migration, so every
-  live pane on every tab stops updating silently while still showing its last rows.
-
-- [ ] **A client tab can unlink the owner's database without telling it** —
-  `src/boundaries/data.js` sends `data.open` with `reset: true` from the "Recreate
-  store from model" control, which is reachable in a **client** tab; the owner
-  unlinks the OPFS database underneath itself and no message informs the tabs that
-  their store is gone. The control is honest in the owner tab and destructive
-  everywhere else.
-
-- [ ] **A busy owner reads as no owner** — `pingForOwner` treats 600 ms of silence as
-  "no OPFS owner exists". An owner whose event loop is blocked (a large migration, a
-  long query) cannot answer inside the window, so a second tab concludes it may take
-  ownership, fails to install the OPFS VFS that is already held, and silently runs a
-  private in-memory store — a studio that looks live and shares nothing.
-
-- [ ] **`notes` is hardcoded in three effects over an editable model** — the model
-  pane lets a reader rename or add collections, but the seed, the row read and the
-  query/explain effects all name `notes` literally, so editing the model produces a
-  studio that queries a collection the model no longer declares.
-
-- [ ] **Nothing pairs the contract with the handler table it describes** —
-  `test/website/data-contract.test.js` asserts the eleven operation ids against a
-  frozen list, which catches a contract edit but not a worker that stopped serving
-  one of them (the worker is browser-only, so the table has to be exported to be
-  paired). Two of the eleven, `data.put` and `data.delete`, have no caller anywhere
-  in the site: they are either the seam a future editor needs, or declaration that
-  should go.
+- [ ] **The suite shapes ride in the main bundle** — `bench.suite` now declares
+  one closed shape per published suite, which is what turns a drifted suite file
+  into a typed refusal instead of a wrong render. The document is imported by
+  `src/boundaries/site.js` and compiled in the browser, so those shapes are part
+  of the bundle every page loads: about 4 KB gzipped, for a declaration only the
+  benchmarks page reads. The honest fix if that grows is to fetch a suite's shape
+  with the suite, which means a contract that can carry a schema by reference —
+  worth doing when the next suite is added, not before.
 
 ## Benchmarks & tooling
 

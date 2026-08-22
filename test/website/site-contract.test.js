@@ -33,10 +33,13 @@ import {
   siteContract, openSiteClient, createSiteHandlers, unwrap, siteContractNodes,
 } from '../../packages/website/src/boundaries/site.js';
 import {
-  serializeSiteData, serializeSiteContent, buildSiteData, buildSiteContent,
+  serializeSiteData, serializeSiteContent, serializeSiteCards,
+  buildSiteData, buildSiteContent, buildSiteCards,
 } from '../../scripts/generate-site-data.js';
 import { serializeBuildInfo, buildInfo } from '../../scripts/generate-build-info.js';
-import { serializeMeta } from '../../benchmark/website-data.js';
+import { serializeMeta, serializeSuite } from '../../benchmark/website-data.js';
+import { suiteShapeName } from '../../scripts/lib/site-contract.js';
+import { SUITES } from '../../packages/website/src/boundaries/bench.js';
 import { git } from '../../scripts/lib/git.js';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
@@ -47,10 +50,15 @@ const read = (path) => JSON.parse(readFileSync(new URL(path, SITE), 'utf8'));
 
 const doc = read('src/contracts/site.contract.json');
 
-/** The six operations, in the document's order. */
+/** The seven operations, in the document's order. */
 const IDS = [
-  'site.packages', 'site.content', 'site.build', 'bench.meta', 'bench.suite', 'readme.fetch',
+  'site.packages', 'site.content', 'site.cards', 'site.build',
+  'bench.meta', 'bench.suite', 'readme.fetch',
 ];
+
+/** The published suites, as the site lists them — `overview` is the
+ * meta file, not a suite payload. */
+const SUITE_KEYS = SUITES.filter((s) => s.key !== 'overview').map((s) => s.key);
 
 const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
 
@@ -63,9 +71,11 @@ const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/ma
  * under test are byte-for-byte the ones the site ships. The benchmark
  * overview beside them IS committed, so it stays a file read.
  */
+const CONTENT = buildSiteContent();
 const ARTIFACTS = {
   packages: buildSiteData(),
-  content: buildSiteContent(),
+  content: CONTENT,
+  cards: buildSiteCards(CONTENT),
   build: buildInfo(),
   meta: read('public/benchmarks/meta.json'),
 };
@@ -114,7 +124,7 @@ function openFixtureClient(overrides = {}) {
 }
 
 describe('the site contract document', function () {
-  it('compiles refusal-free, and declares exactly the six site-owned reads', function () {
+  it('compiles refusal-free, and declares exactly the seven site-owned reads', function () {
     const contract = compileContract(doc);
     assert.strictEqual(contract.id, 'jaren-site');
     assert.strictEqual(doc.$contract, '0.1');
@@ -131,12 +141,24 @@ describe('the site contract document', function () {
     }
   });
 
-  it('types the suite payloads as open, and says so rather than pretending', function () {
+  it('declares one shape per published suite, and answers exactly one of them', function () {
     const suite = siteContract.operations['bench.suite'];
-    // twenty-one heterogeneous shapes: a declared unknown beats a schema
-    // that would only appear to check something
-    assert.strictEqual(suite.output.validate({ tables: [] }).valid, true);
-    assert.strictEqual(suite.output.validate([1, 2, 3]).valid, true);
+    const shapes = Object.keys(doc.$defs).filter((name) => name.startsWith('Suite'));
+    assert.deepStrictEqual(shapes.sort(), SUITE_KEYS.map(suiteShapeName).sort(),
+      'every published suite has a shape and every shape has a published suite:'
+      + ' a suite added to one side alone is a payload nothing declares');
+    assert.deepStrictEqual(doc.operations['bench.suite'].output.oneOf
+      .map((/** @type {any} */ member) => member.$ref.replace('#/$defs/', '')).sort(),
+      shapes.sort(), 'and every shape is one of the answers the operation can give');
+    // oneOf, not anyOf: no two published suites share a shape, so a
+    // payload that matched two would already be a defect
+    for (const key of SUITE_KEYS) {
+      assert.strictEqual(suite.output.validate(read(`public/benchmarks/${key}.json`)).valid, true,
+        `the committed ${key}.json matches exactly one declared shape`);
+    }
+    // and a shape the document does not know is refused, not passed on
+    assert.strictEqual(suite.output.validate({ tables: [] }).valid, false);
+    assert.strictEqual(suite.output.validate([1, 2, 3]).valid, false);
     // the input, by contrast, is bounded: a name that could escape the
     // benchmark directory never reaches a fetch
     assert.strictEqual(suite.input.validate({ suite: 'long-horizon' }).valid, true);
@@ -210,6 +232,13 @@ describe('the site client (the local binding)', function () {
     const build = await site.request('site.build');
     assert.strictEqual(build.ok, true);
     assert.strictEqual(build.value.version, ARTIFACTS.build.version);
+
+    const cards = await site.request('site.cards');
+    assert.strictEqual(cards.ok, true);
+    assert.strictEqual(cards.value.packages.length, ARTIFACTS.content.packages.length,
+      'the cards artifact answers for every workspace the content does');
+    assert.strictEqual(Object.hasOwn(cards.value.packages[0], 'docs'), false,
+      'and carries none of their documentation bodies');
 
     const meta = await site.request('bench.meta');
     assert.strictEqual(meta.ok, true);
@@ -448,6 +477,42 @@ describe('the generators write nothing the site could not read', function () {
         ({ ...entry, card: { ...entry.card, perf: 3 } })),
     };
     assert.throws(() => serializeSiteContent(retyped), /JC2010: .*site\.content/);
+  });
+
+  it('refuses cards the home page\'s operation does not declare, and projects them from the content', function () {
+    const cards = buildSiteCards(ARTIFACTS.content);
+    assert.strictEqual(serializeSiteCards(cards), `${JSON.stringify(cards, null, 2)}\n`,
+      'the cards this repository ships pass their own gate');
+    // the artifact is a PROJECTION: every entry is the content entry
+    // minus its body, so the grid and the rail cannot come to describe
+    // one package two ways
+    assert.deepStrictEqual(cards.packages,
+      ARTIFACTS.content.packages.map(({ docs: _docs, ...rest }) => rest));
+    assert.deepStrictEqual([cards.generated, cards.commit],
+      [ARTIFACTS.content.generated, ARTIFACTS.content.commit]);
+    assert.throws(() => serializeSiteCards({ ...cards, packages: ARTIFACTS.content.packages }),
+      /JC2010: .*site\.cards/, 'the body it exists to leave out is a member it cannot carry');
+  });
+
+  it('refuses a benchmark suite file the page would refuse, naming the suite\'s own shape', function () {
+    for (const key of SUITE_KEYS) {
+      const payload = read(`public/benchmarks/${key}.json`);
+      assert.strictEqual(serializeSuite(key, payload), JSON.stringify(payload),
+        `the committed ${key}.json passes the shape the site reads it through`);
+    }
+    // the refusal names the ONE shape at fault, not twenty-one ways the
+    // payload is not something else
+    assert.throws(() => serializeSuite('charts', { ...read('public/benchmarks/charts.json'), extra: 1 }),
+      (/** @type {Error} */ error) => {
+        assert.match(error.message, /^JC2010: /);
+        assert.match(error.message, /'SuiteCharts' shape of 'bench\.suite'/);
+        assert.match(error.message, /benchmarks\/charts\.json/);
+        return true;
+      });
+    // a suite with no declared shape is a payload nothing types: the
+    // refusal says which member of the document is missing
+    assert.throws(() => serializeSuite('brand-new', {}),
+      /declares no shape 'SuiteBrandNew' for the 'brand-new' suite/);
   });
 
   it('refuses build provenance the footer\'s operation does not declare', function () {

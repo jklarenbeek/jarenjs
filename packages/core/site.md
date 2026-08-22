@@ -8,6 +8,18 @@ card:
     arithmetic on strings and epoch milliseconds, a GeoJSON-native spatial
     kernel with exact orientation predicates, and asm.js-style int32/float64
     math.
+engines:
+  - key: geo
+    suite: geo
+    title: Geospatial kernel
+    blurb: >-
+      GeoJSON itself as the representation, not a geometry class: Shewchuk
+      adaptive-precision orientation predicates, great-circle distance and
+      area on the sphere, ring closure and winding, geohash, and a
+      Hilbert-packed static R-tree behind the query engine's spatial joins.
+    perf: >-
+      results asserted equivalent to the rivals before timing, and the
+      point-in-polygon loss is published — an exact predicate costs
 ---
 
 Everything underneath, usable standalone: type guards, grapheme-aware Unicode

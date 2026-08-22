@@ -1145,6 +1145,19 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   align-items: start;
 }
 
+/* The stored documents, each removable. A row's own text can be long
+   (it is a whole document), so it scrolls inside the row rather than
+   widening the card — the delete stays reachable at every width. */
+.data-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.data-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); padding: var(--space-1) var(--space-2);
+}
+.data-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.8rem; }
+.data-row-delete { flex: none; color: var(--muted); }
+.data-row-delete:hover { color: var(--fail); border-color: var(--fail); }
+
 /* ---- The adventure game (#/game) ------------------------------------ */
 .game-title { display: grid; place-items: center; padding-block: var(--space-8); }
 .game-title-card { max-width: 44rem; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-8); }

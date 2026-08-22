@@ -70,6 +70,18 @@
       },
       "additionalProperties": false
     },
+    "CardsEntry": {
+      "description": "One published workspace's site presence WITHOUT its documentation body: the same entry site.content carries, minus docs. Nothing derives it independently — the collector projects it from the content entry, so the two can only ever disagree by a member this document does not declare.",
+      "type": "object",
+      "required": ["name", "card", "engines", "derived"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "card": { "$ref": "#/$defs/SiteCard" },
+        "engines": { "type": "array", "items": { "$ref": "#/$defs/SiteEngine" } },
+        "derived": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "RunStamp": {
       "description": "The invocation that last ran the generator: the machine, the runtime, the suite version and the iteration mode. It describes the RUN, never the rows — those carry their own.",
       "type": "object",
@@ -213,6 +225,818 @@
         "regressions": { "$ref": "#/$defs/Count" }
       },
       "additionalProperties": false
+    },
+    "SuiteCharts": {
+      "description": "charts.json — the chart-type render table and the two scaling series (points/series, then bar categories) behind the incremental-render claim.",
+      "type": "object",
+      "required": ["date", "node", "points", "series", "iterations", "types", "scaling", "barScaling"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "points": { "type": "number" },
+        "series": { "type": "number" },
+        "iterations": { "type": "number" },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "ns"],
+            "properties": { "label": { "type": "string" }, "ns": { "type": "number" } },
+            "additionalProperties": false
+          }
+        },
+        "scaling": { "type": "array", "items": { "type": "object" } },
+        "barScaling": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": false
+    },
+    "SuiteContract": {
+      "description": "contract.json — the contract dispatch suite: the per-stage pipeline tables and the serialization share of a dispatch.",
+      "type": "object",
+      "required": ["mode", "date", "node", "iterations", "caveat", "tables", "serialization"],
+      "properties": {
+        "mode": { "type": "string" },
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "iterations": { "type": "number" },
+        "caveat": { "type": "string" },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "serialization": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "stringifyNs", "dispatchNs", "share"],
+            "properties": {
+              "name": { "type": "string" },
+              "stringifyNs": { "type": "number" },
+              "dispatchNs": { "type": "number" },
+              "share": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteContracts": {
+      "description": "contracts.json — the validation front door measured against Zod, as tables of named rows.",
+      "type": "object",
+      "required": ["mode", "date", "node", "iterations", "caveat", "tables"],
+      "properties": {
+        "mode": { "type": "string" },
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "iterations": { "type": "number" },
+        "caveat": { "type": "string" },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteCsv": {
+      "description": "csv.json — the reader and writer against the CSV field, its damage-healing spectrum, and the streaming profile.",
+      "type": "object",
+      "required": ["date", "node", "engines", "spectrum", "healing", "profile"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "spectrum": { "type": "object", "additionalProperties": { "type": "object" } },
+        "healing": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["damage", "results"],
+            "properties": { "damage": { "type": "string" }, "results": { "type": "object" } },
+            "additionalProperties": false
+          }
+        },
+        "profile": {
+          "type": "object",
+          "required": ["iterations", "rows", "objects", "streaming", "stringify"],
+          "properties": {
+            "iterations": { "type": "number" },
+            "rows": { "type": "array" },
+            "objects": { "type": "array" },
+            "streaming": { "type": "array" },
+            "stringify": { "type": "object" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteDb": {
+      "description": "db.json — the phase-A store and LINQ front door: one meta block of corpus sizes and equivalence, and the timing tables.",
+      "type": "object",
+      "required": ["meta", "tables"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["docs", "docBytes", "lookups", "engines", "headlineRatio", "notes", "equivalenceFailures"],
+          "properties": {
+            "docs": { "type": "number" },
+            "docBytes": { "type": "number" },
+            "lookups": { "type": "number" },
+            "engines": { "type": "array" },
+            "headlineRatio": { "type": "number" },
+            "notes": { "type": "array" },
+            "equivalenceFailures": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteFlow": {
+      "description": "flow.json — the FSM and DAG engines against XState: compile and transition by machine size, the JSON-survivability wedge, and the memory series.",
+      "type": "object",
+      "required": ["date", "node", "xstate", "sizes", "compile", "transition", "wedge", "memory", "dag"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "xstate": { "type": "string" },
+        "sizes": { "type": "array", "items": { "type": "number" } },
+        "compile": { "type": "object", "additionalProperties": { "type": "array" } },
+        "transition": { "type": "object", "additionalProperties": { "type": "array" } },
+        "wedge": {
+          "type": "object",
+          "required": ["guardsSurviveJson", "droppedGuardCount"],
+          "properties": {
+            "guardsSurviveJson": { "type": "object" },
+            "droppedGuardCount": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "memory": { "type": "object", "additionalProperties": { "type": "number" } },
+        "dag": { "type": "object", "additionalProperties": { "type": "array" } }
+      },
+      "additionalProperties": false
+    },
+    "SuiteFormats": {
+      "description": "formats.json — the format registry against ajv-formats over the formats both engines implement, with the agreement count that gates the timing.",
+      "type": "object",
+      "required": ["mode", "date", "node", "iterations", "conformance", "tables"],
+      "properties": {
+        "mode": { "type": "string" },
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "iterations": { "type": "number" },
+        "conformance": {
+          "type": "object",
+          "required": ["pass", "total", "formats", "unregistered"],
+          "properties": {
+            "pass": { "type": "number" },
+            "total": { "type": "number" },
+            "formats": { "type": "number" },
+            "unregistered": { "type": "array" }
+          },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "note", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "note": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteGeo": {
+      "description": "geo.json — the spatial kernel against turf/geolib/flatbush: the equivalence checks first, then the rows they license.",
+      "type": "object",
+      "required": ["node", "iterations", "checks", "rows"],
+      "properties": {
+        "node": { "type": "string" },
+        "iterations": { "type": "number" },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "rival", "agrees", "detail", "note"],
+            "properties": {
+              "name": { "type": "string" },
+              "rival": { "type": "string" },
+              "agrees": { "type": "boolean" },
+              "detail": { "type": "string" },
+              "note": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "ours", "rival", "rivalName"],
+            "properties": {
+              "name": { "type": "string" },
+              "ours": { "type": "number" },
+              "rival": { "type": ["null", "number"] },
+              "rivalName": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteJslt": {
+      "description": "jslt.json — the stylesheet engine by scenario, with the compile-mean row and the scenario descriptions the page prints.",
+      "type": "object",
+      "required": ["date", "node", "engines", "rows", "compile", "scenarios"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["scenario", "title", "document", "engines", "iterations"],
+            "properties": {
+              "scenario": { "type": "string" },
+              "title": { "type": "string" },
+              "document": { "type": "string" },
+              "engines": { "type": "object" },
+              "iterations": { "type": "object" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "compile": {
+          "type": "object",
+          "required": ["sources", "iterations", "results"],
+          "properties": {
+            "sources": { "type": "array" },
+            "iterations": { "type": "number" },
+            "results": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "title", "description", "sources"],
+            "properties": {
+              "key": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "sources": { "type": "object" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteJsonpatch": {
+      "description": "jsonpatch.json — RFC 6902/7396 appliers, their conformance count, and the compile row.",
+      "type": "object",
+      "required": ["mode", "date", "node", "iterations", "conformance", "tables", "compile"],
+      "properties": {
+        "mode": { "type": "string" },
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "iterations": { "type": "number" },
+        "conformance": {
+          "type": "object",
+          "required": ["total", "pass", "files"],
+          "properties": {
+            "total": { "type": "number" },
+            "pass": { "type": "number" },
+            "files": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "title", "columns", "rows"],
+            "properties": {
+              "key": { "type": "string" },
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "compile": {
+          "type": "object",
+          "required": ["jaren"],
+          "properties": { "jaren": { "type": "object" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteJsonpath": {
+      "description": "jsonpath.json — the RFC 9535 compliance matrix and the profile: per-selector rows, the compile row, and the scale and early-exit series.",
+      "type": "object",
+      "required": ["date", "node", "engines", "compliance", "profile"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "compliance": {
+          "type": "object",
+          "required": ["total", "groups", "failures"],
+          "properties": {
+            "total": { "type": "number" },
+            "groups": { "type": "array" },
+            "failures": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "profile": {
+          "type": "object",
+          "required": ["iterations", "rows", "compileRow", "scaleRows", "earlyExitRows"],
+          "properties": {
+            "iterations": { "type": "number" },
+            "rows": { "type": "array" },
+            "compileRow": { "type": "object" },
+            "scaleRows": { "type": "array" },
+            "earlyExitRows": { "type": "array" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteJsonpointer": {
+      "description": "jsonpointer.json — compiled getters against the interpretive resolver and the npm package, plus the compile row.",
+      "type": "object",
+      "required": ["mode", "date", "node", "iterations", "tables", "compile"],
+      "properties": {
+        "mode": { "type": "string" },
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "iterations": { "type": "number" },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "title", "columns", "rows"],
+            "properties": {
+              "key": { "type": "string" },
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "compile": {
+          "type": "object",
+          "required": ["jaren", "npm"],
+          "properties": { "jaren": { "type": "object" }, "npm": { "type": "object" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteJsonquery": {
+      "description": "jsonquery.json — the query engine by scenario against fontoxpath and JSONata, with the compile-mean row.",
+      "type": "object",
+      "required": ["date", "node", "engines", "rows", "compile", "scenarios"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["scenario", "document", "engines", "iterations"],
+            "properties": {
+              "scenario": { "type": "string" },
+              "document": { "type": "string" },
+              "engines": { "type": "object" },
+              "iterations": { "type": "object" },
+              "capped": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "compile": {
+          "type": "object",
+          "required": ["sources", "iterations", "results"],
+          "properties": {
+            "sources": { "type": "array" },
+            "iterations": { "type": "number" },
+            "results": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "title", "description", "sources"],
+            "properties": {
+              "key": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "sources": { "type": "object" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteLive": {
+      "description": "live.json — the live-query layer: one meta block naming the runtime, the sizes and the published losses, and the timing tables.",
+      "type": "object",
+      "required": ["meta", "tables"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["suite", "title", "description", "runtime", "sizes", "incrementalRatios", "liveLosses", "omitted"],
+          "properties": {
+            "suite": { "type": "string" },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "runtime": { "type": "string" },
+            "sizes": { "type": "array" },
+            "incrementalRatios": { "type": "array" },
+            "liveLosses": { "type": "object" },
+            "omitted": { "type": "array" }
+          },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteLongHorizon": {
+      "description": "long-horizon.json — the agent long-horizon suite: the run meta (including what a missing key made it skip), the headline, the tables and one row per configuration.",
+      "type": "object",
+      "required": ["meta", "headline", "tables", "rows"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["suite", "title", "description", "date", "node", "n", "seed", "padding", "budgets", "model", "trials", "liveSkipped", "asked", "calls", "recalls", "failed", "usage", "errors", "bounded", "scheduling", "depths", "authoring"],
+          "properties": {
+            "suite": { "type": "string" },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "date": { "type": "string" },
+            "node": { "type": "string" },
+            "n": { "type": "number" },
+            "seed": { "type": "number" },
+            "padding": { "type": "number" },
+            "budgets": { "type": "array" },
+            "model": { "type": ["null", "string"] },
+            "trials": { "type": "number" },
+            "liveSkipped": { "type": ["null", "string"] },
+            "asked": { "type": "number" },
+            "calls": { "type": "number" },
+            "recalls": { "type": "number" },
+            "failed": { "type": "number" },
+            "usage": { "type": ["null", "object"] },
+            "errors": { "type": "array" },
+            "bounded": { "type": ["null", "string"] },
+            "scheduling": { "type": "object" },
+            "depths": { "type": "array" },
+            "authoring": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "headline": {
+          "type": "object",
+          "required": ["title", "text"],
+          "properties": { "title": { "type": "string" }, "text": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "head", "rows", "note"],
+            "properties": {
+              "title": { "type": "string" },
+              "head": { "type": "array" },
+              "rows": { "type": "array" },
+              "note": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["config", "task", "variant", "shape", "budget", "ceiling", "ceilingRecall", "actual", "recalls", "model", "n", "trials", "compacted", "pairSurvived", "valuePresent", "valueRecoverable", "slotsArchived", "messagesSent", "charsSent", "charsFull"],
+            "properties": {
+              "config": { "type": "object" },
+              "task": { "type": "string" },
+              "variant": { "type": "string" },
+              "shape": { "type": "string" },
+              "budget": { "type": ["null", "number"] },
+              "ceiling": { "type": "number" },
+              "ceilingRecall": { "type": ["null", "number"] },
+              "actual": { "type": ["null", "number"] },
+              "recalls": { "type": "number" },
+              "model": { "type": "string" },
+              "n": { "type": "number" },
+              "trials": { "type": "number" },
+              "compacted": { "type": "boolean" },
+              "pairSurvived": { "type": "boolean" },
+              "idPresent": { "type": "number" },
+              "valuePresent": { "type": ["null", "number"] },
+              "valueRecoverable": { "type": ["null", "number"] },
+              "slotsArchived": { "type": "number" },
+              "messagesSent": { "type": ["null", "number"] },
+              "charsSent": { "type": ["null", "number"] },
+              "charsFull": { "type": ["null", "number"] },
+              "idsReached": { "type": ["null", "number"] },
+              "subcalls": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteMarkdown": {
+      "description": "markdown.json — the Markdown engine against four rivals: the CommonMark and GFM scorecards and the render profile.",
+      "type": "object",
+      "required": ["date", "node", "engines", "examples", "scorecard", "gfm", "profile"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "examples": { "type": "number" },
+        "scorecard": { "type": "object", "additionalProperties": { "type": "object" } },
+        "gfm": {
+          "type": "object",
+          "required": ["examples", "totals", "scorecard"],
+          "properties": {
+            "examples": { "type": "number" },
+            "totals": { "type": "object" },
+            "scorecard": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "profile": {
+          "type": "object",
+          "required": ["iterations", "render", "jaren"],
+          "properties": {
+            "iterations": { "type": "number" },
+            "render": { "type": "array" },
+            "jaren": { "type": "array" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteMermaid": {
+      "description": "mermaid.json — the diagram engine against the jison-based reference: the per-diagram scorecard and the parse profile.",
+      "type": "object",
+      "required": ["date", "node", "engines", "jisonEngines", "examples", "scorecard", "profile"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "jisonEngines": { "type": "array", "items": { "type": "string" } },
+        "examples": { "type": "number" },
+        "scorecard": { "type": "object", "additionalProperties": { "type": "object" } },
+        "profile": {
+          "type": "object",
+          "required": ["iterations", "parse", "parseJison", "jaren"],
+          "properties": {
+            "iterations": { "type": "number" },
+            "parse": { "type": "array" },
+            "parseJison": { "type": "array" },
+            "jaren": { "type": "array" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteOrm": {
+      "description": "orm.json — the ORM comparison: one meta block of corpus sizes, engines and published losses, and the timing tables (a Bun leg only when Bun ran).",
+      "type": "object",
+      "required": ["meta", "tables"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["runtime", "users", "posts", "comments", "engines", "headlineRatio", "notes", "equivalenceFailures", "headlineRival"],
+          "properties": {
+            "runtime": { "type": "string" },
+            "users": { "type": "number" },
+            "posts": { "type": "number" },
+            "comments": { "type": "number" },
+            "engines": { "type": "array" },
+            "headlineRatio": { "type": "number" },
+            "notes": { "type": "array" },
+            "equivalenceFailures": { "type": "number" },
+            "bunRuntime": { "type": "string" },
+            "bunNotes": { "type": "array" },
+            "headlineRival": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteToml": {
+      "description": "toml.json — the JOSL reader and writer against the TOML field: the toml-test compliance blocks, the parse/stringify profile and the streaming record.",
+      "type": "object",
+      "required": ["date", "node", "engines", "cases", "compliance", "profile", "stream"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "cases": {
+          "type": "object",
+          "required": ["valid", "invalid"],
+          "properties": { "valid": { "type": "number" }, "invalid": { "type": "number" } },
+          "additionalProperties": false
+        },
+        "compliance": { "type": "object", "additionalProperties": { "type": "object" } },
+        "profile": {
+          "type": "object",
+          "required": ["iterations", "parse", "stringify"],
+          "properties": {
+            "iterations": { "type": "number" },
+            "parse": { "type": "array" },
+            "stringify": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "stream": {
+          "type": "object",
+          "required": ["date", "node", "iterations", "messageBytes", "documentBytes", "chunkBytes", "chunks", "message", "document"],
+          "properties": {
+            "date": { "type": "string" },
+            "node": { "type": "string" },
+            "iterations": { "type": "number" },
+            "messageBytes": { "type": "number" },
+            "documentBytes": { "type": "number" },
+            "chunkBytes": { "type": "number" },
+            "chunks": { "type": "number" },
+            "message": { "type": "array" },
+            "document": { "type": "array" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteValidate": {
+      "description": "validate.json — the JSON Schema run: the run metadata, the per-engine summary, one row per official-suite test and the tests that errored.",
+      "type": "object",
+      "required": ["metadata", "summary", "results", "errors"],
+      "properties": {
+        "metadata": {
+          "type": "object",
+          "required": ["timestamp", "node", "iterations", "warmupIterations", "totalTests", "validTests", "successTests", "drafts"],
+          "properties": {
+            "timestamp": { "type": "string" },
+            "node": { "type": "string" },
+            "iterations": { "type": "number" },
+            "warmupIterations": { "type": "number" },
+            "totalTests": { "type": "number" },
+            "validTests": { "type": "number" },
+            "successTests": { "type": "number" },
+            "drafts": { "type": "array" }
+          },
+          "additionalProperties": false
+        },
+        "summary": { "type": "object", "additionalProperties": { "type": "object" } },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["suite", "draft", "description", "assertions", "testCount", "isSuccessTest", "jarenTime", "ajvTime", "jarenTotal", "ajvTotal", "ratio", "jarenFailures", "ajvFailures"],
+            "properties": {
+              "suite": { "type": "string" },
+              "draft": { "type": "string" },
+              "description": { "type": "string" },
+              "assertions": { "type": "number" },
+              "testCount": { "type": "number" },
+              "isSuccessTest": { "type": "boolean" },
+              "jarenTime": { "type": "number" },
+              "ajvTime": { "type": "number" },
+              "jarenTotal": { "type": "number" },
+              "ajvTotal": { "type": "number" },
+              "ratio": { "type": "number" },
+              "jarenFailures": { "type": ["null", "number"] },
+              "ajvFailures": { "type": ["null", "number"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["suite", "draft", "description", "jarenError", "ajvError", "jarenFailures", "ajvFailures"],
+            "properties": {
+              "suite": { "type": "string" },
+              "draft": { "type": "string" },
+              "description": { "type": "string" },
+              "jarenError": { "type": ["null", "string"] },
+              "ajvError": { "type": ["null", "string"] },
+              "jarenFailures": { "type": ["null", "number"] },
+              "ajvFailures": { "type": ["null", "number"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuiteView": {
+      "description": "view.json — the view engine: the build/update/SSR/frame/memo tables and the corpus the run used.",
+      "type": "object",
+      "required": ["date", "node", "rows", "iterations", "ssrChars", "memoChildren", "tables"],
+      "properties": {
+        "date": { "type": "string" },
+        "node": { "type": "string" },
+        "rows": { "type": "number" },
+        "iterations": { "type": "number" },
+        "ssrChars": { "type": "number" },
+        "memoChildren": { "type": "number" },
+        "tables": { "type": "object", "additionalProperties": { "type": "array" } }
+      },
+      "additionalProperties": false
     }
   },
   "operations": {
@@ -245,6 +1069,21 @@
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
       "doc": "The site content the workspaces own: one entry per published workspace, in the census's order, carrying the card the package wrote for itself, the engine grid mapping it claims, and its documentation section as a parsed Markdown document. `docs` is declared open here on purpose — its grammar is the Markdown AST @jarenjs/md publishes (components/md/schemas/jaren-md-ast.schema.json), and a copy of that grammar in this document would be a second one to keep true."
+    },
+    "site.cards": {
+      "kind": "read",
+      "output": {
+        "type": "object",
+        "required": ["generated", "commit", "packages"],
+        "properties": {
+          "generated": { "type": ["string", "null"] },
+          "commit": { "type": ["string", "null"] },
+          "packages": { "type": "array", "items": { "$ref": "#/$defs/CardsEntry" } }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "The cards half of the site content: every entry site.content answers, minus the documentation body. The home page draws its engine grid from a few hundred bytes per workspace, while the markdown sections — which are the bulk of the other artifact — are fetched only by the page that renders them."
     },
     "site.build": {
       "kind": "read",
@@ -294,9 +1133,33 @@
         },
         "additionalProperties": false
       },
-      "output": true,
+      "output": {
+        "oneOf": [
+          { "$ref": "#/$defs/SuiteCharts" },
+          { "$ref": "#/$defs/SuiteContract" },
+          { "$ref": "#/$defs/SuiteContracts" },
+          { "$ref": "#/$defs/SuiteCsv" },
+          { "$ref": "#/$defs/SuiteDb" },
+          { "$ref": "#/$defs/SuiteFlow" },
+          { "$ref": "#/$defs/SuiteFormats" },
+          { "$ref": "#/$defs/SuiteGeo" },
+          { "$ref": "#/$defs/SuiteJslt" },
+          { "$ref": "#/$defs/SuiteJsonpatch" },
+          { "$ref": "#/$defs/SuiteJsonpath" },
+          { "$ref": "#/$defs/SuiteJsonpointer" },
+          { "$ref": "#/$defs/SuiteJsonquery" },
+          { "$ref": "#/$defs/SuiteLive" },
+          { "$ref": "#/$defs/SuiteLongHorizon" },
+          { "$ref": "#/$defs/SuiteMarkdown" },
+          { "$ref": "#/$defs/SuiteMermaid" },
+          { "$ref": "#/$defs/SuiteOrm" },
+          { "$ref": "#/$defs/SuiteToml" },
+          { "$ref": "#/$defs/SuiteValidate" },
+          { "$ref": "#/$defs/SuiteView" }
+        ]
+      },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
-      "doc": "One benchmark suite's payload. The twenty-one suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so the output is declared open rather than given a schema that would only pretend. Tightening it per suite is open work, not a shape this document can honestly claim today."
+      "doc": "One benchmark suite's payload. The twenty-one suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
     },
     "readme.fetch": {
       "kind": "read",

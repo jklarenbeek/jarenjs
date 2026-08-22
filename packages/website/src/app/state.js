@@ -200,6 +200,11 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       refusal: null,           // the JD2061 second-writer message, if any
       modelText: '',           // the editable model document (JSON)
       queryText: '',           // the editable query document (JSON)
+      // the collection every effect works on and the key pointer its
+      // model declares — the model pane is editable, so both move with
+      // the model rather than being named anywhere
+      collection: 'notes',
+      keyPointer: '/id',
       rows: [],                // the whole collection, last read
       results: [],             // the last query() result
       explain: null,           // the last explain() { sql, params, indexes, residual }

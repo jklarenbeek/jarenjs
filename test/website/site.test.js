@@ -9,7 +9,9 @@ import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { viewModel } from '../../packages/website/src/app/viewmodel.js';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
-import { buildSiteData, buildSiteContent } from '../../scripts/generate-site-data.js';
+import {
+  buildSiteData, buildSiteContent, buildSiteCards,
+} from '../../scripts/generate-site-data.js';
 import { buildInfo } from '../../scripts/generate-build-info.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
@@ -18,8 +20,10 @@ import { createStubHost, fire, serialize } from '../view/dom.stub.js';
  * the REAL provenance rather than fixtures, so the docs rail, the engine
  * grid and the footer are asserted against the repository they describe.
  * Read once — every mount serves the same three documents. */
+const CONTENT = buildSiteContent();
 const SITE_DATA = {
-  packages: buildSiteData(), content: buildSiteContent(), build: buildInfo(),
+  packages: buildSiteData(), content: CONTENT, cards: buildSiteCards(CONTENT),
+  build: buildInfo(),
 };
 
 /** The engine cards, every one of them a package's own. */
@@ -49,11 +53,16 @@ const FIXTURES = {
     } } },
     headlines: [],
   },
+  // a suite fixture is a whole suite payload: `bench.suite` declares one
+  // shape per published suite, so a stub missing a member is refused by
+  // the same validator the browser runs — which is the point of it
   jsonpointer: {
+    mode: 'pointer', date: '2026-07-18T14:15:25.703Z', node: 'v22', iterations: 1000,
     tables: [{
       key: 'absolute', title: 'Absolute JSON Pointer', columns: ['jaren', 'npm'],
       rows: [{ name: 'shallow member', results: [17.23, 53.05] }],
     }],
+    compile: { jaren: { ns: 1086, pointers: 11 }, npm: { ns: 219.9, pointers: 6 } },
   },
 };
 
@@ -904,7 +913,9 @@ describe('website — the packages own their pages', function () {
     // — through the same code paths, knowing nothing about it
     const content = buildSiteContent(
       new URL('../../test/website/fixtures/zero-edit/', import.meta.url).pathname);
-    const siteData = { ...SITE_DATA, content };
+    // both artifacts come from the ONE collection of that repository:
+    // the grid reads the cards projection, the docs page the bodies
+    const siteData = { ...SITE_DATA, content, cards: buildSiteCards(content) };
     const home = mountSite({ siteData });
     await tick();
     const grid = serialize(home.container);

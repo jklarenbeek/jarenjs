@@ -26,6 +26,7 @@
 
 import { pickAllowed } from '@jarenjs/core/array';
 import { applyJSONPatch } from '@jarenjs/json/patch';
+import { compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
 import { compileContract } from '@jarenjs/contract';
 import { openPortClient } from '@jarenjs/contract/port';
 
@@ -104,11 +105,25 @@ function createTransport() {
   /** @param {any} input @param {any} callbacks */
   const subscribe = (input, callbacks) => /** @type {NonNullable<typeof client>} */ (client).subscribe('data.live', input, callbacks);
 
+  /** @type {((notice: any) => void) | null} */
+  let onNotice = null;
+  /** The owner's store-changed notices travel beside the contract frames
+   * on whichever transport this tab ended up on, and are told apart by
+   * shape — the same arrangement the owner-discovery frames use. */
+  const listen = (/** @type {any} */ target) => {
+    target.addEventListener('message', (/** @type {any} */ event) => {
+      const message = event.data;
+      if (message === null || typeof message !== 'object' || message.store === undefined) return;
+      onNotice?.(message);
+    });
+  };
+
   const boot = async () => {
     worker = new Worker(new URL('../db-worker.js', import.meta.url),
       { type: 'module' });
     // the wasm build + first store open is real work: give init room
     client = openPortClient(contract, { channel: worker, timeoutMs: 30_000 });
+    listen(worker);
     const status = await request('data.init', null);
     if (status.topology !== 'client') {
       // 'owner' (holds the OPFS pool) or 'memory' (OPFS absent — a
@@ -121,12 +136,39 @@ function createTransport() {
     client.close();
     worker.terminate();
     worker = null;
-    client = openPortClient(contract, { channel: new BroadcastChannel(CHANNEL), timeoutMs: 30_000 });
+    const shared = new BroadcastChannel(CHANNEL);
+    listen(shared);
+    client = openPortClient(contract, { channel: shared, timeoutMs: 30_000 });
     return status;
   };
 
-  return { boot, request, subscribe };
+  return {
+    boot,
+    request,
+    subscribe,
+    /** @param {(notice: any) => void} cb */
+    notices: (cb) => { onNotice = cb; },
+  };
 }
+
+/**
+ * The collection an opened model puts the studio on: the first one it
+ * declares. A model with none is a refusal the store itself raises, so
+ * this only has to answer honestly for a model that has one.
+ * @param {any} model
+ * @returns {string}
+ */
+const firstCollection = (model) => Object.keys(model?.collections ?? {})[0] ?? '';
+
+/**
+ * The key pointer a model declares for one of its collections — how a
+ * row list names the document a delete is about. Models declare it; the
+ * store's own default is `/id`.
+ * @param {any} model
+ * @param {string} name
+ * @returns {string}
+ */
+const keyPointerOf = (model, name) => model?.collections?.[name]?.key ?? '/id';
 
 /**
  * The runtime: effects plus the exported view model.
@@ -139,6 +181,11 @@ export function createDataRuntime(_env = {}) {
   let liveSub = null;
   /** @type {any} */
   let liveDoc = null;
+  /** The collection every effect works on: the model pane is EDITABLE,
+   * so naming one literally makes editing the model produce a studio
+   * that queries a collection the model no longer declares. It is the
+   * first collection the open model declares, and it moves with it. */
+  let collection = firstCollection(DATA_MODEL);
 
   const parse = (text, what) => {
     try {
@@ -153,11 +200,11 @@ export function createDataRuntime(_env = {}) {
    * (Re)subscribe the live pane over the stream binding: the snapshot
    * replaces the maintained document, each `{ patch, seq }` emission
    * applies copy-on-write, and after every live event the owner's
-   * registration count is refreshed (the status surface).
-   * @param {string} collection
+   * registration count is refreshed (the status surface). It follows the
+   * ACTIVE collection, so a reopened model takes the pane with it.
    * @param {(name: string, payload?: any) => void} dispatch
    */
-  const subscribeLive = (collection, dispatch) => {
+  const subscribeLive = (dispatch) => {
     liveSub?.stop();
     const refreshRegistrations = () => {
       transport?.request('data.lives', null)
@@ -183,6 +230,12 @@ export function createDataRuntime(_env = {}) {
           dispatch('data/error', { message: `live stream ended (${info.reason})` }),
       });
   };
+
+  /** Re-read the collection into the store pane.
+   * @param {(name: string, payload?: any) => void} dispatch */
+  const refreshRows = (dispatch) => transport?.request('data.rows', { collection })
+    .then((rows) => dispatch('data/rows', { rows }))
+    .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
 
   // A departing tab releases its subscription so the owner's
   // registration is not leaked (the wire's unsubscribe frame). BOTH
@@ -220,12 +273,20 @@ export function createDataRuntime(_env = {}) {
             dispatch('data/opened', opened);
             for (const seedDoc of SEEDS) {
               await transport.request('data.insert',
-                { collection: 'notes', doc: seedDoc }).catch(() => {});
+                { collection, doc: seedDoc }).catch(() => {});
             }
           }
-          subscribeLive('notes', dispatch);
-          const rows = await transport.request('data.rows', { collection: 'notes' });
-          dispatch('data/rows', { rows });
+          // any reopen — a recreate here, a migration anywhere — ends
+          // every live registration on the store, so the owner announces
+          // it and the pane takes its subscription out again. Without
+          // this, a live pane keeps its last rows and goes on looking
+          // live while nothing reaches it.
+          transport.notices(() => {
+            subscribeLive(dispatch);
+            refreshRows(dispatch);
+          });
+          subscribeLive(dispatch);
+          await refreshRows(dispatch);
         })
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
@@ -237,8 +298,12 @@ export function createDataRuntime(_env = {}) {
       }
       transport?.request('data.open', { model: model.value, reset: true })
         .then((opened) => {
-          dispatch('data/opened', opened);
-          subscribeLive(Object.keys(model.value.collections)[0], dispatch);
+          collection = firstCollection(model.value);
+          dispatch('data/opened', {
+            ...opened, collection, keyPointer: keyPointerOf(model.value, collection),
+          });
+          subscribeLive(dispatch);
+          return refreshRows(dispatch);
         })
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
@@ -250,9 +315,15 @@ export function createDataRuntime(_env = {}) {
         title,
         points: Math.floor(Math.random() * 50),
       };
-      transport?.request('data.insert', { collection: 'notes', doc })
-        .then(() => transport.request('data.rows', { collection: 'notes' }))
-        .then((rows) => dispatch('data/rows', { rows }))
+      transport?.request('data.insert', { collection, doc })
+        .then(() => refreshRows(dispatch))
+        .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
+    },
+    // the write half the live pane makes visible: a removal arrives there
+    // as an RFC 6902 remove, the same feed an insert arrives on
+    'data-delete': (props, dispatch) => {
+      transport?.request('data.delete', { collection, key: props.key })
+        .then(() => refreshRows(dispatch))
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
     'data-run': (props, dispatch) => {
@@ -262,8 +333,8 @@ export function createDataRuntime(_env = {}) {
         return;
       }
       Promise.all([
-        transport?.request('data.execute', { collection: 'notes', document: query.value }),
-        transport?.request('data.explain', { collection: 'notes', document: query.value }),
+        transport?.request('data.execute', { collection, document: query.value }),
+        transport?.request('data.explain', { collection, document: query.value }),
       ])
         .then(([results, explain]) => dispatch('data/results', {
           // an empty sequence crosses the JSON wire as null (undefined
@@ -280,7 +351,9 @@ export function createDataRuntime(_env = {}) {
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
     'data-migrate': (_props, dispatch) => {
-      // the worked migration: index the title member, shadow-verified
+      // the worked migration: index the title member, shadow-verified.
+      // The reopen it ends with drops every live registration, and the
+      // owner's notice is what puts the pane's subscription back.
       const to = JSON.parse(JSON.stringify(DATA_MODEL));
       to.collections.notes.indexes.push({ name: 'by_title', path: '$.title' });
       transport?.request('data.migrate', { to, id: 'add-title-index' })
@@ -302,6 +375,44 @@ export function createDataRuntime(_env = {}) {
   return { effects, ownerSub };
 }
 
+/** One compiled key getter per pointer the models have named: the row
+ * list is rebuilt on every live event, and compiling per render would
+ * pay for the pointer over and over. */
+const keyGetters = new Map();
+
+/** @param {string} pointer */
+function keyGetter(pointer) {
+  let get = keyGetters.get(pointer);
+  if (get === undefined) {
+    get = compileJSONPointer(pointer);
+    keyGetters.set(pointer, get);
+  }
+  return get;
+}
+
+/**
+ * The stored documents as a deletable list. The key comes from the
+ * pointer the MODEL declares, not from a member name written here, so a
+ * reader who renames the key in the model pane still gets rows they can
+ * remove. A document the pointer misses is listed without a key and its
+ * control is left out — a delete with nothing to address would be a
+ * button that quietly does nothing.
+ * @param {any[]} rows
+ * @param {string} pointer
+ */
+function rowList(rows, pointer) {
+  const get = keyGetter(pointer);
+  return rows.map((doc, index) => {
+    const key = get(doc);
+    const found = key !== JSONPOINTER_NOTHING;
+    return {
+      index,
+      text: JSON.stringify(doc),
+      ...(found ? { key } : {}),
+    };
+  });
+}
+
 /**
  * The page's view model — the boundary-exports convention.
  * @param {any} state
@@ -309,6 +420,8 @@ export function createDataRuntime(_env = {}) {
 export function dataViewModel(state) {
   const data = state.data;
   return {
+    collection: data.collection,
+    insertPlaceholder: `new ${data.collection} title… (enter inserts)`,
     status: data.status,
     topology: data.topology,
     vfs: data.vfs,
@@ -336,6 +449,8 @@ export function dataViewModel(state) {
     queryText: data.queryText,
     rows: data.rows,
     rowCount: data.rows.length,
+    rowList: rowList(data.rows, data.keyPointer),
+    rowSummary: `${data.rows.length} stored in ${data.collection}`,
     results: data.results,
     resultsJson: JSON.stringify(data.results, null, 1),
     explain: data.explain === null ? null : {

@@ -55,7 +55,7 @@ import { fileURLToPath } from 'url';
 import { Float64, geoMean } from '@jarenjs/core/math';
 
 import { geoMeanRatio } from './derive.js';
-import { assertSiteOutput } from '../scripts/lib/site-contract.js';
+import { assertSiteOutput, assertSuiteOutput } from '../scripts/lib/site-contract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -153,8 +153,20 @@ function previousSuite(name) {
   }
 }
 
-function writeJson(name, data) {
-  writeText(name, JSON.stringify(data));
+/**
+ * One suite file, proven against the shape `bench.suite` declares for it
+ * before it reaches disk. The browser reads every suite through that same
+ * document, so a member this run added, renamed or retyped is caught at
+ * the write instead of arriving on the page as a wrong render.
+ * @param {string} suite - the suite key, which is also the file's name.
+ * @param {any} data
+ * @returns {string}
+ * @throws {Error} naming the JC code, the shape and every failing path.
+ */
+function serializeSuite(suite, data) {
+  assertSuiteOutput(suite, data,
+    `packages/website/public/benchmarks/${suite}.json`);
+  return JSON.stringify(data);
 }
 
 /** Write one already-serialized data file and report its size. */
@@ -1509,7 +1521,7 @@ async function main() {
 
   console.log('\nAssembling website data files...');
   for (const [name, data] of Object.entries(generated))
-    writeJson(`${name}.json`, data);
+    writeText(`${name}.json`, serializeSuite(name, data));
 
   // meta.json: everything the overview needs without loading the big files.
   const rootPkg = readJson(path.join(ROOT, 'package.json'));
@@ -1600,7 +1612,10 @@ async function main() {
 
 // The pure assembly steps are exported for the drift tests; running the
 // file runs the generator.
-export { parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance, serializeMeta, SUITE_ORDER };
+export {
+  parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance,
+  serializeMeta, serializeSuite, SUITE_ORDER,
+};
 
 if (process.argv[1] !== undefined
   && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

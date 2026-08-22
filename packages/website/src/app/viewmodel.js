@@ -73,7 +73,9 @@ function perfLine(headline) {
  * addressing engines of @jarenjs/json, the JOSL and CSV readers)
  * contributes one card each. The website authors none of them — which
  * is why a new engine reaches this page in its own package's commit.
- * @param {any} content - The collected site content, or undefined.
+ * @param {any} content - The collected cards, or undefined. This page
+ *   shows no documentation body, so it reads the artifact that carries
+ *   none: the same entries, an order of magnitude fewer bytes.
  * @returns {any[]}
  */
 const engineCards = memo1((content) => (content?.packages ?? [])
@@ -99,8 +101,8 @@ const engineCards = memo1((content) => (content?.packages ?? [])
  * @returns {any}
  */
 const homeContent = (state) => withDispatch(
-  composeHome(engineCards(state.site.data.content),
-    state.bench?.meta?.headlines, state.site.status.content),
+  composeHome(engineCards(state.site.data.cards),
+    state.bench?.meta?.headlines, state.site.status.cards),
   heroDemo(state.hero));
 
 /** Both halves are memoized, so the merge is too — and the JSLT memo

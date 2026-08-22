@@ -39,8 +39,30 @@ const statusCard =
       editorTextarea({ value: '$.modelText', action: 'data/model-text', rows: 14 }),
       ['button', { class: 'btn small', type: 'button', on: { click: 'data/open' } },
         'Recreate store from model'],
+      ['p', { class: 'muted' },
+        'Recreating unlinks the database the owning tab holds, so only that tab can do it: a client tab is refused, with the store\u2019s own coded message.'],
+    ],
+    ['details', { class: 'details-card', open: true },
+      ['summary', {}, 'Documents'],
+      ['p', { class: 'muted data-row-summary' }, '$.rowSummary'],
+      ['ul', { class: 'data-rows' }, [{ $apply: '$.rowList[*]' }]],
     ],
   ];
+
+/** One stored document: what it holds, and the delete the live pane
+ * shows arriving as an RFC 6902 remove. A row whose key pointer found
+ * nothing carries no control — there would be nothing to address. */
+const documentRow = {
+  match: '$.ui.data.rowList[*]', mode: 'data',
+  body: ['li', { class: 'data-row' },
+    ['code', {}, '$.text'],
+    { $if: [{ $exists: '$.key' },
+      ['button', {
+        type: 'button', class: 'btn small data-row-delete', title: 'Delete this document',
+        on: { click: { action: 'data/delete', with: '$.key' } },
+      }, '\u00d7']] },
+  ],
+};
 
 const queryCard =
   ['div', { class: 'card pg-card data-query' },
@@ -53,8 +75,9 @@ const queryCard =
       // page re-renders on each live-query event, and a controlled input
       // whose buffer is not in state is reset by that render mid-typing
       ['input', {
-        class: 'data-insert-title', type: 'text', placeholder: 'new note title… (enter inserts)',
-        value: '$.insertDraft', on: { input: 'data/insert-draft', change: 'data/insert' },
+        class: 'data-insert-title', type: 'text',
+        value: '$.insertDraft', placeholder: '$.insertPlaceholder',
+        on: { input: 'data/insert-draft', change: 'data/insert' },
       }]],
     { $if: ['$.explain',
       ['details', { class: 'details-card', open: true },
@@ -98,6 +121,7 @@ const liveCard =
   ];
 
 export const DATA_RULES = [
+  documentRow,
   {
     match: '$.ui.data', mode: 'data',
     // `container` for the gutters the other studios have: without it this

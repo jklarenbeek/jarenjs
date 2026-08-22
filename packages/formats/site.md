@@ -6,6 +6,12 @@ card:
     One canonical name → predicate registry for the string, numeric,
     date-time, addressing and geospatial formats, shared by the validator
     and the form model so the two can never drift.
+engines:
+  - key: formats
+    suite: formats
+    perf: >-
+      every format both engines implement, checked for agreement before it
+      is timed
 ---
 
 All standard string formats plus many extras (iban, isbn10, mac, color…),

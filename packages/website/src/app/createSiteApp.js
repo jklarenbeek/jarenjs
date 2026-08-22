@@ -58,8 +58,10 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   types every payload they carry.
  * @property {(name: string) => Promise<any>} [fetchSite] - Loader for the
  *   data the build generated about this repository ('packages' — the
- *   workspace census; 'build' — the build provenance). Omit it and the
- *   surfaces reading them say so instead of showing a stale answer.
+ *   workspace census; 'content' — the workspaces' own site documents;
+ *   'cards' — the same entries without their documentation bodies;
+ *   'build' — the build provenance). Omit it and the surfaces reading
+ *   them say so instead of showing a stale answer.
  * @property {(url: string) => Promise<string>} [fetchText] - Raw-text
  *   loader for the repository documents the dialog renders; omit for
  *   no-network hosts.
@@ -124,7 +126,8 @@ const SHARE_TOKEN_LIMIT = 8000;
 /** The build-generated site data, by the name the route effects ask for
  * it under, as the contract operation that answers it. */
 const SITE_OPERATIONS = {
-  packages: 'site.packages', content: 'site.content', build: 'site.build',
+  packages: 'site.packages', content: 'site.content',
+  cards: 'site.cards', build: 'site.build',
 };
 
 /** Play-slice paths that are IDE chrome, not engine inputs: a change to any

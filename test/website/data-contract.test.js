@@ -1,14 +1,18 @@
 //@ts-check
 /**
  * @file The data studio's operation contract compiles and declares what
- * the worker actually serves: the eleven operations of the db-owner
+ * the worker actually serves: the ten operations of the db-owner
  * protocol, each with the declared `db` failure carrying the store's
  * code and message, `data.live` a SUBSCRIBE operation whose snapshot is
  * LIVE's `{ rows }` result document (the emissions travel the stream
  * binding as push frames), and `data.lives` the registration-count
- * surface. The worker itself is browser-only (wasm, BroadcastChannel),
- * so this is the Node-side half: the document is valid, compiled, and
- * shaped for the port binding the page opens it over.
+ * surface.
+ *
+ * This file reads the DOCUMENT. That the worker serves exactly what it
+ * declares is a different claim, and a frozen id list here could never
+ * make it: `data-handlers.test.js` pairs the two by importing the table
+ * itself, which is why the table lives apart from the browser-only host
+ * that runs it.
  */
 
 import { describe, it } from 'node:test';
@@ -21,11 +25,11 @@ const doc = JSON.parse(readFileSync(
   new URL('../../packages/website/src/contracts/data.contract.json', import.meta.url), 'utf8'));
 
 describe('the data studio contract document', () => {
-  it('compiles, with the operations the worker serves and the db failure declared on every one', () => {
+  it('compiles, with the operations it declares and the db failure on every one', () => {
     const contract = compileContract(doc);
     assert.strictEqual(contract.id, 'jaren-data-studio');
     assert.deepStrictEqual(contract.ids, [
-      'data.init', 'data.open', 'data.insert', 'data.put', 'data.delete',
+      'data.init', 'data.open', 'data.insert', 'data.delete',
       'data.rows', 'data.execute', 'data.explain', 'data.live', 'data.lives', 'data.migrate',
     ]);
     for (const id of contract.ids) {
@@ -68,5 +72,7 @@ describe('the data studio contract document', () => {
     const migrate = contract.operations['data.migrate'];
     assert.strictEqual(migrate.output.validate({ planned: ['CREATE INDEX …'], losses: [], applied: ['add-title-index'] }).valid, true);
     assert.strictEqual(migrate.output.validate({ planned: [], losses: [], applied: [], note: 'memory stores recreate instead of migrating' }).valid, true);
+    assert.strictEqual(migrate.output.validate({ planned: [], losses: [], applied: [null] }).valid, false,
+      'the applied ids are strings — a list of nulls under this declaration was a real report');
   });
 });

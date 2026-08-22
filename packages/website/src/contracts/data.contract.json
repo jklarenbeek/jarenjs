@@ -54,7 +54,7 @@
         }
       },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Open (or recreate, with reset) the store from a jaren-model document. capabilities is the store's own capabilities table, passed through."
+      "doc": "Open (or recreate, with reset) the store from a jaren-model document. capabilities is the store's own capabilities table, passed through. reset unlinks the database the owning context holds, so it is answered only in that context: a client tab asking for it is refused with the db failure rather than served."
     },
     "data.insert": {
       "kind": "command",
@@ -69,21 +69,6 @@
       "output": true,
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
       "doc": "Insert one document. The output is the store's own insert result — the driver decides its shape, so it is deliberately open."
-    },
-    "data.put": {
-      "kind": "command",
-      "input": {
-        "type": "object",
-        "required": ["collection", "doc"],
-        "properties": {
-          "collection": { "$ref": "#/$defs/Collection" },
-          "doc": { "type": "object" },
-          "key": true
-        }
-      },
-      "output": true,
-      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Put one document, optionally at an explicit key. The output is the store's own put result — deliberately open, like insert's."
     },
     "data.delete": {
       "kind": "command",

@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "benchmark:generate": "cd ../.. && node benchmark/website-data.js --iterations 1000",
-    "predeploy": "node ../../scripts/check-benchmark-drift.js && npm run build",
+    "predeploy": "node ../../scripts/check-benchmark-drift.js && node ../../scripts/check-sw-cache.js && npm run build",
     "deploy": "gh-pages -d dist",
     "postdeploy": "node ../../scripts/verify-live-site.js",
     "deploy:remeasure": "npm run benchmark:generate && npm run build && gh-pages -d dist",

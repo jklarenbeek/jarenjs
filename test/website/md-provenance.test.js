@@ -20,12 +20,14 @@ import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { viewModel } from '../../packages/website/src/app/viewmodel.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { md, rawUrl, TRUSTED, UNTRUSTED } from '../../packages/website/src/boundaries/markdown.js';
-import { buildSiteData, buildSiteContent } from '../../scripts/generate-site-data.js';
+import { buildSiteData, buildSiteContent, buildSiteCards } from '../../scripts/generate-site-data.js';
 import { buildInfo } from '../../scripts/generate-build-info.js';
 import { createStubHost } from '../view/dom.stub.js';
 
+const CONTENT = buildSiteContent();
 const SITE_DATA = {
-  packages: buildSiteData(), content: buildSiteContent(), build: buildInfo(),
+  packages: buildSiteData(), content: CONTENT, cards: buildSiteCards(CONTENT),
+  build: buildInfo(),
 };
 
 /** A document whose heading slug would collide with a real docs section
@@ -34,7 +36,7 @@ const SITE_DATA = {
 const SOURCE = '## md\n\nSee [below](#md).\n';
 
 /** A headless site, only so a real state tree exists to project. */
-function mountSite() {
+function mountSite(hash = '#/') {
   const { document, container } = createStubHost();
   /** @type {any} */
   let routeCb = null;
@@ -48,7 +50,7 @@ function mountSite() {
       ? Promise.resolve(SITE_DATA[name])
       : Promise.reject(new Error('404'))),
     applyTheme: () => {},
-    listenHash: (cb) => { routeCb = cb; cb(parseHash('#/')); },
+    listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
     navigate: (h) => routeCb(parseHash(h)),
     storage: { read: () => null, write: () => {} },
     scrollToAnchor: () => {},
@@ -96,9 +98,11 @@ describe('the site names a rendering policy per markdown provenance', function (
   });
 
   it('renders a package site document with bare ids too', async function () {
-    const app = mountSite();
+    // mounted ON the docs page: its sections are what the route effects
+    // fetched, not what a hand-written route would have implied
+    const app = mountSite('#/docs');
     await tick();
-    const model = viewModel({ ...app.getState(), route: parseHash('#/docs') });
+    const model = viewModel(app.getState());
     const owned = model.ui.docs.sections.filter((/** @type {any} */ s) => s.id === 'md');
     assert.strictEqual(owned.length, 1, 'the @jarenjs/md workspace still owns a section');
     const html = renderToString(owned[0].blocks);

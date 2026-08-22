@@ -31,6 +31,12 @@
  * name that is not the one beside it, a body the parser cannot read —
  * is a refusal naming the path, never a silently omitted package.
  *
+ * The bodies are the bulk of it, and only the documentation page renders
+ * them, so the cards half is published a second time on its own
+ * (`site/cards.json`) — PROJECTED from the collected content rather than
+ * collected again, because two collectors over one source is how the
+ * grid and the rail come to disagree about what a package calls itself.
+ *
  * Nothing is written that the site could not read: the emit path proves
  * each artifact against the output schema of the operation the browser
  * reads it through — the same compiled document — and refuses rather
@@ -50,6 +56,7 @@ import { assertSiteOutput } from './lib/site-contract.js';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const OUT = join(ROOT, 'packages/website/public/site/packages.json');
 const CONTENT_OUT = join(ROOT, 'packages/website/public/site/content.json');
+const CARDS_OUT = join(ROOT, 'packages/website/public/site/cards.json');
 
 /** The document a workspace commits to own its presence on the site. */
 const SITE_DOC = 'site.md';
@@ -332,16 +339,47 @@ export function serializeSiteContent(content) {
   return `${JSON.stringify(content, null, 2)}\n`;
 }
 
+/**
+ * The cards half of the site content: every entry without its parsed
+ * documentation body. It is a PROJECTION of the collected content, not a
+ * second collection of it — the home page needs the cards and the engine
+ * mapping, and the markdown bodies it would otherwise download are the
+ * whole weight of the other artifact.
+ * @param {SiteContent} content - the collected content.
+ * @returns {{ generated: string | null, commit: string | null, packages: Omit<ContentEntry, 'docs'>[] }}
+ */
+export function buildSiteCards(content) {
+  return {
+    generated: content.generated,
+    commit: content.commit,
+    packages: content.packages.map(({ docs: _docs, ...entry }) => entry),
+  };
+}
+
+/**
+ * Serialize the cards artifact — the emit path, for the same reason the
+ * other two have one.
+ * @param {ReturnType<typeof buildSiteCards>} cards
+ * @returns {string}
+ * @throws {Error} when the cards do not match what `site.cards` declares.
+ */
+export function serializeSiteCards(cards) {
+  assertSiteOutput('site.cards', cards, 'packages/website/public/site/cards.json');
+  return `${JSON.stringify(cards, null, 2)}\n`;
+}
+
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   let census;
   let censusText;
   let content;
   let contentText;
+  let cardsText;
   try {
     census = buildSiteData();
     censusText = serializeSiteData(census);
     content = buildSiteContent();
     contentText = serializeSiteContent(content);
+    cardsText = serializeSiteCards(buildSiteCards(content));
   }
   catch (error) {
     console.error(/** @type {Error} */ (error).message);
@@ -350,9 +388,12 @@ if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === imp
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, censusText);
   writeFileSync(CONTENT_OUT, contentText);
+  writeFileSync(CARDS_OUT, cardsText);
   const authored = content.packages.filter((entry) => !entry.derived).length;
   console.log(`site/packages.json: ${census.packages.length} published workspaces`
     + ` @ ${census.commit === null ? '(no git)' : census.commit.slice(0, 7)}`);
   console.log(`site/content.json: ${authored} workspaces own their site document,`
     + ` ${content.packages.length - authored} derived from their manifest`);
+  console.log(`site/cards.json: the same ${content.packages.length} entries without their`
+    + ` documentation bodies (${Math.round(cardsText.length / 1024)} kB of ${Math.round(contentText.length / 1024)} kB)`);
 }

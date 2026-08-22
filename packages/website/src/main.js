@@ -16,7 +16,8 @@ import { createMotion, prefersReducedMotion } from './lib/motion.js';
 const BASE = import.meta.env.BASE_URL;
 /** The build-generated site data, by the name the app asks for it under. */
 const SITE_FILES = {
-  packages: 'site/packages.json', content: 'site/content.json', build: 'build.json',
+  packages: 'site/packages.json', content: 'site/content.json',
+  cards: 'site/cards.json', build: 'build.json',
 };
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';

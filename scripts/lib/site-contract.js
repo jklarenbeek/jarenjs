@@ -25,6 +25,7 @@
 import { readFileSync } from 'node:fs';
 
 import { compileContract } from '@jarenjs/contract';
+import { JarenValidator } from '@jarenjs/validate';
 
 /** The document's repo-relative home, as messages name it. */
 export const SITE_CONTRACT_PATH = 'packages/website/src/contracts/site.contract.json';
@@ -34,16 +35,92 @@ const DOC_URL = new URL(`../../${SITE_CONTRACT_PATH}`, import.meta.url);
 /** @type {any} */
 let compiled = null;
 
+/** @type {any} */
+let document = null;
+
+/** The document as JSON, read at most once per process. */
+function siteDocument() {
+  if (document === null) document = JSON.parse(readFileSync(DOC_URL, 'utf8'));
+  return document;
+}
+
 /**
  * The compiled site contract, compiled at most once per process — the
  * generators call this per payload and compilation is the expensive half.
  * @returns {any}
  */
 export function siteContract() {
-  if (compiled === null) {
-    compiled = compileContract(JSON.parse(readFileSync(DOC_URL, 'utf8')));
-  }
+  if (compiled === null) compiled = compileContract(siteDocument());
   return compiled;
+}
+
+/**
+ * The `$defs` member that declares one benchmark suite's payload.
+ * `bench.suite` answers exactly one of them, so a generator writing a
+ * suite file can be held to ITS shape rather than to the whole union —
+ * which is the difference between a refusal that names the member at
+ * fault and one that lists twenty-one ways the payload is not something
+ * else. The name is derived from the suite key, and the website test
+ * suite pairs the two sets so neither can grow a member alone.
+ * @param {string} suite - a suite key, e.g. `'long-horizon'`.
+ * @returns {string}
+ */
+export function suiteShapeName(suite) {
+  return `Suite${suite.split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('')}`;
+}
+
+/** @type {Map<string, (value: unknown) => any>} */
+const suiteValidators = new Map();
+
+/**
+ * The compiled validator for one suite's declared shape.
+ * @param {string} suite
+ * @returns {(value: unknown) => any}
+ * @throws {Error} when the document declares no shape for that suite.
+ */
+function suiteValidator(suite) {
+  let validate = suiteValidators.get(suite);
+  if (validate === undefined) {
+    const doc = siteDocument();
+    const name = suiteShapeName(suite);
+    if (doc.$defs?.[name] === undefined) {
+      throw new Error(`${SITE_CONTRACT_PATH} declares no shape '${name}' for the '${suite}' suite.`
+        + ' A published suite needs its shape in the same document the browser reads it through:'
+        + ' add it to $defs and to the oneOf of operations/bench.suite/output.');
+    }
+    validate = new JarenValidator({ skipErrors: false, collectErrors: true })
+      .compile({ $ref: `#/$defs/${name}`, $defs: doc.$defs });
+    suiteValidators.set(suite, validate);
+  }
+  return validate;
+}
+
+/**
+ * Prove one benchmark suite's payload against the shape this document
+ * declares for it, or refuse to let it be written. `bench.suite` reads
+ * every suite through the same document, so a member the generator adds,
+ * renames or retypes has to land with the contract change — the point
+ * being that it is caught here, at the write, rather than as a wrong
+ * render weeks later.
+ * @param {string} suite - the suite key the file is named for.
+ * @param {unknown} value - the payload about to be serialized.
+ * @param {string} target - the file the caller is about to write.
+ * @returns {unknown} the payload, unchanged.
+ * @throws {Error} naming the `JC` code, the shape and every failing path.
+ */
+export function assertSuiteOutput(suite, value, target) {
+  const name = suiteShapeName(suite);
+  const result = suiteValidator(suite)(value);
+  if (result.valid === true) return value;
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+  throw new Error(
+    `JC2010: the payload for ${target} fails the '${name}' shape of 'bench.suite'`
+    + ` (${SITE_CONTRACT_PATH}/$defs/${name})\n`
+    + `${errors.map(line).join('\n')}\n`
+    + 'The generator and the browser read this suite through the same document:'
+    + ' change the contract in the same commit as the payload, or fix the payload.');
 }
 
 /**
