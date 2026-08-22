@@ -98,20 +98,61 @@ const overviewCharts = memo1((meta) => {
     'One bar per suite; the axis is logarithmic and 1× is parity. Bars below parity are suites where a rival is faster — they are on the chart for the same reason the wins are.')];
 });
 
+/** Numeric order for `0.9.0` vs `0.37.1`, which sort backwards as text. */
+function compareVersion(a, b) {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
+ * The span one provenance field covers across the headline rows, with
+ * the rows that do not record it counted rather than folded in.
+ *
+ * The tiles used to print the LAST RUN's date and version as though
+ * they described every row, over rows measured weeks and versions
+ * earlier. A set of rows is honestly summarized by its range.
+ */
+function provenanceSpan(headlines, pick, compare) {
+  const values = headlines.map(pick).filter((v) => typeof v === 'string' && v !== '');
+  const known = [...new Set(values)].sort(compare);
+  return {
+    span: known.length === 0 ? '—'
+      : known.length === 1 ? known[0]
+        : `${known[0]} → ${known[known.length - 1]}`,
+    unknown: headlines.length - values.length,
+  };
+}
+
+/** `, 3 rows unrecorded` — appended wherever a span leaves rows out. */
+const unrecorded = (n) => (n === 0 ? '' : `, ${n} row${n === 1 ? '' : 's'} unrecorded`);
+
 /**
  * The overview: what every suite measured, in one screen. Each row is
  * DERIVED from that suite's generated data (benchmark/website-data.js
  * `buildHeadlines`), so the summary cannot drift from the detail pages
- * behind it — and a suite skipped in a partial regeneration carries its
- * own older run date rather than borrowing this one.
+ * behind it — and each row carries the run that measured IT, so a
+ * partial regeneration is visible here as a range rather than hidden
+ * behind one flattering date.
  */
 function overview(meta) {
   const headlines = meta.headlines ?? [];
-  const runDate = (meta.generated ?? '').slice(0, 10);
+  const lastRun = meta.lastRun ?? {};
+  const measured = provenanceSpan(headlines, (h) => (h.generated ?? '').slice(0, 10));
+  const versions = provenanceSpan(headlines, (h) => h.version, compareVersion);
+  const lastRunDate = (lastRun.generated ?? '').slice(0, 10);
   const out = [cards([
-    { title: 'Generated', value: runDate || '—', note: `${meta.node ?? ''} · ${meta.quick ? 'quick run' : 'full run'}` },
-    { title: 'Machine', value: meta.cpu ?? '—', note: meta.platform ?? '' },
-    { title: 'Suite version', value: meta.version ?? '—', note: `${headlines.length} suites measured` },
+    { title: 'Measured', value: measured.span, note: `${headlines.length} suites measured${unrecorded(measured.unknown)}` },
+    { title: 'Machine', value: lastRun.cpu ?? '—', note: lastRun.platform ?? '' },
+    {
+      title: 'Suite version',
+      value: versions.span === '—' ? '—' : `v${versions.span.replace(' → ', ' → v')}`,
+      note: `last run ${lastRunDate || '—'} · ${lastRun.node ?? ''} · ${lastRun.quick ? 'quick iterations' : 'full iterations'}${unrecorded(versions.unknown)}`,
+    },
   ])];
 
   if (headlines.length !== 0) {
@@ -224,7 +265,9 @@ function validate(data, benchUi) {
     out.push(cards([
       { title: 'Success-only totals', value: `${Math.round(overall.jarenSuccessTime)} ms vs ${Math.round(overall.ajvSuccessTime)} ms`, note: 'Jaren vs Ajv, tests both can run' },
       { title: 'Jaren wins', value: `${overall.successOnly?.jarenWins ?? '—'} tests`, note: `Ajv wins ${overall.successOnly?.ajvWins ?? '—'}` },
-      { title: 'Ajv failures', value: `${overall.ajvFailures} tests, ${overall.ajvErrors} errors`, note: 'Jaren: 0 and 0' },
+      // both columns are derived: the note used to spell Jaren's side as
+      // a literal, which stops being true the moment a test regresses
+      { title: 'Ajv failures', value: `${overall.ajvFailures} tests, ${overall.ajvErrors} errors`, note: `Jaren: ${overall.jarenFailures ?? '—'} and ${overall.jarenErrors ?? '—'}` },
     ]));
   }
   const results = Array.isArray(data.results) ? data.results : [];

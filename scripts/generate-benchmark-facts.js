@@ -8,10 +8,10 @@
  *
  * Why this exists: those numbers used to be hand-copied out of a
  * benchmark run and never touched again. By the time this was written 19
- * of them had drifted, in both directions — the root README understated
- * its own JSONPath result as 18.7x when the committed data said 23.1x,
- * and understated three per-draft win counts. A figure nobody can
- * recompute is a figure nobody can trust.
+ * of them had drifted, in both directions — the root README quoted a
+ * JSONPath ratio the committed data no longer supported, and understated
+ * three per-draft win counts. A figure nobody can recompute is a figure
+ * nobody can trust.
  *
  * This NEVER runs a benchmark. It reads the committed measurements, so it
  * is deterministic, instant, and safe on any machine — re-measuring is a
@@ -34,10 +34,12 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { bake } from '@jarenjs/md';
+
+import { ratioSummary } from '../benchmark/derive.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const DATA = join(ROOT, 'packages/website/public/benchmarks');
@@ -64,13 +66,18 @@ const band = (xs, fmt) => `${fmt(Math.min(...xs))}–${fmt(Math.max(...xs))}`;
 
 //#endregion
 
-/** Mean of one engine's column across profile rows. */
-const meanOf = (rows, engine) => rows.reduce((a, r) => a + r.engines[engine], 0) / rows.length;
-
 /** A row from a labelled `[{label, ns}]` list. */
 const byLabel = (rows, label) => rows.find((r) => r.label === label);
 
-/** One conformance row as `pass of total (pct%)`. */
+/** The JSONPath compliance-suite profile, summarized against json-p3. */
+function cts() {
+  const summary = ratioSummary(data('jsonpath').profile.rows, 'jaren', 'json-p3');
+  if (summary.rows === 0) {
+    throw new Error('jsonpath.json carries no comparable profile rows — regenerate it before quoting one');
+  }
+  return summary;
+}
+
 /**
  * The phase split of the largest markdown document measured.
  */
@@ -179,9 +186,33 @@ const FACTS = {
       }
       return stamp.slice(0, 10);
     }))].sort();
-    const nodes = [...new Set(suites.map((s) => data(s).node).filter(Boolean))];
+    const nodes = [...new Set(suites
+      .map((s) => data(s).node ?? data(s).metadata?.node)
+      .filter(Boolean))];
     const when = dates.length === 1 ? dates[0] : `${dates[0]}–${dates[dates.length - 1]}`;
     return `${when} with Node ${nodes.length === 1 ? nodes[0] : nodes.join('/')}`;
+  },
+
+  // ——— @jarenjs/validate: the official suite, scored per engine over the
+  // tests THAT engine ran. The rival's status is not consulted: a test Ajv
+  // cannot compile is still a test Jaren passed or failed, and dropping
+  // those from the count is how real `$dynamicRef` failures were published
+  // as a clean sweep for months.
+  'validate.conformance': () => {
+    const stats = data('validate').summary.engineStats.jaren;
+    const total = (pick) => Object.values(stats).reduce((n, draft) => n + pick(draft), 0);
+    const passed = total((d) => d.passed);
+    return `${passed} of ${passed + total((d) => d.failed) + total((d) => d.errors)}`;
+  },
+  // the success-only totals: the tests BOTH engines run and both pass, the
+  // only rows where a timing comparison means anything
+  'validate.vsAjv': () => {
+    const o = data('validate').summary.overall;
+    return ratio(o.ajvSuccessTime / o.jarenSuccessTime);
+  },
+  'validate.perTestWins': () => {
+    const s = data('validate').summary.overall.successOnly;
+    return `${s.jarenWins} of ${s.jarenWins + s.ajvWins + s.tied}`;
   },
 
   // ——— @jarenjs/validate: the per-draft table in the root README ———
@@ -258,15 +289,13 @@ const FACTS = {
     return `${(worst.share * 100).toFixed(1)}%`;
   },
 
-  // ——— @jarenjs/json: JSONPath compliance-suite profile ———
-  'jsonpath.ctsRatio': () => {
-    const rows = data('jsonpath').profile.rows;
-    return ratio(meanOf(rows, 'json-p3') / meanOf(rows, 'jaren'));
-  },
-  'jsonpath.ctsTimes': () => {
-    const rows = data('jsonpath').profile.rows;
-    return `${ns(meanOf(rows, 'jaren'))} ns vs ${us(meanOf(rows, 'json-p3'))} µs`;
-  },
+  // ——— @jarenjs/json: JSONPath compliance-suite profile. The ratio and
+  // the two timings beside it come from ONE summary over one row set, and
+  // that summary is the same builder the website's overview headline
+  // reads — the alternative, a second formula here, is how these 456 rows
+  // came to be published as 23.1x in this file and 8.8x on the site.
+  'jsonpath.ctsRatio': () => ratio(cts().ratio),
+  'jsonpath.ctsTimes': () => `${ns(cts().mine)} ns vs ${us(cts().rival)} µs`,
 
   // ——— @jarenjs/json: query compile cost ———
   'jsonquery.compile': () => {
@@ -594,55 +623,114 @@ const DOCS = [
   'packages/ai/README.md',
 ];
 
-const check = process.argv.includes('--check');
-/** @type {string[]} */
-const drift = [];
-const seen = new Set();
-let rewritten = 0;
+/**
+ * @typedef {object} GateReport
+ * @property {number} code - 0 green, 1 failed
+ * @property {string[]} unanswered - markers no derivation could answer
+ * @property {string[]} drift - documents whose figure differs from the data
+ * @property {string[]} unused - derivations no document quotes
+ * @property {string[]} seen - the facts that resolved
+ * @property {number} rewritten - documents written (write mode only)
+ */
 
-for (const rel of DOCS) {
-  const path = join(ROOT, rel);
-  const before = readFileSync(path, 'utf8');
-  // The marker grammar, the pairing and the byte-local splice belong to
-  // @jarenjs/md — this script owns the DERIVATIONS and nothing else. It
-  // used to carry its own regex, which meant the repository had two
-  // ideas of what a directive is and only one of them was tested.
-  const result = bake(before, {
-    ns: 'bm',
-    resolve: (key, directive) => {
-      if (FACTS[key] === undefined) {
-        drift.push(`${rel}: unknown fact '${key}' — no derivation exists for this marker`);
-        return undefined;
-      }
-      seen.add(key);
-      const value = FACTS[key]();
-      if (value !== directive.body) {
-        drift.push(`${rel}: ${key}\n    doc:  ${directive.body.trim()}\n    data: ${value.trim()}`);
-      }
-      return value;
-    },
-  });
-  for (const message of result.diagnostics) drift.push(`${rel}: ${message}`);
-  if (result.changed && !check) {
-    writeFileSync(path, result.text);
-    rewritten += 1;
+/**
+ * Bake (or check) every marker in `docs` against `facts`.
+ *
+ * There are two ways a document and the data can disagree, and only one
+ * of them is repairable by rewriting. A figure that has MOVED is the
+ * gate's daily work: `--check` reports it, the write mode fixes it. A
+ * marker the data cannot ANSWER — no derivation, or a derivation that
+ * throws because the file it reads was never regenerated — is not
+ * repairable, and a run that rewrote its way past one would leave last
+ * month's number sitting in the document under a success line. So an
+ * unanswered marker fails both modes, and fails BEFORE anything is
+ * written.
+ *
+ * @param {{ docs?: string[], facts?: Record<string, () => string>, check?: boolean }} [options]
+ * @returns {GateReport}
+ */
+export function runFactsGate(options = {}) {
+  const docs = options.docs ?? DOCS;
+  const facts = options.facts ?? FACTS;
+  const check = options.check ?? false;
+  /** @type {string[]} */
+  const unanswered = [];
+  /** @type {string[]} */
+  const drift = [];
+  const seen = new Set();
+  /** @type {{ file: string, text: string }[]} */
+  const pending = [];
+
+  for (const rel of docs) {
+    const file = resolve(ROOT, rel);
+    const before = readFileSync(file, 'utf8');
+    // The marker grammar, the pairing and the byte-local splice belong to
+    // @jarenjs/md — this script owns the DERIVATIONS and nothing else. It
+    // used to carry its own regex, which meant the repository had two
+    // ideas of what a directive is and only one of them was tested.
+    const result = bake(before, {
+      ns: 'bm',
+      resolve: (key, directive) => {
+        if (facts[key] === undefined) {
+          unanswered.push(`${rel}: unknown fact '${key}' — no derivation exists for this marker`);
+          return undefined;
+        }
+        const value = facts[key]();
+        // counted only once the derivation ANSWERED: a fact whose data is
+        // missing throws, and counting it here would let the success line
+        // report a coverage the run did not have
+        seen.add(key);
+        if (value !== directive.body) {
+          drift.push(`${rel}: ${key}\n    doc:  ${directive.body.trim()}\n    data: ${value.trim()}`);
+        }
+        return value;
+      },
+    });
+    // a diagnostic is a marker that did NOT bake — a resolver that threw,
+    // or a marker the renderer will never see
+    for (const message of result.diagnostics) unanswered.push(`${rel}: ${message}`);
+    if (result.changed) pending.push({ file, text: result.text });
   }
+
+  const unused = Object.keys(facts).filter((key) => !seen.has(key));
+  let rewritten = 0;
+  if (unanswered.length === 0 && !check) {
+    for (const entry of pending) {
+      writeFileSync(entry.file, entry.text);
+      rewritten += 1;
+    }
+  }
+  const failed = unanswered.length > 0 || (check && (drift.length > 0 || unused.length > 0));
+  return { code: failed ? 1 : 0, unanswered, drift, unused, seen: [...seen], rewritten };
 }
 
-const unused = Object.keys(FACTS).filter((key) => !seen.has(key));
-if (unused.length > 0) drift.push(`facts with no marker in any document: ${unused.join(', ')}`);
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const check = process.argv.includes('--check');
+  const report = runFactsGate({ check });
 
-if (check) {
-  if (drift.length > 0) {
-    console.error(`benchmark figures are stale (${drift.length}):\n\n${drift.join('\n')}\n`);
-    console.error('run `npm run docs:benchmarks` to refresh them from the committed measurements.');
-    process.exit(1);
+  if (report.unanswered.length > 0) {
+    console.error(`benchmark markers the committed measurements cannot answer `
+      + `(${report.unanswered.length}):\n\n${report.unanswered.join('\n')}\n`);
+    console.error('nothing was rewritten: regenerate the data these markers derive from, '
+      + 'or remove the markers.');
   }
-  console.log(`benchmark figures current (${seen.size} facts across ${DOCS.length} documents).`);
-}
-else {
-  console.log(`benchmark figures: ${seen.size} facts, ${rewritten} document(s) rewritten.`);
-  if (unused.length > 0) console.warn(`WARNING: ${unused.join(', ')}`);
+  else if (check) {
+    const stale = [...report.drift, ...(report.unused.length > 0
+      ? [`facts with no marker in any document: ${report.unused.join(', ')}`]
+      : [])];
+    if (stale.length > 0) {
+      console.error(`benchmark figures are stale (${stale.length}):\n\n${stale.join('\n')}\n`);
+      console.error('run `npm run docs:benchmarks` to refresh them from the committed measurements.');
+    }
+    else {
+      console.log(`benchmark figures current (${report.seen.length} facts across ${DOCS.length} documents).`);
+    }
+  }
+  else {
+    console.log(`benchmark figures: ${report.seen.length} facts, ${report.rewritten} document(s) rewritten.`);
+    if (report.unused.length > 0) console.warn(`WARNING: ${report.unused.join(', ')}`);
+  }
+  process.exit(report.code);
 }
 
 //#endregion

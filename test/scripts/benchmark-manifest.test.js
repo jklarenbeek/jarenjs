@@ -56,13 +56,25 @@ describe('benchmark suite lists agree', () => {
     assert.deepStrictEqual([...header].sort(), [...expected].sort());
   });
 
-  it('the --help skip list covers every suite (qt3 is a legitimate extra)', () => {
+  // Two skip targets produce no file of their own: `qt3` feeds meta.json,
+  // and `jsonx-stream` merges into toml.json as its `stream` block. Both
+  // are accepted by --skip, so both have to be documented — one of them
+  // was accepted and undocumented, which is how a skip nobody knew about
+  // silently stripped published rows.
+  const SKIP_ONLY = ['jsonx-stream', 'qt3'];
+
+  it('the --help skip list covers every suite plus the file-less targets', () => {
     const help = helpSuites();
     for (const suite of order) {
       assert.ok(help.has(suite), `--help omits suite '${suite}'`);
     }
-    const extras = [...help].filter((s) => !order.includes(s));
-    assert.deepStrictEqual(extras, ['qt3'],
-      'the only non-suite skip target is qt3 (it feeds meta.json)');
+    const extras = [...help].filter((s) => !order.includes(s)).sort();
+    assert.deepStrictEqual(extras, SKIP_ONLY,
+      'the non-suite skip targets are qt3 (it feeds meta.json) and jsonx-stream (it rides toml.json)');
+  });
+
+  it('the header documents the sub-run that has no file of its own', () => {
+    assert.match(SOURCE, /jsonx-stream\.js\s+—/,
+      'the header manifest must name jsonx-stream.js beside the file it merges into');
   });
 });

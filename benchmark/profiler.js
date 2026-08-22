@@ -206,14 +206,19 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
     return null;
   }
 
-  // Check for errors first
+  // Check for errors first. An engine that threw has no verdict on this
+  // test, and its failure count is null rather than 0 so nothing can read
+  // it as "no failures". The engine that DID run keeps its real count:
+  // zeroing both because one of them errored is how real failures were
+  // counted as passes for as long as the rival happened to error on the
+  // same test.
   if (jarenResult.error || ajvResult.error) {
     return {
       description: test.description,
       jarenError: jarenResult.error || null,
       ajvError: ajvResult.error || null,
-      jarenFailures: 0,
-      ajvFailures: 0,
+      jarenFailures: jarenResult.error ? null : jarenResult.failures,
+      ajvFailures: ajvResult.error ? null : ajvResult.failures,
     };
   }
 
@@ -356,6 +361,20 @@ function padStart(text, targetWidth) {
 }
 
 /**
+ * The tests one engine actually ran: a harness failure or that engine's
+ * own error means it produced no verdict. The RIVAL's status is
+ * deliberately not consulted — conformance is a property of an engine
+ * and its corpus, and a count that drops whatever the rival could not
+ * compile reports the intersection while claiming the corpus.
+ * @param {Array} rows
+ * @param {'jarenError'|'ajvError'} errorKey
+ * @returns {Array}
+ */
+function ranTests(rows, errorKey) {
+  return rows.filter(r => !r.error && !r[errorKey]);
+}
+
+/**
  * Print results to console in table format
  * @param {Array} results - Profiling results
  * @param {Object} options - Output options
@@ -370,12 +389,16 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
   // Calculate success-only stats
   const successResults = validResults.filter(r => r.isSuccessTest);
 
-  // Calculate failure/error counts per engine
+  // Calculate failure/error counts per engine. Each engine is scored over
+  // the tests IT ran — a test the other engine could not compile is still
+  // a test this one passed or failed.
   const errorResults = results.filter(r => r.error || r.jarenError || r.ajvError);
-  const jarenErrors = errorResults.filter(r => r.jarenError).length;
-  const ajvErrors = errorResults.filter(r => r.ajvError).length;
-  const jarenFailures = validResults.filter(r => r.jarenFailures > 0).length;
-  const ajvFailures = validResults.filter(r => r.ajvFailures > 0).length;
+  const jarenRan = ranTests(results, 'jarenError');
+  const ajvRan = ranTests(results, 'ajvError');
+  const jarenErrors = results.length - jarenRan.length;
+  const ajvErrors = results.length - ajvRan.length;
+  const jarenFailures = jarenRan.filter(r => r.jarenFailures > 0).length;
+  const ajvFailures = ajvRan.filter(r => r.ajvFailures > 0).length;
 
   // Combine all results for display (valid + errors), sorted by ratio
   const allDisplayResults = [...results].sort((a, b) => {
@@ -411,8 +434,8 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
 
   // Engine-specific failure/error counts
   console.log(`\nEngine Results:`);
-  console.log(`  Jaren: ${results.length - jarenErrors - jarenFailures} passed, ${jarenFailures} failed, ${jarenErrors} errors`);
-  console.log(`  AJV:   ${results.length - ajvErrors - ajvFailures} passed, ${ajvFailures} failed, ${ajvErrors} errors`);
+  console.log(`  Jaren: ${jarenRan.length - jarenFailures} passed, ${jarenFailures} failed, ${jarenErrors} errors`);
+  console.log(`  AJV:   ${ajvRan.length - ajvFailures} passed, ${ajvFailures} failed, ${ajvErrors} errors`);
 
   if (validResults.length === 0) {
     console.log('\nNo valid results to display.');
@@ -611,7 +634,6 @@ function exportJson(results, outputPath, options) {
   
   for (const draft of options.drafts) {
     const draftResults = results.filter(r => r.draft === draft);
-    const draftErrors = draftResults.filter(r => r.error || r.jarenError || r.ajvError);
     const draftValidResults = draftResults.filter(r => !r.error && !r.jarenError && !r.ajvError);
     const draftSuccessResults = draftValidResults.filter(r => r.isSuccessTest);
     
@@ -623,6 +645,13 @@ function exportJson(results, outputPath, options) {
     const jarenSuccessTime = draftSuccessResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
     const ajvSuccessTime = draftSuccessResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
     
+    // Scored per engine over the tests that engine ran, so that
+    // passed + failed + errors === totalTests for both columns.
+    const jarenRan = ranTests(draftResults, 'jarenError');
+    const ajvRan = ranTests(draftResults, 'ajvError');
+    const jarenFailed = jarenRan.filter(r => r.jarenFailures > 0).length;
+    const ajvFailed = ajvRan.filter(r => r.ajvFailures > 0).length;
+
     byDraft[draft] = {
       totalTests: draftResults.length,
       validTests: draftValidResults.length,
@@ -631,22 +660,22 @@ function exportJson(results, outputPath, options) {
       ajvTotalTime,
       jarenSuccessTime,
       ajvSuccessTime,
-      jarenErrors: draftErrors.filter(r => r.jarenError).length,
-      ajvErrors: draftErrors.filter(r => r.ajvError).length,
-      jarenFailures: draftValidResults.filter(r => r.jarenFailures > 0).length,
-      ajvFailures: draftValidResults.filter(r => r.ajvFailures > 0).length,
+      jarenErrors: draftResults.length - jarenRan.length,
+      ajvErrors: draftResults.length - ajvRan.length,
+      jarenFailures: jarenFailed,
+      ajvFailures: ajvFailed,
       ...calculateSummaryStats(draftResults),
     };
     
     engineStats.jaren[draft] = {
-      passed: draftResults.length - draftErrors.filter(r => r.jarenError).length - draftValidResults.filter(r => r.jarenFailures > 0).length,
-      failed: draftValidResults.filter(r => r.jarenFailures > 0).length,
-      errors: draftErrors.filter(r => r.jarenError).length,
+      passed: jarenRan.length - jarenFailed,
+      failed: jarenFailed,
+      errors: draftResults.length - jarenRan.length,
     };
     engineStats.ajv[draft] = {
-      passed: draftResults.length - draftErrors.filter(r => r.ajvError).length - draftValidResults.filter(r => r.ajvFailures > 0).length,
-      failed: draftValidResults.filter(r => r.ajvFailures > 0).length,
-      errors: draftErrors.filter(r => r.ajvError).length,
+      passed: ajvRan.length - ajvFailed,
+      failed: ajvFailed,
+      errors: draftResults.length - ajvRan.length,
     };
   }
 
@@ -661,6 +690,11 @@ function exportJson(results, outputPath, options) {
   const output = {
     metadata: {
       timestamp: new Date().toISOString(),
+      // the runtime these timings were taken on: a file that records only
+      // WHEN it ran leaves the reader to borrow a runtime from somewhere
+      // else, which is how a summary came to name one Node version over
+      // rows measured on two
+      node: process.version,
       iterations: options.iterations,
       warmupIterations: WARMUP_ITERATIONS,
       totalTests: results.length,
@@ -674,10 +708,10 @@ function exportJson(results, outputPath, options) {
         ajvTotalTime,
         jarenSuccessTime,
         ajvSuccessTime,
-        jarenErrors: results.filter(r => r.jarenError).length,
-        ajvErrors: results.filter(r => r.ajvError).length,
-        jarenFailures: validResults.filter(r => r.jarenFailures > 0).length,
-        ajvFailures: validResults.filter(r => r.ajvFailures > 0).length,
+        jarenErrors: results.length - ranTests(results, 'jarenError').length,
+        ajvErrors: results.length - ranTests(results, 'ajvError').length,
+        jarenFailures: ranTests(results, 'jarenError').filter(r => r.jarenFailures > 0).length,
+        ajvFailures: ranTests(results, 'ajvError').filter(r => r.ajvFailures > 0).length,
         ...calculateSummaryStats(results),
       },
       byDraft,

@@ -18,6 +18,7 @@
  *   jsonpointer.json  jsonpointer.js    — compiled vs legacy vs jsonpointer npm
  *   jsonpatch.json    jsonpatch.js      — compiled COW patch/merge vs naive clone-and-interpret
  *   toml.json         toml.js           — JOSL strict-TOML vs smol-toml/@iarna/toml/toml (toml-test)
+ *                     jsonx-stream.js   — the JSONX streaming reader, merged into toml.json as `stream`
  *   csv.json          csv.js            — CSV reader/writer vs udsv/csv-parse/d3-dsv
  *   markdown.json     markdown.js       — @jarenjs/md vs marked/markdown-it/micromark (CommonMark spec)
  *   mermaid.json      mermaid.js        — @jarenjs/mermaid coverage + parse-speed vs @mermaid-js/parser
@@ -46,22 +47,58 @@ import { fileURLToPath } from 'url';
 
 import { Float64, geoMean } from '@jarenjs/core/math';
 
+import { geoMeanRatio } from './derive.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'packages', 'website', 'public', 'benchmarks');
 
 //#region helpers
 
+/** Refuse the invocation, naming the reason in one line. */
+function refuse(reason) {
+  console.error(reason);
+  process.exit(2);
+}
+
+/**
+ * A flag's value, refused unless it is really there: an option that
+ * swallowed the NEXT FLAG, or accepted `abc` as a count, used to reach
+ * the profiler as `NaN` and the published metadata as `null`.
+ */
+function flagValue(argv, i, flag) {
+  const value = argv[i];
+  if (value === undefined || value.startsWith('--'))
+    refuse(`${flag} needs a value.`);
+  return value;
+}
+
 function parseArgs(argv) {
   const options = { iterations: 1000, quick: false, skip: new Set() };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
-      case '--iterations': case '-i': options.iterations = parseInt(argv[++i], 10); break;
+      case '--iterations': case '-i': {
+        const flag = argv[i];
+        const value = flagValue(argv, ++i, flag);
+        const count = Number(value);
+        if (!Number.isInteger(count) || count <= 0)
+          refuse(`--iterations needs a positive integer, got '${value}'.`);
+        options.iterations = count;
+        break;
+      }
       case '--quick': options.quick = true; break;
-      case '--skip': argv[++i].split(',').forEach((s) => options.skip.add(s.trim())); break;
+      case '--skip': {
+        const value = flagValue(argv, ++i, '--skip');
+        for (const name of value.split(',')) {
+          const suite = name.trim();
+          if (suite !== '') options.skip.add(suite);
+        }
+        if (options.skip.size === 0) refuse('--skip needs at least one suite name.');
+        break;
+      }
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, qt3');
         process.exit(0);
         break;
       default:
@@ -69,6 +106,11 @@ function parseArgs(argv) {
         process.exit(2);
     }
   }
+  // A quick partial run cannot be attributed at all: its rows would be
+  // published as measurements beside carried full-run rows, at a tenth
+  // of the iterations, under the same summary.
+  if (options.quick && options.skip.size > 0)
+    refuse('--quick cannot be combined with --skip: a quick partial run would publish low-iteration rows beside carried full-run ones.');
   if (options.quick)
     options.iterations = Math.min(options.iterations, 100);
   return options;
@@ -91,6 +133,16 @@ function runTool(args, { capture = false } = {}) {
 
 function readJson(filepath) {
   return JSON.parse(fs.readFileSync(filepath, 'utf8'));
+}
+
+/** The published file for a suite, or null when this checkout has none. */
+function previousSuite(name) {
+  try {
+    return readJson(path.join(OUT_DIR, `${name}.json`));
+  }
+  catch {
+    return null;
+  }
 }
 
 function writeJson(name, data) {
@@ -872,7 +924,7 @@ function buildHeadlines(generated, meta) {
   if (generated.jsonpath !== undefined) {
     const rows = generated.jsonpath.profile?.rows ?? [];
     add('jsonpath', 'JSONPath', {
-      ratio: geoMean(rows.map((r) => r.engines['json-p3'] / r.engines.jaren)),
+      ratio: geoMeanRatio(rows, 'jaren', 'json-p3'),
       rival: 'json-p3',
       conformance: `${generated.jsonpath.compliance.total} / ${generated.jsonpath.compliance.total}`,
       note: `RFC 9535 CTS, ${rows.length} queries`,
@@ -1064,7 +1116,100 @@ function buildHeadlines(generated, meta) {
       note: 'incremental live-query maintenance versus re-running the query; measured against RxDB and TinyBase (which wins raw update latency — the honest cost of durability, published on the suite page)',
     });
   }
+  if (generated['long-horizon'] !== undefined) {
+    // This suite measures RETENTION, not speed: what a compacted agent
+    // history still carries. It has no ratio because there is no rival
+    // engine to time — and it belongs on the overview anyway, because a
+    // summary that counted 20 of the 21 published suites was itself a
+    // number that could not be checked.
+    const rows = generated['long-horizon'].rows ?? [];
+    const at = (variant, budget) => rows.find((r) => r.variant === variant
+      && r.task === 'needle' && r.shape === 'late' && r.budget === budget);
+    // the budget where the defect is most visible on the realistic
+    // payload shape — the same row the package docs quote
+    const budget = 6000;
+    const lossy = at('synopsis', budget);
+    const ledger = at('ledger', budget);
+    if (lossy !== undefined && ledger !== undefined && ledger.valueRecoverable !== null) {
+      add('long-horizon', 'Long horizon', {
+        ratio: null,
+        rival: 'the same run without a ledger',
+        conformance: `${ledger.valueRecoverable} / ${ledger.n} values`,
+        note: `agent context retention, not speed: at a ${budget}-character history budget on the`
+          + ` realistic payload shape, built-in compaction still carries ${lossy.valuePresent} of`
+          + ` ${lossy.n} record values, and a ledger brings ${ledger.valueRecoverable} of`
+          + ` ${ledger.n} back — verbatim or one recall away. The pairwise relation is 0% either`
+          + ' way; only an environment moves it — see the suite page',
+      });
+    }
+  }
   return out;
+}
+
+/** The provenance a row measured by THIS invocation carries. */
+function measuredBy(lastRun) {
+  return {
+    generated: lastRun.generated,
+    node: lastRun.node,
+    version: lastRun.version,
+    quick: lastRun.quick,
+  };
+}
+
+/**
+ * A published suite file's OWN measurement stamp, for a row derived
+ * from the committed data rather than from a run. The suites spell it
+ * three ways; what none of them record is the suite version or the
+ * iteration mode, so those stay unknown instead of borrowing this run's.
+ */
+function fileProvenance(payload) {
+  const asString = (v) => (typeof v === 'string' && v !== '' ? v : null);
+  return {
+    generated: asString(payload?.date ?? payload?.meta?.date ?? payload?.metadata?.timestamp),
+    node: asString(payload?.node ?? payload?.meta?.node),
+    version: null,
+    quick: null,
+  };
+}
+
+/**
+ * The overview's row list: rows measured by this run, then the rows it
+ * did not measure, each keeping the run that DID measure it.
+ *
+ * The global run stamp used to be written over every row, so a partial
+ * regeneration republished weeks-old numbers as freshly measured on
+ * today's runtime and version. A row recorded before per-row provenance
+ * existed knows only its date; the rest is published as unknown, which
+ * is a smaller claim than a plausible lie.
+ */
+function carryHeadlines(fresh, previous, lastRun) {
+  const rows = fresh.map((h) => ({ ...h, ...measuredBy(lastRun) }));
+  const known = new Set(rows.map((h) => h.key));
+  for (const h of previous ?? []) {
+    if (known.has(h.key)) continue;
+    known.add(h.key);
+    rows.push({
+      ...h,
+      generated: h.generated ?? null,
+      node: h.node ?? null,
+      version: h.version ?? null,
+      quick: h.quick ?? null,
+    });
+  }
+  return rows;
+}
+
+/**
+ * The JOSL suite file: the TOML measurements plus the JSONX streaming
+ * rows that ride with them as `stream`. A skipped or failed streaming
+ * sub-run has nothing fresh to write, and writing the file without the
+ * member would DELETE rows the site still renders — so it carries
+ * forward, the way a skipped suite carries its whole file.
+ */
+function mergeToml(toml, stream, previousToml) {
+  if (toml === null || toml === undefined) return null;
+  const carried = stream ?? previousToml?.stream ?? null;
+  return carried === null ? toml : { ...toml, stream: carried };
 }
 
 /**
@@ -1238,10 +1383,16 @@ async function main() {
     generated.jsonquery = await generateJsonQuery(tmp, options);
   if (!options.skip.has('jslt'))
     generated.jslt = await generateJslt(tmp, options);
-  if (!options.skip.has('formats'))
-    generated.formats = generateFormats(tmp, options);
-  if (!options.skip.has('contracts'))
-    generated.contracts = generateContracts(tmp, options);
+  if (!options.skip.has('formats')) {
+    const formats = generateFormats(tmp, options);
+    if (formats !== null)
+      generated.formats = formats;
+  }
+  if (!options.skip.has('contracts')) {
+    const contracts = generateContracts(tmp, options);
+    if (contracts !== null)
+      generated.contracts = contracts;
+  }
   if (!options.skip.has('contract')) {
     const contract = generateContract(tmp, options);
     if (contract !== null)
@@ -1257,7 +1408,7 @@ async function main() {
       const stream = options.skip.has('jsonx-stream')
         ? null
         : generateJsonxStream(tmp, options);
-      generated.toml = stream === null ? toml : { ...toml, stream };
+      generated.toml = mergeToml(toml, stream, previousSuite('toml'));
     }
   }
   if (!options.skip.has('csv')) {
@@ -1334,13 +1485,21 @@ async function main() {
 
   // meta.json: everything the overview needs without loading the big files.
   const rootPkg = readJson(path.join(ROOT, 'package.json'));
-  const meta = {
+  // What THIS invocation was — the machine, the runtime, the suite
+  // version, the iteration mode. It describes the RUN and nothing else:
+  // the measurement set is described row by row, because these five
+  // fields written over carried rows is exactly how a partial
+  // regeneration came to publish weeks-old numbers as freshly measured.
+  const lastRun = {
     generated: new Date().toISOString(),
     node: process.version,
     cpu: os.cpus()[0]?.model ?? 'unknown',
     platform: `${os.type()} ${os.arch()}`,
     version: rootPkg.version,
     quick: options.quick,
+  };
+  const meta = {
+    lastRun,
     iterations: {
       validate: generated.validate === undefined
         ? (previousMeta?.iterations?.validate ?? options.iterations)
@@ -1385,13 +1544,23 @@ async function main() {
         : { examples: generated.mermaid.examples, scorecard: generated.mermaid.scorecard },
     },
   };
-  // Derived headline rows for the overview. Suites skipped this run
-  // keep their previous rows, so a partial regeneration never empties
-  // the summary — and each row records the run that produced it.
-  const freshHeadlines = buildHeadlines(generated, meta);
-  const carried = (previousMeta?.headlines ?? [])
-    .filter((h) => !freshHeadlines.some((f) => f.key === h.key));
-  meta.headlines = [...freshHeadlines.map((h) => ({ ...h, generated: meta.generated })), ...carried]
+  // Derived headline rows for the overview. Suites skipped this run keep
+  // their previous rows, so a partial regeneration never empties the
+  // summary — and each row records the run that produced it.
+  const headlines = carryHeadlines(buildHeadlines(generated, meta), previousMeta?.headlines, lastRun);
+  // A published suite with neither a fresh nor a carried row still has a
+  // file the site serves: its row is derived from that file and stamped
+  // with the file's own measurement date, because this run measured
+  // nothing of it. Without this, a suite silently sits out the summary
+  // that claims to count every one.
+  for (const key of SUITE_ORDER) {
+    if (headlines.some((h) => h.key === key)) continue;
+    const payload = previousSuite(key);
+    if (payload === null) continue;
+    const [row] = buildHeadlines({ [key]: payload }, meta);
+    if (row !== undefined) headlines.push({ ...row, ...fileProvenance(payload) });
+  }
+  meta.headlines = headlines
     .sort((a, b) => SUITE_ORDER.indexOf(a.key) - SUITE_ORDER.indexOf(b.key));
   writeJson('meta.json', meta);
 
@@ -1401,7 +1570,14 @@ async function main() {
     console.log('NOTE: --quick numbers are for wiring only; use a full run before publishing.');
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// The pure assembly steps are exported for the drift tests; running the
+// file runs the generator.
+export { parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance, SUITE_ORDER };
+
+if (process.argv[1] !== undefined
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

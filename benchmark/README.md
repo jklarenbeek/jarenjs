@@ -116,6 +116,14 @@ The conformance table in the repository [README](../README.md) is produced by
 drafts). `npm run benchmark` runs the simpler suite pass in `index.js`; its
 results are written to `benchmark/results/results.html`.
 
+**How the pass/fail columns are counted.** Each engine is scored over the
+tests *it* ran: a test where the other engine could not compile the schema
+is still a test this one passed or failed, and it is counted here — so
+`passed + failed + errors` equals the corpus for both columns, and neither
+column is silently narrowed to the intersection. Ajv errors on more than a
+dozen cases of the official suite, and counting only what both engines could
+run hid real failures on Jaren's side for months.
+
 ## debug.js — investigating test failures
 
 A debugging utility for investigating test failures and understanding schema

@@ -8,16 +8,16 @@
 export const HOME_CONTENT = {
   hero: {
     title: 'JSON all the way down',
-    lead: 'Jaren is a high-performance JSON toolchain: a fully conformant JSON Schema validating compiler surrounded by compiled engines for JSON Pointer, JSONPath, an XQuery-semantics JSON query language, JSLT stylesheets, JTLT text templates (Markdown, XML, SQL DDL), schema-driven forms, a Markdown engine and a headless Mermaid diagram engine. Zero dependencies, eval-free, CSP-safe.',
+    lead: 'Jaren is a high-performance JSON toolchain: a conformance-scored JSON Schema validating compiler surrounded by compiled engines for JSON Pointer, JSONPath, an XQuery-semantics JSON query language, JSLT stylesheets, JTLT text templates (Markdown, XML, SQL DDL), schema-driven forms, a Markdown engine and a headless Mermaid diagram engine. Zero dependencies, eval-free, CSP-safe.',
     install: 'npm install @jarenjs/validate',
     points: [
-      '100% of the official JSON-Schema-Test-Suite, all benchmarked drafts',
-      'Faster than Ajv on roughly 4 of 5 individual tests per draft, ≈2× faster on the suite totals',
+      'The official JSON-Schema-Test-Suite scored on every benchmarked draft — passes and failures alike',
+      'Measured against Ajv test by test, with every ratio published in the direction it fell',
       'Every grammar published as JSON Schema for LLM constrained decoding',
     ],
   },
   engines: [
-    { key: 'validate', title: 'JSON Schema', blurb: 'Compiles schemas to specialized closures: annotation-driven unevaluated* with statically-elided checks, dynamic refs, $data, the $query cross-field keyword and structured, localizable errors.', perf: '0 failures on every draft, ≈2× Ajv where both pass' },
+    { key: 'validate', title: 'JSON Schema', blurb: 'Compiles schemas to specialized closures: annotation-driven unevaluated* with statically-elided checks, dynamic refs, $data, the $query cross-field keyword and structured, localizable errors.', perf: 'scored on the official suite per draft; the Ajv ratio is measured, not claimed' },
     { key: 'path', title: 'JSONPath', blurb: 'The complete RFC 9535 grammar as a compiler — all 703 compliance tests pass, normalized paths included.', perf: 'all 703 RFC 9535 compliance tests pass' },
     { key: 'pointer', title: 'JSON Pointer', blurb: 'RFC 6901 with zero-allocation compiled getters, plus relative pointers — the $data hot path.', perf: 'compiled getters, far ahead of the npm package' },
     { key: 'patch', title: 'JSON Patch', blurb: 'RFC 6902 and RFC 7396 as copy-on-write appliers: atomic, structure-sharing, and a change feed of written paths.', perf: '5–170× vs clone-and-interpret' },

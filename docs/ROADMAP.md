@@ -138,6 +138,19 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
+- [ ] **Two `$dynamicRef` cases fail in 2020-12** — the official suite's
+  `dynamicRef.json` has two groups Jaren does not satisfy: *"A `$dynamicRef`
+  that initially resolves to a schema with a matching `$dynamicAnchor`
+  resolves to the first `$dynamicAnchor` in the dynamic scope"* (1 of 2
+  assertions) and *"after leaving a dynamic scope, it is not used by a
+  `$dynamicRef`"* (2 of 3). Both sit where the dynamic scope must be
+  *unwound*: the resolver keeps an anchor visible after the scope that
+  introduced it has been left. They went unseen because Ajv errors on the
+  same two groups (`"$dynamicRef" only supports hash fragment reference`)
+  and the conformance count dropped every test the rival could not compile
+  — each engine is now scored over the tests it ran, so the suite reports
+  them.
+
 - [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped
   sibling-coverage elision compiles away the checks that are statically
   unreachable, but the genuinely dynamic cases — nested `unevaluated*`, cousin

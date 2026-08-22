@@ -670,7 +670,7 @@ Validator-specific troubleshooting recipes — "Can not resolve schema for 'X'",
 
 ## Summary
 
-JarenJS validates all of draft-06, draft-07, 2019-09 and 2020-12 - passing 100% of the official JSON-Schema-Test-Suite for draft-07, 2019-09 and 2020-12 - and achieves high performance through:
+JarenJS validates all of draft-06, draft-07, 2019-09 and 2020-12 - passing the official JSON-Schema-Test-Suite for draft-07 and 2019-09 in full, and all of 2020-12 except the `$dynamicRef` cases named in `ROADMAP.md` - and achieves high performance through:
 
 1. **Compile-time ref resolution** - All refs resolved before validation
 2. **Function inlining** - Simple schemas compile to direct checks

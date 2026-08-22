@@ -384,6 +384,63 @@ describe('website boundaries — the benchmarks overview', function () {
       'hand-written tagged arrays outbuild the rivals — the format was never the price');
   });
 
+  // The tiles used to print the LAST RUN's date and version as though
+  // they described every row, over rows measured weeks and versions
+  // earlier. A set of rows is honestly summarized by the span it covers.
+  describe('the provenance tiles range over the rows, not over the last run', function () {
+    const tiles = (headlines, lastRun) => {
+      const nodes = deriveSuite({
+        benchStatus: { meta: 'loaded' },
+        bench: { meta: { headlines, lastRun } },
+        benchUi: { search: '', limit: 40 },
+      }, 'overview');
+      return (nodes.find((n) => n.kind === 'cards').items ?? []);
+    };
+    const lastRun = {
+      generated: '2026-08-22T09:00:00.000Z', node: 'v24.19.0', cpu: 'Test CPU',
+      platform: 'Test x64', version: '0.39.0', quick: false,
+    };
+    const row = (key, generated, version) => ({
+      key, label: key, ratio: 2, rival: 'a rival', conformance: null, generated, version,
+    });
+
+    it('prints a range when the rows disagree', function () {
+      const items = tiles([
+        row('validate', '2026-08-02T10:00:00.000Z', '0.24.9'),
+        row('contract', '2026-08-21T10:00:00.000Z', '0.37.1'),
+      ], lastRun);
+      assert.equal(items[0].title, 'Measured');
+      assert.equal(items[0].value, '2026-08-02 → 2026-08-21');
+      assert.equal(items[2].value, 'v0.24.9 → v0.37.1');
+      assert.match(items[2].note, /last run 2026-08-22/,
+        'the last invocation is labeled as the last invocation, not as the measurement set');
+    });
+
+    it('prints one value when every row agrees', function () {
+      const items = tiles([row('validate', '2026-08-22T10:00:00.000Z', '0.39.0')], lastRun);
+      assert.equal(items[0].value, '2026-08-22');
+      assert.equal(items[2].value, 'v0.39.0');
+    });
+
+    it('orders versions numerically, not as text', function () {
+      const items = tiles([
+        row('a', '2026-08-02T10:00:00.000Z', '0.9.0'),
+        row('b', '2026-08-03T10:00:00.000Z', '0.37.1'),
+      ], lastRun);
+      assert.equal(items[2].value, 'v0.9.0 → v0.37.1');
+    });
+
+    it('counts rows whose provenance is unknown instead of folding them in', function () {
+      const items = tiles([
+        row('validate', '2026-08-22T10:00:00.000Z', '0.39.0'),
+        row('jsonpath', '2026-08-02T10:00:00.000Z', null),
+      ], lastRun);
+      assert.equal(items[2].value, 'v0.39.0');
+      assert.match(items[2].note, /1 row unrecorded/,
+        'a row that never recorded its version must not borrow one');
+    });
+  });
+
   it('renders the cross-suite chart host-linked, and stays memoized', function () {
     const first = chartsIn(deriveSuite(state, 'overview'));
     const second = chartsIn(deriveSuite(state, 'overview'));

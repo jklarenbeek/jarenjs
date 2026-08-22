@@ -56,11 +56,11 @@ export const DOCS_SECTIONS = [
   {
     id: 'draft-support', title: 'Draft support',
     blocks: [
-      p('draft-06, draft-07, 2019-09 and 2020-12 are fully supported — including annotation-driven unevaluatedProperties/unevaluatedItems, $dynamicRef/$dynamicAnchor and $vocabulary processing. The official test suite passes 100% for every benchmarked draft, optional format suites included.'),
+      p('draft-06, draft-07, 2019-09 and 2020-12 are fully supported — including annotation-driven unevaluatedProperties/unevaluatedItems, $dynamicRef/$dynamicAnchor and $vocabulary processing. The official test suite is scored on every benchmarked draft, optional format suites included, and each engine is counted over the tests it could run — so a case the rival cannot compile still counts here.'),
       { kind: 'table', title: 'Official suite results', note: 'passed / failed / errors — see the Benchmarks page for the live numbers', head: ['Draft', 'Jaren', 'Ajv'], rows: [
         { kind: 'row', strong: true, cells: ['draft-07', '308 / 0 / 0', '294 / 13 / 1'] },
         { kind: 'row', strong: true, cells: ['2019-09', '425 / 0 / 0', '406 / 15 / 4'] },
-        { kind: 'row', strong: true, cells: ['2020-12', '433 / 0 / 0', '390 / 33 / 10'] },
+        { kind: 'row', strong: true, cells: ['2020-12', '431 / 2 / 0', '390 / 33 / 10'] },
       ] },
     ],
   },

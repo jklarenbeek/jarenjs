@@ -20,7 +20,10 @@ const SITE_DATA = { packages: buildSiteData(), build: buildInfo() };
 /** Fixture benchmark payloads, shaped like website-data.js output. */
 const FIXTURES = {
   meta: {
-    generated: '2026-07-18T14:15:25.703Z', node: 'v22', cpu: 'Test CPU', platform: 'Test', version: '0.10.0', quick: false,
+    lastRun: {
+      generated: '2026-07-18T14:15:25.703Z', node: 'v22', cpu: 'Test CPU',
+      platform: 'Test', version: '0.10.0', quick: false,
+    },
     qt3: { total: 31821, pass: 1858, unsupportedSyntax: 21191, regressions: 0 },
     conformance: { jsonSchema: { engineStats: {
       jaren: { draft7: { passed: 308, failed: 0, errors: 0 } },
