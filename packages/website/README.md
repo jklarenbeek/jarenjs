@@ -65,9 +65,9 @@ npm run test:browser         # from the repository root: builds the site, then r
 What it asserts: boot with landmark semantics, client-side navigation
 mount/unmount lifecycle, keyboard activation of the router, rapid
 widget/view route churn with history back, the assistant and studio flows,
-and mobile layout — every test also asserting **zero page errors** under
-real engine scheduling. The `browser` CI job runs all three engines on
-every push.
+mobile layout, and the motion contract — every test also asserting **zero
+page errors** under real engine scheduling. The `browser` CI job runs all
+three engines on every push.
 
 `e2e/mobile.spec.js` is where the phone contract is pinned, because CSS
 is the only thing that can prove it: at 390 × 844 every studio
@@ -85,9 +85,21 @@ the shape itself is written down once in [DESIGN.md](../../docs/DESIGN.md) §5.
 > `distrobox enter ubuntu-playwright -- npm run test:browser`. CI uses the
 > Playwright image and needs no such workaround.
 
+`e2e/motion.spec.js` pins the other thing only a real engine can answer:
+that the site moves, and that it stops when the reader asks. Under an
+emulated `no-preference` a card below the fold waits at its pre-view state
+and reaches its final transform when scrolled to, a measured headline
+counts up and lands on exactly the string the renderer published, and
+neither a scroll that flies past a card nor a disclosure that opens can
+leave content unpainted; under an emulated `reduce` every surface carries
+its final state on first paint, with `animation-name: none` and nothing
+counting. The vocabulary those tests assert is written down once in
+[DESIGN.md](../../docs/DESIGN.md) §6.
+
 This suite covers the **lifecycle** half of the app/view real-browser
-matrix. The **accessibility** half — dialog focus traps and focus
-restoration under an actual screen reader, AT semantics,
-`prefers-reduced-motion` — is not covered yet and is tracked in
-[ROADMAP.md](../../docs/ROADMAP.md); [APP-FORMAT](../app/docs/APP-FORMAT.md) §8.7
-states the contracts it will have to prove.
+matrix, plus the `prefers-reduced-motion` half of the accessibility one.
+What is still uncovered is assistive technology itself — dialog focus
+traps and focus restoration under an actual screen reader, and AT
+semantics — tracked in [ROADMAP.md](../../docs/ROADMAP.md);
+[APP-FORMAT](../app/docs/APP-FORMAT.md) §8.7 states the contracts it will
+have to prove.

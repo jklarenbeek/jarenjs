@@ -71,6 +71,11 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * @property {() => void} [revealActiveTab] - Per committed frame: keep
  *   the active tab/section of the mobile scroll strips in view; omit
  *   for headless hosts.
+ * @property {() => void} [syncMotion] - Per committed frame: install the
+ *   motion layer over what the frame committed (reveal on first view,
+ *   count a measured headline up to the value the renderer wrote).
+ *   Omit for headless hosts: nothing moves, and the renderer's final
+ *   values are exactly what renders.
  * @property {{ read: () => string | null, write: (s: string) => void }} [gameSave]
  *   The adventure game's save slot — a raw JSONX string (the game
  *   serializes itself); omit and saving degrades gracefully.
@@ -603,9 +608,14 @@ export function createSiteApp(env) {
     // the structured-value editor) decode it here
     eventFields: { ...formEventFields() },
     viewModel,
-    // per committed frame: keep the active tab/section of the mobile
-    // scroll strips in view (a no-op capability on headless hosts)
-    afterRender: () => env.revealActiveTab?.(),
+    // per committed frame, the two jobs that need the COMMITTED frame
+    // rather than an effect racing the patch: keep the active tab of the
+    // mobile scroll strips in view, and install the motion layer over
+    // what this frame rendered (both no-op capabilities headless)
+    afterRender: () => {
+      env.revealActiveTab?.();
+      env.syncMotion?.();
+    },
     onError: report,
     effects,
     widgets: {

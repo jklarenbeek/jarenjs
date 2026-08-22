@@ -210,7 +210,37 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 - **One global focus style**: `:focus-visible { outline: 2px solid var(--accent); }` —
   no per-control focus rules, no outline suppression.
 - All scroll/transition animation sits behind `@media (prefers-reduced-motion:
-  no-preference)`.
+  no-preference)`, and `reduce` means **the final state at once** — never a shortened
+  animation, never a slower one. A rule whose resting state needs a value of its own
+  (the running machine's glow) states it in the base rule and adds only the movement
+  behind the preference.
+- **The motion vocabulary is one layer, tokenized** (the end of `styles.css`), so every
+  surface moves with the same voice: `--motion-fast|base|slow` for duration,
+  `--motion-stagger` for one step of a reveal wave, `--motion-rise` for the whole
+  distance anything travels, and the easing pair `--motion-ease-out` (things arriving
+  decelerate into place) / `--motion-ease-loop` (things that repeat breathe
+  symmetrically). A new animation reaches for those tokens or it is not part of the
+  system. Only `transform` and `opacity` animate, ever — animating a layout property
+  costs a frame the compositor cannot give back.
+- **Three families, and no fourth without a reason.**
+  1. *Page entrance* — the shell keys `<main>` on the route, so a route swap MOUNTS the
+     page container instead of patching the old one in place, and the entrance plays
+     once per arrival (a reused element keeps the animation it already ran). CSS only.
+  2. *Card reveal* — the site's card vocabulary rises in the first time it is scrolled
+     to: `.reveal` is the pre-view state, `.reveal-in` the arrival, and
+     `--motion-index` staggers a batch that arrives together.
+  3. *Counted headline* — a measured line counts up to the value the renderer already
+     wrote. Only the leading numeric token moves and the last frame restores the
+     rendered string verbatim: the count borrows a published figure, it never formats
+     one, and a string whose leading number is a date, a version or a grouped number is
+     refused rather than rewritten.
+- **The motion install lives at the committed-frame boundary** (`afterRender`, through a
+  host capability the site injects), never in an effect and never in the view: an
+  IntersectionObserver stamps the classes, CSS does the moving. Two guarantees ride on
+  that split — a host with no DOM (every headless test) renders the final values and
+  never learns motion exists, and content can never be lost to an animation: what the
+  observer stamps, a settled-scroll sweep releases when a flick or an anchor jump moved
+  the viewport past a card between two observation cycles.
 - Disclosure toggles expose state declaratively (`aria-expanded` + `aria-controls` on the
   menu button). **No programmatic focus management from actions/effects**: the app's
   render is async-scheduled, so an effect touching the DOM races the patch — state must be
@@ -303,6 +333,12 @@ A visual pass is verified the way the original audit was made:
   above shows up in an overflow assertion. The measurements that catch them are the page
   root's x against the header's own, and the studio frame's height against the viewport —
   `packages/website/e2e/layout.spec.js`, which fails on the pre-fix build in ten places;
+- **motion is verified in both directions**, not by watching it: under an emulated
+  `no-preference` a card reaches its final transform, a headline settles on exactly the
+  string the renderer published, and a jumped scroll still leaves nothing invisible;
+  under an emulated `reduce` every surface carries its final state on first paint with
+  `animation-name: none` and a zero transition — `packages/website/e2e/motion.spec.js`,
+  across all three engines;
 - grep the built `dist/` for banned hues (the historical offenders):
   `5646d6|473bce|7f75f0|4f46e5|db2777|f472b6|ECECFF|9370DB|a626a4|c678dd|b07aa1|ff9da7|hsl(245`
   — zero hits required;

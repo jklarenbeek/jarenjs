@@ -56,8 +56,13 @@ export const SHELL_RULES = [
     body: ['div', { class: 'site' },
       header,
       // the viewModel materializes only the active page's node; the
-      // other selectors come back empty and render nothing
-      ['main', { class: 'main' },
+      // other selectors come back empty and render nothing.
+      // `key` is the route: a swap therefore MOUNTS the page container
+      // rather than patching the old one in place, which is what lets
+      // the stylesheet play its entrance once per arrival (a reused
+      // element keeps the animation it already ran) and what tells the
+      // motion layer its observers belong to a new surface.
+      ['main', { class: 'main', key: '$.route.page' },
         { $apply: ['$.ui.home', 'home'] },
         // Three surfaces are COMPONENT roots, not site pages: @jarenjs/studio,
         // @jarenjs/play and @jarenjs/calc each render their own shell, and a

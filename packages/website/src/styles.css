@@ -199,7 +199,7 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 }
 .nav-trigger:hover { color: var(--fg); background: var(--surface); }
 .nav-trigger.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
-.nav-caret { font-size: 0.7em; transition: transform 0.15s ease; }
+.nav-caret { font-size: 0.7em; }
 .nav-group.open .nav-caret { transform: rotate(180deg); }
 .nav-menu {
   display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
@@ -1021,27 +1021,28 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .mm-selected .mm-edge-line { stroke-width: 2.5; }
 .mm-armed .mm-node-shape { stroke-dasharray: 4 3; stroke-width: 2.5; }
 
-/* The running machine's CURRENT state pulses with an accent glow, so
-   the eye follows the machine as events drive it. */
+/* The running machine's CURRENT state carries an accent glow, so the eye
+   follows the machine as events drive it. The glow is a resting state;
+   the breathing that makes it a pulse is motion, and lives with the rest
+   of the site's motion behind `no-preference` below. */
 .mm-active .mm-node-shape {
   stroke: var(--accent);
   stroke-width: 2.5;
   transform-box: fill-box;
   transform-origin: center;
-  animation: mm-pulse 1.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px var(--accent));
 }
 @keyframes mm-pulse {
   0%, 100% { filter: drop-shadow(0 0 2px var(--accent)); }
   50%      { filter: drop-shadow(0 0 9px var(--accent)); }
 }
 
-/* The transition JUST TAKEN flows accent-coloured marching ants from the
-   old state to the new one — the path the machine worked through. */
+/* The transition JUST TAKEN marks the path the machine worked through;
+   under motion its accent-coloured ants march along it. */
 .mm-fired .mm-edge-line {
   stroke: var(--accent);
   stroke-width: 2.5;
   stroke-dasharray: 6 4;
-  animation: mm-flow 0.7s linear infinite;
 }
 .mm-fired .mm-edge-label { fill: var(--accent); font-weight: 600; }
 @keyframes mm-flow {
@@ -1049,19 +1050,19 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 }
 
 /* The dag run's per-node status: ok settles green, the failing node
-   pulses, an aborted sibling dims. */
+   carries the danger stroke, an aborted sibling dims. */
 .mm-run-ok .mm-node-shape { stroke: var(--ok, #16a34a); stroke-width: 2.5; }
-.mm-run-error .mm-node-shape {
-  stroke: var(--danger, #dc2626); stroke-width: 2.5;
-  animation: mm-pulse 1s ease-in-out infinite;
-}
+.mm-run-error .mm-node-shape { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
 .mm-run-aborted .mm-node-shape { opacity: 0.5; }
 
-@media (prefers-reduced-motion: reduce) {
-  .mm-active .mm-node-shape,
-  .mm-fired .mm-edge-line,
-  .mm-run-error .mm-node-shape { animation: none; }
-  .mm-active .mm-node-shape { filter: drop-shadow(0 0 6px var(--accent)); }
+/* The run's motion, in one place and behind the preference: a running
+   state breathes, the transition it just took flows, and the failing
+   node of a dag run pulses faster. Nothing here plays under `reduce` —
+   each rule's resting state above is what that reader sees. */
+@media (prefers-reduced-motion: no-preference) {
+  .mm-active .mm-node-shape { animation: mm-pulse 1.5s var(--motion-ease-loop) infinite; }
+  .mm-fired .mm-edge-line { animation: mm-flow 0.7s linear infinite; }
+  .mm-run-error .mm-node-shape { animation: mm-pulse 1s var(--motion-ease-loop) infinite; }
 }
 
 /* ---------------------------------------------------------------- */
@@ -1151,3 +1152,59 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .duel-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); border-top: 1px dashed var(--border); padding-top: var(--space-4); align-items: center; }
 .duel-chart { margin: var(--space-2) 0; }
 .duel-chart svg { max-width: 100%; height: auto; max-height: 9rem; }
+
+/* ---------------------------------------------------------------- */
+/* The motion layer (DESIGN §6)                                      */
+/* ---------------------------------------------------------------- */
+
+/* One vocabulary, three families — a page entrance, a card reveal and a
+   counted headline — so every surface moves with the same voice. Every
+   rule that MOVES anything sits behind `no-preference` and animates
+   `transform`/`opacity` only; `reduce` means the final state at once,
+   never a shortened animation. The class pairs are stamped from the
+   committed-frame boundary (`src/lib/motion.js`), never from an effect. */
+:root {
+  --motion-fast: 150ms;
+  --motion-base: 240ms;
+  --motion-slow: 420ms;
+  /* one step of the reveal wave */
+  --motion-stagger: 45ms;
+  /* how far an entering surface travels — the whole distance the site moves */
+  --motion-rise: 8px;
+  /* the easing pair: things that ARRIVE decelerate into place; things
+     that repeat (a running machine's glow) breathe symmetrically */
+  --motion-ease-out: cubic-bezier(0.22, 0.7, 0.25, 1);
+  --motion-ease-loop: ease-in-out;
+}
+
+/* a headline mid-count keeps its digits in one column, so the value
+   settles instead of jittering (no motion of its own — it applies under
+   `reduce` too, where nothing ever counts) */
+.counting { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 1. the page entrance. The shell keys `<main>` on the route, so a
+     route swap mounts a NEW element and this plays once per arrival —
+     a reused element would keep the animation it already ran. */
+  .main { animation: page-in var(--motion-base) var(--motion-ease-out) backwards; }
+  @keyframes page-in {
+    from { opacity: 0; transform: translateY(var(--motion-rise)); }
+  }
+
+  /* 2. the card reveal: `.reveal` is the pre-view state, `.reveal-in`
+     the arrival. Both come from the observer, so a card the reader
+     never scrolls to never animates — and a stylesheet-only host (JS
+     that never ran) shows every card in its final state. */
+  .reveal { opacity: 0; transform: translateY(var(--motion-rise)); }
+  .reveal-in {
+    opacity: 1;
+    transform: none;
+    transition: opacity var(--motion-slow) var(--motion-ease-out),
+                transform var(--motion-slow) var(--motion-ease-out);
+    transition-delay: calc(var(--motion-index, 0) * var(--motion-stagger));
+  }
+
+  /* 3. the dropdown caret's flip — a state change, and the one piece of
+     site chrome that moves */
+  .nav-caret { transition: transform var(--motion-fast) var(--motion-ease-out); }
+}

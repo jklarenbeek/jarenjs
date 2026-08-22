@@ -11,6 +11,7 @@ import '@jarenjs/play/styles/play.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';
+import { createMotion, prefersReducedMotion } from './lib/motion.js';
 
 const BASE = import.meta.env.BASE_URL;
 /** The build-generated site data, by the name the app asks for it under. */
@@ -91,11 +92,18 @@ const app = createSiteApp({
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   },
+  // the site's motion layer, installed over each committed frame
+  syncMotion: createMotion(document),
   // an in-page link in a rendered document: the target heading carries
   // the id @jarenjs/md minted for it. The header overlap is the
-  // stylesheet's job (`--md-scroll-margin`), so this stays one line.
+  // stylesheet's job (`--md-scroll-margin`), so this stays one line —
+  // and the glide is motion like any other, so a reader who asked for
+  // none is taken straight there.
   scrollToAnchor: (id) => {
-    document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    document.getElementById(id)?.scrollIntoView({
+      block: 'start',
+      behavior: prefersReducedMotion(window) ? 'auto' : 'smooth',
+    });
   },
   applyTheme: (next) => {
     document.documentElement.classList.toggle('dark', next === 'dark');
