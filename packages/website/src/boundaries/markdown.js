@@ -27,15 +27,31 @@ export const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/h
 export const REPO = 'https://github.com/jklarenbeek/jarenjs';
 
 /**
- * A workspace directory's README, as a raw URL. Every repo document the
- * site opens is addressed through here or through the link rewriter
- * below — one place builds these URLs, so the docs rail, a rewritten
- * in-document link and the dialog's trail cannot disagree about where a
- * README lives.
+ * A repo-relative path, as a raw URL. Every repo document the site opens
+ * is addressed through here or through the link rewriter below — one
+ * place builds these URLs, so the docs rail, a rewritten in-document
+ * link, the dialog's trail and the fetch handler behind them cannot
+ * disagree about where a document lives.
+ * @param {string} path - Repo-relative file path.
+ * @returns {string}
+ */
+export const rawUrl = (path) => `${RAW}/${path}`;
+
+/**
+ * `rawUrl`'s inverse: the repo-relative path a raw URL addresses, or
+ * null for a URL that is not under the raw base at all.
+ * @param {string} url
+ * @returns {string | null}
+ */
+export const rawPath = (url) =>
+  (url.startsWith(`${RAW}/`) ? url.slice(RAW.length + 1) : null);
+
+/**
+ * A workspace directory's README, as a raw URL.
  * @param {string} dir - Repo-relative workspace directory.
  * @returns {string}
  */
-export const readmeUrl = (dir) => `${RAW}/${dir}/README.md`;
+export const readmeUrl = (dir) => rawUrl(`${dir}/README.md`);
 
 // theme 'host': diagram cssVars reference the site tokens, so memoized
 // SVGs follow light/dark live (docs/DESIGN.md §7)

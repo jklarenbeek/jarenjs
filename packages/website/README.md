@@ -1,6 +1,6 @@
 # @jarenjs/website
 
-The jarenjs website — **the site is one JSON app document** running on [`@jarenjs/app`](../app) and [`@jarenjs/view`](../view). No React, no framework: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, navigation is plain hash links feeding one subscription, and the play validator's generated form renders through the standard forms stylesheet. The site is its own best demo: everything it claims about the suite, it does with the suite.
+The jarenjs website — **the site is one JSON app document** running on [`@jarenjs/app`](../app) and [`@jarenjs/view`](../view). No React, no framework: the view is a JSLT stylesheet producing vnodes, actions are query documents producing JSON Patches, navigation is plain hash links feeding one subscription, and the play validator's generated form renders through the standard forms stylesheet. The site is its own best demo: everything it claims about the suite, it does with the suite — its own data plane included, since every read of site-owned data resolves through a compiled `$contract` document on [`@jarenjs/contract`](../contract)'s local binding.
 
 ```bash
 npm run dev                  # in this package
@@ -32,6 +32,7 @@ npm run deploy               # benchmark:generate + build + gh-pages publish
 | Generic UI | `src/views/ui.js` | one rule per node kind (`callout`/`card`/`cards`/`chart`/`code`/`details`/`error`/`more`/`p`/`row`/`search`/`table`) renders every data-driven section |
 | Reactivity | `src/app/createSiteApp.js` | one subscriber on the transition **changed-path feed** re-runs the play engine and the Project IDE — debounced, driven by data |
 | Generated site data | `scripts/generate-site-data.js`, `scripts/generate-build-info.js` | the package census and the build provenance, written into `public/` at build time and fetched by the `fetch-site` effect; both derive their timestamp from the HEAD commit, so a rebuild of one revision is byte-identical |
+| The site's data plane | `src/contracts/site.contract.json`, `src/boundaries/site.js` | every read of site-owned data — the census, the build provenance, the benchmark meta and suites, the repository documents the dialog renders — resolves through one compiled `$contract` on [`@jarenjs/contract`](../contract)'s local binding with output validation on, so an artifact that drifts from the shape the page declares for it settles as a typed refusal instead of a wrong render |
 | Styling | `src/styles.css` | hand-rolled CSS, light + dark |
 
 Tests live in `test/website/` at the repository root (`npm run test:website`) and drive the complete site headless — routing, the play surface, the IDE round-trip, WebMCP tool execution, benchmark search against the real generated data, SSR — on the same DOM stub the view package uses.

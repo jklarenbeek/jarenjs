@@ -41,6 +41,8 @@ import {
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
+import { openSiteClient } from '../boundaries/site.js';
+import { rawPath } from '../boundaries/markdown.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
 /**
@@ -49,13 +51,17 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * @property {any} [document] - DOM document for the renderer.
  * @property {(flush: () => void) => void} [schedule] - Render scheduler.
  * @property {string} [initialTheme] - 'light' | 'dark'.
- * @property {(name: string) => Promise<any>} fetchJson - Benchmark file loader.
+ * @property {(name: string) => Promise<any>} fetchJson - Benchmark file
+ *   loader. This and the two below are transport only: the site's own
+ *   data plane runs them behind its operation contract, which is what
+ *   types every payload they carry.
  * @property {(name: string) => Promise<any>} [fetchSite] - Loader for the
  *   data the build generated about this repository ('packages' — the
  *   workspace census; 'build' — the build provenance). Omit it and the
  *   surfaces reading them say so instead of showing a stale answer.
  * @property {(url: string) => Promise<string>} [fetchText] - Raw-text
- *   loader for package READMEs (the dialog); omit for no-network hosts.
+ *   loader for the repository documents the dialog renders; omit for
+ *   no-network hosts.
  * @property {(theme: string) => void} [applyTheme]
  * @property {(on: boolean) => void} [lockScroll] - Lock the page scroll
  *   behind the README dialog; omit for headless hosts.
@@ -109,6 +115,10 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  * silently mangled URL (project documents can be long). */
 const SHARE_TOKEN_LIMIT = 8000;
 
+/** The build-generated site data, by the name the route effects ask for
+ * it under, as the contract operation that answers it. */
+const SITE_OPERATIONS = { packages: 'site.packages', build: 'site.build' };
+
 /** Play-slice paths that are IDE chrome, not engine inputs: a change to any
  * of them must NOT re-run the engine (the run's own output, the active tab,
  * the depth toggle + its pick, the session name/list, the share status, the
@@ -135,6 +145,33 @@ export function createSiteApp(env) {
   const requested = new Set();
   /** the same, for the build-generated site data (its own key space) */
   const requestedSite = new Set();
+  // the site's own data plane: the package census, the build
+  // provenance, the benchmark files and the repository documents, every
+  // one through a compiled contract on @jarenjs/contract's local
+  // binding with output validation ON — the artifact and the page
+  // declare their shapes in the same document, so a drift between them
+  // settles as a typed refusal instead of a wrong render
+  const site = openSiteClient({
+    fetchJson: env.fetchJson,
+    fetchSite: env.fetchSite,
+    fetchText: env.fetchText,
+    onError: (error) => report(/** @type {Error} */ (error)),
+  });
+
+  /**
+   * A refusal that is not the declared "this host cannot fetch it" means
+   * the artifact and the shape the site declares for it disagree — a
+   * defect rather than a missing capability, so it is reported as one
+   * instead of resting silently behind an error state.
+   * @param {{ ok: false, kind: string, code: string, reason: string }} result
+   * @param {string} source - What was being read, as the site addresses it.
+   */
+  const refused = (result, source) => {
+    if (result.kind === 'failure') return;
+    const error = new Error(`${result.code}: ${source} — ${result.reason}`);
+    /** @type {any} */ (error).code = result.code;
+    report(error);
+  };
   /** @type {any} */
   let app = null;
   // the data studio's owner-worker runtime (its boot sub lives in the
@@ -183,12 +220,21 @@ export function createSiteApp(env) {
       if (requested.has(props.name)) return;
       requested.add(props.name);
       dispatch('bench/status', { name: props.name, status: 'loading' });
-      env.fetchJson(props.name)
-        .then((data) => dispatch('bench/loaded', { name: props.name, data }))
-        .catch(() => {
-          requested.delete(props.name);
-          dispatch('bench/status', { name: props.name, status: 'error' });
-        });
+      // the overview reads meta.json; every other name is one of the
+      // published suites, whose payloads are heterogeneous by nature and
+      // typed as such by the contract
+      const call = props.name === 'meta'
+        ? site.request('bench.meta')
+        : site.request('bench.suite', { suite: props.name });
+      call.then((result) => {
+        if (result.ok) {
+          dispatch('bench/loaded', { name: props.name, data: result.value });
+          return;
+        }
+        refused(result, `benchmarks/${props.name}.json`);
+        requested.delete(props.name);
+        dispatch('bench/status', { name: props.name, status: 'error' });
+      });
     },
     // the build's own answers about this repository (the package census,
     // the build provenance): fetched once each, exactly like the
@@ -198,17 +244,22 @@ export function createSiteApp(env) {
     'fetch-site': (props, dispatch) => {
       if (requestedSite.has(props.name)) return;
       requestedSite.add(props.name);
-      if (env.fetchSite === undefined) {
+      const op = SITE_OPERATIONS[props.name];
+      if (op === undefined) {
+        requestedSite.delete(props.name);
         dispatch('site/status', { name: props.name, status: 'error' });
         return;
       }
       dispatch('site/status', { name: props.name, status: 'loading' });
-      env.fetchSite(props.name)
-        .then((data) => dispatch('site/loaded', { name: props.name, data }))
-        .catch(() => {
-          requestedSite.delete(props.name);
-          dispatch('site/status', { name: props.name, status: 'error' });
-        });
+      site.request(op).then((result) => {
+        if (result.ok) {
+          dispatch('site/loaded', { name: props.name, data: result.value });
+          return;
+        }
+        refused(result, `site/${props.name}`);
+        requestedSite.delete(props.name);
+        dispatch('site/status', { name: props.name, status: 'error' });
+      });
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
     // the README dialog locks the page scroll behind it; headless
@@ -480,37 +531,28 @@ export function createSiteApp(env) {
         dispatch('readme/show', { title: entry.title, url: entry.url });
       }
     },
-    // fetch a package README as raw text (cached per URL); the viewModel
-    // parses + renders it through the @jarenjs/md component
+    // fetch a repository document as raw text (cached per URL by the
+    // site client); the viewModel parses + renders it through the
+    // @jarenjs/md component
     'readme-load': (props, dispatch) => {
-      if (env.fetchText === undefined) {
-        dispatch(props.error, 'README loading is unavailable in this environment.');
+      const path = rawPath(props.url);
+      if (path === null) {
+        dispatch(props.error, `Not a repository document: ${props.url}`);
         return;
       }
-      const cached = readmeCache.get(props.url);
-      if (cached !== undefined) {
-        dispatch(props.done, cached);
-        return;
-      }
-      env.fetchText(props.url).then(
-        (text) => {
-          readmeCache.set(props.url, text);
-          // ignore a stale response if the dialog moved on or closed
-          const readme = app.getState().readme;
-          if (readme.open && readme.url === props.url) dispatch(props.done, text);
-        },
-        (err) => {
-          const readme = app.getState().readme;
-          if (readme.open && readme.url === props.url) {
-            dispatch(props.error, /** @type {Error} */ (err)?.message ?? String(err));
-          }
-        },
-      );
+      site.request('readme.fetch', { path }).then((result) => {
+        // ignore a stale answer if the dialog moved on or closed
+        const readme = app.getState().readme;
+        if (!readme.open || readme.url !== props.url) return;
+        if (result.ok) {
+          dispatch(props.done, result.value.text);
+          return;
+        }
+        refused(result, path);
+        dispatch(props.error, result.reason);
+      });
     },
   };
-
-  /** README text cache, keyed by URL (a reopen is instant). */
-  const readmeCache = new Map();
 
   // fold in the calc sub-app's effects (= evaluation, backspace), the
   // live-rates effect (plus the `when`-gated rates-poll subscription),

@@ -20,6 +20,11 @@ import { createStubHost, fire, serialize } from '../view/dom.stub.js';
  * describe. Read once — every mount serves the same two documents. */
 const SITE_DATA = { packages: buildSiteData(), build: buildInfo() };
 
+/** The per-row provenance every headline in `meta.json` carries. */
+const MEASURED_BY = {
+  generated: '2026-07-18T14:15:25.703Z', node: 'v22', version: '0.10.0', quick: false,
+};
+
 /** Fixture benchmark payloads, shaped like website-data.js output. */
 const FIXTURES = {
   meta: {
@@ -32,6 +37,7 @@ const FIXTURES = {
       jaren: { draft7: { passed: 308, failed: 0, errors: 0 } },
       ajv: { draft7: { passed: 294, failed: 13, errors: 1 } },
     } } },
+    headlines: [],
   },
   jsonpointer: {
     tables: [{
@@ -117,7 +123,8 @@ describe('website — the site as one app document', function () {
   it('an engine card whose suite has a headline shows the MEASURED line, loss included', async function () {
     const headline = {
       key: 'contract', label: 'Contract dispatch', ratio: 0.2775,
-      rival: 'a hand-composed router', conformance: null,
+      rival: 'a hand-composed router', conformance: null, note: 'the dispatch table',
+      ...MEASURED_BY,
     };
     const { container } = mountSite({
       fixtures: { ...FIXTURES, meta: { ...FIXTURES.meta, headlines: [headline] } },
@@ -711,10 +718,10 @@ describe('website — the /charts page', function () {
 describe('website — every published figure is the measured one', function () {
   /** Headline rows shaped like `meta.json`'s, for the four cards under test. */
   const HEADLINES = [
-    { key: 'validate', label: 'JSON Schema', ratio: 1.3752, rival: 'Ajv', conformance: '1164 / 1166' },
-    { key: 'orm', label: 'ORM', ratio: 5.6, rival: 'Prisma (graph load)', conformance: '1 statement' },
-    { key: 'view', label: 'View', ratio: 1.744, rival: 'its own no-memo frame', conformance: null },
-    { key: 'flow', label: 'Flow', ratio: 5.6303, rival: 'XState v5', conformance: 'serializable' },
+    { key: 'validate', label: 'JSON Schema', ratio: 1.3752, rival: 'Ajv', conformance: '1164 / 1166', note: 'official suite', ...MEASURED_BY },
+    { key: 'orm', label: 'ORM', ratio: 5.6, rival: 'Prisma (graph load)', conformance: '1 statement', note: 'graph load', ...MEASURED_BY },
+    { key: 'view', label: 'View', ratio: 1.744, rival: 'its own no-memo frame', conformance: null, note: 'memo frame', ...MEASURED_BY },
+    { key: 'flow', label: 'Flow', ratio: 5.6303, rival: 'XState v5', conformance: 'serializable', note: 'machine step', ...MEASURED_BY },
   ];
   const measured = () => ({ ...FIXTURES, meta: { ...FIXTURES.meta, headlines: HEADLINES } });
   const authored = (key) => HOME_CONTENT.engines.find((e) => e.key === key).perf;

@@ -1,0 +1,277 @@
+{
+  "$contract": "0.1",
+  "id": "jaren-site",
+  "version": "1.0.0",
+  "$defs": {
+    "Unavailable": {
+      "description": "What the page could not read and why the host said so.",
+      "type": "object",
+      "required": ["source", "reason"],
+      "properties": {
+        "source": {
+          "description": "The artifact the operation went for, named as the site names it.",
+          "type": "string"
+        },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "CensusEntry": {
+      "type": "object",
+      "required": ["name", "dir", "version", "description"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "dir": {
+          "description": "Repo-relative workspace directory — the base every README URL is built from.",
+          "type": "string",
+          "minLength": 1
+        },
+        "version": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "RunStamp": {
+      "description": "The invocation that last ran the generator: the machine, the runtime, the suite version and the iteration mode. It describes the RUN, never the rows — those carry their own.",
+      "type": "object",
+      "required": ["generated", "node", "cpu", "platform", "version", "quick"],
+      "properties": {
+        "generated": { "type": "string" },
+        "node": { "type": "string" },
+        "cpu": { "type": "string" },
+        "platform": { "type": "string" },
+        "version": { "type": "string" },
+        "quick": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "Headline": {
+      "description": "One suite's overview row. The four provenance members are nullable because a row carried from an older file knows only its date, and an unknown is a smaller claim than a plausible lie.",
+      "type": "object",
+      "required": ["key", "label", "ratio", "rival", "conformance", "note", "generated", "node", "version", "quick"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "ratio": {
+          "description": "Jaren over the fastest rival; below 1 is a published loss. Null where the suite scores no ratio.",
+          "type": ["number", "null"]
+        },
+        "rival": { "type": "string" },
+        "conformance": { "type": ["string", "null"] },
+        "note": { "type": "string" },
+        "generated": { "type": ["string", "null"] },
+        "node": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "quick": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "Count": { "type": ["integer", "null"], "minimum": 0 },
+    "Score": {
+      "type": "object",
+      "required": ["pass", "total"],
+      "properties": {
+        "pass": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "DraftStats": {
+      "type": "object",
+      "required": ["passed", "failed", "errors"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "Conformance": {
+      "description": "The scores the overview and the docs page publish. Every block is nullable: a suite the run skipped and no committed file answers for scores nothing, and says so.",
+      "type": "object",
+      "properties": {
+        "jsonSchema": {
+          "type": ["object", "null"],
+          "required": ["engineStats"],
+          "properties": {
+            "engineStats": {
+              "description": "engine → draft → the tests that engine passed, failed and errored on. Each engine is scored over the tests IT ran.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": { "$ref": "#/$defs/DraftStats" }
+              }
+            },
+            "drafts": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "jsonpath": {
+          "type": ["object", "null"],
+          "required": ["total", "pass"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "pass": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+          },
+          "additionalProperties": false
+        },
+        "jsonPatch": {
+          "type": ["object", "null"],
+          "required": ["total", "pass"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "pass": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "toml": { "type": ["object", "null"], "additionalProperties": { "$ref": "#/$defs/Score" } },
+        "csv": { "type": ["object", "null"], "additionalProperties": { "$ref": "#/$defs/Score" } },
+        "markdown": {
+          "type": ["object", "null"],
+          "required": ["examples", "scorecard"],
+          "properties": {
+            "examples": { "type": "integer", "minimum": 0 },
+            "scorecard": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Score" } }
+          },
+          "additionalProperties": false
+        },
+        "mermaid": {
+          "type": ["object", "null"],
+          "required": ["examples", "scorecard"],
+          "properties": {
+            "examples": { "type": "integer", "minimum": 0 },
+            "scorecard": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["rendered", "total"],
+                "properties": {
+                  "rendered": { "type": "integer", "minimum": 0 },
+                  "total": { "type": "integer", "minimum": 0 }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Qt3": {
+      "description": "The XQuery scorecard, parsed from the runner's print format — null when the suite did not run, and a member is null when the line it comes from was not printed.",
+      "type": ["object", "null"],
+      "properties": {
+        "suite": { "type": ["string", "null"] },
+        "total": { "$ref": "#/$defs/Count" },
+        "tierC": { "$ref": "#/$defs/Count" },
+        "tierA": { "$ref": "#/$defs/Count" },
+        "reclassified": { "$ref": "#/$defs/Count" },
+        "pass": { "$ref": "#/$defs/Count" },
+        "unsupportedSyntax": { "$ref": "#/$defs/Count" },
+        "failByDesign": { "$ref": "#/$defs/Count" },
+        "knownBugs": { "$ref": "#/$defs/Count" },
+        "regressions": { "$ref": "#/$defs/Count" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "operations": {
+    "site.packages": {
+      "kind": "read",
+      "output": {
+        "type": "object",
+        "required": ["generated", "commit", "packages"],
+        "properties": {
+          "generated": { "type": ["string", "null"] },
+          "commit": { "type": ["string", "null"] },
+          "packages": { "type": "array", "items": { "$ref": "#/$defs/CensusEntry" } }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "The package census: the published workspaces of this repository, in manifest order, each in its own manifest's words. generated and commit are the HEAD commit's date and hash — null in a checkout without git, which is the honest answer, not a wall clock."
+    },
+    "site.build": {
+      "kind": "read",
+      "output": {
+        "type": "object",
+        "required": ["version", "commit", "built", "reproducible", "node", "platform"],
+        "properties": {
+          "version": { "type": "string" },
+          "commit": { "type": ["string", "null"] },
+          "built": { "type": "string" },
+          "reproducible": {
+            "description": "The bundle is tied to a commit AND the tree matched it.",
+            "type": "boolean"
+          },
+          "node": { "type": "string" },
+          "platform": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "The build provenance the footer prints: which version, which revision and which toolchain produced the deployed bundle. Deliberately not measurement provenance — the gap between the two is what the site shows."
+    },
+    "bench.meta": {
+      "kind": "read",
+      "output": {
+        "type": "object",
+        "required": ["lastRun", "headlines"],
+        "properties": {
+          "lastRun": { "$ref": "#/$defs/RunStamp" },
+          "iterations": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+          "qt3": { "$ref": "#/$defs/Qt3" },
+          "conformance": { "$ref": "#/$defs/Conformance" },
+          "headlines": { "type": "array", "items": { "$ref": "#/$defs/Headline" } }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "Everything the overview needs without loading the big suite files: the run stamp, the conformance blocks, the XQuery scorecard and one headline row per published suite with the provenance of the run that measured it. This is the shape the generator writes and the browser reads, and the pair agreeing is what this operation exists to enforce."
+    },
+    "bench.suite": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["suite"],
+        "properties": {
+          "suite": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+        },
+        "additionalProperties": false
+      },
+      "output": true,
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "One benchmark suite's payload. The twenty-one suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so the output is declared open rather than given a schema that would only pretend. Tightening it per suite is open work, not a shape this document can honestly claim today."
+    },
+    "readme.fetch": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "description": "A repo-relative Markdown path — a workspace README, or a document a rendered README links to. Bounded here so no other origin and no traversal can reach the raw base.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*\\.md$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "required": ["url", "text"],
+        "properties": {
+          "url": {
+            "description": "The raw URL the document was read from — the dialog resolves the document's own relative links against it.",
+            "type": "string"
+          },
+          "text": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "A repository Markdown document as raw text, addressed from the one raw base the site keeps. The reader is handed the URL beside the text because the link rewriter resolves against it."
+    }
+  }
+}
