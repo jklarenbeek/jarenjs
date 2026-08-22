@@ -10,6 +10,7 @@
 import { deriveSuite, draftConformanceTable, SUITES } from '../boundaries/bench.js';
 import { formViewFor } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
+import { HERO_DEMO } from '../content/hero.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
 import { md, mdArticle, rewriteReadmeLinks, readmeUrl } from '../boundaries/markdown.js';
 import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
@@ -97,8 +98,57 @@ const engineCards = memo1((content) => (content?.packages ?? [])
  * @param {any} state
  * @returns {any}
  */
-const homeContent = (state) => composeHome(engineCards(state.site.data.content),
-  state.bench?.meta?.headlines, state.site.status.content);
+const homeContent = (state) => withDispatch(
+  composeHome(engineCards(state.site.data.content),
+    state.bench?.meta?.headlines, state.site.status.content),
+  heroDemo(state.hero));
+
+/** Both halves are memoized, so the merge is too — and the JSLT memo
+ * keeps firing for the grid subtree while the hero re-dispatches. */
+const withDispatch = memo1((home, dispatch) => ({ ...home, dispatch }));
+
+/**
+ * The living hero, as the page shows it: the recorded stages of a real
+ * dispatch, one of them focused. Every line under `stages` was written
+ * by the run itself (`boundaries/hero.js`) — this only decides what is
+ * on screen, which member is expanded, and what to say while nothing
+ * has settled yet. A member that has no answer is OMITTED rather than
+ * nulled: the stylesheet `$apply`s it, and an absent member selects
+ * nothing.
+ */
+const heroDemo = memo1((hero) => {
+  const run = hero.run;
+  const stages = run === null ? [] : run.stages.map((stage, index) => ({
+    ...stage, index, focused: index === hero.focus,
+  }));
+  /** @type {any} */
+  const view = {
+    ...HERO_DEMO,
+    input: hero.input,
+    variant: hero.variant,
+    revision: String(hero.revision),
+    stages,
+    status: statusLine(hero.status, run),
+  };
+  const focused = stages.find((stage) => stage.focused);
+  if (focused !== undefined && focused.artifact !== null) view.focused = focused;
+  if (run !== null && run.refusal !== null) {
+    view.refusal = callout('Nothing dispatched', `The input is not a JSON document: ${run.refusal}`);
+  }
+  // the demo document's own identity, and the digest over its public
+  // projection — the same revision any other consumer of it would compute
+  if (run !== null && run.revision !== null) {
+    view.identity = { ...run.document, binding: run.binding, revision: run.revision };
+  }
+  return view;
+});
+
+/** What the controls say about the run beside them, from the run. */
+function statusLine(status, run) {
+  if (status !== 'ready' || run === null) return status === 'running' ? 'dispatching…' : '';
+  if (run.refusal !== null) return 'nothing dispatched';
+  return `${run.binding} binding · output validation ${run.validatedOutput ? 'on' : 'off'}`;
+}
 
 const composeHome = memo1((engines, headlines, status) => {
   // the grid is fetched, so the page renders before it exists: say what

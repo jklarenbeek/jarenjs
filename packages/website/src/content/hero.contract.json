@@ -1,0 +1,70 @@
+{
+  "$contract": "0.1",
+  "id": "jaren-hero",
+  "version": "1",
+  "$defs": {
+    "Sku": {
+      "description": "A stock number: three capitals, a dash, four digits.",
+      "type": "string",
+      "pattern": "^[A-Z]{3}-[0-9]{4}$"
+    },
+    "Item": {
+      "type": "object",
+      "required": ["sku", "title", "price"],
+      "additionalProperties": false,
+      "properties": {
+        "sku": { "$ref": "#/$defs/Sku" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "price": { "type": "number", "exclusiveMinimum": 0 },
+        "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 4 }
+      }
+    }
+  },
+  "operations": {
+    "shop.item": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["sku"],
+        "additionalProperties": false,
+        "properties": { "sku": { "$ref": "#/$defs/Sku" } }
+      },
+      "output": { "$ref": "#/$defs/Item" },
+      "errors": {
+        "not-found": {
+          "schema": {
+            "type": "object",
+            "required": ["sku"],
+            "properties": { "sku": { "$ref": "#/$defs/Sku" } }
+          }
+        }
+      },
+      "doc": "Read one catalogue item by its stock number."
+    },
+    "shop.save": {
+      "kind": "command",
+      "input": { "$ref": "#/$defs/Item" },
+      "output": {
+        "type": "object",
+        "required": ["sku", "saved", "held"],
+        "additionalProperties": false,
+        "properties": {
+          "sku": { "$ref": "#/$defs/Sku" },
+          "saved": { "type": "boolean" },
+          "held": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "errors": {
+        "conflict": {
+          "schema": {
+            "type": "object",
+            "required": ["sku"],
+            "properties": { "sku": { "$ref": "#/$defs/Sku" } }
+          }
+        }
+      },
+      "policy": { "errors": { "details": "full" } },
+      "doc": "Save one item into the catalogue. A stock number already held is the declared conflict, not a fault."
+    }
+  }
+}

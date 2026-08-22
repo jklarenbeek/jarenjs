@@ -42,6 +42,7 @@ import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
 import { openSiteClient, siteContract } from '../boundaries/site.js';
+import { runHeroDispatch } from '../boundaries/hero.js';
 import { rawPath } from '../boundaries/markdown.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
@@ -152,6 +153,8 @@ export function createSiteApp(env) {
   const requested = new Set();
   /** the same, for the build-generated site data (its own key space) */
   const requestedSite = new Set();
+  /** the hero's arrival dispatch runs once; the reader's own always runs */
+  let heroDispatched = false;
   // the site's own data plane: the package census, the build
   // provenance, the benchmark files and the repository documents, every
   // one through a compiled contract on @jarenjs/contract's local
@@ -287,6 +290,19 @@ export function createSiteApp(env) {
           report(/** @type {Error} */ (error));
           dispatch('site/status', { name: 'contract', status: 'error' });
         });
+    },
+    // the homepage hero: one real dispatch of the demo document through
+    // @jarenjs/contract's local binding, recorded stage by stage. It is
+    // an effect and not a derivation because a dispatch is asynchronous
+    // and the pipeline is real; the input arrives with the effect
+    // because an action's effects resolve before its own patch does.
+    // `initial` is the arrival, which must not re-run a settled demo on
+    // every visit back to the page.
+    'hero-run': (props, dispatch) => {
+      if (props?.initial === true && heroDispatched) return;
+      heroDispatched = true;
+      dispatch('hero/running');
+      runHeroDispatch(String(props?.input ?? '')).then((run) => dispatch('hero/settled', run));
     },
     'apply-theme': (props) => env.applyTheme?.(props.theme),
     // the README dialog locks the page scroll behind it; headless

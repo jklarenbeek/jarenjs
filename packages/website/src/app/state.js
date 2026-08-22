@@ -9,6 +9,7 @@ import { calcInitialState } from '@jarenjs/calc/component';
 import { START_LOCATION } from '../content/gameContent.js';
 import { STARTER_PROJECT } from '../content/projectTemplates.js';
 import { PLAY_START } from '../boundaries/play.js';
+import { HERO_INPUTS } from '../content/hero.js';
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',  // 'openrouter' | 'ollama' | 'lmstudio' | 'custom'
@@ -41,6 +42,23 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // their fetch lands, so every surface reading them renders its own
     // honest waiting state rather than a stale hand-written answer.
     site: { data: {}, status: {} },
+
+    // the homepage's living dispatch: the input document a reader can
+    // edit, and the last RECORDED run of it through @jarenjs/contract's
+    // local binding (boundaries/hero.js). `run` is null until the first
+    // dispatch settles — the hero renders its own waiting state rather
+    // than a stage list nothing produced. `focus` is which recorded
+    // stage shows its artifact; `revision` bumps per settled run, which
+    // is what re-mounts the stage list so its entrance plays again.
+    hero: {
+      presets: { ...HERO_INPUTS },
+      input: HERO_INPUTS.valid,
+      variant: 'valid',      // 'valid' | 'invalid' | 'edited'
+      status: 'idle',        // 'idle' | 'running' | 'ready'
+      run: null,
+      focus: 0,
+      revision: 0,
+    },
 
     chartsLive: null,            // /charts page live-feed render nodes
     ide: { name: '', names: ideNames, shared: null },

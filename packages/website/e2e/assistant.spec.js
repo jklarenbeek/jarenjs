@@ -36,11 +36,14 @@ test('the assistant opens as an on-screen sheet, gated on configuration', async 
   expect(icon.height).toBeGreaterThanOrEqual(43);
 
   // configuring a local provider brings the composer to life (the
-  // settings row holds Save AND Test connection — target by name)
+  // settings row holds Save AND Test connection — target by name, and
+  // EXACTLY: an accessible name is matched as a substring, so a button
+  // anywhere else on the page whose label merely contains the word would
+  // otherwise make this locator ambiguous)
   await page.locator('.ai-settings select').selectOption('ollama');
   await page.getByPlaceholder('qwen/qwen3-4b · llama3.2 · …').fill('qwen3:4b');
   await expect(page.getByRole('button', { name: 'Test connection' })).toBeVisible();
-  await page.getByRole('button', { name: 'Save' }).tap();
+  await page.getByRole('button', { name: 'Save', exact: true }).tap();
   await expect(page.locator('.ai-composer')).toBeVisible();
   await expect(page.locator('.ai-settings')).toHaveCount(0);
 });

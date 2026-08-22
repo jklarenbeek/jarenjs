@@ -18,6 +18,7 @@ export const HOME_RULES = [
             ['a', { href: '#/play', class: 'btn primary' }, 'Open Play'],
             ['a', { href: '#/benchmarks', class: 'btn' }, 'See the benchmarks'],
           ],
+          { $apply: '$.dispatch' },
         ],
       ],
       ['section', { class: 'container section' },
@@ -69,5 +70,91 @@ export const HOME_RULES = [
       ['p', {}, '$.blurb'],
       ['p', { class: 'engine-perf' }, '$.perf'],
     ],
+  },
+
+  // The living dispatch. Nothing under `$.dispatch.stages` is written
+  // here: every title, state and summary was recorded from a real run
+  // through @jarenjs/contract's local binding, so this rule only decides
+  // where it goes. The stage list is keyed on the run's revision, so a
+  // re-dispatch MOUNTS a new list and its entrance plays again — a
+  // reused element would keep the animation it already ran.
+  {
+    match: '$.ui.home.dispatch', mode: 'home',
+    body: ['div', { class: 'hero-demo' },
+      ['h2', { class: 'hero-demo-title' }, '$.title'],
+      ['p', { class: 'hero-demo-lead' }, '$.lead'],
+      ['div', { class: 'hero-demo-grid' },
+        ['div', { class: 'hero-panel' },
+          ['div', { class: 'hero-panel-head' },
+            ['h3', {}, 'Input'],
+            ['div', { class: 'seg', role: 'group', 'aria-label': 'input' },
+              ['button', {
+                type: 'button',
+                class: { $if: [{ $eq: ['$.variant', 'valid'] }, 'seg-btn active', 'seg-btn'] },
+                'aria-pressed': { $if: [{ $eq: ['$.variant', 'valid'] }, 'true', 'false'] },
+                on: { click: { action: 'hero/pick', with: 'valid' } },
+              }, 'Valid'],
+              ['button', {
+                type: 'button',
+                class: { $if: [{ $eq: ['$.variant', 'invalid'] }, 'seg-btn active', 'seg-btn'] },
+                'aria-pressed': { $if: [{ $eq: ['$.variant', 'invalid'] }, 'true', 'false'] },
+                on: { click: { action: 'hero/pick', with: 'invalid' } },
+              }, 'Break it'],
+            ],
+          ],
+          ['textarea', {
+            class: 'editor hero-editor', rows: 9, spellcheck: 'false',
+            'aria-label': 'dispatch input',
+            value: '$.input', on: { change: 'hero/edit' },
+          }],
+          ['div', { class: 'hero-controls' },
+            ['button', { type: 'button', class: 'btn primary', on: { click: 'hero/dispatch' } }, 'Dispatch'],
+            ['button', { type: 'button', class: 'btn hero-step', on: { click: 'hero/step' } }, 'Step'],
+            ['span', { class: 'hero-status' }, '$.status'],
+          ],
+          ['p', { class: 'hero-hint' }, '$.edit'],
+        ],
+        ['div', { class: 'hero-panel' },
+          { $apply: ['$.refusal', 'ui'] },
+          ['ol', { class: 'hero-stages', key: '$.revision' }, [{ $apply: '$.stages[*]' }]],
+          { $apply: '$.focused' },
+          { $apply: '$.identity' },
+        ],
+      ],
+      ['p', { class: 'hero-demo-links' }, [{ $apply: '$.links[*]' }]],
+      ['p', { class: 'hero-demo-caption' }, '$.caption'],
+    ],
+  },
+  {
+    match: '$.ui.home.dispatch.stages[*]', mode: 'home',
+    body: ['li', {
+      class: { $concat: ['hero-stage is-', '$.state', { $if: ['$.focused', ' is-focus', ''] }] },
+    },
+      ['button', {
+        type: 'button', class: 'hero-stage-btn',
+        'aria-pressed': { $if: ['$.focused', 'true', 'false'] },
+        on: { click: { action: 'hero/focus', with: '$.index' } },
+      },
+        ['span', { class: 'hero-stage-title' }, '$.title'],
+        ['span', { class: 'hero-stage-summary' }, '$.summary'],
+      ],
+    ],
+  },
+  {
+    match: '$.ui.home.dispatch.focused', mode: 'home',
+    body: ['pre', { class: 'hero-artifact' },
+      ['code', {}, '$.artifact'],
+    ],
+  },
+  {
+    match: '$.ui.home.dispatch.identity', mode: 'home',
+    body: ['p', { class: 'hero-identity' },
+      ['span', {}, { $concat: ['$.id', ' v', '$.version', ' · ', '$.binding', ' binding · revision'] }],
+      ['code', {}, '$.revision'],
+    ],
+  },
+  {
+    match: '$.ui.home.dispatch.links[*]', mode: 'home',
+    body: ['a', { href: '$.href', class: 'hero-demo-link' }, '$.label'],
   },
 ];

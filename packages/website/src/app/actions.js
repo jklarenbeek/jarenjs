@@ -35,6 +35,25 @@ const CENSUS_PAGE = { $or: [
  * its contract section is the site's own compiled document. */
 const DOCS_PAGE = { $eq: ['$payload.page', 'docs'] };
 
+/** The home page: its hero dispatches a real contract operation. */
+const HOME_PAGE = { $eq: ['$payload.page', 'home'] };
+
+/** The starting input a hero pick names, of the two the state carries.
+ * An action's effects resolve against the state BEFORE its own patch, so
+ * the load and the run must read the same expression, not the member the
+ * load is about to write. */
+const PICKED = { $if: [
+  { $eq: ['$payload', 'invalid'] }, '$.hero.presets.invalid', '$.hero.presets.valid',
+] };
+
+/** The index of the last recorded stage, or 0 when nothing ran — the
+ * settled outcome is the frame a reader wants first. */
+const LAST_STAGE = (stages) => ({ $if: [
+  { $gt: [{ $count: stages }, 0] },
+  { $sub: [{ $count: stages }, 1] },
+  0,
+] });
+
 export const ACTIONS = {
   // the @jarenjs/calc sub-app's actions (namespaced 'calc/*' + 'calc-form/*')
   ...calcActions,
@@ -67,6 +86,10 @@ export const ACTIONS = {
       // and the contract section renders the site's own compiled
       // document, whose revision is a digest the page must await
       { $if: [DOCS_PAGE, { run: 'site-contract' }] },
+      // the hero runs a real dispatch through the real local binding;
+      // `initial` makes the arrival free after the first one, while the
+      // reader's own Dispatch always re-runs
+      { $if: [HOME_PAGE, { run: 'hero-run', with: { initial: true, input: '$.hero.input' } }] },
       {
         $if: [
           {
@@ -96,6 +119,49 @@ export const ACTIONS = {
       { op: 'add', path: { $concat: ['/site/data/', '$payload.name'] }, value: '$payload.data' },
       { op: 'add', path: { $concat: ['/site/status/', '$payload.name'] }, value: 'ready' },
     ],
+  },
+
+  // The homepage's living dispatch. The two starting inputs live in
+  // state, so picking one is a patch rather than a capability: the
+  // action loads it and the same effect runs it, exactly as the reader's
+  // own edit does.
+  'hero/pick': {
+    patch: [
+      { op: 'replace', path: '/hero/input', value: PICKED },
+      { op: 'replace', path: '/hero/variant', value: '$payload' },
+    ],
+    effects: [{ run: 'hero-run', with: { input: PICKED } }],
+  },
+
+  'hero/edit': {
+    patch: [
+      { op: 'replace', path: '/hero/input', value: '$event.value' },
+      { op: 'replace', path: '/hero/variant', value: 'edited' },
+    ],
+  },
+
+  'hero/dispatch': { effects: [{ run: 'hero-run', with: { input: '$.hero.input' } }] },
+
+  'hero/running': { patch: [{ op: 'replace', path: '/hero/status', value: 'running' }] },
+
+  'hero/settled': {
+    patch: [
+      { op: 'replace', path: '/hero/run', value: '$payload' },
+      { op: 'replace', path: '/hero/status', value: 'ready' },
+      { op: 'replace', path: '/hero/focus', value: LAST_STAGE('$payload.stages[*]') },
+      { op: 'replace', path: '/hero/revision', value: { $add: ['$.hero.revision', 1] } },
+    ],
+  },
+
+  'hero/focus': { patch: [{ op: 'replace', path: '/hero/focus', value: '$payload' }] },
+
+  // stepping wraps, so the control never dead-ends on the last stage
+  'hero/step': {
+    patch: [{ op: 'replace', path: '/hero/focus', value: { $if: [
+      { $lt: ['$.hero.focus', { $sub: [{ $count: '$.hero.run.stages[*]' }, 1] }] },
+      { $add: ['$.hero.focus', 1] },
+      0,
+    ] } }],
   },
 
   'bench/status': {

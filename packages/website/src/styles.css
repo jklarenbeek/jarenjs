@@ -244,6 +244,72 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 .hero-points { color: var(--muted); }
 .hero-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
 
+/* the living dispatch: a real contract operation running in the page.
+   The two panels are input and recording; the stage list is the
+   pipeline's own order, top to bottom. */
+.hero-demo { margin-top: var(--space-8); }
+.hero-demo-title { font-size: 1.35rem; margin-bottom: var(--space-2); }
+.hero-demo-lead { max-width: 52rem; color: var(--muted); }
+.hero-demo-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4); margin-top: var(--space-4); align-items: start;
+}
+.hero-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--space-4);
+}
+.hero-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3);
+}
+.hero-panel-head h3 { margin: 0; font-size: 0.95rem; }
+.hero-editor { min-height: 12rem; }
+.hero-controls {
+  display: flex; align-items: center; gap: var(--space-3);
+  flex-wrap: wrap; margin-top: var(--space-3);
+}
+.hero-status { color: var(--muted); font-size: 0.8rem; font-family: var(--mono); }
+.hero-hint { color: var(--muted); font-size: 0.85rem; margin-top: var(--space-3); }
+
+.hero-stages { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+/* the connector: the stages are one pipeline, and the eye should read
+   them as one — a hairline between each pair, never around the last */
+.hero-stage + .hero-stage { border-top: 1px solid var(--border); padding-top: var(--space-2); }
+.hero-stage-btn {
+  display: grid; gap: 2px; width: 100%; text-align: left; cursor: pointer;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3); color: var(--fg);
+  /* the focus lift is a transform, so it composites — see the motion layer */
+  border-left-width: 3px;
+}
+.hero-stage-btn:hover { border-color: var(--border); border-left-color: var(--muted); }
+.hero-stage-title { font-weight: 600; font-size: 0.9rem; }
+.hero-stage-summary { color: var(--muted); font-size: 0.8rem; font-family: var(--mono); word-break: break-word; }
+.hero-stage.is-ok .hero-stage-btn { border-left-color: var(--ok); }
+.hero-stage.is-refused .hero-stage-btn { border-left-color: var(--fail); }
+.hero-stage.is-skipped .hero-stage-btn { border-left-color: var(--border); }
+.hero-stage.is-skipped .hero-stage-title { color: var(--muted); font-weight: 500; }
+.hero-stage.is-focus .hero-stage-btn { background: var(--accent-soft); border-color: var(--accent); }
+.hero-stage.is-focus.is-ok .hero-stage-btn { border-left-color: var(--ok); }
+.hero-stage.is-focus.is-refused .hero-stage-btn { border-left-color: var(--fail); }
+
+.hero-artifact {
+  margin-top: var(--space-3); max-height: 18rem; overflow: auto;
+  background: var(--code-bg); color: var(--code-fg);
+  border-radius: var(--radius-sm); padding: var(--space-3);
+}
+.hero-identity {
+  margin-top: var(--space-3); color: var(--muted); font-size: 0.78rem;
+  display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline;
+}
+.hero-identity code { word-break: break-all; }
+.hero-demo-links { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-4); }
+.hero-demo-caption { color: var(--muted); font-size: 0.85rem; margin-top: var(--space-2); }
+
+@media (max-width: 900px) {
+  .hero-demo-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* buttons, chips, tabs */
 .btn {
   display: inline-block; border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -1207,4 +1273,25 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   /* 3. the dropdown caret's flip — a state change, and the one piece of
      site chrome that moves */
   .nav-caret { transition: transform var(--motion-fast) var(--motion-ease-out); }
+
+  /* 4. the hero's dispatch, in the same voice: the recorded stages
+     arrive in the pipeline's own order, and the focus glides between
+     them. The list is keyed on the run, so a re-dispatch mounts a new
+     one and the wave plays again. Under `reduce` none of this exists:
+     every stage is on screen at once from the first paint, and the step
+     control moves the focus instantly. */
+  .hero-stage {
+    animation: stage-in var(--motion-base) var(--motion-ease-out) backwards;
+    animation-delay: calc(var(--motion-index, 0) * var(--motion-stagger) * 4);
+  }
+  .hero-stage:nth-child(2) { --motion-index: 1; }
+  .hero-stage:nth-child(3) { --motion-index: 2; }
+  .hero-stage:nth-child(4) { --motion-index: 3; }
+  .hero-stage:nth-child(5) { --motion-index: 4; }
+  @keyframes stage-in {
+    from { opacity: 0; transform: translateY(var(--motion-rise)); }
+  }
+  /* the moving focus: the lift is what travels from stage to stage */
+  .hero-stage-btn { transition: transform var(--motion-fast) var(--motion-ease-out); }
+  .hero-stage.is-focus .hero-stage-btn { transform: translateX(var(--motion-rise)); }
 }
