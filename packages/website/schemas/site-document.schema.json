@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-site-document/0.1",
+  "title": "Jaren package site document — frontmatter",
+  "description": "The frontmatter grammar of a workspace's site.md: the structured metadata the website needs about a package, committed WITH the package. The markdown body below the frontmatter is the package's documentation section and its grammar is markdown itself (jaren-md-ast.schema.json describes what the parser produces). A document whose frontmatter fails this schema is refused by the collector, named by its path — the site never renders a package card the workspace did not describe.",
+  "type": "object",
+  "required": ["package", "card"],
+  "properties": {
+    "package": {
+      "description": "The published name of the workspace this document sits in. The collector cross-checks it against the package.json beside it, so a document copied between workspaces is refused rather than silently advertising the wrong package.",
+      "type": "string",
+      "pattern": "^@jarenjs/[a-z0-9][a-z0-9-]*$"
+    },
+    "card": {
+      "description": "The package's card on the site: its own words about what it is.",
+      "type": "object",
+      "required": ["title", "blurb"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "blurb": { "type": "string", "minLength": 1 },
+        "perf": {
+          "description": "The authored voice of the card's measured line — what the numbers are ABOUT, never a number. Every figure the site publishes is derived from a committed measurement, so a digit here would be a claim nothing can keep true; the pattern refuses one. Where a benchmark headline exists (engine.suite), it replaces this line entirely.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^0-9]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "engine": {
+      "description": "Where the package appears as an engine: the id the site's engine grid and the playground know it by, and the benchmark suite whose headline measures it.",
+      "type": "object",
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "suite": {
+          "description": "A published benchmark suite key. The card's measured line is that suite's headline, derived at render time — the card never states the figure itself.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

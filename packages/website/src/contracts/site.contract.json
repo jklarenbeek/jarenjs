@@ -31,6 +31,42 @@
       },
       "additionalProperties": false
     },
+    "SiteCard": {
+      "description": "A package's card on the site, in the package's own words. `perf` is authored voice — the measured line comes from the benchmark headline its engine names, never from here — so it carries no figure.",
+      "type": "object",
+      "required": ["title", "blurb", "perf"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "blurb": { "type": "string" },
+        "perf": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "SiteEngine": {
+      "description": "Where a package appears as an engine: the id the engine grid and the playground know it by, and the benchmark suite whose headline measures it. A package that is not an engine has none.",
+      "type": "object",
+      "required": ["key", "suite"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "suite": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "ContentEntry": {
+      "description": "One published workspace's site presence. `derived` says where the card came from: false for a workspace that committed its own site document, true for one still described by its manifest alone.",
+      "type": "object",
+      "required": ["name", "card", "engine", "docs", "derived"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "card": { "$ref": "#/$defs/SiteCard" },
+        "engine": {
+          "anyOf": [{ "$ref": "#/$defs/SiteEngine" }, { "type": "null" }]
+        },
+        "docs": true,
+        "derived": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "RunStamp": {
       "description": "The invocation that last ran the generator: the machine, the runtime, the suite version and the iteration mode. It describes the RUN, never the rows — those carry their own.",
       "type": "object",
@@ -191,6 +227,21 @@
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
       "doc": "The package census: the published workspaces of this repository, in manifest order, each in its own manifest's words. generated and commit are the HEAD commit's date and hash — null in a checkout without git, which is the honest answer, not a wall clock."
+    },
+    "site.content": {
+      "kind": "read",
+      "output": {
+        "type": "object",
+        "required": ["generated", "commit", "packages"],
+        "properties": {
+          "generated": { "type": ["string", "null"] },
+          "commit": { "type": ["string", "null"] },
+          "packages": { "type": "array", "items": { "$ref": "#/$defs/ContentEntry" } }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "The site content the workspaces own: one entry per published workspace, in the census's order, carrying the card the package wrote for itself, the engine grid mapping it claims, and its documentation section as a parsed Markdown document. `docs` is declared open here on purpose — its grammar is the Markdown AST @jarenjs/md publishes (components/md/schemas/jaren-md-ast.schema.json), and a copy of that grammar in this document would be a second one to keep true."
     },
     "site.build": {
       "kind": "read",

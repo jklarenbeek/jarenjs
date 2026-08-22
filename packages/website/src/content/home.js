@@ -1,8 +1,12 @@
 //@ts-check
 /**
- * The home page content — a content document, not markup. The `home`
- * view mode renders these nodes with JSLT rules; editing copy means
- * editing JSON.
+ * The home page content the SITE owns — a content document, not markup.
+ * The `home` view mode renders these nodes with JSLT rules; editing copy
+ * means editing JSON.
+ *
+ * A package that has taken its card over is not here: it writes the card
+ * in its own workspace and the build collects it, so the engine grid a
+ * reader sees is these cards plus the collected ones.
  */
 
 export const HOME_CONTENT = {
@@ -36,7 +40,6 @@ export const HOME_CONTENT = {
     { key: 'calc', title: 'Calculator', blurb: 'A multi-mode calculator (standard / scientific / programmer / financial / converter) as an @jarenjs/app document: a two-stage expression compiler (parseExpression ⇄ toExpression), x·y/x·y·z plots as pure-vnode SVG, and a pure numeric kernel pushed down into @jarenjs/core (math/finance/convert).', perf: 'apps as JSON, eval-free, SSR-able' },
     { key: 'view', title: 'View', blurb: 'UIs as JSON: the tagged-array vnode format, a keyed DOM patcher that skips unchanged subtrees in O(1), an SSR serializer and a registered-widget escape hatch for irreducibly imperative islands. The grammar ships as JSON Schema, so a constrained decoder cannot emit a structurally invalid interface — and an opt-in safe-render profile sanitizes an untrusted one. Running a view as data costs engine time against a hand-written build, and the benchmark publishes that price beside the win.', perf: 'hand-written vnodes outbuild the mainstream frameworks; the stylesheet pays for views-as-data — both published' },
     { key: 'app', title: 'App', blurb: 'Whole applications as one JSON document: state, a JSLT stylesheet for the view, query documents for actions, JSON Patch transitions and subscriptions with an EBV liveness query. Everything compiles once at createApp; the running loop only calls specialized closures.', perf: 'this site and the Studio are both app documents' },
-    { key: 'contract', title: 'Contract', blurb: 'One document declares your JSON-in/JSON-out operations — kind, policy, HTTP binding — and compiles once into validators, transport normalizers and a static-beats-variable path matcher. The same contract serves over HTTP, in-process through the local binding, and across a MessagePort or a worker, binds into an @jarenjs/app document as generated task slots, and projects to OpenAPI 3.1, TypeScript, Markdown and AI tool definitions from the one source.', perf: 'measured against a hand-composed router doing the same work — the dispatch loss published beside the wins' },
     { key: 'flow', title: 'Flow', blurb: 'Executable workflows as JSON: jaren-fsm state machines compiled to a pure step function, and jaren-dag dataflow over the suite’s own engines. Guards are query documents, effects come back as data, and @jarenjs/mermaid projects a diagram both ways — the Flow studio edits, runs and animates them live.', perf: 'a machine survives a JSON round trip with its guards; XState’s functions do not' },
     { key: 'linq', title: 'LINQ', blurb: 'C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.', perf: 'one operator set, byte-identical documents through the sync and async drivers' },
     { key: 'db', title: 'Data', blurb: 'Documents AND entities in SQLite behind driver and dialect seams: a pushdown planner that renders guarded parameter-bound SQL, one-statement graph loads, a copy-on-write unit of work with optimistic concurrency, generated entity types, and a jaren-db CLI whose migrations rebuild tables the documented twelve-step way.', perf: 'the two-level graph load runs in ONE statement; statement counts published beside every timing' },

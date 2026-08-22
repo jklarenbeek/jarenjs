@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 
 import { ENGINES } from '@jarenjs/play';
 import { KINDS } from '@jarenjs/studio';
-import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
+import { docsSections } from '../../packages/website/src/app/viewmodel.js';
+import { buildSiteContent } from '../../scripts/generate-site-data.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -52,8 +53,10 @@ describe('documented counts match the code', () => {
   it('the website README states the real benchmark-suite and docs-section counts', () => {
     const doc = read('packages/website/README.md');
     assert.strictEqual(statedCount(doc, 'Benchmarks, all', 'suites'), benchmarkSuites.length);
+    // the page is the site's own sections PLUS the ones the packages
+    // commit in their workspaces, so the claim is counted over the merge
     assert.strictEqual(statedCount(doc, '\\*\\*Docs & Examples\\.\\*\\*', 'documentation sections'),
-      DOCS_SECTIONS.length);
+      docsSections(buildSiteContent()).length);
   });
 
   it('the play engine count matches the registry, in every document that states it', () => {

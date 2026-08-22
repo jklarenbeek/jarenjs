@@ -23,7 +23,9 @@ const MEASURED_PAGE = { $or: [
   { $eq: ['$payload.page', 'home'] },
 ] };
 
-/** The pages that render the package census. */
+/** The pages that render the package census and the workspaces' own
+ * site content — the docs rail and its package sections, the engine
+ * cards a package writes for itself. */
 const CENSUS_PAGE = { $or: [
   { $eq: ['$payload.page', 'docs'] },
   { $eq: ['$payload.page', 'home'] },
@@ -55,6 +57,7 @@ export const ACTIONS = {
       // reader lands on a page that can already say what produced it
       { run: 'fetch-site', with: { name: 'build' } },
       { $if: [CENSUS_PAGE, { run: 'fetch-site', with: { name: 'packages' } }] },
+      { $if: [CENSUS_PAGE, { run: 'fetch-site', with: { name: 'content' } }] },
       // the home page shows measured headlines on its engine cards, so
       // it needs the same meta.json the benchmarks overview reads
       { $if: [MEASURED_PAGE, { run: 'fetch-bench', with: { name: 'meta' } }] },

@@ -14,7 +14,9 @@ import { parseHash } from './lib/route.js';
 
 const BASE = import.meta.env.BASE_URL;
 /** The build-generated site data, by the name the app asks for it under. */
-const SITE_FILES = { packages: 'site/packages.json', build: 'build.json' };
+const SITE_FILES = {
+  packages: 'site/packages.json', content: 'site/content.json', build: 'build.json',
+};
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
 const AI_KEY = 'jaren-ai';

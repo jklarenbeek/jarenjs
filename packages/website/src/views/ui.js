@@ -4,7 +4,8 @@
  * docs content) emit kind-tagged JSON nodes; one rule per kind turns
  * them into vnodes. This is the site's component library, as data:
  * cards, tables, callouts, code blocks, error blocks, bar charts,
- * collapsibles, a search box and a show-more button.
+ * collapsibles, rendered Markdown articles, a search box and a
+ * show-more button.
  */
 
 /**
@@ -107,6 +108,12 @@ export const UI_RULES = [
       '$.vnode',
       { $if: ['$.note', ['p', { class: 'table-note' }, '$.note']] },
     ],
+  },
+  {
+    // A package-owned section: the md component has already produced the
+    // vnode, so it splices in verbatim — no dispatch, exactly like a chart.
+    match: "$..[?@.kind == 'article']", mode: 'ui',
+    body: ['div', { class: 'doc-md' }, '$.vnode'],
   },
   {
     match: "$..[?@.kind == 'search']", mode: 'ui',

@@ -117,7 +117,9 @@ const SHARE_TOKEN_LIMIT = 8000;
 
 /** The build-generated site data, by the name the route effects ask for
  * it under, as the contract operation that answers it. */
-const SITE_OPERATIONS = { packages: 'site.packages', build: 'site.build' };
+const SITE_OPERATIONS = {
+  packages: 'site.packages', content: 'site.content', build: 'site.build',
+};
 
 /** Play-slice paths that are IDE chrome, not engine inputs: a change to any
  * of them must NOT re-run the engine (the run's own output, the active tab,

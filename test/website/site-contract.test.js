@@ -32,7 +32,7 @@ import { publicProjection } from '@jarenjs/contract/project';
 import {
   siteContract, openSiteClient, createSiteHandlers, unwrap, siteContractNodes,
 } from '../../packages/website/src/boundaries/site.js';
-import { serializeSiteData } from '../../scripts/generate-site-data.js';
+import { serializeSiteData, serializeSiteContent } from '../../scripts/generate-site-data.js';
 import { serializeBuildInfo } from '../../scripts/generate-build-info.js';
 import { serializeMeta } from '../../benchmark/website-data.js';
 import { git } from '../../scripts/lib/git.js';
@@ -45,14 +45,17 @@ const read = (path) => JSON.parse(readFileSync(new URL(path, SITE), 'utf8'));
 
 const doc = read('src/contracts/site.contract.json');
 
-/** The five operations, in the document's order. */
-const IDS = ['site.packages', 'site.build', 'bench.meta', 'bench.suite', 'readme.fetch'];
+/** The six operations, in the document's order. */
+const IDS = [
+  'site.packages', 'site.content', 'site.build', 'bench.meta', 'bench.suite', 'readme.fetch',
+];
 
 const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
 
 /** The committed artifacts, as the browser gets them. */
 const ARTIFACTS = {
   packages: read('public/site/packages.json'),
+  content: read('public/site/content.json'),
   build: read('public/build.json'),
   meta: read('public/benchmarks/meta.json'),
 };
@@ -101,7 +104,7 @@ function openFixtureClient(overrides = {}) {
 }
 
 describe('the site contract document', function () {
-  it('compiles refusal-free, and declares exactly the five site-owned reads', function () {
+  it('compiles refusal-free, and declares exactly the six site-owned reads', function () {
     const contract = compileContract(doc);
     assert.strictEqual(contract.id, 'jaren-site');
     assert.strictEqual(doc.$contract, '0.1');
@@ -306,7 +309,9 @@ describe('the site running on its own contract', function () {
       fetchJson: (name) => (name === 'meta'
         ? Promise.resolve(ARTIFACTS.meta)
         : Promise.reject(new Error('404'))),
-      fetchSite: (name) => Promise.resolve(name === 'packages' ? census : ARTIFACTS.build),
+      fetchSite: (name) => (name === 'packages'
+        ? Promise.resolve(census)
+        : Promise.resolve(ARTIFACTS[name])),
       listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
       navigate: (h) => routeCb(parseHash(h)),
       onError: (error) => faults.push(error),
@@ -322,7 +327,7 @@ describe('the site running on its own contract', function () {
   });
 
   it('puts the live document on the docs page — the operations, the revision, both projections', async function () {
-    const { container, faults } = mount(ARTIFACTS.packages, '#/docs?s=contract');
+    const { container, faults } = mount(ARTIFACTS.packages, '#/docs?s=site-contract');
     await tick();
     const html = serialize(container);
     const revision = await siteContract.revision();
@@ -337,6 +342,35 @@ describe('the site running on its own contract', function () {
     assert.ok(html.includes('&quot;openapi&quot;: &quot;3.1.0&quot;')
       || html.includes('"openapi": "3.1.0"'), 'the projection is the document, rendered');
     assert.deepStrictEqual(faults, [], 'showing the contract is not a fetch and cannot fail');
+  });
+
+  it('refuses drifted site content on the READ side too — the page never renders it', async function () {
+    const { document, container } = createStubHost();
+    const faults = [];
+    createSiteApp({
+      node: container,
+      document,
+      schedule: (/** @type {any} */ f) => f(),
+      debounceMs: 0,
+      fetchJson: () => Promise.reject(new Error('404')),
+      fetchSite: (/** @type {string} */ name) => Promise.resolve(name === 'content'
+        ? {
+          ...ARTIFACTS.content,
+          packages: ARTIFACTS.content.packages.map((/** @type {any} */ entry) =>
+            ({ ...entry, card: { ...entry.card, blurb: 42 } })),
+        }
+        : ARTIFACTS[name]),
+      listenHash: (/** @type {any} */ cb) => cb(parseHash('#/docs')),
+      navigate: () => {},
+      onError: (/** @type {any} */ error) => faults.push(error),
+    });
+    await tick();
+    const reported = faults.find((/** @type {any} */ f) => f.code === 'JC2070');
+    assert.notStrictEqual(reported, undefined,
+      'the same document that gated the write gates the read');
+    assert.match(reported.message, /site\/content/);
+    assert.doesNotMatch(serialize(container), /doc-md/,
+      'no package section renders from content the contract refused');
   });
 
   it('shows the unavailable state — and reports the JC code — when the census drifts', async function () {
@@ -379,6 +413,31 @@ describe('the generators write nothing the site could not read', function () {
       assert.match(error.message, /\/packages\/0 — required/, 'and where in the payload');
       return true;
     });
+  });
+
+  it('refuses site content whose shape the content operation does not declare', function () {
+    assert.strictEqual(serializeSiteContent(ARTIFACTS.content),
+      `${JSON.stringify(ARTIFACTS.content, null, 2)}\n`,
+      'the content this repository ships passes its own gate');
+    // the card and the engine mapping are declared strictly; the parsed
+    // Markdown deliberately is not, because its grammar is the one the
+    // md package publishes and a copy here would be a second one
+    const dropped = {
+      ...ARTIFACTS.content,
+      packages: ARTIFACTS.content.packages.map(({ derived: _derived, ...rest }) => rest),
+    };
+    assert.throws(() => serializeSiteContent(dropped), (/** @type {Error} */ error) => {
+      assert.match(error.message, /^JC2010: /);
+      assert.match(error.message, /site\.contract\.json\/operations\/site\.content\/output/);
+      assert.match(error.message, /\/packages\/0 — required/);
+      return true;
+    });
+    const retyped = {
+      ...ARTIFACTS.content,
+      packages: ARTIFACTS.content.packages.map((/** @type {any} */ entry) =>
+        ({ ...entry, card: { ...entry.card, perf: 3 } })),
+    };
+    assert.throws(() => serializeSiteContent(retyped), /JC2010: .*site\.content/);
   });
 
   it('refuses build provenance the footer\'s operation does not declare', function () {

@@ -1,10 +1,11 @@
 //@ts-check
 /**
  * One shared Markdown visual component (`@jarenjs/md/component`) for the
- * whole site. The playground's Markdown tab and the docs-page README
- * dialog both derive their vnodes through `md.view(...)`, so they share
- * one memo cache: the same source string renders to the same
- * reference-equal vnode, which the DOM patcher skips in O(1).
+ * whole site. The playground's Markdown tab, the docs-page README dialog
+ * and the docs sections the packages own all derive their vnodes through
+ * `md.view(...)`, so they share one memo cache: the same source renders
+ * to the same reference-equal vnode, which the DOM patcher skips in
+ * O(1).
  *
  * The mermaid plugin is compiled in so fenced ```mermaid diagrams in
  * fetched READMEs render to inline SVG through @jarenjs/mermaid (the
@@ -91,6 +92,9 @@ export const md = createMdComponent({
 //   an #anchor      -> stay put: a `readme/anchor` binding
 //                      (preventDefault) that scrolls to the heading;
 //                      the hash router must never see the fragment
+//   a #/route        -> a PAGE of this hash-routed site, not a fragment:
+//                      the same close-and-navigate answer as an absolute
+//                      site link
 //
 // Relative image sources resolve to the raw base the same way, so a
 // README's own images load. Other absolute URLs and mailto: pass through
@@ -117,6 +121,19 @@ function rewriteAnchor(props, base) {
   const href = props.href;
   if (typeof href !== 'string' || href === '')
     return null;
+  if (href.startsWith('#/')) {
+    // A ROUTE, not a fragment: this site is hash-routed, so `#/play` is
+    // a page of it. Treated as an in-page anchor it would scroll to a
+    // heading that does not exist; left as a bare href behind an open
+    // dialog it would change the page invisibly. Both are the same
+    // answer as an absolute link to the site — close and navigate.
+    return {
+      ...props,
+      on: {
+        click: { action: 'readme/goto', with: { hash: href }, preventDefault: true },
+      },
+    };
+  }
   if (href.startsWith('#')) {
     // An in-page fragment, on a hash-routed site. Left alone it sets
     // `location.hash`, which the router reads as a PAGE name: `#setup` is

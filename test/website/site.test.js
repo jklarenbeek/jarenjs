@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
@@ -10,15 +10,26 @@ import { viewModel } from '../../packages/website/src/app/viewmodel.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
-import { buildSiteData } from '../../scripts/generate-site-data.js';
+import { buildSiteData, buildSiteContent } from '../../scripts/generate-site-data.js';
 import { buildInfo } from '../../scripts/generate-build-info.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
 /** What the build generates about this repository, as the browser gets
- * it: the REAL census and the REAL provenance rather than a fixture, so
- * the docs rail and the footer are asserted against the repository they
- * describe. Read once — every mount serves the same two documents. */
-const SITE_DATA = { packages: buildSiteData(), build: buildInfo() };
+ * it: the REAL census, the REAL site documents the workspaces commit and
+ * the REAL provenance rather than fixtures, so the docs rail, the engine
+ * grid and the footer are asserted against the repository they describe.
+ * Read once — every mount serves the same three documents. */
+const SITE_DATA = {
+  packages: buildSiteData(), content: buildSiteContent(), build: buildInfo(),
+};
+
+/** The engine cards the site owns, plus the ones their packages do. */
+const ENGINE_CARDS = HOME_CONTENT.engines.length
+  + SITE_DATA.content.packages.filter((entry) => entry.engine !== null).length;
+
+/** One collected card, by the engine key its workspace claims. */
+const collected = (key) => SITE_DATA.content.packages
+  .find((entry) => entry.engine?.key === key);
 
 /** The per-row provenance every headline in `meta.json` carries. */
 const MEASURED_BY = {
@@ -104,19 +115,24 @@ function find(node, pred) {
 }
 
 describe('website — the site as one app document', function () {
-  it('renders the home page through the shell', function () {
+  it('renders the home page through the shell', async function () {
     const { container } = mountSite();
+    // the cards a package owns arrive with the collected site content,
+    // one turn after the route — before it, the site's own cards render
+    assert.strictEqual((serialize(container).match(/class="card engine-card"/g) ?? []).length,
+      HOME_CONTENT.engines.length);
+    await tick();
     const html = serialize(container);
     assert.match(html, /JSON all the way down/);
     // the heading counts the content document rather than spelling a
     // number, so this asserts the two agree instead of pinning a literal
     // that goes stale the next time an engine is added
     const cards = (html.match(/class="card engine-card"/g) ?? []).length;
-    assert.strictEqual(cards, HOME_CONTENT.engines.length);
+    assert.strictEqual(cards, ENGINE_CARDS);
     assert.match(html, new RegExp(`One stack, ${cards} engines`));
     assert.match(html, /nav-link active/);
     // the suite's operation contracts are one of the engines the page
-    // advertises, and the count above follows the document
+    // advertises — from the card @jarenjs/contract writes for itself
     assert.match(html, /<h3>Contract<\/h3>/);
   });
 
@@ -133,8 +149,8 @@ describe('website — the site as one app document', function () {
     const html = serialize(container);
     assert.match(html, /3\.6× slower than a hand-composed router/,
       'a sub-parity ratio is published in the direction it measures');
-    const authored = HOME_CONTENT.engines.find((e) => e.key === 'contract');
-    assert.doesNotMatch(html, new RegExp(authored.perf.slice(0, 24)),
+    const authored = collected('contract').card.perf;
+    assert.doesNotMatch(html, new RegExp(authored.slice(0, 24)),
       'the authored line is the pre-arrival fallback, not a second published figure');
   });
 
@@ -805,5 +821,75 @@ describe('website — every published figure is the measured one', function () {
       assert.ok(!section.blocks.some((b) => b.kind === 'table'),
         'a hand-written results table in the docs is the defect this replaced');
     });
+  });
+});
+
+describe('website — the packages own their pages', function () {
+  const SRC = new URL('../../packages/website/src/', import.meta.url);
+  const source = (path) => readFileSync(new URL(path, SRC), 'utf8');
+
+  it('renders each pilot\'s section from its own workspace, through the one md component', async function () {
+    for (const [id, marker] of [
+      ['contract', 'The layer between two Jaren ends'],
+      ['studio', 'hosts a user- or AI-authored'],
+      ['play', 'is that pair made visible'],
+    ]) {
+      const { container, go } = mountSite();
+      go(`#/docs?s=${id}`);
+      await tick();
+      const html = serialize(container);
+      assert.match(html, /<div class="doc-md"><article class="md">/,
+        `${id}: the section is the md component's article, not re-implemented markup`);
+      assert.ok(html.toLowerCase().includes(marker.toLowerCase()),
+        `${id}: the prose comes from ${id}/site.md`);
+    }
+  });
+
+  it('keeps no package-owned section body in the website\'s own content document', function () {
+    const docs = source('content/docs.js');
+    assert.ok(!docs.includes('The layer between two Jaren ends'),
+      'the contract section body lives in packages/contract/site.md now');
+    assert.ok(!docs.includes('id: \'contract\''),
+      'and the website declares no section for it');
+    assert.ok(docs.includes('id: \'site-contract\''),
+      'what stays is what only the site can answer: the binding tables and its own document');
+  });
+
+  it('has exactly one Markdown component — every provenance renders through it', function () {
+    const files = readdirSync(new URL('boundaries/', SRC));
+    const creators = files.filter((f) => source(`boundaries/${f}`).includes('createMdComponent('));
+    assert.deepStrictEqual(creators, ['markdown.js'],
+      'a second component would be a second memo cache and a second policy');
+  });
+
+  it('merges the sections without a collision — one page, unique deep links', async function () {
+    const { container, go } = mountSite();
+    go('#/docs');
+    await tick();
+    const html = serialize(container);
+    const ids = [...html.matchAll(/href="#\/docs\?s=([a-z-]+)"/g)].map((m) => m[1]);
+    assert.deepStrictEqual([...new Set(ids)], ids, 'a duplicated id would shadow a section');
+    for (const id of ['contract', 'studio', 'play']) {
+      assert.ok(ids.includes(id), `${id} has its own deep link`);
+    }
+    // the site's own preamble first, the packages after it, and the
+    // sections that close the page last
+    assert.strictEqual(ids[0], 'installation');
+    assert.deepStrictEqual(ids.slice(-5),
+      ['contract', 'studio', 'play', 'site-contract', 'further-reading']);
+  });
+
+  it('routes an in-app link inside package markdown instead of scrolling to nothing', async function () {
+    const { container, go, hashes } = mountSite();
+    go('#/docs?s=play');
+    await tick();
+    // the link the DOCUMENT wrote, not the one in the nav: its text is
+    // the route itself, exactly as the markdown spells it
+    const link = find(container, (n) => n.tagName === 'a'
+      && n.childNodes?.[0]?.nodeValue === '#/play');
+    assert.notStrictEqual(link, undefined, 'the section links to the playground');
+    fire(link, 'click');
+    assert.deepStrictEqual(hashes, ['#/play'],
+      'a #/route in a rendered document is a page of this site, not an anchor in it');
   });
 });

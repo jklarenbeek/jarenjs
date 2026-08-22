@@ -839,6 +839,9 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .docs-article table, .docs-article svg, .docs-article img,
 .md-dialog-body table, .md-dialog-body svg, .md-dialog-body img { max-width: 100%; }
 .md-dialog-body .md table { display: block; overflow-x: auto; }
+/* a package-owned docs section is the md component's own article, set in
+   the docs column: its tables scroll instead of widening the page */
+.doc-md .md table { display: block; overflow-x: auto; }
 /* section links land below the sticky header, not under it */
 .docs-article [id], section[id] { scroll-margin-top: 4.5rem; }
 

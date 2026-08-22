@@ -1,11 +1,11 @@
 //@ts-check
 /**
  * @file The site's own data plane: every fetch of site-owned data — the
- * package census, the build provenance, the benchmark meta and suite
- * files, and the repository READMEs the docs dialog renders — resolves
- * through one compiled `$contract` document
- * (`../contracts/site.contract.json`) on @jarenjs/contract's LOCAL
- * binding.
+ * package census, the site content the workspaces own, the build
+ * provenance, the benchmark meta and suite files, and the repository
+ * READMEs the docs dialog renders — resolves through one compiled
+ * `$contract` document (`../contracts/site.contract.json`) on
+ * @jarenjs/contract's LOCAL binding.
  *
  * There is no server and no wire: GitHub Pages is static, so the
  * handlers are thin wrappers over the host's fetch capabilities and
@@ -114,6 +114,7 @@ export function createSiteHandlers(env) {
 
   return {
     'site.packages': (_input, ctx) => json(env.fetchSite, 'packages', ctx),
+    'site.content': (_input, ctx) => json(env.fetchSite, 'content', ctx),
     'site.build': (_input, ctx) => json(env.fetchSite, 'build', ctx),
     'bench.meta': (_input, ctx) => json(env.fetchJson, 'meta', ctx),
     'bench.suite': (input, ctx) => json(env.fetchJson, input.suite, ctx),

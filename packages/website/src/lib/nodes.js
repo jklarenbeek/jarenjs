@@ -78,6 +78,14 @@ export const details = (summary, items) => ({ kind: 'details', summary, items })
 export const chart = (title, vnode, note) =>
   ({ kind: 'chart', title: title ?? null, vnode, note: note ?? null });
 
+/**
+ * A rendered Markdown article: `vnode` is the @jarenjs/md component's
+ * projection, spliced in verbatim exactly as a chart's SVG is. The
+ * site's own sections are kind-nodes; a section a PACKAGE owns arrives
+ * as markdown, and this is the one node that carries it.
+ */
+export const article = (vnode) => ({ kind: 'article', vnode });
+
 /** A live search input bound to the given action. */
 export const search = (action, value, placeholder) =>
   ({ kind: 'search', action, value, placeholder });

@@ -24,7 +24,7 @@ import { gamePageViewModel } from '../boundaries/game.js';
 import { dataViewModel } from '../boundaries/data.js';
 import { siteContractNodes } from '../boundaries/site.js';
 import { formatRatio, memo1 } from '../lib/format.js';
-import { callout } from '../lib/nodes.js';
+import { article, callout } from '../lib/nodes.js';
 
 // the nav is grouped into three dropdown menus by what each surface IS:
 // stateless ENGINES you tinker with, stateful STUDIOS you compose in, and
@@ -49,16 +49,29 @@ const NAV_GROUPS = [
 ];
 
 /**
- * Home engine card → the benchmark headline that measures it. Every
- * engine whose suite publishes a headline is mapped: an unmapped card
- * with a measurable suite is how the page kept hand-typed numbers.
+ * Home engine card → the benchmark headline that measures it, for the
+ * cards the SITE still owns. Every engine whose suite publishes a
+ * headline is mapped: an unmapped card with a measurable suite is how
+ * the page kept hand-typed numbers. A package that has taken its card
+ * over states the same mapping in its own site document, and this table
+ * loses the row.
  */
 export const HOME_ENGINE_SUITE = {
   validate: 'validate', path: 'jsonpath', pointer: 'jsonpointer', patch: 'jsonpatch',
   query: 'jsonquery', jslt: 'jslt', josl: 'toml', csv: 'csv', charts: 'charts',
-  markdown: 'markdown', mermaid: 'mermaid', contract: 'contract',
+  markdown: 'markdown', mermaid: 'mermaid',
   view: 'view', flow: 'flow', db: 'orm',
 };
+
+/**
+ * The suite whose headline measures a card: the package's own claim
+ * where the package wrote one, the site's map for the cards it still
+ * owns. One lookup, so a migrated card and a site-owned card cannot end
+ * up measured two different ways.
+ * @param {any} card - A merged engine card.
+ * @returns {string | undefined}
+ */
+const suiteOf = (card) => card.suite ?? HOME_ENGINE_SUITE[card.key];
 
 /** A pass/total score — the shape that earns the word "conformance". */
 const SCORE = /^\d+ \/ \d+$/;
@@ -78,6 +91,29 @@ function perfLine(headline) {
 }
 
 /**
+ * The engine grid: the cards this page still owns, followed by the cards
+ * their packages have taken over — each of those read from the site
+ * document its workspace commits, in census order. A workspace that has
+ * not written one contributes nothing here (its card is the manifest
+ * fallback the collector marks `derived`), so a half-migrated repository
+ * shows every card exactly once.
+ * @param {any} content - The collected site content, or undefined.
+ * @returns {any[]}
+ */
+const engineCards = memo1((content) => {
+  const owned = (content?.packages ?? [])
+    .filter((/** @type {any} */ entry) => entry.engine !== null)
+    .map((/** @type {any} */ entry) => ({
+      key: entry.engine.key,
+      suite: entry.engine.suite,
+      title: entry.card.title,
+      blurb: entry.card.blurb,
+      perf: entry.card.perf ?? '',
+    }));
+  return owned.length === 0 ? HOME_CONTENT.engines : [...HOME_CONTENT.engines, ...owned];
+});
+
+/**
  * The home content with every measurable claim taken from the generated
  * benchmark run rather than from prose: the hero's conformance bullet
  * and each mapped card's performance line. A card whose engine has no
@@ -88,22 +124,25 @@ function perfLine(headline) {
  * @param {any} state
  * @returns {any}
  */
-function homeContent(state) {
-  const headlines = state.bench?.meta?.headlines;
-  if (!Array.isArray(headlines) || headlines.length === 0) return HOME_CONTENT;
+const homeContent = (state) =>
+  composeHome(engineCards(state.site.data.content), state.bench?.meta?.headlines);
+
+const composeHome = memo1((engines, headlines) => {
+  const base = engines === HOME_CONTENT.engines ? HOME_CONTENT : { ...HOME_CONTENT, engines };
+  if (!Array.isArray(headlines) || headlines.length === 0) return base;
   const byKey = new Map(headlines.map((h) => [h.key, h]));
   return {
-    ...HOME_CONTENT,
+    ...base,
     hero: heroWith(HOME_CONTENT.hero, byKey.get('validate')),
-    engines: HOME_CONTENT.engines.map((engine) => {
-      const headline = byKey.get(HOME_ENGINE_SUITE[engine.key]);
+    engines: engines.map((engine) => {
+      const headline = byKey.get(suiteOf(engine));
       if (headline === undefined || !Number.isFinite(headline.ratio)) return engine;
       // formatRatio names the direction, so a sub-parity suite reads
       // "2.3× slower than …" rather than the cryptic "0.4× vs …"
       return { ...engine, perf: perfLine(headline) };
     }),
   };
-}
+});
 
 /**
  * The hero's first bullet is the conformance claim, and it becomes the
@@ -157,7 +196,8 @@ export function viewModel(state) {
     ui.docs = docsPage(state.route.params.s,
       state.site.data.packages, state.site.status.packages,
       state.bench.validate, state.benchStatus.validate,
-      state.site.data.contract, state.site.status.contract);
+      state.site.data.contract, state.site.status.contract,
+      state.site.data.content);
   }
   if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
 
@@ -343,11 +383,41 @@ const ideModel = memo1((name, names, shared) => ({
   names: names.map((n) => ({ name: n })),
 }));
 
-const docsPage = memo1((param, census, status, validateRun, validateStatus, contractInfo, contractStatus) => {
-  const current = param ?? DOCS_SECTIONS[0].id;
-  const section = DOCS_SECTIONS.find((s) => s.id === current) ?? DOCS_SECTIONS[0];
+/**
+ * The docs page's sections, in reading order: the site's own preamble,
+ * then one section per package that has committed a documentation body,
+ * in census order, then the site-owned sections that close the page.
+ *
+ * A package section is markdown — the workspace wrote it beside its
+ * code — so it renders through the site's ONE md component, the same
+ * renderer the README dialog uses, and arrives here as a single article
+ * node. Nothing about a package is authored inside the website package.
+ * @param {any} content - The collected site content, or undefined.
+ * @returns {any[]}
+ */
+export const docsSections = memo1((content) => {
+  const owned = (content?.packages ?? [])
+    .filter((/** @type {any} */ entry) => entry.docs !== null)
+    .map((/** @type {any} */ entry) => ({
+      id: entry.name.replace(/^@jarenjs\//, ''),
+      title: entry.card.title,
+      blocks: [article(mdArticle(md.view(entry.docs)))],
+    }));
+  if (owned.length === 0) return DOCS_SECTIONS;
+  return [
+    ...DOCS_SECTIONS.filter((s) => s.tail !== true),
+    ...owned,
+    ...DOCS_SECTIONS.filter((s) => s.tail === true),
+  ];
+});
+
+const docsPage = memo1((param, census, status, validateRun, validateStatus,
+  contractInfo, contractStatus, content) => {
+  const all = docsSections(content);
+  const current = param ?? all[0].id;
+  const section = all.find((s) => s.id === current) ?? all[0];
   return {
-    sections: DOCS_SECTIONS.map((s) => ({
+    sections: all.map((s) => ({
       id: s.id,
       title: s.title,
       active: s.id === section.id,
@@ -364,7 +434,7 @@ const docsPage = memo1((param, census, status, validateRun, validateStatus, cont
         return b;
       }),
     },
-    ...readmeRail(census, status),
+    ...readmeRail(census, status, content),
   };
 });
 
@@ -393,10 +463,16 @@ function measuredBlock(run, status) {
  * of its own, because a hand-kept copy drifts from the repository it
  * describes — so until the census lands the rail says what it is waiting
  * for, exactly as the benchmarks page does with its data.
+ *
+ * A package that has written its own site document describes itself in
+ * that document's card; one that has not is described by its manifest,
+ * which is where the collector's fallback card comes from. Either way
+ * the rail shows the package's own words, never the website's.
  * @param {any} census - The generated census, or undefined.
  * @param {string | undefined} status
+ * @param {any} content - The collected site content, or undefined.
  */
-function readmeRail(census, status) {
+function readmeRail(census, status, content) {
   if (census === undefined) {
     return {
       packages: [],
@@ -406,10 +482,12 @@ function readmeRail(census, status) {
         : callout('Loading…', 'Fetching the package census.'),
     };
   }
+  const cards = new Map((content?.packages ?? [])
+    .map((/** @type {any} */ entry) => [entry.name, entry.card]));
   return {
     packages: census.packages.map((entry) => ({
       name: entry.name,
-      blurb: entry.description,
+      blurb: cards.get(entry.name)?.blurb ?? entry.description,
       url: readmeUrl(entry.dir),
     })),
   };

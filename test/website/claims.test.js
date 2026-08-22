@@ -27,7 +27,8 @@ import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { SUITES } from '../../packages/website/src/boundaries/bench.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
-import { HOME_ENGINE_SUITE } from '../../packages/website/src/app/viewmodel.js';
+import { HOME_ENGINE_SUITE, docsSections } from '../../packages/website/src/app/viewmodel.js';
+import { buildSiteContent } from '../../scripts/generate-site-data.js';
 import { UI_RULES } from '../../packages/website/src/views/ui.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -170,7 +171,7 @@ describe('the website README counts what the code holds', function () {
     const listed = cell[1].split('/').map((s) => s.replace(/`/g, '').trim()).sort();
     assert.deepStrictEqual(listed, kinds,
       'a kind the site renders is a kind its README lists');
-    assert.strictEqual(kinds.length, 12);
+    assert.strictEqual(kinds.length, 13);
   });
 
   it('counts the benchmark suites it enumerates', function () {
@@ -180,8 +181,11 @@ describe('the website README counts what the code holds', function () {
   });
 
   it('counts the documentation sections it advertises', function () {
-    assert.match(SITE_README, new RegExp(`${spell(DOCS_SECTIONS.length)} documentation sections`, 'i'),
-      `the README claims a section count other than ${DOCS_SECTIONS.length}`);
+    // what a reader sees is the site's own sections PLUS the ones the
+    // packages committed, so the claim is pinned to the merged list
+    const rendered = docsSections(buildSiteContent()).length;
+    assert.match(SITE_README, new RegExp(`${spell(rendered)} documentation sections`, 'i'),
+      `the README claims a section count other than ${rendered}`);
   });
 });
 

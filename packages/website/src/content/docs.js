@@ -1,9 +1,16 @@
 //@ts-check
 /**
- * The documentation — a content document. Each section's `blocks` are
- * kind-tagged render nodes (lib/nodes.js vocabulary) rendered by the
- * generic 'ui' rules; editing the docs means editing JSON, and an LLM
- * constrained to the vnode/kind schemas could write these pages.
+ * The documentation the SITE owns — a content document. Each section's
+ * `blocks` are kind-tagged render nodes (lib/nodes.js vocabulary)
+ * rendered by the generic 'ui' rules; editing the docs means editing
+ * JSON, and an LLM constrained to the vnode/kind schemas could write
+ * these pages.
+ *
+ * A package's own section is not here: a workspace commits it as
+ * markdown beside its code and the build collects it, so the page a
+ * reader sees is these sections plus the collected ones. `tail: true`
+ * marks a section that closes the page — the collected sections go
+ * before it.
  */
 
 import { p, code, callout } from '../lib/nodes.js';
@@ -271,23 +278,6 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
-    id: 'studio', title: 'The Studio',
-    blocks: [
-      p('The Studio (#/project) hosts a user- or AI-authored @jarenjs/app document — initial state, a JSLT view stylesheet and named actions as one JSON value — as a live application next to the site’s own. The document is one `app` file inside a multi-file project IDE, beside the query, JSLT, schema and data files it can sit with. This is the honest version of “one prompt → website” for this suite: the site does not scaffold a foreign repo, it lets the model author the suite’s own app format, gated by the suite’s own meta-schema, rendered by the suite’s own view engine. The AI writes JSON; Jaren validates it; the app runtime runs it. No eval, no server, CSP-safe.'),
-      p('Why this shape works: an app document IS a website — the jarenjs site itself is one — so the generative tier needs no new runtime, only a safe host for a second, untrusted document. The threat model is the meta-schema: jaren-app.schema.json (composing the published query and JSLT grammars) is compiled by @jarenjs/validate and gates every boot. The nested app is granted no effects and no subs, so a document is inert JSON — the worst a hostile or hallucinated document can do is fail validation or render junk inside its error-contained mount. Boot is atomic: a document that fails mid-boot leaves no half-mounted DOM.'),
-      p('Iteration is patch-based, not resend-based: a weak local model cannot re-emit a 200-line document per turn, but it can emit an RFC 6902 patch — and the suite’s own patch engine applies it, with the patched result re-validated before it swaps in (an invalid result is rejected atomically; the current document stays live). Dogfooding is the feature: the assistant’s studio tools — jaren_studio_write, jaren_studio_patch, jaren_studio_read and jaren_get_templates for the app document, plus jaren_project_files, jaren_project_write and jaren_project_run for the project as a file tree — are the same schema-guarded toolbox as everything else. The project tools matter for honesty as much as capability: an assistant that could only read the app document would answer questions about “my project” from one file and confidently miss the rest.'),
-      code('A complete studio document', '{ "$app": "0.1",\n  "state": { "count": 0 },\n  "view": { "$jslt": "0.1", "rules": [\n    { "match": "$", "body": ["main", {},\n      ["h2", {}, "Count: ", "$.count"],\n      ["button", { "on": { "click": "inc" } }, "+"]] }\n  ] },\n  "actions": {\n    "inc": { "patch": [{ "op": "replace", "path": "/count",\n                         "value": { "$add": ["$.count", 1] } }] }\n  } }'),
-      p('Documents may name four render capabilities as widgets — form ({ schema, data }: the standard forms stylesheet with live JSON Schema errors), chart ({ config }: an @jarenjs/charts definition), markdown and mermaid ({ source }) — each a pure props-to-vnode projection through the shipped compilers. Keep what you build: studio documents save into the experiment store, share as links (with an honest size limit), and download as JSON. Granting effects or subs to studio documents is a deliberate non-goal for now — that is a later order with its own threat model.'),
-      {
-        kind: 'callout',
-        title: 'Try it',
-        text: 'Load a seed template — a validated form, a charts dashboard, a routed mini-site — and edit the JSON, or ask the assistant to build on one via template + patch.',
-        href: '#/project',
-        link: 'Open the Studio',
-      },
-    ],
-  },
-  {
     id: 'flow', title: 'Flow — executable workflows',
     blocks: [
       p('@jarenjs/flow makes the suite’s machines executable, in two document formats. A jaren-fsm is a finite state machine as one JSON value — declared states, an initial state and a document-ordered transition table whose guards are Jaren JSON Query documents — compiled once into a pure step function; a jaren-dag is an acyclic dataflow whose nodes are the suite’s own engines (a query filters, a JSLT stylesheet projects, a registered task awaits) wired by edges that carry data. Both are schema-published for constrained decoding, both compile fail-closed with coded, docPath-carrying errors, and neither uses eval.'),
@@ -326,35 +316,27 @@ export const DOCS_SECTIONS = [
     ],
   },
   {
-    id: 'contract', title: 'Contract — operations over any wire',
+    // The contract layer's own documentation is committed with the
+    // package (its workspace carries the section); what stays here is
+    // what only the SITE can answer — the frozen capability tables of
+    // the three bindings, and the compiled document this page is
+    // reading through while you look at it.
+    id: 'site-contract', title: 'This site runs on a contract', tail: true,
     blocks: [
-      p('The layer between two Jaren ends. A $contract document — the sibling of $model, $fsm and jaren-app — declares the operations they may exchange: JSON in, JSON out, each with a kind (read, command or subscribe), one input schema, an output schema, declared errors, a behavior policy and a REST-faithful HTTP binding. compileContract compiles it once into per-operation validators, transport normalizers (path and query strings decoded through the input schema itself) and a path matcher whose static segments beat variables regardless of registration order. A bad document is refused at compile with a stable JC code and the JSON Pointer of the member at fault — never at request time.'),
-      code('The document', '{ "$contract": "0.1", "id": "shop",\n  "operations": {\n    "catalog.load": {\n      "kind": "read",\n      "input":  { "type": "object", "properties": { "since": { "type": "string", "format": "date-time" } } },\n      "output": { "type": "array", "items": { "$ref": "#/$defs/Product" } },\n      "http":   { "method": "GET", "path": "/api/catalog" }\n    }\n  },\n  "$defs": { "Product": { "type": "object", "required": ["id", "name"],\n             "properties": { "id": { "type": "integer" }, "name": { "type": "string" } } } } }'),
-      p('Serving it is one call per binding: serveHttp turns the compiled contract plus a handler table into a total dispatch pipeline — plain request in, plain response out, every hostile input settled into a coded response — with fetch (Request→Response) and node adapters, body limits, prototype-safe parameter assembly, idempotency through a ledger interface, and the response validated against the output schema before it leaves. The same handler table serves in-process (local) and over MessagePort, Worker or BroadcastChannel (port, with collision-free client-scoped request ids — this site’s own cross-tab data studio runs on it). A subscribe operation streams a @jarenjs/db live() subscription — a snapshot, then { patch, seq } emissions — as Server-Sent Events over http and push frames over port, resumable by seq.'),
-      code('Serve, call, bind', "import { compileContract } from '@jarenjs/contract';\nimport { serveHttp } from '@jarenjs/contract/http';\nimport { toNodeHandler } from '@jarenjs/contract/node';\nimport { openHttpClient } from '@jarenjs/contract/client';\nimport { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';\n\nconst contract = compileContract(doc);\nhttp.createServer(toNodeHandler(serveHttp(contract, handlers))).listen(8080);\n\nconst client = openHttpClient(contract, { baseUrl: 'http://localhost:8080' });\nawait client.invoke('catalog.load', { since: '2026-01-01T00:00:00Z' });\n// { ok: true, value: [...], meta: { op, attempt, trace, revision, etag, notModified } }\n\n// or drive it from an app document: generated task slots + ONE effect\nconst { slice, actions, schema } = contractAppBinding(contract);"),
-      p('The client resolves a JSON outcome for everything a server or a network can do — a declared failure, a transport error, a peer that violated the contract, a local cancellation — and never rejects for any of them. Three identities stay apart by construction: the attempt id is the caller’s, the trace id is the server’s, and the idempotency key is generated client-side and travels only as its header. The app binding turns each operation into a generated task slot with start/done/reset actions and one registered effect — no route strings, no hand-written wrappers, and no import between the packages: the documents cross as JSON.'),
+      p('A binding is a promise about what a wire can carry, and each one publishes a frozen capability table rather than degrading in silence. These are those tables, read off the three bindings the packages ship — and below them, the $contract document this website itself runs on.'),
       { kind: 'table', title: 'What each binding carries', note: 'from the frozen capabilities table each binding publishes — a binding that cannot carry a feature says so, never degrades silently', head: ['capability', 'http', 'local', 'port'], rows: [
         { kind: 'row', cells: ['status codes', 'yes', 'no (status: null)', 'no (status: null)'] },
         { kind: 'row', cells: ['headers / etag', 'yes', 'no', 'no'] },
         { kind: 'row', cells: ['idempotency', 'with a ledger', 'no — stated', 'no — stated'] },
         { kind: 'row', cells: ['stream (subscribe)', 'SSE, resumable', 'no', 'push frames'] },
       ] },
-      p('Everything a consumer wants beside the runtime is a projection of the same compiled document: a browser-safe public subset (itself a valid $contract), OpenAPI 3.1 (validated against the official meta-schema), TypeScript declarations with a typed operation map, Markdown reference docs and AI tool definitions — with a jaren-contract CLI whose --check fails CI the moment an artifact drifts. The contract knows its own identity: revision() is the SHA-256 of the canonical public projection, served at /.well-known/jaren-contract, and diffContracts classifies what changed between two versions as breaking, additive, neutral or honestly unknown, by a published rule table.'),
       // the docs page renders the site's OWN compiled contract here —
       // describe(), its revision and its projections, live
       { kind: 'site-contract' },
-      p('What it is not, said plainly: not a server framework (bring your own http server or any framework via the adapters), no authentication or authorization, no transport encryption, no replay protection beyond idempotency keys, and bytes are not JSON — a non-JSON media operation is routed and matched but its body crosses opaque. The measured cost per request is published beside Fastify’s on the Benchmarks page, losses included.'),
-      {
-        kind: 'callout',
-        title: 'Try it',
-        text: 'Play’s Contract engine compiles a $contract document as you type — describe(), the OpenAPI 3.1 projection, the TypeScript declarations and an in-process dispatch against echo handlers, one tab each. The Benchmarks page has the match and dispatch numbers beside find-my-way, hono and Fastify.',
-        href: '#/play?engine=contract',
-        link: 'Open Play',
-      },
     ],
   },
   {
-    id: 'further-reading', title: 'Further reading',
+    id: 'further-reading', title: 'Further reading', tail: true,
     blocks: [
       p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, FLOW-FORMAT.md, ERROR-MESSAGES.md and the JOSL FORMAT.md. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),
       callout('The code is the reference', 'Every public function carries JSDoc. When in doubt, open the source — the packages are written to be read.'),
