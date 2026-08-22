@@ -8,7 +8,7 @@
    cached forever, and a bad navigation response must never replace the
    shell. */
 
-const CACHE = 'jaren-website-v22';
+const CACHE = 'jaren-website-v23';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 
 /* Precached at install AND served by the fetch handler's cache-first
