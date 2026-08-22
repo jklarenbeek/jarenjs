@@ -21,10 +21,11 @@ export const HOME_RULES = [
         ],
       ],
       ['section', { class: 'container section' },
-        // counted from the content document rather than written down, so
-        // the heading cannot drift the next time an engine is added
-        ['h2', {}, { $concat: ['One stack, ', { $count: '$.engines[*]' }, ' engines'] }],
-        ['div', { class: 'engine-grid' }, [{ $apply: '$.engines[*]' }]],
+        // the grid arrives with the collected site content: `grid` exists
+        // only once it has, `enginesNote` only while it has not, so the
+        // page never renders a heading over an empty grid
+        { $apply: ['$.enginesNote', 'ui'] },
+        { $apply: '$.grid' },
       ],
       ['section', { class: 'container section' },
         ['div', { class: 'callout wide' },
@@ -53,7 +54,16 @@ export const HOME_RULES = [
     body: ['li', {}, '$'],
   },
   {
-    match: '$.ui.home.engines[*]', mode: 'home',
+    match: '$.ui.home.grid', mode: 'home',
+    // counted from the collected document rather than written down, so
+    // the heading cannot drift the next time a package publishes an engine
+    body: ['div', {},
+      ['h2', {}, { $concat: ['One stack, ', { $count: '$.engines[*]' }, ' engines'] }],
+      ['div', { class: 'engine-grid' }, [{ $apply: '$.engines[*]' }]],
+    ],
+  },
+  {
+    match: '$.ui.home.grid.engines[*]', mode: 'home',
     body: ['article', { class: 'card engine-card' },
       ['h3', {}, '$.title'],
       ['p', {}, '$.blurb'],

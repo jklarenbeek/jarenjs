@@ -53,7 +53,9 @@ const CLAIMS = [
   { file: 'components/md/README.md', label: 'the package README' },
   { file: 'components/md/src/index.js', label: "the package's own file comment" },
   { file: 'README.md', label: 'the root README' },
-  { file: 'packages/website/src/content/docs.js', label: 'the website docs page' },
+  // the website's Markdown section is committed with the package now,
+  // and the site collects it — so the claim is gated where it is written
+  { file: 'components/md/site.md', label: "the package's site document" },
 ];
 
 describe('the markdown feature list matches the parser', function () {

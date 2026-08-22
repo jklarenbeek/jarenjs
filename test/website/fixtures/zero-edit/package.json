@@ -1,0 +1,8 @@
+{
+  "name": "zero-edit-fixture",
+  "private": true,
+  "description": "A fabricated repository whose only public workspace was never known to the website. The collector walks THIS root in test/website/site-data.test.js, to prove that a new package reaches the site with no website edit at all.",
+  "workspaces": [
+    "./packages/widget"
+  ]
+}

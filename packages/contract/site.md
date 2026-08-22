@@ -12,9 +12,9 @@ card:
   perf: >-
     measured against a hand-composed router doing the same work — the dispatch
     loss published beside the wins
-engine:
-  key: contract
-  suite: contract
+engines:
+  - key: contract
+    suite: contract
 ---
 
 The layer between two Jaren ends. A `$contract` document — the sibling of

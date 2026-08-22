@@ -275,13 +275,15 @@ test('the playground fits the viewport, light and dark, mobile and desktop', asy
   }
 });
 
-// The docs callouts link straight at an engine. They used to point at the
-// retired #/playground?engine=…, whose redirect dropped the parameter, so
-// a link promising Markdown delivered JSONPath. Clicking one is the only
-// way to prove the whole chain — href, redirect, param, seeded run.
-test('a docs callout lands on the engine it promises', async ({ page }) => {
-  await page.goto('/#/docs?s=markdown');
-  const link = page.locator('.callout a', { hasText: 'Open Play' }).first();
+// The docs invitations link straight at an engine. They used to point at
+// the retired #/playground?engine=…, whose redirect dropped the parameter,
+// so a link promising Markdown delivered JSONPath. Clicking one is the only
+// way to prove the whole chain — href, redirect, param, seeded run. The
+// Markdown section is @jarenjs/md's own document now (#/docs?s=md), so the
+// link is one the PACKAGE wrote, rendered by the md component.
+test('a docs invitation lands on the engine it promises', async ({ page }) => {
+  await page.goto('/#/docs?s=md');
+  const link = page.locator('.doc-md a[href="#/play?engine=markdown"]').first();
   await expect(link).toHaveAttribute('href', '#/play?engine=markdown');
   await link.click();
   await expect(page).toHaveURL(/#\/play\?engine=markdown/);

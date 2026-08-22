@@ -43,24 +43,27 @@
       "additionalProperties": false
     },
     "SiteEngine": {
-      "description": "Where a package appears as an engine: the id the engine grid and the playground know it by, and the benchmark suite whose headline measures it. A package that is not an engine has none.",
+      "description": "One engine card a package contributes to the engine grid: the id the grid and the playground know it by, the benchmark suite whose headline measures it, and the card to render. The card is the engine's own where its document wrote one and the package's card otherwise, resolved by the collector so a reader never has to fall anything back.",
       "type": "object",
-      "required": ["key", "suite"],
+      "required": ["key", "suite", "card"],
       "properties": {
         "key": { "type": "string", "minLength": 1 },
-        "suite": { "type": ["string", "null"] }
+        "suite": { "type": ["string", "null"] },
+        "card": { "$ref": "#/$defs/SiteCard" }
       },
       "additionalProperties": false
     },
     "ContentEntry": {
       "description": "One published workspace's site presence. `derived` says where the card came from: false for a workspace that committed its own site document, true for one still described by its manifest alone.",
       "type": "object",
-      "required": ["name", "card", "engine", "docs", "derived"],
+      "required": ["name", "card", "engines", "docs", "derived"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "card": { "$ref": "#/$defs/SiteCard" },
-        "engine": {
-          "anyOf": [{ "$ref": "#/$defs/SiteEngine" }, { "type": "null" }]
+        "engines": {
+          "description": "The engine cards this workspace contributes, in the order it wants them. Empty for a package that is not an engine — several packages publish more than one, which is why this is a list and not a member.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/SiteEngine" }
         },
         "docs": true,
         "derived": { "type": "boolean" }

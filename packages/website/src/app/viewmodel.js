@@ -48,31 +48,6 @@ const NAV_GROUPS = [
   ] },
 ];
 
-/**
- * Home engine card → the benchmark headline that measures it, for the
- * cards the SITE still owns. Every engine whose suite publishes a
- * headline is mapped: an unmapped card with a measurable suite is how
- * the page kept hand-typed numbers. A package that has taken its card
- * over states the same mapping in its own site document, and this table
- * loses the row.
- */
-export const HOME_ENGINE_SUITE = {
-  validate: 'validate', path: 'jsonpath', pointer: 'jsonpointer', patch: 'jsonpatch',
-  query: 'jsonquery', jslt: 'jslt', josl: 'toml', csv: 'csv', charts: 'charts',
-  markdown: 'markdown', mermaid: 'mermaid',
-  view: 'view', flow: 'flow', db: 'orm',
-};
-
-/**
- * The suite whose headline measures a card: the package's own claim
- * where the package wrote one, the site's map for the cards it still
- * owns. One lookup, so a migrated card and a site-owned card cannot end
- * up measured two different ways.
- * @param {any} card - A merged engine card.
- * @returns {string | undefined}
- */
-const suiteOf = (card) => card.suite ?? HOME_ENGINE_SUITE[card.key];
-
 /** A pass/total score — the shape that earns the word "conformance". */
 const SCORE = /^\d+ \/ \d+$/;
 
@@ -91,58 +66,67 @@ function perfLine(headline) {
 }
 
 /**
- * The engine grid: the cards this page still owns, followed by the cards
- * their packages have taken over — each of those read from the site
- * document its workspace commits, in census order. A workspace that has
- * not written one contributes nothing here (its card is the manifest
- * fallback the collector marks `derived`), so a half-migrated repository
- * shows every card exactly once.
+ * The engine grid, entirely from the site documents the workspaces
+ * commit: every card is the words a package wrote about its own engine,
+ * in census order, and a package that publishes several engines (the
+ * addressing engines of @jarenjs/json, the JOSL and CSV readers)
+ * contributes one card each. The website authors none of them — which
+ * is why a new engine reaches this page in its own package's commit.
  * @param {any} content - The collected site content, or undefined.
  * @returns {any[]}
  */
-const engineCards = memo1((content) => {
-  const owned = (content?.packages ?? [])
-    .filter((/** @type {any} */ entry) => entry.engine !== null)
-    .map((/** @type {any} */ entry) => ({
-      key: entry.engine.key,
-      suite: entry.engine.suite,
-      title: entry.card.title,
-      blurb: entry.card.blurb,
-      perf: entry.card.perf ?? '',
-    }));
-  return owned.length === 0 ? HOME_CONTENT.engines : [...HOME_CONTENT.engines, ...owned];
-});
+const engineCards = memo1((content) => (content?.packages ?? [])
+  .flatMap((/** @type {any} */ entry) => entry.engines
+    .map((/** @type {any} */ engine) => ({
+      key: engine.key,
+      suite: engine.suite,
+      title: engine.card.title,
+      blurb: engine.card.blurb,
+      perf: engine.card.perf ?? '',
+    }))));
 
 /**
  * The home content with every measurable claim taken from the generated
  * benchmark run rather than from prose: the hero's conformance bullet
- * and each mapped card's performance line. A card whose engine has no
- * headline keeps its authored line — and those carry no figures, so
- * nothing on this page can be a number that stopped being true. Before
- * `meta.json` arrives, or if it fails to, the authored document renders
- * as written.
+ * and each card's performance line, from the suite the package's own
+ * document names. A card whose engine has no headline keeps its
+ * authored line — and the grammar refuses a figure in one, so nothing
+ * on this page can be a number that stopped being true. Before
+ * `meta.json` arrives, or if it fails to, the authored cards render as
+ * their packages wrote them.
  * @param {any} state
  * @returns {any}
  */
-const homeContent = (state) =>
-  composeHome(engineCards(state.site.data.content), state.bench?.meta?.headlines);
+const homeContent = (state) => composeHome(engineCards(state.site.data.content),
+  state.bench?.meta?.headlines, state.site.status.content);
 
-const composeHome = memo1((engines, headlines) => {
-  const base = engines === HOME_CONTENT.engines ? HOME_CONTENT : { ...HOME_CONTENT, engines };
-  if (!Array.isArray(headlines) || headlines.length === 0) return base;
-  const byKey = new Map(headlines.map((h) => [h.key, h]));
+const composeHome = memo1((engines, headlines, status) => {
+  // the grid is fetched, so the page renders before it exists: say what
+  // it is waiting for, exactly as the docs rail does with its census —
+  // an empty grid under "One stack, 0 engines" would be a lie told for
+  // one frame
+  if (engines.length === 0) return { ...HOME_CONTENT, enginesNote: gridNote(status) };
+  const byKey = new Map(Array.isArray(headlines) ? headlines.map((h) => [h.key, h]) : []);
   return {
-    ...base,
-    hero: heroWith(HOME_CONTENT.hero, byKey.get('validate')),
-    engines: engines.map((engine) => {
-      const headline = byKey.get(suiteOf(engine));
-      if (headline === undefined || !Number.isFinite(headline.ratio)) return engine;
-      // formatRatio names the direction, so a sub-parity suite reads
-      // "2.3× slower than …" rather than the cryptic "0.4× vs …"
-      return { ...engine, perf: perfLine(headline) };
-    }),
+    ...HOME_CONTENT,
+    hero: byKey.size === 0 ? HOME_CONTENT.hero : heroWith(HOME_CONTENT.hero, byKey.get('validate')),
+    grid: {
+      engines: engines.map((engine) => {
+        const headline = byKey.get(engine.suite);
+        if (headline === undefined || !Number.isFinite(headline.ratio)) return engine;
+        // formatRatio names the direction, so a sub-parity suite reads
+        // "2.3× slower than …" rather than the cryptic "0.4× vs …"
+        return { ...engine, perf: perfLine(headline) };
+      }),
+    },
   };
 });
+
+/** What the grid says while it has no cards to show — or none to come. */
+const gridNote = (status) => (status === 'error'
+  ? callout('Engine list unavailable',
+    'The site content could not be loaded. The build collects it from the site document each workspace commits.')
+  : callout('Loading…', 'Fetching the engines, as each package describes its own.'));
 
 /**
  * The hero's first bullet is the conformance claim, and it becomes the

@@ -72,10 +72,14 @@ const SCHEMA_PATH = 'packages/website/schemas/site-document.schema.json';
  * @property {CensusEntry[]} packages - Public workspaces, in manifest order.
  */
 
-/** The root manifest's workspace directories, repo-relative. */
-export function workspaceDirs() {
-  const root = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-  return root.workspaces.map((/** @type {string} */ entry) => entry.replace(/^\.\//, ''));
+/**
+ * The root manifest's workspace directories, repo-relative.
+ * @param {string} [root] - The repository to read, for a test that walks a
+ *   fabricated one; the repository this file lives in otherwise.
+ */
+export function workspaceDirs(root = ROOT) {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  return manifest.workspaces.map((/** @type {string} */ entry) => entry.replace(/^\.\//, ''));
 }
 
 /**
@@ -123,13 +127,14 @@ export function serializeSiteData(census) {
  * @typedef {Object} SiteEngine
  * @property {string} key - The id the engine grid and the playground know.
  * @property {string | null} suite - The benchmark suite whose headline measures it.
+ * @property {SiteCard} card - The engine's own card, the package's where it wrote none.
  */
 
 /**
  * @typedef {Object} ContentEntry
  * @property {string} name - The published package name.
  * @property {SiteCard} card
- * @property {SiteEngine | null} engine
+ * @property {SiteEngine[]} engines - The grid cards this package contributes; empty for a package that is not an engine.
  * @property {any} docs - The plain-JSON MdDocument, or null for a card-only document.
  * @property {boolean} derived - The card came from the manifest, not from a site.md.
  */
@@ -226,12 +231,22 @@ export function readSiteDocument(dir, source, packageName) {
     throw refuse(dir, `names package '${front.package}', but the manifest beside it is`
       + ` '${packageName}'`);
   }
+  const card = { title: front.card.title, blurb: front.card.blurb, perf: front.card.perf ?? null };
   return {
     name: packageName,
-    card: { title: front.card.title, blurb: front.card.blurb, perf: front.card.perf ?? null },
-    engine: front.engine === undefined
-      ? null
-      : { key: front.engine.key, suite: front.engine.suite ?? null },
+    card,
+    // an engine entry states only what differs from the package's own
+    // card, so a single-engine workspace writes `key` (and its suite)
+    // and nothing else; the site is handed complete cards either way
+    engines: (front.engines ?? []).map((/** @type {any} */ engine) => ({
+      key: engine.key,
+      suite: engine.suite ?? null,
+      card: {
+        title: engine.title ?? card.title,
+        blurb: engine.blurb ?? card.blurb,
+        perf: engine.perf ?? card.perf ?? null,
+      },
+    })),
     // a document may be frontmatter only: a package that wants a card
     // and no documentation section says so by writing no body
     docs: doc.ast.length === 0 ? null : doc,
@@ -244,16 +259,17 @@ export function readSiteDocument(dir, source, packageName) {
  * one, its manifest otherwise.
  * @param {string} dir - Repo-relative workspace directory.
  * @param {any} manifest - The manifest beside the document.
+ * @param {string} [root] - The repository the directory is relative to.
  * @returns {ContentEntry}
  * @throws {Error} naming the path, for any document that cannot be trusted.
  */
-export function collectSiteDocument(dir, manifest) {
-  const path = join(ROOT, dir, SITE_DOC);
+export function collectSiteDocument(dir, manifest, root = ROOT) {
+  const path = join(root, dir, SITE_DOC);
   if (!existsSync(path)) {
     return {
       name: manifest.name,
       card: derivedCard(manifest),
-      engine: null,
+      engines: [],
       docs: null,
       derived: true,
     };
@@ -264,16 +280,23 @@ export function collectSiteDocument(dir, manifest) {
 /**
  * Build the site-content document: one entry per public workspace, in
  * manifest order, exactly as the census orders them.
+ *
+ * Nothing here knows the name of a single package: a workspace appears
+ * on the site because the root manifest lists it and its own document
+ * describes it, which is why adding one needs no website edit at all —
+ * the property the website test suite proves by running this over a
+ * fabricated repository.
+ * @param {string} [root] - The repository to collect, for that test.
  * @returns {SiteContent}
  */
-export function buildSiteContent() {
+export function buildSiteContent(root = ROOT) {
   const { commit, committed } = headCommit();
   /** @type {ContentEntry[]} */
   const packages = [];
-  for (const dir of workspaceDirs()) {
-    const manifest = JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8'));
+  for (const dir of workspaceDirs(root)) {
+    const manifest = JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'));
     if (manifest.private === true) continue;
-    packages.push(collectSiteDocument(dir, manifest));
+    packages.push(collectSiteDocument(dir, manifest, root));
   }
   return { generated: committed, commit, packages };
 }

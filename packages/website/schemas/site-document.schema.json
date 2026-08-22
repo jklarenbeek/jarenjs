@@ -19,7 +19,7 @@
         "title": { "type": "string", "minLength": 1 },
         "blurb": { "type": "string", "minLength": 1 },
         "perf": {
-          "description": "The authored voice of the card's measured line — what the numbers are ABOUT, never a number. Every figure the site publishes is derived from a committed measurement, so a digit here would be a claim nothing can keep true; the pattern refuses one. Where a benchmark headline exists (engine.suite), it replaces this line entirely.",
+          "description": "The authored voice of the card's measured line — what the numbers are ABOUT, never a number. Every figure the site publishes is derived from a committed measurement, so a digit here would be a claim nothing can keep true; the pattern refuses one. Where a benchmark headline exists (an engine entry naming a suite), it replaces this line entirely.",
           "type": "string",
           "minLength": 1,
           "pattern": "^[^0-9]*$"
@@ -27,19 +27,43 @@
       },
       "additionalProperties": false
     },
-    "engine": {
-      "description": "Where the package appears as an engine: the id the site's engine grid and the playground know it by, and the benchmark suite whose headline measures it.",
-      "type": "object",
-      "required": ["key"],
-      "properties": {
-        "key": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "suite": {
-          "description": "A published benchmark suite key. The card's measured line is that suite's headline, derived at render time — the card never states the figure itself.",
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$"
-        }
-      },
-      "additionalProperties": false
+    "engines": {
+      "description": "The engine cards this package contributes to the site's engine grid, in the order the package wants them shown. Most packages carry one; a package that publishes several engines (the addressing engines of @jarenjs/json, the JOSL and CSV readers) carries one entry each, because the grid is a list of ENGINES and a card per package would hide them. A package that is not an engine — a component, a locale pack, a meta-schema bundle — writes no engines member and contributes no card.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["key"],
+        "properties": {
+          "key": {
+            "description": "The id the site's engine grid and the playground know this engine by.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "suite": {
+            "description": "A published benchmark suite key. The card's measured line is that suite's headline, derived at render time — the card never states the figure itself.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "title": {
+            "description": "The engine's own name on the grid. Omitted, the package's card title stands — which is what a single-engine package wants.",
+            "type": "string",
+            "minLength": 1
+          },
+          "blurb": {
+            "description": "The engine's own words. Omitted, the package's card blurb stands.",
+            "type": "string",
+            "minLength": 1
+          },
+          "perf": {
+            "description": "The engine's authored perf voice, under the same no-digit rule as the card's. Omitted, the package's card perf stands.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^0-9]*$"
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

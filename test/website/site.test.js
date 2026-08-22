@@ -7,7 +7,6 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { viewModel } from '../../packages/website/src/app/viewmodel.js';
-import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { buildSiteData, buildSiteContent } from '../../scripts/generate-site-data.js';
@@ -23,13 +22,13 @@ const SITE_DATA = {
   packages: buildSiteData(), content: buildSiteContent(), build: buildInfo(),
 };
 
-/** The engine cards the site owns, plus the ones their packages do. */
-const ENGINE_CARDS = HOME_CONTENT.engines.length
-  + SITE_DATA.content.packages.filter((entry) => entry.engine !== null).length;
+/** The engine cards, every one of them a package's own. */
+const ENGINE_CARDS = SITE_DATA.content.packages
+  .reduce((n, entry) => n + entry.engines.length, 0);
 
-/** One collected card, by the engine key its workspace claims. */
+/** One collected engine card, by the key its workspace claims. */
 const collected = (key) => SITE_DATA.content.packages
-  .find((entry) => entry.engine?.key === key);
+  .flatMap((entry) => entry.engines).find((engine) => engine.key === key);
 
 /** The per-row provenance every headline in `meta.json` carries. */
 const MEASURED_BY = {
@@ -117,10 +116,11 @@ function find(node, pred) {
 describe('website — the site as one app document', function () {
   it('renders the home page through the shell', async function () {
     const { container } = mountSite();
-    // the cards a package owns arrive with the collected site content,
-    // one turn after the route — before it, the site's own cards render
-    assert.strictEqual((serialize(container).match(/class="card engine-card"/g) ?? []).length,
-      HOME_CONTENT.engines.length);
+    // every card is a package's own, so the grid arrives with the
+    // collected content one turn after the route: until then the page
+    // says what it is waiting for rather than heading an empty grid
+    assert.strictEqual((serialize(container).match(/class="card engine-card"/g) ?? []).length, 0);
+    assert.match(serialize(container), /Fetching the engines/);
     await tick();
     const html = serialize(container);
     assert.match(html, /JSON all the way down/);
@@ -740,7 +740,7 @@ describe('website — every published figure is the measured one', function () {
     { key: 'flow', label: 'Flow', ratio: 5.6303, rival: 'XState v5', conformance: 'serializable', note: 'machine step', ...MEASURED_BY },
   ];
   const measured = () => ({ ...FIXTURES, meta: { ...FIXTURES.meta, headlines: HEADLINES } });
-  const authored = (key) => HOME_CONTENT.engines.find((e) => e.key === key).perf;
+  const authored = (key) => collected(key).card.perf;
 
   it('the db, view and flow cards read their headline instead of a typed number', async function () {
     const { container } = mountSite({ fixtures: measured() });
@@ -845,14 +845,80 @@ describe('website — the packages own their pages', function () {
     }
   });
 
+  it('kept the prose and the code of the sections it moved', async function () {
+    // The parity check for the migration, sampled: three sections that
+    // used to be authored in `content/docs.js` as kind-nodes, and are
+    // now markdown in their own workspaces. Re-authoring changes the
+    // node shapes; what a reader gets must survive it — sentence and
+    // code alike, which is why each pair below is one of each.
+    const SAMPLED = [
+      ['json', 'The complete RFC 9535 grammar as a compiler',
+        "import { compileJSONPath } from '@jarenjs/json';"],
+      ['md', 'A vnode has no slot for unescaped author markup',
+        "toHtml(doc, { html: 'raw' });      // trusted input only"],
+      ['db', 'a graph loads with its children in exactly ONE statement',
+        'const report = await store.saveChanges();'],
+    ];
+    // what a READER gets: tags off (the highlighter tokenizes code into
+    // spans), entities back, soft line breaks flattened. The stub host
+    // writes text unescaped, so a sample carrying a `<` would lose the
+    // rest of its line to the tag strip — these three do not.
+    const readable = (html) => html.replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ');
+    const flat = (text) => text.replace(/\s+/g, ' ');
+    for (const [id, prose, code] of SAMPLED) {
+      const { container, go } = mountSite();
+      go(`#/docs?s=${id}`);
+      await tick();
+      const text = readable(serialize(container));
+      assert.ok(text.includes(flat(prose)), `${id}: the sentence did not survive the move`);
+      assert.ok(text.includes(flat(code)), `${id}: the code block did not survive the move`);
+    }
+  });
+
   it('keeps no package-owned section body in the website\'s own content document', function () {
     const docs = source('content/docs.js');
-    assert.ok(!docs.includes('The layer between two Jaren ends'),
-      'the contract section body lives in packages/contract/site.md now');
-    assert.ok(!docs.includes('id: \'contract\''),
-      'and the website declares no section for it');
+    // three sections that moved, by the words a reader would search for
+    for (const [marker, where] of [
+      ['The layer between two Jaren ends', 'packages/contract/site.md'],
+      ['XSLT\'s apply-templates idea', 'packages/json/site.md'],
+      ['A model document declares collections', 'packages/db/site.md'],
+    ]) {
+      assert.ok(!docs.includes(marker), `that section body lives in ${where} now`);
+    }
+    for (const id of ['contract', 'jslt', 'db', 'markdown']) {
+      assert.ok(!docs.includes(`id: '${id}'`), `and the website declares no section for ${id}`);
+    }
     assert.ok(docs.includes('id: \'site-contract\''),
       'what stays is what only the site can answer: the binding tables and its own document');
+    assert.ok(!source('content/home.js').includes('blurb:'),
+      'and no engine card either — the packages write those');
+  });
+
+  it('renders a workspace it has never heard of, with no edit of its own', async function () {
+    // the inversion, end to end: the collector walks a fabricated
+    // repository (test/website/fixtures/zero-edit) and the site renders
+    // what it found — a card on the grid and a section on the docs page
+    // — through the same code paths, knowing nothing about it
+    const content = buildSiteContent(
+      new URL('../../test/website/fixtures/zero-edit/', import.meta.url).pathname);
+    const siteData = { ...SITE_DATA, content };
+    const home = mountSite({ siteData });
+    await tick();
+    const grid = serialize(home.container);
+    assert.match(grid, /One stack, 1 engines/, 'the heading counts what was collected');
+    assert.match(grid, /<h3>Widget<\/h3>/);
+    assert.match(grid, /describes itself to it in this document/);
+
+    const docs = mountSite({ siteData });
+    docs.go('#/docs?s=widget');
+    await tick();
+    const html = serialize(docs.container);
+    assert.match(html, /<div class="doc-md"><article class="md">/,
+      'its section renders through the one md component, like every other');
+    assert.match(html, /wrote this section beside its own code/);
   });
 
   it('has exactly one Markdown component — every provenance renders through it', function () {
@@ -872,11 +938,15 @@ describe('website — the packages own their pages', function () {
     for (const id of ['contract', 'studio', 'play']) {
       assert.ok(ids.includes(id), `${id} has its own deep link`);
     }
-    // the site's own preamble first, the packages after it, and the
-    // sections that close the page last
-    assert.strictEqual(ids[0], 'installation');
-    assert.deepStrictEqual(ids.slice(-5),
-      ['contract', 'studio', 'play', 'site-contract', 'further-reading']);
+    // the site's own preamble first, the packages after it in the order
+    // the root manifest lists their workspaces, and the two sections
+    // that close the page last
+    assert.deepStrictEqual(ids.slice(0, 2), ['installation', 'draft-support']);
+    assert.deepStrictEqual(ids.slice(-2), ['site-contract', 'further-reading']);
+    assert.deepStrictEqual(ids.slice(2, -2), SITE_DATA.content.packages
+      .filter((entry) => entry.docs !== null)
+      .map((entry) => entry.name.replace(/^@jarenjs\//, '')),
+    'every package that committed a section has one, in census order');
   });
 
   it('routes an in-app link inside package markdown instead of scrolling to nothing', async function () {

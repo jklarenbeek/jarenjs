@@ -27,7 +27,7 @@ import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { SUITES } from '../../packages/website/src/boundaries/bench.js';
 import { HOME_CONTENT } from '../../packages/website/src/content/home.js';
-import { HOME_ENGINE_SUITE, docsSections } from '../../packages/website/src/app/viewmodel.js';
+import { docsSections } from '../../packages/website/src/app/viewmodel.js';
 import { buildSiteContent } from '../../scripts/generate-site-data.js';
 import { UI_RULES } from '../../packages/website/src/views/ui.js';
 
@@ -212,28 +212,37 @@ describe('the docs page states the runtime it actually requires', function () {
 //#region the homepage carries no figure it did not measure
 
 describe('the homepage engine cards', function () {
-  it('map every engine whose suite publishes a headline', function () {
+  /** Every collected card, with the workspace that wrote it. */
+  const cards = () => buildSiteContent().packages.flatMap((/** @type {any} */ entry) =>
+    entry.engines.map((/** @type {any} */ engine) => ({ name: entry.name, ...engine })));
+
+  it('name a suite that publishes a headline, or no suite at all', function () {
     const meta = JSON.parse(read('packages', 'website', 'public', 'benchmarks', 'meta.json'));
     const measured = new Set(meta.headlines.map((/** @type {any} */ h) => h.key));
-    for (const suite of Object.values(HOME_ENGINE_SUITE)) {
-      assert.ok(measured.has(suite),
-        `${suite} is mapped from a home card but publishes no headline`);
+    for (const card of cards()) {
+      if (card.suite === null) continue;
+      assert.ok(measured.has(card.suite),
+        `${card.name} maps its ${card.key} card to '${card.suite}', which publishes no headline`);
     }
   });
 
-  it('never hand-write a figure a mapped card overwrites', function () {
-    for (const engine of HOME_CONTENT.engines) {
-      if (HOME_ENGINE_SUITE[engine.key] === undefined) continue;
-      assert.doesNotMatch(engine.perf, /[0-9]/,
-        `${engine.key}: the authored line is a fallback, and a figure in it is dead the moment meta.json lands`);
-    }
+  it('are all written by the packages — the website authors none of them', function () {
+    assert.strictEqual(HOME_CONTENT.engines, undefined,
+      'an engine card in the website\'s own content document is the inversion undone');
+    const source = read('packages', 'website', 'src', 'app', 'viewmodel.js');
+    assert.ok(!source.includes('HOME_ENGINE_SUITE'),
+      'the card → suite map is the package\'s own claim now, in its frontmatter');
+    assert.ok(cards().length > 0, 'and the grid is not empty');
   });
 
-  it('leaves no figure in an unmapped card either — those have nothing to derive from', function () {
-    for (const engine of HOME_CONTENT.engines) {
-      if (HOME_ENGINE_SUITE[engine.key] !== undefined) continue;
-      assert.doesNotMatch(engine.perf, /[0-9]/,
-        `${engine.key}: a card with no measured suite states no figure`);
+  it('never state a figure: the measured line replaces the authored one', function () {
+    // the frontmatter grammar refuses a digit in `perf`; this asserts it
+    // over what the repository actually committed, mapped or not
+    for (const card of cards()) {
+      if (card.card.perf === null) continue;
+      assert.doesNotMatch(card.card.perf, /[0-9]/,
+        `${card.name}: the authored line for ${card.key} is a fallback, and a figure in it is`
+        + ' dead the moment meta.json lands');
     }
   });
 

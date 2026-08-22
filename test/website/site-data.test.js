@@ -24,6 +24,7 @@ import {
   buildSiteData, serializeSiteData, buildSiteContent, serializeSiteContent,
   readSiteDocument, derivedCard,
 } from '../../scripts/generate-site-data.js';
+import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { buildInfo } from '../../scripts/generate-build-info.js';
 import { git, headCommit, isDirty } from '../../scripts/lib/git.js';
 
@@ -150,9 +151,9 @@ describe('a workspace\'s own site document (site.md)', function () {
     '  title: Play',
     '  blurb: The engine playground.',
     '  perf: understand an engine standalone',
-    'engine:',
-    '  key: play',
-    '  suite: markdown',
+    'engines:',
+    '  - key: play',
+    '    suite: markdown',
     '---',
     '',
     '# Play',
@@ -174,7 +175,12 @@ describe('a workspace\'s own site document (site.md)', function () {
     assert.strictEqual(entry.derived, false, 'a workspace that wrote one owns its card');
     assert.deepStrictEqual(entry.card,
       { title: 'Play', blurb: 'The engine playground.', perf: 'understand an engine standalone' });
-    assert.deepStrictEqual(entry.engine, { key: 'play', suite: 'markdown' });
+    assert.deepStrictEqual(entry.engines, [{
+      key: 'play', suite: 'markdown',
+      // an entry that states only its key and suite is measured by the
+      // package's own card — one card, written once
+      card: { title: 'Play', blurb: 'The engine playground.', perf: 'understand an engine standalone' },
+    }]);
     assert.strictEqual(entry.docs.$md, '0.1');
     assert.deepStrictEqual(entry.docs.ast.map((/** @type {any} */ n) => n.type),
       ['heading', 'paragraph']);
@@ -191,7 +197,7 @@ describe('a workspace\'s own site document (site.md)', function () {
       '---', 'package: "@jarenjs/play"', 'card:', '  title: Play', '  blurb: x', '---', '',
     ].join('\n'));
     assert.strictEqual(entry.card.perf, null);
-    assert.strictEqual(entry.engine, null);
+    assert.deepStrictEqual(entry.engines, [], 'a package that is not an engine contributes no card');
   });
 
   /**
@@ -265,19 +271,45 @@ describe('the collected site content', function () {
     }
   });
 
-  it('marks exactly the workspaces that committed a document as not derived', function () {
-    const authored = content.packages.filter((/** @type {any} */ e) => !e.derived);
-    assert.deepStrictEqual(authored.map((/** @type {any} */ e) => e.name),
-      ['@jarenjs/contract', '@jarenjs/studio', '@jarenjs/play']);
-    assert.strictEqual(content.packages.length - authored.length, 19,
-      'every other workspace still renders from its manifest');
-    for (const entry of authored) {
-      assert.ok(entry.docs !== null, `${entry.name} carries a documentation section`);
+  it('has every published workspace owning its document — none derived', function () {
+    const derived = content.packages.filter((/** @type {any} */ e) => e.derived);
+    assert.deepStrictEqual(derived.map((/** @type {any} */ e) => e.name), [],
+      'a workspace still described by its manifest has not written its site.md yet');
+    assert.strictEqual(content.packages.length, publicWorkspaces().length);
+  });
+
+  it('carries a documentation section for every workspace but the two that chose a card', function () {
+    // a card-only document is a decision the grammar allows, so the ones
+    // that made it are named here: adding a third silently would be the
+    // site quietly losing a section
+    const cardOnly = content.packages
+      .filter((/** @type {any} */ e) => e.docs === null)
+      .map((/** @type {any} */ e) => e.name);
+    assert.deepStrictEqual(cardOnly, ['@jarenjs/refs', '@jarenjs/locales'],
+      'these two describe themselves on the rail and document themselves in their READMEs');
+  });
+
+  it('collects the engine grid from the packages, several from one workspace', function () {
+    const byPackage = new Map(content.packages
+      .map((/** @type {any} */ e) => [e.name, e.engines.map((/** @type {any} */ x) => x.key)]));
+    // the grid is a list of ENGINES, and @jarenjs/json publishes six of
+    // them: one card per package would have hidden five
+    assert.deepStrictEqual(byPackage.get('@jarenjs/json'),
+      ['path', 'pointer', 'patch', 'query', 'jslt', 'jtlt']);
+    assert.deepStrictEqual(byPackage.get('@jarenjs/josl'), ['josl', 'csv']);
+    assert.deepStrictEqual(byPackage.get('@jarenjs/contract'), ['contract']);
+    // and a package that is not an engine contributes no card
+    assert.deepStrictEqual(byPackage.get('@jarenjs/studio'), []);
+    assert.deepStrictEqual(byPackage.get('@jarenjs/locales'), []);
+    const keys = content.packages.flatMap((/** @type {any} */ e) =>
+      e.engines.map((/** @type {any} */ x) => x.key));
+    assert.deepStrictEqual([...new Set(keys)], keys, 'two packages claiming one key would render twice');
+    for (const entry of content.packages) {
+      for (const engine of entry.engines) {
+        assert.ok(engine.card.title.length > 0 && engine.card.blurb.trim() !== '',
+          `${entry.name}: the ${engine.key} card says what the engine is`);
+      }
     }
-    // the engine grid is for engines: the contract layer is one, the IDE
-    // and the playground are surfaces built ON the engines, not engines
-    assert.deepStrictEqual(authored.map((/** @type {any} */ e) => e.engine),
-      [{ key: 'contract', suite: 'contract' }, null, null]);
   });
 
   it('ships documentation sections that are valid Markdown documents', function () {
@@ -303,11 +335,11 @@ describe('the collected site content', function () {
   });
 
   it('never reaches an npm tarball — site presence is a repo concern', function () {
+    const workspaces = buildSiteData().packages.map((p) => `--workspace=${p.name}`);
     const packed = JSON.parse(execFileSync('npm',
-      ['pack', '--dry-run', '--json', '--ignore-scripts',
-        '--workspace=@jarenjs/contract', '--workspace=@jarenjs/studio', '--workspace=@jarenjs/play'],
+      ['pack', '--dry-run', '--json', '--ignore-scripts', ...workspaces],
       { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
-    assert.strictEqual(packed.length, 3);
+    assert.strictEqual(packed.length, workspaces.length, 'every published workspace is checked');
     for (const tarball of packed) {
       assert.ok(tarball.files.some((/** @type {any} */ f) => f.path === 'README.md'),
         `${tarball.name} still publishes its README`);
@@ -315,6 +347,60 @@ describe('the collected site content', function () {
         tarball.files.filter((/** @type {any} */ f) => f.path === 'site.md'), [],
         `${tarball.name} publishes no site.md — the manifest's files allow-list keeps it out`);
     }
+  });
+});
+
+describe('a workspace the website has never heard of', function () {
+  /**
+   * The campaign's definition of done, as a test: a package reaches the
+   * site because the root manifest lists it and its own document
+   * describes it, so adding one needs NO website edit. The proof runs
+   * the real collector over a fabricated repository — a root manifest
+   * with one workspace, a manifest and a `site.md` beside it, none of
+   * which any line of `packages/website` has ever seen.
+   */
+  const REPO = join(ROOT, 'test/website/fixtures/zero-edit');
+
+  it('reaches the site with its authored card, its engine and its parsed body', function () {
+    const content = buildSiteContent(REPO);
+    assert.strictEqual(content.packages.length, 1);
+    const [entry] = content.packages;
+    assert.strictEqual(entry.name, '@jarenjs/widget');
+    assert.strictEqual(entry.derived, false, 'the card is the one the workspace wrote');
+    assert.strictEqual(entry.card.title, 'Widget');
+    assert.deepStrictEqual(entry.engines.map((/** @type {any} */ e) => [e.key, e.suite]),
+      [['widget', 'markdown']]);
+    assert.strictEqual(entry.engines[0].card.title, 'Widget',
+      'an engine that states only a key and a suite is carded by its package');
+    assert.deepStrictEqual(entry.docs.ast.map((/** @type {any} */ n) => n.type),
+      ['paragraph', 'code'], 'the body arrives parsed, not as text the site would have to parse');
+    assert.strictEqual(entry.docs.meta.sourceUrl, 'packages/widget/site.md');
+  });
+
+  it('and the artifact it produces is one the site would accept', function () {
+    // the same emit-path gate the real content passes: a fabricated
+    // workspace cannot ship a shape the browser's contract refuses
+    const text = serializeSiteContent(buildSiteContent(REPO));
+    assert.strictEqual(JSON.parse(text).packages[0].name, '@jarenjs/widget');
+  });
+
+  it('needs no edit anywhere in packages/website to do it', function () {
+    // what a new package would otherwise have had to add: a card in the
+    // home document, a section in the docs document, and a row in the
+    // card → suite map. None of the three exists any more.
+    const source = (file) => readFileSync(join(ROOT, 'packages/website', file), 'utf8');
+    assert.ok(!source('src/content/home.js').includes('engines:'),
+      'an engine card authored in the website is one a package could not have brought with it');
+    assert.ok(!source('src/app/viewmodel.js').includes('HOME_ENGINE_SUITE'),
+      'the card → suite map is gone: a package names its own suite in its frontmatter');
+    const docs = source('src/content/docs.js');
+    for (const moved of ['JSLT stylesheets', 'Schemas as TypeScript', 'Data — documents in SQLite']) {
+      assert.ok(!docs.includes(moved),
+        `the website still authors the "${moved}" section, which its package owns`);
+    }
+    assert.deepStrictEqual(DOCS_SECTIONS.map((/** @type {any} */ x) => x.id),
+      ['installation', 'draft-support', 'site-contract', 'further-reading'],
+      'what the site still authors is what only the site can answer');
   });
 });
 

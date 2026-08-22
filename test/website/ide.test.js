@@ -12,7 +12,14 @@ import * as assert from 'node:assert';
 
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
+import { buildSiteContent } from '../../scripts/generate-site-data.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
+
+/** The real collected site content: the docs sections a package owns
+ * arrive through the same fetch the browser makes. Read once. */
+const SITE_CONTENT = buildSiteContent();
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function mountSite({ hash = '#/project', stored = null, modelContext, share } = {}) {
   const { document, container } = createStubHost();
@@ -26,6 +33,9 @@ function mountSite({ hash = '#/project', stored = null, modelContext, share } = 
     schedule: (f) => f(),
     debounceMs: 0,
     fetchJson: () => Promise.reject(new Error('404')),
+    fetchSite: (name) => (name === 'content'
+      ? Promise.resolve(SITE_CONTENT)
+      : Promise.reject(new Error('404'))),
     listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
     navigate: (h) => { hashes.push(h); routeCb(parseHash(h)); },
     storage: {
@@ -121,22 +131,26 @@ describe('website — legacy playground links redirect to #/play', function () {
 });
 
 describe('website — docs, examples, menu', function () {
-  it('docs render sections from the content document, deep-linkable', function () {
+  it('docs render sections from the content document, deep-linkable', async function () {
     const { container, go } = mountSite();
     go('#/docs');
     assert.match(serialize(container), /Every package is published on npm/, 'default section is installation');
-    go('#/docs?s=jslt');
+    // a package's own section arrives with the collected site content,
+    // one turn after the route: the JSLT material is @jarenjs/json's
+    go('#/docs?s=json');
+    await tick();
     const html = serialize(container);
     assert.match(html, /JSLT stylesheets/);
     assert.match(html, /apply-templates/);
   });
 
-  it('the emit docs section explains the cyclic verification, not just the API', function () {
+  it('the emit docs section explains the cyclic verification, not just the API', async function () {
     // The reason a generated type can be trusted is the loop back to the
     // validator. A docs section that only showed the CLI would sell the
     // feature and omit the argument for it.
     const { container, go } = mountSite();
     go('#/docs?s=emit');
+    await tick();
     const html = serialize(container);
     assert.match(html, /Schemas as TypeScript/);
     assert.match(html, /jaren-emit --schema/);

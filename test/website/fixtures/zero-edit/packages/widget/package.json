@@ -1,0 +1,6 @@
+{
+  "name": "@jarenjs/widget",
+  "version": "1.2.3",
+  "description": "A package the website has never heard of.",
+  "type": "module"
+}
