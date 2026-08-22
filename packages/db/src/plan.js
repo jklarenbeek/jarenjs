@@ -16,6 +16,9 @@
  * - `native` — everything translated; the plan alone answers.
  * - `row`    — predicates, ordering and window pushed; only the
  *   projection runs in the engine, per fetched row (streams).
+ *   `rowReturn` is the COMPLETE one-row document to run, binding
+ *   included — the collection binding is named by the document, so a
+ *   wrapper built anywhere else would have to guess it.
  * - `set`    — the pushed conjuncts narrow candidates; the WHOLE
  *   compiled document runs over the materialized candidates.
  *
@@ -362,11 +365,12 @@ function planPredicate(node, itSlot, shape) {
  * @param {any} shape - { collection, schema, columnByCanonical }
  * @param {any} rawFlwor - The raw FLWOR document (conjunct fragments
  *   for the hook — the AST has no unparser)
- * @param {((fragment: any) => { name: string, key: string } | null) | undefined} udfHook
+ * @param {((fragment: any, binding: string) => { name: string, key: string } | null) | undefined} udfHook
  * @returns {{ plan: import('./algebra.js').Plan,
  *   reasons: { construct: string, reason: string }[],
  *   whereFullyPushed: boolean, orderPushed: boolean,
- *   projectionNative: boolean, itSlot: number, udfs: string[] }}
+ *   projectionNative: boolean, itSlot: number, itName: string | null,
+ *   udfs: string[] }}
  */
 function planFlwor(node, shape, rawFlwor, udfHook) {
   const reasons = [];
@@ -386,9 +390,14 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     reasons.push(refusal('$for',
       'only a single plain binding over the whole collection is translated'));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, itSlot: -1, udfs: [] };
+      projectionNative: false, itSlot: -1, itName: null, udfs: [] };
   }
   const itSlot = binding.slot;
+  // the document's own name for the collection binding. The residual and
+  // the UDF hatch both wrap raw fragments in a synthetic one-row query,
+  // and that wrapper must bind what the fragments actually reference —
+  // the name is the document's to choose, never this package's.
+  const itName = binding.name;
 
   if (node.fold !== null) reasons.push(refusal('$fold', KIND_REASONS.let));
   if (node.letBindings.length > 0) reasons.push(refusal('$let', KIND_REASONS.let));
@@ -417,7 +426,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
       const outcome = planPredicate(conjuncts[i], itSlot, shape);
       if ('refusal' in outcome) {
         const promoted = udfHook !== undefined && rawConjuncts[i] !== undefined
-          ? udfHook(rawConjuncts[i])
+          ? udfHook(rawConjuncts[i], itName)
           : null;
         if (promoted !== null) {
           plan.filter = conjoin(plan.filter,
@@ -480,6 +489,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     orderPushed: orderPushed && structureClean,
     projectionNative,
     itSlot,
+    itName,
     udfs,
   };
 }
@@ -489,7 +499,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
  * @param {any} document - The raw query document (kept beside the AST
  *   for residual construction — the AST has no unparser)
  * @param {any} shape - { collection, schema, columnByCanonical }
- * @param {{ udf?: (fragment: any) => { name: string, key: string } | null }} [options]
+ * @param {{ udf?: (fragment: any, binding: string) => { name: string, key: string } | null }} [options]
  * @returns {{
  *   analysis: any,
  *   plan: import('./algebra.js').Plan | null,
@@ -617,12 +627,19 @@ function planCollectionCore(document, shape, options = undefined) {
   if (fullyPushed && !flwor.projectionNative
     && (windows.length === 0 || plan.window !== null)) {
     const rawFlwor = rawInner;
+    const name = flwor.itName ?? 'it';
     return {
       analysis,
       plan,
       mode: 'row',
       reasons: flwor.reasons,
-      rowReturn: rawFlwor?.$return ?? '$it',
+      // a COMPLETE one-row document, not a bare expression the caller
+      // must re-wrap: the binding and the projection that references it
+      // travel together, so the two cannot be paired up wrongly
+      rowReturn: {
+        $for: { [name]: '$[*]' },
+        $return: [rawFlwor?.$return ?? `$${name}`],
+      },
       udfs: flwor.udfs,
     };
   }

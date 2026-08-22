@@ -109,9 +109,9 @@ export function createQueryEngine(context) {
   };
 
   const udfHook = connection.capabilities.userFunctions
-    ? (fragment) => {
+    ? (/** @type {any} */ fragment, /** @type {string} */ binding) => {
       // Ring 3: admit the registry's pushable:'scalar' operators too
-      const qualified = deterministicFragment(fragment, operators);
+      const qualified = deterministicFragment(fragment, operators, binding);
       if (qualified === null) return null;
       // the store owns the final name: a fingerprint clash between two
       // distinct fragments is disambiguated at registration

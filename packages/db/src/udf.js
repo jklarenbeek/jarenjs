@@ -55,16 +55,22 @@ const functionNameFor = (identity) => `jaren_p_${hashContent(identity)}`;
  *   [operators] - the store's registered operators (Ring 3); only its
  *   `pushable:'scalar'` subset is admitted. `null`/absent keeps the
  *   original engine-internal-only rule (no host function pushes).
+ * @param {string} [binding='it'] - the name the caller's document gave
+ *   the collection binding. The fragment references it, so the wrapper
+ *   below must bind it: under any other name every reference reads as an
+ *   external, the determinism check below rejects the fragment, and the
+ *   hatch silently never engages.
  * @returns {{ key: string, name: string,
  *   compile: () => (docText: string) => number } | null}
  */
-export function deterministicFragment(fragment, operators = null) {
+export function deterministicFragment(fragment, operators = null, binding = 'it') {
   const analyzeOpts = operators === null
     ? undefined
     : { functions: operators.functions, extensions: operators.extensions };
+  const wrap = (/** @type {any} */ body) => ({ $let: { [binding]: '$' }, $return: body });
   let dependencies;
   try {
-    dependencies = analyzeQuery({ $let: { it: '$' }, $return: fragment }, analyzeOpts).dependencies;
+    dependencies = analyzeQuery(wrap(fragment), analyzeOpts).dependencies;
   }
   catch {
     return null;
@@ -101,7 +107,10 @@ export function deterministicFragment(fragment, operators = null) {
     key,
     name: functionNameFor(key),
     compile: () => {
-      const compiled = compileJsonQuery({ $let: { it: '$' }, $return: fragment }, analyzeOpts);
+      // the SAME wrapper the analysis ran over: a compile that bound a
+      // different name than the analysis would judge one document and
+      // run another
+      const compiled = compileJsonQuery(wrap(fragment), analyzeOpts);
       return (docText) => (compiled.ebv(JSON.parse(docText)) ? 1 : 0);
     },
   };

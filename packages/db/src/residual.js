@@ -10,10 +10,17 @@
  *   materialized candidate array. Re-applying pushed conjuncts is
  *   idempotent, so SQL-side narrowing never changes the answer.
  * - `row` — only the projection stayed behind: each fetched row runs
- *   `{ $for: { it: '$[*]' }, $return: [ <ret> ] }` over the one-row
- *   array; the array wrapper packs the item sequence so an
- *   array-VALUED item stays unambiguous, and the per-row results
- *   concatenate in row order (streamable).
+ *   the planner's one-row document over the one-row array; the array
+ *   wrapper packs the item sequence so an array-VALUED item stays
+ *   unambiguous, and the per-row results concatenate in row order
+ *   (streamable).
+ *
+ * Neither mode builds a query document here. The collection binding is
+ * named by the caller's document — `it`, `user`, anything — so a wrapper
+ * synthesized in this file could only guess it, and a guess that
+ * disagreed with the projection's references would surface as an
+ * unbound-external error at request time rather than at compile time.
+ * The planner knows the name and hands both modes something complete.
  */
 
 import { compileJsonQuery } from '@jarenjs/json/query';
@@ -59,16 +66,17 @@ export function compileSetResidual(document, limits, operators) {
 
 /**
  * Compile the per-row projection for row-mode evaluation.
- * @param {any} returnExpression - The document's raw `$return` value
+ * @param {any} rowDocument - The planner's complete one-row document
+ *   (`{ $for: { <the document's own binding>: '$[*]' },
+ *   $return: [ <its $return> ] }`). It arrives whole because the binding
+ *   and the projection that references it must agree, and the planner is
+ *   the only place that knows the name.
  * @param {any} [limits]
  * @param {{ functions?: any, extensions?: any } | null} [operators]
  * @returns {(row: any, externals: any) => any[]} the row's items
  */
-export function compileRowResidual(returnExpression, limits, operators) {
-  const compiled = compileJsonQuery({
-    $for: { it: '$[*]' },
-    $return: [returnExpression],
-  }, residualOptions(limits, operators));
+export function compileRowResidual(rowDocument, limits, operators) {
+  const compiled = compileJsonQuery(rowDocument, residualOptions(limits, operators));
   return (row, externals) => {
     const packed = compiled([row], externals);
     // one binding → exactly one packed array of that row's items

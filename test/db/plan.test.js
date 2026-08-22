@@ -133,16 +133,36 @@ describe('golden plans (algebra, no SQL anywhere)', () => {
 });
 
 describe('mode decisions and reasons', () => {
-  it('a projected return is a ROW residual carrying the raw $return', () => {
+  it('a projected return is a ROW residual carrying a COMPLETE one-row document', () => {
     const planned = planQuery({
       $for: { it: '$[*]' },
       $where: { $gt: ['$it.age', 21] },
       $return: { n: '$it.name' },
     }, SHAPE);
     assert.strictEqual(planned.mode, 'row');
-    assert.deepStrictEqual(planned.rowReturn, { n: '$it.name' });
+    assert.deepStrictEqual(planned.rowReturn, {
+      $for: { it: '$[*]' },
+      $return: [{ n: '$it.name' }],
+    }, 'the binding travels WITH the projection that references it');
     assert.strictEqual(planned.plan.filter !== null, true, 'predicates stay pushed');
     assert.match(planned.reasons[0].reason, /row residual/);
+  });
+
+  it('the one-row document binds whatever the caller named the collection', () => {
+    // the binding is the document's choice; a wrapper that assumed a
+    // name would leave the projection referencing an unbound variable
+    for (const name of ['it', 'user', 'row']) {
+      const planned = planQuery({
+        $for: { [name]: '$[*]' },
+        $where: { $gt: [`$${name}.age`, 21] },
+        $return: { n: `$${name}.name` },
+      }, SHAPE);
+      assert.strictEqual(planned.mode, 'row');
+      assert.deepStrictEqual(planned.rowReturn, {
+        $for: { [name]: '$[*]' },
+        $return: [{ n: `$${name}.name` }],
+      }, `the binding '${name}' survived planning`);
+    }
   });
 
   it('an untranslatable conjunct is a SET residual that still narrows by the rest', () => {

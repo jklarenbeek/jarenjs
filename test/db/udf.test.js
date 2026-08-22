@@ -159,3 +159,50 @@ describe('the planner is correct WITHOUT the capability', () => {
     await store.close();
   });
 });
+
+// The hatch reads the caller's fragment, which references the caller's
+// binding. Wrapping it under a name the document never chose makes every
+// reference read as an external — and the determinism rule then rejects
+// the fragment. That failure is SILENT: no error, no reason in
+// `explain()`, just a capability that quietly is not there.
+describe('the hatch under a binding the document named itself', () => {
+  const MATCH_AS = (/** @type {string} */ name) => ({
+    $for: { [name]: '$[*]' },
+    $where: { $and: [{ $gt: [`$${name}.age`, 10] }, { $match: [`$${name}.name`, 'a.*'] }] },
+    $return: `$${name}`,
+  });
+
+  for (const name of ['it', 'user', 'row']) {
+    it(`promotes the conjunct when the binding is '${name}'`, async () => {
+      const store = await openStore(MODEL, { driver: nodeDriver() });
+      await seed(store);
+      const users = store.collection('users');
+      const document = MATCH_AS(name);
+
+      const actual = await Promise.resolve(users.execute(document));
+      assert.deepStrictEqual(actual, compileJsonQuery(document)(structuredClone(DATA)));
+
+      const explanation = await users.explain(document);
+      assert.strictEqual(explanation.udfs.length, 1,
+        'the hatch engages whatever the binding is called');
+      assert.strictEqual(explanation.residual, null);
+      await store.close();
+    });
+  }
+
+  it('keys two bindings of the same predicate as two fragments', async () => {
+    // the fragment text carries the binding, so the identities differ —
+    // sharing one registration would run the wrong predicate
+    const a = deterministicFragment({ $match: ['$it.name', 'a.*'] }, null, 'it');
+    const b = deterministicFragment({ $match: ['$user.name', 'a.*'] }, null, 'user');
+    assert.notStrictEqual(a, null);
+    assert.notStrictEqual(b, null);
+    assert.notStrictEqual(a?.key, b?.key);
+  });
+
+  it('still refuses a fragment with a real external, under any binding', async () => {
+    assert.strictEqual(
+      deterministicFragment({ $match: ['$user.name', '$pat'] }, null, 'user'), null,
+      'an external is not deterministic no matter what the binding is called');
+  });
+});

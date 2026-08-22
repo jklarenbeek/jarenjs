@@ -292,3 +292,69 @@ describe('operational assertions', () => {
       `live set grew ${growthMb.toFixed(2)} MB — the cursor must not materialize`);
   });
 });
+
+/**
+ * Rewrite a query document's collection binding to `name`: the `$for`
+ * key and every path string rooted at the old variable. Externals
+ * (`$who`) and absolute paths (`$.x`) are untouched — only a path whose
+ * root variable is the binding moves.
+ * @param {any} node
+ * @param {string} from
+ * @param {string} to
+ * @returns {any}
+ */
+function rebind(node, from, to) {
+  if (typeof node === 'string') {
+    if (node === `$${from}`) return `$${to}`;
+    return node.startsWith(`$${from}.`) || node.startsWith(`$${from}[`)
+      ? `$${to}${node.slice(from.length + 1)}`
+      : node;
+  }
+  if (Array.isArray(node)) return node.map((n) => rebind(n, from, to));
+  if (node === null || typeof node !== 'object') return node;
+  /** @type {any} */
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '$for' && Object.prototype.hasOwnProperty.call(value, from)) {
+      out.$for = { [to]: rebind(/** @type {any} */ (value)[from], from, to) };
+      continue;
+    }
+    out[key] = rebind(value, from, to);
+  }
+  return out;
+}
+
+// The binding name is the document's choice, not the engine's and not
+// this package's. Every shape above is re-run under names the suite's
+// own examples never use, because that is exactly how a hard-coded
+// wrapper survives: `@jarenjs/linq` always emits `it`, and so does every
+// README, test and format-document example.
+describe('the collection binding name is the document\'s to choose', () => {
+  for (const name of ['p', 'row', 'user']) {
+    for (const [title, document, externals] of CORPUS) {
+      it(`${title} — bound as '${name}'`, async () => {
+        const rebound = rebind(document, 'it', name);
+        assert.notDeepStrictEqual(rebound, document, 'the rewrite must change the document');
+        const { store, users } = await freshStore();
+        let expected;
+        let expectedError = null;
+        try {
+          expected = compileJsonQuery(rebound)(structuredClone(DATA), externals);
+        }
+        catch (error) {
+          expectedError = error;
+        }
+        if (expectedError !== null) {
+          await assert.rejects(
+            async () => users.execute(rebound, { externals }),
+            (actualError) => actualError.code === expectedError.code);
+        }
+        else {
+          const actual = await Promise.resolve(users.execute(rebound, { externals }));
+          assert.deepStrictEqual(actual, expected);
+        }
+        await store.close();
+      });
+    }
+  }
+});

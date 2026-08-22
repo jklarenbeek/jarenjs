@@ -127,7 +127,9 @@ below, and that table's reasons are what `explain()` reports.
 
 ### The translated set
 
-A single-binding FLWOR over the collection (`$for: { it: '$[*]' }`)
+A single-binding FLWOR over the collection (`$for: { <name>: '$[*]' }`
+— the examples here write `it`, but the binding is the **document's** to
+name and nothing translates differently under another one)
 with: comparison predicates (`$eq $ne $lt $le $gt $ge`) between a
 singular member path and a literal or external; `$and`/`$or`/`$not`
 composition; `$exists`/`$empty`; `$starts-with`/`$ends-with`/
@@ -136,7 +138,7 @@ composition; `$exists`/`$empty`; `$starts-with`/`$ends-with`/
 collation); a top-level `$subsequence` window with literal bounds; the
 top-level aggregates `$count` (bare-binding return only) and
 `$sum`/`$avg`/`$min`/`$max` over a singular schema-typed path; and the
-whole-document projection `$return: '$it'`.
+whole-document projection that returns the bare binding.
 
 ### The deliberate-residual table
 
@@ -214,9 +216,13 @@ of the native statement — same answer, one branch, no wrong-typed SQL.
 
 - **Row residual** — only the projection is untranslated: predicates,
   ordering and the window are fully pushed; each fetched row runs
-  `{ $for: { it: '$[*]' }, $return: [ <the document's $return> ] }`
-  (the array wrapper keeps array-valued items unambiguous) and the
-  items concatenate in row order. Streams.
+  `{ $for: { <the document's own binding>: '$[*]' },
+  $return: [ <the document's $return> ] }` (the array wrapper keeps
+  array-valued items unambiguous) and the items concatenate in row
+  order. Streams. **The planner emits that one-row document whole**,
+  binding included, rather than handing the projection to be re-wrapped
+  elsewhere: the wrapper must bind what the projection references, and
+  only the planner knows what the caller called it.
 - **Set residual** — anything else: the pushed predicate conjuncts
   narrow candidates (`$and` splits; a partially translatable `$or`
   does not), and the WHOLE original compiled document runs over the
@@ -247,7 +253,12 @@ predicate conjunct as a deterministic function used in the `WHERE`
 clause. Gated on `capabilities.userFunctions` (absent on Bun by
 construction) and applied only to fragments with no externals, no
 functions and no collations — deterministic and side-effect-free by
-analysis, not by hope. Registration is keyed by `contentKey(fragment)`
+analysis, not by hope. The fragment is a raw conjunct over the caller's
+collection binding, so the planner passes that binding's **name** in:
+wrapped under any other name every reference would read as an external,
+the determinism rule would reject the fragment, and the hatch would
+silently not engage — no error and no reason in `explain()`.
+Registration is keyed by `contentKey(fragment)`
 so identical fragments share one registration, and the planner MUST
 produce a correct plan with the capability disabled (tested that way).
 Preference order: native SQL → deterministic function → residual, and
