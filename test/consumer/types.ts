@@ -704,7 +704,7 @@ void [claimed, record, idempotencyLedgerModel.$model === '0.1', commandLifecycle
 import { openHttpClient, CLIENT_ERRORS } from '@jarenjs/contract/client';
 import type { HttpClient, HttpClientOptions, InvokeContext, Outcome, OutcomeMeta, OutcomeError, Negotiation } from '@jarenjs/contract/client';
 import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
-import type { ContractAppBinding, ContractEffect, TaskSlot } from '@jarenjs/contract/app';
+import type { ContractAppBinding, ContractEffect, TaskSlot, StreamSlot } from '@jarenjs/contract/app';
 
 const clientOptions: HttpClientOptions = {
   baseUrl: 'http://x', headers: { authorization: 'Bearer t' }, timeoutMs: 1000, keys: () => 'k', storage: { read: () => undefined, write: () => {} },
@@ -724,7 +724,9 @@ const negotiation: Promise<Negotiation> = httpClient.negotiate({ signal: new Abo
 void [negotiation, httpClient.url('product.save', { id: 1 }), httpClient.pending(), httpClient.capabilities.name === 'http', httpClient.contract.ids, httpClient.describe(), CLIENT_ERRORS.JC2050.msgid];
 httpClient.close();
 const appBinding: ContractAppBinding = contractAppBinding(shopContract, { namespace: 'contract/', statePath: '/contract', ops: ['product.save'] });
-const slot: TaskSlot = appBinding.slice['product.save'];
+// a slice entry is a task slot or — for a subscribe operation — a stream
+// slot, so the record's value type is the union the binding declares
+const slot: TaskSlot | StreamSlot = appBinding.slice['product.save'];
 void [slot.id, slot.status, appBinding.actions, appBinding.schema, appBinding.effect === 'contract'];
 const contractEffect: ContractEffect = createContractEffect(httpClient, {
   createTaskEffect: (run, options) => Object.assign((props: any, dispatch: (name: string, payload?: any) => void) => void [run(props, new AbortController().signal), options.mode, dispatch], { cancel() {}, cancelAll() {}, dispose() {} }),

@@ -32,8 +32,10 @@ import { publicProjection } from '@jarenjs/contract/project';
 import {
   siteContract, openSiteClient, createSiteHandlers, unwrap, siteContractNodes,
 } from '../../packages/website/src/boundaries/site.js';
-import { serializeSiteData, serializeSiteContent } from '../../scripts/generate-site-data.js';
-import { serializeBuildInfo } from '../../scripts/generate-build-info.js';
+import {
+  serializeSiteData, serializeSiteContent, buildSiteData, buildSiteContent,
+} from '../../scripts/generate-site-data.js';
+import { serializeBuildInfo, buildInfo } from '../../scripts/generate-build-info.js';
 import { serializeMeta } from '../../benchmark/website-data.js';
 import { git } from '../../scripts/lib/git.js';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
@@ -52,11 +54,19 @@ const IDS = [
 
 const RAW = 'https://raw.githubusercontent.com/jklarenbeek/jarenjs/refs/heads/main';
 
-/** The committed artifacts, as the browser gets them. */
+/**
+ * The artifacts, as the browser gets them — DERIVED here rather than read
+ * off disk, because `public/site/` and `public/build.json` are generated
+ * and gitignored: reading them made `npm test` pass only on a machine
+ * that had already run a build, and fail on every clean checkout. These
+ * are the same builders the generator's CLI writes with, so the payloads
+ * under test are byte-for-byte the ones the site ships. The benchmark
+ * overview beside them IS committed, so it stays a file read.
+ */
 const ARTIFACTS = {
-  packages: read('public/site/packages.json'),
-  content: read('public/site/content.json'),
-  build: read('public/build.json'),
+  packages: buildSiteData(),
+  content: buildSiteContent(),
+  build: buildInfo(),
   meta: read('public/benchmarks/meta.json'),
 };
 
