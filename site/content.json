@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-22T14:12:59+02:00",
-  "commit": "1e3004066b6ef6f0d084596ee34b51e83f299b2d",
+  "generated": "2026-08-22T15:50:33+02:00",
+  "commit": "3643f6c20ddc66def7796f3060776ba221eb6e10",
   "packages": [
     {
       "name": "@jarenjs/core",
