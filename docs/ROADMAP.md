@@ -835,20 +835,6 @@ rendering, and is a projection *out*, not a CRS system.
   [Turf](https://github.com/Turfjs/turf) (~796k weekly downloads) and JSTS
   (~577k), and records the loss here rather than pretending the gap is small.
 
-## The website
-
-The site is a private workspace, but it is the suite's flagship consumer and its
-open work is repository work like any other.
-
-- [ ] **The suite shapes ride in the main bundle** — `bench.suite` now declares
-  one closed shape per published suite, which is what turns a drifted suite file
-  into a typed refusal instead of a wrong render. The document is imported by
-  `src/boundaries/site.js` and compiled in the browser, so those shapes are part
-  of the bundle every page loads: about 4 KB gzipped, for a declaration only the
-  benchmarks page reads. The honest fix if that grows is to fetch a suite's shape
-  with the suite, which means a contract that can carry a schema by reference —
-  worth doing when the next suite is added, not before.
-
 ## Benchmarks & tooling
 
 - [ ] **Compile-mean coverage in `jslt.js`** — `COMPILE_KEYS` is `['identity', 'surgical', 'annotate']`, so the compile row's stylesheet set omits the reshape stylesheet.
