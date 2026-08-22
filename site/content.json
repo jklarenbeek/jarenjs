@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-22T15:50:33+02:00",
-  "commit": "3643f6c20ddc66def7796f3060776ba221eb6e10",
+  "generated": "2026-08-22T17:59:35+02:00",
+  "commit": "d96f0c5a552a5c86e165899d3bc8e5a8c470c9bf",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -9,7 +9,17 @@
         "blurb": "The kernel every other package reaches for: type guards, grapheme-aware Unicode strings, a large text-validation toolbox, RFC 3339 date arithmetic on strings and epoch milliseconds, a GeoJSON-native spatial kernel with exact orientation predicates, and asm.js-style int32/float64 math.",
         "perf": null
       },
-      "engines": [],
+      "engines": [
+        {
+          "key": "geo",
+          "suite": "geo",
+          "card": {
+            "title": "Geospatial kernel",
+            "blurb": "GeoJSON itself as the representation, not a geometry class: Shewchuk adaptive-precision orientation predicates, great-circle distance and area on the sphere, ring closure and winding, geohash, and a Hilbert-packed static R-tree behind the query engine's spatial joins.",
+            "perf": "results asserted equivalent to the rivals before timing, and the point-in-polygon loss is published — an exact predicate costs"
+          }
+        }
+      ],
       "docs": {
         "$md": "0.1",
         "frontmatter": {
@@ -17,7 +27,16 @@
           "card": {
             "title": "Core utilities",
             "blurb": "The kernel every other package reaches for: type guards, grapheme-aware Unicode strings, a large text-validation toolbox, RFC 3339 date arithmetic on strings and epoch milliseconds, a GeoJSON-native spatial kernel with exact orientation predicates, and asm.js-style int32/float64 math."
-          }
+          },
+          "engines": [
+            {
+              "key": "geo",
+              "suite": "geo",
+              "title": "Geospatial kernel",
+              "blurb": "GeoJSON itself as the representation, not a geometry class: Shewchuk adaptive-precision orientation predicates, great-circle distance and area on the sphere, ring closure and winding, geohash, and a Hilbert-packed static R-tree behind the query engine's spatial joins.",
+              "perf": "results asserted equivalent to the rivals before timing, and the point-in-polygon loss is published — an exact predicate costs"
+            }
+          ]
         },
         "ast": [
           {
@@ -187,7 +206,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/core/site.md",
-          "hash": "yeq2ig",
+          "hash": "v1kjem",
           "frontmatterLang": "yaml"
         }
       },
@@ -1150,6 +1169,168 @@
             "children": [
               {
                 "type": "text",
+                "value": "JTLT text templates"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The text sibling of JSLT, and a front-end rather than a second engine:"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "compileJtltStylesheet"
+              },
+              {
+                "type": "text",
+                "value": " desugars a template into an ordinary JSLT stylesheet"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "(inspectable as "
+              },
+              {
+                "type": "inlineCode",
+                "value": "render.stylesheet"
+              },
+              {
+                "type": "text",
+                "value": ") and serializes what the dispatcher"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "produced, so modes, priorities, schema matching and conflict resolution are"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "inherited rather than reimplemented. A rule body is a segment list — literal"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "text, interpolated query expressions, and "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$apply"
+              },
+              {
+                "type": "text",
+                "value": " splices that dispatch into"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "other rules."
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "lang": "json",
+            "meta": null,
+            "value": "[ { \"match\": \"$\", \"body\": [\"# Books\\n\", { \"$apply\": \"$.store.book[*]\" }] },\n  { \"match\": \"$.store.book[*]\", \"body\": [\"- \", \"$.title\", \" (\", \"$.price\", \")\\n\"] } ]\n"
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The envelope's "
+              },
+              {
+                "type": "inlineCode",
+                "value": "output"
+              },
+              {
+                "type": "text",
+                "value": " member picks the serialization method. "
+              },
+              {
+                "type": "inlineCode",
+                "value": "text"
+              },
+              {
+                "type": "text",
+                "value": " writes"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "every segment raw; "
+              },
+              {
+                "type": "inlineCode",
+                "value": "xml"
+              },
+              {
+                "type": "text",
+                "value": " escapes interpolated DATA while literal template"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "markup passes through untouched — the XSLT and T4 contract exactly, which is"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "what makes one template document able to emit Markdown, XML or SQL DDL from"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "schema-matched rules. Unmatched nodes follow XSLT's built-in rules restated"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "for JSON: containers apply templates to every child in document order, atoms"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "emit their escaped string value."
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "depth": 3,
+            "children": [
+              {
+                "type": "text",
                 "value": "The XQuery front-end"
               }
             ]
@@ -1329,7 +1510,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/json/site.md",
-          "hash": "1nel1g",
+          "hash": "1hznnt0",
           "frontmatterLang": "yaml"
         }
       },
@@ -1851,7 +2032,17 @@
         "blurb": "One canonical name → predicate registry for the string, numeric, date-time, addressing and geospatial formats, shared by the validator and the form model so the two can never drift.",
         "perf": null
       },
-      "engines": [],
+      "engines": [
+        {
+          "key": "formats",
+          "suite": "formats",
+          "card": {
+            "title": "Format validators",
+            "blurb": "One canonical name → predicate registry for the string, numeric, date-time, addressing and geospatial formats, shared by the validator and the form model so the two can never drift.",
+            "perf": "every format both engines implement, checked for agreement before it is timed"
+          }
+        }
+      ],
       "docs": {
         "$md": "0.1",
         "frontmatter": {
@@ -1859,7 +2050,14 @@
           "card": {
             "title": "Format validators",
             "blurb": "One canonical name → predicate registry for the string, numeric, date-time, addressing and geospatial formats, shared by the validator and the form model so the two can never drift."
-          }
+          },
+          "engines": [
+            {
+              "key": "formats",
+              "suite": "formats",
+              "perf": "every format both engines implement, checked for agreement before it is timed"
+            }
+          ]
         },
         "ast": [
           {
@@ -1915,7 +2113,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/formats/site.md",
-          "hash": "15q9fyg",
+          "hash": "nd8a1k",
           "frontmatterLang": "yaml"
         }
       },
@@ -1929,7 +2127,209 @@
         "perf": null
       },
       "engines": [],
-      "docs": null,
+      "docs": {
+        "$md": "0.1",
+        "frontmatter": {
+          "package": "@jarenjs/refs",
+          "card": {
+            "title": "Draft meta-schemas",
+            "blurb": "The bundled JSON Schema draft meta-schemas and their vocabularies, so draft detection, $vocabulary processing and meta-validation answer offline — a validator that never fetches a schema from the network to find out which draft it is reading."
+          }
+        },
+        "ast": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The four official JSON Schema meta-schemas — draft-06, draft-07, 2019-09 and"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "2020-12 — bundled as data, so everything a validator needs to know about the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "dialect it is reading is already in the process. 2019-09 and 2020-12 publish"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "their vocabularies as several documents each, and a draft entry carries all of"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "them."
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "lang": "js",
+            "meta": null,
+            "value": "import { JarenValidator } from '@jarenjs/validate';\nimport { getSchemaDraftByName } from '@jarenjs/refs';\n\nconst meta = getSchemaDraftByName('draft2020-12');\nconst jaren = new JarenValidator().addMetaSchema([...meta.schema], meta.draft);\n"
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The lookups accept the spellings people actually write: "
+              },
+              {
+                "type": "inlineCode",
+                "value": "getSchemaDraftById"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "resolves a "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$schema"
+              },
+              {
+                "type": "text",
+                "value": " URI, "
+              },
+              {
+                "type": "inlineCode",
+                "value": "getSchemaDraftByName"
+              },
+              {
+                "type": "text",
+                "value": " the common names ("
+              },
+              {
+                "type": "inlineCode",
+                "value": "draft7"
+              },
+              {
+                "type": "text",
+                "value": ","
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "draft-07"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "type": "inlineCode",
+                "value": "2019-09"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "type": "inlineCode",
+                "value": "draft2020-12"
+              },
+              {
+                "type": "text",
+                "value": "), "
+              },
+              {
+                "type": "inlineCode",
+                "value": "getSchemaDraftByVersion"
+              },
+              {
+                "type": "text",
+                "value": " the bare"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "years. Each answers "
+              },
+              {
+                "type": "inlineCode",
+                "value": "{ draft, schema }"
+              },
+              {
+                "type": "text",
+                "value": "."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "What this buys is offline behaviour, not convenience: draft detection,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "$vocabulary"
+              },
+              {
+                "type": "text",
+                "value": "-aware keyword selection ("
+              },
+              {
+                "type": "inlineCode",
+                "value": "format-assertion"
+              },
+              {
+                "type": "text",
+                "value": " included) and"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "cross-draft references all resolve from these documents, so compiling a schema"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "never reaches the network to find out which dialect it is in — the property"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "that lets the validator run in a browser tab under a strict connect policy."
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "sourceUrl": "packages/refs/site.md",
+          "hash": "y4yao0",
+          "frontmatterLang": "yaml"
+        }
+      },
       "derived": false
     },
     {
@@ -2988,7 +3388,170 @@
         "perf": null
       },
       "engines": [],
-      "docs": null,
+      "docs": {
+        "$md": "0.1",
+        "frontmatter": {
+          "package": "@jarenjs/locales",
+          "card": {
+            "title": "Locale packs",
+            "blurb": "Message catalogs for the validator's and the form model's errors, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing."
+          }
+        },
+        "ast": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "Jaren never bakes prose into a hot path. A failing check carries a stable"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "message key ("
+              },
+              {
+                "type": "inlineCode",
+                "value": "msgid"
+              },
+              {
+                "type": "text",
+                "value": ") and its raw structured "
+              },
+              {
+                "type": "inlineCode",
+                "value": "params"
+              },
+              {
+                "type": "text",
+                "value": "; human text is produced"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "later, at report or render time, from a "
+              },
+              {
+                "type": "strong",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "catalog"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " — a flat object of"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "templates and closures. This package is the home of the non-English catalogs"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "for the validator, the form model and the contract layer."
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "lang": "js",
+            "meta": null,
+            "value": "import { JarenValidator, compileMessageCatalog, localizeErrors } from '@jarenjs/validate';\nimport { nl } from '@jarenjs/locales';\n\nconst catalog = compileMessageCatalog(nl);\nconst result = new JarenValidator({ collectErrors: true })\n  .compile({ type: 'string', minLength: 2 })('x');\nlocalizeErrors(result.errors, catalog);\n// 'mag niet minder dan 2 tekens bevatten'\n"
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "Arabic, German, Spanish, French, Japanese, Korean, Dutch, Portuguese, Russian,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "Turkish and Traditional Chinese each ship as their own export and their own"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "subpath ("
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/locales/nl"
+              },
+              {
+                "type": "text",
+                "value": "), so a bundle carries only the languages it"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "imports. Because localization happens after the check, switching language"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "re-renders the text and re-validates nothing — the same result object answers"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "in a second language without the validator running again."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "Arabic is a right-to-left pack, and the site's own language switcher is where"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "that is proven: the messages are isolated for bidirectional text so an"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "interpolated Latin-script value cannot reorder the Arabic sentence around it."
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "sourceUrl": "packages/locales/site.md",
+          "hash": "1xk6lic",
+          "frontmatterLang": "yaml"
+        }
+      },
       "derived": false
     },
     {

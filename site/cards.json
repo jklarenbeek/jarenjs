@@ -1,0 +1,450 @@
+{
+  "generated": "2026-08-22T17:59:35+02:00",
+  "commit": "d96f0c5a552a5c86e165899d3bc8e5a8c470c9bf",
+  "packages": [
+    {
+      "name": "@jarenjs/core",
+      "card": {
+        "title": "Core utilities",
+        "blurb": "The kernel every other package reaches for: type guards, grapheme-aware Unicode strings, a large text-validation toolbox, RFC 3339 date arithmetic on strings and epoch milliseconds, a GeoJSON-native spatial kernel with exact orientation predicates, and asm.js-style int32/float64 math.",
+        "perf": null
+      },
+      "engines": [
+        {
+          "key": "geo",
+          "suite": "geo",
+          "card": {
+            "title": "Geospatial kernel",
+            "blurb": "GeoJSON itself as the representation, not a geometry class: Shewchuk adaptive-precision orientation predicates, great-circle distance and area on the sphere, ring closure and winding, geohash, and a Hilbert-packed static R-tree behind the query engine's spatial joins.",
+            "perf": "results asserted equivalent to the rivals before timing, and the point-in-polygon loss is published — an exact predicate costs"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/json",
+      "card": {
+        "title": "JSON addressing",
+        "blurb": "The addressing and transformation standards as compilers: JSON Pointer, JSONPath, JSON Patch and Merge Patch, copy-on-write write operations, an XQuery-semantics query language written as JSON documents, JSLT stylesheets and the JTLT text front-end — one family, every grammar published as JSON Schema.",
+        "perf": null
+      },
+      "engines": [
+        {
+          "key": "path",
+          "suite": "jsonpath",
+          "card": {
+            "title": "JSONPath",
+            "blurb": "The complete RFC 9535 grammar as a compiler — every case of the official compliance corpus scored, normalized paths included.",
+            "perf": "scored on the whole official compliance corpus"
+          }
+        },
+        {
+          "key": "pointer",
+          "suite": "jsonpointer",
+          "card": {
+            "title": "JSON Pointer",
+            "blurb": "RFC 6901 with zero-allocation compiled getters, plus relative pointers — the $data hot path.",
+            "perf": "compiled getters, far ahead of the npm package"
+          }
+        },
+        {
+          "key": "patch",
+          "suite": "jsonpatch",
+          "card": {
+            "title": "JSON Patch",
+            "blurb": "RFC 6902 and RFC 7396 as copy-on-write appliers: atomic, structure-sharing, and a change feed of written paths.",
+            "perf": "measured against clone-and-interpret"
+          }
+        },
+        {
+          "key": "query",
+          "suite": "jsonquery",
+          "card": {
+            "title": "JSON Query",
+            "blurb": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, folds and windows — as JSON documents with JSONPath leaves. Uncorrelated equijoins are planned as hash joins, and only where the rewrite is provably invisible.",
+            "perf": "measured against fontoxpath and JSONata"
+          }
+        },
+        {
+          "key": "jslt",
+          "suite": "jslt",
+          "card": {
+            "title": "JSLT",
+            "blurb": "The stylesheet layer: JSONPath matches position, JSON Schema matches shape, query documents produce output. Identity transforms return the input reference. Operator packs register more — createJsltRegistry().use(mathPack)… adds $npv, $mean, $sqrt to JSLT, query and linq, and over @jarenjs/db the scalar subset pushes to SQLite as UDFs.",
+            "perf": "proof-of-no-change without rebuilding the document; host operator packs are opt-in"
+          }
+        },
+        {
+          "key": "jtlt",
+          "suite": null,
+          "card": {
+            "title": "JTLT",
+            "blurb": "The text sibling of JSLT: template rules render JSON as Markdown, XML or source code — schema-matched rules turn one table document into SQLite or PostgreSQL DDL, and the xml method escapes interpolated data while literal markup passes raw.",
+            "perf": "a front-end, not a second engine: compiles to JSLT"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/validate",
+      "card": {
+        "title": "JSON Schema",
+        "blurb": "Compiles schemas to specialized closures: annotation-driven unevaluated* with statically-elided checks, dynamic refs, $data, the $query cross-field keyword and structured, localizable errors.",
+        "perf": "scored on the official suite per draft; the Ajv ratio is measured, not claimed"
+      },
+      "engines": [
+        {
+          "key": "validate",
+          "suite": "validate",
+          "card": {
+            "title": "JSON Schema",
+            "blurb": "Compiles schemas to specialized closures: annotation-driven unevaluated* with statically-elided checks, dynamic refs, $data, the $query cross-field keyword and structured, localizable errors.",
+            "perf": "scored on the official suite per draft; the Ajv ratio is measured, not claimed"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/formats",
+      "card": {
+        "title": "Format validators",
+        "blurb": "One canonical name → predicate registry for the string, numeric, date-time, addressing and geospatial formats, shared by the validator and the form model so the two can never drift.",
+        "perf": null
+      },
+      "engines": [
+        {
+          "key": "formats",
+          "suite": "formats",
+          "card": {
+            "title": "Format validators",
+            "blurb": "One canonical name → predicate registry for the string, numeric, date-time, addressing and geospatial formats, shared by the validator and the form model so the two can never drift.",
+            "perf": "every format both engines implement, checked for agreement before it is timed"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/refs",
+      "card": {
+        "title": "Draft meta-schemas",
+        "blurb": "The bundled JSON Schema draft meta-schemas and their vocabularies, so draft detection, $vocabulary processing and meta-validation answer offline — a validator that never fetches a schema from the network to find out which draft it is reading.",
+        "perf": null
+      },
+      "engines": [],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/emit",
+      "card": {
+        "title": "Schemas as TypeScript",
+        "blurb": "Build-time artifacts from JSON documents: a schema graph flattened into a published type model and rendered by a JTLT stylesheet per target — TypeScript declarations, Markdown reference docs — with a check mode that fails CI when a schema moved and the types did not.",
+        "perf": null
+      },
+      "engines": [],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/contract",
+      "card": {
+        "title": "Contract",
+        "blurb": "One document declares your JSON-in/JSON-out operations — kind, policy, HTTP binding — and compiles once into validators, transport normalizers and a static-beats-variable path matcher. The same contract serves over HTTP, in-process through the local binding, and across a MessagePort or a worker, binds into an @jarenjs/app document as generated task slots, and projects to OpenAPI 3.1, TypeScript, Markdown and AI tool definitions from the one source.",
+        "perf": "measured against a hand-composed router doing the same work — the dispatch loss published beside the wins"
+      },
+      "engines": [
+        {
+          "key": "contract",
+          "suite": "contract",
+          "card": {
+            "title": "Contract",
+            "blurb": "One document declares your JSON-in/JSON-out operations — kind, policy, HTTP binding — and compiles once into validators, transport normalizers and a static-beats-variable path matcher. The same contract serves over HTTP, in-process through the local binding, and across a MessagePort or a worker, binds into an @jarenjs/app document as generated task slots, and projects to OpenAPI 3.1, TypeScript, Markdown and AI tool definitions from the one source.",
+            "perf": "measured against a hand-composed router doing the same work — the dispatch loss published beside the wins"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/forms",
+      "card": {
+        "title": "Forms",
+        "blurb": "JSON Schema to a framework-agnostic field tree with three validation layers on one stack — per keystroke, cross-field, and authoritative on submit.",
+        "perf": "this site renders forms with it"
+      },
+      "engines": [
+        {
+          "key": "forms",
+          "suite": null,
+          "card": {
+            "title": "Forms",
+            "blurb": "JSON Schema to a framework-agnostic field tree with three validation layers on one stack — per keystroke, cross-field, and authoritative on submit.",
+            "perf": "this site renders forms with it"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/locales",
+      "card": {
+        "title": "Locale packs",
+        "blurb": "Message catalogs for the validator's and the form model's errors, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing.",
+        "perf": null
+      },
+      "engines": [],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/view",
+      "card": {
+        "title": "View",
+        "blurb": "UIs as JSON: the tagged-array vnode format, a keyed DOM patcher that skips unchanged subtrees in O(1), an SSR serializer and a registered-widget escape hatch for irreducibly imperative islands. The grammar ships as JSON Schema, so a constrained decoder cannot emit a structurally invalid interface — and an opt-in safe-render profile sanitizes an untrusted one. Running a view as data costs engine time against a hand-written build, and the benchmark publishes that price beside the win.",
+        "perf": "hand-written vnodes outbuild the mainstream frameworks; the stylesheet pays for views-as-data — both published"
+      },
+      "engines": [
+        {
+          "key": "view",
+          "suite": "view",
+          "card": {
+            "title": "View",
+            "blurb": "UIs as JSON: the tagged-array vnode format, a keyed DOM patcher that skips unchanged subtrees in O(1), an SSR serializer and a registered-widget escape hatch for irreducibly imperative islands. The grammar ships as JSON Schema, so a constrained decoder cannot emit a structurally invalid interface — and an opt-in safe-render profile sanitizes an untrusted one. Running a view as data costs engine time against a hand-written build, and the benchmark publishes that price beside the win.",
+            "perf": "hand-written vnodes outbuild the mainstream frameworks; the stylesheet pays for views-as-data — both published"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/app",
+      "card": {
+        "title": "App",
+        "blurb": "Whole applications as one JSON document: state, a JSLT stylesheet for the view, query documents for actions, JSON Patch transitions and subscriptions with an EBV liveness query. Everything compiles once at createApp; the running loop only calls specialized closures.",
+        "perf": "this site and the Studio are both app documents"
+      },
+      "engines": [
+        {
+          "key": "app",
+          "suite": null,
+          "card": {
+            "title": "App",
+            "blurb": "Whole applications as one JSON document: state, a JSLT stylesheet for the view, query documents for actions, JSON Patch transitions and subscriptions with an EBV liveness query. Everything compiles once at createApp; the running loop only calls specialized closures.",
+            "perf": "this site and the Studio are both app documents"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/md",
+      "card": {
+        "title": "Markdown",
+        "blurb": "The inverse of JTLT: CommonMark + GFM + frontmatter parsed into a JSON AST — transformed by JSLT, rendered by @jarenjs/view with content-hash keys and structural sharing. Ships an app-ready visual component.",
+        "perf": "measured against marked, markdown-it and micromark; constant-time re-render"
+      },
+      "engines": [
+        {
+          "key": "markdown",
+          "suite": "markdown",
+          "card": {
+            "title": "Markdown",
+            "blurb": "The inverse of JTLT: CommonMark + GFM + frontmatter parsed into a JSON AST — transformed by JSLT, rendered by @jarenjs/view with content-hash keys and structural sharing. Ships an app-ready visual component.",
+            "perf": "measured against marked, markdown-it and micromark; constant-time re-render"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/mermaid",
+      "card": {
+        "title": "Mermaid",
+        "blurb": "A native, headless Mermaid clone: diagrams-as-code parsed to a geometry-free JSON AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able with no browser, structurally shared, bidirectional (parseMermaid ⇄ toMermaid).",
+        "perf": "headless SVG, constant-time re-render"
+      },
+      "engines": [
+        {
+          "key": "mermaid",
+          "suite": "mermaid",
+          "card": {
+            "title": "Mermaid",
+            "blurb": "A native, headless Mermaid clone: diagrams-as-code parsed to a geometry-free JSON AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able with no browser, structurally shared, bidirectional (parseMermaid ⇄ toMermaid).",
+            "perf": "headless SVG, constant-time re-render"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/calc",
+      "card": {
+        "title": "Calculator",
+        "blurb": "A multi-mode calculator (standard / scientific / programmer / financial / converter) as an @jarenjs/app document: a two-stage expression compiler (parseExpression ⇄ toExpression), x·y/x·y·z plots as pure-vnode SVG, and a pure numeric kernel pushed down into @jarenjs/core (math/finance/convert).",
+        "perf": "apps as JSON, eval-free, SSR-able"
+      },
+      "engines": [
+        {
+          "key": "calc",
+          "suite": null,
+          "card": {
+            "title": "Calculator",
+            "blurb": "A multi-mode calculator (standard / scientific / programmer / financial / converter) as an @jarenjs/app document: a two-stage expression compiler (parseExpression ⇄ toExpression), x·y/x·y·z plots as pure-vnode SVG, and a pure numeric kernel pushed down into @jarenjs/core (math/finance/convert).",
+            "perf": "apps as JSON, eval-free, SSR-able"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/charts",
+      "card": {
+        "title": "Charts",
+        "blurb": "Headless SVG charts from JSON/JSONX/JOSL definitions: geometry-free ASTs, thirteen chart types from pie to GeoJSON maps, schema-validated, and a stream adapter that builds charts live from the incremental readers — replay a document chunk by chunk, or go live on real market data.",
+        "perf": "incremental ticks that stay flat as the series grows"
+      },
+      "engines": [
+        {
+          "key": "charts",
+          "suite": "charts",
+          "card": {
+            "title": "Charts",
+            "blurb": "Headless SVG charts from JSON/JSONX/JOSL definitions: geometry-free ASTs, thirteen chart types from pie to GeoJSON maps, schema-validated, and a stream adapter that builds charts live from the incremental readers — replay a document chunk by chunk, or go live on real market data.",
+            "perf": "incremental ticks that stay flat as the series grows"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/studio",
+      "card": {
+        "title": "Studio",
+        "blurb": "The project IDE: a multi-file project — an app document beside the schema, view, actions, model and query files it sits with — is one document, each file validated against its own published grammar, assembled into runnable artifacts and hosted live by the studio widget. The engine is headless; the component layer is the IDE.",
+        "perf": null
+      },
+      "engines": [],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/play",
+      "card": {
+        "title": "Play",
+        "blurb": "The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON Pointer, JSON Patch, query, JSLT, JTLT, JOSL, CSV, Markdown, Mermaid, Contract — feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the Studio. The engine is headless; the component is the playground UI.",
+        "perf": null
+      },
+      "engines": [],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/josl",
+      "card": {
+        "title": "JOSL, JSONX & CSV",
+        "blurb": "TOML 1.0 as a superset with JavaScript's obvious values first-class, the same extensions over JSON as JSONX, and a self-healing CSV reader — each with an incremental streaming reader whose chunks may split any token, all reporting one unified event with pointer-able paths.",
+        "perf": null
+      },
+      "engines": [
+        {
+          "key": "josl",
+          "suite": "toml",
+          "card": {
+            "title": "JOSL",
+            "blurb": "A strict TOML 1.0 superset with JavaScript-obvious values and streaming document-order events. The only engine in our benchmark passing the full toml-test suite — and the same reader family streams JSONX, strict JSON and CSV. Opt into detach and a record is handed over and forgotten, so a document larger than memory reads in a flat 0.1 MB.",
+            "perf": "scored on the whole toml-test corpus"
+          }
+        },
+        {
+          "key": "csv",
+          "suite": "csv",
+          "card": {
+            "title": "CSV",
+            "blurb": "RFC 4180 strict by default, and self-healing on demand: an unclosed quote, a stray quote inside a value or a ragged row is read the way that loses the least — and every fix is reported with a code, a line and a column, where other parsers heal silently or reject the file. Wholesale and chunk-streaming share one grammar path.",
+            "perf": "reports what it repaired, instead of guessing quietly"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/ai",
+      "card": {
+        "title": "AI assistant",
+        "blurb": "Browser-side AI with bring-your-own-key: one OpenAI-compatible client (OpenRouter / Ollama / LM Studio), an incremental SSE decoder, retry with Retry-After, structured output with local-validation repair, token-budget compaction, a bounded agent loop and WebMCP registration.",
+        "perf": "tool calls validated by Jaren before they run"
+      },
+      "engines": [
+        {
+          "key": "ai",
+          "suite": null,
+          "card": {
+            "title": "AI",
+            "blurb": "Browser-side AI with bring-your-own-key: one OpenAI-compatible client (OpenRouter / Ollama / LM Studio), an incremental SSE decoder, retry with Retry-After, structured output with local-validation repair, token-budget compaction, a bounded agent loop and WebMCP registration.",
+            "perf": "tool calls validated by Jaren before they run"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/flow",
+      "card": {
+        "title": "Flow — executable workflows",
+        "blurb": "Executable workflows as JSON: jaren-fsm state machines compiled to a pure step function, and jaren-dag dataflow over the suite’s own engines. Guards are query documents, effects come back as data, and @jarenjs/mermaid projects a diagram both ways — the Flow studio edits, runs and animates them live.",
+        "perf": "a machine survives a JSON round trip with its guards; XState’s functions do not"
+      },
+      "engines": [
+        {
+          "key": "flow",
+          "suite": "flow",
+          "card": {
+            "title": "Flow",
+            "blurb": "Executable workflows as JSON: jaren-fsm state machines compiled to a pure step function, and jaren-dag dataflow over the suite’s own engines. Guards are query documents, effects come back as data, and @jarenjs/mermaid projects a diagram both ways — the Flow studio edits, runs and animates them live.",
+            "perf": "a machine survives a JSON round trip with its guards; XState’s functions do not"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/linq",
+      "card": {
+        "title": "LINQ — chains to query documents",
+        "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+        "perf": "one operator set, byte-identical documents through the sync and async drivers"
+      },
+      "engines": [
+        {
+          "key": "linq",
+          "suite": null,
+          "card": {
+            "title": "LINQ",
+            "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+            "perf": "one operator set, byte-identical documents through the sync and async drivers"
+          }
+        }
+      ],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/db",
+      "card": {
+        "title": "Data — documents in SQLite",
+        "blurb": "Documents AND entities in SQLite behind driver and dialect seams: a pushdown planner that renders guarded parameter-bound SQL, one-statement graph loads, a copy-on-write unit of work with optimistic concurrency, generated entity types, and a jaren-db CLI whose migrations rebuild tables the documented twelve-step way.",
+        "perf": "the two-level graph load runs in ONE statement; statement counts published beside every timing"
+      },
+      "engines": [
+        {
+          "key": "db",
+          "suite": "orm",
+          "card": {
+            "title": "Data",
+            "blurb": "Documents AND entities in SQLite behind driver and dialect seams: a pushdown planner that renders guarded parameter-bound SQL, one-statement graph loads, a copy-on-write unit of work with optimistic concurrency, generated entity types, and a jaren-db CLI whose migrations rebuild tables the documented twelve-step way.",
+            "perf": "the two-level graph load runs in ONE statement; statement counts published beside every timing"
+          }
+        }
+      ],
+      "derived": false
+    }
+  ]
+}
