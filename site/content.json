@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-22T17:59:35+02:00",
-  "commit": "d96f0c5a552a5c86e165899d3bc8e5a8c470c9bf",
+  "generated": "2026-08-23T10:47:37+02:00",
+  "commit": "69d002952710ddfbf8c734255a499ae7820d4c94",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -552,7 +552,7 @@
             "children": [
               {
                 "type": "text",
-                "value": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 93-operator"
+                "value": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 98-operator"
               },
               {
                 "type": "softBreak"
@@ -1510,7 +1510,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/json/site.md",
-          "hash": "1hznnt0",
+          "hash": "87iziw",
           "frontmatterLang": "yaml"
         }
       },
@@ -7316,6 +7316,145 @@
             "children": [
               {
                 "type": "text",
+                "value": "Spatial members get indexable columns too. A GeoJSON position is an array and a"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "geometry is an object, so neither is indexable as it stands; an index declaring"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "derive: 'geohash' (with a required precision) or derive: 'bbox' materializes the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "cell, or the four box edges, as columns computed by "
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/core/geo"
+              },
+              {
+                "type": "text",
+                "value": " — a"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "generated column over a registered deterministic function where the driver can"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "index one, and a stored column the store writes where it cannot."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "A spatial query over such a collection is then two stages, and "
+              },
+              {
+                "type": "inlineCode",
+                "value": "explain()"
+              },
+              {
+                "type": "text",
+                "value": " names"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "both. "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$bbox-intersects"
+              },
+              {
+                "type": "text",
+                "value": " and a geohash cell probe decide in SQL; a "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$within"
+              },
+              {
+                "type": "text",
+                "value": " or"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "a bounded "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$distance"
+              },
+              {
+                "type": "text",
+                "value": " pushes the bounding box it provably implies and refines"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "the exact predicate in the engine over the narrowed rows, with"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "explain().prefilters"
+              },
+              {
+                "type": "text",
+                "value": " reporting the construct, the columns it read, and whether"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "it decided or merely narrowed. A proximity probe is nine cells, never one — two"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "points ten metres apart can differ in the first character of their cell."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
                 "value": "A store can also open with an operator registry — "
               },
               {
@@ -7786,7 +7925,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/db/site.md",
-          "hash": "1ij6e0o",
+          "hash": "kkihdk",
           "frontmatterLang": "yaml"
         }
       },
