@@ -16,6 +16,7 @@ import {
   fromCodePoints,
   countCodePoints,
   compareCodePoints,
+  codePointPrefixSuccessor,
   hashContent,
   fnv1a,
   FNV1A_OFFSET_BASIS,
@@ -321,6 +322,59 @@ describe('compareCodePoints', () => {
     assert.isTrue('｡' > '\u{10000}');
     assert.deepEqual(compareCodePoints('｡', '\u{10000}'), -1);
     assert.deepEqual(compareCodePoints('\u{10000}', '｡'), 1);
+  });
+});
+
+describe('codePointPrefixSuccessor', () => {
+  // the property the whole helper exists for: it turns "starts with p"
+  // into a half-open range, so an ordered index can seek instead of
+  // testing every row
+  const bounds = (prefix, value) => {
+    const upper = codePointPrefixSuccessor(prefix);
+    assert.isTrue(upper !== null, 'this suite only ranges over bounded prefixes');
+    return compareCodePoints(prefix, value) <= 0 && compareCodePoints(value, upper) < 0;
+  };
+
+  it('should increment the last code point', () => {
+    assert.deepEqual(codePointPrefixSuccessor('a'), 'b');
+    assert.deepEqual(codePointPrefixSuccessor('pre'), 'prf');
+    assert.deepEqual(codePointPrefixSuccessor('az'), 'a{');
+  });
+
+  it('should step by code point, not by UTF-16 unit', () => {
+    // 'a\u{10000}' is three code units; incrementing the last of them
+    // would leave a lone high surrogate and an upper bound below the
+    // string it is meant to bound
+    assert.deepEqual(codePointPrefixSuccessor('a\u{10000}'), 'a\u{10001}');
+    assert.deepEqual(codePointPrefixSuccessor('\u{FFFF}'), '\u{10000}');
+    assert.isTrue(bounds('a\u{10000}', 'a\u{10000}z'));
+    assert.isTrue(bounds('\u{FFFF}', '\u{FFFF}\u{10000}'));
+  });
+
+  it('should carry when the last code point is the highest there is', () => {
+    assert.deepEqual(codePointPrefixSuccessor('a\u{10FFFF}'), 'b');
+    assert.deepEqual(codePointPrefixSuccessor('a\u{10FFFF}\u{10FFFF}'), 'b');
+    assert.isTrue(bounds('a\u{10FFFF}', 'a\u{10FFFF}\u{10FFFF}'));
+  });
+
+  it('should answer null when no upper bound exists', () => {
+    assert.deepEqual(codePointPrefixSuccessor(''), null, 'every string begins with the empty one');
+    assert.deepEqual(codePointPrefixSuccessor('\u{10FFFF}'), null);
+    assert.deepEqual(codePointPrefixSuccessor('\u{10FFFF}\u{10FFFF}'), null);
+  });
+
+  it('should skip the surrogate range so the bound is itself a string', () => {
+    assert.deepEqual(codePointPrefixSuccessor('\u{D7FF}'), '\u{E000}');
+    assert.isTrue(bounds('\u{D7FF}', '\u{D7FF}a'));
+  });
+
+  it('should bound exactly: inside iff it has the prefix', () => {
+    const inside = ['pre', 'pre-a', 'pre\u{10FFFF}', 'preZ'];
+    const outside = ['pr', 'prf', 'p', '', 'qre', 'PRE'];
+    for (const value of inside)
+      assert.isTrue(bounds('pre', value), `${JSON.stringify(value)} has the prefix`);
+    for (const value of outside)
+      assert.isFalse(bounds('pre', value), `${JSON.stringify(value)} does not`);
   });
 });
 

@@ -191,9 +191,19 @@ generated column where one exists), `?` = the bound operand:
 | `$eq` path, external | `(jt = 'text' AND typeof(?) = 'text' AND v = ?) OR (jt IN ('integer','real') AND typeof(?) IN ('integer','real') AND v = ?)` |
 | `$ne` path, external | `jt IS NOT NULL AND NOT (…the $eq form…)` |
 | ordering vs external | the same two-branch form with `op` |
-| `$starts-with` path, string | `jt = 'text' AND substr(v, 1, length(?)) = ?` |
+| `$starts-with` path, string | `jt = 'text' AND (v >= ? AND v < ?)` — the prefix and its code-point successor |
 | `$ends-with` path, string | `jt = 'text' AND (length(?) = 0 OR substr(v, -length(?)) = ?)` |
 | `$contains` path, string | `jt = 'text' AND instr(v, ?) > 0` |
+
+**The prefix predicate is index-usable, and the other two are not.**
+`$starts-with` emits a half-open range over the value, so a declared
+index on that path is *seeked*, not scanned — worth declaring one for.
+The bounds are computed at emit time, which the planner's own rule
+makes exact: a string operator translates only with a literal,
+non-empty pattern, so its code-point successor is known there. (A
+pattern of nothing but U+10FFFF has no successor and falls back to the
+scannable `substr` form.) `$ends-with` and `$contains` have no
+index-usable spelling and read every row of the collection.
 
 The guards make the forms sound for typed AND untyped paths alike —
 the schema type's job is choosing the generated COLUMN (the index),

@@ -17,6 +17,14 @@
  * The bounding box of a list of positions, as `[west, south, east, north]`.
  * Returns null for an empty list — there is no box that bounds nothing,
  * and an all-Infinity placeholder would silently intersect everything.
+ *
+ * Null too when any position is non-finite. Narrowing would drop it —
+ * every comparison against `NaN` is false — and answer with a finite,
+ * plausible box that does not contain the input it was asked to bound.
+ * A pre-filter built on such a box loses matching rows silently, which
+ * is the one failure a two-stage spatial plan cannot survive, so a
+ * position that cannot be bounded refuses the box rather than leaving
+ * it too small.
  * @param {Array<number[]>} positions
  * @returns {number[] | null}
  */
@@ -31,6 +39,8 @@ export function bboxOfPositions(positions) {
   for (let i = 0; i < n; i++) {
     const x = positions[i][0];
     const y = positions[i][1];
+    if (!Number.isFinite(x) || !Number.isFinite(y))
+      return null;
     if (x < west) west = x;
     if (x > east) east = x;
     if (y < south) south = y;

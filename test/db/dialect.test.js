@@ -139,6 +139,23 @@ describe('SQLite dialect goldens', () => {
     assert.strictEqual(sqliteDialect.typeFor(undefined, 'key'), 'TEXT');
   });
 
+  // A prefix predicate is the one string operator with a sargable
+  // spelling: `substr(col, 1, n) = p` is a function OF the column and
+  // can only be scanned, while the half-open range over the same
+  // prefix is an index seek. `strStartsWithExact` keeps the scannable
+  // form for the one pattern that has no expressible upper bound.
+  it('the prefix predicate is a half-open range, not a substr call', () => {
+    assert.strictEqual(sqliteDialect.strStartsWith('"gx_name"', '?', '?'),
+      '("gx_name" >= ? AND "gx_name" < ?)');
+    assert.strictEqual(sqliteDialect.strStartsWithExact('"gx_name"', '?', '?'),
+      'substr("gx_name", 1, length(?)) = ?');
+    assert.strictEqual(sqliteDialect.strEndsWith('"gx_name"', '?', '?', '?'),
+      '(length(?) = 0 OR substr("gx_name", -length(?)) = ?)',
+      'unchanged: no sargable form exists');
+    assert.strictEqual(sqliteDialect.strContains('"gx_name"', '?'),
+      'instr("gx_name", ?) > 0', 'unchanged: no sargable form exists');
+  });
+
   it('transaction, pragma and introspection phrases', () => {
     assert.strictEqual(sqliteDialect.tx.savepoint('sp_1'), 'SAVEPOINT "sp_1"');
     assert.strictEqual(sqliteDialect.tx.release('sp_1'), 'RELEASE SAVEPOINT "sp_1"');

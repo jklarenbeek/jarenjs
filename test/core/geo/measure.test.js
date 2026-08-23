@@ -149,6 +149,21 @@ describe('bounding boxes', () => {
     assert.strictEqual(bboxContains([0, 0, 2, 2], 3, 1), false);
   });
 
+  // A non-finite coordinate compares false against everything, so the
+  // narrowing loop leaves it out of the box entirely: the answer is a
+  // plausible, finite box that does not bound the input it was given.
+  // A box index and a conservative pre-filter are both built on this,
+  // and a pre-filter whose box is too small drops matching rows.
+  it('should refuse a box rather than return one that does not bound its input', () => {
+    assert.strictEqual(bboxOfPositions([[NaN, 0]]), null, 'a lone non-finite position has no box');
+    assert.strictEqual(bboxOfPositions([[NaN, 0], [5, 5]]), null,
+      'the dangerous case: [5,0,5,5] is finite, plausible, and does not contain [NaN,0]');
+    assert.strictEqual(bboxOfPositions([[0, Infinity]]), null, 'infinite is non-finite too');
+    assert.strictEqual(bboxOfPositions([[1, 2], [-Infinity, 3]]), null);
+    assert.deepStrictEqual(bboxOfPositions([[1, 2], [5, 0], [3, 9]]), [1, 0, 5, 9],
+      'every finite case is unchanged');
+  });
+
   it('should union boxes', () => {
     assert.deepStrictEqual(bboxUnion([0, 0, 1, 1], [2, 2, 3, 3]), [0, 0, 3, 3]);
     assert.deepStrictEqual(bboxUnion([0, 0, 5, 5], [1, 1, 2, 2]), [0, 0, 5, 5]);

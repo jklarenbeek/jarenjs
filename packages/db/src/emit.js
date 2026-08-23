@@ -16,9 +16,40 @@
  * logic never decides a row.
  */
 
+import { codePointPrefixSuccessor } from '@jarenjs/core/string';
+
 /**
  * @typedef {{ external: string } | { literal: unknown }} ParamSlot
  */
+
+/**
+ * The SQL for one string predicate. The prefix case is the only one
+ * with an index-usable spelling: a function of the value (`substr`) or
+ * a pattern match (`LIKE`) can only be scanned, while the half-open
+ * range `value >= p AND value < successor(p)` is a seek, and holds
+ * exactly the values beginning with `p` under a code-point ordering.
+ * The planner reaches here only with a non-empty literal pattern, so
+ * the successor is computable at emit time and needs no slot kind of
+ * its own; the one pattern that has no successor keeps the scannable
+ * form, which is correct, merely slow.
+ * @param {any} dialect
+ * @param {(slot: ParamSlot) => string} param
+ * @param {string} valueSql
+ * @param {any} pred
+ * @returns {string}
+ */
+function stropForm(dialect, param, valueSql, pred) {
+  const pattern = pred.operand.lit;
+  const bind = () => param({ literal: pattern });
+  if (pred.kind === 'ends')
+    return dialect.strEndsWith(valueSql, bind(), bind(), bind());
+  if (pred.kind === 'contains')
+    return dialect.strContains(valueSql, bind());
+  const upper = codePointPrefixSuccessor(pattern);
+  return upper === null
+    ? dialect.strStartsWithExact(valueSql, bind(), bind())
+    : dialect.strStartsWith(valueSql, bind(), param({ literal: upper }));
+}
 
 /**
  * Emit one plan as SQL plus its ordered parameter slots.
@@ -132,13 +163,7 @@ export function emitPlan(plan, dialect, physical) {
         return `${pred.name}(${dialect.jsonText(docColumn)})`;
       case 'strop': {
         const jt = typeOf(pred.ref);
-        const value = valueOf(pred.ref);
-        const bind = () => param({ literal: /** @type {any} */ (pred.operand).lit });
-        const form = pred.kind === 'starts'
-          ? dialect.strStartsWith(value, bind(), bind())
-          : pred.kind === 'ends'
-            ? dialect.strEndsWith(value, bind(), bind(), bind())
-            : dialect.strContains(value, bind());
+        const form = stropForm(dialect, param, valueOf(pred.ref), pred);
         return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
       }
       default:
@@ -209,12 +234,7 @@ export function createEntityPredicateEmitters(dialect, param) {
         : `(${jt} IS NOT NULL AND ${jt} NOT IN (${list}))`;
     }
     if (pred.p === 'strop') {
-      const bind = () => param({ literal: pred.operand.lit });
-      const form = pred.kind === 'starts'
-        ? dialect.strStartsWith(value, bind(), bind())
-        : pred.kind === 'ends'
-          ? dialect.strEndsWith(value, bind(), bind(), bind())
-          : dialect.strContains(value, bind());
+      const form = stropForm(dialect, param, value, pred);
       return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
     }
     const lit = pred.operand.lit;
@@ -243,12 +263,7 @@ export function createEntityPredicateEmitters(dialect, param) {
         : `(${column} IS NOT NULL AND ${column} <> ${param({ literal: wanted })})`;
     }
     if (pred.p === 'strop') {
-      const bind = () => param({ literal: pred.operand.lit });
-      const form = pred.kind === 'starts'
-        ? dialect.strStartsWith(column, bind(), bind())
-        : pred.kind === 'ends'
-          ? dialect.strEndsWith(column, bind(), bind(), bind())
-          : dialect.strContains(column, bind());
+      const form = stropForm(dialect, param, column, pred);
       return `(${column} IS NOT NULL AND ${form})`;
     }
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];

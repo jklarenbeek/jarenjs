@@ -358,3 +358,91 @@ describe('the collection binding name is the document\'s to choose', () => {
     }
   }
 });
+
+// A prefix predicate is the only string operator with an index-usable
+// spelling, and the planner's own rules are what make the rewrite
+// exact: a pattern reaches the dialect only as a literal string, and
+// never as the empty one. So the half-open range `w >= p AND w <
+// successor(p)` can be computed at emit time, and the engine stays the
+// oracle for every answer it produces.
+const PREFIX_MODEL = {
+  $model: '0.1',
+  collections: {
+    words: {
+      schema: {
+        type: 'object',
+        properties: { id: { type: 'string' }, w: { type: 'string' } },
+      },
+      key: '/id',
+      indexes: [{ name: 'by_w', path: '$.w' }],
+    },
+  },
+};
+
+// every value shares one prefix, so a whole-table match is reachable;
+// the tail characters are the ones a UTF-16 rewrite gets wrong — an
+// astral pair, the last BMP code point, and the last code point there
+// is (whose successor has to carry into the character before it)
+const WORDS = [
+  { id: '1', w: 'pre' },
+  { id: '2', w: 'pre-a' },
+  { id: '3', w: 'pre-b' },
+  { id: '4', w: 'pre-\u{10000}' },
+  { id: '5', w: 'pre-￿' },
+  { id: '6', w: 'pre-\u{10FFFF}' },
+  { id: '7', w: 'other' },
+  { id: '8' },
+];
+
+describe('a prefix predicate seeks the index', () => {
+  const query = (pattern) => ({
+    $for: { it: '$[*]' },
+    $where: { '$starts-with': ['$it.w', pattern] },
+    $return: '$it.id',
+  });
+
+  async function freshWords() {
+    const store = await openStore(PREFIX_MODEL, { driver: nodeDriver() });
+    const words = store.collection('words');
+    for (const row of WORDS) await words.insert(row);
+    return { store, words };
+  }
+
+  it('the database seeks the declared index and no substr survives', async () => {
+    const { store, words } = await freshWords();
+    const explanation = await words.explain({
+      $for: { it: '$[*]' },
+      $where: { '$starts-with': ['$it.w', 'pre-'] },
+      $return: '$it',
+    });
+    assert.strictEqual(explanation.sql.includes('substr('), false,
+      'a function of the column can only be scanned');
+    assert.match(explanation.sql, /"gx_w" >= \? AND "gx_w" < \?/);
+    assert.deepStrictEqual(explanation.indexes, ['words_by_w']);
+    assert.match(explanation.scanNarrative, /SEARCH/, 'the database plan output, not a guess');
+    assert.match(explanation.scanNarrative, /words_by_w/);
+    assert.strictEqual(explanation.residual, null);
+    await store.close();
+  });
+
+  for (const [title, pattern] of /** @type {[string, string][]} */ ([
+    ['the whole table', 'pre'],
+    ['no rows at all', 'zzz'],
+    ['a whole value, exactly', 'pre-a'],
+    ['a pattern ending in a surrogate pair', 'pre-\u{10000}'],
+    ['a pattern ending at the last BMP code point', 'pre-￿'],
+    ['a pattern ending at the last code point there is', 'pre-\u{10FFFF}'],
+    ['a pattern longer than every value', 'pre-aaaaaaaa'],
+    ['a bare hyphen tail', 'pre-'],
+    ['a pattern with no upper bound at all', '\u{10FFFF}'],
+  ])) {
+    it(`answers as the engine does: ${title}`, async () => {
+      const { store, words } = await freshWords();
+      const document = query(pattern);
+      const expected = compileJsonQuery(document)(structuredClone(WORDS));
+      const actual = await Promise.resolve(words.execute(document));
+      assert.deepStrictEqual(actual, expected);
+      await store.close();
+    });
+  }
+});

@@ -276,6 +276,42 @@ export function compareCodePoints(a, b) {
   return a.codePointAt(i) < b.codePointAt(i) ? -1 : 1;
 }
 
+/**
+ * The exclusive upper bound of the strings beginning with `prefix`: the
+ * smallest string that sorts above every one of them. For a
+ * well-formed `value`, `value` begins with `prefix` **iff**
+ * `prefix <= value < codePointPrefixSuccessor(prefix)` under
+ * {@link compareCodePoints} — which is what lets a caller spell a
+ * prefix test as a half-open range, the form an ordered index can seek
+ * rather than test row by row.
+ *
+ * Null when there is no such string, and the caller then has no range
+ * to offer: the empty prefix (every string begins with it) and a
+ * prefix of nothing but U+10FFFF (nothing sorts above it).
+ *
+ * The bound never lands in the surrogate range, because it has to be a
+ * string the caller can hand on — to a comparator, a database
+ * parameter, a serializer. No well-formed string sorts inside that
+ * range, so stepping over it leaves the equivalence above intact.
+ *
+ * @param {string} prefix - The prefix to bound
+ * @returns {string | null} The exclusive upper bound, or null when none exists
+ */
+export function codePointPrefixSuccessor(prefix) {
+  const points = toCodePoints(prefix);
+  // the last code point that can still be incremented: U+10FFFF cannot,
+  // so it drops off and the carry moves left
+  let i = points.length - 1;
+  while (i >= 0 && points[i] === 0x10FFFF)
+    i--;
+  if (i < 0)
+    return null;
+  const next = points[i] + 1;
+  points.length = i + 1;
+  points[i] = next >= 0xD800 && next <= 0xDFFF ? 0xE000 : next;
+  return fromCodePoints(points);
+}
+
 /** FNV-1a 32-bit offset basis — the seed a fresh hash starts from. */
 export const FNV1A_OFFSET_BASIS = 0x811c9dc5;
 

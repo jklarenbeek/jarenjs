@@ -56,6 +56,15 @@ never-matching, keeping positions aligned with the caller's array.
 Build and probe are level with Flatbush (`npm run benchmark:geo`; the
 table lives in [ARCHITECTURE](../ARCHITECTURE.md)).
 
+**A box is refused rather than made too small.** `bboxOfPositions` and
+`bboxOf` answer `null` for an empty input *and* whenever any position
+they are asked to bound has a non-finite coordinate — they never skip
+the position and bound the rest. A narrowing loop would drop it
+silently (every comparison against `NaN` is false) and return a finite,
+plausible box that does not contain its input, and a candidate filter
+built on such a box loses matching entries with nothing to show for it.
+`null` is the answer every caller already handles.
+
 ## GeoJSON traversal — `geojson.js`
 
 The one layer that reads the `type` discriminator; every function takes

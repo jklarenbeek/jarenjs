@@ -94,7 +94,7 @@ describe('golden SQL (the truth-table forms)', () => {
     ]);
   });
 
-  it('string operators spell substr/instr with doubled pattern binds', () => {
+  it('string operators spell a prefix range, substr and instr', () => {
     const { sql, slots } = emitFor({
       $for: { it: '$[*]' },
       $where: { $and: [
@@ -104,10 +104,25 @@ describe('golden SQL (the truth-table forms)', () => {
       ] },
       $return: '$it',
     }, sqliteDialect);
-    assert.match(sql, /substr\(jsonb_extract\("doc", '\$\."name"'\), 1, length\(\?\)\) = \?/);
+    assert.match(sql, /\(jsonb_extract\("doc", '\$\."name"'\) >= \? AND jsonb_extract\("doc", '\$\."name"'\) < \?\)/);
     assert.match(sql, /\(length\(\?\) = 0 OR substr\(jsonb_extract\("doc", '\$\."name"'\), -length\(\?\)\) = \?\)/);
     assert.match(sql, /instr\(jsonb_extract\("doc", '\$\."name"'\), \?\) > 0/);
     assert.strictEqual(slots.length, 6, 'starts:2 + ends:3 + contains:1');
+    assert.deepStrictEqual(slots[0], { literal: 'a' }, 'the prefix is the lower bound');
+    assert.deepStrictEqual(slots[1], { literal: 'b' }, 'and its successor the upper one');
+  });
+
+  // the one prefix with no expressible upper bound: nothing sorts above
+  // U+10FFFF, so there is no range to seek and the scannable form —
+  // correct, merely slow — is what the emitter falls back to
+  it('a prefix with no successor keeps the exact form', () => {
+    const { sql, slots } = emitFor({
+      $for: { it: '$[*]' },
+      $where: { '$starts-with': ['$it.name', '\u{10FFFF}'] },
+      $return: '$it',
+    }, sqliteDialect);
+    assert.match(sql, /substr\(jsonb_extract\("doc", '\$\."name"'\), 1, length\(\?\)\) = \?/);
+    assert.deepStrictEqual(slots, [{ literal: '\u{10FFFF}' }, { literal: '\u{10FFFF}' }]);
   });
 
   it('aggregates select the value column; count needs no ref', () => {

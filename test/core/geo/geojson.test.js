@@ -64,6 +64,22 @@ describe('GeoJSON traversal', () => {
     assert.strictEqual(bboxOf({ type: 'Feature', geometry: null }), null);
   });
 
+  // The walk is over a whole value, so one bad vertex anywhere in a
+  // feature poisons the box: answering with a box over the rest would
+  // be a box that does not bound the feature.
+  it('should refuse a box for a value carrying a non-finite coordinate', () => {
+    const broken = {
+      type: 'Feature',
+      properties: { name: 'broken' },
+      geometry: { type: 'LineString', coordinates: [[4, 52], [NaN, 53], [5, 54]] },
+    };
+    assert.strictEqual(bboxOf(broken), null);
+    assert.strictEqual(bboxOf({ type: 'Point', coordinates: [4, Infinity] }), null);
+    assert.strictEqual(
+      bboxOf({ type: 'FeatureCollection', features: [FEATURE, broken] }), null,
+      'one broken member refuses the collection\'s box');
+  });
+
   it('should measure area, subtracting holes', () => {
     const solid = geometryArea(POLY);
     const holed = geometryArea({

@@ -113,7 +113,14 @@ export const sqliteDialect = createDialect({
   jsonTypeOf: (columnSql, pathText) =>
     `json_type(${columnSql}, ${stringLiteral(pathText)})`,
   valueTypeOf: (paramSql) => `typeof(${paramSql})`,
-  strStartsWith: (valueSql, patternA, patternB) =>
+  // the half-open range over the prefix, which an index on the value
+  // can seek; `substr(value, 1, n) = p` and `value LIKE 'p%'` both read
+  // every row. SQLite's default BINARY collation compares UTF-8 bytes,
+  // which orders code points, so the range holds exactly the values
+  // that begin with the prefix
+  strStartsWith: (valueSql, lowerParamSql, upperParamSql) =>
+    `(${valueSql} >= ${lowerParamSql} AND ${valueSql} < ${upperParamSql})`,
+  strStartsWithExact: (valueSql, patternA, patternB) =>
     `substr(${valueSql}, 1, length(${patternA})) = ${patternB}`,
   strEndsWith: (valueSql, patternA, patternB, patternC) =>
     `(length(${patternA}) = 0 OR substr(${valueSql}, -length(${patternB})) = ${patternC})`,

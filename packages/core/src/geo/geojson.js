@@ -105,7 +105,10 @@ export function eachPosition(value, visit) {
 
 /**
  * The bounding box of any GeoJSON value, as `[west, south, east, north]`.
- * Null when the value contains no positions.
+ * Null when the value contains no positions, and null when any position
+ * it walks is non-finite — the rule `bboxOfPositions` states, for the
+ * same reason: a box that does not bound its input is worse than no
+ * box.
  *
  * A `bbox` member already present on the value is ignored: it is an
  * optimization the producer may have got wrong, and recomputing is the
@@ -123,16 +126,21 @@ export function bboxOf(value) {
   let east = -Infinity;
   let north = -Infinity;
   let seen = false;
+  let bounded = true;
   eachPosition(value, (p) => {
     const x = p[0];
     const y = p[1];
     seen = true;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      bounded = false;
+      return;
+    }
     if (x < west) west = x;
     if (x > east) east = x;
     if (y < south) south = y;
     if (y > north) north = y;
   });
-  return seen ? [west, south, east, north] : null;
+  return seen && bounded ? [west, south, east, north] : null;
 }
 
 /**
