@@ -75,7 +75,7 @@ mass), `containsPosition`, `geoDistance` (between representative
 positions), `ringsClosed`. Nothing here validates — malformed input
 yields null or 0 — because judgment lives one module over.
 
-## Validity — `valid.js`, `wkt.js`, `geohash.js`
+## Validity — `valid.js`, `geohash.js`
 
 The one-call judgments backing the `geoFormats` group in
 `@jarenjs/formats`:
@@ -85,10 +85,60 @@ The one-call judgments backing the `geoFormats` group in
   invariant a JSON Schema provably cannot express. The shallow twin of
   the meta-schema artifacts in `@jarenjs/json`, which locate failures
   and (via `$query`) also check winding.
-- `isValidWkt(text)` — strict ISO 19125 grammar: seven tags, `Z`/`M`/
-  `ZM` modifiers (unmodified accepts 2 or 3 coordinates, as PostGIS
-  does), consistent counts, closed rings, `EMPTY`, no surrounding text.
 - `isValidGeohash(hash)` — non-empty, lowercase base-32 alphabet.
+
+## Well-Known Text — `wkt.js`
+
+The round trip with the text encoding every spatial database emits.
+`wktToGeoJson(text)` returns a geometry or `null`; `geoJsonToWkt(value,
+options?)` returns a string or `null`; `isValidWkt(text)` answers
+yes-or-no. **All three are one grammar walk**: each scan function takes
+a sink that is absent for the predicate and present for the parser, so
+the format tester allocates nothing and the two entry points cannot
+drift. A committed corpus asserts `isValidWkt(s) === (wktToGeoJson(s)
+!== null)` for every entry, malformed half included — a divergence is a
+failing test.
+
+The grammar is strict ISO 19125: the seven tags and no others,
+`Z`/`M`/`ZM` modifiers (unmodified accepts 2 or 3 coordinates, as
+PostGIS does), coordinate counts consistent with the modifier and with
+the geometry's first point, rings of four or more positions that close,
+`EMPTY`, and no text before or after.
+
+Four rules decide what a lenient converter loses:
+
+- **`EMPTY` is an empty coordinate array**, not `null`: `POINT EMPTY` →
+  `{ type: 'Point', coordinates: [] }`. Unparseable and validly empty
+  are different answers.
+- **`Z` is kept and `M` is dropped.** RFC 7946 §3.1.1 defines a
+  position's third element as altitude; a WKT measure is not one, so
+  writing it there would be a lie. `POINT ZM (1 2 3 4)` → `[1, 2, 3]`,
+  `POINT M (1 2 3)` → `[1, 2]`. The measure is discarded, and it is
+  discarded on purpose.
+- **The parser does not judge ranges.** `POINT (999 999)` parses;
+  `isValidGeoJson` is the value gate, and duplicating it here would make
+  the two entry points disagree.
+- **A value that cannot be written is not written approximately.**
+  `geoJsonToWkt` answers `null` for a non-finite coordinate, and writes
+  numbers with the shortest round-tripping spelling (`String(n)`, what
+  `JSON.stringify` uses) — never a fixed precision, which would silently
+  move the point.
+
+`geoJsonToWkt` accepts what the traversal layer accepts: a Feature
+writes its geometry, a FeatureCollection a `GEOMETRYCOLLECTION` of its
+features' geometries, a bare position a `POINT`. `options.dim` is 2 (the
+default) or 3; at 3 a geometry whose every position carries a third
+element gets a `Z` modifier, and anything else is written 2D with the
+third elements dropped, because one WKT geometry carries one modifier
+for all of its coordinates. The decision is made per tagged geometry, so
+a `GEOMETRYCOLLECTION` may mix 2D and 3D members — invalid WKT is never
+emitted.
+
+**One direction round-trips and the other does not.**
+`wktToGeoJson(geoJsonToWkt(g))` returns `g`, and that is asserted over
+the whole corpus. `geoJsonToWkt(wktToGeoJson(s)) === s` is false in
+general and is not claimed: whitespace, the `M` measure and number
+spelling are all normalized.
 
 ## Geohash — `geohash.js`
 

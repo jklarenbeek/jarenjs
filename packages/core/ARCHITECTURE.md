@@ -120,7 +120,8 @@ flowchart TB
             GeoBbox["bbox.js<br/>Bounding boxes"]
             GeoHash["geohash.js<br/>Base-32 cells"]
             GeoJson["geojson.js<br/>Typed-geometry traversal"]
-            GeoValid["valid.js + wkt.js<br/>Validity testers"]
+            GeoValid["valid.js<br/>Structural judgment"]
+            GeoWkt["wkt.js<br/>Well-Known Text round trip"]
             GeoTree["index-tree.js<br/>Packed-Hilbert box index"]
             GeoMerc["mercator.js + simplify.js<br/>Projection out, simplification"]
         end
@@ -194,6 +195,7 @@ flowchart TB
     GeoIndex --> GeoHash
     GeoIndex --> GeoJson
     GeoIndex --> GeoValid
+    GeoIndex --> GeoWkt
     GeoIndex --> GeoTree
     GeoIndex --> GeoMerc
 
@@ -549,13 +551,52 @@ passed straight in without the `type` discriminator being involved.
 | `geohash.js` | the base-32 cell encoding, and its validity tester |
 | `geojson.js` | the one layer that knows the `type` discriminator |
 | `valid.js` | `isValidGeoJson` — the one-call structural judgment (rings must close), the boolean twin of the schema artifacts in `@jarenjs/json` |
-| `wkt.js` | `isValidWkt` — a strict validity tester for Well-Known Text |
+| `wkt.js` | the Well-Known Text round trip — `wktToGeoJson`, `geoJsonToWkt` and `isValidWkt`, one grammar walk with and without a builder |
 | `index-tree.js` | a static packed-Hilbert box index for spatial joins |
 | `mercator.js` | Web Mercator, the projection *out* for anything that draws |
 | `simplify.js` | Douglas-Peucker — dropping the vertices a drawing cannot show |
 
 The three validity testers back the `geoFormats` group in
 [`@jarenjs/formats`](../formats) (`geohash`, `wkt`, `geojson`).
+
+**WKT is one grammar walk with two entry points.** `isValidWkt` is a format
+tester — it runs per value in the validator and per keystroke in the form
+layer — so it must not allocate a geometry to answer a boolean; and two
+hand-maintained grammars for one syntax would drift apart. Both are avoided by
+giving every scan function a sink: absent, it validates; present, it appends
+the value it just recognized, and `wktToGeoJson` reads the result. A committed
+corpus of 181 strings, its malformed half included, asserts
+`isValidWkt(s) === (wktToGeoJson(s) !== null)` for every entry — a divergence
+is a failing test, not a note. `geoJsonToWkt` writes the string back, and the
+parse-write-parse direction is asserted over the corpus; the write-parse-write
+direction is *not* claimed, because WKT whitespace, the `M` measure and number
+spelling are normalized on the way through.
+
+Against [`wellknown`](https://www.npmjs.com/package/wellknown), the established
+WKT↔GeoJSON converter (`npm run benchmark:geo`, Node v24.19.0):
+
+| scenario | Jaren | wellknown | ratio |
+|---|---|---|---|
+| parse a `POINT` | 439 ns | 1.34 µs | **3.1×** |
+| parse a 2000-vertex `POLYGON` | 820 µs | 2.20 ms | **2.7×** |
+| write that polygon | 160 µs | 213 µs | **1.3×** |
+| validate a `POINT` | 241 ns | 1.29 µs | **5.4×** |
+| validate that polygon | 493 µs | 1.94 ms | **3.9×** |
+
+The last two rows are the ones the sink exists for: `wellknown` has no
+predicate, so validating means parsing and throwing the geometry away. And the
+comparison is *not* like-for-like on work done — **wellknown validates less**
+and is still slower. Over the corpus it accepts 38 strings this grammar
+refuses (no ring closure, no four-point ring or two-point line minimum, no
+coordinate count checked against the modifier, no tag list, and text after the
+geometry ignored); it refuses 22 this one accepts (`M`/`ZM` geometries, `EMPTY`
+for POINT/MULTIPOINT/GEOMETRYCOLLECTION); and on 10 more the two produce
+*different geometries*, because wellknown answers an EMPTY geometry for a
+POLYGON/MULTILINESTRING/MULTIPOLYGON carrying a modifier and writes a
+MULTIPOINT's measure into the altitude slot. Every one of those classes has a
+pinned size in the benchmark's equivalence table, so a difference cannot be
+quietly absorbed, and the entries behind each are listed under it. The
+stringify output is byte-identical on the polygon.
 
 Two decisions carry the module. **Orientation is computed exactly**, through
 Shewchuk's adaptive precision arithmetic: a naive floating-point determinant

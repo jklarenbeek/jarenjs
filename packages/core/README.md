@@ -75,7 +75,7 @@ Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostn
 ```javascript
 import {
   orient2d, haversineDistance, ringWinding, bboxOf,
-  geohashEncode, isValidWkt, createBboxIndex,
+  geohashEncode, wktToGeoJson, geoJsonToWkt, createBboxIndex,
 } from '@jarenjs/core/geo';
 
 orient2d(0, 0, 1, 0, 0, 1);                    // > 0 — counter-clockwise, exactly
@@ -83,17 +83,20 @@ haversineDistance(4.9041, 52.3676, 2.3522, 48.8566); // 429_862 m (Amsterdam–P
 ringWinding([[0,0],[1,0],[1,1],[0,1],[0,0]]);  // 1 — an RFC 7946 exterior ring
 bboxOf({ type: 'Polygon', coordinates: [[[4,52],[5,52],[5,53],[4,52]]] }); // [4, 52, 5, 53]
 geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string, so a prefix test is proximity
-isValidWkt('POINT (4.9041 52.3676)');          // true — strict ISO 19125 grammar
+
+wktToGeoJson('POINT (4.9041 52.3676)');        // { type: 'Point', coordinates: [4.9041, 52.3676] }
+geoJsonToWkt({ type: 'Point', coordinates: [4.9041, 52.3676] }); // 'POINT (4.9041 52.3676)'
 
 const index = createBboxIndex(regions.map(bboxOf));       // packed-Hilbert, build once
 for (const i of index.search(...bboxOf(point))) confirm(regions[i]); // candidates, then the exact test
 ```
 
-Three design decisions carry the module:
+Four design decisions carry the module:
 
 - **Orientation is computed exactly** (Shewchuk's adaptive predicates): a naive floating-point determinant returns the *wrong sign* on near-collinear input, which makes containment contradict itself. Every ring winding and point-in-polygon answer rests on this sign, and the deliberate cost is on the [benchmark page](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).
 - **Measurement is spherical, drawing is projected, and the two never mix.** A Euclidean norm on raw degrees is 64% wrong over 1 km at Dutch latitudes, so `haversineDistance`/`sphericalRingArea` work on the sphere (`equirectDistance` is the cheap screening form for rejecting candidates first), while `projectMercator`/`fitMercator` and `simplifyLine`/`simplifyRing` exist for renderers — never measure on a projected coordinate.
 - **Validity is a separate concern from traversal.** `eachPosition`, `bboxOf`, `centroidOf` and friends measure without judging; `isValidGeoJson` (structure plus the ring closure a JSON Schema provably cannot express), `isValidWkt` and `isValidGeohash` are the one-call judgments that back the `geoFormats` group in [`@jarenjs/formats`](../formats), next to the full GeoJSON meta-schema artifacts in [`@jarenjs/json`](../json).
+- **WKT is one grammar walk with two entry points.** `isValidWkt` and `wktToGeoJson` run the *same* scan, parameterized by a sink that is absent for the predicate and present for the parser — so the `wkt` format tester (which runs per value in the validator and per keystroke in the form layer) allocates nothing, and the two cannot drift apart. A committed corpus asserts `isValidWkt(s) === (wktToGeoJson(s) !== null)` for all 181 entries, malformed half included. `geoJsonToWkt` writes the string back, and `wktToGeoJson(geoJsonToWkt(g))` returns `g`; the text direction is *not* claimed, because whitespace, the `M` measure and number spelling are normalized. Against [`wellknown`](https://www.npmjs.com/package/wellknown) the parse is 3.1× faster on a `POINT` and the yes-or-no answer 5.4× — and wellknown *validates less* while being slower, which is the honest framing; the table and every language difference are in [ARCHITECTURE](./ARCHITECTURE.md).
 
 The spatial query operators (`$distance`, `$within`, `$geohash`, spatial joins over the box index) live in the query engine in [`@jarenjs/json`](../json); the streaming map chart that draws a FeatureCollection with bounded memory lives in [`@jarenjs/charts`](../../components/charts). The full module reference is [docs/GEO.md](./docs/GEO.md).
 

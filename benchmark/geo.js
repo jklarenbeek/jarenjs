@@ -6,6 +6,7 @@
  *   @turf/turf  the GeoJSON-native standard (~796k weekly downloads)
  *   geolib      the lightweight distance/bbox library (~318k)
  *   flatbush    the static packed-Hilbert index this one is modelled on
+ *   wellknown   the established WKT<->GeoJSON converter
  *
  * Every scenario asserts **result equivalence first** and refuses to
  * print a timing table if the engines disagree beyond a stated
@@ -20,6 +21,12 @@
  * genuinely different (and more accurate) answer, not an error. Where
  * that happens the difference is reported rather than hidden.
  *
+ * The WKT section works the same way over a different axis: the two
+ * converters accept different languages, so every corpus entry they
+ * disagree about is counted into a class with a pinned size and listed
+ * under the table. A class that changes size fails the run, which is
+ * what stops a difference from being quietly absorbed.
+ *
  * Usage:
  *   node benchmark/geo.js                # equivalence, then timings
  *   node benchmark/geo.js --check-only   # equivalence only
@@ -27,6 +34,7 @@
  */
 
 import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import {
   haversineDistance,
@@ -38,11 +46,15 @@ import {
   containsPosition,
   createBboxIndex,
   bboxIntersects,
+  isValidWkt,
+  wktToGeoJson,
+  geoJsonToWkt,
 } from '@jarenjs/core/geo';
 
 import * as turf from '@turf/turf';
 import { getDistance, getPathLength } from 'geolib';
 import Flatbush from 'flatbush';
+import wellknown from 'wellknown';
 
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp } from './lib/measure.js';
@@ -72,6 +84,28 @@ const LINE = {
   type: 'LineString',
   coordinates: Array.from({ length: 500 }, (_, i) => [4 + i * 0.002, 52 + i * 0.001]),
 };
+
+const POINT_WKT = 'POINT (4.9041 52.3676)';
+/** The 2000-vertex ring as text, written here rather than by the code under test. */
+const BIG_POLY_WKT = `POLYGON ((${BIG_POLY.coordinates[0].map(([x, y]) => `${x} ${y}`).join(', ')}))`;
+
+/**
+ * The committed WKT corpus — the same strings the differential test in
+ * `test/core/geo/validity.test.js` pins the language with, so the
+ * benchmark measures agreement over exactly what the suite claims.
+ */
+const WKT_CORPUS = JSON.parse(fs.readFileSync(
+  fileURLToPath(new URL('../test/core/geo/fixtures/wkt-corpus.json', import.meta.url)), 'utf8'));
+
+/** Whatever `wellknown` does with a string, as a value: it throws on some. */
+function wellknownParse(text) {
+  try {
+    return wellknown.parse(text);
+  }
+  catch {
+    return null;
+  }
+}
 
 /** `n` deterministic boxes spread over the globe. */
 function makeBoxes(n) {
@@ -184,6 +218,88 @@ function runEquivalence() {
     if (JSON.stringify(a) === JSON.stringify(b)) indexAgree++;
   }
   check('index search (200 queries)', 'flatbush', indexAgree, indexTotal, 0);
+
+  runWktEquivalence();
+}
+
+/**
+ * Every corpus entry falls into exactly one of four classes, and each
+ * class has a pinned size: agreement, a shared answer that differs, and
+ * the two halves of the language gap. Pinning the sizes rather than
+ * classifying each entry means a change in either converter's language
+ * fails the run instead of being absorbed by a looser rule.
+ */
+const WKT_CLASSES = {
+  same: { expected: 54, entries: [], name: 'wkt parse (both accept, same geometry)', note: '' },
+  differs: {
+    expected: 10,
+    entries: [],
+    name: 'wkt parse (both accept, different geometry)',
+    note: 'wellknown has no measure dimension: a POLYGON/MULTILINESTRING/MULTIPOLYGON '
+      + 'carrying Z, M or ZM comes back as an EMPTY geometry, and a MULTIPOINT M writes '
+      + 'the measure into the altitude slot RFC 7946 reserves for one',
+  },
+  jarenOnly: {
+    expected: 22,
+    entries: [],
+    name: 'wkt language (jaren accepts, wellknown does not)',
+    note: 'M/ZM geometries, EMPTY for POINT/MULTIPOINT/GEOMETRYCOLLECTION, a trailing '
+      + 'decimal point and runs of whitespace',
+  },
+  wellknownOnly: {
+    expected: 38,
+    entries: [],
+    name: 'wkt language (wellknown accepts, jaren does not)',
+    note: 'wellknown validates less: no ring closure, no four-point ring or two-point '
+      + 'line minimum, no coordinate count against the modifier, no tag list, and text '
+      + 'after the geometry is ignored',
+  },
+};
+
+function runWktEquivalence() {
+  for (const text of WKT_CORPUS) {
+    const ours = wktToGeoJson(text);
+    const theirs = wellknownParse(text);
+    let bucket;
+    if (ours !== null && theirs !== null)
+      bucket = JSON.stringify(ours) === JSON.stringify(theirs) ? 'same' : 'differs';
+    else if (ours !== null)
+      bucket = 'jarenOnly';
+    else if (theirs !== null)
+      bucket = 'wellknownOnly';
+    else
+      continue; // both refuse it: the malformed half agreeing is not a difference
+    WKT_CLASSES[bucket].entries.push(text);
+  }
+  for (const cls of Object.values(WKT_CLASSES))
+    check(cls.name, 'wellknown', cls.entries.length, cls.expected, 0, cls.note);
+
+  // the round trip is ours to keep honest whatever the rival does
+  check('wkt round trip (corpus geometries)', 'self',
+    WKT_CORPUS.filter((text) => {
+      const geometry = wktToGeoJson(text);
+      if (geometry === null) return false;
+      const written = geoJsonToWkt(geometry, { dim: 3 });
+      return written !== null
+        && JSON.stringify(wktToGeoJson(written)) === JSON.stringify(geometry);
+    }).length,
+    85, 0, 'the 86th parses to an infinite coordinate, which has no WKT spelling');
+
+  check('wkt stringify (2000-vertex polygon)', 'wellknown',
+    geoJsonToWkt(BIG_POLY) === wellknown.stringify(BIG_POLY), true, 0,
+    'byte-identical: both write the shortest round-tripping number spelling');
+}
+
+/** The corpus entries behind each difference class, so the note is auditable. */
+function printWktDifferences() {
+  for (const key of ['differs', 'jarenOnly', 'wellknownOnly']) {
+    const cls = WKT_CLASSES[key];
+    if (cls.entries.length === 0)
+      continue;
+    console.log(`\n  ${cls.name} — ${cls.entries.length} entries`);
+    for (const text of cls.entries)
+      console.log(`    ${JSON.stringify(text)}`);
+  }
 }
 
 //#endregion
@@ -218,7 +334,7 @@ function main() {
   const iterations = idx >= 0 ? parseInt(args[idx + 1], 10) : DEFAULT_ITERATIONS;
   const checkOnly = args.includes('--check-only');
 
-  console.log('\nSpatial benchmark — @jarenjs/core/geo vs turf / geolib / flatbush');
+  console.log('\nSpatial benchmark — @jarenjs/core/geo vs turf / geolib / flatbush / wellknown');
   console.log(`Node ${process.version}\n`);
 
   runEquivalence();
@@ -236,6 +352,7 @@ function main() {
     return;
   }
   console.log('\nall scenarios agree within their stated tolerance.');
+  printWktDifferences();
   if (checkOnly) return;
 
   // -- timings --------------------------------------------------------
@@ -301,6 +418,45 @@ function main() {
     ours: measure(() => centroidOf(BIG_POLY), tiny),
     rival: measure(() => turf.centroid(BIG_POLY), tiny),
     rivalName: 'turf',
+  });
+
+  // WKT: one grammar walk with and without a builder, against the
+  // converter every JavaScript project reaches for
+  rows.push({
+    name: 'wkt parse (POINT)',
+    ours: measure(() => wktToGeoJson(POINT_WKT), iterations),
+    rival: measure(() => wellknown.parse(POINT_WKT), iterations),
+    rivalName: 'wellknown',
+  });
+  // a 74 KB input at milliseconds per operation turns the shared
+  // 5 000-run warmup into a ten-second stall, so the WKT text rows warm
+  // up in proportion to what they cost
+  const heavy = (fn) => measureNsPerOp(fn, tiny, 50);
+  rows.push({
+    name: 'wkt parse (2000-vertex polygon)',
+    ours: heavy(() => wktToGeoJson(BIG_POLY_WKT)),
+    rival: heavy(() => wellknown.parse(BIG_POLY_WKT)),
+    rivalName: 'wellknown',
+  });
+  rows.push({
+    name: 'wkt stringify (2000-vertex polygon)',
+    ours: heavy(() => geoJsonToWkt(BIG_POLY)),
+    rival: heavy(() => wellknown.stringify(BIG_POLY)),
+    rivalName: 'wellknown',
+  });
+  // what the non-allocating predicate buys: the format tester answers
+  // yes-or-no without building the geometry it would have to throw away
+  rows.push({
+    name: 'wkt validate (POINT)',
+    ours: measure(() => isValidWkt(POINT_WKT), iterations),
+    rival: measure(() => wellknown.parse(POINT_WKT) !== null, iterations),
+    rivalName: 'wellknown',
+  });
+  rows.push({
+    name: 'wkt validate (2000-vertex polygon)',
+    ours: heavy(() => isValidWkt(BIG_POLY_WKT)),
+    rival: heavy(() => wellknown.parse(BIG_POLY_WKT) !== null),
+    rivalName: 'wellknown',
   });
 
   // index build and probe, against the library this one is modelled on
