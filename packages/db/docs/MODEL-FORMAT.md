@@ -112,7 +112,13 @@ Every rule below is `JD0004` with a `docPath` at the offending member:
    collection's schema types as `string`, `integer`, `number` or
    `boolean` is refused: the mistake is worth catching at open rather
    than at the first query that quietly returns nothing. A path the
-   schema does not type is accepted — there is nothing to contradict.
+   schema does not type is accepted — there is nothing to contradict —
+   but **a spatial predicate is only PUSHED onto a column whose member
+   the schema types as an array or an object** (a union of the two is
+   fine; one that also admits `null` is not), because §8.14 raises for
+   a non-geographic operand and a pushed filter would simply not see
+   the row. Declaring the type is what turns a derived index from
+   storage into a plan.
 5. **Two indexes with the same `(path, derive, precision)` share one
    column set**, extending §3's rule for undecorated paths. Two
    `geohash` indexes over one path at DIFFERENT precisions are two
@@ -240,11 +246,19 @@ no positions at all, or one whose coordinates are not positions, which
 is what a non-finite coordinate becomes: JSON cannot carry `NaN`, so it
 arrives as `null` and is no longer a number.
 
-The consequence is a real behavioural difference and is stated here
-rather than discovered later: **a row whose derived column is `NULL` is
-not found by a predicate pushed to that column.** A document whose
-geometry cannot be bounded is invisible to an index-backed spatial
-query and visible to the engine-only one.
+The consequence is stated here rather than discovered later: **a row
+whose derived column is `NULL` is not found by a predicate pushed to
+that column.** For the spatial predicates the planner promotes
+(ARCHITECTURE.md, "The implied conjunct") that is not a divergence —
+§8.14 measures a value by its representative position, and that
+position is missing in exactly the cases the box is, so `$within`,
+`$bbox-intersects` and `$distance` answer `false`/empty for such a row
+anyway. Where it does bite is the ERROR behaviour: §8.14 raises
+`JQ2001` for an operand that is not geography at all (a string, a
+stored `null`), and a row the pushed filter never fetched cannot
+raise. The promotion therefore requires the schema to type the member
+as an array or an object and nothing else; a store that wants the
+engine's refusal instead keeps `compileSchema` injected.
 
 Traversal and validity stay separate concerns, as they do in the
 kernel: a value that carries SOME positions is bounded by the positions

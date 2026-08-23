@@ -145,6 +145,14 @@ top-level aggregates `$count` (bare-binding return only) and
 `$sum`/`$avg`/`$min`/`$max` over a singular schema-typed path; and the
 whole-document projection that returns the bare binding.
 
+Plus the spatial predicates a **derived** index makes decidable:
+`$bbox-intersects` against a literal or external region, a geohash
+prefix no longer than a `derive: 'geohash'` column's precision, and the
+nine-cell neighbourhood probe over that same column — each over a
+member the schema types as an array or an object. Those are exact; the
+spatial predicates that only NARROW are rows in the residual table, and
+the implied-conjunct table below carries every proof.
+
 ### The deliberate-residual table
 
 | construct | reason |
@@ -157,7 +165,11 @@ whole-document projection that returns the bare binding.
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
 | comparisons where both sides are paths | join territory |
 | array/object literals in comparisons | deep-equality has no guarded native form |
-| spatial predicates | the model format now declares derived spatial columns (a geohash cell, a bounding box), but no plan promotes a spatial predicate onto them yet |
+| `$within` over a `derive: 'bbox'` column | a bounding-box pre-filter is pushed; exact containment refines in the engine |
+| a bounded `$distance` over a `derive: 'bbox'` column | a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine |
+| a geohash prefix LONGER than the column's precision | a cell-range pre-filter over the derived column's precision is pushed; the longer prefix refines in the engine |
+| a spatial predicate over a member with no matching derived index, or one the schema does not type as an array or an object | nothing is proven; the whole predicate runs in the engine (the deterministic-function hatch may still take it) |
+| an unbounded `$distance` (`>= r`), a circle reaching a pole or crossing the antimeridian, a probe with no bounding box | no conservative box exists — pushing nothing is correct, pushing a wrong box is not |
 
 ### The type truth table
 
@@ -226,6 +238,66 @@ matters to you.
 execute time, if any referenced external is missing or not a string or
 finite number, the call runs the always-compiled set residual instead
 of the native statement — same answer, one branch, no wrong-typed SQL.
+A **derived** slot is the exception that proves it: a GeoJSON region is
+not bindable at all, so what binds is one edge of its bounding box per
+slot, computed at bind time; such a call diverts only when the bound
+value has no box.
+
+### The implied conjunct (spatial)
+
+Every conjunct above is a conjunct **of the document**: it translates
+exactly or it does not. A spatial predicate mostly cannot — there is no
+`ST_Within` in SQLite and this package does not build one — but it
+*implies* one that can be, over the columns a model declares with
+`indexes[].derive` (MODEL-FORMAT §2.1).
+
+> An **implied conjunct** is a predicate the planner ADDS to the SQL
+> that is not in the document, proven below to be implied by one that
+> is. It narrows; it never decides. The conjunct it came from stays in
+> the residual.
+
+Three properties make that safe, and each is asserted by test: **no
+false negatives** (every row the document's predicate keeps passes the
+implied one — the proofs below); **idempotent refinement** (the residual
+re-runs the original predicate over the narrowed candidates, which is
+why an implied conjunct forces the SET residual and not the row one);
+and **`strict: true` refuses it** (an implied conjunct leaves its own
+reason behind, so the plan is never native and `JD0010` names it).
+
+Throughout, `B(v)` is the value's bounding box and `<c>_w`/`_s`/`_e`/`_n`
+are a `bbox` index's columns; `<c>` is a `geohash` index's column at its
+declared precision `k`. Every promotion requires the schema to type the
+member as an array or an object **and nothing else** — §8.14 answers
+`JQ2001` for a non-geographic operand, and a union that also admits
+`null` is not geography.
+
+| Jaren predicate | pushed | exact? | why it is implied |
+|---|---|---|---|
+| `$bbox-intersects(<path>, <literal\|external>)` | `w <= L_e AND e >= L_w AND s <= L_n AND n >= L_s` | **exact** | the derived columns ARE `B(row)`, so box overlap is fully decidable. `<=`/`>=`, not `<`/`>`: the kernel counts touching edges as intersecting, and a strict comparison would disagree on every shared edge |
+| `$within(<path>, <literal\|external>)` | the same four comparisons against `B(area)` | implied | the representative position is inside `B(subject)` — a bare position IS the box, and a centroid is a mean of positions, which lies within their min/max — and inside the area's surface implies inside `B(area)`; so the two boxes share at least that position ∎ |
+| `{$le\|$lt: [{$distance: [<path>, <literal>]}, r]}` | the same four comparisons against `circleBounds(probe, r)` | implied | every position within `r` metres lies inside the circle's box, which the kernel computes on the same sphere and the same `EARTH_RADIUS` the engine measures with — so the two cannot disagree by model. `$ge`/`$gt` is NOT promoted: no box narrows "farther than r" |
+| `{$starts-with: [{$geohash: [<path>, k]}, "<cell>"]}`, cell length ≤ k | `<c> IN ("<cell>")` or `<c> >= "<cell>" AND <c> < successor` | **exact** | the column HOLDS `$geohash(row, k)`, and geohash is a prefix code, so a prefix test on the expression is the same test on the column |
+| the same, cell length > k | the cell truncated to k | implied | the column can only confirm its own first k characters |
+| `{$exists: {$index-of: [{$geohash-neighbours: "<cell>"}, {$geohash: [<path>, k]}]}}`, cell length = k | `<c> IN (…the nine cells…)` | **exact** | the membership test compares whole strings and the column is exactly one of them. Nine cells, never one: two points ten metres apart can differ in the FIRST character of their cell (D7), so a single prefix is bucketing and only the neighbourhood is proximity |
+
+The implied forms carry no `json_type` guard — a derived column IS the
+value — but each is TOTAL through its own `IS NOT NULL`, so a row with
+no box answers `FALSE` rather than SQL's `NULL` and negation composes
+classically. An implied conjunct may not be negated at all: negating a
+superset is a subset, and that drops rows. That guard also makes the
+leading term a two-sided range, which is what SQLite will actually
+**seek**: with a one-sided range it prefers a table scan, and a scan over
+a virtual generated column pays a registered-function call per row.
+
+**A pre-filter decides which rows the engine SEES, so it also decides
+which rows can raise.** The row set is unchanged — that is what the
+table above proves — but a row the pre-filter excludes never reaches
+the engine and therefore never throws: a stored `null` under a member
+the schema types as geography, or a value with no bounded position
+under §8.14's membership recipe (`$index-of` refuses an empty search
+item). This is the same class as the string-operator and aggregate
+preconditions above, and the same answer: keep `compileSchema` injected
+if that distinction matters to you.
 
 ### The two residual modes
 
@@ -248,13 +320,18 @@ of the native statement — same answer, one branch, no wrong-typed SQL.
 
 Extends `compileJsonQuery(...).explain()`'s shape — `{ externals,
 operators, functions, collations, limits }` — with `{ sql, params,
-indexes, residual, barriers, scanNarrative }`. `params` lists the
-bound slots in order (external names and literal markers — values are
-ALWAYS bound, never interpolated). `indexes` names the declared
+indexes, prefilters, residual, barriers, scanNarrative }`. `params`
+lists the bound slots in order (external names, literal markers, and
+derived slots naming the external and box axis they compute — values
+are ALWAYS bound, never interpolated). `indexes` names the declared
 indexes whose generated columns the pushed predicates and ordering
 touch, and the `scanNarrative` is the database's own `EXPLAIN QUERY
 PLAN` prose so the claim is checkable against the engine that will run
-it. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
+it. `prefilters` is the implied conjuncts — `{ construct, columns,
+exact }` each — because whether a declared index is earning its keep is
+not readable from `sql` alone, and because `indexes` says what a
+predicate TOUCHES while the narrative says what the database will
+DO. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
 is empty and no number is fabricated. `residual` is `null` or
 `{ mode: 'row' | 'set', reasons: [{ construct, reason }] }` with
 reasons drawn from the deliberate-residual table. With

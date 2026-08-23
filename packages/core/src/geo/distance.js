@@ -136,6 +136,54 @@ export function destinationPoint(lon, lat, bearing, distance, radius = EARTH_RAD
 }
 
 /**
+ * The bounding box of a geodesic circle: every position within
+ * `distance` metres of `(lon, lat)` on the same sphere lies inside it.
+ * This is what turns "nearer than r" into a box a range index can seek.
+ *
+ * The latitude bounds are the circle's due-north and due-south points,
+ * but the longitude bounds are **not** its due-east and due-west ones:
+ * the circle reaches its extreme meridians where it runs tangent to
+ * them, further out than a 90° bearing travels — 0.4 % further at 80°N
+ * over 100 km. A box built from four bearings is therefore too small,
+ * and too small is the one error a conservative pre-filter cannot
+ * survive. The extreme half-width is `asin(sin δ / cos φ)` for angular
+ * radius δ at latitude φ.
+ *
+ * `null` when the circle reaches a pole (`|lat| + δ >= 90°`), where the
+ * longitude bound does not exist because the circle spans every
+ * meridian, and for any non-finite or negative input.
+ *
+ * West and east are NOT wrapped into `[-180, 180]`: a circle spanning
+ * the antimeridian answers a west below -180 or an east above 180, so
+ * a caller can tell that case apart — RFC 7946 asks producers to cut
+ * there, and a wrapped box would silently claim the short way round.
+ *
+ * @param {number} lon - centre longitude, degrees
+ * @param {number} lat - centre latitude, degrees
+ * @param {number} distance - radius in metres (or in `radius`'s unit)
+ * @param {number} [radius] - sphere radius
+ * @returns {[number, number, number, number] | null} `[west, south, east, north]`
+ * @example
+ * circleBounds(5, 52, 1000); // [4.98539…, 51.99101…, 5.01461…, 52.00899…]
+ */
+export function circleBounds(lon, lat, distance, radius = EARTH_RADIUS) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)
+    || !Number.isFinite(distance) || distance < 0) return null;
+  const d = distance / radius;
+  const dDeg = d * RAD;
+  // at or past a pole the circle covers every meridian, so no box bounds it
+  if (Math.abs(lat) + dDeg >= 90) return null;
+  // the tangent half-width is never narrower than the angular radius
+  // itself (cos φ <= 1), and at the equator the asin(sin …) round trip
+  // loses the last bit of exactly that value — taking the wider of the
+  // two restores an inequality the real numbers always satisfy rather
+  // than padding by a constant nobody could justify
+  const tangent = Math.asin(Math.sin(d) / Math.cos(lat * DEG)) * RAD;
+  const half = tangent > dDeg ? tangent : dDeg;
+  return [lon - half, lat - dDeg, lon + half, lat + dDeg];
+}
+
+/**
  * Total great-circle length of a line of positions, in metres. An empty
  * or single-position line has length 0.
  * @param {Array<number[]>} positions - GeoJSON positions

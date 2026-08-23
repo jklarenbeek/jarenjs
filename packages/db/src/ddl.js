@@ -77,15 +77,15 @@ export function compileIndexPath(expression, docPath) {
 }
 
 /**
- * The declared schema type at a segment path, walked structurally
- * through `properties` / `items` / `prefixItems`. The collection's
- * schema is the type source — that is why the physical mapping needs
- * no engine-side inference.
+ * The schema subschema at a segment path, walked structurally through
+ * `properties` / `items` / `prefixItems`. The collection's schema is
+ * the type source — that is why the physical mapping needs no
+ * engine-side inference. `undefined` where the walk leaves the schema.
  * @param {any} schema
  * @param {import('./dialect.js').JsonPathSegment[]} segments
- * @returns {string | undefined}
+ * @returns {any}
  */
-export function schemaTypeAt(schema, segments) {
+export function schemaNodeAt(schema, segments) {
   let node = schema;
   for (const segment of segments) {
     if (node === null || typeof node !== 'object') return undefined;
@@ -93,7 +93,21 @@ export function schemaTypeAt(schema, segments) {
       ? node.properties?.[segment.name]
       : node.prefixItems?.[segment.index] ?? node.items;
   }
-  if (node === null || typeof node !== 'object') return undefined;
+  return node === null || typeof node !== 'object' ? undefined : node;
+}
+
+/**
+ * The declared schema type at a segment path: the first non-`null`
+ * member of a union, which is the type a COLUMN takes its storage
+ * from. A caller that must know the whole union (a promotion refusing
+ * a member that may also be `null`) reads {@link schemaNodeAt}.
+ * @param {any} schema
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {string | undefined}
+ */
+export function schemaTypeAt(schema, segments) {
+  const node = schemaNodeAt(schema, segments);
+  if (node === undefined) return undefined;
   if (typeof node.type === 'string') return node.type;
   if (Array.isArray(node.type)) {
     return node.type.find((t) => typeof t === 'string' && t !== 'null');

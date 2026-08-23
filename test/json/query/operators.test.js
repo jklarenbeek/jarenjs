@@ -1110,6 +1110,35 @@ describe('section 8.14 — spatial', () => {
       (e) => e.code === 'JQ2001' && /precision/.test(e.message));
   });
 
+  // Every unary spatial measurement can answer EMPTY for an operand
+  // that is present — the non-finite rule, malformed text, a cell
+  // outside the alphabet — so its declared cardinality is OPTIONAL,
+  // never ONE. Declaring ONE lets the internal empty marker escape into
+  // a constructor, where it is neither an item nor a JSON value.
+  it('should never leak the empty marker into a constructor', () => {
+    const nan = { $div: [0, 0] };
+    const leaked = [];
+    const cases = {
+      '$bbox': { $bbox: [nan, 0] },
+      '$centroid': { $centroid: [nan, 0] },
+      '$geohash': { $geohash: [[nan, 0]] },
+      '$area': { $area: [nan, 0] },
+      '$length': { $length: [nan, 0] },
+      '$geo-text': { '$geo-text': [nan, 0] },
+      '$geo-parse': { '$geo-parse': 'not well-known text' },
+      '$geohash-bounds': { '$geohash-bounds': 'u17a' },
+    };
+    for (const [name, expression] of Object.entries(cases)) {
+      const inArray = queryJson([expression], {});
+      const inObject = queryJson({ m: expression }, {});
+      if (!Array.isArray(inArray) || inArray.length !== 0)
+        leaked.push(`${name}: [expr] answered a ${inArray.length}-item array`);
+      if (inObject === null || typeof inObject !== 'object' || 'm' in inObject)
+        leaked.push(`${name}: {m: expr} kept the member`);
+    }
+    assert.deepStrictEqual(leaked, []);
+  });
+
   it('should filter, sort and bucket — the shapes this exists for', () => {
     assert.strictEqual(queryJson({
       $for: { c: '$.cities[*]' },

@@ -239,6 +239,228 @@ describe('mode decisions and reasons', () => {
   });
 });
 
+// ————— spatial promotions —————
+
+const PLACES_MODEL = {
+  $model: '0.1',
+  collections: {
+    places: {
+      schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          at: { type: ['array', 'object'] },
+          maybe: { type: ['array', 'null'] },
+          label: { type: 'string' },
+        },
+      },
+      key: '/id',
+      indexes: [
+        { name: 'by_box', path: '$.at', derive: 'bbox' },
+        { name: 'by_cell', path: '$.at', derive: 'geohash', precision: 6 },
+        { name: 'by_maybe', path: '$.maybe', derive: 'bbox' },
+      ],
+    },
+  },
+};
+const places = normalizeModel(PLACES_MODEL).get('places');
+const placesPhysical = planCollection('places', places, sqliteDialect);
+const PLACES_SHAPE = {
+  collection: 'places',
+  schema: places.schema,
+  columnByCanonical: placesPhysical.columnByCanonical,
+};
+const BOX_COLUMNS = {
+  w: 'gx_at_bbox_w', s: 'gx_at_bbox_s', e: 'gx_at_bbox_e', n: 'gx_at_bbox_n',
+};
+const REGION = {
+  type: 'Polygon',
+  coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]],
+};
+const where = (predicate) =>
+  ({ $for: { it: '$[*]' }, $where: predicate, $return: '$it' });
+
+describe('spatial promotions (the implied conjunct)', () => {
+  it('$bbox-intersects against a literal is EXACT: box columns, no residual', () => {
+    const planned = planQuery(where({ '$bbox-intersects': ['$it.at', REGION] }), PLACES_SHAPE);
+    assert.strictEqual(planned.mode, 'native');
+    assertNoSqlText(planned.plan);
+    assert.deepStrictEqual(planned.plan.filter, {
+      p: 'bboxOverlap', columns: BOX_COLUMNS, probe: { box: [4, 52, 5, 53] },
+    });
+    assert.deepStrictEqual(planned.prefilters, [{
+      construct: '$bbox-intersects',
+      columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
+      exact: true,
+    }]);
+    assert.deepStrictEqual(planned.reasons, []);
+  });
+
+  it('the subject may be either operand of $bbox-intersects, and only the first of $within', () => {
+    const flipped = planQuery(where({ '$bbox-intersects': [REGION, '$it.at'] }), PLACES_SHAPE);
+    assert.strictEqual(flipped.plan.filter.p, 'bboxOverlap');
+    // `$within(area, subject)` asks the other question, and the planner
+    // must not answer it by symmetry
+    const wrong = planQuery(where({ $within: [REGION, '$it.at'] }), PLACES_SHAPE);
+    assert.strictEqual(wrong.plan.filter, null);
+    assert.strictEqual(wrong.mode, 'set');
+  });
+
+  it('$within pushes the SAME box and keeps itself in the residual', () => {
+    const planned = planQuery(where({ $within: ['$it.at', REGION] }), PLACES_SHAPE);
+    assert.strictEqual(planned.mode, 'set');
+    assert.deepStrictEqual(planned.plan.filter, {
+      p: 'bboxOverlap', columns: BOX_COLUMNS, probe: { box: [4, 52, 5, 53] },
+    });
+    assert.deepStrictEqual(planned.reasons, [{
+      construct: '$within',
+      reason: 'a bounding-box pre-filter is pushed; exact containment refines in the engine',
+    }]);
+    assert.strictEqual(planned.prefilters[0].exact, false);
+  });
+
+  it('an external region becomes a probe the binder resolves, not a literal box', () => {
+    const planned = planQuery(where({ $within: ['$it.at', '$region'] }), PLACES_SHAPE);
+    assert.deepStrictEqual(planned.plan.filter,
+      { p: 'bboxOverlap', columns: BOX_COLUMNS, probe: { ext: 'region' } });
+  });
+
+  it('a bounded $distance pushes the circle box; "farther than" pushes nothing', () => {
+    for (const document of [
+      where({ $le: [{ $distance: ['$it.at', [5, 52]] }, 1000] }),
+      where({ $lt: [{ $distance: [[5, 52], '$it.at'] }, 1000] }),
+      where({ $ge: [1000, { $distance: ['$it.at', [5, 52]] }] }),
+    ]) {
+      const planned = planQuery(document, PLACES_SHAPE);
+      assert.strictEqual(planned.plan.filter.p, 'bboxOverlap', JSON.stringify(document));
+      const box = planned.plan.filter.probe.box;
+      assert.ok(box[0] < 5 && box[2] > 5 && box[1] < 52 && box[3] > 52, box.join(','));
+      assert.deepStrictEqual(planned.reasons, [{
+        construct: '$distance',
+        reason: 'a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine',
+      }]);
+    }
+    const farther = planQuery(where({ $ge: [{ $distance: ['$it.at', [5, 52]] }, 1000] }), PLACES_SHAPE);
+    assert.strictEqual(farther.plan.filter, null);
+    assert.match(farther.reasons[0].reason, /only a BOUNDED distance/);
+  });
+
+  it('a circle over a pole or across the antimeridian pushes NOTHING', () => {
+    for (const [centre, why] of [
+      [[0, 89.99], /reaches a pole/],
+      [[179.99, 0], /crosses the antimeridian/],
+      [[-179.99, 0], /crosses the antimeridian/],
+    ]) {
+      const planned = planQuery(
+        where({ $le: [{ $distance: ['$it.at', centre] }, 5000] }), PLACES_SHAPE);
+      assert.strictEqual(planned.plan.filter, null, centre.join(','));
+      assert.deepStrictEqual(planned.prefilters, []);
+      assert.match(planned.reasons[0].reason, why, centre.join(','));
+    }
+  });
+
+  it('a geohash prefix is exact up to the column precision and implied beyond it', () => {
+    const short = planQuery(
+      where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u17'] }), PLACES_SHAPE);
+    assert.deepStrictEqual(short.plan.filter,
+      { p: 'cellPrefix', column: 'gx_at_gh6', prefix: 'u17' });
+    assert.strictEqual(short.mode, 'native');
+
+    const whole = planQuery(
+      where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u173zc'] }), PLACES_SHAPE);
+    assert.deepStrictEqual(whole.plan.filter,
+      { p: 'cellIn', column: 'gx_at_gh6', cells: ['u173zc'] });
+    assert.strictEqual(whole.mode, 'native');
+
+    const long = planQuery(
+      where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u173zcb'] }), PLACES_SHAPE);
+    assert.deepStrictEqual(long.plan.filter,
+      { p: 'cellIn', column: 'gx_at_gh6', cells: ['u173zc'] });
+    assert.strictEqual(long.mode, 'set');
+    assert.strictEqual(long.prefilters[0].exact, false);
+    assert.match(long.reasons[0].reason, /longer prefix refines/);
+  });
+
+  it('a different precision is a different column, and no column is no promotion', () => {
+    for (const precision of [5, 7]) {
+      const planned = planQuery(
+        where({ '$starts-with': [{ $geohash: ['$it.at', precision] }, 'u17'] }), PLACES_SHAPE);
+      assert.strictEqual(planned.plan.filter, null, `precision ${precision}`);
+      assert.match(planned.reasons[0].reason, /no derived spatial index/);
+    }
+  });
+
+  it('the nine-cell neighbourhood is a membership test over the same column (D7)', () => {
+    const planned = planQuery(where({
+      $exists: {
+        '$index-of': [{ '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }],
+      },
+    }), PLACES_SHAPE);
+    assert.strictEqual(planned.plan.filter.p, 'cellIn');
+    assert.strictEqual(planned.plan.filter.column, 'gx_at_gh6');
+    assert.strictEqual(planned.plan.filter.cells.length, 9);
+    assert.ok(planned.plan.filter.cells.includes('u173zc'), 'the cell itself is one of the nine');
+    assert.strictEqual(planned.mode, 'native');
+    assert.strictEqual(planned.prefilters[0].exact, true);
+    // a cell that is not the column's own length compares whole strings
+    // against a different length, so nothing may be assumed
+    const mismatched = planQuery(where({
+      $exists: {
+        '$index-of': [{ '$geohash-neighbours': 'u17' }, { $geohash: ['$it.at', 6] }],
+      },
+    }), PLACES_SHAPE);
+    assert.strictEqual(mismatched.plan.filter, null);
+    assert.match(mismatched.reasons[0].reason, /must match the derived column/);
+  });
+
+  it('a member the schema does not type as geography is never promoted', () => {
+    // a string member, an untyped one, and a union that also admits null
+    for (const [predicate, why] of [
+      [{ $within: ['$it.label', REGION] }, 'a string member'],
+      [{ $within: ['$it.other', REGION] }, 'an untyped member'],
+      [{ $within: ['$it.maybe', REGION] }, 'a union that admits null'],
+    ]) {
+      const planned = planQuery(where(predicate), PLACES_SHAPE);
+      assert.strictEqual(planned.plan.filter, null, why);
+      assert.match(planned.reasons[0].reason, /array or an object/, why);
+    }
+  });
+
+  it('an implied conjunct may not be negated; an exact one may', () => {
+    const negatedImplied = planQuery(
+      where({ $not: { $within: ['$it.at', REGION] } }), PLACES_SHAPE);
+    assert.strictEqual(negatedImplied.plan.filter, null);
+    assert.match(negatedImplied.reasons[0].reason, /negating a superset drops rows/);
+
+    const negatedExact = planQuery(
+      where({ $not: { '$bbox-intersects': ['$it.at', REGION] } }), PLACES_SHAPE);
+    assert.deepStrictEqual(negatedExact.plan.filter,
+      { p: 'not', item: { p: 'bboxOverlap', columns: BOX_COLUMNS, probe: { box: [4, 52, 5, 53] } } });
+    assert.strictEqual(negatedExact.mode, 'native');
+  });
+
+  it('an implied conjunct still narrows beside an exact one, and says so once', () => {
+    const planned = planQuery(where({
+      $and: [{ $eq: ['$it.id', 'a'] }, { $within: ['$it.at', REGION] }],
+    }), PLACES_SHAPE);
+    assert.strictEqual(planned.mode, 'set');
+    assert.strictEqual(planned.plan.filter.p, 'and');
+    assert.strictEqual(planned.plan.filter.items.length, 2);
+    assert.deepStrictEqual(planned.reasons.map((r) => r.construct), ['$within']);
+    assertNoSqlText(planned.plan);
+  });
+
+  it('a probe that cannot be folded to a value, or has no box, refuses', () => {
+    const computed = planQuery(
+      where({ $within: ['$it.at', { $centroid: '$it.at' }] }), PLACES_SHAPE);
+    assert.strictEqual(computed.plan.filter, null);
+    const boxless = planQuery(
+      where({ $within: ['$it.at', { type: 'FeatureCollection', features: [] }] }), PLACES_SHAPE);
+    assert.strictEqual(boxless.plan.filter, null);
+    assert.match(boxless.reasons[0].reason, /no bounding box/);
+  });
+});
+
 describe('exhaustive dispatch', () => {
   it('an unrecognised kind throws naming the kind and the AST_VERSION', () => {
     assert.throws(() => assertDecidedKind({ kind: 'zebra' }), (error) => {

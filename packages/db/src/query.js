@@ -31,6 +31,7 @@ import {
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters } from './emit.js';
 import { selectPlan } from './algebra.js';
 import { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
+import { derivedSlotValue, probeBox } from './derive.js';
 import { deterministicFragment, registerFragment } from './udf.js';
 import {
   normalizeProfile, translateProfilePredicate,
@@ -61,6 +62,43 @@ export function createQueryState(bound = undefined, operators = null) {
 function bindable(value) {
   return typeof value === 'string'
     || (typeof value === 'number' && Number.isFinite(value));
+}
+
+/**
+ * The value one parameter slot binds for a call. A DERIVED slot holds
+ * no value of its own: it names one edge of a bound external's
+ * bounding box, computed here because a GeoJSON object is not
+ * something any database binds.
+ * @param {import('./emit.js').ParamSlot} slot
+ * @param {any} externals
+ * @returns {any}
+ */
+function slotValue(slot, externals) {
+  if ('literal' in slot) return slot.literal;
+  if ('derived' in slot)
+    return derivedSlotValue(slot.derived, externals[slot.derived.external]);
+  return externals[slot.external];
+}
+
+/**
+ * How one external reaches the statement. An external reached ONLY
+ * through derived slots is bindable when its bound value HAS a box —
+ * the object itself never had to be bindable. One reached directly
+ * must be a string or a finite number, as before; and an external in
+ * the document that reaches no slot at all still forces the diversion,
+ * because the residual needs the engine's own semantics for it.
+ * @param {import('./emit.js').ParamSlot[]} slots
+ * @returns {Map<string, 'plain' | 'derived'>}
+ */
+function externalSlotKinds(slots) {
+  /** @type {Map<string, 'plain' | 'derived'>} */
+  const kinds = new Map();
+  for (const slot of slots) {
+    if ('external' in slot) kinds.set(slot.external, 'plain');
+    else if ('derived' in slot && !kinds.has(slot.derived.external))
+      kinds.set(slot.derived.external, 'derived');
+  }
+  return kinds;
 }
 
 /**
@@ -165,6 +203,7 @@ export function createQueryEngine(context) {
         reasons: [{ construct: 'pushdown', reason: 'disabled by the harness switch' }],
         rowReturn: null,
         udfs: [],
+        prefilters: [],
       };
     }
 
@@ -213,6 +252,7 @@ export function createQueryEngine(context) {
       sql: emitted.sql,
       slots: emitted.slots,
       externalNames,
+      externalSlotKinds: externalSlotKinds(emitted.slots),
       dependencies: planned.analysis.dependencies,
       limits: planned.analysis.limits,
       residualLimits: limits,
@@ -305,11 +345,13 @@ export function createQueryEngine(context) {
 
   /** Bind slots against the call's externals. */
   const bindParams = (entry, externals) =>
-    entry.slots.map((slot) => ('literal' in slot ? slot.literal : externals[slot.external]));
+    entry.slots.map((slot) => slotValue(slot, externals));
 
   /** Must this call divert to the residual? */
   const mustDivert = (entry, externals) =>
-    entry.externalNames.some((name) => !bindable(externals[name]));
+    entry.externalNames.some((name) => (entry.externalSlotKinds.get(name) === 'derived'
+      ? probeBox(externals[name]) === null
+      : !bindable(externals[name])));
 
   const rowsToDocs = (rows) => rows.map((row) => JSON.parse(row.doc));
 
@@ -499,6 +541,10 @@ export function createQueryEngine(context) {
       if (pred === null) return;
       if (pred.p === 'and' || pred.p === 'or') pred.items.forEach(collectColumns);
       else if (pred.p === 'not') collectColumns(pred.item);
+      else if (pred.p === 'bboxOverlap')
+        for (const column of Object.values(pred.columns)) touchedColumns.add(column);
+      else if (pred.p === 'cellIn' || pred.p === 'cellPrefix')
+        touchedColumns.add(pred.column);
       else if ('ref' in pred && pred.ref?.column) touchedColumns.add(pred.ref.column);
     };
     collectColumns(entry.plan.filter);
@@ -510,11 +556,15 @@ export function createQueryEngine(context) {
       .filter((index) => index.columns.some((column) => touchedColumns.has(column)))
       .map((index) => index.name);
 
-    const params = entry.slots.map((slot) =>
-      ('external' in slot ? { external: slot.external } : { literal: slot.literal }));
-    const eqpParams = entry.slots.map((slot) => ('literal' in slot
-      ? slot.literal
-      : bindable(externals[slot.external]) ? externals[slot.external] : null));
+    const params = entry.slots.map((slot) => {
+      if ('external' in slot) return { external: slot.external };
+      if ('derived' in slot) return { derived: { ...slot.derived } };
+      return { literal: slot.literal };
+    });
+    const eqpParams = entry.slots.map((slot) => {
+      const value = slotValue(slot, externals);
+      return bindable(value) ? value : null;
+    });
 
     return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
       chain(statement.all(eqpParams), (rows) => ({
@@ -526,6 +576,8 @@ export function createQueryEngine(context) {
         sql: entry.sql,
         params,
         indexes,
+        prefilters: entry.planned.prefilters.map((prefilter) => ({ ...prefilter,
+          columns: [...prefilter.columns] })),
         residual: entry.planned.mode === 'native'
           ? null
           : { mode: entry.planned.mode, reasons: entry.planned.reasons },

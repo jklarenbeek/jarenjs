@@ -3074,6 +3074,896 @@
     "expected": 5
   },
   {
+    "name": "plan/box-intersects-touching-and-degenerate",
+    "note": "touching edges count, a vertex counts, and a value with no box is not found — the exact promotion",
+    "data": [
+      {
+        "id": "inside",
+        "at": [
+          4.5,
+          52.5
+        ]
+      },
+      {
+        "id": "vertex",
+        "at": [
+          4,
+          52
+        ]
+      },
+      {
+        "id": "edge",
+        "at": [
+          4.5,
+          52
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      },
+      {
+        "id": "shares-one-edge",
+        "at": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                3,
+                52
+              ],
+              [
+                4,
+                52
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                3,
+                53
+              ],
+              [
+                3,
+                52
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "id": "no-box",
+        "at": {
+          "type": "FeatureCollection",
+          "features": []
+        }
+      },
+      {
+        "id": "no-member"
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$bbox-intersects": [
+          "$it.at",
+          {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  4,
+                  52
+                ],
+                [
+                  5,
+                  52
+                ],
+                [
+                  5,
+                  53
+                ],
+                [
+                  4,
+                  53
+                ],
+                [
+                  4,
+                  52
+                ]
+              ]
+            ]
+          }
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "inside",
+      "vertex",
+      "edge",
+      "shares-one-edge"
+    ]
+  },
+  {
+    "name": "plan/within-on-a-vertex-and-an-edge",
+    "note": "the boundary is inside; the box-sharing polygon is NOT, so the pre-filter must be refined and not trusted",
+    "data": [
+      {
+        "id": "inside",
+        "at": [
+          4.5,
+          52.5
+        ]
+      },
+      {
+        "id": "vertex",
+        "at": [
+          4,
+          52
+        ]
+      },
+      {
+        "id": "edge",
+        "at": [
+          4.5,
+          52
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      },
+      {
+        "id": "shares-one-edge",
+        "at": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                3,
+                52
+              ],
+              [
+                4,
+                52
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                3,
+                53
+              ],
+              [
+                3,
+                52
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "id": "no-box",
+        "at": {
+          "type": "FeatureCollection",
+          "features": []
+        }
+      },
+      {
+        "id": "no-member"
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$within": [
+          "$it.at",
+          {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  4,
+                  52
+                ],
+                [
+                  5,
+                  52
+                ],
+                [
+                  5,
+                  53
+                ],
+                [
+                  4,
+                  53
+                ],
+                [
+                  4,
+                  52
+                ]
+              ]
+            ]
+          }
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "inside",
+      "vertex",
+      "edge"
+    ]
+  },
+  {
+    "name": "plan/within-a-far-region-finds-nothing",
+    "note": "the narrowed candidate set is empty and the answer still has to be the empty sequence",
+    "data": [
+      {
+        "id": "inside",
+        "at": [
+          4.5,
+          52.5
+        ]
+      },
+      {
+        "id": "vertex",
+        "at": [
+          4,
+          52
+        ]
+      },
+      {
+        "id": "edge",
+        "at": [
+          4.5,
+          52
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      },
+      {
+        "id": "shares-one-edge",
+        "at": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                3,
+                52
+              ],
+              [
+                4,
+                52
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                3,
+                53
+              ],
+              [
+                3,
+                52
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "id": "no-box",
+        "at": {
+          "type": "FeatureCollection",
+          "features": []
+        }
+      },
+      {
+        "id": "no-member"
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$within": [
+          "$it.at",
+          {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  10,
+                  40
+                ],
+                [
+                  11,
+                  40
+                ],
+                [
+                  11,
+                  41
+                ],
+                [
+                  10,
+                  41
+                ],
+                [
+                  10,
+                  40
+                ]
+              ]
+            ]
+          }
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "empty": true
+  },
+  {
+    "name": "plan/distance-exactly-on-the-bound",
+    "note": "four positions exactly RING_RADIUS metres out, one at each cardinal bearing: whatever the engine answers on the boundary, a pushed box must answer the same",
+    "data": [
+      {
+        "id": "bearing-0",
+        "at": [
+          4.904099999999971,
+          52.376593203637256
+        ]
+      },
+      {
+        "id": "bearing-90",
+        "at": [
+          4.918828636105445,
+          52.3675990845828
+        ]
+      },
+      {
+        "id": "bearing-180",
+        "at": [
+          4.904099999999971,
+          52.358606796362764
+        ]
+      },
+      {
+        "id": "bearing-270",
+        "at": [
+          4.889371363894611,
+          52.3675990845828
+        ]
+      },
+      {
+        "id": "centre",
+        "at": [
+          4.9041,
+          52.3676
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$le": [
+          {
+            "$distance": [
+              "$it.at",
+              [
+                4.9041,
+                52.3676
+              ]
+            ]
+          },
+          1000
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "bearing-180",
+      "bearing-270",
+      "centre"
+    ]
+  },
+  {
+    "name": "plan/distance-just-inside-the-bound",
+    "note": "the same ring one metre wider, where every position is unambiguously inside",
+    "data": [
+      {
+        "id": "bearing-0",
+        "at": [
+          4.904099999999971,
+          52.376593203637256
+        ]
+      },
+      {
+        "id": "bearing-90",
+        "at": [
+          4.918828636105445,
+          52.3675990845828
+        ]
+      },
+      {
+        "id": "bearing-180",
+        "at": [
+          4.904099999999971,
+          52.358606796362764
+        ]
+      },
+      {
+        "id": "bearing-270",
+        "at": [
+          4.889371363894611,
+          52.3675990845828
+        ]
+      },
+      {
+        "id": "centre",
+        "at": [
+          4.9041,
+          52.3676
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$le": [
+          {
+            "$distance": [
+              "$it.at",
+              [
+                4.9041,
+                52.3676
+              ]
+            ]
+          },
+          1001
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "bearing-0",
+      "bearing-90",
+      "bearing-180",
+      "bearing-270",
+      "centre"
+    ]
+  },
+  {
+    "name": "plan/distance-across-the-antimeridian",
+    "note": "a circle spanning ±180 has no single box, so nothing may be pushed — and the answer is still the engine's",
+    "data": [
+      {
+        "id": "west-of-the-line",
+        "at": [
+          179.98,
+          0
+        ]
+      },
+      {
+        "id": "east-of-the-line",
+        "at": [
+          -179.98,
+          0
+        ]
+      },
+      {
+        "id": "elsewhere",
+        "at": [
+          4.9041,
+          52.3676
+        ]
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$le": [
+          {
+            "$distance": [
+              "$it.at",
+              [
+                179.99,
+                0
+              ]
+            ]
+          },
+          5000
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "west-of-the-line",
+      "east-of-the-line"
+    ]
+  },
+  {
+    "name": "plan/distance-over-a-pole",
+    "note": "a circle reaching a pole has no longitude bound at all; same rule, same answer",
+    "data": [
+      {
+        "id": "near-the-pole",
+        "at": [
+          0,
+          89.995
+        ]
+      },
+      {
+        "id": "across-the-pole",
+        "at": [
+          180,
+          89.995
+        ]
+      },
+      {
+        "id": "elsewhere",
+        "at": [
+          4.9041,
+          52.3676
+        ]
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$le": [
+          {
+            "$distance": [
+              "$it.at",
+              [
+                0,
+                89.99
+              ]
+            ]
+          },
+          5000
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "near-the-pole",
+      "across-the-pole"
+    ]
+  },
+  {
+    "name": "plan/geohash-prefix-shorter-than-the-cell",
+    "note": "a literal no longer than the indexed precision decides in the column",
+    "data": [
+      {
+        "id": "inside",
+        "at": [
+          4.5,
+          52.5
+        ]
+      },
+      {
+        "id": "vertex",
+        "at": [
+          4,
+          52
+        ]
+      },
+      {
+        "id": "edge",
+        "at": [
+          4.5,
+          52
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      },
+      {
+        "id": "shares-one-edge",
+        "at": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                3,
+                52
+              ],
+              [
+                4,
+                52
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                3,
+                53
+              ],
+              [
+                3,
+                52
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "id": "no-box",
+        "at": {
+          "type": "FeatureCollection",
+          "features": []
+        }
+      },
+      {
+        "id": "no-member"
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$starts-with": [
+          {
+            "$geohash": [
+              "$it.at",
+              6
+            ]
+          },
+          "u174"
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": "inside"
+  },
+  {
+    "name": "plan/geohash-prefix-longer-than-the-cell",
+    "note": "a 7-character literal against a 6-character cell is false for every row; the column can only confirm the first six, so it refines",
+    "data": [
+      {
+        "id": "inside",
+        "at": [
+          4.5,
+          52.5
+        ]
+      },
+      {
+        "id": "vertex",
+        "at": [
+          4,
+          52
+        ]
+      },
+      {
+        "id": "edge",
+        "at": [
+          4.5,
+          52
+        ]
+      },
+      {
+        "id": "far",
+        "at": [
+          2.3522,
+          48.8566
+        ]
+      },
+      {
+        "id": "shares-one-edge",
+        "at": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                3,
+                52
+              ],
+              [
+                4,
+                52
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                3,
+                53
+              ],
+              [
+                3,
+                52
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "id": "no-box",
+        "at": {
+          "type": "FeatureCollection",
+          "features": []
+        }
+      },
+      {
+        "id": "no-member"
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$starts-with": [
+          {
+            "$geohash": [
+              "$it.at",
+              6
+            ]
+          },
+          "u174wmb"
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "empty": true
+  },
+  {
+    "name": "plan/nine-cells-across-a-level-1-boundary",
+    "note": "the D7 case as a stored query: the point 9.7 m east is in a cell whose FIRST character differs, and only the neighbourhood finds it",
+    "data": [
+      {
+        "id": "here",
+        "at": [
+          -0.00007,
+          51.4779
+        ]
+      },
+      {
+        "id": "there",
+        "at": [
+          0.00007,
+          51.4779
+        ]
+      },
+      {
+        "id": "elsewhere",
+        "at": [
+          4.9041,
+          52.3676
+        ]
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$exists": {
+          "$index-of": [
+            {
+              "$geohash-neighbours": "gcpuzg"
+            },
+            {
+              "$geohash": [
+                "$it.at",
+                6
+              ]
+            }
+          ]
+        }
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": [
+      "here",
+      "there"
+    ]
+  },
+  {
+    "name": "plan/one-cell-misses-what-nine-find",
+    "note": "the same pair through a single cell: the neighbour across the edge is lost. This is why a prefix is bucketing",
+    "data": [
+      {
+        "id": "here",
+        "at": [
+          -0.00007,
+          51.4779
+        ]
+      },
+      {
+        "id": "there",
+        "at": [
+          0.00007,
+          51.4779
+        ]
+      },
+      {
+        "id": "elsewhere",
+        "at": [
+          4.9041,
+          52.3676
+        ]
+      }
+    ],
+    "query": {
+      "$for": {
+        "it": "$[*]"
+      },
+      "$where": {
+        "$starts-with": [
+          {
+            "$geohash": [
+              "$it.at",
+              6
+            ]
+          },
+          "gcpuzg"
+        ]
+      },
+      "$return": "$it.id"
+    },
+    "collection": true,
+    "expected": "here"
+  },
+  {
     "name": "non-finite/bbox-is-empty",
     "note": "a box that does not bound its input is worse than no box",
     "data": {},

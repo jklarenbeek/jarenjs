@@ -25,12 +25,22 @@
  * executor could produce (a WKT string is text this engine writes)
  * carries `executors: ["engine"]`, so a later order skips it explicitly
  * rather than by accident.
+ *
+ * An entry whose `data` is a LIST carries `collection: true`: its data
+ * IS a collection of documents and its query a FLWOR over `$[*]`, so a
+ * relational executor stores the rows and runs the query as written
+ * rather than wrapping one document. Those are the cases only a QUERY
+ * PLAN can get wrong — a probe sharing exactly one edge, a distance
+ * exactly on the bound, a cell longer than an index's precision, a
+ * circle that crosses the antimeridian — and they read a member named
+ * `at`, which is the member a store declares its spatial indexes over.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { queryJson } from '@jarenjs/json/query';
+import { destinationPoint, geohashEncode } from '@jarenjs/core/geo';
 
 const OUT = fileURLToPath(new URL('../test/json/fixtures/spatial-corpus.json', import.meta.url));
 
@@ -68,9 +78,58 @@ const CITIES = [
 /** NaN is not a JSON number, so a non-finite coordinate is COMPUTED. */
 const NAN = { $div: [0, 0] };
 
+/** A FLWOR over a stored collection: the shape a relational executor plans. */
+const rows = (where) => ({ $for: { it: '$[*]' }, $where: where, $return: '$it.id' });
+
+/**
+ * The rows the plan cases share. Every one sits exactly on a boundary:
+ * a vertex of the probe, an edge of it, a polygon sharing one edge and
+ * nothing else, a value with no bounding box at all, and a document
+ * with no such member.
+ */
+const PLACES = [
+  { id: 'inside', at: [4.5, 52.5] },
+  { id: 'vertex', at: [4, 52] },
+  { id: 'edge', at: [4.5, 52] },
+  { id: 'far', at: PAR },
+  { id: 'shares-one-edge',
+    at: { type: 'Polygon', coordinates: [[[3, 52], [4, 52], [4, 53], [3, 53], [3, 52]]] } },
+  { id: 'no-box', at: EMPTY_COLLECTION },
+  { id: 'no-member' },
+];
+const CELL6 = geohashEncode(4.5, 52.5, 6);
+
+/** Four positions exactly on a circle, one per cardinal bearing. */
+const RING_CENTRE = [4.9041, 52.3676];
+const RING_RADIUS = 1000;
+const RING = [0, 90, 180, 270].map((bearing) => ({
+  id: `bearing-${bearing}`,
+  at: destinationPoint(RING_CENTRE[0], RING_CENTRE[1], bearing, RING_RADIUS),
+})).concat([{ id: 'centre', at: RING_CENTRE }, { id: 'far', at: PAR }]);
+
+/** Either side of ±180, and either side of a pole. */
+const DATELINE = [
+  { id: 'west-of-the-line', at: [179.98, 0] },
+  { id: 'east-of-the-line', at: [-179.98, 0] },
+  { id: 'elsewhere', at: AMS },
+];
+const POLAR = [
+  { id: 'near-the-pole', at: [0, 89.995] },
+  { id: 'across-the-pole', at: [180, 89.995] },
+  { id: 'elsewhere', at: AMS },
+];
+
+/** The pair order 03 measured at 9.7 m apart, in different level-1 cells. */
+const GREENWICH = [
+  { id: 'here', at: [-0.00007, 51.4779] },
+  { id: 'there', at: [0.00007, 51.4779] },
+  { id: 'elsewhere', at: AMS },
+];
+
 //#endregion
 
-/** @type {Array<{name: string, data: any, query: any, note: string, executors?: string[]}>} */
+/** @type {Array<{name: string, data: any, query: any, note: string,
+ *   executors?: string[], collection?: boolean}>} */
 const ENTRIES = [
   // -- containment -----------------------------------------------------
   { name: 'within/inside', data: { at: AMS, region: SIMPLE }, query: { $within: ['$.at', '$.region'] },
@@ -250,6 +309,48 @@ const ENTRIES = [
   { name: 'geo-simplify/the-vertex-count-before', data: { g: { type: 'LineString', coordinates: [[0, 0], [1, 0.0001], [2, 0], [3, 0.0001], [4, 0]] } },
     query: { $count: '$.g.coordinates[*]' }, note: 'the same value unsimplified, for the comparison the entry above is half of' },
 
+  // -- the cases only a query PLAN can get wrong ------------------------
+  //
+  // `data` is a LIST here: these run over a COLLECTION, where a store
+  // can promote the predicate onto a derived spatial index and a
+  // pre-filter that is a hair too small silently drops a row. Every row
+  // sits exactly on a boundary the promotion has to get right.
+  { name: 'plan/box-intersects-touching-and-degenerate', collection: true, data: PLACES,
+    query: rows({ '$bbox-intersects': ['$it.at', SIMPLE] }),
+    note: 'touching edges count, a vertex counts, and a value with no box is not found — the exact promotion' },
+  { name: 'plan/within-on-a-vertex-and-an-edge', collection: true, data: PLACES,
+    query: rows({ $within: ['$it.at', SIMPLE] }),
+    note: 'the boundary is inside; the box-sharing polygon is NOT, so the pre-filter must be refined and not trusted' },
+  { name: 'plan/within-a-far-region-finds-nothing', collection: true, data: PLACES,
+    query: rows({ $within: ['$it.at', FAR] }),
+    note: 'the narrowed candidate set is empty and the answer still has to be the empty sequence' },
+  { name: 'plan/distance-exactly-on-the-bound', collection: true, data: RING,
+    query: rows({ $le: [{ $distance: ['$it.at', RING_CENTRE] }, RING_RADIUS] }),
+    note: 'four positions exactly RING_RADIUS metres out, one at each cardinal bearing: whatever the engine answers on the boundary, a pushed box must answer the same' },
+  { name: 'plan/distance-just-inside-the-bound', collection: true, data: RING,
+    query: rows({ $le: [{ $distance: ['$it.at', RING_CENTRE] }, RING_RADIUS + 1] }),
+    note: 'the same ring one metre wider, where every position is unambiguously inside' },
+  { name: 'plan/distance-across-the-antimeridian', collection: true, data: DATELINE,
+    query: rows({ $le: [{ $distance: ['$it.at', [179.99, 0]] }, 5000] }),
+    note: 'a circle spanning ±180 has no single box, so nothing may be pushed — and the answer is still the engine\'s' },
+  { name: 'plan/distance-over-a-pole', collection: true, data: POLAR,
+    query: rows({ $le: [{ $distance: ['$it.at', [0, 89.99]] }, 5000] }),
+    note: 'a circle reaching a pole has no longitude bound at all; same rule, same answer' },
+  { name: 'plan/geohash-prefix-shorter-than-the-cell', collection: true, data: PLACES,
+    query: rows({ '$starts-with': [{ $geohash: ['$it.at', 6] }, CELL6.slice(0, 4)] }),
+    note: 'a literal no longer than the indexed precision decides in the column' },
+  { name: 'plan/geohash-prefix-longer-than-the-cell', collection: true, data: PLACES,
+    query: rows({ '$starts-with': [{ $geohash: ['$it.at', 6] }, `${CELL6}b` ] }),
+    note: 'a 7-character literal against a 6-character cell is false for every row; the column can only confirm the first six, so it refines' },
+  { name: 'plan/nine-cells-across-a-level-1-boundary', collection: true, data: GREENWICH,
+    query: rows({ $exists: { '$index-of': [
+      { '$geohash-neighbours': geohashEncode(-0.00007, 51.4779, 6) },
+      { $geohash: ['$it.at', 6] }] } }),
+    note: 'the D7 case as a stored query: the point 9.7 m east is in a cell whose FIRST character differs, and only the neighbourhood finds it' },
+  { name: 'plan/one-cell-misses-what-nine-find', collection: true, data: GREENWICH,
+    query: rows({ '$starts-with': [{ $geohash: ['$it.at', 6] }, geohashEncode(-0.00007, 51.4779, 6)] }),
+    note: 'the same pair through a single cell: the neighbour across the edge is lost. This is why a prefix is bucketing' },
+
   // -- the non-finite rule ---------------------------------------------
   { name: 'non-finite/bbox-is-empty', data: {}, query: { $bbox: [NAN, 0] },
     note: 'a box that does not bound its input is worse than no box' },
@@ -273,6 +374,8 @@ function build() {
     const answer = queryJson(entry.query, entry.data);
     /** @type {any} */
     const out = { name: entry.name, note: entry.note, data: entry.data, query: entry.query };
+    if (entry.collection === true)
+      out.collection = true;
     if (entry.executors !== undefined)
       out.executors = entry.executors;
     if (answer === undefined)

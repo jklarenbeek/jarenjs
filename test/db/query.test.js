@@ -446,3 +446,228 @@ describe('a prefix predicate seeks the index', () => {
     });
   }
 });
+
+// ————— the two-stage spatial plan —————
+
+describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
+  const REGION = {
+    type: 'Polygon',
+    coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]],
+  };
+  const FAR = {
+    type: 'Polygon',
+    coordinates: [[[10, 40], [11, 40], [11, 41], [10, 41], [10, 40]]],
+  };
+  const PLACES = [
+    { id: 'inside', at: [4.5, 52.5] },
+    { id: 'vertex', at: [4, 52] },
+    { id: 'far', at: [2.3522, 48.8566] },
+    { id: 'shares-one-edge',
+      at: { type: 'Polygon', coordinates: [[[3, 52], [4, 52], [4, 53], [3, 53], [3, 52]]] } },
+    { id: 'no-box', at: { type: 'FeatureCollection', features: [] } },
+    { id: 'no-member' },
+  ];
+  const SPATIAL_MODEL = (indexes) => ({
+    $model: '0.1',
+    collections: {
+      places: {
+        schema: {
+          type: 'object',
+          properties: { id: { type: 'string' }, at: { type: ['array', 'object'] } },
+        },
+        key: '/id',
+        indexes,
+      },
+    },
+  });
+  const INDEXES = [
+    { name: 'by_box', path: '$.at', derive: 'bbox' },
+    { name: 'by_cell', path: '$.at', derive: 'geohash', precision: 6 },
+  ];
+
+  const freshPlaces = async (indexes = INDEXES, documents = PLACES) => {
+    const store = await openStore(SPATIAL_MODEL(indexes), { driver: nodeDriver() });
+    const places = store.collection('places');
+    for (const document of documents) await places.insert(document);
+    return { store, places };
+  };
+  const where = (predicate) =>
+    ({ $for: { it: '$[*]' }, $where: predicate, $return: '$it' });
+
+  /** Every promoted shape, with the reason it is or is not exact. */
+  const SHAPES = [
+    { name: '$bbox-intersects against a literal',
+      document: where({ '$bbox-intersects': ['$it.at', REGION] }), exact: true },
+    { name: '$within against a literal',
+      document: where({ $within: ['$it.at', REGION] }), exact: false },
+    { name: '$within against an external',
+      document: where({ $within: ['$it.at', '$region'] }), exact: false },
+    { name: 'a bounded $distance',
+      document: where({ $le: [{ $distance: ['$it.at', [4.5, 52.5]] }, 60_000] }),
+      exact: false },
+    { name: 'a geohash prefix inside the column precision',
+      document: where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u1'] }), exact: true },
+    { name: 'a geohash literal longer than the column precision',
+      document: where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u173zcbb'] }),
+      exact: false },
+    { name: 'the nine-cell neighbourhood',
+      document: where({ $exists: { '$index-of': [
+        { '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }] } }),
+      exact: true,
+      // §8.14's membership recipe RAISES on a value with no bounded
+      // position (`$index-of` refuses an empty search item), so the
+      // engine side cannot run over the degenerate rows at all; the
+      // difference that makes is pinned on its own below
+      documents: PLACES.filter((place) => place.id !== 'no-box' && place.id !== 'no-member') },
+  ];
+
+  for (const shape of SHAPES) {
+    it(`answers as the engine does, indexed and not: ${shape.name}`, async () => {
+      const externals = { region: REGION };
+      const documents = shape.documents ?? PLACES;
+      const expected = compileJsonQuery(shape.document)(structuredClone(documents), externals);
+      const indexed = await freshPlaces(INDEXES, documents);
+      const plain = await freshPlaces([], documents);
+      try {
+        assert.deepStrictEqual(
+          await indexed.places.execute(shape.document, { externals }), expected);
+        assert.deepStrictEqual(
+          await plain.places.execute(shape.document, { externals }), expected);
+      }
+      finally {
+        await indexed.store.close();
+        await plain.store.close();
+      }
+    });
+
+    it(`explains both stages: ${shape.name}`, async () => {
+      const { store, places } = await freshPlaces();
+      const explained = await places.explain(shape.document, { externals: { region: REGION } });
+      assert.strictEqual(explained.prefilters.length, 1);
+      assert.strictEqual(explained.prefilters[0].exact, shape.exact);
+      assert.ok(explained.prefilters[0].columns.length > 0);
+      assert.ok(explained.indexes.length > 0, 'the derived index is named');
+      if (shape.exact) {
+        assert.strictEqual(explained.residual, null, 'nothing is left to refine');
+      }
+      else {
+        assert.notStrictEqual(explained.residual, null,
+          'a refinement ran, so the query is NOT native');
+        assert.strictEqual(explained.residual.mode, 'set');
+        assert.match(explained.residual.reasons[0].reason, /pre-filter/);
+        assert.match(explained.residual.reasons[0].reason, /refines in the engine/);
+        await assert.rejects(
+          () => Promise.resolve(places.explain(shape.document,
+            { externals: { region: REGION }, strict: true })),
+          (error) => error.code === 'JD0010');
+      }
+      await store.close();
+    });
+  }
+
+  it('SQLite SEEKS the derived index rather than scanning', async () => {
+    const { store, places } = await freshPlaces();
+    for (const shape of SHAPES) {
+      const explained = await places.explain(shape.document, { externals: { region: REGION } });
+      assert.match(explained.scanNarrative, /SEARCH/, shape.name);
+      assert.match(explained.scanNarrative,
+        new RegExp(explained.indexes[0]), `${shape.name}: the narrative names the index`);
+    }
+    await store.close();
+  });
+
+  it('a circle over a pole or across the antimeridian pushes nothing, and is still right', async () => {
+    const documents = [
+      { id: 'west-of-the-line', at: [179.98, 0] },
+      { id: 'east-of-the-line', at: [-179.98, 0] },
+      { id: 'polar', at: [0, 89.995] },
+      { id: 'elsewhere', at: [4.9041, 52.3676] },
+    ];
+    const { store, places } = await freshPlaces(INDEXES, documents);
+    for (const centre of [[179.99, 0], [0, 89.99]]) {
+      const document = where({ $le: [{ $distance: ['$it.at', centre] }, 5000] });
+      const explained = await places.explain(document);
+      assert.deepStrictEqual(explained.prefilters, [], centre.join(','));
+      assert.deepStrictEqual(await places.execute(document),
+        compileJsonQuery(document)(structuredClone(documents)), centre.join(','));
+    }
+    await store.close();
+  });
+
+  it('a parameterized region binds through DERIVED slots, and an unboundable one diverts', async () => {
+    const { store, places } = await freshPlaces();
+    const document = where({ $within: ['$it.at', '$region'] });
+    const explained = await places.explain(document, { externals: { region: REGION } });
+    // a GeoJSON object is not a value SQLite can bind: what binds is one
+    // edge of its box per slot, computed at bind time
+    assert.deepStrictEqual(explained.params, [
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 'e' } },
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 'w' } },
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 'n' } },
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 's' } },
+    ]);
+    assert.match(explained.scanNarrative, /SEARCH/);
+
+    for (const region of [REGION, FAR, { type: 'FeatureCollection', features: [] }]) {
+      const externals = { region };
+      assert.deepStrictEqual(await places.execute(document, { externals }),
+        compileJsonQuery(document)(structuredClone(PLACES), externals),
+        JSON.stringify(region).slice(0, 40));
+    }
+    // the unboundable region has no box, so the call diverts to the full
+    // scan — the same answer, reached without the index
+    const diverted = await places.explain(document,
+      { externals: { region: { type: 'FeatureCollection', features: [] } } });
+    assert.match(diverted.scanNarrative, /SEARCH/, 'explain() reports the PLAN, not the diversion');
+    await store.close();
+  });
+
+  // A pushed pre-filter decides which rows the engine SEES, so it also
+  // decides which rows can raise. The row set is unchanged — that is
+  // what the truth table proves — but a row the pre-filter excludes
+  // never reaches the engine and therefore never throws. Both cases
+  // below are documented in ARCHITECTURE.md; they are pinned here so
+  // the difference is deliberate rather than discovered.
+  it('a row the pre-filter excludes never reaches the engine, so it never raises', async () => {
+    const documents = [{ id: 'good', at: [4.5, 52.5] }, { id: 'null-member', at: null }];
+    const { store, places } = await freshPlaces(INDEXES, documents);
+    const document = where({ $within: ['$it.at', REGION] });
+    assert.throws(() => compileJsonQuery(document)(structuredClone(documents)),
+      (error) => error.code === 'JQ2001',
+      'the engine refuses a null operand — the schema types this member as geography only');
+    assert.deepStrictEqual(await places.execute(document), documents[0],
+      'the pushed filter never fetched it');
+    await store.close();
+  });
+
+  it('the same rule covers the membership recipe, which raises on an unbounded value', async () => {
+    const documents = [
+      { id: 'greenwich', at: [-0.00007, 51.4779] },
+      { id: 'no-box', at: { type: 'FeatureCollection', features: [] } },
+    ];
+    // the cell just east of the level-1 boundary Greenwich sits on: the
+    // point is in 'gcpuz' and only the NEIGHBOURHOOD reaches it (D7)
+    const document = where({ $exists: { '$index-of': [
+      { '$geohash-neighbours': 'u10hb' }, { $geohash: ['$it.at', 5] }] } });
+    assert.throws(() => compileJsonQuery(document)(structuredClone(documents)),
+      (error) => error.code === 'JQ2001',
+      "'$index-of' refuses an empty search item, which is what an unbounded value produces");
+    const indexes = [{ name: 'by_cell5', path: '$.at', derive: 'geohash', precision: 5 }];
+    const { store, places } = await freshPlaces(indexes, documents);
+    const explained = await places.explain(document);
+    assert.strictEqual(explained.prefilters[0].exact, true);
+    assert.deepStrictEqual(await places.execute(document), documents[0],
+      'the unbounded row is not a candidate, so nothing raises and the match still lands');
+    await store.close();
+  });
+
+  it('a spatial predicate over a collection with no derived index still answers', async () => {
+    const { store, places } = await freshPlaces([]);
+    const document = where({ $within: ['$it.at', REGION] });
+    const explained = await places.explain(document);
+    assert.deepStrictEqual(explained.prefilters, []);
+    assert.deepStrictEqual(await places.execute(document),
+      compileJsonQuery(document)(structuredClone(PLACES)));
+    await store.close();
+  });
+});

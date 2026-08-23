@@ -19,7 +19,17 @@
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
 
 /**
- * @typedef {{ external: string } | { literal: unknown }} ParamSlot
+ * @typedef {{ external: string } | { literal: unknown } |
+ *   { derived: { kind: 'bboxAxis', external: string,
+ *     axis: 'w' | 's' | 'e' | 'n' } }} ParamSlot
+ *   Three kinds, closed. A DERIVED slot is the escape for a value SQL
+ *   cannot bind at all: a GeoJSON region arrives as an external object,
+ *   and what the statement needs is one edge of its bounding box, so
+ *   the binder computes that edge from the bound value. It is the same
+ *   shape the prefix successor uses — compute in JavaScript what SQL
+ *   cannot, bind an ordinary parameter — and it stays closed on
+ *   purpose: a general expression slot would be a second query language
+ *   living in the emitter.
  */
 
 /**
@@ -52,6 +62,39 @@ function stropForm(dialect, param, valueSql, pred) {
 }
 
 /**
+ * The name a dialect uses for one slot's parameter reference.
+ * @param {ParamSlot} slot
+ * @returns {string}
+ */
+function slotName(slot) {
+  if ('external' in slot) return slot.external;
+  if ('derived' in slot) return slot.derived.external;
+  return 'value';
+}
+
+/** Where each edge sits in a `[west, south, east, north]` box. */
+const BOX_AT = { w: 0, s: 1, e: 2, n: 3 };
+
+/**
+ * Bind one edge of the probe box: a plan-time literal box binds its own
+ * number, an external one binds a derived slot the binder computes from
+ * the value at call time.
+ *
+ * A positional dialect numbers parameters by the statement's TEXT
+ * order, so this is called in the order the placeholders appear and
+ * never in the order the box carries its edges.
+ * @param {any} probe
+ * @param {(slot: ParamSlot) => string} param
+ * @param {'w' | 's' | 'e' | 'n'} axis
+ * @returns {string}
+ */
+function probeEdge(probe, param, axis) {
+  return 'box' in probe
+    ? param({ literal: probe.box[BOX_AT[axis]] })
+    : param({ derived: { kind: 'bboxAxis', external: probe.ext, axis } });
+}
+
+/**
  * Emit one plan as SQL plus its ordered parameter slots.
  * @param {import('./algebra.js').Plan} plan
  * @param {any} dialect
@@ -65,7 +108,7 @@ export function emitPlan(plan, dialect, physical) {
   const slots = [];
   const param = (slot) => {
     slots.push(slot);
-    return dialect.parameterRef(slots.length, 'external' in slot ? slot.external : 'value');
+    return dialect.parameterRef(slots.length, slotName(slot));
   };
 
   /** SQL for a ref's VALUE: the generated column when one exists. */
@@ -165,6 +208,48 @@ export function emitPlan(plan, dialect, physical) {
         const jt = typeOf(pred.ref);
         const form = stropForm(dialect, param, valueOf(pred.ref), pred);
         return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
+      }
+      case 'bboxOverlap': {
+        // Two boxes meet when neither is wholly past the other, and
+        // TOUCHING counts (`bboxIntersects`), so these are `<=`/`>=`:
+        // a strict comparison would disagree with the engine on every
+        // shared edge. Emitted in the index's covered column order —
+        // (w, e, s, n) — so the leading longitude bound sits in front.
+        // The leading `IS NOT NULL` keeps the form TOTAL — a row with no
+        // box answers FALSE, not NULL, so a negation over an exact box
+        // test still composes classically — and it is also what makes
+        // the term SEEKABLE: it bounds the leading column from below,
+        // and a one-sided range alone loses to a table scan in SQLite's
+        // cost model, which prices a virtual generated column as a free
+        // column read when it is a host function call per row.
+        const c = pred.columns;
+        const edge = (axis) => probeEdge(pred.probe, param, axis);
+        return `(${q(c.w)} IS NOT NULL AND ${q(c.w)} <= ${edge('e')}`
+          + ` AND ${q(c.e)} >= ${edge('w')}`
+          + ` AND ${q(c.s)} <= ${edge('n')} AND ${q(c.n)} >= ${edge('s')})`;
+      }
+      case 'cellIn': {
+        // The cells are whole values of the column, so this is an
+        // equality set — and `IN` is the spelling that keeps it one:
+        // nine OR-ed ranges defeat SQLite's multi-index OR optimization
+        // (it gives up past a handful of terms) and fall back to a scan,
+        // which for a virtual generated column is a host function call
+        // per row.
+        const column = q(pred.column);
+        const list = pred.cells.map((cell) => param({ literal: cell })).join(', ');
+        return `(${column} IS NOT NULL AND ${column} IN (${list}))`;
+      }
+      case 'cellPrefix': {
+        // A cell SHORTER than the column's own: the half-open range an
+        // index seeks. Every cell is base-32, so the code-point
+        // successor always exists.
+        const column = q(pred.column);
+        const upper = codePointPrefixSuccessor(pred.prefix);
+        if (upper === null)
+          throw new Error('emit: a geohash cell has no code-point successor');
+        const range = dialect.strStartsWith(column, param({ literal: pred.prefix }),
+          param({ literal: upper }));
+        return `(${column} IS NOT NULL AND ${range})`;
       }
       default:
         throw new Error(`emit: unknown predicate node '${/** @type {any} */ (pred).p}'`);
@@ -345,7 +430,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const slots = [];
   const param = (slot) => {
     slots.push(slot);
-    return dialect.parameterRef(slots.length, 'external' in slot ? slot.external : 'value');
+    return dialect.parameterRef(slots.length, slotName(slot));
   };
 
   const aliases = new Map(plan.bindings.map((binding, i) => [

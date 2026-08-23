@@ -11,7 +11,8 @@
  *
  * The outcome of planning one document:
  *
- *   { plan, mode: 'native' | 'row' | 'set', reasons, rowReturn }
+ *   { plan, mode: 'native' | 'row' | 'set', reasons, rowReturn,
+ *     prefilters }
  *
  * - `native` — everything translated; the plan alone answers.
  * - `row`    — predicates, ordering and window pushed; only the
@@ -24,6 +25,10 @@
  *
  * `reasons` names every construct that forced work off the database,
  * with reason text drawn from the deliberate-residual table.
+ * `prefilters` names the IMPLIED conjuncts — predicates the planner
+ * ADDED because a spatial one provably implies them (see "Spatial
+ * promotions" below) — with the columns each reads and whether it
+ * decided or merely narrowed.
  */
 
 import { analyzeQuery, AST_VERSION, NODE_KINDS } from '@jarenjs/json/query';
@@ -34,6 +39,11 @@ import {
 
 import { selectPlan, conjoin, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
+import { schemaNodeAt } from './ddl.js';
+import {
+  BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
+  probeBox, probePosition, probeCircleBox, cellNeighbourhood,
+} from './derive.js';
 
 /** Comparison operator names → plan ops. */
 const COMPARISONS = new Map([
@@ -105,6 +115,15 @@ for (const kind of NODE_KINDS) {
  */
 function refusal(construct, reason) {
   return { construct, reason };
+}
+
+/**
+ * A translated predicate that DECIDES: no pre-filter, nothing left for
+ * a residual to refine.
+ * @param {import('./algebra.js').PlanPredicate} pred
+ */
+function exactly(pred) {
+  return { pred, exact: true, prefilters: [], refinements: [] };
 }
 
 // ————— Registered operators (Ring 2) —————
@@ -216,13 +235,15 @@ function isItVar(node, itSlot) {
 }
 
 /**
- * A singular member path rooted on the binding → a PlanRef, or null.
+ * The typed segments of a singular member path rooted on the binding,
+ * with the canonical spelling the physical mapping keys columns by.
+ * `null` when the node is not such a path.
  * @param {any} node
  * @param {number} itSlot
- * @param {any} shape - { schema, columnByCanonical }
- * @returns {import('./algebra.js').PlanRef | null}
+ * @returns {{ segments: ({ name: string } | { index: number })[],
+ *   canonical: string } | null}
  */
-function pathRef(node, itSlot, shape) {
+function memberPath(node, itSlot) {
   if (node.kind !== 'path' || node.external === true) return null;
   if (node.rootSlot !== itSlot || node.singular !== true) return null;
   /** @type {({ name: string } | { index: number })[]} */
@@ -237,10 +258,23 @@ function pathRef(node, itSlot, shape) {
   if (segments.length === 0) return null;
   const canonical = segments
     .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`)).join('');
+  return { segments, canonical };
+}
+
+/**
+ * A singular member path rooted on the binding → a PlanRef, or null.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape - { schema, columnByCanonical }
+ * @returns {import('./algebra.js').PlanRef | null}
+ */
+function pathRef(node, itSlot, shape) {
+  const path = memberPath(node, itSlot);
+  if (path === null) return null;
   return {
-    segments,
-    type: typeOfPath(shape.schema, segments),
-    column: shape.columnByCanonical.get(canonical) ?? null,
+    segments: path.segments,
+    type: typeOfPath(shape.schema, path.segments),
+    column: shape.columnByCanonical.get(path.canonical) ?? null,
   };
 }
 
@@ -261,12 +295,414 @@ function isScalarLiteral(value) {
     || typeof value === 'number' || typeof value === 'boolean';
 }
 
+
+// ————— Spatial promotions: the implied conjunct —————
+//
+// Every other conjunct the planner pushes is a conjunct OF the document:
+// it translates exactly or it does not. A spatial predicate cannot be
+// translated exactly — there is no `ST_Within` in SQLite and this
+// package does not build one — but it IMPLIES one that can be, over the
+// derived columns a model declares (`indexes[].derive`): a bounding-box
+// overlap, or a geohash-cell range.
+//
+// An IMPLIED conjunct narrows; it never decides. Three properties make
+// that safe, and each is asserted by test:
+//
+//  1. No false negatives — every row the document's predicate keeps
+//     passes the implied one. The proof per rule is in ARCHITECTURE.md's
+//     truth table. A row with no derived value at all is not an
+//     exception: the box is missing in exactly the cases §8.14's
+//     representative position is, so the engine answers false for it
+//     too. What a pre-filter DOES change is which rows can raise —
+//     one it excludes never reaches the engine — and that is why the
+//     precondition below is a schema one.
+//  2. Idempotent refinement — the residual re-runs the ORIGINAL
+//     predicate over the narrowed candidates, so the answer is the
+//     engine's. That is why an implied conjunct forces the SET residual
+//     rather than the row one.
+//  3. `strict: true` refuses it — an implied conjunct leaves its own
+//     reason behind, so the plan is not native and `JD0010` names it.
+//
+// A promotion reads a member the schema types as an array or an object.
+// That precondition is the string operators' rule again: §8.14 answers
+// `JQ2001` for a non-geographic operand, so on a member the schema does
+// not type as geography a pushed filter could silently answer where the
+// engine would throw.
+
+/** The geographic schema types a spatial promotion is allowed over. */
+const GEO_TYPES = new Set(['array', 'object']);
+
 /**
- * Translate one predicate node, or explain why not.
+ * Does the schema type this member as geography and ONLY as geography?
+ * A union of `array` and `object` is the natural declaration for a
+ * §8.14 operand (a bare position or a geometry); one that also admits
+ * `null` is not, because §8.14 answers `JQ2001` for a `null` operand
+ * while a pushed filter would simply not see the row.
+ * @param {any} node - a subschema, or `undefined`
+ * @returns {boolean}
+ */
+function isGeographicSchema(node) {
+  const declared = node?.type;
+  if (typeof declared === 'string') return GEO_TYPES.has(declared);
+  return Array.isArray(declared) && declared.length > 0
+    && declared.every((type) => GEO_TYPES.has(type));
+}
+
+/** `$geohash`'s default precision (QUERY-FORMAT §8.14). */
+const GEOHASH_DEFAULT_PRECISION = 9;
+
+const SPATIAL_REASONS = {
+  within: 'a bounding-box pre-filter is pushed; exact containment refines in the engine',
+  distance: 'a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine',
+  prefix: "a cell-range pre-filter over the derived column's precision is pushed; "
+    + 'the longer prefix refines in the engine',
+  noIndex: 'no derived spatial index on this member covers the predicate '
+    + '(declare indexes[].derive on it)',
+  notGeographic: 'spatial predicates translate only over a member the schema types as an '
+    + 'array or an object (the engine ERRORS on a non-geographic operand)',
+  operand: 'a spatial predicate translates only against a literal value or an external',
+  unbounded: 'the probe has no bounding box, so no conservative pre-filter exists',
+  pole: 'the circle reaches a pole, where a box has no longitude bound at all — '
+    + 'pushing nothing is correct, pushing a wrong box is not',
+  wrapped: 'the circle crosses the antimeridian, and a box that crosses it would need two '
+    + 'disjuncts this suite\'s box convention does not carry — '
+    + 'pushing nothing is correct, pushing a wrong box is not',
+  precision: "the cell length must match the derived column's precision",
+};
+
+/**
+ * The constant value an AST subtree denotes, or `null` when it denotes
+ * anything else. A literal GeoJSON region in a document is NOT a
+ * `literal` node — it is the object/array constructor tree the engine
+ * builds from the same members — so the planner folds it here to get
+ * the value it must compute a probe box from.
+ * @param {any} node
+ * @returns {{ value: any } | null}
+ */
+function constantOf(node) {
+  if (node.kind === 'literal') return { value: node.value };
+  if (node.kind === 'array') {
+    const value = [];
+    for (const element of node.elements) {
+      const item = constantOf(element);
+      if (item === null) return null;
+      value.push(item.value);
+    }
+    return { value };
+  }
+  if (node.kind === 'object') {
+    /** @type {any} */
+    const value = {};
+    for (const entry of node.entries) {
+      if (typeof entry.name !== 'string') return null;
+      const member = constantOf(entry.expr);
+      if (member === null) return null;
+      value[entry.name] = member.value;
+    }
+    return { value };
+  }
+  return null;
+}
+
+/**
+ * The derived columns one `(member, derivation)` pair maps to, or
+ * `null` when the collection declares no such index. The identity is
+ * the same one the physical mapping keys its column set by — path,
+ * kind AND precision — so a query at a different precision finds no
+ * column rather than the wrong one.
+ * @param {any} shape
+ * @param {string} canonical
+ * @param {'geohash' | 'bbox'} derive
+ * @param {number} [precision]
+ * @returns {string | { w: string, s: string, e: string, n: string } | null}
+ */
+function derivedColumnsOf(shape, canonical, derive, precision) {
+  const stem = shape.columnByCanonical?.get(`${canonical}|${derive}|${precision ?? ''}`);
+  if (stem === undefined) return null;
+  if (derive === 'geohash') return stem;
+  /** @type {any} */
+  const columns = {};
+  for (const component of BBOX_COMPONENTS) columns[`${component}`] = `${stem}_${component}`;
+  return columns;
+}
+
+/**
+ * A spatial SUBJECT: a singular member path on the binding that the
+ * schema types as geography. Answers the canonical path a derived
+ * column set is looked up by, or a named refusal.
  * @param {any} node
  * @param {number} itSlot
  * @param {any} shape
- * @returns {{ pred: import('./algebra.js').PlanPredicate } |
+ * @param {string} construct
+ * @returns {{ canonical: string } | { refusal: { construct: string, reason: string } }}
+ */
+function spatialSubject(node, itSlot, shape, construct) {
+  const path = memberPath(node, itSlot);
+  if (path === null || !isGeographicSchema(schemaNodeAt(shape.schema, path.segments)))
+    return { refusal: refusal(construct, SPATIAL_REASONS.notGeographic) };
+  return { canonical: path.canonical };
+}
+
+/** A promotion outcome: a pushed predicate that may still need refining. */
+function promotion(pred, prefilter, refinements = []) {
+  return { pred, exact: refinements.length === 0, prefilters: [prefilter], refinements };
+}
+
+/** The four bbox columns in the order the declared index covers them. */
+function boxColumnList(columns) {
+  return BBOX_INDEX_ORDER.map((component) => columns[component]);
+}
+
+/**
+ * P1/P2 — a box predicate over a `bbox`-derived index.
+ *
+ * `$bbox-intersects(path, probe)` is EXACT: the derived columns ARE the
+ * row's box, so overlap is fully decidable in SQL. `<=`/`>=` and not
+ * `<`/`>` because the kernel counts touching edges as intersecting.
+ *
+ * `$within(path, area)` is IMPLIED by the same overlap: the subject's
+ * representative position lies inside its own box (a bare position IS
+ * the box; a centroid is a mean of positions and a mean lies within
+ * their min/max), and inside the area's surface implies inside the
+ * area's box — so the two boxes share at least that position.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planBoxPredicate(node, itSlot, shape) {
+  const construct = node.name;
+  const symmetric = construct === '$bbox-intersects';
+  // `$within` asks whether the FIRST value is inside the second, so only
+  // the first may be the row; box overlap is symmetric, so either may be
+  let subjectAt = 0;
+  if (symmetric && memberPath(node.args[0], itSlot) === null
+    && memberPath(node.args[1], itSlot) !== null) subjectAt = 1;
+  const subject = spatialSubject(node.args[subjectAt], itSlot, shape, construct);
+  if ('refusal' in subject) return subject;
+  const columns = derivedColumnsOf(shape, subject.canonical, 'bbox');
+  if (columns === null) return { refusal: refusal(construct, SPATIAL_REASONS.noIndex) };
+
+  const probeNode = node.args[subjectAt === 0 ? 1 : 0];
+  /** @type {any} */
+  let probe = null;
+  if (probeNode.kind === 'var' && probeNode.external === true) {
+    // a GeoJSON object is not a value any database binds, so its four
+    // box edges bind instead — computed at bind time from the same
+    // kernel the stored columns were computed with
+    probe = { ext: probeNode.name };
+  }
+  else {
+    const constant = constantOf(probeNode);
+    if (constant === null) return { refusal: refusal(construct, SPATIAL_REASONS.operand) };
+    const box = probeBox(constant.value);
+    if (box === null) return { refusal: refusal(construct, SPATIAL_REASONS.unbounded) };
+    probe = { box };
+  }
+  const pred = { p: 'bboxOverlap', columns, probe };
+  const exact = construct === '$bbox-intersects';
+  return promotion(pred,
+    { construct, columns: boxColumnList(columns), exact },
+    exact ? [] : [refusal('$within', SPATIAL_REASONS.within)]);
+}
+
+/**
+ * P3 — a BOUNDED `$distance` is implied by the box of its circle.
+ *
+ * Recognized: `{$le|$lt: [{$distance: [path, probe]}, r]}` and the
+ * mirrored `{$ge|$gt: [r, {$distance: …}]}`. A "farther than r"
+ * predicate is deliberately NOT promoted: no box narrows it.
+ *
+ * The box comes from `circleBounds` on the same sphere and the same
+ * `EARTH_RADIUS` the engine's `$distance` measures with, so the two
+ * cannot disagree by model rather than by rounding — there is no
+ * padding constant here, because no honest value could be chosen for
+ * one. Two refusals instead: a circle reaching a pole has no longitude
+ * bound at all, and one crossing the antimeridian would need two
+ * disjoint boxes this suite's box convention cannot carry.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planDistanceBound(node, itSlot, shape) {
+  const op = COMPARISONS.get(node.name);
+  const upperOnLeft = op === 'le' || op === 'lt';
+  const distanceNode = upperOnLeft ? node.args[0] : node.args[1];
+  const radiusNode = upperOnLeft ? node.args[1] : node.args[0];
+  const radius = constantOf(radiusNode);
+  if (radius === null || typeof radius.value !== 'number')
+    return { refusal: refusal('$distance', SPATIAL_REASONS.operand) };
+
+  let subjectAt = 0;
+  if (memberPath(distanceNode.args[0], itSlot) === null
+    && memberPath(distanceNode.args[1], itSlot) !== null) subjectAt = 1;
+  const subject = spatialSubject(distanceNode.args[subjectAt], itSlot, shape, '$distance');
+  if ('refusal' in subject) return subject;
+  const columns = derivedColumnsOf(shape, subject.canonical, 'bbox');
+  if (columns === null) return { refusal: refusal('$distance', SPATIAL_REASONS.noIndex) };
+
+  const probeNode = distanceNode.args[subjectAt === 0 ? 1 : 0];
+  const constant = constantOf(probeNode);
+  // an EXTERNAL centre would need a slot that composes the bound value
+  // with the radius, and the derived slot kind is closed at one axis of
+  // one bound value; such a query diverts to the full scan as before
+  if (constant === null) return { refusal: refusal('$distance', SPATIAL_REASONS.operand) };
+  const at = probePosition(constant.value);
+  if (at === null) return { refusal: refusal('$distance', SPATIAL_REASONS.unbounded) };
+  const box = probeCircleBox(at, radius.value);
+  if (box === null) return { refusal: refusal('$distance', SPATIAL_REASONS.pole) };
+  if (box[0] < -180 || box[2] > 180)
+    return { refusal: refusal('$distance', SPATIAL_REASONS.wrapped) };
+
+  return promotion({ p: 'bboxOverlap', columns, probe: { box } },
+    { construct: '$distance', columns: boxColumnList(columns), exact: false },
+    [refusal('$distance', SPATIAL_REASONS.distance)]);
+}
+
+/**
+ * The `(canonical, precision)` a `$geohash` call over the binding
+ * denotes, or a refusal. The precision must be a literal — it decides
+ * WHICH column the derivation maps to.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @param {string} construct
+ * @returns {any}
+ */
+function geohashDerivation(node, itSlot, shape, construct) {
+  if (node.kind !== 'op' || node.name !== '$geohash')
+    return { refusal: refusal(construct, SPATIAL_REASONS.operand) };
+  let precision = GEOHASH_DEFAULT_PRECISION;
+  if (node.args.length > 1) {
+    const declared = constantOf(node.args[1]);
+    if (declared === null || !Number.isInteger(declared.value)
+      || declared.value < PRECISION_MIN || declared.value > PRECISION_MAX)
+      return { refusal: refusal(construct, SPATIAL_REASONS.operand) };
+    precision = declared.value;
+  }
+  const subject = spatialSubject(node.args[0], itSlot, shape, construct);
+  if ('refusal' in subject) return subject;
+  const column = derivedColumnsOf(shape, subject.canonical, 'geohash', precision);
+  if (column === null) return { refusal: refusal(construct, SPATIAL_REASONS.noIndex) };
+  return { column: /** @type {string} */ (column), precision };
+}
+
+/**
+ * P4, bucketing — `{$starts-with: [{$geohash: [path, k]}, "cell"]}` over
+ * a `geohash` index declared at exactly `k`. The column HOLDS the k-
+ * character cell, so a prefix test on the expression is a prefix test
+ * on the column: exact while the literal is no longer than k, and
+ * merely implied beyond it, where the column can only confirm its own
+ * first k characters.
+ *
+ * A prefix range is what order 01 made sargable; `LIKE` and `substr`
+ * both scan.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planCellPrefix(node, itSlot, shape) {
+  const derivation = geohashDerivation(node.args[0], itSlot, shape, '$starts-with');
+  if ('refusal' in derivation) return derivation;
+  const pattern = constantOf(node.args[1]);
+  if (pattern === null || typeof pattern.value !== 'string' || pattern.value === '')
+    return { refusal: refusal('$starts-with', SPATIAL_REASONS.operand) };
+  const exact = pattern.value.length <= derivation.precision;
+  const cell = exact ? pattern.value : pattern.value.slice(0, derivation.precision);
+  // a pattern as long as the column's own cell is an EQUALITY on it;
+  // a shorter one is the half-open range order 01 made sargable
+  const pred = cell.length === derivation.precision
+    ? { p: 'cellIn', column: derivation.column, cells: [cell] }
+    : { p: 'cellPrefix', column: derivation.column, prefix: cell };
+  return promotion(pred,
+    { construct: '$starts-with', columns: [derivation.column], exact },
+    exact ? [] : [refusal('$starts-with', SPATIAL_REASONS.prefix)]);
+}
+
+/**
+ * P4, proximity — the nine-cell probe (D7), promoted to a membership
+ * test over one column. The single-cell version misses a point ten metres
+ * away across a cell edge, so a single prefix is BUCKETING and only the
+ * neighbourhood is proximity; this is the shape §8.14 publishes with
+ * the cells inline, where the planner can see them.
+ *
+ * Recognized: `{$exists: {$index-of: [{$geohash-neighbours: "cell"},
+ * {$geohash: [path, k]}]}}`. Exact only when the cell's length IS k —
+ * the membership test compares whole strings, so any other length makes
+ * the document's own predicate constantly false and the promotion would
+ * be answering a different question.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planCellNeighbourhood(node, itSlot, shape) {
+  const membership = node.args[0];
+  const neighbours = membership.args[0];
+  const cell = constantOf(neighbours.args[0]);
+  if (cell === null || typeof cell.value !== 'string' || cell.value === '')
+    return { refusal: refusal('$geohash-neighbours', SPATIAL_REASONS.operand) };
+  const derivation = geohashDerivation(membership.args[1], itSlot, shape, '$geohash-neighbours');
+  if ('refusal' in derivation) return derivation;
+  if (cell.value.length !== derivation.precision)
+    return { refusal: refusal('$geohash-neighbours', SPATIAL_REASONS.precision) };
+  const cells = cellNeighbourhood(cell.value);
+  if (cells.length === 0)
+    return { refusal: refusal('$geohash-neighbours', SPATIAL_REASONS.operand) };
+  return promotion({ p: 'cellIn', column: derivation.column, cells },
+    { construct: '$geohash-neighbours', columns: [derivation.column], exact: true });
+}
+
+/**
+ * Dispatch the spatial shapes. Answers `null` when the node is not one
+ * of them, so the caller falls through to the rest of the grammar.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planSpatial(node, itSlot, shape) {
+  if (node.name === '$within' || node.name === '$bbox-intersects')
+    return planBoxPredicate(node, itSlot, shape);
+  const op = COMPARISONS.get(node.name);
+  if (op !== undefined && ORDERING_OPS.has(op)) {
+    const upperOnLeft = op === 'le' || op === 'lt';
+    const distanceNode = upperOnLeft ? node.args[0] : node.args[1];
+    if (distanceNode?.kind === 'op' && distanceNode.name === '$distance')
+      return planDistanceBound(node, itSlot, shape);
+    // `$distance >= r` — "farther than" — is narrowed by no box at all
+    const other = upperOnLeft ? node.args[1] : node.args[0];
+    if (other?.kind === 'op' && other.name === '$distance') {
+      return { refusal: refusal('$distance',
+        'only a BOUNDED distance is promoted; no box narrows "farther than r"') };
+    }
+    return null;
+  }
+  if (node.name === '$starts-with' && node.args[0]?.kind === 'op'
+    && node.args[0].name === '$geohash')
+    return planCellPrefix(node, itSlot, shape);
+  if (node.name === '$exists' && node.args[0]?.kind === 'op'
+    && node.args[0].name === '$index-of'
+    && node.args[0].args[0]?.kind === 'op'
+    && node.args[0].args[0].name === '$geohash-neighbours')
+    return planCellNeighbourhood(node, itSlot, shape);
+  return null;
+}
+
+/**
+ * Translate one predicate node, or explain why not.
+ *
+ * A translated predicate is EXACT unless it carries `refinements`: an
+ * implied spatial conjunct narrows the fetch and leaves the original
+ * predicate to the residual, and `prefilters` records what it reads so
+ * `explain()` can say whether a declared index is earning its keep.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {{ pred: import('./algebra.js').PlanPredicate, exact: boolean,
+ *   prefilters: any[], refinements: { construct: string, reason: string }[] } |
  *   { refusal: { construct: string, reason: string } }}
  */
 function planPredicate(node, itSlot, shape) {
@@ -278,18 +714,35 @@ function planPredicate(node, itSlot, shape) {
 
   if (node.name === '$and' || node.name === '$or') {
     const items = [];
+    const prefilters = [];
+    const refinements = [];
     for (const arg of node.args) {
       const inner = planPredicate(arg, itSlot, shape);
       if ('refusal' in inner) return inner; // partial $or/$and is not splittable here
       items.push(inner.pred);
+      prefilters.push(...inner.prefilters);
+      refinements.push(...inner.refinements);
     }
-    return { pred: { p: node.name === '$and' ? 'and' : 'or', items } };
+    // an implied child makes the composition a SUPERSET either way, so
+    // it still narrows honestly — it just stops deciding
+    return { pred: { p: node.name === '$and' ? 'and' : 'or', items },
+      exact: refinements.length === 0, prefilters, refinements };
   }
   if (node.name === '$not') {
     const inner = planPredicate(node.args[0], itSlot, shape);
     if ('refusal' in inner) return inner;
-    return { pred: { p: 'not', item: inner.pred } };
+    if (inner.refinements.length > 0) {
+      // negating a superset is a SUBSET, which drops matching rows —
+      // the one composition an implied conjunct may never enter
+      return { refusal: refusal('$not',
+        'a negated predicate cannot ride an implied pre-filter (negating a superset drops rows)') };
+    }
+    return { pred: { p: 'not', item: inner.pred },
+      exact: true, prefilters: inner.prefilters, refinements: [] };
   }
+
+  const spatial = planSpatial(node, itSlot, shape);
+  if (spatial !== null) return spatial;
 
   if (node.name === '$exists' || node.name === '$empty') {
     const ref = pathRef(node.args[0], itSlot, shape);
@@ -297,7 +750,7 @@ function planPredicate(node, itSlot, shape) {
       return { refusal: refusal(node.name,
         'existence tests translate only over a singular member path on the binding') };
     }
-    return { pred: { p: 'typeIs', ref, types: [], positive: node.name === '$exists' } };
+    return exactly({ p: 'typeIs', ref, types: [], positive: node.name === '$exists' });
   }
 
   const comparison = COMPARISONS.get(node.name);
@@ -324,12 +777,12 @@ function planPredicate(node, itSlot, shape) {
       }
       const lit = operand.lit;
       if (typeof lit === 'boolean' || lit === null) {
-        if (ORDERING_OPS.has(op)) return { pred: { p: 'const', value: false } };
+        if (ORDERING_OPS.has(op)) return exactly({ p: 'const', value: false });
         const typeName = lit === null ? 'null' : lit ? 'true' : 'false';
-        return { pred: { p: 'typeIs', ref, types: [typeName], positive: op === 'eq' } };
+        return exactly({ p: 'typeIs', ref, types: [typeName], positive: op === 'eq' });
       }
     }
-    return { pred: { p: 'cmp', op: /** @type {any} */ (op), ref, operand } };
+    return exactly({ p: 'cmp', op: /** @type {any} */ (op), ref, operand });
   }
 
   const stringOp = STRING_OPS.get(node.name);
@@ -348,7 +801,7 @@ function planPredicate(node, itSlot, shape) {
       return { refusal: refusal(node.name,
         "the empty pattern's vacuous-truth corner (true even on a missing member) is not translated") };
     }
-    return { pred: { p: 'strop', kind: /** @type {any} */ (stringOp), ref, operand } };
+    return exactly({ p: 'strop', kind: /** @type {any} */ (stringOp), ref, operand });
   }
 
   return { refusal: refusal(node.name,
@@ -370,7 +823,7 @@ function planPredicate(node, itSlot, shape) {
  *   reasons: { construct: string, reason: string }[],
  *   whereFullyPushed: boolean, orderPushed: boolean,
  *   projectionNative: boolean, itSlot: number, itName: string | null,
- *   udfs: string[] }}
+ *   udfs: string[], prefilters: any[] }}
  */
 function planFlwor(node, shape, rawFlwor, udfHook) {
   const reasons = [];
@@ -390,7 +843,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     reasons.push(refusal('$for',
       'only a single plain binding over the whole collection is translated'));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, itSlot: -1, itName: null, udfs: [] };
+      projectionNative: false, itSlot: -1, itName: null, udfs: [], prefilters: [] };
   }
   const itSlot = binding.slot;
   // the document's own name for the collection binding. The residual and
@@ -416,6 +869,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   // accepts its raw fragment.
   let whereFullyPushed = true;
   const udfs = [];
+  const prefilters = [];
   if (!narrowingSound) whereFullyPushed = false;
   else if (node.where !== null) {
     const split = node.where.kind === 'op' && node.where.name === '$and';
@@ -440,6 +894,13 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
       }
       else {
         plan.filter = conjoin(plan.filter, outcome.pred);
+        prefilters.push(...outcome.prefilters);
+        // an IMPLIED conjunct narrows and leaves the original predicate
+        // for the residual, which is why it is reported as forcing one
+        for (const refinement of outcome.refinements) {
+          reasons.push(refinement);
+          whereFullyPushed = false;
+        }
       }
     }
   }
@@ -491,6 +952,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     itSlot,
     itName,
     udfs,
+    prefilters,
   };
 }
 
@@ -507,6 +969,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
  *   reasons: { construct: string, reason: string }[],
  *   rowReturn: any,
  *   udfs: string[],
+ *   prefilters: { construct: string, columns: string[], exact: boolean }[],
  * }}
  */
 function planCollectionCore(document, shape, options = undefined) {
@@ -525,7 +988,7 @@ function planCollectionCore(document, shape, options = undefined) {
       return {
         analysis, plan: null, mode: 'set',
         reasons: [refusal('$subsequence', 'window bounds must be literal numbers to push')],
-        rowReturn: null, udfs: [],
+        rowReturn: null, udfs: [], prefilters: [],
       };
     }
     windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
@@ -541,7 +1004,7 @@ function planCollectionCore(document, shape, options = undefined) {
       return {
         analysis, plan: null, mode: 'set',
         reasons: [refusal(root.name, 'a windowed aggregate is not translated')],
-        rowReturn: null, udfs: [],
+        rowReturn: null, udfs: [], prefilters: [],
       };
     }
     aggregate = { name: root.name, fn: AGGREGATES.get(root.name) };
@@ -555,7 +1018,7 @@ function planCollectionCore(document, shape, options = undefined) {
       analysis, plan: null, mode: 'set',
       reasons: [refusal(root.kind, KIND_REASONS[root.kind]
         ?? 'only a FLWOR over the collection is translated')],
-      rowReturn: null, udfs: [],
+      rowReturn: null, udfs: [], prefilters: [],
     };
   }
 
@@ -568,7 +1031,7 @@ function planCollectionCore(document, shape, options = undefined) {
     // full sequence, not a narrowed candidate set)
     if (!fullyPushed) {
       return { analysis, plan: null, mode: 'set', reasons: flwor.reasons,
-        rowReturn: null, udfs: [] };
+        rowReturn: null, udfs: [], prefilters: flwor.prefilters };
     }
     if (aggregate.fn === 'count') {
       if (!flwor.projectionNative) {
@@ -576,12 +1039,12 @@ function planCollectionCore(document, shape, options = undefined) {
           analysis, plan: null, mode: 'set',
           reasons: [refusal('$count',
             'count translates only over the bare binding (a projected return can change the item count)')],
-          rowReturn: null, udfs: [],
+          rowReturn: null, udfs: [], prefilters: [],
         };
       }
       plan.aggregate = { fn: 'count', ref: null };
       return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-        udfs: flwor.udfs };
+        udfs: flwor.udfs, prefilters: flwor.prefilters };
     }
     const ref = pathRef(root.ret, flwor.itSlot, shape);
     const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg';
@@ -592,12 +1055,12 @@ function planCollectionCore(document, shape, options = undefined) {
         analysis, plan: null, mode: 'set',
         reasons: [refusal(aggregate.name,
           'aggregates translate only over a singular schema-typed path (the engine ERRORS on non-conforming operands)')],
-        rowReturn: null, udfs: [],
+        rowReturn: null, udfs: [], prefilters: [],
       };
     }
     plan.aggregate = { fn: /** @type {any} */ (aggregate.fn), ref };
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs };
+      udfs: flwor.udfs, prefilters: flwor.prefilters };
   }
 
   // windows push only onto a fully pushed selection
@@ -620,7 +1083,7 @@ function planCollectionCore(document, shape, options = undefined) {
 
   if (fullyPushed && flwor.projectionNative && (windows.length === 0 || plan.window !== null)) {
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs };
+      udfs: flwor.udfs, prefilters: flwor.prefilters };
   }
 
   // the row residual: everything but the projection pushed
@@ -641,6 +1104,7 @@ function planCollectionCore(document, shape, options = undefined) {
         $return: [rawFlwor?.$return ?? `$${name}`],
       },
       udfs: flwor.udfs,
+      prefilters: flwor.prefilters,
     };
   }
 
@@ -648,7 +1112,7 @@ function planCollectionCore(document, shape, options = undefined) {
   plan.order = null;
   plan.window = null;
   return { analysis, plan, mode: 'set', reasons: flwor.reasons, rowReturn: null,
-    udfs: flwor.udfs };
+    udfs: flwor.udfs, prefilters: flwor.prefilters };
 }
 
 /**
@@ -667,6 +1131,7 @@ function planCollectionCore(document, shape, options = undefined) {
  *   reasons: { construct: string, reason: string }[],
  *   rowReturn: any,
  *   udfs: string[],
+ *   prefilters: { construct: string, columns: string[], exact: boolean }[],
  * }}
  */
 export function planQuery(document, shape, options = undefined) {

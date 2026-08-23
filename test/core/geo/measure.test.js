@@ -3,7 +3,7 @@ import * as assert from '../../assert.node.js';
 
 import {
   haversineDistance, equirectDistance, initialBearing, destinationPoint, lineLength,
-  EARTH_RADIUS,
+  circleBounds, EARTH_RADIUS,
   isRingClosed, ringWinding, ringSignedArea, sphericalRingArea,
   pointInRing, pointInPolygon,
   bboxOfPositions, bboxIntersects, bboxContains, bboxUnion,
@@ -167,5 +167,82 @@ describe('bounding boxes', () => {
   it('should union boxes', () => {
     assert.deepStrictEqual(bboxUnion([0, 0, 1, 1], [2, 2, 3, 3]), [0, 0, 3, 3]);
     assert.deepStrictEqual(bboxUnion([0, 0, 5, 5], [1, 1, 2, 2]), [0, 0, 5, 5]);
+  });
+});
+
+describe('the bounding box of a geodesic circle', () => {
+  // The property that matters, and the one a pushdown pre-filter rests
+  // on: every position the exact distance test would KEEP lies inside
+  // the box. The oracle is `haversineDistance` — the same function
+  // `$distance` answers with — never a second bearing walk, because two
+  // roundings of the same real number disagree in the last bits and it
+  // is the distance test, not the walk, that decides a row's fate.
+  const noFalseNegatives = (lon, lat, metres) => {
+    const box = circleBounds(lon, lat, metres);
+    assert.ok(box !== null, `no box for ${lon},${lat} r=${metres}`);
+    let kept = 0;
+    const check = (plon, plat) => {
+      if (haversineDistance(lon, lat, plon, plat) > metres) return;
+      kept++;
+      assert.ok(plon >= box[0] && plon <= box[2] && plat >= box[1] && plat <= box[3],
+        `[${plon}, ${plat}] is within ${metres} m but outside [${box.join(', ')}]`);
+    };
+    // the boundary, where a too-small box would show first
+    for (let bearing = 0; bearing < 360; bearing += 0.05) {
+      const [plon, plat] = destinationPoint(lon, lat, bearing, metres);
+      check(plon, plat);
+    }
+    // and the interior, on a grid a little wider than the box
+    const padLon = (box[2] - box[0]) * 0.1;
+    const padLat = (box[3] - box[1]) * 0.1;
+    for (let i = 0; i <= 40; i++) {
+      for (let j = 0; j <= 40; j++) {
+        check(box[0] - padLon + ((box[2] - box[0] + 2 * padLon) * i) / 40,
+          box[1] - padLat + ((box[3] - box[1] + 2 * padLat) * j) / 40);
+      }
+    }
+    assert.ok(kept > 1000, `only ${kept} sampled positions were inside the circle`);
+  };
+
+  it('should contain every position the exact distance test keeps', () => {
+    noFalseNegatives(5, 52, 1000);
+    noFalseNegatives(5, 52, 100_000);
+    noFalseNegatives(0, 0, 100_000);
+    noFalseNegatives(5, 80, 100_000);
+    noFalseNegatives(0, -45, 500_000);
+    noFalseNegatives(123.4, -33.8, 25_000);
+  });
+
+  // the reason this function exists rather than four destinationPoint
+  // calls: the circle's extreme meridian is NOT its due-east point
+  it('should be wider than the four-bearing box a caller would write by hand', () => {
+    const box = circleBounds(5, 80, 100_000);
+    const east = destinationPoint(5, 80, 90, 100_000)[0];
+    assert.ok(box[2] > east,
+      `the tangent meridian ${box[2]} must lie east of the 90°-bearing point ${east}`);
+    // and the latitude bounds ARE the two bearings, exactly
+    assert.strictEqual(box[3], 80 + (100_000 / EARTH_RADIUS) * (180 / Math.PI));
+  });
+
+  it('should refuse a box when the circle reaches a pole', () => {
+    assert.strictEqual(circleBounds(0, 89, 200_000), null, 'over the north pole');
+    assert.strictEqual(circleBounds(0, -89, 200_000), null, 'over the south pole');
+    assert.strictEqual(circleBounds(0, 0, 20_000_000), null, 'larger than the sphere');
+  });
+
+  it('should report an antimeridian span unwrapped, so a caller can see it', () => {
+    const box = circleBounds(179.9, 0, 50_000);
+    assert.ok(box !== null);
+    assert.ok(box[2] > 180, `east ${box[2]} stays above 180 rather than wrapping`);
+    const west = circleBounds(-179.9, 0, 50_000);
+    assert.ok(west !== null && west[0] < -180, 'and below -180 on the other side');
+  });
+
+  it('should refuse a non-finite or negative input', () => {
+    assert.strictEqual(circleBounds(NaN, 52, 1000), null);
+    assert.strictEqual(circleBounds(5, Infinity, 1000), null);
+    assert.strictEqual(circleBounds(5, 52, NaN), null);
+    assert.strictEqual(circleBounds(5, 52, -1), null);
+    assert.deepStrictEqual(circleBounds(5, 52, 0), [5, 52, 5, 52], 'a zero radius is the point');
   });
 });

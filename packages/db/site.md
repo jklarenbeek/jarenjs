@@ -32,6 +32,14 @@ cell, or the four box edges, as columns computed by `@jarenjs/core/geo` — a
 generated column over a registered deterministic function where the driver can
 index one, and a stored column the store writes where it cannot.
 
+A spatial query over such a collection is then two stages, and `explain()` names
+both. `$bbox-intersects` and a geohash cell probe decide in SQL; a `$within` or
+a bounded `$distance` pushes the bounding box it provably implies and refines
+the exact predicate in the engine over the narrowed rows, with
+`explain().prefilters` reporting the construct, the columns it read, and whether
+it decided or merely narrowed. A proximity probe is nine cells, never one — two
+points ten metres apart can differ in the first character of their cell.
+
 A store can also open with an operator registry — `openStore`(model, {
 operators: `createJsltRegistry()`.use(`mathPack`)… }) — and registered
 operators (`$npv`, `$mean`, `$sqrt`) then work in query and entity documents.

@@ -15,7 +15,7 @@
  */
 
 /** The plan format version, carried on every plan. */
-export const PLAN_VERSION = 1;
+export const PLAN_VERSION = 2;
 
 /**
  * @typedef {{ segments: ({ name: string } | { index: number })[],
@@ -35,8 +35,23 @@ export const PLAN_VERSION = 1;
  *   { p: 'strop', kind: 'starts' | 'ends' | 'contains',
  *     ref: PlanRef, operand: PlanOperand } |
  *   { p: 'const', value: boolean } |
- *   { p: 'udf', name: string, key: string }
+ *   { p: 'udf', name: string, key: string } |
+ *   { p: 'bboxOverlap', columns: { w: string, s: string, e: string,
+ *     n: string }, probe: { box: number[] } | { ext: string } } |
+ *   { p: 'cellIn', column: string, cells: string[] } |
+ *   { p: 'cellPrefix', column: string, prefix: string }
  * )} PlanPredicate
+ *   The last three are the SPATIAL forms: predicates over the derived
+ *   index columns a model declares, which a spatial conjunct either
+ *   translates to exactly or is proven to IMPLY. `bboxOverlap` is true
+ *   when the row's stored box meets the probe's (touching edges count,
+ *   as the kernel's `bboxIntersects` does); `cellIn` when the row's
+ *   cell is one of the listed ones (the nine-cell neighbourhood, or a
+ *   single whole cell); `cellPrefix` when it begins with a shorter one.
+ *   None carries a `json_type` guard — the derived column IS the value
+ *   — but each is TOTAL through its own `IS NOT NULL`, so a row with no
+ *   box or no cell answers FALSE rather than SQL's NULL and negation
+ *   still composes classically.
  *
  * @typedef {{ ref: PlanRef, desc: boolean, emptyGreatest: boolean }} PlanOrderTerm
  *

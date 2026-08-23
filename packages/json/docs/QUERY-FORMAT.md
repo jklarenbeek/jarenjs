@@ -1375,6 +1375,16 @@ value carrying a non-finite coordinate answers **empty** (`$bbox`, `$area`,
 gives for a missing operand. A value with no positions at all is a different
 thing and still measures: `$area` of an empty `FeatureCollection` is `0`.
 
+Because of that rule, **every measurement and every conversion in this section
+is optional-valued**: `$bbox`, `$area`, `$length`, `$centroid`, `$distance`,
+`$geohash`, `$geo-parse`, `$geo-text` and `$geohash-bounds` can answer the
+empty sequence for an operand that is present — a non-finite coordinate, text
+that is not well-formed WKT, a cell outside the base-32 alphabet. Only the two
+predicates answer exactly one item, because `false` is their missing-operand
+value. This matters wherever such an expression sits in a position that expects
+one item: `[{"$bbox": expr}]` builds an empty array rather than a one-item one,
+and `{"m": {"$bbox": expr}}` omits the member entirely.
+
 **Boxes do not cross the antimeridian.** RFC 7946 §3.1.9 tells producers to cut
 geometries at ±180° rather than let them span it, and this format follows that
 rather than re-joining what a producer split: `$bbox` of an uncut geometry whose

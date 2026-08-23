@@ -35,6 +35,20 @@ rejecting candidates before the real test. Also `initialBearing`,
 `destinationPoint`, `lineLength(positions)`. The ellipsoid is
 deliberately not modelled.
 
+`circleBounds(lon, lat, metres)` answers the `[west, south, east,
+north]` box a "nearer than r" test can be seeked with — the shape a
+range index needs before the exact distance runs. Its longitude bounds
+are **not** the circle's due-east and due-west points: the circle
+reaches its extreme meridians where it runs tangent to them, which is
+`asin(sin δ / cos φ)` from the centre and 0.4 % further than a 90°
+bearing travels at 80°N over 100 km. A box built from four bearings is
+too small, and a pre-filter that is too small drops matching rows
+silently. It answers `null` when the circle reaches a pole (there is no
+longitude bound to give), and it does not wrap west/east into
+`[-180, 180]` — a circle spanning the antimeridian answers a west below
+-180, which is how a caller detects the case RFC 7946 asks producers to
+cut.
+
 ## Rings — `ring.js`
 
 `isRingClosed`, `ringSignedArea` (shoelace over `orient2d` terms —

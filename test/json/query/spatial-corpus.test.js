@@ -48,6 +48,12 @@ describe('the spatial corpus', () => {
         malformed.push(`${entry.name}: carries both an expected value and empty:true, or neither`);
       if (entry.executors !== undefined && !Array.isArray(entry.executors))
         malformed.push(`${entry.name}: executors must be a list`);
+      // an entry whose data is a LIST is a COLLECTION case: its data is
+      // a set of documents and its query a FLWOR over them, which is
+      // what lets a relational executor store the rows and plan the
+      // query as written instead of wrapping one document
+      if ((entry.collection === true) !== Array.isArray(entry.data))
+        malformed.push(`${entry.name}: the collection flag and the data shape disagree`);
     }
     assert.deepStrictEqual(malformed, []);
   });

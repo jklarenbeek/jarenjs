@@ -812,11 +812,18 @@ function representative(value) {
   return finitePosition(isPosition(value) ? value : centroidOf(value));
 }
 
-// a unary spatial measurement: empty propagates, anything else is JQ2001
-function geoUnaryEntry(measure, resultCard = resultEmptyPropagates, check = geoArg) {
+// A unary spatial measurement: empty propagates, anything else is
+// JQ2001 — and the answer is OPTIONAL rather than exactly-one, because
+// `null` from the kernel IS the empty sequence and every one of these
+// can answer it for an operand that is present (a non-finite
+// coordinate, text that is not well-formed, a cell outside the
+// alphabet). Declaring exactly-one would let the internal empty marker
+// escape into an array or object constructor, which is neither an item
+// nor a JSON value.
+function geoUnaryEntry(measure, check = geoArg) {
   return {
     params: UNARY,
-    result: resultCard,
+    result: RESULT_OPT,
     compile: (gets, args) => {
       const get = gets[0];
       const docPath = args[0].docPath;
@@ -1567,10 +1574,8 @@ export const OPERATORS = Object.freeze({
   //#region section 8.14 - spatial
 
   '$bbox': geoUnaryEntry(bboxOf),
-  // RESULT_OPT, not RESULT_ONE: an aggregate measurement over a value
-  // carrying a non-finite coordinate is empty, not a plausible number
-  '$area': geoUnaryEntry((v) => (geoFinite(v) ? geometryArea(v) : null), RESULT_OPT),
-  '$length': geoUnaryEntry((v) => (geoFinite(v) ? geometryLength(v) : null), RESULT_OPT),
+  '$area': geoUnaryEntry((v) => (geoFinite(v) ? geometryArea(v) : null)),
+  '$length': geoUnaryEntry((v) => (geoFinite(v) ? geometryLength(v) : null)),
   '$centroid': geoUnaryEntry((v) => finitePosition(centroidOf(v))),
 
   '$distance': { // metres between two values' representative positions
@@ -1645,7 +1650,9 @@ export const OPERATORS = Object.freeze({
 
   '$geohash': { // a position as a base-32 cell string
     params: ARGS_1_2,
-    result: resultEmptyPropagates,
+    // OPTIONAL for the same reason the unary measurements are: a value
+    // with no bounded position answers the empty sequence
+    result: RESULT_OPT,
     compile: (gets, args) => {
       const get = gets[0];
       const docPath = args[0].docPath;
@@ -1678,7 +1685,7 @@ export const OPERATORS = Object.freeze({
   // `ST_AsText` emit, so without these a document can only carry such a
   // string through untouched. Text that is not well-formed WKT is empty
   // rather than an error, like every other "nothing to answer" here.
-  '$geo-parse': geoUnaryEntry(wktToGeoJson, resultEmptyPropagates,
+  '$geo-parse': geoUnaryEntry(wktToGeoJson,
     (v, docPath) => geoTextArg(v, 'a Well-Known Text string', docPath)),
 
   // A value with no WKT spelling — a non-finite coordinate — is empty,
@@ -1686,7 +1693,7 @@ export const OPERATORS = Object.freeze({
   '$geo-text': geoUnaryEntry(geoJsonToWkt),
 
   '$geohash-bounds': geoUnaryEntry(
-    (hash) => bboxPolygon(geohashBounds(hash)), resultEmptyPropagates,
+    (hash) => bboxPolygon(geohashBounds(hash)),
     (v, docPath) => geoTextArg(v, 'a geohash cell string', docPath)),
 
   // The neighbourhood, not the cell: two points metres apart can sit in

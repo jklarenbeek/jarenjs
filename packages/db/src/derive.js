@@ -12,6 +12,12 @@
  * driver can index them, and called directly on the write path where
  * it cannot — so the two branches cannot drift into different answers.
  *
+ * It is also this package's ONLY seam onto `@jarenjs/core/geo` (D1 —
+ * one home for spatial arithmetic, grep-proven by test): the planner's
+ * probe geometry — the box of a literal or bound region, the box of a
+ * bounded-distance circle, a cell's neighbourhood — is computed by the
+ * helpers below rather than by an import of its own.
+ *
  * Determinism is the contract, not a convenience: a value here is a
  * pure function of the document bytes. Nothing reads the clock, a
  * random source or store state, because an INDEX over a function that
@@ -22,7 +28,9 @@
  * capability-gated rather than always-on.
  */
 
-import { bboxOf, centroidOf, geohashEncode } from '@jarenjs/core/geo';
+import {
+  bboxOf, centroidOf, circleBounds, geohashEncode, geohashNeighbours,
+} from '@jarenjs/core/geo';
 
 import { chain } from './driver.js';
 
@@ -201,4 +209,76 @@ export function registerDeriveFunctions(connection) {
     : chain(connection.registerFunction(registrations[i][0],
       { deterministic: true }, registrations[i][1]), () => step(i + 1)));
   return step(0);
+}
+
+// ————— Probe geometry: what a PUSHED predicate compares against —————
+//
+// A promoted spatial predicate narrows through the derived columns by
+// comparing them with a box (or a cell) computed from the query's own
+// operand. That operand is known either at plan time (a literal region)
+// or at bind time (an external one), and both go through here so the
+// two answer identically and neither reaches past this file for its
+// arithmetic.
+
+/**
+ * The bounding box of a probe value, or `null` when it has none — the
+ * D6 refusal included, which is what makes an unbounded probe divert to
+ * the full scan instead of narrowing with a box that does not bound it.
+ * @param {any} value - a GeoJSON value or a `[lon, lat]` position
+ * @returns {number[] | null} `[west, south, east, north]`
+ */
+export function probeBox(value) {
+  return bboxOf(value);
+}
+
+/**
+ * The representative position §8.14 measures a probe value by — the
+ * same rule the derived columns use, so the pushed filter and the
+ * engine cannot disagree about where a value IS. `null` when it has no
+ * bounded position.
+ * @param {any} value
+ * @returns {number[] | null}
+ */
+export function probePosition(value) {
+  return representativePosition(value);
+}
+
+/**
+ * The bounding box of the circle of `metres` around a position — the
+ * box a `$distance <= r` predicate narrows with, on the same sphere and
+ * the same radius constant the engine measures with. `null` when the
+ * radius is not a finite non-negative number, or when the circle
+ * reaches a pole, where there is no longitude bound to give.
+ * @param {number[]} position
+ * @param {number} metres
+ * @returns {number[] | null} `[west, south, east, north]`, NOT wrapped
+ *   into `[-180, 180]`: a circle spanning the antimeridian answers a
+ *   west below -180, which is how the planner detects it
+ */
+export function probeCircleBox(position, metres) {
+  return circleBounds(position[0], position[1], metres);
+}
+
+/**
+ * A cell and its neighbours, the nine-cell probe D7 requires — a single
+ * prefix is bucketing, never proximity.
+ * @param {string} cell
+ * @returns {string[]} up to nine cells (fewer past a pole)
+ */
+export function cellNeighbourhood(cell) {
+  return geohashNeighbours(cell);
+}
+
+/**
+ * The value one DERIVED parameter slot binds: an axis of a bound
+ * external's bounding box, computed at bind time because a GeoJSON
+ * object is not a value any database can bind. `null` when the value
+ * has no box, which is what tells the caller to divert.
+ * @param {{ kind: string, external: string, axis: string }} derived
+ * @param {any} value - the bound external
+ * @returns {number | null}
+ */
+export function derivedSlotValue(derived, value) {
+  const box = bboxOf(value);
+  return box === null ? null : box[BBOX_AT[derived.axis]];
 }

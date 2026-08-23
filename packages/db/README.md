@@ -93,6 +93,46 @@ const adults = await users.execute({
   columns computed by `@jarenjs/core/geo` — a generated column over a
   registered deterministic function where the driver can index one, and
   a stored column the store writes where it cannot.
+- **A spatial query is two stages, and `explain()` names both.** A
+  `$within`, a `$bbox-intersects`, a bounded `$distance` or a geohash
+  probe over such a collection narrows **in SQLite** through the index
+  and refines **in the engine**. `$bbox-intersects` and a geohash cell
+  test are exact and need no refinement; `$within` and a bounded
+  `$distance` push a bounding box the truth table proves they imply,
+  and the exact predicate re-runs over the narrowed candidates —
+  `explain().prefilters` says which, over what columns, and whether it
+  decided or merely narrowed.
+
+```js
+// the collection declares  indexes: [{ name: 'by_box', path: '$.at',
+//   derive: 'bbox' }]  and types that member  at: { type: ['array', 'object'] }
+// — a predicate is only PUSHED onto a member the schema types as geography
+const places = store.collection('places');
+const nearby = {
+  $for: { p: '$[*]' },
+  $where: { $within: ['$p.at', '$region'] },
+  $return: '$p',
+};
+await places.execute(nearby, { externals: { region } });
+
+const how = await places.explain(nearby, { externals: { region } });
+how.prefilters;
+// [{ construct: '$within',
+//    columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
+//    exact: false }]
+how.residual.reasons[0].reason;
+// 'a bounding-box pre-filter is pushed; exact containment refines in the engine'
+how.scanNarrative;
+// 'SEARCH places USING INDEX places_by_box (gx_at_bbox_w>? AND gx_at_bbox_w<?); …'
+```
+
+  The region arrives as a bound parameter: a GeoJSON object is not a
+  value any database can bind, so what binds is one edge of its box per
+  slot, computed at bind time from the same kernel the stored columns
+  came from. A circle that reaches a pole or crosses the antimeridian
+  pushes **nothing** — there is no single box to push — and the answer
+  is the same, reached by reading more rows. `explain()` is what makes
+  that checkable rather than quoted.
 - **Migrations are documents.** `planMigration` diffs two models into
   rendered-DDL + JSLT-transform + assertion steps; a shadow database
   replays the whole chain before the real store is touched; a

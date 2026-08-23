@@ -159,6 +159,92 @@ describe('the dialect proof, repeated at the query layer (D21)', () => {
   });
 });
 
+describe('the spatial forms (over derived columns)', () => {
+  const PLACES_MODEL = {
+    $model: '0.1',
+    collections: {
+      places: {
+        schema: {
+          type: 'object',
+          properties: { id: { type: 'string' }, at: { type: ['array', 'object'] } },
+        },
+        key: '/id',
+        indexes: [
+          { name: 'by_box', path: '$.at', derive: 'bbox' },
+          { name: 'by_cell', path: '$.at', derive: 'geohash', precision: 6 },
+        ],
+      },
+    },
+  };
+  const places = normalizeModel(PLACES_MODEL).get('places');
+  const placesPhysical = planCollection('places', places, sqliteDialect);
+  const PLACES_SHAPE = {
+    collection: 'places', schema: places.schema,
+    columnByCanonical: placesPhysical.columnByCanonical,
+  };
+  const emitPlaces = (document, dialect) => {
+    const planned = planQuery(document, PLACES_SHAPE);
+    return emitPlan(planned.plan, dialect,
+      { table: 'places', keyColumn: 'key', docColumn: 'doc' });
+  };
+  const where = (predicate) =>
+    ({ $for: { it: '$[*]' }, $where: predicate, $return: '$it' });
+  const REGION = {
+    type: 'Polygon',
+    coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]],
+  };
+
+  it('a box overlap reads only the derived columns, in index order, with no json_type', () => {
+    const { sql, slots } = emitPlaces(
+      where({ '$bbox-intersects': ['$it.at', REGION] }), sqliteDialect);
+    assert.match(sql, /WHERE \("gx_at_bbox_w" IS NOT NULL AND "gx_at_bbox_w" <= \? /);
+    assert.match(sql,
+      /"gx_at_bbox_e" >= \? AND "gx_at_bbox_s" <= \? AND "gx_at_bbox_n" >= \?\)/);
+    assert.strictEqual(sql.includes('json_type('), false,
+      'a derived column IS the value; there is nothing to discriminate');
+    // the probe binds in the statement's TEXT order, not the box's:
+    // east, west, north, south — a positional dialect numbers by text
+    assert.deepStrictEqual(slots.map((slot) => slot.literal), [5, 4, 53, 52]);
+  });
+
+  it('an external region binds four DERIVED slots naming the axis each computes', () => {
+    const { slots } = emitPlaces(where({ $within: ['$it.at', '$region'] }), sqliteDialect);
+    assert.deepStrictEqual(slots, [
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 'e' } },
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 'w' } },
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 'n' } },
+      { derived: { kind: 'bboxAxis', external: 'region', axis: 's' } },
+    ]);
+  });
+
+  it('a whole cell is a membership test and a shorter one a half-open range', () => {
+    const whole = emitPlaces(
+      where({ $exists: { '$index-of': [
+        { '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }] } }), sqliteDialect);
+    assert.match(whole.sql,
+      /WHERE \("gx_at_gh6" IS NOT NULL AND "gx_at_gh6" IN \(\?, \?, \?, \?, \?, \?, \?, \?, \?\)\)/);
+    assert.strictEqual(whole.slots.length, 9);
+
+    const prefix = emitPlaces(
+      where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u17'] }), sqliteDialect);
+    assert.match(prefix.sql,
+      /WHERE \("gx_at_gh6" IS NOT NULL AND \("gx_at_gh6" >= \? AND "gx_at_gh6" < \?\)\)/);
+    assert.deepStrictEqual(prefix.slots.map((slot) => slot.literal), ['u17', 'u18']);
+  });
+
+  it('the same spatial plans render through the double dialect (D21)', () => {
+    for (const document of [
+      where({ '$bbox-intersects': ['$it.at', REGION] }),
+      where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u17'] }),
+    ]) {
+      const viaDouble = emitPlaces(document, doubled).sql;
+      assert.notStrictEqual(viaDouble, emitPlaces(document, sqliteDialect).sql);
+      assert.match(viaDouble, /\[gx_at_/, 'bracket quoting reaches the derived columns');
+      assert.match(viaDouble, /@p1/, 'named parameter style');
+    }
+  });
+});
+
 describe('injection is structurally impossible', () => {
   it('a hostile literal value never reaches the SQL text', () => {
     const hostile = "x'; DROP TABLE users; --";

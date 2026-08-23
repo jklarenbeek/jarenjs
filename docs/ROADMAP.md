@@ -837,12 +837,12 @@ JavaScript engine answers so a second executor can be held to it.
 
 What is still open below the overlay entry: **the spatial PLAN**. The model
 format now declares derived spatial index kinds — `indexes[].derive` is a
-geohash cell or a bounding box as four columns (MODEL-FORMAT §2.1, §3.1) — so
-the columns a spatial query needs exist and are maintained on both physical
-mappings. Nothing plans against them yet: a spatial predicate still drags every
-row of the table into JavaScript, which `packages/db/ARCHITECTURE.md`'s own
-deliberate-residual table names. Until that lands, a spatial query over a stored
-collection is slower than the same query over an in-memory array.
+geohash cell or a bounding box as four columns (MODEL-FORMAT §2.1, §3.1), and
+the planner promotes a spatial predicate onto them: `$bbox-intersects` and a
+geohash cell test decide in SQL, while `$within` and a bounded `$distance` push
+a bounding box proven to have no false negatives and refine the exact predicate
+in the engine (`packages/db/ARCHITECTURE.md`, "The implied conjunct").
+`explain().prefilters` names both stages.
 
 **The representation is GeoJSON, and there is no geometry type.**
 [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) is a closed JSON
@@ -855,14 +855,29 @@ conformance rather than by omission: no SRID table, no `proj4`, and no
 geometry/geography duality to model. Web Mercator is needed only for
 rendering, and is a projection *out*, not a CRS system.
 
-- [ ] **The two-stage spatial plan** — the derived index kinds have shipped
-  (`derive: 'geohash' | 'bbox'`), and no plan promotes a spatial predicate onto
-  them: a `$within` today is a full table scan with a set residual, which
-  measures slower than running the same query over a plain in-memory array.
-  What it needs is a plan that pushes only a filter proven to have no false
-  negatives — a bounding box, a geohash-cell range — keeps the exact predicate
-  as the refinement, publishes the equivalence proof in the deliberate-residual
-  truth table, and has `explain()` name both stages.
+- [ ] **A string at a derived index path cannot be stored.** A collection
+  declaring `derive` on a member writes that member into the generated column
+  through `json(jsonb_extract(doc, …))`, and `jsonb_extract` hands back the raw
+  SQL value for a string rather than its JSON representation — so `json()`
+  rejects it and the insert fails with `JD2005: malformed JSON`. Numbers,
+  booleans, `null` and arrays are unaffected. The member is not geography in
+  that case, so the document was wrong; the failure is opaque about it, and a
+  collection whose spatial member is sometimes a WKT string cannot be written
+  at all. The fix is a dialect-level change to how the member reaches the
+  function, which moves a generated column's declared expression and therefore
+  needs the shape-verification and migration story thought through with it.
+- [ ] **A parameterized `$distance` bound is not promoted.** A bounded
+  `$distance` pushes its circle's box only when BOTH the probe position and the
+  radius are literals: an external on either side would need a parameter slot
+  that composes the bound value with the radius, and the derived slot kind is
+  closed at one axis of one bound value. Such a query is correct and reads
+  every row. `$within` and `$bbox-intersects` do bind an external region.
+- [ ] **A box-overlap probe is a one-sided range on every column.** A `bbox`
+  index is a four-column B-tree and only its leading column carries a bound
+  from a box-overlap probe, so the seek narrows on longitude alone and the
+  other three comparisons filter the rows it returns. An R\*Tree is the
+  physical mapping that indexes all four; whether it earns its place is a
+  measurement, not an assumption.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and

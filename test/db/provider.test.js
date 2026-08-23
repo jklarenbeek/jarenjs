@@ -16,6 +16,27 @@ import { from, fromAsync } from '@jarenjs/linq';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
+const REGION = {
+  type: 'Polygon',
+  coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]],
+};
+const PLACES_MODEL = {
+  $model: '0.1',
+  collections: {
+    places: {
+      schema: { type: 'object', properties: {
+        id: { type: 'string' }, at: { type: ['array', 'object'] } } },
+      key: '/id',
+      indexes: [{ name: 'by_box', path: '$.at', derive: 'bbox' }],
+    },
+  },
+};
+const PLACES = [
+  { id: 'inside', at: [4.5, 52.5] },
+  { id: 'vertex', at: [4, 52] },
+  { id: 'far', at: [2.3522, 48.8566] },
+];
+
 const MODEL = {
   $model: '0.1',
   collections: {
@@ -117,5 +138,56 @@ describe('no import edge in either direction (D2)', () => {
     assert.strictEqual(/import\('@jarenjs\/linq/.test(scan('packages/db/src')), false);
     assert.strictEqual(/from '@jarenjs\/db/.test(scan('packages/linq/src')), false);
     assert.strictEqual(/import\('@jarenjs\/db/.test(scan('packages/linq/src')), false);
+  });
+});
+
+describe('a spatial linq chain reaches the derived index (D2)', () => {
+  const seededPlaces = async () => {
+    const store = await openStore(PLACES_MODEL, { driver: nodeDriver() });
+    const places = store.collection('places');
+    for (const row of PLACES) await places.insert(row);
+    return { store, places };
+  };
+  // `at` is the index METHOD on this surface, so a member of that name
+  // is reached with get() — the collision LINQ-FORMAT §4 records
+  const chain = (source) => from(source)
+    .params({ region: REGION })
+    .where((p, q) => p.get('at').within(q.region))
+    .select((p) => p.id);
+
+  it('the fluent surface and the in-memory run agree', async () => {
+    const { store, places } = await seededPlaces();
+    assert.deepStrictEqual(chain(places).toArray(), chain(PLACES).toArray());
+    assert.deepStrictEqual(chain(PLACES).toArray(), ['inside', 'vertex']);
+    await store.close();
+  });
+
+  it('the document it emits plans onto the derived columns and SEEKS them', async () => {
+    const { store, places } = await seededPlaces();
+    // `toDocument()` is the chain as data; the provider explains it
+    const explained = await places.explain(chain(places).toDocument(),
+      { externals: { region: REGION } });
+    assert.deepStrictEqual(explained.prefilters, [{
+      construct: '$within',
+      columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
+      exact: false,
+    }]);
+    assert.deepStrictEqual(explained.params.map((slot) => slot.derived?.axis),
+      ['e', 'w', 'n', 's'], 'the region binds through derived slots, not as an object');
+    assert.match(explained.scanNarrative, /SEARCH/);
+    assert.match(explained.scanNarrative, /places_by_box/);
+    await store.close();
+  });
+
+  it('a region with no bounding box diverts to the full scan and still answers', async () => {
+    const { store, places } = await seededPlaces();
+    const empty = { type: 'FeatureCollection', features: [] };
+    const emptyChain = (source) => from(source)
+      .params({ region: empty })
+      .where((p, q) => p.get('at').within(q.region))
+      .select((p) => p.id);
+    assert.deepStrictEqual(emptyChain(places).toArray(), emptyChain(PLACES).toArray());
+    assert.deepStrictEqual(emptyChain(PLACES).toArray(), []);
+    await store.close();
   });
 });
