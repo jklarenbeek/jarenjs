@@ -84,6 +84,6 @@ residual runs locally, and `explain()` reports the split.
 Not an ORM (no entities, no identity map — the store is
 `@jarenjs/db`'s job), not IQueryable with expression trees over
 arbitrary CLR-style methods (the operator set is the query engine's
-93, closed and documented), and not a lazy-collection library for
+98, closed and documented), and not a lazy-collection library for
 JavaScript iterables in general — the deliverable is always a QUERY
 DOCUMENT, and everything else follows from that.

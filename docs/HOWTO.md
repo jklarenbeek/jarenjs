@@ -12,6 +12,7 @@ A practical guide for using JarenJS in your projects, from basic usage to advanc
 - [Advanced Usage](#advanced-usage)
 - [Performance Tips](#performance-tips)
 - [Common Pitfalls](#common-pitfalls)
+- [Getting Geographic Data In and Out](#getting-geographic-data-in-and-out)
 - [API Reference](#api-reference)
 
 ---
@@ -687,6 +688,116 @@ validate2(123);  // Returns false, doesn't throw
 ```
 
 **Note**: Schema errors throw during `compile()`. Data validation failures return `false`.
+
+---
+
+## Getting Geographic Data In and Out
+
+Two formats carry almost all the geographic data anyone has: a **CSV of
+coordinates** and **Well-Known Text** from a spatial database. Neither
+needs a plugin, a converter package, or any code you write.
+
+### A CSV of coordinates → GeoJSON
+
+This is a **stylesheet**, not a function. `parseCsv` with `typed: true`
+makes the coordinate columns numbers, and one JSLT rule builds the
+`FeatureCollection`:
+
+```javascript
+import { parseCsv } from '@jarenjs/josl';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+
+const rows = parseCsv(csvText, { headers: true, typed: true });
+
+const toGeoJson = compileJsltStylesheet([{
+  match: '$',
+  body: {
+    type: 'FeatureCollection',
+    features: [{
+      $for: { r: '$[*]' },
+      $return: {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: ['$r.lon', '$r.lat'] },
+        properties: { name: '$r.name', pop: '$r.pop' },
+      },
+    }],
+  },
+}]);
+
+const collection = toGeoJson(rows);
+```
+
+> **The one trap.** `coordinates` and `features` need the **array
+> constructor** — the square brackets — and not `$seq`. A two-item
+> *sequence* in member position is `JQ2001`, because a sequence is not
+> an array and the brackets are what make one. It reads
+> `["$r.lon", "$r.lat"]`, never `{ "$seq": ["$r.lon", "$r.lat"] }`, and
+> the `$for` phrase inside `features` needs the same wrapper.
+
+Then validate it against the GeoJSON meta-schema, which checks the ring
+closure the [official GeoJSON JSON Schema states it cannot express](https://github.com/geojson/schema):
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import geojson from '@jarenjs/json/schemas/geojson.schema.json' with { type: 'json' };
+
+const validate = new JarenValidator().compile(geojson);
+validate(collection); // true
+```
+
+### Well-Known Text → GeoJSON, and back
+
+`$geo-parse` reads what `ST_AsText` writes; `$geo-text` writes what a
+spatial database reads. Both are ordinary operators, so they compose
+with the rest of the query language in one expression:
+
+```javascript
+import { queryJson } from '@jarenjs/json/query';
+
+// a WKT column from PostGIS becomes measurable in place
+queryJson({ $bbox: { '$geo-parse': '$.shape' } },
+  { shape: 'POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))' });
+// [4, 52, 5, 53]
+
+// and a geometry goes back out as text
+queryJson({ '$geo-text': '$.at' }, { at: [4.9041, 52.3676] });
+// 'POINT (4.9041 52.3676)'
+```
+
+### Finding what is near a point
+
+**A geohash prefix is bucketing, not proximity.** Two points ten metres
+apart can differ in the *first* character of their cell — at Greenwich
+they do — so `$starts-with` on a prefix misses a neighbour at every cell
+boundary. Probe the neighbourhood instead, then narrow with the exact
+distance:
+
+```javascript
+queryJson({
+  $let: { cells: { '$geohash-neighbours': { $geohash: ['$.here', 6] } } },
+  $return: {
+    $for: { p: '$.places[*]' },
+    $where: { $exists: { '$index-of': ['$cells', { $geohash: ['$p.at', 6] }] } },
+    $orderby: [{ $key: { $distance: ['$p.at', '$.here'] } }],
+    $return: '$p.name',
+  },
+}, data);
+```
+
+Use `$groupby` over `$substring` of a hash when you actually want
+bucketing or tiling — that is what a prefix is good at.
+
+### Making a big collection smaller before you store it
+
+`$geo-simplify` drops the vertices that carry no shape, and the value
+that comes back is the value that went in — same structure, same
+properties, fewer positions — so it can be stored or sent as-is. A ring
+stays closed and a line keeps both endpoints, so what was valid stays
+valid. The tolerance is in **degrees**, not metres:
+
+```javascript
+queryJson({ '$geo-simplify': ['$.route', 0.001] }, { route });
+```
 
 ---
 

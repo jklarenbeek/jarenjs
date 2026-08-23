@@ -115,7 +115,22 @@ is part of THIS design.
 | `Cast<S>` | `$assert` per item | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Zip` | — no positional co-iteration in the grammar | unsupported (`JL0006`) | — |
 | expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `and or not`; `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `year month day epoch` → §8.13; `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
-| spatial family (§8.14) | — surface deferred to the relational order; hand-write the document (`fromDocument`) today | unsupported (`JL0006`-adjacent: no methods exist yet) | — |
+| spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |
+
+Two spatial names are deliberately not the obvious ones, and the reason
+is the same one that made §8.14's `$length` and §8.7's `$string-length`
+two operators: **`length` on this surface is already `$string-length`**,
+and §8.14's `$length` is a geodesic line measurement. One method name
+cannot carry both, and renaming the shipped string method for symmetry
+would break a published surface for a cosmetic gain — so the spatial one
+is **`geoLength`**, and **`geoArea`** joins it, because a bare `area()`
+on an arbitrary expression reads as arithmetic to a C# eye. The prefix
+names the family the way `geoParse`/`geoText` already do.
+
+Every method name shadows a data member of the same name — that is what
+the null prototype on the method table is for, and what `get(name)`
+escapes. A position stored as `at` is the case that bites: `p.at` is the
+index method, so it reads `p.get('at').within(region)`.
 
 ## 5. Deferred execution and re-enumeration
 

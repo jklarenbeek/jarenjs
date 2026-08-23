@@ -813,8 +813,25 @@ operators, the spatial-join index, the `geoFormats` group (`geohash`/`wkt`/
 `geojson`), the streaming map accumulator and the published benchmark suite
 are done; what they do is documented in `packages/core/ARCHITECTURE.md`,
 `packages/json/ARCHITECTURE.md`, QUERY-FORMAT.md §8.14 and the
-`@jarenjs/json`, `@jarenjs/formats` and `@jarenjs/charts` READMEs. One entry
-is left.
+`@jarenjs/json`, `@jarenjs/formats` and `@jarenjs/charts` READMEs.
+
+**Geography now enters and leaves as the text the rest of the world speaks,**
+and every surface that writes a query can spell it: the WKT round trip lives in
+`@jarenjs/core/geo` (`wktToGeoJson`/`geoJsonToWkt`, one grammar walk shared with
+the `wkt` format tester), §8.14 carries the conversion family (`$geo-parse`,
+`$geo-text`, `$geohash-bounds`, `$geohash-neighbours`, `$geo-simplify`) which
+JSLT and JTLT inherit, and `@jarenjs/linq` spells the whole family fluently. A
+CSV of coordinates needs no code at all — the recipe is in
+[HOWTO](./HOWTO.md#getting-geographic-data-in-and-out) — and the committed
+spatial corpus (`test/json/fixtures/spatial-corpus.json`) records what the
+JavaScript engine answers so a second executor can be held to it.
+
+What is still open below the overlay entry: **storage**. A spatial predicate in
+`@jarenjs/db` has no index vocabulary in the model format, so it drags every row
+of the table into JavaScript and the residual is a full scan —
+`packages/db/ARCHITECTURE.md`'s own deliberate-residual table names it. Until
+that lands, a spatial query over a stored collection is slower than the same
+query over an in-memory array.
 
 **The representation is GeoJSON, and there is no geometry type.**
 [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) is a closed JSON
@@ -827,6 +844,15 @@ conformance rather than by omission: no SRID table, no `proj4`, and no
 geometry/geography duality to model. Web Mercator is needed only for
 rendering, and is a projection *out*, not a CRS system.
 
+- [ ] **Spatial storage** — `indexes[].path` must be a singular member path and a
+  generated column is typed `string|integer|number|boolean`, so a coordinate
+  array can be neither: `@jarenjs/db`'s model format has no way to declare a
+  spatial index. A `$within` today is a full table scan with a set residual,
+  which measures slower than running the same query over a plain in-memory
+  array. What it needs is a derived index kind (a geohash cell, a bounding box
+  as four columns), a two-stage plan that pushes only a filter proven to have
+  no false negatives and keeps the exact predicate as the refinement, and
+  `explain()` naming both stages.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and

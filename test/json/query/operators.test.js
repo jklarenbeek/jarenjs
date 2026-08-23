@@ -10,6 +10,7 @@ import {
   queryJson,
   JsonQueryRuntimeError,
 } from '@jarenjs/json/query';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(__dirname, '..', 'fixtures', 'query-format');
@@ -1131,5 +1132,156 @@ describe('section 8.14 — spatial', () => {
       { cell: 'u09', names: 'Paris' },
       { cell: 'u17', names: 'Amsterdam+Utrecht' },
     ]);
+  });
+
+  it('should answer empty for a measurement over a non-finite coordinate', () => {
+    // NaN is not a JSON number, but a computed value can carry one, and
+    // every formula underneath launders it into something plausible: a
+    // great-circle distance from NaN is the antipodal distance, and a
+    // NaN area compares false against zero and reports 0
+    const bad = {
+      line: { type: 'LineString', coordinates: [[NaN, 0], [1, 1]] },
+      at: [NaN, 0],
+      poly: { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 52]]] },
+    };
+    for (const op of ['$bbox', '$area', '$length', '$centroid'])
+      assert.strictEqual(queryJson({ [op]: '$.line' }, bad), undefined, op);
+    assert.strictEqual(queryJson({ $distance: ['$.at', '$.poly'] }, bad), undefined);
+    assert.strictEqual(queryJson({ $geohash: ['$.at'] }, bad), undefined);
+    // a predicate answers its own missing-operand value, not empty
+    assert.strictEqual(queryJson({ $within: ['$.at', '$.poly'] }, bad), false);
+    assert.strictEqual(queryJson({ '$bbox-intersects': ['$.line', '$.poly'] }, bad), false);
+    // a value with no positions is a different thing, and still measures
+    const none = { fc: { type: 'FeatureCollection', features: [] }, at: [1, 2] };
+    assert.strictEqual(queryJson({ $area: '$.fc' }, none), 0);
+    assert.strictEqual(queryJson({ $area: '$.at' }, none), 0, 'a point has no surface, not no answer');
+    assert.strictEqual(queryJson({ $length: '$.at' }, none), 0);
+  });
+
+  it('should read and write Well-Known Text', () => {
+    const wkt = 'POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))';
+    assert.deepStrictEqual(queryJson({ '$geo-parse': '$.w' }, { w: wkt }),
+      { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] });
+    // a geometry, never a Feature: WKT carries no properties to put in one
+    assert.strictEqual(queryJson({ '$geo-parse': '$.w' }, { w: wkt }).type, 'Polygon');
+    assert.strictEqual(run({ '$geo-text': '$.area' }), wkt, 'a Feature writes its geometry');
+    assert.strictEqual(run({ '$geo-text': '$.ams' }), 'POINT (4.9041 52.3676)');
+    // through the language, not only through the kernel
+    assert.strictEqual(queryJson({ '$geo-text': { '$geo-parse': '$.w' } }, { w: wkt }), wkt);
+    // text that is not WKT is empty, not an error; a non-string is JQ2001
+    assert.strictEqual(queryJson({ '$geo-parse': '$.w' }, { w: 'POINT (1' }), undefined);
+    assert.strictEqual(queryJson({ '$geo-parse': '$.w' }, { w: 'CIRCLE EMPTY' }), undefined);
+    runtimeFails({ '$geo-parse': '$.n' }, { n: 42 }, 'JQ2001');
+    // a value with no WKT spelling is empty, never written approximately
+    assert.strictEqual(queryJson({ '$geo-text': '$.at' }, { at: [NaN, 2] }), undefined);
+  });
+
+  it('should decode a geohash cell to the polygon it covers', () => {
+    const cell = queryJson({ '$geohash-bounds': '$.c' }, { c: 'u173z' });
+    assert.strictEqual(cell.type, 'Polygon');
+    // the round trip closes: the cell's own centre encodes back to it
+    assert.strictEqual(queryJson({ $geohash: [{ '$geohash-bounds': '$.c' }, 5] }, { c: 'u173z' }),
+      'u173z');
+    assert.strictEqual(queryJson({ $within: ['$.at', { '$geohash-bounds': '$.c' }] },
+      { c: 'u173z', at: [4.9041, 52.3676] }), true);
+    // outside the base-32 alphabet there is no cell
+    assert.strictEqual(queryJson({ '$geohash-bounds': '$.c' }, { c: 'u17a' }), undefined);
+    runtimeFails({ '$geohash-bounds': '$.c' }, { c: 5 }, 'JQ2001');
+  });
+
+  it('should probe the neighbourhood — a prefix is bucketing, not proximity', () => {
+    // Greenwich, on a level-1 cell boundary: two points 9.7 m apart whose
+    // cells differ in the FIRST character. A single-prefix test misses
+    // the neighbour at every cell edge, which is everywhere a customer
+    // actually looks; the nine-cell probe finds it.
+    const data = {
+      here: [-0.00007, 51.4779],
+      places: [
+        { name: 'across the meridian', at: [0.00007, 51.4779] },
+        { name: 'far away', at: [4.9041, 52.3676] },
+      ],
+    };
+    const cells = queryJson({ '$geohash-neighbours': { $geohash: ['$.here', 6] } }, data);
+    assert.strictEqual(cells.length, 9);
+    assert.strictEqual(cells[4], 'gcpuzg', 'reading order: the cell itself is the middle one');
+    assert.strictEqual(cells[0], 'gcpuzs', 'and the north-west neighbour is the first');
+
+    const neighbourhood = {
+      $let: { cells: { '$geohash-neighbours': { $geohash: ['$.here', 6] } } },
+      $return: {
+        $for: { p: '$.places[*]' },
+        $where: { $exists: { '$index-of': ['$cells', { $geohash: ['$p.at', 6] }] } },
+        $return: '$p.name',
+      },
+    };
+    assert.strictEqual(queryJson(neighbourhood, data), 'across the meridian');
+
+    const singlePrefix = {
+      $for: { p: '$.places[*]' },
+      $where: { '$starts-with': [{ $geohash: ['$p.at', 9] }, { $geohash: ['$.here', 6] }] },
+      $return: '$p.name',
+    };
+    assert.strictEqual(queryJson(singlePrefix, data), undefined,
+      'the prefix finds nothing 9.7 m away — this is why the operator exists');
+
+    assert.strictEqual(queryJson({ '$geohash-neighbours': '$.c' }, { c: '!!' }), undefined);
+    runtimeFails({ '$geohash-neighbours': '$.c' }, { c: 5 }, 'JQ2001');
+  });
+
+  it('should simplify for storage and transport, keeping the value valid', () => {
+    const line = { type: 'LineString', coordinates: [[0, 0], [1, 0.0001], [2, 0], [2, 2]] };
+    assert.deepStrictEqual(queryJson({ '$geo-simplify': ['$.l', 0.01] }, { l: line }),
+      { type: 'LineString', coordinates: [[0, 0], [2, 0], [2, 2]] },
+      'both endpoints survive');
+    const ring = {
+      type: 'Polygon',
+      coordinates: [[[0, 0], [1, 0.0001], [2, 0], [2, 2], [0, 2], [0, 0]]],
+    };
+    const reduced = queryJson({ '$geo-simplify': ['$.p', 0.01] }, { p: ring });
+    const positions = reduced.coordinates[0];
+    assert.ok(positions.length < ring.coordinates[0].length, 'a vertex was dropped');
+    assert.deepStrictEqual(positions[0], positions[positions.length - 1], 'the ring stays closed');
+    // a tolerance is a non-negative number of DEGREES, never a distance
+    runtimeFails({ '$geo-simplify': ['$.p', -1] }, { p: ring }, 'JQ2001');
+    runtimeFails({ '$geo-simplify': ['$.p', '10m'] }, { p: ring }, 'JQ2001');
+    assert.strictEqual(queryJson({ '$geo-simplify': ['$.missing', 0.01] }, { p: ring }), undefined);
+  });
+});
+
+describe('section 8.14 — spatial, inherited by JSLT', () => {
+  // A JSLT rule body IS a query expression, so the conversion family
+  // arrived in stylesheets with no JSLT change at all. This test exists
+  // to prove that claim rather than assert it: if it ever needs a JSLT
+  // code change to pass, the inheritance broke.
+  it('should run every conversion operator in a rule body', () => {
+    const transform = compileJsltStylesheet([
+      { match: '$.places[*]', body: {
+        name: '$.name',
+        wkt: { '$geo-text': '$.at' },
+        cell: { $geohash: ['$.at', 5] },
+        // a multi-item sequence in member position is JQ2001; the array
+        // constructor is what puts a sequence into a member
+        near: [{ '$geohash-neighbours': { $geohash: ['$.at', 5] } }],
+      } },
+      { match: '$.region', body: { '$geo-parse': '$' } },
+      { match: '$.route', body: { '$geo-simplify': ['$', 0.01] } },
+    ]);
+    const out = transform({
+      places: [{ name: 'Amsterdam', at: [4.9041, 52.3676] }],
+      region: 'POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))',
+      route: { type: 'LineString', coordinates: [[0, 0], [1, 0.0001], [2, 0]] },
+    });
+    assert.strictEqual(out.places[0].wkt, 'POINT (4.9041 52.3676)');
+    assert.strictEqual(out.places[0].cell, 'u173z');
+    assert.strictEqual(out.places[0].near.length, 9);
+    assert.strictEqual(out.region.type, 'Polygon');
+    assert.deepStrictEqual(out.route.coordinates, [[0, 0], [2, 0]]);
+  });
+
+  it('should decode a cell to a polygon in a rule body', () => {
+    const transform = compileJsltStylesheet([
+      { match: '$.cell', body: { '$geohash-bounds': '$' } },
+    ]);
+    assert.strictEqual(transform({ cell: 'u173z' }).cell.type, 'Polygon');
   });
 });

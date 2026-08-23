@@ -42,6 +42,16 @@ played by the provider seam below.
   concurrency bound and the `parallel`/`concat`/`switch`/`exhaust`
   vocabulary; barrier operators buffer and run through the one engine
   so streaming answers equal in-memory answers by construction.
+- **Geography is spellable.** The whole §8.14 family is on the
+  expression surface: `p.location.within(region)`,
+  `p.location.distance(here)`, `p.route.geoLength()`,
+  `p.location.geohash(6)`, and the conversion pair `geoParse`/`geoText`
+  that reads a WKT column and writes one back. A plain GeoJSON object
+  embeds as a literal; `.params({ region })` binds it at call time
+  instead, which is the shape a spatial index can be probed with. The
+  spatial measurements are `geoArea`/`geoLength` because `length` on
+  this surface is already `$string-length` — the mapping table says so
+  in its own row.
 - **The provider contract.** Any object with
   `execute(queryDocument, { externals })` is a provider.
   `@jarenjs/db` implements it — a chain over a SQLite-backed

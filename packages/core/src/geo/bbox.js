@@ -87,4 +87,35 @@ export function bboxUnion(a, b) {
   ];
 }
 
+/**
+ * A box as the `Polygon` that covers it — the rectangle written
+ * counter-clockwise from its south-west corner, which is RFC 7946's
+ * exterior winding, and closed.
+ *
+ * A box is four numbers and a polygon is a value the rest of the
+ * language can measure, contain and intersect, so this is the crossing
+ * between the two: a geohash cell, an index probe box or a `bbox`
+ * member becomes something `$within` and `$area` can take.
+ *
+ * @param {number[] | null} box - [west, south, east, north]
+ * @returns {{ type: string, coordinates: number[][][] } | null} null for no box
+ * @example
+ * bboxPolygon([4, 52, 5, 53]);
+ * // { type: 'Polygon', coordinates: [[[4,52],[5,52],[5,53],[4,53],[4,52]]] }
+ */
+export function bboxPolygon(box) {
+  if (box === null || !Array.isArray(box) || box.length < 4)
+    return null;
+  const west = box[0];
+  const south = box[1];
+  const east = box[2];
+  const north = box[3];
+  return {
+    type: 'Polygon',
+    coordinates: [[
+      [west, south], [east, south], [east, north], [west, north], [west, south],
+    ]],
+  };
+}
+
 //#endregion

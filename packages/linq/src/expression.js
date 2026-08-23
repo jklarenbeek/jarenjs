@@ -216,6 +216,27 @@ const METHODS = {
   // arrives with the relational order)
   year: unary('$year'), month: unary('$month'), day: unary('$day'),
   epoch: unary('$epoch'),
+  // §8.14 spatial. `geoArea`/`geoLength` rather than `area`/`length`:
+  // `length` is already `$string-length` on this surface and renaming a
+  // shipped method for symmetry is a breaking change for a cosmetic
+  // gain, while a bare `area()` on an arbitrary expression reads as
+  // arithmetic. The prefix names the family the way `geoParse`/`geoText`
+  // do, and it is the same reason `$length` and `$string-length` are two
+  // operators in the first place.
+  bbox: unary('$bbox'), geoArea: unary('$area'),
+  geoLength: unary('$length'), centroid: unary('$centroid'),
+  distance: binary('$distance'), within: binary('$within'),
+  bboxIntersects: binary('$bbox-intersects'),
+  geoParse: unary('$geo-parse'), geoText: unary('$geo-text'),
+  geohashBounds: unary('$geohash-bounds'),
+  geohashNeighbours: unary('$geohash-neighbours'),
+  geoSimplify: binary('$geo-simplify'),
+  geohash(record, precision) {
+    const args = precision === undefined
+      ? record.doc
+      : [record.doc, toExpression(precision)];
+    return makeExpr({ $geohash: args }, record.epoch, false);
+  },
   // path navigation
   at(record, index) {
     if (record.pathable && Number.isInteger(index)) {

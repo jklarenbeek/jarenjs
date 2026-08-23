@@ -163,7 +163,7 @@ Grouping, `$distinct` and the `$orderby` machinery need a total, deterministic e
 
 ### The operator registry
 
-All 93 §8 operators live in one table in `operators.js` — the query-language analogue of `path.js`'s `FUNCTIONS` table (the count is cross-checked against QUERY-FORMAT §8 by a test, so it cannot go stale again):
+All 98 §8 operators live in one table in `operators.js` — the query-language analogue of `path.js`'s `FUNCTIONS` table. A test derives the count from the registry and asserts it against QUERY-FORMAT §8 *and* against every committed document that states a number — this file, the README twice, `site.md` and `@jarenjs/linq`'s architecture — so an operator cannot be added without moving all of them in the same change:
 
 ```javascript
 '$substring': {

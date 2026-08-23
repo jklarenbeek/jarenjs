@@ -1339,10 +1339,73 @@ intersection is overlay work and is deliberately absent.
 | `$within` | `[a, b]` → is `a`'s representative position inside `b`'s surface? Only a polygon has an inside, so a line or point as `b` is `false` |
 | `$bbox-intersects` | `[a, b]` → do the two bounding boxes overlap? Touching edges count |
 | `$geohash` | `[value]` or `[value, precision]` → the base-32 cell string; precision is 1-12, default 9 |
+| `$geo-parse` | a Well-Known Text string → the geometry it denotes; text that is not well-formed WKT → empty. A non-string operand is `JQ2001` |
+| `$geo-text` | any value → its Well-Known Text string; a value with no WKT spelling → empty |
+| `$geohash-bounds` | a cell string → the `Polygon` covering that cell; a string outside the base-32 alphabet → empty |
+| `$geohash-neighbours` | a cell string → the cell and its neighbours as a sequence of up to nine strings, in reading order (north-west first, the cell itself in the middle); cells past a pole do not exist and are absent |
+| `$geo-simplify` | `[value, tolerance]` → the same value with vertices dropped. The tolerance is in **degrees**, not metres |
 
-Note what needs **no** operator. A geohash is a string, so proximity is
-`$starts-with` on a prefix and spatial bucketing is `$groupby` over
-`$substring` — the existing vocabulary already indexes, groups and orders them.
+**Conversion is how geography gets in and out.** Well-Known Text is what
+PostGIS, SpatiaLite, GEOS, JTS and every `ST_AsText` emit, so `$geo-parse` and
+`$geo-text` are the doors: a WKT column becomes a value the rest of §8.14
+measures, and any value goes back out as the text the database reads.
+`$geo-parse` answers a **geometry**, never a `Feature` — WKT carries no
+properties, and inventing an empty `properties` member would be a value the
+source never had.
+
+`$geo-simplify` is reduction **for storage and transport**: a 50 MB
+`FeatureCollection` a caller wants to keep, send or store smaller comes back as
+valid GeoJSON with the same structure and fewer positions. A renderer's
+simplification is a different job and is not this one — a chart simplifies into
+its own drawing space and hands back a picture, not a document. A ring stays
+closed and a line keeps both endpoints, so a value that was valid before is
+valid after. The tolerance is a planar vertex-dropping threshold in the
+coordinate's own units, which for GeoJSON is degrees; calling it metres would
+be exactly the planar-for-geodesic confusion the rule above exists to prevent.
+A negative or non-numeric tolerance is `JQ2001`.
+
+**A non-finite coordinate has no measurement.** `NaN` and `Infinity` are not
+JSON numbers, but a value that reached the engine through a computation can
+carry one, and every underlying formula launders it into something plausible —
+a great-circle distance from `NaN` comes back as the antipodal distance, and a
+`NaN` area compares false against zero and reports `0`. So a measurement over a
+value carrying a non-finite coordinate answers **empty** (`$bbox`, `$area`,
+`$length`, `$centroid`, `$distance`, `$geohash`), and a predicate answers
+**false** (`$within`, `$bbox-intersects`) — each the same answer it already
+gives for a missing operand. A value with no positions at all is a different
+thing and still measures: `$area` of an empty `FeatureCollection` is `0`.
+
+**Boxes do not cross the antimeridian.** RFC 7946 §3.1.9 tells producers to cut
+geometries at ±180° rather than let them span it, and this format follows that
+rather than re-joining what a producer split: `$bbox` of an uncut geometry whose
+positions sit either side of the line returns a box spanning the globe the
+*wrong* way — `[-179, 0, 179, 0]` for two points four degrees apart. Cut the
+geometry at the antimeridian, as the RFC asks, and every box, containment test
+and index probe is right. There is no flag for this: a box that silently meant
+"the short way round" for some values and "the long way" for others is worse
+than one rule.
+
+Note what needs **no** operator — and one that does. A geohash is a string, so
+**bucketing and tiling** need nothing new: `$groupby` over `$substring` groups
+by cell, ordering by the hash orders by locality, and an index over it is a
+spatial index. **Proximity is different, and `$starts-with` on a prefix is not
+it.** Two points ten metres apart can differ in the *first* character of their
+cell, so a single-prefix test misses a neighbour at every cell boundary — which
+is to say, everywhere a customer actually looks. A correct proximity probe
+tests the neighbourhood: `$geohash-neighbours` of the query point's cell, then
+a membership test against those cells, then the exact `$distance` on what
+survives.
+
+```json
+{ "$let": { "cells": { "$geohash-neighbours": { "$geohash": ["$.here", 6] } } },
+  "$return": { "$for": { "c": "$.places[*]" },
+               "$where": { "$exists": { "$index-of": ["$cells", { "$geohash": ["$c.at", 6] }] } },
+               "$return": "$c.name" } }
+```
+
+— the nine-cell probe, in the language's own clauses. Narrow it with
+`$distance` when an exact radius matters; the cells are the cheap filter, not
+the answer.
 
 ```json
 { "$for": { "c": "$.cities[*]" },

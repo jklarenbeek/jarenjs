@@ -1,0 +1,3250 @@
+[
+  {
+    "name": "within/inside",
+    "note": "the ordinary case: a point inside a polygon",
+    "data": {
+      "at": [
+        4.9041,
+        52.3676
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "within/outside",
+    "note": "a point outside it",
+    "data": {
+      "at": [
+        2.3522,
+        48.8566
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "within/on-an-edge",
+    "note": "the boundary counts as inside — stated so the answer is not an accident of the crossing count",
+    "data": {
+      "at": [
+        4.5,
+        52
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "within/on-a-vertex",
+    "note": "a corner is on the boundary too",
+    "data": {
+      "at": [
+        4,
+        52
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "within/in-a-hole",
+    "note": "inside the exterior ring but inside a hole: not in the surface",
+    "data": {
+      "at": [
+        4.5,
+        52.5
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ],
+          [
+            [
+              4.4,
+              52.4
+            ],
+            [
+              4.6,
+              52.4
+            ],
+            [
+              4.6,
+              52.6
+            ],
+            [
+              4.4,
+              52.6
+            ],
+            [
+              4.4,
+              52.4
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "within/in-the-ring-body",
+    "note": "the same polygon, outside the hole",
+    "data": {
+      "at": [
+        4.2,
+        52.2
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ],
+          [
+            [
+              4.4,
+              52.4
+            ],
+            [
+              4.6,
+              52.4
+            ],
+            [
+              4.6,
+              52.6
+            ],
+            [
+              4.4,
+              52.6
+            ],
+            [
+              4.4,
+              52.4
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "within/multipolygon-second-part",
+    "note": "containment is over every part, not the first",
+    "data": {
+      "at": [
+        10.5,
+        10.5
+      ],
+      "region": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                0,
+                1
+              ],
+              [
+                0,
+                0
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                10,
+                10
+              ],
+              [
+                11,
+                10
+              ],
+              [
+                11,
+                11
+              ],
+              [
+                10,
+                11
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "within/a-point-has-no-inside",
+    "note": "only a surface has an inside; a point against itself is false, not true",
+    "data": {
+      "a": [
+        4.9041,
+        52.3676
+      ],
+      "b": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$within": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "within/a-line-has-no-inside",
+    "note": "the same rule for a line",
+    "data": {
+      "at": [
+        4.5,
+        52
+      ],
+      "line": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4,
+            52
+          ],
+          [
+            5,
+            52
+          ],
+          [
+            5,
+            53
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.line"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "within/a-collection-surface",
+    "note": "a FeatureCollection is unwrapped, and its features supply the surfaces",
+    "data": {
+      "at": [
+        4.9041,
+        52.3676
+      ],
+      "region": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "region"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    4,
+                    52
+                  ],
+                  [
+                    5,
+                    52
+                  ],
+                  [
+                    5,
+                    53
+                  ],
+                  [
+                    4,
+                    53
+                  ],
+                  [
+                    4,
+                    52
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "within/an-unclosed-ring-still-answers",
+    "note": "the division of labour: traversal treats a ring as implicitly closed and isValidGeoJson is what refuses it",
+    "data": {
+      "at": [
+        1,
+        1
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              4,
+              4
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        "$.region"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "bbox/polygon",
+    "note": "west, south, east, north",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "expected": [
+      4,
+      52,
+      5,
+      53
+    ]
+  },
+  {
+    "name": "bbox/point",
+    "note": "a position bounds itself",
+    "data": {
+      "g": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "expected": [
+      4.9041,
+      52.3676,
+      4.9041,
+      52.3676
+    ]
+  },
+  {
+    "name": "bbox/linestring",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4,
+            52
+          ],
+          [
+            5,
+            52
+          ],
+          [
+            5,
+            53
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "expected": [
+      4,
+      52,
+      5,
+      53
+    ]
+  },
+  {
+    "name": "bbox/feature",
+    "note": "the wrapper is unwrapped",
+    "data": {
+      "g": {
+        "type": "Feature",
+        "properties": {
+          "name": "region"
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4,
+                52
+              ],
+              [
+                5,
+                52
+              ],
+              [
+                5,
+                53
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                4,
+                52
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "expected": [
+      4,
+      52,
+      5,
+      53
+    ]
+  },
+  {
+    "name": "bbox/collection",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "region"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    4,
+                    52
+                  ],
+                  [
+                    5,
+                    52
+                  ],
+                  [
+                    5,
+                    53
+                  ],
+                  [
+                    4,
+                    53
+                  ],
+                  [
+                    4,
+                    52
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "expected": [
+      4,
+      52,
+      5,
+      53
+    ]
+  },
+  {
+    "name": "bbox/empty-collection",
+    "note": "no positions, no box — empty rather than a null-member array",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": []
+      }
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "empty": true
+  },
+  {
+    "name": "bbox/antimeridian-uncut",
+    "note": "RFC 7946 tells producers to CUT at the antimeridian; an uncut geometry gets a box spanning the globe the wrong way, and this pins that posture",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            179,
+            0
+          ],
+          [
+            -179,
+            0
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox": "$.g"
+    },
+    "expected": [
+      -179,
+      0,
+      179,
+      0
+    ]
+  },
+  {
+    "name": "bbox-intersects/overlapping",
+    "note": "",
+    "data": {
+      "a": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      },
+      "b": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4.5,
+              52.5
+            ],
+            [
+              6,
+              52.5
+            ],
+            [
+              6,
+              54
+            ],
+            [
+              4.5,
+              54
+            ],
+            [
+              4.5,
+              52.5
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox-intersects": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "bbox-intersects/touching-edges",
+    "note": "touching counts as overlap",
+    "data": {
+      "a": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      },
+      "b": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              5,
+              52
+            ],
+            [
+              6,
+              52
+            ],
+            [
+              6,
+              53
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              5,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox-intersects": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "bbox-intersects/disjoint",
+    "note": "",
+    "data": {
+      "a": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      },
+      "b": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              10,
+              40
+            ],
+            [
+              11,
+              40
+            ],
+            [
+              11,
+              41
+            ],
+            [
+              10,
+              41
+            ],
+            [
+              10,
+              40
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox-intersects": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "bbox-intersects/one-inside-another",
+    "note": "",
+    "data": {
+      "a": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4.2,
+              52.2
+            ],
+            [
+              4.3,
+              52.2
+            ],
+            [
+              4.3,
+              52.3
+            ],
+            [
+              4.2,
+              52.2
+            ]
+          ]
+        ]
+      },
+      "b": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox-intersects": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "bbox-intersects/boxes-overlap-but-shapes-do-not",
+    "note": "these boxes do NOT overlap; the operator is named for the box precisely so this can never be read as real intersection",
+    "data": {
+      "a": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      },
+      "b": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              2
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ],
+            [
+              0,
+              3
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox-intersects": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "distance/amsterdam-paris",
+    "note": "metres on the WGS 84 sphere",
+    "data": {
+      "a": [
+        4.9041,
+        52.3676
+      ],
+      "b": [
+        2.3522,
+        48.8566
+      ]
+    },
+    "query": {
+      "$distance": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": 429861.983446582
+  },
+  {
+    "name": "distance/a-point-to-itself",
+    "note": "",
+    "data": {
+      "a": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$distance": [
+        "$.a",
+        "$.a"
+      ]
+    },
+    "expected": 0
+  },
+  {
+    "name": "distance/point-to-polygon-centroid",
+    "note": "a non-position is measured by its representative position, which is its centroid",
+    "data": {
+      "a": [
+        4.9041,
+        52.3676
+      ],
+      "b": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$distance": [
+        "$.a",
+        "$.b"
+      ]
+    },
+    "expected": 34402.38264147427
+  },
+  {
+    "name": "distance/in-kilometres",
+    "note": "conversion is ordinary arithmetic, not an option",
+    "data": {
+      "a": [
+        4.9041,
+        52.3676
+      ],
+      "b": [
+        2.3522,
+        48.8566
+      ]
+    },
+    "query": {
+      "$idiv": [
+        {
+          "$distance": [
+            "$.a",
+            "$.b"
+          ]
+        },
+        1000
+      ]
+    },
+    "expected": 429
+  },
+  {
+    "name": "area/polygon",
+    "note": "square metres",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$area": "$.g"
+    },
+    "expected": 7526841324.975262
+  },
+  {
+    "name": "area/exterior-less-holes",
+    "note": "the hole is subtracted, so this is smaller than the simple box",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ],
+          [
+            [
+              4.4,
+              52.4
+            ],
+            [
+              4.6,
+              52.4
+            ],
+            [
+              4.6,
+              52.6
+            ],
+            [
+              4.4,
+              52.6
+            ],
+            [
+              4.4,
+              52.4
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$area": "$.g"
+    },
+    "expected": 7225764003.453012
+  },
+  {
+    "name": "area/multipolygon-sums-parts",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                0,
+                1
+              ],
+              [
+                0,
+                0
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                10,
+                10
+              ],
+              [
+                11,
+                10
+              ],
+              [
+                11,
+                11
+              ],
+              [
+                10,
+                11
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$area": "$.g"
+    },
+    "expected": 24520867594.165077
+  },
+  {
+    "name": "area/a-line-has-no-surface",
+    "note": "zero, not empty and not an error",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4,
+            52
+          ],
+          [
+            5,
+            52
+          ],
+          [
+            5,
+            53
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$area": "$.g"
+    },
+    "expected": 0
+  },
+  {
+    "name": "area/empty-collection",
+    "note": "no positions is not the same as a non-finite one: this still measures",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": []
+      }
+    },
+    "query": {
+      "$area": "$.g"
+    },
+    "expected": 0
+  },
+  {
+    "name": "area/collection-ignores-its-points",
+    "note": "the sum over the surfaces only",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "region"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    4,
+                    52
+                  ],
+                  [
+                    5,
+                    52
+                  ],
+                  [
+                    5,
+                    53
+                  ],
+                  [
+                    4,
+                    53
+                  ],
+                  [
+                    4,
+                    52
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": null,
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                4.9041,
+                52.3676
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "query": {
+      "$area": "$.g"
+    },
+    "expected": 7526841324.975262
+  },
+  {
+    "name": "length/linestring",
+    "note": "metres",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4,
+            52
+          ],
+          [
+            5,
+            52
+          ],
+          [
+            5,
+            53
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$length": "$.g"
+    },
+    "expected": 179653.06781959327
+  },
+  {
+    "name": "length/ring-perimeter",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$length": "$.g"
+    },
+    "expected": 357766.4760955728
+  },
+  {
+    "name": "length/a-point-has-no-length",
+    "note": "",
+    "data": {
+      "g": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$length": "$.g"
+    },
+    "expected": 0
+  },
+  {
+    "name": "centroid/polygon",
+    "note": "the mean of the positions, NOT the area-weighted centre of mass",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$centroid": "$.g"
+    },
+    "expected": [
+      4.4,
+      52.4
+    ]
+  },
+  {
+    "name": "centroid/multipoint",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            0,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            3
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$centroid": "$.g"
+    },
+    "expected": [
+      1,
+      1
+    ]
+  },
+  {
+    "name": "centroid/empty-collection",
+    "note": "no positions, no mean",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": []
+      }
+    },
+    "query": {
+      "$centroid": "$.g"
+    },
+    "empty": true
+  },
+  {
+    "name": "filter/cities-within-a-region",
+    "note": "a spatial filter in the language own clause",
+    "data": {
+      "cities": [
+        {
+          "name": "Amsterdam",
+          "at": [
+            4.9041,
+            52.3676
+          ]
+        },
+        {
+          "name": "Paris",
+          "at": [
+            2.3522,
+            48.8566
+          ]
+        },
+        {
+          "name": "Utrecht",
+          "at": [
+            5.1214,
+            52.0907
+          ]
+        }
+      ],
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$for": {
+        "c": "$.cities[*]"
+      },
+      "$where": {
+        "$within": [
+          "$c.at",
+          "$.region"
+        ]
+      },
+      "$return": "$c.name"
+    },
+    "expected": "Amsterdam"
+  },
+  {
+    "name": "order/by-distance-from-a-point",
+    "note": "a spatial sort",
+    "data": {
+      "cities": [
+        {
+          "name": "Amsterdam",
+          "at": [
+            4.9041,
+            52.3676
+          ]
+        },
+        {
+          "name": "Paris",
+          "at": [
+            2.3522,
+            48.8566
+          ]
+        },
+        {
+          "name": "Utrecht",
+          "at": [
+            5.1214,
+            52.0907
+          ]
+        }
+      ],
+      "here": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$for": {
+        "c": "$.cities[*]"
+      },
+      "$orderby": [
+        {
+          "$key": {
+            "$distance": [
+              "$c.at",
+              "$.here"
+            ]
+          }
+        }
+      ],
+      "$return": "$c.name"
+    },
+    "expected": [
+      "Amsterdam",
+      "Utrecht",
+      "Paris"
+    ]
+  },
+  {
+    "name": "group/by-geohash-cell",
+    "note": "bucketing on a prefix: what a geohash IS for",
+    "data": {
+      "cities": [
+        {
+          "name": "Amsterdam",
+          "at": [
+            4.9041,
+            52.3676
+          ]
+        },
+        {
+          "name": "Paris",
+          "at": [
+            2.3522,
+            48.8566
+          ]
+        },
+        {
+          "name": "Utrecht",
+          "at": [
+            5.1214,
+            52.0907
+          ]
+        }
+      ]
+    },
+    "query": {
+      "$for": {
+        "c": "$.cities[*]"
+      },
+      "$groupby": {
+        "cell": {
+          "$geohash": [
+            "$c.at",
+            3
+          ]
+        }
+      },
+      "$orderby": [
+        "$cell"
+      ],
+      "$return": {
+        "cell": "$cell",
+        "names": {
+          "$string-join": [
+            "$c.name",
+            "+"
+          ]
+        }
+      }
+    },
+    "expected": [
+      {
+        "cell": "u09",
+        "names": "Paris"
+      },
+      {
+        "cell": "u17",
+        "names": "Amsterdam+Utrecht"
+      }
+    ]
+  },
+  {
+    "name": "join/nested-within",
+    "note": "the spatial-join shape the planner probes a box index for",
+    "data": {
+      "cities": [
+        {
+          "name": "Amsterdam",
+          "at": [
+            4.9041,
+            52.3676
+          ]
+        },
+        {
+          "name": "Paris",
+          "at": [
+            2.3522,
+            48.8566
+          ]
+        },
+        {
+          "name": "Utrecht",
+          "at": [
+            5.1214,
+            52.0907
+          ]
+        }
+      ],
+      "regions": [
+        {
+          "id": "nl",
+          "shape": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  4,
+                  52
+                ],
+                [
+                  5,
+                  52
+                ],
+                [
+                  5,
+                  53
+                ],
+                [
+                  4,
+                  53
+                ],
+                [
+                  4,
+                  52
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": "far",
+          "shape": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [
+                  10,
+                  40
+                ],
+                [
+                  11,
+                  40
+                ],
+                [
+                  11,
+                  41
+                ],
+                [
+                  10,
+                  41
+                ],
+                [
+                  10,
+                  40
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "query": {
+      "$for": {
+        "r": "$.regions[*]"
+      },
+      "$return": {
+        "id": "$r.id",
+        "inside": [
+          {
+            "$for": {
+              "c": "$.cities[*]"
+            },
+            "$where": {
+              "$within": [
+                "$c.at",
+                "$r.shape"
+              ]
+            },
+            "$return": "$c.name"
+          }
+        ]
+      }
+    },
+    "expected": [
+      {
+        "id": "nl",
+        "inside": [
+          "Amsterdam"
+        ]
+      },
+      {
+        "id": "far",
+        "inside": []
+      }
+    ]
+  },
+  {
+    "name": "geohash/encode-default-precision",
+    "note": "precision 9 unless asked otherwise",
+    "data": {
+      "at": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$geohash": [
+        "$.at"
+      ]
+    },
+    "expected": "u173zt5p3"
+  },
+  {
+    "name": "geohash/encode-precision-5",
+    "note": "",
+    "data": {
+      "at": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$geohash": [
+        "$.at",
+        5
+      ]
+    },
+    "expected": "u173z"
+  },
+  {
+    "name": "geohash/a-shape-is-its-centroid",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$geohash": [
+        "$.g",
+        3
+      ]
+    },
+    "expected": "u17"
+  },
+  {
+    "name": "geohash/at-the-pole",
+    "note": "the top-edge cell, not an error",
+    "data": {
+      "at": [
+        0,
+        90
+      ]
+    },
+    "query": {
+      "$geohash": [
+        "$.at",
+        12
+      ]
+    },
+    "expected": "upbpbpbpbpbp"
+  },
+  {
+    "name": "geohash-bounds/a-cell-becomes-a-polygon",
+    "note": "the crossing back: a cell string becomes a value the rest of the family measures",
+    "data": {
+      "c": "u173z"
+    },
+    "query": {
+      "$geohash-bounds": "$.c"
+    },
+    "expected": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            4.8779296875,
+            52.3388671875
+          ],
+          [
+            4.921875,
+            52.3388671875
+          ],
+          [
+            4.921875,
+            52.3828125
+          ],
+          [
+            4.8779296875,
+            52.3828125
+          ],
+          [
+            4.8779296875,
+            52.3388671875
+          ]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geohash-bounds/round-trips-through-its-own-centre",
+    "note": "encode(bounds(c)) === c — the round trip $geohash alone could not close",
+    "data": {
+      "c": "u173z"
+    },
+    "query": {
+      "$geohash": [
+        {
+          "$geohash-bounds": "$.c"
+        },
+        5
+      ]
+    },
+    "expected": "u173z"
+  },
+  {
+    "name": "geohash-bounds/contains-the-point-it-came-from",
+    "note": "",
+    "data": {
+      "at": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        {
+          "$geohash-bounds": {
+            "$geohash": [
+              "$.at",
+              7
+            ]
+          }
+        }
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "geohash-bounds/outside-the-alphabet",
+    "note": "a, i, l and o are not in the base-32 alphabet",
+    "data": {
+      "c": "u17a"
+    },
+    "query": {
+      "$geohash-bounds": "$.c"
+    },
+    "empty": true
+  },
+  {
+    "name": "geohash-neighbours/nine-cells-in-reading-order",
+    "note": "north-west first, the cell itself in the middle",
+    "data": {
+      "c": "u173z"
+    },
+    "query": {
+      "$geohash-neighbours": "$.c"
+    },
+    "expected": [
+      "u176n",
+      "u176p",
+      "u17d0",
+      "u173y",
+      "u173z",
+      "u179b",
+      "u173w",
+      "u173x",
+      "u1798"
+    ]
+  },
+  {
+    "name": "geohash-neighbours/across-a-level-1-boundary",
+    "note": "Greenwich: two points 9.7 m apart whose cells differ in the FIRST character, and the neighbourhood still finds them",
+    "data": {
+      "here": [
+        -0.00007,
+        51.4779
+      ],
+      "there": [
+        0.00007,
+        51.4779
+      ]
+    },
+    "query": {
+      "$exists": {
+        "$index-of": [
+          {
+            "$geohash-neighbours": {
+              "$geohash": [
+                "$.here",
+                6
+              ]
+            }
+          },
+          {
+            "$geohash": [
+              "$.there",
+              6
+            ]
+          }
+        ]
+      }
+    },
+    "expected": true
+  },
+  {
+    "name": "geohash-neighbours/a-single-prefix-misses-it",
+    "note": "the same pair through a prefix test: false. This is why a prefix is bucketing and never proximity",
+    "data": {
+      "here": [
+        -0.00007,
+        51.4779
+      ],
+      "there": [
+        0.00007,
+        51.4779
+      ]
+    },
+    "query": {
+      "$starts-with": [
+        {
+          "$geohash": [
+            "$.there",
+            9
+          ]
+        },
+        {
+          "$geohash": [
+            "$.here",
+            6
+          ]
+        }
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "geohash-neighbours/across-the-antimeridian",
+    "note": "longitude wraps, so the neighbourhood spans the date line",
+    "data": {
+      "at": [
+        179.999,
+        0
+      ]
+    },
+    "query": {
+      "$geohash-neighbours": {
+        "$geohash": [
+          "$.at",
+          5
+        ]
+      }
+    },
+    "expected": [
+      "xbpbq",
+      "xbpbr",
+      "80002",
+      "xbpbn",
+      "xbpbp",
+      "80000",
+      "rzzzy",
+      "rzzzz",
+      "2pbpb"
+    ]
+  },
+  {
+    "name": "geohash-neighbours/at-the-pole-there-are-fewer",
+    "note": "cells past a pole do not exist, so the sequence is shorter than nine",
+    "data": {
+      "at": [
+        0,
+        90
+      ]
+    },
+    "query": {
+      "$count": {
+        "$geohash-neighbours": {
+          "$geohash": [
+            "$.at",
+            5
+          ]
+        }
+      }
+    },
+    "expected": 6
+  },
+  {
+    "name": "geohash-neighbours/outside-the-alphabet",
+    "note": "",
+    "data": {
+      "c": "u17a"
+    },
+    "query": {
+      "$geohash-neighbours": "$.c"
+    },
+    "empty": true
+  },
+  {
+    "name": "geo-parse/point",
+    "note": "",
+    "data": {
+      "w": "POINT (4.9041 52.3676)"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "expected": {
+      "type": "Point",
+      "coordinates": [
+        4.9041,
+        52.3676
+      ]
+    }
+  },
+  {
+    "name": "geo-parse/polygon",
+    "note": "the shape every ST_AsText emits",
+    "data": {
+      "w": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "expected": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            4,
+            52
+          ],
+          [
+            5,
+            52
+          ],
+          [
+            5,
+            53
+          ],
+          [
+            4,
+            53
+          ],
+          [
+            4,
+            52
+          ]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geo-parse/multipolygon",
+    "note": "",
+    "data": {
+      "w": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "expected": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0
+            ],
+            [
+              1,
+              1
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              5,
+              5
+            ],
+            [
+              6,
+              5
+            ],
+            [
+              6,
+              6
+            ],
+            [
+              5,
+              5
+            ]
+          ]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geo-parse/geometrycollection",
+    "note": "geometries, not coordinates",
+    "data": {
+      "w": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "expected": {
+      "type": "GeometryCollection",
+      "geometries": [
+        {
+          "type": "Point",
+          "coordinates": [
+            1,
+            2
+          ]
+        },
+        {
+          "type": "LineString",
+          "coordinates": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "geo-parse/empty-is-not-null",
+    "note": "an empty coordinate array: unparseable and validly empty are different answers",
+    "data": {
+      "w": "POINT EMPTY"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "expected": {
+      "type": "Point",
+      "coordinates": []
+    }
+  },
+  {
+    "name": "geo-parse/the-measure-dimension-is-dropped",
+    "note": "Z is an altitude and is kept; M is a measure and has no place in a GeoJSON position",
+    "data": {
+      "w": "POINT ZM (1 2 3 4)"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "expected": {
+      "type": "Point",
+      "coordinates": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "geo-parse/malformed",
+    "note": "an open ring is not WKT — empty, not an error",
+    "data": {
+      "w": "POLYGON ((0 0, 4 0, 4 4, 1 1))"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "empty": true
+  },
+  {
+    "name": "geo-parse/not-one-of-the-seven-tags",
+    "note": "",
+    "data": {
+      "w": "CIRCLE EMPTY"
+    },
+    "query": {
+      "$geo-parse": "$.w"
+    },
+    "empty": true
+  },
+  {
+    "name": "geo-parse/then-measure-it",
+    "note": "the point of the operator: a database string becomes measurable in one expression",
+    "data": {
+      "w": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))"
+    },
+    "query": {
+      "$bbox": {
+        "$geo-parse": "$.w"
+      }
+    },
+    "expected": [
+      4,
+      52,
+      5,
+      53
+    ]
+  },
+  {
+    "name": "geo-parse/then-test-containment",
+    "note": "",
+    "data": {
+      "w": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))",
+      "at": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$within": [
+        "$.at",
+        {
+          "$geo-parse": "$.w"
+        }
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "geo-text/point",
+    "note": "",
+    "data": {
+      "g": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$geo-text": "$.g"
+    },
+    "executors": [
+      "engine"
+    ],
+    "expected": "POINT (4.9041 52.3676)"
+  },
+  {
+    "name": "geo-text/polygon",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$geo-text": "$.g"
+    },
+    "executors": [
+      "engine"
+    ],
+    "expected": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))"
+  },
+  {
+    "name": "geo-text/a-feature-writes-its-geometry",
+    "note": "the unwrapping posture, in the writing direction",
+    "data": {
+      "g": {
+        "type": "Feature",
+        "properties": {
+          "name": "region"
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4,
+                52
+              ],
+              [
+                5,
+                52
+              ],
+              [
+                5,
+                53
+              ],
+              [
+                4,
+                53
+              ],
+              [
+                4,
+                52
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    "query": {
+      "$geo-text": "$.g"
+    },
+    "executors": [
+      "engine"
+    ],
+    "expected": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))"
+  },
+  {
+    "name": "geo-text/a-collection-writes-a-geometrycollection",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "region"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    4,
+                    52
+                  ],
+                  [
+                    5,
+                    52
+                  ],
+                  [
+                    5,
+                    53
+                  ],
+                  [
+                    4,
+                    53
+                  ],
+                  [
+                    4,
+                    52
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "query": {
+      "$geo-text": "$.g"
+    },
+    "executors": [
+      "engine"
+    ],
+    "expected": "GEOMETRYCOLLECTION (POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52)))"
+  },
+  {
+    "name": "geo-text/round-trip-through-the-language",
+    "note": "parse then write: the text direction that DOES hold for a normalized string",
+    "data": {
+      "w": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))"
+    },
+    "query": {
+      "$geo-text": {
+        "$geo-parse": "$.w"
+      }
+    },
+    "executors": [
+      "engine"
+    ],
+    "expected": "POLYGON ((4 52, 5 52, 5 53, 4 53, 4 52))"
+  },
+  {
+    "name": "geo-text/a-non-finite-coordinate-has-no-spelling",
+    "note": "a value that cannot be written is not written approximately",
+    "data": {},
+    "query": {
+      "$geo-text": [
+        {
+          "$div": [
+            0,
+            0
+          ]
+        },
+        0
+      ]
+    },
+    "executors": [
+      "engine"
+    ],
+    "empty": true
+  },
+  {
+    "name": "geo-simplify/a-line-keeps-both-endpoints",
+    "note": "the middle vertex is on the run and goes; the ends never do",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0.0001
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            2,
+            2
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$geo-simplify": [
+        "$.g",
+        0.01
+      ]
+    },
+    "expected": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geo-simplify/a-ring-stays-closed",
+    "note": "simplification can never turn a valid polygon into an invalid one",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0.0001
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$geo-simplify": [
+        "$.g",
+        0.01
+      ]
+    },
+    "expected": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geo-simplify/a-ring-too-small-to-reduce-is-returned-whole",
+    "note": "a ring needs four positions to bound a surface, so it is kept rather than made degenerate",
+    "data": {
+      "g": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0.0001
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$geo-simplify": [
+        "$.g",
+        5
+      ]
+    },
+    "expected": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0.0001
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geo-simplify/a-collection-keeps-its-properties",
+    "note": "the value that comes back is the value that went in, with fewer positions — so it can be stored or sent as-is",
+    "data": {
+      "g": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "route",
+              "id": 7
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0.0001
+                ],
+                [
+                  2,
+                  0
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "query": {
+      "$geo-simplify": [
+        "$.g",
+        0.01
+      ]
+    },
+    "expected": {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": {
+            "name": "route",
+            "id": 7
+          },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                0,
+                0
+              ],
+              [
+                2,
+                0
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "geo-simplify/a-point-has-nothing-to-drop",
+    "note": "",
+    "data": {
+      "g": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$geo-simplify": [
+        "$.g",
+        1
+      ]
+    },
+    "expected": [
+      4.9041,
+      52.3676
+    ]
+  },
+  {
+    "name": "geo-simplify/a-zero-tolerance-changes-nothing",
+    "note": "",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4,
+            52
+          ],
+          [
+            5,
+            52
+          ],
+          [
+            5,
+            53
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$geo-simplify": [
+        "$.g",
+        0
+      ]
+    },
+    "expected": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          4,
+          52
+        ],
+        [
+          5,
+          52
+        ],
+        [
+          5,
+          53
+        ]
+      ]
+    }
+  },
+  {
+    "name": "geo-simplify/the-vertex-count-drops",
+    "note": "five positions in, two out — the reduction a developer stores, counted through the language rather than asserted",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0.0001
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            0.0001
+          ],
+          [
+            4,
+            0
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$let": {
+        "s": {
+          "$geo-simplify": [
+            "$.g",
+            0.01
+          ]
+        }
+      },
+      "$return": {
+        "$count": "$s.coordinates[*]"
+      }
+    },
+    "expected": 2
+  },
+  {
+    "name": "geo-simplify/the-vertex-count-before",
+    "note": "the same value unsimplified, for the comparison the entry above is half of",
+    "data": {
+      "g": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0.0001
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            0.0001
+          ],
+          [
+            4,
+            0
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$count": "$.g.coordinates[*]"
+    },
+    "expected": 5
+  },
+  {
+    "name": "non-finite/bbox-is-empty",
+    "note": "a box that does not bound its input is worse than no box",
+    "data": {},
+    "query": {
+      "$bbox": [
+        {
+          "$div": [
+            0,
+            0
+          ]
+        },
+        0
+      ]
+    },
+    "empty": true
+  },
+  {
+    "name": "non-finite/distance-is-empty",
+    "note": "a great-circle distance from NaN comes back as the antipodal distance, so the operator answers empty instead",
+    "data": {
+      "b": [
+        4.9041,
+        52.3676
+      ]
+    },
+    "query": {
+      "$distance": [
+        [
+          {
+            "$div": [
+              0,
+              0
+            ]
+          },
+          0
+        ],
+        "$.b"
+      ]
+    },
+    "empty": true
+  },
+  {
+    "name": "non-finite/centroid-is-empty",
+    "note": "",
+    "data": {},
+    "query": {
+      "$centroid": [
+        {
+          "$div": [
+            0,
+            0
+          ]
+        },
+        0
+      ]
+    },
+    "empty": true
+  },
+  {
+    "name": "non-finite/geohash-is-empty",
+    "note": "without this the cell string is plausible and wrong",
+    "data": {},
+    "query": {
+      "$geohash": [
+        [
+          {
+            "$div": [
+              0,
+              0
+            ]
+          },
+          0
+        ]
+      ]
+    },
+    "empty": true
+  },
+  {
+    "name": "non-finite/within-is-false",
+    "note": "a predicate answers its own missing-operand value, not empty",
+    "data": {
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$within": [
+        [
+          {
+            "$div": [
+              0,
+              0
+            ]
+          },
+          0
+        ],
+        "$.region"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "non-finite/bbox-intersects-is-false",
+    "note": "",
+    "data": {
+      "region": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              4,
+              52
+            ],
+            [
+              5,
+              52
+            ],
+            [
+              5,
+              53
+            ],
+            [
+              4,
+              53
+            ],
+            [
+              4,
+              52
+            ]
+          ]
+        ]
+      }
+    },
+    "query": {
+      "$bbox-intersects": [
+        [
+          {
+            "$div": [
+              0,
+              0
+            ]
+          },
+          0
+        ],
+        "$.region"
+      ]
+    },
+    "expected": false
+  }
+]

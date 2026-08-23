@@ -402,6 +402,21 @@ const OPERATOR_ALIASES = {
   // conditionals ($coalesce is a real operator; the guesses are here)
   $case: "$if", $cond: "$if", $switch: "$if", $ternary: "$if",
   $ifnull: "$default", $ifempty: "$default", $nvl: "$default",
+  // spatial: the PostGIS/Turf spellings, and the American plural
+  $wkt: "$geo-parse to read one, $geo-text to write one",
+  "$parse-wkt": "$geo-parse", "$from-wkt": "$geo-parse", $st_geomfromtext: "$geo-parse",
+  "$to-wkt": "$geo-text", $st_astext: "$geo-text", "$geo-stringify": "$geo-text",
+  "$geohash-decode": "$geohash-bounds", "$geohash-bbox": "$geohash-bounds",
+  "$geohash-neighbors": "$geohash-neighbours", "$geohash-adjacent": "$geohash-neighbours",
+  $simplify: "$geo-simplify", "$douglas-peucker": "$geo-simplify",
+  $intersects: "$bbox-intersects (boxes only — real overlay is deliberately absent)",
+  $buffer: null, $union: null, $difference: null,
+  // the one absence that needs its reason, not a pointer: a projected
+  // position is the same [x, y] array as a geographic one, so an
+  // operator making one could not stop it reaching $distance
+  $project: "the renderer — the language cannot make a projected coordinate at all, so a measurement can never land on one; measurement here is geodesic",
+  "$geo-project": "the renderer, as for '$project'",
+  $srid: null, $transform: null,
 };
 
 // JQ0002 for an unknown $-key, with a "did you mean" suggestion. A

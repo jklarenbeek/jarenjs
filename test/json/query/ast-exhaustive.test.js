@@ -8,9 +8,12 @@
  *     `NODE_KINDS` set — a new node kind nobody documented fails here.
  *  2. `NODE_KINDS` equals Appendix C.3's table — code and spec cannot
  *     disagree about the kinds.
- *  3. The operator registry equals QUERY-FORMAT §8's operator tables —
- *     the "91 vs 93" stale-count problem is dead permanently, by test
- *     rather than by hand.
+ *  3. The operator registry equals QUERY-FORMAT §8's operator tables,
+ *     and the count it derives from the registry matches EVERY committed
+ *     document that states one — the "91 vs 93" stale-count problem is
+ *     dead permanently, by test rather than by hand. Six places state
+ *     the number and five of them used to be unchecked, including the
+ *     one the published website reads.
  */
 
 import { describe, it } from 'node:test';
@@ -21,6 +24,29 @@ import { analyzeQuery, NODE_KINDS } from '@jarenjs/json/query';
 import { OPERATORS } from '../../../packages/json/src/query/operators.js';
 
 const FORMAT = fs.readFileSync('packages/json/docs/QUERY-FORMAT.md', 'utf8');
+
+/**
+ * Every committed statement of the operator count, and the pattern that
+ * reads the number out of it. The count itself is DERIVED from the
+ * registry — nothing here restates it — so the only way to add an
+ * operator is to move every one of these in the same change.
+ *
+ * `site.md` feeds the published website and `README.md` is the first
+ * thing an evaluating developer reads, so a stale number here is a wrong
+ * number on the page the suite is judged by, not bookkeeping.
+ */
+const COUNT_SOURCES = [
+  { file: 'packages/json/ARCHITECTURE.md', says: 'the registry section',
+    pattern: /^All (\d+) §8 operators live in one table/m },
+  { file: 'packages/json/README.md', says: 'the operator-library sentence',
+    pattern: /^The operator library \((\d+) operators:/m },
+  { file: 'packages/json/README.md', says: 'the host-extension sentence',
+    pattern: /^\*\*Extending the vocabulary \(host opt-in\)\.\*\* The (\d+) are closed/m },
+  { file: 'packages/json/site.md', says: 'the JSON Query card',
+    pattern: /a (\d+)-operator\n?library/m },
+  { file: 'packages/linq/ARCHITECTURE.md', says: 'the not-IQueryable paragraph',
+    pattern: /the operator set is the query engine's\n(\d+), closed and documented/m },
+];
 
 /**
  * Walk every node of a normalized tree (the child positions of
@@ -111,7 +137,7 @@ describe('gate 2 — NODE_KINDS equals the Appendix C.3 table', () => {
 });
 
 describe('gate 3 — the operator registry equals QUERY-FORMAT §8', () => {
-  it('every registry operator is documented and vice versa (93 total)', () => {
+  it('every registry operator is documented and vice versa (98 total)', () => {
     const section = FORMAT.split(/^## 8\. /m)[1]?.split(/^## 9\. /m)[0];
     assert.ok(section, 'section 8 is missing from QUERY-FORMAT.md');
     const documented = new Set();
@@ -127,7 +153,23 @@ describe('gate 3 — the operator registry equals QUERY-FORMAT §8', () => {
     const undocumented = registry.filter((op) => !documented.has(op));
     assert.deepStrictEqual(undocumented, [],
       'registry operators with no mention in section 8');
-    assert.strictEqual(registry.length, 93,
-      'the operator count moved — update ARCHITECTURE.md and this pin together');
+    assert.strictEqual(registry.length, 98,
+      'the operator count moved — update this pin and every COUNT_SOURCES document together');
+  });
+
+  it('every document that states the count states the derived one', () => {
+    const derived = Object.keys(OPERATORS).length;
+    const stale = [];
+    for (const source of COUNT_SOURCES) {
+      const text = fs.readFileSync(source.file, 'utf8');
+      const found = text.match(source.pattern);
+      if (found === null) {
+        stale.push(`${source.file} — ${source.says}: the sentence stating the count is gone`);
+        continue;
+      }
+      if (Number(found[1]) !== derived)
+        stale.push(`${source.file} — ${source.says}: states ${found[1]}, the registry holds ${derived}`);
+    }
+    assert.deepStrictEqual(stale, []);
   });
 });

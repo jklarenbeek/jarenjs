@@ -126,7 +126,7 @@ query.nodes(data);  // [{ path: "$['store']['book'][0]['title']", value: '...' }
 
 ### JSON Query
 
-XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 93-operator
+XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 98-operator
 library extensible with host operator packs (see JSLT stylesheets, below) — as
 JSON documents with JSONPath leaves. The grammar is published as JSON Schema,
 so a constrained decoder cannot emit an invalid query.

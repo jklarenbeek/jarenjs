@@ -348,8 +348,38 @@ describe('Jaren JSON Query normalizer', () => {
       }
     });
 
+    it('should point a spatial guess at the real spelling', () => {
+      const cases = [
+        // the American plural is the one a writer reaches for most
+        ['$geohash-neighbors', "use '$geohash-neighbours'"],
+        ['$parse-wkt', "use '$geo-parse'"],
+        ['$st_astext', "use '$geo-text'"],
+        ['$geohash-decode', "use '$geohash-bounds'"],
+        ['$simplify', "use '$geo-simplify'"],
+        ['$intersects', 'use $bbox-intersects (boxes only'],
+        // and the one absence that needs a reason rather than a pointer:
+        // a projected position is the same [x, y] array as a geographic
+        // one, so an operator making one could not stop it being measured
+        ['$project', 'the language cannot make a projected coordinate'],
+      ];
+      for (const [op, expected] of cases) {
+        assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
+          assert.strictEqual(e.code, 'JQ0002');
+          assert.ok(e.message.includes(expected),
+            `${op}: expected "${expected}" in "${e.message}"`);
+          return true;
+        });
+      }
+      // and a plain typo still reaches the near-miss path
+      assert.throws(() => compileJsonQuery({ '$geo-tex': '$' }), (e) => {
+        assert.strictEqual(e.code, 'JQ0002');
+        assert.ok(e.message.includes("did you mean '$geo-text'?"), e.message);
+        return true;
+      });
+    });
+
     it('should say plainly when no operator does it (e.g. $abs)', () => {
-      for (const op of ['$abs', '$sqrt', '$ceil']) {
+      for (const op of ['$abs', '$sqrt', '$ceil', '$buffer', '$union']) {
         assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
           assert.strictEqual(e.code, 'JQ0002');
           assert.ok(e.message.includes('no operator does this'), e.message);

@@ -60,12 +60,18 @@ import {
   isPosition,
   bboxOf,
   bboxIntersects,
+  bboxPolygon,
   geometryArea,
   geometryLength,
   centroidOf,
   containsPosition,
   geoDistance,
   geohashEncode,
+  geohashBounds,
+  geohashNeighbours,
+  wktToGeoJson,
+  geoJsonToWkt,
+  simplifyGeometry,
 } from '@jarenjs/core/geo';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 import {
@@ -748,7 +754,17 @@ function dateTruncEntry(truncate) {
 // What is deliberately absent is real geometry-to-geometry intersection.
 // `$bbox-intersects` says exactly what it tests, because an operator
 // named `$intersects` that only compared bounding boxes would be a lie
-// the first time two L-shapes shared a box and nothing else.
+// the first time two L-shapes shared a box and nothing else. So is any
+// operator producing a PROJECTED coordinate: a projected position is
+// the same `[x, y]` array as a geographic one, so a language that could
+// make one could not stop it reaching `$distance`. Leaving it out makes
+// "never measure on a projected coordinate" structural instead of
+// advisory; `projectMercator` stays a kernel export for renderers.
+//
+// The conversion members carry geography in and out of the forms the
+// rest of the world uses — Well-Known Text, geohash cells — and reduce
+// a value for storage. Each is a call into the kernel and nothing else:
+// the grammar, the cell arithmetic and Douglas-Peucker each exist once.
 
 // A spatial operand, rejected uniformly: the empty sequence propagates
 // at the call site, so this only ever sees a real item.
@@ -761,8 +777,43 @@ function geoArg(v, docPath) {
   return v;
 }
 
+// A cell string operand — the geohash family and `$geo-parse` take text
+// where the rest of the family takes a value.
+function geoTextArg(v, what, docPath) {
+  if (typeof v !== 'string') {
+    throw runtimeError('JQ2001',
+      `expected ${what}, got ${describeItem(v)}`, docPath);
+  }
+  return v;
+}
+
+// The family's non-finite rule, in one place. A coordinate that is not a
+// finite number has no measurement, and every kernel function that
+// touches one launders it into something plausible: `haversineDistance`
+// answers the antipodal distance, a NaN area compares false against zero
+// and reports 0. A representative-position operator checks the one
+// position it uses; an aggregate measurement has to know that EVERY
+// position is finite, and `centroidOf` is the kernel walk that already
+// answers it — NaN propagates through the mean, and a null mean is "no
+// positions at all", which still measures (as zero) rather than being
+// refused. No second finiteness walk exists.
+function finitePosition(at) {
+  return at !== null && Number.isFinite(at[0]) && Number.isFinite(at[1]) ? at : null;
+}
+
+function geoFinite(value) {
+  const at = centroidOf(value);
+  return at === null || finitePosition(at) !== null;
+}
+
+// the representative position §8.14 measures a value by: a bare position
+// is itself, anything else is its centroid
+function representative(value) {
+  return finitePosition(isPosition(value) ? value : centroidOf(value));
+}
+
 // a unary spatial measurement: empty propagates, anything else is JQ2001
-function geoUnaryEntry(measure, resultCard = resultEmptyPropagates) {
+function geoUnaryEntry(measure, resultCard = resultEmptyPropagates, check = geoArg) {
   return {
     params: UNARY,
     result: resultCard,
@@ -773,7 +824,7 @@ function geoUnaryEntry(measure, resultCard = resultEmptyPropagates) {
         const v = get(f);
         if (v === EMPTY)
           return EMPTY;
-        const out = measure(geoArg(v, docPath));
+        const out = measure(check(v, docPath));
         return out === null ? EMPTY : out;
       };
     },
@@ -1516,9 +1567,11 @@ export const OPERATORS = Object.freeze({
   //#region section 8.14 - spatial
 
   '$bbox': geoUnaryEntry(bboxOf),
-  '$area': geoUnaryEntry(geometryArea, RESULT_ONE),
-  '$length': geoUnaryEntry(geometryLength, RESULT_ONE),
-  '$centroid': geoUnaryEntry(centroidOf),
+  // RESULT_OPT, not RESULT_ONE: an aggregate measurement over a value
+  // carrying a non-finite coordinate is empty, not a plausible number
+  '$area': geoUnaryEntry((v) => (geoFinite(v) ? geometryArea(v) : null), RESULT_OPT),
+  '$length': geoUnaryEntry((v) => (geoFinite(v) ? geometryLength(v) : null), RESULT_OPT),
+  '$centroid': geoUnaryEntry((v) => finitePosition(centroidOf(v))),
 
   '$distance': { // metres between two values' representative positions
     params: ARGS_2,
@@ -1533,7 +1586,11 @@ export const OPERATORS = Object.freeze({
         const b = bGet(f);
         if (a === EMPTY || b === EMPTY)
           return EMPTY;
-        const out = geoDistance(geoArg(a, aPath), geoArg(b, bPath));
+        const pa = representative(geoArg(a, aPath));
+        const pb = representative(geoArg(b, bPath));
+        if (pa === null || pb === null)
+          return EMPTY;
+        const out = geoDistance(pa, pb);
         return out === null ? EMPTY : out;
       };
     },
@@ -1552,13 +1609,16 @@ export const OPERATORS = Object.freeze({
         const area = areaGet(f);
         if (point === EMPTY || area === EMPTY)
           return false; // nothing is inside nothing
-        const p = geoArg(point, pointPath);
         // a bare position is itself; anything else is represented by its
         // centroid, the same rule $distance uses
-        const at = isPosition(p) ? p : centroidOf(p);
-        if (at === null)
+        const at = representative(geoArg(point, pointPath));
+        const surface = geoArg(area, areaPath);
+        // a predicate answers its missing-operand value, not empty: the
+        // surface has to be bounded too, or a NaN vertex makes an
+        // even-odd crossing count report containment that is not there
+        if (at === null || !geoFinite(surface))
           return false;
-        return containsPosition(geoArg(area, areaPath), at[0], at[1]);
+        return containsPosition(surface, at[0], at[1]);
       };
     },
   },
@@ -1595,8 +1655,7 @@ export const OPERATORS = Object.freeze({
         const v = get(f);
         if (v === EMPTY)
           return EMPTY;
-        const value = geoArg(v, docPath);
-        const at = isPosition(value) ? value : centroidOf(value);
+        const at = representative(geoArg(v, docPath));
         if (at === null)
           return EMPTY;
         let precision = 9;
@@ -1609,6 +1668,73 @@ export const OPERATORS = Object.freeze({
           }
         }
         return geohashEncode(at[0], at[1], precision);
+      };
+    },
+  },
+
+  // -- conversion: geography in and out of the forms the world uses --
+
+  // Well-Known Text is what PostGIS, SpatiaLite, GEOS, JTS and every
+  // `ST_AsText` emit, so without these a document can only carry such a
+  // string through untouched. Text that is not well-formed WKT is empty
+  // rather than an error, like every other "nothing to answer" here.
+  '$geo-parse': geoUnaryEntry(wktToGeoJson, resultEmptyPropagates,
+    (v, docPath) => geoTextArg(v, 'a Well-Known Text string', docPath)),
+
+  // A value with no WKT spelling — a non-finite coordinate — is empty,
+  // never written approximately.
+  '$geo-text': geoUnaryEntry(geoJsonToWkt),
+
+  '$geohash-bounds': geoUnaryEntry(
+    (hash) => bboxPolygon(geohashBounds(hash)), resultEmptyPropagates,
+    (v, docPath) => geoTextArg(v, 'a geohash cell string', docPath)),
+
+  // The neighbourhood, not the cell: two points metres apart can sit in
+  // different cells, so a proximity probe tests the nine cells and a
+  // single prefix is bucketing. The cells come in reading order — north
+  // -west first, the cell itself in the middle; cells past a pole do
+  // not exist and are absent, so the sequence can be shorter.
+  '$geohash-neighbours': {
+    params: UNARY,
+    result: RESULT_MANY,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const v = get(f);
+        if (v === EMPTY)
+          return EMPTY;
+        return seqOf(geohashNeighbours(geoTextArg(v, 'a geohash cell string', docPath)));
+      };
+    },
+  },
+
+  // Reduction for STORAGE and TRANSPORT: the same value with vertices
+  // dropped, still valid GeoJSON a caller can keep or send. The chart
+  // layer simplifies too, but only into its own drawing space, so
+  // nothing there hands a document back.
+  '$geo-simplify': {
+    params: ARGS_2,
+    result: resultEmptyPropagates,
+    compile: (gets, args) => {
+      const valueGet = gets[0];
+      const valuePath = args[0].docPath;
+      const toleranceGet = gets[1];
+      const tolerancePath = args[1].docPath;
+      return (f) => {
+        const v = valueGet(f);
+        const tolerance = toleranceGet(f);
+        if (v === EMPTY || tolerance === EMPTY)
+          return EMPTY;
+        // degrees, not metres: a planar vertex-dropping threshold. A
+        // degree of longitude is not a fixed distance, so naming it a
+        // distance is the confusion this family exists to prevent.
+        if (typeof tolerance !== 'number' || !Number.isFinite(tolerance) || tolerance < 0) {
+          throw runtimeError('JQ2001',
+            `a simplification tolerance is a non-negative number of degrees, got ${describeItem(tolerance)}`,
+            tolerancePath);
+        }
+        return simplifyGeometry(geoArg(v, valuePath), tolerance);
       };
     },
   },

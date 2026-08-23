@@ -8,7 +8,7 @@
  */
 
 import { createChartComponent } from '@jarenjs/charts/component';
-import { geohashBounds, geometryArea } from '@jarenjs/core/geo';
+import { bboxPolygon, geohashBounds, geometryArea } from '@jarenjs/core/geo';
 import { chart, code, details, callout } from '../lib/nodes.js';
 
 /**
@@ -26,10 +26,7 @@ function geohashWorld() {
   const features = [];
   for (const character of '0123456789bcdefghjkmnpqrstuvwxyz') {
     const [west, south, east, north] = geohashBounds(character);
-    const geometry = {
-      type: 'Polygon',
-      coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]],
-    };
+    const geometry = bboxPolygon([west, south, east, north]);
     features.push({
       type: 'Feature',
       properties: {

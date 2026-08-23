@@ -127,4 +127,73 @@ export function simplifyRing(ring, tolerance) {
   return simplified.length >= 4 ? simplified : ring.slice();
 }
 
+/** Every line/ring of a coordinate nest `depth` levels above the leaf. */
+function simplifyNest(value, depth, tolerance, simplify) {
+  if (!Array.isArray(value))
+    return value;
+  if (depth === 0)
+    return simplify(value, tolerance);
+  const out = new Array(value.length);
+  for (let i = 0; i < value.length; i++)
+    out[i] = simplifyNest(value[i], depth - 1, tolerance, simplify);
+  return out;
+}
+
+/**
+ * A whole GeoJSON value with its vertices dropped — the same value,
+ * reduced. Lines go through {@link simplifyLine} and rings through
+ * {@link simplifyRing}, so **a ring stays closed and a line keeps both
+ * endpoints**; points and multipoints have no run to collapse and come
+ * back untouched.
+ *
+ * Accepts what the traversal layer accepts: a geometry, a Feature, a
+ * FeatureCollection or a GeometryCollection. Foreign members, ids and
+ * properties ride along — the value that comes back is the value that
+ * went in, with fewer positions, so it can be stored or sent as-is.
+ * Anything this does not recognize is returned unchanged rather than
+ * dropped.
+ *
+ * The tolerance is in the coordinate's own units, which for GeoJSON is
+ * **degrees** — a planar vertex-dropping threshold, never a distance. A
+ * degree of longitude is not a fixed length, so calling it metres would
+ * be the planar-for-geodesic confusion the rest of this module exists to
+ * prevent.
+ *
+ * @param {any} value
+ * @param {number} tolerance - in degrees
+ * @returns {any} a new value; the input is not modified
+ * @example
+ * simplifyGeometry({ type: 'LineString', coordinates: [[0,0],[1,0.001],[2,0]] }, 0.01);
+ * // { type: 'LineString', coordinates: [[0,0],[2,0]] }
+ */
+export function simplifyGeometry(value, tolerance) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return value;
+  if (value.type === 'FeatureCollection') {
+    if (!Array.isArray(value.features))
+      return value;
+    return { ...value, features: value.features.map((f) => simplifyGeometry(f, tolerance)) };
+  }
+  if (value.type === 'Feature') {
+    return { ...value, geometry: simplifyGeometry(value.geometry, tolerance) };
+  }
+  if (value.type === 'GeometryCollection') {
+    if (!Array.isArray(value.geometries))
+      return value;
+    return { ...value, geometries: value.geometries.map((g) => simplifyGeometry(g, tolerance)) };
+  }
+  switch (value.type) {
+    case 'LineString':
+      return { ...value, coordinates: simplifyNest(value.coordinates, 0, tolerance, simplifyLine) };
+    case 'MultiLineString':
+      return { ...value, coordinates: simplifyNest(value.coordinates, 1, tolerance, simplifyLine) };
+    case 'Polygon':
+      return { ...value, coordinates: simplifyNest(value.coordinates, 1, tolerance, simplifyRing) };
+    case 'MultiPolygon':
+      return { ...value, coordinates: simplifyNest(value.coordinates, 2, tolerance, simplifyRing) };
+    default: // Point, MultiPoint, and anything unrecognized: nothing to drop
+      return value;
+  }
+}
+
 //#endregion
