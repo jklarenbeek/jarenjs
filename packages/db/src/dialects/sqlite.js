@@ -101,6 +101,14 @@ export const sqliteDialect = createDialect({
   jsonPathText,
   jsonExtract: (columnSql, pathText) =>
     `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
+  // a DERIVED column's expression: the member as JSON text handed to
+  // the deterministic function the store registers at open. The
+  // precision is a LITERAL, not a parameter — a generated column's
+  // expression takes none — which is also what makes two precisions
+  // over one path two different columns by declared text.
+  derivedExpression: (memberSql, column) => (column.derive === 'geohash'
+    ? `jaren_geohash(${memberSql}, ${Math.trunc(Number(column.precision))})`
+    : `jaren_bbox_${column.component}(${memberSql})`),
   jsonSet: (exprSql, pathText, valueSql) =>
     `jsonb_set(${exprSql}, ${stringLiteral(pathText)}, ${valueSql})`,
   jsonRemove: (exprSql, pathText) =>

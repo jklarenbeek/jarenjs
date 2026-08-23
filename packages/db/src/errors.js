@@ -22,7 +22,7 @@ export const DB_CODES = Object.freeze({
   JD0001: 'the SQLite library is below the supported floor',
   JD0002: 'the declared model disagrees with the existing database',
   JD0003: 'the driver binding is unavailable on this runtime',
-  JD0004: 'an index path is not a singular member selection',
+  JD0004: 'a declared index cannot be mapped to a column',
   JD0005: 'the model document is invalid',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
@@ -66,9 +66,11 @@ export const DB_CODES = Object.freeze({
  *  - `JD0003` — the runtime builtin behind a driver could not be
  *    loaded here (Node cannot resolve `bun:`; Bun ships no
  *    `node:sqlite`), or an injected handle is missing
- *  - `JD0004` — an index path does not select exactly one member
- *    (wildcards, slices, filters and descendants are not indexable);
- *    the reason names the expression
+ *  - `JD0004` — a declared index cannot be mapped to a column: its
+ *    path does not select exactly one member (wildcards, slices,
+ *    filters and descendants are not indexable), or its `derive`
+ *    declaration is not one the storage vocabulary carries; the reason
+ *    names the expression or the member and `docPath` points at it
  *  - `JD0005` — the model document is invalid; `docPath` points at
  *    the offending member
  *  - `JD0010` — `strict: true` and part of the query would have run

@@ -86,6 +86,13 @@ const adults = await users.execute({
   plus real indexes, typed from the collection's schema. Opening an
   existing database verifies the declared shape and refuses to alter
   it — reshaping is the migration story.
+- **Spatial members get indexable columns.** A position is an array and
+  a geometry is an object, so neither is indexable as it stands. An
+  index declaring `derive: 'geohash'` (with a required `precision`) or
+  `derive: 'bbox'` materializes the cell, or the four box edges, as
+  columns computed by `@jarenjs/core/geo` — a generated column over a
+  registered deterministic function where the driver can index one, and
+  a stored column the store writes where it cannot.
 - **Migrations are documents.** `planMigration` diffs two models into
   rendered-DDL + JSLT-transform + assertion steps; a shadow database
   replays the whole chain before the real store is touched; a

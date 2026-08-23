@@ -3,11 +3,14 @@
  * @file Shared db test doubles: a bun:sqlite-shaped Database over
  * node:sqlite (so the Bun adapter's whole open path runs under Node),
  * an all-asynchronous injected wasm handle (so every driver method is
- * exercised returning promises), and a temp-file helper for the
- * file-backed reopen scenarios.
+ * exercised returning promises), an injected handle whose capability
+ * DECLARATION the caller picks (so a declaration-selected branch runs
+ * under Node), a driver that records the statements it executes, and a
+ * temp-file helper for the file-backed reopen scenarios.
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { chain } from '@jarenjs/db';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -70,6 +73,83 @@ export function asyncWasmHandle() {
 }
 
 /**
+ * An injected wasm handle over `node:sqlite` whose CAPABILITY
+ * DECLARATION the caller chooses. It exists to run the branch a
+ * driver's declaration selects — most of all the physical mapping of
+ * derived index columns — under Node, without needing the runtime that
+ * declares it: `bun:sqlite` exposes no `function`, so its columns are
+ * stored rather than generated, and the same code path is what runs
+ * here. The binding still EXPOSES `registerFunction`, so the branch
+ * under test is the declaration and nothing else.
+ * @param {{ userFunctions?: boolean,
+ *   deterministicIndexableFunctions?: boolean, sessions?: boolean }} declares
+ * @returns {any}
+ */
+export function declaringWasmHandle(declares) {
+  return {
+    synchronous: true,
+    declares,
+    /** @param {string} dbPath */
+    open: (dbPath) => {
+      const db = new DatabaseSync(dbPath);
+      return {
+        /** @param {string} sql */
+        exec: (sql) => db.exec(sql),
+        /** @param {string} sql */
+        prepare: (sql) => {
+          const statement = db.prepare(sql);
+          return {
+            run: (params = []) => statement.run(...params),
+            get: (params = []) => statement.get(...params),
+            all: (params = []) => statement.all(...params),
+            iterate: (params = []) => statement.iterate(...params),
+          };
+        },
+        close: () => db.close(),
+        registerFunction: (name, options, fn) => db.function(name, options, fn),
+      };
+    },
+  };
+}
+
+/**
+ * A driver wrapper that records every statement EXECUTED through it —
+ * the two-run check needs to prove a second open runs no DDL, and
+ * counting is the only way to say so by exit code.
+ *
+ * A transaction hands its callback a SCOPE whose `exec` reaches the raw
+ * binding directly, so wrapping the connection alone would miss every
+ * statement inside a transaction — which is where the shape work runs.
+ * The scope is wrapped too, at every nesting depth.
+ * @param {any} driver
+ * @returns {{ driver: any, executed: string[] }}
+ */
+export function recordingDriver(driver) {
+  /** @type {string[]} */
+  const executed = [];
+  /** @param {any} target @returns {any} */
+  const recording = (target) => Object.freeze({
+    ...target,
+    /** @param {string} sql */
+    exec: (sql) => {
+      executed.push(String(sql));
+      return target.exec(sql);
+    },
+    /** @param {(scope: any) => any} fn */
+    transaction: (fn) => target.transaction((scope) => fn(recording(scope))),
+  });
+  return {
+    executed,
+    driver: {
+      name: driver.name,
+      dialect: driver.dialect,
+      /** @param {string} dbPath @param {any} options */
+      open: (dbPath, options) => chain(driver.open(dbPath, options), recording),
+    },
+  };
+}
+
+/**
  * A fresh temp database path plus its cleanup.
  * @returns {{ dbPath: string, cleanup: () => void }}
  */
@@ -118,6 +198,9 @@ export function fullDoubleDialect(createDialect) {
     jsonPathText: (segments) => segments
       .map((s) => ('name' in s ? `/${s.name}` : `/#${s.index}`)).join(''),
     jsonExtract: (column, pathText) => `JX(${column}, '${pathText}')`,
+    derivedExpression: (member, column) => (column.derive === 'geohash'
+      ? `CELL(${member}, ${column.precision})`
+      : `BOX_${column.component.toUpperCase()}(${member})`),
     jsonSet: (expr, pathText, value) => `JS(${expr}, '${pathText}', ${value})`,
     jsonRemove: (expr, pathText) => `JR(${expr}, '${pathText}')`,
     jsonAppend: (expr, pathText, value) => `JA(${expr}, '${pathText}', ${value})`,

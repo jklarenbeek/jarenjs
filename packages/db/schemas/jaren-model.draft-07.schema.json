@@ -80,7 +80,7 @@
    "additionalProperties": false
   },
   "index": {
-   "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004).",
+   "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004). A derived index computes indexable scalars from the selected member instead of indexing it directly.",
    "type": "object",
    "properties": {
     "name": {
@@ -108,6 +108,19 @@
     "unique": {
      "description": "Whether the index enforces uniqueness. Defaults to false.",
      "type": "boolean"
+    },
+    "derive": {
+     "description": "Derive indexable columns from the selected spatial member instead of indexing it: 'geohash' (one TEXT cell column, precision required) or 'bbox' (four REAL columns — west, south, east, north). A derived index is never unique.",
+     "enum": [
+      "geohash",
+      "bbox"
+     ]
+    },
+    "precision": {
+     "description": "Geohash cell length in characters, 1-12. Required beside derive: 'geohash' and refused anywhere else — there is no safe default, because the right cell size depends on the query radius, which the model cannot know.",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 12
     }
    },
    "required": [

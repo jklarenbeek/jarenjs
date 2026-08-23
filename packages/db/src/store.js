@@ -36,6 +36,10 @@ import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
 import { createJobEngine } from './jobs.js';
 import { collectEntityRoots } from './plan.js';
+import {
+  DERIVE_KINDS, PRECISION_MIN, PRECISION_MAX, derivedValue, memberAt,
+  storedMemberForm, registerDeriveFunctions,
+} from './derive.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -51,6 +55,70 @@ const IDENTITIES = new Set(['uuid', 'integer']);
  */
 function modelError(code, reason, docPath) {
   return new DbCompileError(code, reason, docPath);
+}
+
+/**
+ * Normalize one index's `derive` declaration — the spatial storage
+ * vocabulary. `derive` says what is COMPUTED from the selected member,
+ * never how the member is selected, so the singular-path rule and its
+ * `JD0004` are untouched; these are the refusals a derived index adds.
+ *
+ * Every one of them is a mistake worth catching at open rather than at
+ * the first query that quietly returns nothing.
+ * @param {any} index - the declared index member
+ * @param {string[]} paths
+ * @param {string} docPath
+ * @returns {{ kind: string | null, precision: number | undefined }}
+ */
+function normalizeDerive(index, paths, docPath) {
+  const declared = index.derive;
+  if (declared === undefined) {
+    if (index.precision !== undefined) {
+      throw modelError('JD0004',
+        "precision belongs to a derived index — declare derive: 'geohash' beside it",
+        `${docPath}/precision`);
+    }
+    return { kind: null, precision: undefined };
+  }
+  if (typeof declared !== 'string' || !DERIVE_KINDS.has(declared)) {
+    throw modelError('JD0004',
+      `derive is a closed set ('geohash' or 'bbox'), got ${JSON.stringify(declared)} — `
+      + 'an open expression member would be a second query language inside the model',
+      `${docPath}/derive`);
+  }
+  if (paths.length !== 1) {
+    throw modelError('JD0004',
+      `a ${declared} index derives its columns from ONE member; a composite path declares several`,
+      `${docPath}/path`);
+  }
+  if (index.unique === true) {
+    throw modelError('JD0004',
+      `a ${declared} index is never unique: distinct positions share a cell (and a box edge) by construction`,
+      `${docPath}/unique`);
+  }
+  if (declared === 'bbox') {
+    if (index.precision !== undefined) {
+      throw modelError('JD0004',
+        'precision applies to a geohash index; a bbox index has no cell size',
+        `${docPath}/precision`);
+    }
+    return { kind: 'bbox', precision: undefined };
+  }
+  const precision = index.precision;
+  if (precision === undefined) {
+    throw modelError('JD0004',
+      `a geohash index must declare precision (${PRECISION_MIN}..${PRECISION_MAX} characters) — `
+      + 'there is no safe default: the right cell size depends on the query radius, '
+      + 'which the model cannot know',
+      `${docPath}/precision`);
+  }
+  if (typeof precision !== 'number' || !Number.isInteger(precision)
+    || precision < PRECISION_MIN || precision > PRECISION_MAX) {
+    throw modelError('JD0004',
+      `precision must be an integer ${PRECISION_MIN}..${PRECISION_MAX}, got ${JSON.stringify(precision)}`,
+      `${docPath}/precision`);
+  }
+  return { kind: 'geohash', precision };
 }
 
 /**
@@ -155,10 +223,13 @@ export function normalizeModel(model) {
           'an index path must be a JSONPath string (a composite index takes a non-empty array of them)',
           `${indexDocPath}/path`);
       }
+      const derive = normalizeDerive(index, paths, indexDocPath);
       indexes.push({
         name: index.name,
         paths,
         unique: index.unique === true,
+        derive: derive.kind,
+        precision: derive.precision,
         docPath: indexDocPath,
       });
     }
@@ -377,10 +448,39 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
  */
 function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef) {
   const dialect = connection.dialect;
+  // the STORED branch (a driver that cannot index a registered
+  // function): the derived columns are ordinary ones, so every write
+  // carries their values. Empty everywhere else, and the statements are
+  // then byte-identical to what they were before derived indexes existed
+  const storedNames = new Set(plan.generated
+    .filter((column) => column.stored === true).map((column) => column.name));
+  const storedDerived = plan.derived.filter((column) => storedNames.has(column.name));
   const shape = {
     table: plan.table,
     keyColumn: plan.keyColumn,
     docColumn: plan.docColumn,
+    stored: storedDerived.length > 0
+      ? storedDerived.map((column) => column.name) : undefined,
+  };
+  /**
+   * The stored derived values for one document, in column order. The
+   * four columns of one bbox index share a segments array by identity,
+   * so the member is read and normalized once per index, not once per
+   * column.
+   * @param {any} doc
+   * @returns {any[]}
+   */
+  const derivedFor = (doc) => {
+    /** @type {Map<any, any>} */
+    const members = new Map();
+    return storedDerived.map((column) => {
+      let member = members.get(column.segments);
+      if (member === undefined) {
+        member = { value: storedMemberForm(memberAt(doc, column.segments)) };
+        members.set(column.segments, member);
+      }
+      return derivedValue(column, member.value);
+    });
   };
   /** @type {Map<string, any>} */
   const statements = new Map();
@@ -456,12 +556,12 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       if (key === null) {
         return chain(
           runWrite('insertAllocated', dialect.dml.insertAllocated(shape),
-            [JSON.stringify(doc)], undefined, true),
+            [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
           (row) => row.key);
       }
       return chain(
         runWrite('insert', dialect.dml.insert(shape),
-          [key, JSON.stringify(doc)], key, false),
+          [key, JSON.stringify(doc), ...derivedFor(doc)], key, false),
         () => key);
     },
     put(doc, explicitKey) {
@@ -470,12 +570,12 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       if (key === null) {
         return chain(
           runWrite('insertAllocated', dialect.dml.insertAllocated(shape),
-            [JSON.stringify(doc)], undefined, true),
+            [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
           (row) => row.key);
       }
       return chain(
         runWrite('upsert', dialect.dml.upsert(shape),
-          [key, JSON.stringify(doc)], key, false),
+          [key, JSON.stringify(doc), ...derivedFor(doc)], key, false),
         () => key);
     },
     patch(key, ops) {
@@ -495,7 +595,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           return chain(
             runWrite('patchFallback',
               dialect.dml.updateDoc(shape, dialect.jsonEncode(dialect.parameterRef(1, 'doc')), 2),
-              [JSON.stringify(next), key], key, false),
+              [JSON.stringify(next), ...derivedFor(next), key], key, false),
             () => next);
         }
         stats.patchTranslated++;
@@ -504,7 +604,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         const sql = dialect.dml.updateDoc(shape, expression, params.length + 1);
         return chain(prepared(`patch:${sql}`, sql), (statement) => {
           try {
-            statement.run([...params, key]);
+            statement.run([...params, ...derivedFor(next), key]);
           }
           catch (error) {
             throw wrapWriteError(error, plan, collection.name, collection.docPath, key);
@@ -747,10 +847,23 @@ export function openStore(model, options) {
       let topLevelTransaction = (fn) => withScope(opened.transaction, fn);
 
       const dialect = connection.dialect;
+      // The PHYSICAL MAPPING BRANCH for derived index columns. A driver
+      // that can index a registered deterministic function generates
+      // them; one that cannot has the store write them. It is a
+      // property of the driver that created the file, so a database
+      // built under one and opened under the other legitimately reports
+      // drift — that is a migration, not an open.
+      const derivedMapping = connection.capabilities.deterministicIndexableFunctions === true
+        ? 'virtual' : 'stored';
       /** @type {Map<string, any>} */
       const plans = new Map();
       for (const [name, collection] of collections)
-        plans.set(name, planCollection(name, collection, dialect));
+        plans.set(name, planCollection(name, collection, dialect, { derived: derivedMapping }));
+      // a table whose column expression calls a function this connection
+      // has not registered cannot even be SELECTed (probed), so the
+      // registration precedes every statement over it
+      const needsDeriveFunctions = derivedMapping === 'virtual'
+        && [...plans.values()].some((plan) => plan.derived.length > 0);
       /** @type {Map<string, any>} */
       const entityPlans = new Map();
       if (mapping !== null) {
@@ -815,6 +928,7 @@ export function openStore(model, options) {
           : Promise.reject(error);
       };
       const opening = () => chain(pragmas, () =>
+        chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, readOnly), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, readOnly), () => {
           /** @type {Map<string, any>} */
@@ -1408,7 +1522,7 @@ export function openStore(model, options) {
           return chain(capture === null ? null : capture.ready,
             () => chain(jobsEngine === null ? null : jobsEngine.ready,
               () => Object.freeze(store)));
-        })));
+        }))));
 
       let opened_;
       try {

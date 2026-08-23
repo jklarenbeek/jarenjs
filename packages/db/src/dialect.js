@@ -42,6 +42,8 @@
  *   limitClause: (limit: number, offset?: number) => string,
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string) => string,
+ *   derivedExpression?: (memberSql: string, column: { derive: string,
+ *     precision?: number, component?: string }) => string,
  *   jsonSet: (exprSql: string, pathText: string, valueSql: string) => string,
  *   jsonRemove: (exprSql: string, pathText: string) => string,
  *   jsonAppend: (exprSql: string, arrayPathText: string, valueSql: string) => string,
@@ -78,6 +80,24 @@ export function createDialect(spec) {
   const q = spec.quoteIdentifier;
   const p = spec.parameterRef;
 
+  /**
+   * One planned column's definition. A path column is a VIRTUAL
+   * generated column over the document; a DERIVED column is the same
+   * shape over a registered deterministic function, except where the
+   * driver cannot index one — there the store writes the value and the
+   * column is an ordinary one.
+   * @param {string} docColumn
+   * @param {{ name: string, type: string, pathText: string,
+   *   expression?: string | null, stored?: boolean }} column
+   * @returns {string}
+   */
+  const generatedColumnSql = (docColumn, column) => {
+    if (column.stored === true) return `${q(column.name)} ${column.type}`;
+    const expression = column.expression
+      ?? spec.jsonExtract(q(docColumn), column.pathText);
+    return `${q(column.name)} ${column.type} GENERATED ALWAYS AS (${expression}) VIRTUAL`;
+  };
+
   const ddl = Object.freeze({
     /**
      * One collection's physical table: a key column, the JSON document
@@ -91,9 +111,7 @@ export function createDialect(spec) {
       const columns = [
         `${q(keyColumn)} ${keyType} PRIMARY KEY`,
         `${q(docColumn)} ${spec.docColumnType} NOT NULL`,
-        ...generated.map((g) =>
-          `${q(g.name)} ${g.type} GENERATED ALWAYS AS `
-          + `(${spec.jsonExtract(q(docColumn), g.pathText)}) VIRTUAL`),
+        ...generated.map((g) => generatedColumnSql(docColumn, g)),
       ];
       return `CREATE TABLE ${q(table)} (${columns.join(', ')})${spec.tableSuffix}`;
     },
@@ -114,8 +132,7 @@ export function createDialect(spec) {
      * @returns {string}
      */
     addGeneratedColumn({ table, docColumn, column }) {
-      return `ALTER TABLE ${q(table)} ADD COLUMN ${q(column.name)} ${column.type} `
-        + `GENERATED ALWAYS AS (${spec.jsonExtract(q(docColumn), column.pathText)}) VIRTUAL`;
+      return `ALTER TABLE ${q(table)} ADD COLUMN ${generatedColumnSql(docColumn, column)}`;
     },
     /**
      * @param {string} table
@@ -218,26 +235,47 @@ export function createDialect(spec) {
   });
 
   const dml = Object.freeze({
-    /** @param {{ table: string, keyColumn: string, docColumn: string }} s */
-    insert({ table, keyColumn, docColumn }) {
-      return `INSERT INTO ${q(table)} (${q(keyColumn)}, ${q(docColumn)}) `
-        + `VALUES (${p(1, 'key')}, ${spec.jsonEncode(p(2, 'doc'))})`;
+    /**
+     * A collection insert. `stored` names the derived columns the
+     * store computes itself — empty on every driver that can index a
+     * registered function, because there the column generates itself.
+     * @param {{ table: string, keyColumn: string, docColumn: string,
+     *   stored?: string[] }} s
+     */
+    insert({ table, keyColumn, docColumn, stored }) {
+      const extra = stored ?? [];
+      const names = [q(keyColumn), q(docColumn), ...extra.map(q)];
+      const values = [p(1, 'key'), spec.jsonEncode(p(2, 'doc')),
+        ...extra.map((name, i) => p(i + 3, name))];
+      return `INSERT INTO ${q(table)} (${names.join(', ')}) VALUES (${values.join(', ')})`;
     },
     /**
      * Insert with a database-allocated key, read back in the same
      * statement.
-     * @param {{ table: string, keyColumn: string, docColumn: string }} s
+     * @param {{ table: string, keyColumn: string, docColumn: string,
+     *   stored?: string[] }} s
      */
-    insertAllocated({ table, keyColumn, docColumn }) {
-      return `INSERT INTO ${q(table)} (${q(docColumn)}) `
-        + `VALUES (${spec.jsonEncode(p(1, 'doc'))}) RETURNING ${q(keyColumn)} AS ${q('key')}`;
+    insertAllocated({ table, keyColumn, docColumn, stored }) {
+      const extra = stored ?? [];
+      const names = [q(docColumn), ...extra.map(q)];
+      const values = [spec.jsonEncode(p(1, 'doc')),
+        ...extra.map((name, i) => p(i + 2, name))];
+      return `INSERT INTO ${q(table)} (${names.join(', ')}) VALUES (${values.join(', ')}) `
+        + `RETURNING ${q(keyColumn)} AS ${q('key')}`;
     },
-    /** @param {{ table: string, keyColumn: string, docColumn: string }} s */
-    upsert({ table, keyColumn, docColumn }) {
-      return `INSERT INTO ${q(table)} (${q(keyColumn)}, ${q(docColumn)}) `
-        + `VALUES (${p(1, 'key')}, ${spec.jsonEncode(p(2, 'doc'))}) `
-        + `ON CONFLICT (${q(keyColumn)}) DO UPDATE SET `
-        + `${q(docColumn)} = ${spec.excludedRef(q(docColumn))}`;
+    /**
+     * @param {{ table: string, keyColumn: string, docColumn: string,
+     *   stored?: string[] }} s
+     */
+    upsert({ table, keyColumn, docColumn, stored }) {
+      const extra = stored ?? [];
+      const names = [q(keyColumn), q(docColumn), ...extra.map(q)];
+      const values = [p(1, 'key'), spec.jsonEncode(p(2, 'doc')),
+        ...extra.map((name, i) => p(i + 3, name))];
+      const assignments = [q(docColumn), ...extra.map(q)]
+        .map((column) => `${column} = ${spec.excludedRef(column)}`);
+      return `INSERT INTO ${q(table)} (${names.join(', ')}) VALUES (${values.join(', ')}) `
+        + `ON CONFLICT (${q(keyColumn)}) DO UPDATE SET ${assignments.join(', ')}`;
     },
     /** @param {{ table: string, keyColumn: string, docColumn: string }} s */
     get({ table, keyColumn, docColumn }) {
@@ -251,13 +289,26 @@ export function createDialect(spec) {
     /**
      * Rewrite the document column through a JSON-set expression chain
      * (the translated-patch path) or a bound parameter (the fallback).
-     * @param {{ table: string, keyColumn: string, docColumn: string }} s
+     * Stored derived columns are rewritten with it — they are computed
+     * FROM the document, so leaving them behind would let a query read a
+     * value the document no longer carries.
+     *
+     * `nextParam` is the first FREE parameter slot after the
+     * expression's own: the derived values take it and the ones after
+     * it, and the key binds LAST. That order is the statement's TEXT
+     * order, which is what a positional dialect numbers by — and with
+     * no derived columns it degenerates to the key at `nextParam`.
+     * @param {{ table: string, keyColumn: string, docColumn: string,
+     *   stored?: string[] }} s
      * @param {string} expression - SQL over the document column
-     * @param {number} keyIndex - 1-based position of the key parameter
+     * @param {number} nextParam - 1-based first free parameter slot
      */
-    updateDoc({ table, keyColumn, docColumn }, expression, keyIndex) {
-      return `UPDATE ${q(table)} SET ${q(docColumn)} = ${expression} `
-        + `WHERE ${q(keyColumn)} = ${p(keyIndex, 'key')}`;
+    updateDoc({ table, keyColumn, docColumn, stored }, expression, nextParam) {
+      const extra = stored ?? [];
+      const assignments = [`${q(docColumn)} = ${expression}`,
+        ...extra.map((name, i) => `${q(name)} = ${p(nextParam + i, name)}`)];
+      return `UPDATE ${q(table)} SET ${assignments.join(', ')} `
+        + `WHERE ${q(keyColumn)} = ${p(nextParam + extra.length, 'key')}`;
     },
   });
 
@@ -273,6 +324,17 @@ export function createDialect(spec) {
     limitClause: spec.limitClause,
     jsonPathText: spec.jsonPathText,
     jsonExtract: spec.jsonExtract,
+    /**
+     * The expression a DERIVED column is generated from: the member at
+     * the index path, as JSON text, handed to the deterministic
+     * function that computes the cell or the box edge.
+     * @param {string} docColumnSql
+     * @param {string} pathText
+     * @param {{ derive: string, precision?: number, component?: string }} column
+     * @returns {string}
+     */
+    derivedColumn: (docColumnSql, pathText, column) => spec.derivedExpression(
+      spec.jsonText(spec.jsonExtract(docColumnSql, pathText)), column),
     jsonSet: spec.jsonSet,
     jsonRemove: spec.jsonRemove,
     jsonAppend: spec.jsonAppend,

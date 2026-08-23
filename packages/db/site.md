@@ -25,6 +25,13 @@ parameter-bound SQL where equivalence is proven — a 418-run differential oracl
 keeps the pushed path and the engine agreeing — and `explain()` always names
 the SQL, the indexes and the residual reasons.
 
+Spatial members get indexable columns too. A GeoJSON position is an array and a
+geometry is an object, so neither is indexable as it stands; an index declaring
+derive: 'geohash' (with a required precision) or derive: 'bbox' materializes the
+cell, or the four box edges, as columns computed by `@jarenjs/core/geo` — a
+generated column over a registered deterministic function where the driver can
+index one, and a stored column the store writes where it cannot.
+
 A store can also open with an operator registry — `openStore`(model, {
 operators: `createJsltRegistry()`.use(`mathPack`)… }) — and registered
 operators (`$npv`, `$mean`, `$sqrt`) then work in query and entity documents.

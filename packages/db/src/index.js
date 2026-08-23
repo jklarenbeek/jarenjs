@@ -30,6 +30,11 @@ export { typeOfPath, isNumericType } from './types.js';
 export { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
 export { deterministicFragment, registerFragment } from './udf.js';
 export {
+  DERIVE_KINDS, BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
+  deriveGeohash, deriveBboxEdge, derivedValue, memberAt, storedMemberForm,
+  registerDeriveFunctions,
+} from './derive.js';
+export {
   createQueryEngine, createQueryState, createEntityQueryEngine,
   createLoadEngine, INCLUDE_DEPTH_DEFAULT,
 } from './query.js';

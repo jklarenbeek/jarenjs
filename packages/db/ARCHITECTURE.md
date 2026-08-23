@@ -66,6 +66,11 @@ binds arrays.
   generated columns. The plan carries both the CREATE statements and
   the structural facts an existing table must match (`JD0002` when it
   does not — nothing is ever altered).
+- `src/derive.js` — the one place a declared `derive` becomes a value.
+  A geohash cell or a bounding-box edge from `@jarenjs/core/geo`, and
+  the deterministic SQL functions a generated column's expression
+  calls. The SAME functions serve both physical mappings, so the two
+  branches cannot drift into different answers.
 - `src/patch-sql.js` — RFC 6902 to JSON-set primitives, discriminated
   against the live document (a pointer cannot say array-or-object on
   its own). Untranslatable operations fall back to a whole-document
@@ -152,7 +157,7 @@ whole-document projection that returns the bare binding.
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
 | comparisons where both sides are paths | join territory |
 | array/object literals in comparisons | deep-equality has no guarded native form |
-| spatial predicates | no spatial index vocabulary in the model format |
+| spatial predicates | the model format now declares derived spatial columns (a geohash cell, a bounding box), but no plan promotes a spatial predicate onto them yet |
 
 ### The type truth table
 

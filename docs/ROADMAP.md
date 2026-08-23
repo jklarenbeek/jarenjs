@@ -526,6 +526,15 @@ what each does is its own documentation's job
   already probed and reported, so the driver gate is in place; whole-
   series functions like `$irr` are never index-eligible — the ceiling is
   stated, not hidden.
+- [ ] **The `jaren-migration` artifact omits two shipped step kinds.** The
+  committed schema's `step` union carries `ddl`, `jslt`, `query` and `derive`,
+  but not `sql` (the directly-spelled data step, MIGRATION-FORMAT §9.4) or
+  `rebuild` (the entity restructure, §10) — both of which the planner emits and
+  the runner accepts. A migration document containing either fails validation
+  against the artifact that claims to describe it. Found while adding `derive`;
+  the fix belongs with whoever next touches entity migrations, together with a
+  planner-output validation that covers the entity path the way
+  `test/db/migrate-plan.test.js` covers the collection one.
 - [ ] **Relation-name query sugar and entity linq roots.** `load` owns
   name navigation today because `$.author.name` over the multi-entity
   root is engine-unexecutable and therefore oracle-unprovable; a linq
@@ -826,12 +835,14 @@ CSV of coordinates needs no code at all — the recipe is in
 spatial corpus (`test/json/fixtures/spatial-corpus.json`) records what the
 JavaScript engine answers so a second executor can be held to it.
 
-What is still open below the overlay entry: **storage**. A spatial predicate in
-`@jarenjs/db` has no index vocabulary in the model format, so it drags every row
-of the table into JavaScript and the residual is a full scan —
-`packages/db/ARCHITECTURE.md`'s own deliberate-residual table names it. Until
-that lands, a spatial query over a stored collection is slower than the same
-query over an in-memory array.
+What is still open below the overlay entry: **the spatial PLAN**. The model
+format now declares derived spatial index kinds — `indexes[].derive` is a
+geohash cell or a bounding box as four columns (MODEL-FORMAT §2.1, §3.1) — so
+the columns a spatial query needs exist and are maintained on both physical
+mappings. Nothing plans against them yet: a spatial predicate still drags every
+row of the table into JavaScript, which `packages/db/ARCHITECTURE.md`'s own
+deliberate-residual table names. Until that lands, a spatial query over a stored
+collection is slower than the same query over an in-memory array.
 
 **The representation is GeoJSON, and there is no geometry type.**
 [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) is a closed JSON
@@ -844,15 +855,14 @@ conformance rather than by omission: no SRID table, no `proj4`, and no
 geometry/geography duality to model. Web Mercator is needed only for
 rendering, and is a projection *out*, not a CRS system.
 
-- [ ] **Spatial storage** — `indexes[].path` must be a singular member path and a
-  generated column is typed `string|integer|number|boolean`, so a coordinate
-  array can be neither: `@jarenjs/db`'s model format has no way to declare a
-  spatial index. A `$within` today is a full table scan with a set residual,
-  which measures slower than running the same query over a plain in-memory
-  array. What it needs is a derived index kind (a geohash cell, a bounding box
-  as four columns), a two-stage plan that pushes only a filter proven to have
-  no false negatives and keeps the exact predicate as the refinement, and
-  `explain()` naming both stages.
+- [ ] **The two-stage spatial plan** — the derived index kinds have shipped
+  (`derive: 'geohash' | 'bbox'`), and no plan promotes a spatial predicate onto
+  them: a `$within` today is a full table scan with a set residual, which
+  measures slower than running the same query over a plain in-memory array.
+  What it needs is a plan that pushes only a filter proven to have no false
+  negatives — a bounding box, a geohash-cell range — keeps the exact predicate
+  as the refinement, publishes the equivalence proof in the deliberate-residual
+  truth table, and has `explain()` name both stages.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and

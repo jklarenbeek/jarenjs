@@ -21,7 +21,7 @@
    }
   },
   "entities": {
-   "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md \u00a79; stripping it leaves a plain JSON Schema.",
+   "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md §9; stripping it leaves a plain JSON Schema.",
    "type": "object",
    "minProperties": 1,
    "propertyNames": {
@@ -46,7 +46,7 @@
      "type": "object"
     },
     "key": {
-     "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member \u2014 or null when the store allocates.",
+     "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member — or null when the store allocates.",
      "type": [
       "string",
       "null"
@@ -54,7 +54,7 @@
      "pattern": "^/"
     },
     "identity": {
-     "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or \u2014 only with \"key\": null \u2014 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
+     "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or — only with \"key\": null — 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
      "enum": [
       "caller",
       "uuid",
@@ -80,7 +80,7 @@
    "additionalProperties": false
   },
   "index": {
-   "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004).",
+   "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004). A derived index computes indexable scalars from the selected member instead of indexing it directly.",
    "type": "object",
    "properties": {
     "name": {
@@ -108,6 +108,19 @@
     "unique": {
      "description": "Whether the index enforces uniqueness. Defaults to false.",
      "type": "boolean"
+    },
+    "derive": {
+     "description": "Derive indexable columns from the selected spatial member instead of indexing it: 'geohash' (one TEXT cell column, precision required) or 'bbox' (four REAL columns — west, south, east, north). A derived index is never unique.",
+     "enum": [
+      "geohash",
+      "bbox"
+     ]
+    },
+    "precision": {
+     "description": "Geohash cell length in characters, 1-12. Required beside derive: 'geohash' and refused anywhere else — there is no safe default, because the right cell size depends on the query radius, which the model cannot know.",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 12
     }
    },
    "required": [
@@ -125,7 +138,7 @@
     },
     "x-rename": {
      "type": "string",
-     "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT \u00a79): a rename is declared, never inferred."
+     "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT §9): a rename is declared, never inferred."
     }
    },
    "required": [

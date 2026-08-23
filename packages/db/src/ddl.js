@@ -17,6 +17,7 @@
 import { analyzeQuery } from '@jarenjs/json/query';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
+import { BBOX_COMPONENTS, BBOX_INDEX_ORDER } from './derive.js';
 
 /** The fixed physical column names of the 0.1 mapping. */
 export const KEY_COLUMN = 'key';
@@ -100,39 +101,139 @@ export function schemaTypeAt(schema, segments) {
   return undefined;
 }
 
+/** The scalar schema types a derived index cannot be declared over. */
+const SCALAR_TYPES = new Set(['string', 'integer', 'number', 'boolean']);
+
 /**
  * A stable generated-column name for a canonical path: readable where
  * the path is tame, disambiguated by suffix where sanitizing collides.
+ *
+ * A DERIVED index names its columns from the same stem plus what makes
+ * the derivation distinct — the kind, and the geohash precision, since
+ * two precisions over one path are legitimately two column sets (a
+ * coarse bucketing index and a fine proximity one). A bbox derivation
+ * owns FOUR columns under one stem, so every one of them is claimed
+ * before the stem is accepted.
  * @param {string} canonical
- * @param {Map<string, string>} byCanonical - canonical -> column name
+ * @param {Map<string, string>} byKey - identity -> column name (or stem)
  * @param {Set<string>} taken
+ * @param {{ key?: string, suffix?: string, parts?: readonly string[] }} [options]
  * @returns {string}
  */
-function generatedColumnName(canonical, byCanonical, taken) {
-  const existing = byCanonical.get(canonical);
+function generatedColumnName(canonical, byKey, taken, options = undefined) {
+  const key = options?.key ?? canonical;
+  const existing = byKey.get(key);
   if (existing !== undefined) return existing;
-  const base = `gx_${canonical.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
+  const stem = `gx_${canonical.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
+  const base = options?.suffix === undefined ? stem : `${stem}_${options.suffix}`;
+  const parts = options?.parts ?? [''];
+  const claims = (/** @type {string} */ candidate) =>
+    parts.map((part) => (part === '' ? candidate : `${candidate}_${part}`));
   let name = base;
-  for (let i = 2; taken.has(name); i++) name = `${base}_${i}`;
-  byCanonical.set(canonical, name);
-  taken.add(name);
+  for (let i = 2; claims(name).some((claimed) => taken.has(claimed)); i++)
+    name = `${base}_${i}`;
+  byKey.set(key, name);
+  for (const claimed of claims(name)) taken.add(claimed);
   return name;
+}
+
+/**
+ * The columns one derived index contributes, appended to the plan's
+ * `generated` (the physical column list) and `derived` (what the write
+ * path and the migration backfill need to recompute a value).
+ *
+ * `derive` changes what is COMPUTED from the member, never how the
+ * member is selected — so the schema is still the type source, and a
+ * derivation over a path the schema types as a scalar is refused here
+ * rather than at the first query that returns nothing.
+ * @param {any} index - the normalized index declaration
+ * @param {any} context
+ * @returns {string[]} the column names the index covers, in order
+ */
+function deriveColumns(index, context) {
+  const {
+    collection, dialect, stored, segments, canonical, pathText,
+    columnByCanonical, taken, generated, derived,
+  } = context;
+  const declaredType = schemaTypeAt(collection.schema, segments);
+  if (declaredType !== undefined && SCALAR_TYPES.has(declaredType)) {
+    throw new DbCompileError('JD0004',
+      `the index path '${index.paths[0]}' is typed '${declaredType}' by the schema, and a `
+      + `${index.derive} index derives from a position or a geometry — an array or an object`,
+      `${index.docPath}/derive`);
+  }
+  const isGeohash = index.derive === 'geohash';
+  // the identity that decides column SHARING: two indexes over the same
+  // path with the same derivation and the same precision are one column
+  // set; two precisions over one path are two, and legitimately so
+  const key = `${canonical}|${index.derive}|${index.precision ?? ''}`;
+  const stem = generatedColumnName(canonical, columnByCanonical, taken, {
+    key,
+    suffix: isGeohash ? `gh${index.precision}` : 'bbox',
+    parts: isGeohash ? undefined : BBOX_COMPONENTS,
+  });
+  const type = dialect.typeFor(isGeohash ? 'string' : 'number', 'generated');
+  const components = isGeohash ? [undefined] : BBOX_COMPONENTS;
+  const nameOf = (/** @type {string | undefined} */ component) =>
+    (component === undefined ? stem : `${stem}_${component}`);
+  if (!generated.some((column) => column.name === nameOf(components[0]))) {
+    for (const component of components) {
+      const column = {
+        name: nameOf(component),
+        type,
+        pathText,
+        canonical,
+        derive: index.derive,
+        precision: index.precision,
+        component,
+        stored,
+      };
+      generated.push({
+        ...column,
+        expression: stored ? null : dialect.derivedColumn(
+          dialect.quoteIdentifier(DOC_COLUMN), pathText, column),
+      });
+      derived.push({
+        name: column.name,
+        derive: index.derive,
+        precision: index.precision,
+        component,
+        segments,
+      });
+    }
+  }
+  // the index COVERS its columns in (w, e, s, n) order, which is not
+  // their declaration order — see BBOX_INDEX_ORDER
+  return isGeohash ? [stem] : BBOX_INDEX_ORDER.map((component) => nameOf(component));
 }
 
 /**
  * Plan one collection's physical shape: the DDL statements to create
  * it and the structural facts an existing table must match (the
  * `JD0002` comparison set).
+ * A derived index (`derive: 'geohash' | 'bbox'`) maps to the same
+ * shape through a registered deterministic function, EXCEPT where the
+ * driver cannot index one (`capabilities.deterministicIndexableFunctions`
+ * is false): there the columns are ordinary ones the store writes. The
+ * two mappings produce different declared text on purpose — a database
+ * built under one and opened under the other really does disagree, and
+ * `verifyShape` says so rather than papering over it.
  * @param {string} name - The collection name (also the table name)
  * @param {{ schema: any, keySegments: { name: string }[] | null,
  *   identity: string, indexes: { name: string, paths: string[],
- *   unique: boolean, docPath: string }[] }} collection - normalized
+ *   unique: boolean, derive?: string | null, precision?: number,
+ *   docPath: string }[] }} collection - normalized
  * @param {any} dialect
+ * @param {{ derived?: 'virtual' | 'stored' }} [options] - the physical
+ *   mapping for derived columns; `'virtual'` (a generated column over a
+ *   registered function) unless the driver says it cannot index one
  * @returns {{
  *   table: string, keyColumn: string, docColumn: string,
  *   keyType: string,
  *   generated: { name: string, type: string, pathText: string,
  *     canonical: string }[],
+ *   derived: { name: string, derive: string, precision?: number,
+ *     component?: string, segments: any[] }[],
  *   columnByCanonical: Map<string, string>,
  *   createSql: string[],
  *   expected: { columns: { name: string, type: string,
@@ -140,7 +241,8 @@ function generatedColumnName(canonical, byCanonical, taken) {
  *     columns: string[] }[] },
  * }}
  */
-export function planCollection(name, collection, dialect) {
+export function planCollection(name, collection, dialect, options = undefined) {
+  const stored = options?.derived === 'stored';
   const keyType = collection.identity === 'integer'
     ? dialect.typeFor('integer', 'key')
     : collection.identity === 'uuid'
@@ -154,6 +256,8 @@ export function planCollection(name, collection, dialect) {
   const taken = new Set([KEY_COLUMN, DOC_COLUMN]);
   /** @type {{ name: string, type: string, pathText: string, canonical: string }[]} */
   const generated = [];
+  /** @type {any[]} */
+  const derived = [];
   /** @type {{ name: string, unique: boolean, columns: string[] }[]} */
   const indexes = [];
 
@@ -167,6 +271,13 @@ export function planCollection(name, collection, dialect) {
         throw new DbCompileError('JD0004',
           `the index path '${index.paths[i]}' names a member the dialect's JSON path grammar cannot carry`,
           pathDocPath);
+      }
+      if (index.derive) {
+        columns.push(...deriveColumns(index, {
+          collection, dialect, stored, segments, canonical, pathText,
+          columnByCanonical, taken, generated, derived,
+        }));
+        continue;
       }
       const known = columnByCanonical.has(canonical);
       const columnName = generatedColumnName(canonical, columnByCanonical, taken);
@@ -210,13 +321,17 @@ export function planCollection(name, collection, dialect) {
     docColumn: DOC_COLUMN,
     keyType,
     generated,
+    derived,
     columnByCanonical,
     createSql,
     expected: {
       columns: [
         { name: KEY_COLUMN, type: keyType, generated: false },
         { name: DOC_COLUMN, type: dialect.docColumnType, generated: false },
-        ...generated.map((g) => ({ name: g.name, type: g.type, generated: true })),
+        // a STORED derived column is an ordinary one: the flag is what
+        // `pragma_table_xinfo` reports, and it is the difference a file
+        // moved between the two physical mappings shows up as
+        ...generated.map((g) => ({ name: g.name, type: g.type, generated: g.stored !== true })),
       ],
       indexes: indexes
         // the COLUMNS keep their declared order — an index is ordered, and

@@ -53,11 +53,40 @@ shape change is a **transformation of values**, not a table rebuild.
   the migration to proceed. This is how a migration states its own
   precondition — "no user has a null email before the NOT NULL
   index" — and it is checked on the shadow first.
+- `kind: "derive"` recomputes named STORED derived index columns from
+  the documents already in a collection — the backfill described in
+  §2.1. It is idempotent: a derived value is a pure function of the
+  document, so a replay writes what the first run wrote.
 - Steps are ordered, and the order is the contract.
+
+### 2.1 Derived spatial columns and the backfill
+
+MODEL-FORMAT §3.1 gives a derived index (`derive: 'geohash' | 'bbox'`)
+two physical mappings, chosen by what the driver declares. That choice
+belongs to the migration DOCUMENT, because the two mappings really are
+different columns: `planMigration(from, to, { dialect, derived })`
+takes `'virtual'` (the default: a generated column) or `'stored'`, and
+a document planned for one is not the document the other needs.
+
+The difference the runner sees is one step. A generated column arrives
+POPULATED — SQLite computes it from every existing row. A stored one
+arrives `NULL`, and a query pushed to a `NULL` column silently returns
+fewer rows, so the planner emits an explicit `derive` step after the
+`ALTER TABLE … ADD COLUMN`:
+
+```json
+{ "kind": "derive", "collection": "places",
+  "columns": [ { "name": "gx_at_gh7", "derive": "geohash", "precision": 7,
+                 "segments": [ { "name": "at" } ] } ] }
+```
+
+A `jslt` transform on such a collection gets the same treatment for the
+same reason: it rewrites the documents the columns are computed from,
+so the planner follows it with a `derive` step that recomputes them.
 
 ## 3. Planning and the widening/narrowing rule
 
-`planMigration(fromModel, toModel, { dialect, id })` produces
+`planMigration(fromModel, toModel, { dialect, id, derived })` produces
 `{ migration, report }` by diffing the two models' PHYSICAL plans:
 
 - An added collection becomes its full CREATE DDL; a removed

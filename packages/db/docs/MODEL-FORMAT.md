@@ -64,9 +64,82 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   non-singular path is rejected at open with `JD0004` naming the
   expression. A composite index takes a non-empty array of paths.
 - Index names MUST be identifiers, unique within their collection.
+- `indexes[].derive` declares a **derived** index: the columns are
+  computed FROM the selected member rather than being the member.
+  See §2.1.
 
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
+
+### 2.1 Derived indexes (spatial storage)
+
+A generated column must be a scalar (§3), and a GeoJSON position is an
+array of numbers while a geometry is an object. No path over spatial
+data is therefore indexable as written. `derive` supplies the missing
+vocabulary: it says what indexable scalar is computed from the member.
+
+```jsonc
+"indexes": [
+  { "name": "by_cell", "path": "$.at",       "derive": "geohash", "precision": 7 },
+  { "name": "by_box",  "path": "$.geometry", "derive": "bbox" }
+]
+```
+
+| `derive` | `path` selects | `precision` | columns | type |
+|---|---|---|---|---|
+| `"geohash"` | a position `[lon, lat]`, a `Point`, or any value with a representative position (the mean of its vertices) | 1..12, **required** | one, `<column>` | `TEXT` |
+| `"bbox"` | any GeoJSON value | — | four: `<column>_w`, `<column>_s`, `<column>_e`, `<column>_n` | `REAL` |
+
+`derive` is a CLOSED set of those two values. An open "expression"
+member would be a second query language inside the model document,
+which this format does not have and will not grow.
+
+Every rule below is `JD0004` with a `docPath` at the offending member:
+
+1. **`precision` is required for `geohash`, and refused anywhere
+   else.** There is no safe default, in either direction — the table
+   below is the reason: precision 9 is a ~4.8 m cell (a very large
+   index for city-scale work) and precision 4 is ~20 km. The right
+   value follows from the query radius, which the model cannot know.
+2. **A derived index is never `unique`.** Two distinct positions share
+   a cell — and share a box edge — by construction.
+3. **The path must still be singular, and there must be exactly one of
+   it.** `derive` changes what is computed from the member, never how
+   the member is selected: a wildcard path is refused exactly as it is
+   for an undecorated index, and a composite (array) path is refused
+   because a derivation reads ONE member.
+4. **The schema is still the type source.** A `derive` over a path the
+   collection's schema types as `string`, `integer`, `number` or
+   `boolean` is refused: the mistake is worth catching at open rather
+   than at the first query that quietly returns nothing. A path the
+   schema does not type is accepted — there is nothing to contradict.
+5. **Two indexes with the same `(path, derive, precision)` share one
+   column set**, extending §3's rule for undecorated paths. Two
+   `geohash` indexes over one path at DIFFERENT precisions are two
+   column sets, and legitimately so: a coarse bucketing index and a
+   fine proximity one are different indexes.
+6. **A `bbox` index covers its four columns in `(w, e, s, n)` order** —
+   not the order they are declared in. An intersection test reads
+   `w <= ? AND e >= ? AND s <= ? AND n >= ?`, so the two longitude
+   bounds sit together at the front of the index where a leading-column
+   range can use them; `(a,b)` and `(b,a)` are different indexes (§3).
+
+Approximate geohash cell size by precision (the kernel's
+`geohashCellSize` computes the degree figures; the metric ones are at
+the equator):
+
+| precision | cell (lon × lat) | precision | cell (lon × lat) |
+|---|---|---|---|
+| 1 | 5009 km × 4976 km | 7 | 153 m × 152 m |
+| 2 | 1252 km × 622 km | 8 | 38 m × 19 m |
+| 3 | 157 km × 155 km | 9 | 4.8 m × 4.7 m |
+| 4 | 39.1 km × 19.4 km | 10 | 1.2 m × 59 cm |
+| 5 | 4.9 km × 4.9 km | 11 | 14.9 cm × 14.8 cm |
+| 6 | 1.2 km × 607 m | 12 | 3.7 cm × 1.9 cm |
+
+A geohash prefix is **bucketing, not proximity**: two points metres
+apart can sit in different cells, so a proximity probe tests the cell's
+neighbourhood (`geohashNeighbours`) rather than the single cell.
 
 ## 3. Physical mapping
 
@@ -124,6 +197,61 @@ Physical column ORDER is deliberately **not** drift. SQLite's
 freshly built one legitimately disagree there, and this store never reads
 a column positionally.
 
+### 3.1 Derived columns, and the capability branch
+
+A derived column (§2.1) needs a function SQLite does not have, so its
+mapping BRANCHES on what the driver declares. That is what the
+capability table (§4) is for: a driver that cannot do a thing says so
+rather than degrading silently.
+
+| `capabilities.deterministicIndexableFunctions` | mapping | drivers |
+|---|---|---|
+| `true` | a **virtual generated column** whose expression calls a deterministic function the store registers at open — `jaren_geohash(<member>, <precision>)`, `jaren_bbox_w(<member>)`, … over `json(jsonb_extract("doc", '<path>'))` | `node`, `wasm` |
+| `false` | a **stored column** the store writes on every insert, upsert and patch, computed in JavaScript from the same kernel call | `bun` |
+
+Three consequences, each normative:
+
+- **The registered function MUST be deterministic** in the strong
+  sense: the same document bytes give the same cell, forever. It reads
+  the member and never the clock, a random source or store state. That
+  is not a style rule. An INDEX over a registered function makes the
+  table unreadable from a connection that has not registered an
+  identical function — not merely wrong, unreadable: a bare `SELECT`
+  fails with `unknown function`. That hazard is exactly why the mapping
+  is capability-gated rather than always-on, and why the store, the
+  migration runner and the shadow database each register these
+  functions before any statement over such a table.
+- **A derived value is a function of the STORED document.** JSON has no
+  `NaN` and no `Infinity`, so the write path computes from the member
+  as it will be held rather than from the object handed in. Without
+  that the two mappings would answer differently for one document.
+- **The same model document produces two different physical shapes**,
+  and *match* is by declared text (above). A database created under
+  `node` and opened under `bun` therefore reports `JD0002` naming the
+  derived column — correctly: the column really is different. The
+  physical mapping is a property of the driver that CREATED the file,
+  and moving a file between the two is a migration, not an open.
+
+### 3.2 When a derived column is `NULL`
+
+A derived column is SQL `NULL` when the document has no member at the
+index path, and when the member has no bounded position — a value with
+no positions at all, or one whose coordinates are not positions, which
+is what a non-finite coordinate becomes: JSON cannot carry `NaN`, so it
+arrives as `null` and is no longer a number.
+
+The consequence is a real behavioural difference and is stated here
+rather than discovered later: **a row whose derived column is `NULL` is
+not found by a predicate pushed to that column.** A document whose
+geometry cannot be bounded is invisible to an index-backed spatial
+query and visible to the engine-only one.
+
+Traversal and validity stay separate concerns, as they do in the
+kernel: a value that carries SOME positions is bounded by the positions
+it has. A `LineString` whose second vertex did not survive as a
+position is bounded by its first — a document the GeoJSON meta-schema
+refuses in the first place — and both mappings agree about it.
+
 ## 4. The driver contract and the synchronous fast path
 
 A driver is `{ name, dialect, open(path, options) }`; `open` returns a
@@ -160,7 +288,10 @@ change.
 On the Bun binding, `userFunctions`,
 `deterministicIndexableFunctions` and `sessions` are `false` by
 construction: `bun:sqlite` exposes no `function`, no `aggregate` and
-no `createSession`.
+no `createSession`. `deterministicIndexableFunctions` is the capability
+the derived-column mapping branches on (§3.1), so a model that declares
+a spatial index is portable across all three drivers and the physical
+shape it produces is not.
 
 A library below SQLite **3.45** fails at open with `JD0001` naming
 the version found.
@@ -320,7 +451,7 @@ error.
 | `JD0001` | the SQLite library is below the supported floor |
 | `JD0002` | the declared model disagrees with the existing database |
 | `JD0003` | the driver binding is unavailable on this runtime |
-| `JD0004` | an index path is not a singular member selection |
+| `JD0004` | a declared index cannot be mapped to a column |
 | `JD0005` | the model document is invalid |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |

@@ -31,6 +31,22 @@ import { chain, toPromise } from './driver.js';
 import { normalizeModel } from './store.js';
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
+import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
+
+/**
+ * The physical mapping a connection's driver imposes on derived index
+ * columns. A driver that can index a registered deterministic function
+ * generates them; one that cannot has them written, which is why the
+ * planner emits a backfill for the second and not the first.
+ * @param {any} connection
+ * @returns {{ derived: 'virtual' | 'stored' }}
+ */
+function mappingFor(connection) {
+  return {
+    derived: connection.capabilities?.deterministicIndexableFunctions === true
+      ? 'virtual' : 'stored',
+  };
+}
 
 /** The migration format version. */
 export const MIGRATION_VERSION = '0.1';
@@ -68,15 +84,44 @@ function refuse(code, reason, cause) {
 }
 
 /**
+ * A backfill step: recompute named STORED derived columns from the
+ * documents already in a collection. Idempotent by construction — the
+ * value is a pure function of the document — so a second run writes
+ * what the first did.
+ * @param {string} collection
+ * @param {any} plan - the target collection's physical plan
+ * @param {string[]} columnNames
+ * @param {string} note
+ * @returns {any} the migration step
+ */
+function deriveStep(collection, plan, columnNames, note) {
+  const columns = plan.derived
+    .filter((column) => columnNames.includes(column.name))
+    .map((column) => {
+      /** @type {any} */
+      const entry = { name: column.name, derive: column.derive, segments: column.segments };
+      if (column.precision !== undefined) entry.precision = column.precision;
+      if (column.component !== undefined) entry.component = column.component;
+      return entry;
+    });
+  return { kind: 'derive', collection, columns, note };
+}
+
+/**
  * Plan a migration between two model documents. The planner diffs the
  * PHYSICAL plans (columns, indexes) and renders DDL through the
  * dialect; a changed schema gets a DRAFT identity transform that
  * refuses to run until the author fills it in — the planner cannot
  * infer a data transform and does not pretend to. Renames are declared
  * (`x-rename` on the target collection), never guessed.
+ * The physical mapping of a DERIVED index column depends on the driver
+ * that will run the migration (`derived`), because the two mappings
+ * really are different columns; a migration document planned for one is
+ * not the document the other needs.
  * @param {any} fromModel
  * @param {any} toModel
- * @param {{ id?: string, dialect?: any }} [options]
+ * @param {{ id?: string, dialect?: any,
+ *   derived?: 'virtual' | 'stored' }} [options]
  * @returns {{ migration: any, report: {
  *   renamed: { from: string, to: string }[],
  *   added: string[], removed: string[],
@@ -87,6 +132,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
+  const mapping = { derived: options?.derived ?? 'virtual' };
   const fromCollections = normalizeModel(fromModel);
   const toCollections = normalizeModel(toModel);
 
@@ -133,15 +179,15 @@ export function planMigration(fromModel, toModel, options = undefined) {
 
     if (fromCollection === undefined) {
       report.added.push(name);
-      for (const sql of planCollection(name, toCollection, dialect).createSql)
+      for (const sql of planCollection(name, toCollection, dialect, mapping).createSql)
         steps.push({ kind: 'ddl', sql, note: `create collection '${name}'` });
       continue;
     }
 
     // the from-side physical facts live under the RENAMED table: same
     // columns, but index names still carry the old collection prefix
-    const fromPlan = planCollection(oldName, fromCollection, dialect);
-    const toPlan = planCollection(name, toCollection, dialect);
+    const fromPlan = planCollection(oldName, fromCollection, dialect, mapping);
+    const toPlan = planCollection(name, toCollection, dialect, mapping);
     if (fromPlan.keyType !== toPlan.keyType
       || fromCollection.identity !== toCollection.identity
       || canonicalizeJson(fromCollection.key) !== canonicalizeJson(toCollection.key)) {
@@ -155,7 +201,12 @@ export function planMigration(fromModel, toModel, options = undefined) {
     const fromIndexes = new Map(fromPlan.expected.indexes.map((i) => [i.name, i]));
     const toIndexes = new Map(toPlan.expected.indexes.map((i) => [i.name, i]));
 
-    const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText;
+    // a derived column's EXPRESSION is part of its identity: the same
+    // path at a different precision, or under the other physical
+    // mapping, is a different column even where name and type agree
+    const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
+      || (a.expression ?? null) !== (b.expression ?? null)
+      || (a.stored === true) !== (b.stored === true);
     const indexChanged = (a, b) => a.unique !== b.unique
       || a.columns.join(',') !== b.columns.join(',');
 
@@ -185,6 +236,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
       steps.push({ kind: 'ddl', sql: dialect.ddl.dropColumn(name, columnName),
         note: `drop generated column '${columnName}' on '${name}'` });
     }
+    const backfilled = [];
     for (const [columnName, toColumn] of toColumns) {
       const source = fromColumns.get(columnName);
       if (source === undefined || columnChanged(source, toColumn)) {
@@ -192,9 +244,20 @@ export function planMigration(fromModel, toModel, options = undefined) {
           kind: 'ddl',
           sql: dialect.ddl.addGeneratedColumn(
             { table: name, docColumn: toPlan.docColumn, column: toColumn }),
-          note: `add generated column '${columnName}' on '${name}'`,
+          note: toColumn.stored === true
+            ? `add stored derived column '${columnName}' on '${name}'`
+            : `add generated column '${columnName}' on '${name}'`,
         });
+        if (toColumn.stored === true) backfilled.push(columnName);
       }
+    }
+    // a GENERATED column arrives populated; a STORED one arrives NULL,
+    // and a pushdown over a NULL column silently returns fewer rows.
+    // The backfill is an explicit step rather than an assumption that
+    // the table is empty
+    if (backfilled.length > 0) {
+      steps.push(deriveStep(name, toPlan, backfilled,
+        `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
     }
     for (const [indexName, toIndex] of toIndexes) {
       const source = fromIndexes.get(indexName);
@@ -221,6 +284,17 @@ export function planMigration(fromModel, toModel, options = undefined) {
           + 'transform. Fill in the stylesheet (or delete this step if every stored '
           + 'document already validates against the new schema) and remove "draft".',
       });
+      // a transform rewrites the document, and a stored derived column
+      // is computed FROM the document: without this it keeps the value
+      // the old document had
+      const stale = toPlan.derived
+        .filter((column) => toColumns.get(column.name)?.stored === true)
+        .map((column) => column.name)
+        .filter((columnName) => !backfilled.includes(columnName));
+      if (stale.length > 0) {
+        steps.push(deriveStep(name, toPlan, stale,
+          `recompute derived column(s) ${stale.join(', ')} on '${name}' after the transform`));
+      }
     }
   }
 
@@ -599,8 +673,10 @@ export function createModelShape(connection, model) {
   const dialect = connection.dialect;
   /** @type {string[]} */
   const statements = [];
-  for (const collection of normalizeModel(model).values())
-    statements.push(...planCollection(collection.name, collection, dialect).createSql);
+  for (const collection of normalizeModel(model).values()) {
+    statements.push(
+      ...planCollection(collection.name, collection, dialect, mappingFor(connection)).createSql);
+  }
   const entities = normalizeEntities(model);
   if (entities.size > 0) {
     const mapping = explainMapping(model);
@@ -699,7 +775,8 @@ function normalizeSchemaSql(sql) {
  */
 export function compareShapeToModel(driver, connection, model, registerFunctions) {
   return chain(driver.open(':memory:', {}), (reference) =>
-    chain(registerFunctions !== undefined ? registerFunctions(reference) : null, () => {
+    chain(chain(registerDeriveFunctions(reference),
+      () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () => {
       const finish = (result) => chain(reference.close(), () => result);
       let outcome;
       try {
@@ -736,7 +813,7 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
     }));
 }
 
-const STEP_KINDS = new Set(['ddl', 'jslt', 'query', 'sql', 'rebuild']);
+const STEP_KINDS = new Set(['ddl', 'jslt', 'query', 'sql', 'rebuild', 'derive']);
 
 /**
  * Structural validation of one migration document, including the
@@ -768,6 +845,12 @@ function checkMigrationDocument(migration) {
     if (step.kind === 'sql' && typeof step.sql !== 'string') {
       throw refuse('JD0023',
         `migration '${migration.id}' step ${i} is a sql step without sql text`);
+    }
+    if (step.kind === 'derive'
+      && (typeof step.collection !== 'string' || !Array.isArray(step.columns)
+        || step.columns.length === 0)) {
+      throw refuse('JD0023',
+        `migration '${migration.id}' step ${i} is a derive backfill without its columns`);
     }
     if (step.kind === 'jslt' && step.draft === true) {
       throw refuse('JD0021',
@@ -886,6 +969,34 @@ function runSteps(connection, migration, options) {
         };
         return runNext(0);
       }
+      if (current.kind === 'derive') {
+        // recompute stored derived columns from the documents already
+        // present — the branch where a derived column is an ordinary
+        // one the store writes, so an ALTER that adds it leaves every
+        // existing row NULL until this runs
+        const columns = current.columns;
+        const assignments = columns.map((column, at) =>
+          `${q(column.name)} = ${dialect.parameterRef(at + 1, column.name)}`);
+        const updateSql = `UPDATE ${q(current.collection)} SET ${assignments.join(', ')} `
+          + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 1, 'rid')}`;
+        let derivedRows = 0;
+        return chain(connection.prepare(updateSql), (update) =>
+          chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
+            for (const row of rows) {
+              const doc = JSON.parse(row.doc);
+              update.run([
+                ...columns.map((column) => derivedValue(column, memberAt(doc, column.segments))),
+                row.rid,
+              ]);
+              derivedRows++;
+            }
+            options.onProgress?.({
+              migration: migration.id,
+              collection: current.collection,
+              derived: derivedRows,
+            });
+          }, false), () => derivedRows));
+      }
       if (current.kind === 'jslt') {
         let transform;
         try {
@@ -992,7 +1103,7 @@ function validateTargetState(connection, model, options) {
   const verifyNext = (i) => {
     if (i >= collections.length) return null;
     const collection = collections[i];
-    const plan = planCollection(collection.name, collection, dialect);
+    const plan = planCollection(collection.name, collection, dialect, mappingFor(connection));
     const validate = options.compileSchema !== undefined
       ? options.compileSchema(collection.schema)
       : null;
@@ -1046,9 +1157,8 @@ function replayOnShadow(driver, shadowPath, baseline, migrations, model, options
     // a UDF-expression index is invisible to a connection that has not
     // registered the function (probed, never assumed): the shadow
     // re-registers every declared function BEFORE any DDL runs
-    const registered = options.registerFunctions !== undefined
-      ? options.registerFunctions(shadow)
-      : null;
+    const registered = chain(registerDeriveFunctions(shadow), () =>
+      (options.registerFunctions !== undefined ? options.registerFunctions(shadow) : null));
     const apply = (i) => {
       if (i >= migrations.length) return null;
       const bracket = migrations[i].steps.some(
@@ -1065,7 +1175,8 @@ function replayOnShadow(driver, shadowPath, baseline, migrations, model, options
         const target = [...normalizeModel(model).values()];
         const verifyNext = (i) => {
           if (i >= target.length) return null;
-          const plan = planCollection(target[i].name, target[i], shadow.dialect);
+          const plan = planCollection(target[i].name, target[i], shadow.dialect,
+            mappingFor(shadow));
           return chain(
             verifyShape(shadow, plan, target[i].name, target[i].docPath),
             () => verifyNext(i + 1));
@@ -1148,7 +1259,8 @@ export function migrationStatus(target, migrations, options) {
       const failClosed = (error) => chain(connection.close(), () => { throw error; });
       let work;
       try {
-        work = chain(connection.exec(statements.create), () =>
+        work = chain(registerDeriveFunctions(connection), () =>
+          chain(connection.exec(statements.create), () =>
           chain(connection.prepare(statements.select), (select) =>
             chain(select.all([]), (rows) => {
               for (let i = 0; i < rows.length; i++) {
@@ -1172,7 +1284,7 @@ export function migrationStatus(target, migrations, options) {
                 (difference) => ({
                   applied, pending, drift: difference, upToDate: difference === null,
                 }));
-            })));
+            }))));
       }
       catch (error) {
         return failClosed(error);
@@ -1221,8 +1333,9 @@ export function migrate(target, migrations, options) {
   return toPromise(chain(
     target.driver.open(target.path ?? ':memory:', { timeout: target.busyTimeout ?? 5000 }),
     (connection) => chain(
-      options.registerFunctions !== undefined
-        ? options.registerFunctions(connection) : null,
+      chain(registerDeriveFunctions(connection),
+        () => (options.registerFunctions !== undefined
+          ? options.registerFunctions(connection) : null)),
       () => {
       const dialect = connection.dialect;
       const statements = historyStatements(dialect);

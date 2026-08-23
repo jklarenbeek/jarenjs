@@ -239,4 +239,51 @@ describe('the wasm driver (real sqlite-wasm build)', () => {
     await reopened.close();
     holder.close();
   });
+
+  it('indexes a DERIVED spatial column through the registered functions', async () => {
+    // the capability that decides the physical mapping is real here:
+    // this build registers deterministic functions and indexes columns
+    // generated from them, so the same model document that produces
+    // stored columns on Bun produces virtual ones on this driver
+    const spatial = {
+      $model: '0.1',
+      collections: {
+        places: {
+          schema: { type: 'object', properties: {
+            id: { type: 'string' }, at: { type: 'array' }, area: { type: 'object' } } },
+          key: '/id',
+          indexes: [
+            { name: 'by_cell', path: '$.at', derive: 'geohash', precision: 5 },
+            { name: 'by_box', path: '$.area', derive: 'bbox' },
+          ],
+        },
+      },
+    };
+    const uri = 'file:/spatial1?vfs=memdb';
+    const holder = new sqlite3.oo1.DB(uri, 'c');
+    const store = await openStore(spatial, { driver, path: uri });
+    assert.strictEqual(store.capabilities.deterministicIndexableFunctions, true);
+    await store.collection('places').insert({
+      id: 'ams',
+      at: [4.9041, 52.3676],
+      area: { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] },
+    });
+    await store.close();
+
+    const probe = new sqlite3.oo1.DB(uri, 'c');
+    // a connection that has NOT registered the functions cannot read
+    // the table at all — the hazard the capability gate exists for
+    assert.throws(() => probe.exec({ sql: 'SELECT "gx_at_gh5" FROM "places"' }),
+      /jaren_geohash/);
+    probe.close();
+
+    const reopened = await openStore(spatial, { driver, path: uri });
+    assert.deepStrictEqual(await reopened.collection('places').get('ams'), {
+      id: 'ams',
+      at: [4.9041, 52.3676],
+      area: { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] },
+    }, 'a second open verifies the shape, registers the functions and reads');
+    await reopened.close();
+    holder.close();
+  });
 });
