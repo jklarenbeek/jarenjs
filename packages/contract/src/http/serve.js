@@ -50,6 +50,13 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
  * @property {boolean} [partial] - allow missing handlers; a missing one answers 501 `JC2013`
  * @property {boolean} [head] - answer HEAD for GET operations by running the handler and dropping the body; default true
  * @property {'always' | 'never'} [validateOutput] - `'never'` is a declared downgrade, reported in `capabilities.validatedOutput`
+ * @property {Record<string, import('./dispatch.js').TagResolver>} [preconditions]
+ *   - operation id → the CURRENT entity-tag resolver, making `If-Match`/
+ *   `If-None-Match` a PRE-handler decision for that operation: a stale
+ *   precondition refuses `JC2014` with zero handler invocations, a
+ *   matching `If-None-Match` read answers 304 without computing the
+ *   representation (docs/CONTRACT-FORMAT.md §7.5); refused on a
+ *   `subscribe` or opaque operation
  * @property {string | false} [wellKnown] - the path answering `describe()`; default `/.well-known/jaren-contract`; `false` disables
  * @property {(wire: WireErrorBody & { status: number }, ctx: RequestContext | null) => unknown} [errorBody]
  *   - projects the wire error record into the response body (a legacy
@@ -111,9 +118,10 @@ function headerNameOf(member) {
  * Prepare one operation for the pipeline.
  * @param {CompiledOperation} op
  * @param {Handler | null} handler
+ * @param {import('./dispatch.js').TagResolver | null} tag
  * @returns {Route}
  */
-function prepare(op, handler) {
+function prepare(op, handler, tag) {
   const http = op.http;
   const input = op.input;
   const transport = input === null ? null : input.transport;
@@ -156,6 +164,7 @@ function prepare(op, handler) {
   return Object.freeze({
     op,
     handler,
+    tag,
     raw: http.opaque,
     stream: op.kind === 'subscribe',
     maxBody: op.policy.limits.maxBodyBytes,
@@ -224,6 +233,29 @@ export function serveHttp(contract, handlers, options = {}) {
       throw host('JC1001', `the handler of '${id}' must be a function, got ${typeof handlers[id]}`);
     }
   }
+  const preconditions = options.preconditions === undefined ? null : options.preconditions;
+  if (preconditions !== null && (typeof preconditions !== 'object' || Array.isArray(preconditions))) {
+    throw host('JC1001', 'options.preconditions must be an object of operation id → tag resolver');
+  }
+  if (preconditions !== null) {
+    const ids = Object.keys(preconditions);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (!Object.hasOwn(contract.operations, id)) {
+        throw host('JC1001', `preconditions names '${id}', which is not an operation of the contract`);
+      }
+      if (typeof preconditions[id] !== 'function') {
+        throw host('JC1001', `the tag resolver of '${id}' must be a function, got ${typeof preconditions[id]}`);
+      }
+      const op = contract.operations[id];
+      if (op.kind === 'subscribe') {
+        throw host('JC1001', `operation '${id}' is a subscribe — a stream has no single representation for a precondition to guard`);
+      }
+      if (op.http.opaque) {
+        throw host('JC1001', `operation '${id}' is opaque — its raw handler owns the bytes and the headers; preconditions cannot apply`);
+      }
+    }
+  }
   /** @type {Map<string, Route>} */
   const routes = new Map();
   for (let i = 0; i < contract.ids.length; i++) {
@@ -236,7 +268,7 @@ export function serveHttp(contract, handlers, options = {}) {
     if (op.policy.idempotency !== 'none' && ledger === null) {
       throw host('JC1003', `operation '${id}' declares policy.idempotency '${op.policy.idempotency}' and no ledger was given — this binding cannot carry idempotency without one`);
     }
-    routes.set(id, prepare(op, handler));
+    routes.set(id, prepare(op, handler, preconditions !== null && Object.hasOwn(preconditions, id) ? preconditions[id] : null));
   }
 
   const validateOutput = options.validateOutput === undefined ? 'always' : options.validateOutput;

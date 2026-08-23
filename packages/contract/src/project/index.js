@@ -6,8 +6,9 @@
  * through a JSLT stylesheet), `toTypeScript` and `toMarkdown` (on
  * `@jarenjs/emit`'s type model), `contractTools` (`@jarenjs/ai` tool
  * definitions, no import edge) and the same-document bundler they share.
- * This is the one subpath that imports `@jarenjs/emit`; a consumer that
- * never imports it never loads it.
+ * This is the one subpath that imports `@jarenjs/emit` — the CLI loads
+ * it lazily, only for `types` and `docs`; a consumer that never imports
+ * either never loads it.
  */
 
 export { publicProjection } from '../public.js';

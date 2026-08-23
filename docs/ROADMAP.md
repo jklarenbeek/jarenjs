@@ -216,7 +216,9 @@ delete it or fix it.
   at <!--bm:contract.validateOutput.share-->29%<!--/bm--> of the same row;
   it is a correctness feature, declared off per server with
   `validateOutput: 'never'`, whose cost the benchmark's fourth column
-  keeps visible.)
+  keeps visible. For a large cached representation the contract README's
+  "validate on rebuild, serve by revision" recipe keeps the guarantee
+  per revision instead of per request.)
 - [ ] **Matcher promotion to core** — the static-segment path matcher is
   private to `packages/contract/src/path.js` by design; it moves to
   `@jarenjs/core` the moment a second consumer appears (the one-

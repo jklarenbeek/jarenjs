@@ -2,9 +2,11 @@
 /**
  * @file The request pipeline of the HTTP server binding: one plain
  * request object in, one plain response object out — route, decode,
- * assemble, normalize, validate, claim idempotency, call the handler
- * through one uniform promise boundary, validate the output, apply the
- * entity-tag conditionals, serialize, commit. Every failure a request
+ * assemble, normalize, validate, claim idempotency, decide a declared
+ * precondition (the `preconditions` option: `If-Match`/`If-None-Match`
+ * against the resolver's CURRENT tag, before the handler), call the
+ * handler through one uniform promise boundary, validate the output,
+ * apply the post-handler entity-tag conditionals, serialize, commit. Every failure a request
  * can cause is a coded response (docs/CONTRACT-FORMAT.md §7); the
  * function rejects only for a malformed request OBJECT (`JC1004`, an
  * adapter author's mistake) — never for request content and never for
@@ -87,11 +89,27 @@ import {
  */
 
 /**
+ * The CURRENT entity-tag resolver of the `preconditions` option
+ * (docs/CONTRACT-FORMAT.md §7.5): called with the operation's validated
+ * input and the frozen context BEFORE the handler, it answers the tag of
+ * the current representation — a plain string is a STRONG tag (the
+ * asymmetry with `ctx.etag`, whose bare form is weak, is deliberate:
+ * `If-Match` needs strong comparison to mean anything), `{ tag, strong }`
+ * spells it out, `null` means "no current representation" (`If-Match`,
+ * `*` included, fails on it; `If-None-Match`, `*` included, passes — the
+ * create-guard). A throw, a rejection or any other shape is the host's
+ * fault (`JC2008`).
+ * @typedef {(input: any, ctx: RequestContext) => string | { tag: string, strong?: boolean } | null | Promise<string | { tag: string, strong?: boolean } | null>} TagResolver
+ */
+
+/**
  * One operation as `serveHttp` prepared it: everything the pipeline
  * reads per request, decided once.
  * @typedef {Object} Route
  * @property {CompiledOperation} op
  * @property {Handler | null} handler - `null` on a partial server
+ * @property {TagResolver | null} tag - the pre-handler resolver of the
+ *   `preconditions` option; `null` = conditionals stay post-handler
  * @property {boolean} raw - opaque: the handler is raw
  * @property {boolean} stream - a subscribe operation: the handler answers a subscription
  * @property {number} maxBody
@@ -295,9 +313,15 @@ function signalOf(request) {
 /**
  * Per-request mutable state: what the context's `etag`/`status` armed,
  * and how the settlement classified — `outcome` 0 success, 1 declared
- * failure (with `retryable`), 2 server fault — which is what the ledger
- * needs to commit, record or release the claim.
- * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean }} Armed
+ * failure (with `retryable`), 2 server fault (a pre-handler `JC2014`
+ * among them: nothing ran, the claim is released retryable), 3 a
+ * POST-handler precondition failure (the handler already ran and may
+ * have mutated: the claim is recorded non-retryable with its 412) —
+ * which is what the ledger needs to commit, record or release the
+ * claim. `decided` is set by a `preconditions` resolver that already
+ * evaluated the conditionals; the post-handler comparison then stands
+ * down.
+ * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean }} Armed
  */
 
 /**
@@ -411,7 +435,7 @@ function run(server, request) {
   const transported = route.normalize === null ? input : route.normalize(input);
 
   /** @type {Armed} */
-  const armed = { etag: null, strong: false, status: 0, outcome: 0, retryable: false };
+  const armed = { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false };
   /** @type {RequestContext} */
   const ctx = {
     op, trace, method, path, params, headers: ctxHeaders,
@@ -514,6 +538,7 @@ function run(server, request) {
   }
 
   Object.freeze(ctx);
+  if (route.tag !== null) return preconditionedBoundary(server, route, ctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch);
   return boundary(server, route, ctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch, false);
 }
 
@@ -734,6 +759,83 @@ function sseResponse(server, route, ctx, sub, trace, headers) {
 //#region the handler boundary
 
 /**
+ * The pre-handler conditionals of a declared tag resolver
+ * (docs/CONTRACT-FORMAT.md §7.5): resolve the CURRENT entity tag, decide
+ * `If-Match` (strong comparison, first — RFC 9110 §13.2.2) and
+ * `If-None-Match` (weak) BEFORE the handler, and only then run it. A
+ * stale precondition refuses `JC2014` with ZERO handler invocations —
+ * the write guard the post-handler comparison cannot be; a matching
+ * `If-None-Match` on a safe method answers 304 without computing the
+ * representation. A command consults its resolver only under a
+ * conditional header; a safe method always resolves, so its response
+ * carries the tag (the handler's own `ctx.etag` re-arms the RESPONSE
+ * tag only — the conditionals are already decided). On pass, an unsafe
+ * method arms nothing: a mutated representation must not echo its
+ * pre-state tag (RFC 9110 §8.8.3).
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} ctx - frozen
+ * @param {any} input
+ * @param {string} trace
+ * @param {Armed} armed
+ * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
+ * @returns {HttpResponse | Promise<HttpResponse>}
+ */
+function preconditionedBoundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch) {
+  const safe = ctx.method === 'GET' || ctx.method === 'HEAD';
+  if (!safe && ifMatch === undefined && ifNoneMatch === undefined) {
+    return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+  }
+  /** @param {unknown} err @returns {HttpResponse} */
+  const fault = (err) => {
+    observe(server, err === undefined ? new TypeError(`the tag resolver of '${route.op.id}' rejected with undefined`) : err, ctx);
+    armed.outcome = 2;
+    return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+  };
+  /** @param {unknown} resolution @returns {HttpResponse | Promise<HttpResponse>} */
+  const decide = (resolution) => {
+    /** @type {{ tag: string, strong: boolean } | null} */
+    let resolved;
+    if (resolution === null) resolved = null;
+    else if (typeof resolution === 'string') resolved = { tag: resolution, strong: true };
+    else if (typeof resolution === 'object' && typeof (/** @type {any} */ (resolution).tag) === 'string') {
+      resolved = { tag: /** @type {any} */ (resolution).tag, strong: /** @type {any} */ (resolution).strong !== false };
+    }
+    else return fault(new TypeError(`the tag resolver of '${route.op.id}' must answer a string, { tag, strong? } or null`));
+    if (resolved !== null && (resolved.tag.length === 0 || resolved.tag.indexOf('"') !== -1)) {
+      return fault(new TypeError(`the tag resolver of '${route.op.id}' answered a tag that is empty or carries a double quote`));
+    }
+    if (ifMatch !== undefined && (resolved === null || !entityTagMatches(ifMatch, resolved.tag, resolved.strong, true))) {
+      armed.outcome = 2; // nothing ran: on a claimed command the key is released retryable
+      const extra = resolved === null ? null : { etag: formatEntityTag(resolved.tag, resolved.strong) };
+      return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, extra, ctx);
+    }
+    if (ifNoneMatch !== undefined && resolved !== null && entityTagMatches(ifNoneMatch, resolved.tag, resolved.strong, false)) {
+      const etag = formatEntityTag(resolved.tag, resolved.strong);
+      if (safe) return { status: 304, headers: { etag, 'x-jaren-trace': trace }, body: null };
+      armed.outcome = 2;
+      return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, { etag }, ctx);
+    }
+    armed.decided = true;
+    if (safe && resolved !== null) {
+      armed.etag = resolved.tag;
+      armed.strong = resolved.strong;
+    }
+    return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+  };
+  let resolution;
+  try {
+    resolution = /** @type {NonNullable<Route['tag']>} */ (route.tag)(input, ctx);
+  }
+  catch (err) {
+    return fault(err);
+  }
+  return isThenable(resolution) ? toPromise(resolution).then(decide, fault) : decide(resolution);
+}
+
+/**
  * Call the handler through the pipeline's uniform promise boundary and
  * project the classified result onto the HTTP wire.
  * @param {Server} server
@@ -812,20 +914,28 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
   /** @type {Record<string, string>} */
   const headers = { 'x-jaren-trace': trace };
   if (armed.etag !== null) {
-    // If-Match first (RFC 9110 §13.2.2), strong comparison; then
-    // If-None-Match, weak comparison: 304 for GET/HEAD, 412 otherwise
-    if (ifMatch !== undefined && !entityTagMatches(ifMatch, armed.etag, armed.strong, true)) {
-      armed.outcome = 2;
-      return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, null, ctx);
-    }
     const etag = formatEntityTag(armed.etag, armed.strong);
-    if (ifNoneMatch !== undefined && entityTagMatches(ifNoneMatch, armed.etag, armed.strong, false)) {
-      if (ctx.method === 'GET' || ctx.method === 'HEAD') {
-        headers.etag = etag;
-        return { status: 304, headers, body: null };
+    if (!armed.decided) {
+      // the POST-handler conditionals — a cache device, never a write
+      // guard: the handler has already run when they are compared, so a
+      // 412 here does not mean the work did not happen. Outcome 3
+      // records that on a claimed command (non-retryable, the 412
+      // replays). If-Match first (RFC 9110 §13.2.2), strong comparison;
+      // then If-None-Match, weak: 304 for GET/HEAD, 412 otherwise. A
+      // `preconditions` resolver (§7.5) decides these BEFORE the
+      // handler instead and stands this block down (`armed.decided`).
+      if (ifMatch !== undefined && !entityTagMatches(ifMatch, armed.etag, armed.strong, true)) {
+        armed.outcome = 3;
+        return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, null, ctx);
       }
-      armed.outcome = 2;
-      return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, { etag }, ctx);
+      if (ifNoneMatch !== undefined && entityTagMatches(ifNoneMatch, armed.etag, armed.strong, false)) {
+        if (ctx.method === 'GET' || ctx.method === 'HEAD') {
+          headers.etag = etag;
+          return { status: 304, headers, body: null };
+        }
+        armed.outcome = 3;
+        return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, { etag }, ctx);
+      }
     }
     headers.etag = etag;
   }
@@ -956,8 +1066,13 @@ function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, if
       return fault(err);
     }
     if (state === 'new') {
-      return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false)
-        .then((response) => settleClaim(server, ledger, ref, response, ctx, armed));
+      // claim first, precondition second: a committed key replays its
+      // stored response before the resolver runs (a retried command
+      // that already succeeded must not answer 412)
+      const ran = route.tag !== null
+        ? preconditionedBoundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch)
+        : boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+      return toPromise(ran).then((response) => settleClaim(server, ledger, ref, response, ctx, armed));
     }
     if (state === 'replay') return replay(server, route, stored, trace, ctx);
     if (state === 'in-progress') {
@@ -992,9 +1107,12 @@ function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, if
  * Settle a `new` claim with the response the handler produced: a
  * success commits (replayed verbatim later); a declared failure is
  * recorded as failed with its response and retryability; a server fault
- * (`JC2008`/`JC2010`/`JC2014`) releases the key as retryable. TOTAL: a
- * ledger that throws or rejects is reported, and the response still
- * goes out.
+ * (`JC2008`/`JC2010`, and a PRE-handler `JC2014` — nothing ran)
+ * releases the key as retryable; a POST-handler `JC2014` (outcome 3) is
+ * recorded NON-retryable with its 412 — the handler already ran and may
+ * have mutated, so a blind retry with the same key replays the 412
+ * instead of running it again. TOTAL: a ledger that throws or rejects
+ * is reported, and the response still goes out.
  * @param {Server} server
  * @param {Ledger} ledger
  * @param {unknown} ref
@@ -1008,6 +1126,7 @@ function settleClaim(server, ledger, ref, response, ctx, armed) {
   try {
     if (armed.outcome === 0) settlement = ledger.commit(ref, response);
     else if (armed.outcome === 1) settlement = ledger.fail(ref, armed.retryable, response);
+    else if (armed.outcome === 3) settlement = ledger.fail(ref, false, response);
     else settlement = ledger.fail(ref, true, undefined);
   }
   catch (err) {

@@ -22,8 +22,6 @@ import { ContractCompileError, ContractHostError } from './errors.js';
 import { diffContracts } from './diff.js';
 import { publicProjection } from './public.js';
 import { toOpenApi } from './project/openapi.js';
-import { toTypeScript } from './project/typescript.js';
-import { toMarkdown } from './project/markdown.js';
 
 const USAGE = `jaren-contract — projections of a jaren-contract document
 
@@ -196,7 +194,7 @@ function runDiff(options) {
   }
 }
 
-function main() {
+async function main() {
   let options;
   try {
     options = parseArgs(process.argv);
@@ -239,8 +237,9 @@ function main() {
         rendered = JSON.stringify(document, null, 2) + '\n';
         break;
       }
-      case 'types': rendered = toTypeScript(contract); break;
-      case 'docs': rendered = toMarkdown(contract); break;
+      // the two emit-edged projections load lazily: diff/describe/public/openapi never touch @jarenjs/emit
+      case 'types': rendered = (await import('./project/typescript.js')).toTypeScript(contract); break;
+      case 'docs': rendered = (await import('./project/markdown.js')).toMarkdown(contract); break;
     }
     if (options.out === null) {
       process.stdout.write(rendered);
@@ -261,4 +260,4 @@ function main() {
   }
 }
 
-main();
+await main();

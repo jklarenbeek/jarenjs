@@ -3,9 +3,13 @@
  * @file Idempotency through the http binding and the memory ledger:
  * new / replay / in-progress / mismatch / retryable re-run / expiry, the
  * ledger's own contract (`claim`/`commit`/`fail`/`lookup`, `sweep`), an
- * asynchronous ledger, the host `scope`, and the identity trinity — a
- * spoofed `x-jaren-trace` is ignored, an `x-attempt` header is never
- * read, the key comes only from `idempotency-key`.
+ * asynchronous ledger, the host `scope`, the precondition interplay
+ * (claim first, resolver second — a committed key replays before the
+ * resolver runs; a POST-handler 412 is recorded non-retryable so a blind
+ * retry replays it instead of re-running a handler that already
+ * mutated), and the identity trinity — a spoofed `x-jaren-trace` is
+ * ignored, an `x-attempt` header is never read, the key comes only from
+ * `idempotency-key`.
  */
 
 import { describe, it } from 'node:test';
@@ -256,6 +260,45 @@ describe('idempotency — the binding over the memory ledger', () => {
     await server.dispatch(req('GET', '/api/images/1', { 'idempotency-key': 'k' }));
     await server.dispatch(req('GET', '/api/catalog', { 'idempotency-key': 'k' }));
     assert.strictEqual(ledger.size, 0);
+  });
+
+  it('claim first, precondition second: a committed key replays before the resolver runs', async () => {
+    let resolves = 0;
+    let calls = 0;
+    const { server } = serve(
+      { 'product.save': () => { calls += 1; return { id: 1, name: 'x', price: 1 }; } },
+      { preconditions: { 'product.save': () => { resolves += 1; return 'r1'; } } });
+    const a = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'pc1', 'if-match': '"r1"' }));
+    assert.strictEqual(a.status, 200);
+    assert.strictEqual(resolves, 1);
+    // the retry arrives with a STALE If-Match — the committed outcome
+    // still wins: the stored response replays and the resolver never runs
+    const b = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'pc1', 'if-match': '"r0"' }));
+    assert.strictEqual(b.status, 200);
+    assert.strictEqual(b.headers['idempotent-replayed'], 'true');
+    assert.strictEqual(resolves, 1, 'the resolver never ran on the replay');
+    assert.strictEqual(calls, 1);
+  });
+
+  it('a POST-handler 412 (no resolver, the handler armed the tag late) is recorded non-retryable: the same key replays the 412, the handler does not run again', async () => {
+    let calls = 0;
+    const { server, ledger } = serve({
+      'product.save': (/** @type {any} */ input, /** @type {any} */ ctx) => { calls += 1; ctx.etag('r9', { strong: true }); return { id: 1, name: 'x', price: 1 }; },
+    });
+    // the stale If-Match is compared only AFTER the handler ran — the
+    // mutation happened and the wire still says 412; what the ledger must
+    // never do is hand that key back for a blind re-run
+    const first = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'ph1', 'if-match': '"r8"' }));
+    assert.strictEqual(first.status, 412);
+    assert.strictEqual(json(first).code, 'JC2014');
+    assert.strictEqual(calls, 1, 'the handler already ran — the post-handler comparison is not a write guard');
+    const record = ledger.lookup({ op: 'product.save', scope: '', key: 'ph1' });
+    assert.strictEqual(record?.status, 'failed');
+    assert.strictEqual(record?.retryable, false);
+    const retry = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'ph1', 'if-match': '"r8"' }));
+    assert.strictEqual(retry.status, 412);
+    assert.strictEqual(retry.headers['idempotent-replayed'], 'true');
+    assert.strictEqual(calls, 1, 'the recorded 412 replays; the handler never runs twice under one key');
   });
 });
 

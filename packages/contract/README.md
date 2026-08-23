@@ -154,9 +154,10 @@ The pipeline routes (404/405 with `Allow`), enforces the body limit
 (413) before reading, checks the media (415), parses (400), assembles the
 input from path, query and headers through a prototype-safe setter,
 normalizes the transport strings, validates (400 with `details` by
-`policy.errors.details`), claims the idempotency key, calls the handler
-through one promise boundary, validates the output (500 — the server
-broke the contract), applies `If-Match`/`If-None-Match`, serializes.
+`policy.errors.details`), claims the idempotency key, decides a declared
+precondition, calls the handler through one promise boundary, validates
+the output (500 — the server broke the contract), applies
+`If-Match`/`If-None-Match`, serializes.
 Every non-2xx body is `{ code, message, requestId, details?, retryable }`
 with `x-jaren-trace` on the response; a handler's thrown error never
 reaches the wire (`onError` sees it). `server.capabilities` says what
@@ -166,22 +167,53 @@ is refused at construction. `GET /.well-known/jaren-contract` answers
 `describe()`. The normative pipeline, taxonomy and ledger interface are
 [CONTRACT-FORMAT.md §7–§9](docs/CONTRACT-FORMAT.md#7-the-http-server-binding).
 
+Without a declared resolver, `If-Match`/`If-None-Match` are applied
+**after** the handler and only when it armed a tag — a cache device,
+**never a write guard**. The `preconditions` option is the write guard:
+a per-operation resolver of the CURRENT entity tag, decided before the
+handler, so a stale `If-Match` refuses 412 with zero handler runs and a
+matching `If-None-Match` read answers 304 without computing the
+representation.
+
+```js
+const server = serveHttp(contract, handlers, {
+  ledger: createMemoryLedger(),
+  preconditions: {
+    'product.save': (input) => `r${revisionOf(input.id)}`,   // a bare string is a STRONG tag; null = no representation
+  },
+});
+```
+
 ### Recipes: Fastify, Hono, Express
 
 None of these is a dependency; each recipe is executed by a test that
 imports the framework from the benchmark workspace.
 
 ```js
-// Fastify — a catch-all route, the raw body handed to dispatch
+// Fastify — hijack before parsing; the node adapter carries body limits, SSE and abort
 const app = fastify();
-app.removeAllContentTypeParsers();
-app.addContentTypeParser('*', { parseAs: 'buffer' }, (req, body, done) => done(null, body));
-app.all('/*', async (req, reply) => {
-  const r = await server.dispatch({ method: req.method, url: req.url, headers: req.headers, body: req.body ?? null });
-  reply.code(r.status).headers(r.headers);
-  return r.body === null ? reply.send() : reply.send(r.body);
-});
+const handler = toNodeHandler(server);
+app.all('/*', {
+  onRequest: (req, reply, done) => { reply.hijack(); handler(req.raw, reply.raw); done(); },
+}, () => {});
 ```
+
+`reply.hijack()` hands the untouched socket to the node adapter before
+any parser runs, so the recipe coexists with an existing app: routes
+registered beside it keep their parsers and parsed bodies, static paths
+beat the wildcard, and Fastify's own `bodyLimit` never answers — the
+operation's `policy.limits.maxBodyBytes` is the single body ceiling,
+refusing as the contract's coded `JC2003` instead of Fastify's
+`FST_ERR_CTP_BODY_TOO_LARGE`. Subscribe operations stream (the adapter
+calls `response.stream`) and a dropped peer reaches the handler as
+`ctx.signal` — the earlier buffer-parser recipe carried neither. To
+confine the contract, register the same route in an encapsulated plugin
+with `{ prefix }`; the prefix must then prefix the contract's declared
+paths (canonical bindings and the well-known path included). One
+shutdown note: a hijacked request never completes in Fastify's own
+bookkeeping, so its keep-alive socket never counts as idle — close the
+dispatcher first, then `app.server.closeAllConnections()` before
+`app.close()`.
 
 ```js
 // Hono — the fetch handler is the whole app (Bun.serve, Deno, workers alike)
@@ -194,6 +226,39 @@ app.all('*', (c) => toFetchHandler(server)(c.req.raw));
 const app = express();
 app.use(toNodeHandler(server));
 ```
+
+### Recipe: large outputs — validate on rebuild, serve by revision
+
+`validateOutput: "always"` proves every response against the contract
+and is the right default; on a multi-megabyte cached representation it
+is also the measured heavy share of the hot row (the benchmark's fourth
+column keeps it visible — docs/ROADMAP.md). The honest downgrade is not
+"skip validation" but "validate once per REVISION instead of once per
+request": prove the snapshot when it is rebuilt, arm its revision as the
+tag, and let `preconditions` answer 304 before the handler even runs.
+
+```js
+const validateCatalog = contract.operations['catalog.load'].output.validate;
+const cache = { revision: 0, value: null };
+function rebuild(next) {                 // on every write to the source
+  const v = validateCatalog(next);       // the JC2010 caught at build time, once
+  if (!(v === true || v?.valid === true)) throw new Error('the snapshot breaks the contract');
+  cache.revision += 1;
+  cache.value = next;
+}
+const server = serveHttp(contract, {
+  ...handlers,
+  'catalog.load': (input, ctx) => { ctx.etag(`r${cache.revision}`, { strong: true }); return cache.value; },
+}, {
+  validateOutput: 'never',               // declared: capabilities.validatedOutput === false
+  preconditions: { 'catalog.load': () => `r${cache.revision}` },   // 304 BEFORE the handler
+});
+```
+
+The tradeoff is declared, never silent: `validateOutput` is server-wide,
+so `capabilities.validatedOutput === false` tells every consumer the
+per-request guarantee moved to the rebuild path — keep that path the
+only writer of the cache, or the guarantee is gone.
 
 ## Call it from the other end
 
@@ -478,7 +543,10 @@ deliberate decision, not a gap:
 - **No replication or durability.** The ledger and the command
   lifecycle ship as JSON documents (`$model`, `$fsm`) a host may open
   with `@jarenjs/db`; the in-memory ledger is for tests and
-  single-process hosts. Durability is the host's.
+  single-process hosts. Durability is the host's — and needs no
+  dependency: [CONTRACT-FORMAT.md §8.1](docs/CONTRACT-FORMAT.md#81-a-durable-ledger-over-nodesqlite--an-example-not-an-export)
+  is a complete, tested ~60-line ledger over `node:sqlite` (built into
+  Node ≥ 24), deliberately an example rather than an export.
 - **No automatic reconnect.** A stream that ends with a `network`
   outcome is re-entered by the host calling `subscribe` again with the
   last delivered seq (`lastSeq` is the hook); the backoff/resume/give-up

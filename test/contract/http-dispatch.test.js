@@ -5,10 +5,11 @@
  * capabilities; `dispatch` routes the shop fixture (query coercion on
  * `catalog.load`/`product.search`, path + body on `product.save`, the
  * canonical binding on `product.remove`), answers HEAD for GET, arms
- * ETags (304, If-Match/412), honors `ctx.status`, passes opaque bytes
- * through, serves the well-known description, and rejects only a
- * malformed request object (`JC1004`); the catalog renders every
- * taxonomy msgid.
+ * ETags (304, If-Match/412), decides a declared `preconditions` resolver
+ * BEFORE the handler (the write guard: a stale If-Match runs nothing),
+ * honors `ctx.status`, passes opaque bytes through, serves the
+ * well-known description, and rejects only a malformed request object
+ * (`JC1004`); the catalog renders every taxonomy msgid.
  */
 
 import { describe, it } from 'node:test';
@@ -465,6 +466,153 @@ describe('dispatch — HEAD, entity tags, status override, opaque, well-known', 
     assert.strictEqual(seen, controller.signal);
     await server.dispatch({ ...req('GET', '/api/catalog'), signal: /** @type {any} */ ('nope') });
     assert.strictEqual(seen, null);
+  });
+});
+
+describe('dispatch — preconditions: a declared tag resolver decides BEFORE the handler', () => {
+  const SAVE = { revision: 3, product: { id: 1, name: 'x', price: 1 } };
+
+  it('a stale If-Match refuses 412 JC2014 with ZERO handler runs; the released key then succeeds with the right tag', async () => {
+    let writes = 0;
+    const server = serve(
+      { 'product.save': () => { writes += 1; return { id: 1, name: 'x', price: 1 }; } },
+      { preconditions: { 'product.save': () => 'r3' } });
+    const stale = await server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'p1', 'if-match': '"r2"' }));
+    assert.strictEqual(stale.status, 412);
+    assert.strictEqual(json(stale).code, 'JC2014');
+    assert.strictEqual(stale.headers.etag, '"r3"', 'the current tag rides the 412 for recovery');
+    assert.strictEqual(writes, 0, 'the handler never ran');
+    // the pre-handler 412 released the claim retryable — nothing ran, so
+    // the SAME key with the corrected precondition runs fresh, no replay
+    const ok = await server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'p1', 'if-match': '"r3"' }));
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(ok.headers['idempotent-replayed'], undefined);
+    assert.strictEqual(writes, 1);
+  });
+
+  it('If-None-Match on a read answers 304 before the handler; HEAD rides the same path', async () => {
+    let reads = 0;
+    const server = serve(
+      { 'catalog.load': () => { reads += 1; return { revision: 7, products: [] }; } },
+      { preconditions: { 'catalog.load': () => 'r7' } });
+    const cached = await server.dispatch(req('GET', '/api/catalog', { 'if-none-match': '"r7"' }));
+    assert.strictEqual(cached.status, 304);
+    assert.strictEqual(cached.headers.etag, '"r7"');
+    assert.strictEqual(cached.body, null);
+    assert.strictEqual(reads, 0, 'the representation was never computed');
+    const head = await server.dispatch(req('HEAD', '/api/catalog', { 'if-none-match': '"r7"' }));
+    assert.strictEqual(head.status, 304);
+    assert.strictEqual(reads, 0);
+    const fresh = await server.dispatch(req('GET', '/api/catalog', { 'if-none-match': '"r6"' }));
+    assert.strictEqual(fresh.status, 200);
+    assert.strictEqual(fresh.headers.etag, '"r7"', 'a read carries the resolved tag even unconditionally');
+    assert.strictEqual(reads, 1);
+  });
+
+  it('on a pass the handler runs: a command echoes no pre-state tag, a read carries the resolved one, ctx.etag re-arms it', async () => {
+    const server = serve(
+      {
+        'product.save': () => ({ id: 1, name: 'x', price: 1 }),
+        'catalog.load': (/** @type {any} */ input, /** @type {any} */ ctx) => { ctx.etag('r8'); return { revision: 8, products: [] }; },
+      },
+      { preconditions: { 'product.save': () => 'r3', 'catalog.load': () => 'r7' } });
+    const put = await server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'p2', 'if-match': '"r3"' }));
+    assert.strictEqual(put.status, 200);
+    assert.strictEqual(put.headers.etag, undefined, 'a mutated representation must not echo its pre-state tag (RFC 9110 §8.8.3)');
+    const get = await server.dispatch(req('GET', '/api/catalog', { 'if-none-match': '"r6"' }));
+    assert.strictEqual(get.status, 200);
+    assert.strictEqual(get.headers.etag, 'W/"r8"', "the handler's own ctx.etag re-arms the RESPONSE tag only");
+  });
+
+  it('a null resolution: If-Match (and *) refuse with nothing run; If-None-Match * proceeds — the create-guard', async () => {
+    let writes = 0;
+    const server = serve(
+      { 'product.remove': () => { writes += 1; return true; } },
+      { preconditions: { 'product.remove': () => null } });
+    for (const header of [{ 'if-match': '"any"' }, { 'if-match': '*' }]) {
+      const r = await server.dispatch(jsonReq('POST', '/product.remove', { id: 1 }, header));
+      assert.strictEqual(r.status, 412);
+      assert.strictEqual(json(r).code, 'JC2014');
+      assert.strictEqual(r.headers.etag, undefined, 'no current representation, no tag to offer');
+    }
+    assert.strictEqual(writes, 0);
+    const create = await server.dispatch(jsonReq('POST', '/product.remove', { id: 1 }, { 'if-none-match': '*' }));
+    assert.strictEqual(create.status, 200);
+    assert.strictEqual(writes, 1);
+  });
+
+  it('a weak resolved tag never satisfies If-Match; a bare string resolves STRONG (the deliberate ctx.etag asymmetry)', async () => {
+    let writes = 0;
+    const weak = serve(
+      { 'product.remove': () => { writes += 1; return true; } },
+      { preconditions: { 'product.remove': () => ({ tag: 'w1', strong: false }) } });
+    const im = await weak.dispatch(jsonReq('POST', '/product.remove', { id: 1 }, { 'if-match': 'W/"w1"' }));
+    assert.strictEqual(im.status, 412);
+    assert.strictEqual(im.headers.etag, 'W/"w1"');
+    const inm = await weak.dispatch(jsonReq('POST', '/product.remove', { id: 1 }, { 'if-none-match': '"w1"' }));
+    assert.strictEqual(inm.status, 412, 'If-None-Match compares weakly, so the weak tag still guards');
+    assert.strictEqual(writes, 0);
+    const strong = serve(
+      { 'product.remove': () => { writes += 1; return true; } },
+      { preconditions: { 'product.remove': () => 's1' } });
+    const ok = await strong.dispatch(jsonReq('POST', '/product.remove', { id: 1 }, { 'if-match': '"s1"' }));
+    assert.strictEqual(ok.status, 200, 'a bare string is a strong tag: If-Match can succeed on it');
+    assert.strictEqual(writes, 1);
+  });
+
+  it('a command without a conditional header never consults its resolver', async () => {
+    let resolves = 0;
+    const server = serve(
+      { 'product.remove': () => true },
+      { preconditions: { 'product.remove': () => { resolves += 1; return 'r1'; } } });
+    const r = await server.dispatch(jsonReq('POST', '/product.remove', { id: 1 }));
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(resolves, 0);
+  });
+
+  it('a resolver that throws, rejects or answers a bad shape is JC2008, observed, and the claim is released retryable', async () => {
+    /** @type {unknown[]} */
+    const seen = [];
+    let mode = 'throw';
+    let writes = 0;
+    const server = serve(
+      { 'product.save': () => { writes += 1; return { id: 1, name: 'x', price: 1 }; } },
+      {
+        onError: (/** @type {unknown} */ err) => { seen.push(err); },
+        preconditions: { 'product.save': () => {
+          if (mode === 'ok') return 'r3';
+          if (mode === 'throw') throw new Error('boom');
+          if (mode === 'reject') return Promise.reject(new Error('boom async'));
+          return /** @type {any} */ (42);
+        } },
+      });
+    for (const m of ['throw', 'reject', 'shape']) {
+      mode = m;
+      const r = await server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'f1', 'if-match': '"r3"' }));
+      assert.strictEqual(r.status, 500, m);
+      assert.strictEqual(json(r).code, 'JC2008', m);
+    }
+    assert.strictEqual(writes, 0);
+    assert.strictEqual(seen.length, 3);
+    mode = 'ok'; // each fault released the key retryable: the same key finally runs
+    const ok = await server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'f1', 'if-match': '"r3"' }));
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(writes, 1);
+  });
+
+  it('JC1001 — preconditions must name operations, hold functions, and never sit on a subscribe or opaque operation', () => {
+    for (const bad of [5, 'x', []]) {
+      assert.throws(() => serve({}, { preconditions: bad }), (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001');
+    }
+    assert.throws(() => serve({}, { preconditions: { 'nope.op': () => 'a' } }),
+      (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001' && /nope\.op/.test(err.message));
+    assert.throws(() => serve({}, { preconditions: { 'catalog.load': 5 } }),
+      (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001');
+    assert.throws(() => serve({}, { preconditions: { 'image.bytes': () => 'a' } }),
+      (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001' && /opaque/.test(err.message));
+    const sub = compileContract({ $contract: '0.1', operations: { feed: { kind: 'subscribe', output: true } } });
+    assert.throws(() => serveHttp(sub, { feed: () => null }, { preconditions: { feed: () => 'a' } }),
+      (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001' && /subscribe/.test(err.message));
   });
 });
 

@@ -184,7 +184,7 @@ the resolved value and marks it inferred.
 |---|---|---|---|
 | `task` | `switch` \| `exhaust` \| `concat` \| `parallel` | `switch` for a read or a subscribe, `exhaust` for a command | Which task mode a host effect runs the operation in: replace an in-flight attempt, let the first one finish, queue, or run concurrently. A **subscribe MUST be `switch`** (`JC0018`) — a subscription slot is replaced, never queued. |
 | `idempotency` | `none` \| `optional` \| `required` | `none` | Whether a command carries an idempotency key. A **read MUST be `none`** (`JC0014`); a **subscribe MUST be `none`** (`JC0020`). |
-| `revision` | `"input:<json-pointer>"` | absent (`null`) | Where in the input the revision a command asserts lives, as an RFC 6901 pointer after `input:` (`JC0014` on malformed). The operation MUST declare `input`, and the pointer's **first reference token** MUST name a member of `input.properties` (`JC0014` otherwise — "revision points at '/x' but input declares no member 'x'"); deeper tokens are not checked (a member's schema may be a `$ref` or open), and the empty pointer (`"input:"`) addresses the whole input. |
+| `revision` | `"input:<json-pointer>"` | absent (`null`) | Where in the input the revision a command asserts lives, as an RFC 6901 pointer after `input:` (`JC0014` on malformed). The operation MUST declare `input`, and the pointer's **first reference token** MUST name a member of `input.properties` (`JC0014` otherwise — "revision points at '/x' but input declares no member 'x'"); deeper tokens are not checked (a member's schema may be a `$ref` or open), and the empty pointer (`"input:"`) addresses the whole input. Distinct from the **contract revision** (`contract.revision()`, `describe().revision`, the client's `meta.revision` — the hash of the public projection, §14): `policy.revision` names the *resource* revision a command asserts, and no binding reads it at runtime — a `preconditions` resolver (§7.5) or the handler's own domain comparison is how a server enforces it. |
 | `cache` | `none` \| `revision` | `none` | Whether a read's result may be cached by revision. |
 | `limits.maxBodyBytes` | positive integer | `1048576` | The request-body ceiling a server binding enforces. |
 | `errors.details` | `none` \| `paths` \| `full` | `paths` | How much of a validation failure crosses the wire: nothing, instance path + keyword, or the raw validator errors. |
@@ -535,7 +535,7 @@ is `JC2008`.
    every matched operation, opaque and body-less included.
 4. **Opaque** → the transport input validated as in step 8 when no
    member is body-located (`JC2006`), then the raw handler through the
-   same boundary as step 10; done.
+   same boundary as step 11; done.
 5. **Media.** A body-carrying operation (a body-located member or a
    whole-body member) with a non-empty body requires a `content-type`
    whose `type/subtype` is the operation's `http.media` (parameters
@@ -571,26 +571,42 @@ is `JC2008`.
 9. **Idempotency** when `policy.idempotency !== "none"` (§8): a missing
    `Idempotency-Key` is `JC2007` under `required` and runs plainly under
    `optional`; otherwise the input is hashed and the ledger claimed.
-10. **The handler**, through **one uniform promise boundary** — a
+10. **Preconditions, opt-in** (§7.5): when the operation has a
+    `preconditions` resolver, the CURRENT tag is resolved BEFORE the
+    handler — a command consults it only under a conditional header, a
+    safe method always. `If-Match` first (strong comparison): a
+    mismatch, or a `null` resolution (`*` included), is `JC2014` with
+    **zero handler invocations** — on a claimed command the key is
+    released retryable, nothing ran; then `If-None-Match` (weak): a
+    match answers `304` before the handler on GET/HEAD and `JC2014` on
+    other methods, while a `null` resolution passes it — the
+    create-guard. On a pass a safe method arms the resolved tag (the
+    handler may re-arm), a command arms nothing, and step 13's
+    comparisons stand down. The claim (step 9) comes FIRST: a committed
+    key replays before the resolver runs.
+11. **The handler**, through **one uniform promise boundary** — a
     synchronous throw, a non-promise return and a rejection settle
     alike. A `ContractFailure` (from `ctx.fail`) or a thrown
     `ContractRuntimeError` with a declared code → the declared error
     response; anything else → `JC2008`, its cause handed to `onError`.
     A value whose `then` accessor throws is a rejection here — the
     hostile-value case of `JC2008`.
-11. **Output validation** (`validateOutput: "always"`, the default): the
+12. **Output validation** (`validateOutput: "always"`, the default): the
     value against the operation's output validator → `JC2010` on failure
     or on a throwing accessor; the validator's errors reach `onError`,
     never the wire. `"never"` is a declared downgrade
     (`capabilities.validatedOutput: false`).
-12. **Entity tags** when the handler armed one (§7.5): `If-Match` first
-    (strong comparison; mismatch → `JC2014`), then `If-None-Match` (weak
-    comparison; match → `304` on GET/HEAD, `JC2014` on other methods).
-    Because the tag is known only after the handler runs, both are
-    evaluated **after** step 10 and only when a tag was armed — a
-    handler that wants a pre-execution precondition compares
-    `ctx.headers["if-match"]` itself.
-13. **Serialize.** `JSON.stringify(value)`; a value JSON cannot carry
+13. **Entity tags** when the handler armed one and step 10 did not
+    already decide (§7.5): `If-Match` first (strong comparison; mismatch
+    → `JC2014`), then `If-None-Match` (weak comparison; match → `304` on
+    GET/HEAD, `JC2014` on other methods). Because the tag is known only
+    after the handler runs, both are evaluated **after** step 11 and
+    only when a tag was armed — **a cache device, never a write guard**:
+    a stale `If-Match` here means the handler already ran, and on a
+    claimed command the 412 is recorded non-retryable (§8). The
+    pre-handler guard is the `preconditions` option (step 10), or the
+    handler's own comparison of `ctx.headers["if-match"]`.
+14. **Serialize.** `JSON.stringify(value)`; a value JSON cannot carry
     (a cycle, a BigInt) is `JC2010`; `undefined` answers no body. Status
     is `ctx.status()` or `http.status`; headers `content-type: <media>;
     charset=utf-8` (when a body), `x-jaren-trace`, `etag` when armed;
@@ -702,13 +718,48 @@ the server's; `x-attempt` or any client attempt id is never read either.
 
 ### §7.5 Entity tags and conditionals
 
-`ctx.etag(tag)` arms a weak tag (`etag: W/"tag"`), `ctx.etag(tag, {
-strong: true })` a strong one (`etag: "tag"`). `If-None-Match` is
-compared weakly (`*` matches; `W/` indicators are ignored) → `304` with
-the `etag` header and no body on GET/HEAD, `412` (`JC2014`) on other
-methods; `If-Match` is compared strongly (`*` matches; a weak candidate
-or a weak armed tag never matches) → `412` on a mismatch. Both are
-evaluated after the handler ran, and only when it armed a tag.
+**Armed tags — post-handler, a cache device.** `ctx.etag(tag)` arms a
+weak tag (`etag: W/"tag"`), `ctx.etag(tag, { strong: true })` a strong
+one (`etag: "tag"`). `If-None-Match` is compared weakly (`*` matches;
+`W/` indicators are ignored) → `304` with the `etag` header and no body
+on GET/HEAD, `412` (`JC2014`) on other methods; `If-Match` is compared
+strongly (`*` matches; a weak candidate or a weak armed tag never
+matches) → `412` on a mismatch. Both are evaluated after the handler
+ran, and only when it armed a tag — so **this path is never a write
+guard**: a command's handler has already run, and may already have
+mutated, when its stale `If-Match` answers 412, and a handler that arms
+no tag has its conditionals silently pass. On a claimed command such a
+post-handler 412 is recorded non-retryable with its response (§8), so a
+blind retry replays the 412 instead of mutating again.
+
+**The `preconditions` option — pre-handler, the write guard.**
+`serveHttp(contract, handlers, { preconditions: { '<op>': (input, ctx)
+=> … } })` declares the CURRENT entity-tag resolver of an operation
+(refused at construction, `JC1001`, on a subscribe or opaque
+operation). The resolver answers a plain string — a **strong** tag (the
+deliberate asymmetry with `ctx.etag`, whose bare form is weak:
+`If-Match` needs strong comparison to mean anything) — or `{ tag,
+strong }`, or `null` for "no current representation", or a promise of
+any of those; a throw, a rejection or another shape is the host's fault
+(`JC2008`, a claimed key released retryable). A command consults its
+resolver only under a conditional header; a safe method always
+resolves, so its response carries the tag. The decision runs BEFORE the
+handler: `If-Match` first (strong; RFC 9110 §13.2.2) — a mismatch or a
+`null` resolution (`*` included) refuses `JC2014` with **zero handler
+invocations**, the current tag riding the 412's `etag` header for
+recovery; then `If-None-Match` (weak) — a match answers `304` before
+the handler on GET/HEAD (the cached-read win: the representation is
+never computed) and `JC2014` on other methods, while a `null`
+resolution passes it (`If-None-Match: *` is the create-guard). On a
+pass, a safe method arms the resolved tag — the handler's own
+`ctx.etag` then re-arms the RESPONSE tag only — and a command arms
+nothing (a mutated representation must not echo its pre-state tag, RFC
+9110 §8.8.3). Idempotency composes claim-first (§8): a committed key
+replays before the resolver runs, and a pre-handler 412 releases the
+key retryable — nothing ran. This is how a `policy.revision` command
+becomes HTTP-enforceable (§3.1): resolve the resource's current
+revision into a tag, and the domain transaction stays the final
+authority.
 
 ### §7.6 HEAD, the well-known path, options
 
@@ -720,10 +771,12 @@ answers `describe()` — `revision: null` until the revision lands, `compat`
 present — for negotiation. `trace` (default `crypto.randomUUID`) generates
 the server trace; `scope(ctx)` derives the idempotency scope (§8);
 `partial` allows missing handlers; `validateOutput` is `"always" |
-"never"`; `errorBody(wire, ctx)` and `onError(err, ctx)` are the two host
-hooks (`ctx` is `null` before an operation is matched); `catalog` is a
-message catalog (templates or compiled renderers) consulted before the
-English one; `now` is the clock stamped into ledger claims.
+"never"`; `preconditions` maps operation ids to pre-handler tag
+resolvers (§7.5); `errorBody(wire, ctx)` and `onError(err, ctx)` are the
+two host hooks (`ctx` is `null` before an operation is matched);
+`catalog` is a message catalog (templates or compiled renderers)
+consulted before the English one; `now` is the clock stamped into ledger
+claims.
 
 ## §8 Idempotency and the ledger
 
@@ -757,8 +810,12 @@ retryable); `started` and not expired → `in-progress` (409, `retry-after:
 key may be retried); `failed` and not retryable → `replay` of the stored
 failure. After the handler: a success **commits** the response; a
 declared failure is recorded as **failed** with its response and its
-`retryable`; a server fault (`JC2008`, `JC2010`, `JC2014`) **releases**
-the key as retryable with no response. `now` on a claim is the binding's
+`retryable`; a server fault (`JC2008`, `JC2010`, and a PRE-handler
+`JC2014` from a `preconditions` resolver — nothing ran) **releases** the
+key as retryable with no response; a POST-handler `JC2014` (the handler
+already ran and may have mutated) is recorded as **failed**, not
+retryable, with its 412 — a blind retry under the same key replays the
+412 instead of running the handler again. `now` on a claim is the binding's
 clock (`options.now`), which a ledger may prefer to its own. Opaque
 operations bypass the ledger; reads never carry a key. A ledger that
 throws or rejects is reported to `onError` and the response still goes
@@ -790,6 +847,104 @@ committed` on `commit`, `started → failed` on `fail`, `failed → started`
 on `claim` guarded by `$.context.retryable` — which the memory ledger
 walks exactly.
 
+### §8.1 A durable ledger over `node:sqlite` — an example, not an export
+
+A host that retries commands needs a ledger that survives a restart, and
+it does NOT need `@jarenjs/db` for that: `node:sqlite` is built into
+Node ≥ 24 — the suite's floor — so the ~60 lines below are as
+dependency-free as the package. Two design points carry the semantics:
+`BEGIN IMMEDIATE` makes each `claim` one writer (two processes cannot
+both claim a key), and the ref is the `AUTOINCREMENT` sequence of one
+specific insert — never reused, where a bare SQLite rowid would be — so
+a stale ref can never settle over a record a later claim re-created
+(the memory ledger's object-identity guard, spelled in SQL). Everything
+else mirrors `createMemoryLedger` exactly: expiry on `claim` and
+`lookup`, `sweep()` for a host timer, mismatch before status, a
+retryable failure handing the key back, a non-retryable one replaying
+its stored response. Remember the boundary (§8): this ledger
+deduplicates DELIVERY — the domain's own durable records stay
+authoritative for business state.
+
+```js
+import { DatabaseSync } from 'node:sqlite';
+
+/** A durable Ledger over one SQLite file — a host's example, not an export. */
+export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date.now } = {}) {
+  const db = new DatabaseSync(path);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ledger (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE, op TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL,
+      hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('started', 'committed', 'failed')),
+      response TEXT, retryable INTEGER,
+      createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS ledger_by_expires ON ledger (expiresAt);
+    CREATE INDEX IF NOT EXISTS ledger_by_status ON ledger (status);`);
+  const one = db.prepare('SELECT * FROM ledger WHERE id = ?');
+  const put = db.prepare("INSERT INTO ledger (id, op, scope, key, hash, status, createdAt, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, 'started', ?, ?, ?)");
+  const drop = db.prepare('DELETE FROM ledger WHERE id = ?');
+  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE seq = ? AND status = 'started'");
+  const reap = db.prepare('DELETE FROM ledger WHERE expiresAt <= ?');
+  const stored = (row) => (row.response === null ? null : JSON.parse(row.response));
+  return {
+    claim({ op, scope, key, hash, now }) {
+      const at = typeof now === 'number' ? now : clock();
+      const id = `${op}|${scope}|${key}`;
+      db.exec('BEGIN IMMEDIATE'); // one writer: two processes cannot both claim the key
+      try {
+        const row = one.get(id);
+        if (row !== undefined) {
+          if (row.expiresAt <= at) drop.run(id);
+          else if (row.hash !== hash) { db.exec('COMMIT'); return { state: 'mismatch' }; }
+          else if (row.status === 'started') { db.exec('COMMIT'); return { state: 'in-progress' }; }
+          else if (row.status === 'committed') { db.exec('COMMIT'); return { state: 'replay', response: stored(row) }; }
+          else if (row.retryable !== 1 && row.response !== null) { db.exec('COMMIT'); return { state: 'replay', response: stored(row) }; }
+          else drop.run(id); // a retryable failure: the key runs again
+        }
+        const ref = { seq: put.run(id, op, scope, key, hash, at, at, at + ttlMs).lastInsertRowid };
+        db.exec('COMMIT');
+        return { state: 'new', ref };
+      }
+      catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
+    commit(ref, response) {
+      settle.run('committed', JSON.stringify(response), null, clock(), ref.seq);
+    },
+    fail(ref, retryable, response) {
+      settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, clock(), ref.seq);
+    },
+    lookup({ op, scope, key }) {
+      const row = one.get(`${op}|${scope}|${key}`);
+      if (row === undefined) return null;
+      if (row.expiresAt <= clock()) {
+        drop.run(row.id);
+        return null;
+      }
+      const record = { ...row, response: stored(row), retryable: row.retryable === null ? null : row.retryable === 1 };
+      delete record.seq; // the record shape is exactly LedgerRecord (§8)
+      return record;
+    },
+    sweep: () => Number(reap.run(clock()).changes),
+    close: () => db.close(),
+  };
+}
+```
+
+The executable copy — the same listing, plus the `@ts-check` casts a
+test file carries — lives in `test/contract/ledger-sqlite.test.js`,
+which proves the memory-ledger contract over it (claim/commit/replay,
+mismatch, in-progress, retryable re-run, non-retryable replay), expiry
+and `sweep`, the stale-ref identity, `serveHttp` idempotency
+end-to-end, and durability across a second open of the same file. It is
+deliberately NOT an export of this package: the `Ledger` interface is
+the product, and an exported implementation would make `node:sqlite`'s
+locking part of this package's API surface. Scope keys by installation
+or principal through `options.scope`, give expiry a real TTL, and put
+`sweep()` on a host timer.
+
 ## §9 Adapters
 
 Two dependency-free, structurally typed adapters put a dispatcher behind
@@ -817,7 +972,10 @@ the platform:
 
 Fastify, Hono and Express are recipes in the README, each ≤15 lines and
 executed by a test that imports the framework from the benchmark
-workspace only — no framework is a dependency of this package.
+workspace only — no framework is a dependency of this package. Each
+recipe rides one of the two adapters (Fastify hijacks the raw
+request/response pair before any parser runs), so body limits, SSE
+streaming and peer abort behave identically through all three.
 
 ## §10 The HTTP client binding
 
@@ -1275,8 +1433,9 @@ operation's input schema or `null`, `seq` to a non-negative integer).
 
 Everything a consumer wants **beside** the runtime is a projection of the
 same compiled contract (`@jarenjs/contract/project` — the one subpath of
-this package that imports `@jarenjs/emit`, so a bundle that never
-projects never carries it): the public projection every other artifact
+this package that imports `@jarenjs/emit`, and the CLI loads it lazily,
+only for `types` and `docs`, so a bundle that never projects never
+carries it): the public projection every other artifact
 is built on (§12.1), OpenAPI 3.1 (§12.2), TypeScript declarations
 (§12.3), Markdown reference documentation (§12.4) and AI tool
 definitions (§12.5), with the `jaren-contract` CLI (§12.6) writing and
