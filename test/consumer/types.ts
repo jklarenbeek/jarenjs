@@ -1126,6 +1126,58 @@ async function ledgerBlock() {
 }
 void ledgerBlock;
 
+// The ledger's record typedefs are the compiler-facing half of its
+// schemas — added after the first strict-TS consumer (the tangleai
+// rebuild, 2026-08-24) had to cast `addMemory`'s former `{}` return to
+// read its own record back. This block is the promise that no consumer
+// needs that cast again: the write unions narrow on `'error' in`, the
+// reads carry the record shape, and a rejection is readable as itself.
+import type { LedgerMemory, LedgerSkill, LedgerRejection } from '@jarenjs/ai/schemas/ledger';
+
+async function ledgerTypedBlock() {
+  const ledger = createLedger();
+
+  const stored = await ledger.addMemory({ text: 'a fact', evidence: 'a source' });
+  if ('errors' in stored) {
+    const rejection: LedgerRejection = stored;
+    const why: string = rejection.error;
+    void why;
+  }
+  else {
+    const record: LedgerMemory = stored;
+    const evidence: string = record.evidence;
+    void evidence;
+  }
+
+  const recalled = await ledger.recall({ tags: ['t'] });
+  if (Array.isArray(recalled)) {
+    const newest: LedgerMemory | undefined = recalled[0];
+    void newest?.at;
+  }
+  else {
+    const why: string = recalled.error;
+    void why;
+  }
+
+  const one = await ledger.getMemory('memory-1');
+  const text: string | undefined = one?.text;
+  void text;
+
+  const skills = await ledger.listSkills();
+  const firstSkill: LedgerSkill | undefined = skills[0];
+  void firstSkill?.instructions;
+}
+void ledgerTypedBlock;
+
+// A schema held as a plain unknown-map — the natural type for a
+// document that crossed a package boundary — is accepted at the
+// validator's boundary methods without a cast (`JSONSchemaLike`).
+const heldSchema: Record<string, unknown> = { type: 'string', minLength: 1 };
+const heldValidator = new JarenValidator();
+heldValidator.addSchema(heldSchema, 'https://example.com/held');
+const heldCheck = heldValidator.compile(heldSchema);
+void heldCheck('data');
+
 // @jarenjs/ai — compaction that moves: the agent takes the ledger, and
 // the address scheme it writes is public so a host can read one back
 // without re-deriving the syntax.

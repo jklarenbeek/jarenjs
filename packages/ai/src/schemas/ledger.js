@@ -156,3 +156,74 @@ export const LEDGER_SCHEMAS = {
   skill: SKILL_SCHEMA,
   slot: SLOT_SCHEMA,
 };
+
+/*
+ * The record shapes, as named types beside the schemas that enforce them.
+ *
+ * These exist because a strictly-typed consumer (the first one was the
+ * tangleai rebuild, 2026-08-24) otherwise hand-writes its own copy of
+ * "what addMemory returns" and the copy drifts. The schema stays the
+ * runtime contract; the typedef is the same statement made to the
+ * compiler, and the two live in one file so a change to one is a diff
+ * touching the other's neighbourhood.
+ */
+
+/**
+ * One evidenced progress entry on the active goal.
+ * @typedef {object} LedgerProgressEntry
+ * @property {string} at RFC 3339
+ * @property {string} note
+ * @property {string} evidence
+ */
+
+/**
+ * The active (or archived) objective — see {@link GOAL_SCHEMA}.
+ * @typedef {object} LedgerGoal
+ * @property {string} objective
+ * @property {string} createdAt RFC 3339
+ * @property {'active'|'done'|'abandoned'|'superseded'} status
+ * @property {LedgerProgressEntry[]} progress
+ */
+
+/**
+ * A stored memory — see {@link MEMORY_SCHEMA}.
+ * @typedef {object} LedgerMemory
+ * @property {string} id
+ * @property {string} text
+ * @property {string} evidence
+ * @property {string[]} tags
+ * @property {string} at RFC 3339
+ */
+
+/**
+ * A stored skill — see {@link SKILL_SCHEMA}.
+ * @typedef {object} LedgerSkill
+ * @property {string} id
+ * @property {string} name
+ * @property {string} when
+ * @property {string} instructions
+ * @property {string[]} tools
+ * @property {string} at RFC 3339
+ */
+
+/**
+ * A slot's metadata — see {@link SLOT_SCHEMA}. Never the content.
+ * @typedef {object} LedgerSlot
+ * @property {string} name
+ * @property {string} kind
+ * @property {number} size
+ * @property {string} excerpt
+ * @property {string} at RFC 3339
+ * @property {number} [count]
+ */
+
+/**
+ * The one rejection shape every schema-guarded write answers with —
+ * produced by `invalidInput` in `check.js`, named here because this is
+ * where a consumer of the ledger's API goes looking for "what comes
+ * back when a write is refused".
+ * @typedef {object} LedgerRejection
+ * @property {string} error
+ * @property {any[]} errors
+ * @property {any} inputSchema
+ */

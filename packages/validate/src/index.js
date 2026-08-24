@@ -169,6 +169,19 @@ export { TraverseOptions };
  */
 
 /**
+ * A schema as a validator boundary ACCEPTS it. {@link JSONSchema}
+ * documents what a schema IS — typed keywords, open for extensions —
+ * but a schema held as a plain `Record<string, unknown>` map (the
+ * natural type for a document that crossed a wire or a package
+ * boundary) does not assign to that keyword intersection under strict
+ * TypeScript, and forcing the consumer to cast at every `compile` and
+ * `addSchema` call site teaches them to cast, which is worse than the
+ * looser parameter. The boundary methods accept this union; both arms
+ * are treated identically at runtime, which was always true.
+ * @typedef {JSONSchema | Record<string, unknown>} JSONSchemaLike
+ */
+
+/**
  * A format compiler function.
  * Called once per schema location at compile time with the compiling
  * ValidationObject and the schema that declares the format; returns the
@@ -1420,7 +1433,7 @@ export class JarenValidator {
    * Adds schema(s) to the validator instance.
    * This method does not compile schemas - it only registers them for reference.
    * Dependencies can be added in any order, and circular dependencies are supported.
-   * @param {JSONSchema | boolean | (JSONSchema | boolean)[]} schema - The schema(s) to add
+   * @param {JSONSchemaLike | boolean | (JSONSchemaLike | boolean)[]} schema - The schema(s) to add
    * @param {string} [key] - Optional key/URI to register the schema under
    * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
    * @example
@@ -1569,7 +1582,7 @@ export class JarenValidator {
   /**
    * Adds meta-schema(s) that can be used to validate schemas.
    * Meta-schemas are schemas that describe the structure of valid JSON schemas.
-   * @param {JSONSchema | boolean | (JSONSchema | boolean)[]} schema - The meta-schema(s) to add
+   * @param {JSONSchemaLike | boolean | (JSONSchemaLike | boolean)[]} schema - The meta-schema(s) to add
    * @param {string} [key] - Optional key/URI for the meta-schema
    * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
    * @example
@@ -1623,7 +1636,7 @@ export class JarenValidator {
   /**
    * Validates a schema against a registered meta-schema.
    * This is used to ensure schemas are valid according to the JSON Schema specification.
-   * @param {JSONSchema | boolean} schema - The schema to validate
+   * @param {JSONSchemaLike | boolean} schema - The schema to validate
    * @returns {boolean} True if the schema is valid
    * @example
    * validator.addMetaSchema(draft7MetaSchema);
@@ -1806,8 +1819,8 @@ export class JarenValidator {
    * what a checked contract wrapper wants; pair it with a schema-to-type
    * generator if you need the shape derived mechanically.
    * @template [T=unknown]
-   * @param {JSONSchema | boolean} schema - The schema to compile
-   * @param {(JSONSchema | boolean)[]} [schemas] - Additional schemas to reference during compilation
+   * @param {JSONSchemaLike | boolean} schema - The schema to compile
+   * @param {(JSONSchemaLike | boolean)[]} [schemas] - Additional schemas to reference during compilation
    * @returns {TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function
    * @example
    * const validate = validator.compile({

@@ -27,9 +27,9 @@
  *    accept later, because a bad one can be undone without a human
  *    reading the diff.
  *
- * Nothing consumes this yet beyond its own tests; it exists first so
- * that the things which will consume it build on one implementation
- * rather than two.
+ * Its consumers today: the agent's compaction archive, the environment's
+ * slots, refinement's patchable state, and the website assistant's
+ * durable memory — all on this one implementation.
  */
 
 import { JarenValidator } from '@jarenjs/validate';
@@ -38,6 +38,12 @@ import { checkOutcome, invalidInput } from './check.js';
 import { createMemoryStorage } from './storage/memory.js';
 import { LEDGER_SCHEMAS } from './schemas/ledger.js';
 import { excerpt } from '@jarenjs/core/chunk';
+
+/** @typedef {import('./schemas/ledger.js').LedgerGoal} LedgerGoal */
+/** @typedef {import('./schemas/ledger.js').LedgerMemory} LedgerMemory */
+/** @typedef {import('./schemas/ledger.js').LedgerSkill} LedgerSkill */
+/** @typedef {import('./schemas/ledger.js').LedgerSlot} LedgerSlot */
+/** @typedef {import('./schemas/ledger.js').LedgerRejection} LedgerRejection */
 
 /** The key space. State and snapshots are separate prefixes on purpose:
  * a rollback wipes state and must not take the other snapshots with it. */
@@ -69,6 +75,9 @@ const seq = (n) => String(n).padStart(6, '0');
  * the way to storage and an unevidenced memory is durable. Stripping
  * first makes what is validated exactly what would be stored.
  * @param {Record<string, any>} record
+ * @returns {any} the stripped record — `any` so each write site's declared
+ *   return type (the record typedef) is the statement that binds, not an
+ *   inference from this generic helper
  */
 function defined(record) {
   const out = {};
@@ -188,7 +197,7 @@ export function createLedger(options = {}) {
    * survives the change.
    * @param {{ objective: string, createdAt?: string, status?: string,
    *   progress?: any[] }} input
-   * @returns {Promise<any>} the stored goal, or a rejection
+   * @returns {Promise<LedgerGoal | LedgerRejection>} the stored goal, or a rejection
    */
   async function setGoal(input) {
     const goal = defined({
@@ -210,12 +219,18 @@ export function createLedger(options = {}) {
     return goal;
   }
 
-  /** The active objective, or null. */
+  /**
+   * The active objective, or null.
+   * @returns {Promise<LedgerGoal | null>}
+   */
   async function getGoal() {
     return (await storage.get(KEYS.goal)) ?? null;
   }
 
-  /** Every superseded goal, oldest first. */
+  /**
+   * Every superseded goal, oldest first.
+   * @returns {Promise<LedgerGoal[]>}
+   */
   async function listArchivedGoals() {
     return readAll(KEYS.goalArchive);
   }
@@ -225,6 +240,9 @@ export function createLedger(options = {}) {
    * only: nothing here reads a note, scores it, or decides that a goal
    * is finished — that judgement belongs to whatever drives the agent.
    * @param {{ note: string, evidence: string, at?: string }} entry
+   * @returns {Promise<LedgerGoal | LedgerRejection | { error: string }>}
+   *   the goal with the entry appended; the bare `{ error }` is "no
+   *   active goal", which is a state problem, not a validation one
    */
   async function recordProgress(entry) {
     const goal = await storage.get(KEYS.goal);
@@ -247,6 +265,7 @@ export function createLedger(options = {}) {
    * Change the active goal's status without superseding it — how a run
    * records that its objective finished or was abandoned.
    * @param {'active'|'done'|'abandoned'|'superseded'} status
+   * @returns {Promise<LedgerGoal | LedgerRejection | { error: string }>}
    */
   async function setGoalStatus(status) {
     const goal = await storage.get(KEYS.goal);
@@ -268,6 +287,9 @@ export function createLedger(options = {}) {
    * ledger of guesses is worse than an empty one.
    * @param {{ id?: string, text: string, evidence: string,
    *   tags?: string[], at?: string }} input
+   * @returns {Promise<LedgerMemory | LedgerRejection>} the record as
+   *   stored (defaults filled, undefined members stripped), or the
+   *   rejection saying why nothing was
    */
   async function addMemory(input) {
     const memory = defined({
@@ -283,17 +305,27 @@ export function createLedger(options = {}) {
     return memory;
   }
 
-  /** One memory by id, or null. */
+  /**
+   * One memory by id, or null.
+   * @param {string} id
+   * @returns {Promise<LedgerMemory | null>}
+   */
   async function getMemory(id) {
     return (await storage.get(`${KEYS.memory}${id}`)) ?? null;
   }
 
-  /** Every memory, newest first. */
+  /**
+   * Every memory, newest first.
+   * @returns {Promise<LedgerMemory[]>}
+   */
   async function listMemories() {
     return byRecency(await readAll(KEYS.memory));
   }
 
-  /** Remove a memory. Answers whether one was there. */
+  /**
+   * Remove a memory. Answers whether one was there.
+   * @param {string} id
+   */
   async function deleteMemory(id) {
     const key = `${KEYS.memory}${id}`;
     const existed = (await storage.get(key)) !== undefined;
@@ -305,6 +337,7 @@ export function createLedger(options = {}) {
    * Store a reusable recipe.
    * @param {{ id?: string, name: string, when: string,
    *   instructions: string, tools?: string[], at?: string }} input
+   * @returns {Promise<LedgerSkill | LedgerRejection>}
    */
   async function addSkill(input) {
     const skill = defined({
@@ -321,17 +354,27 @@ export function createLedger(options = {}) {
     return skill;
   }
 
-  /** One skill by id, or null. */
+  /**
+   * One skill by id, or null.
+   * @param {string} id
+   * @returns {Promise<LedgerSkill | null>}
+   */
   async function getSkill(id) {
     return (await storage.get(`${KEYS.skill}${id}`)) ?? null;
   }
 
-  /** Every skill, newest first. */
+  /**
+   * Every skill, newest first.
+   * @returns {Promise<LedgerSkill[]>}
+   */
   async function listSkills() {
     return byRecency(await readAll(KEYS.skill));
   }
 
-  /** Remove a skill. Answers whether one was there. */
+  /**
+   * Remove a skill. Answers whether one was there.
+   * @param {string} id
+   */
   async function deleteSkill(id) {
     const key = `${KEYS.skill}${id}`;
     const existed = (await storage.get(key)) !== undefined;
@@ -416,6 +459,9 @@ export function createLedger(options = {}) {
   /**
    * Memories relevant to a query, newest first.
    * @param {{ tags?: string[], where?: any, limit?: number }} [query]
+   * @returns {Promise<LedgerMemory[] | { error: string }>} the `{ error }`
+   *   is a predicate problem (no seam, or one that does not compile) —
+   *   content, not a crash
    */
   async function recall(query = {}) {
     return retrieve(await readAll(KEYS.memory), query);
@@ -425,6 +471,7 @@ export function createLedger(options = {}) {
    * Skills relevant to a query, newest first — what a host composes into
    * a system prompt.
    * @param {{ tags?: string[], where?: any, limit?: number }} [query]
+   * @returns {Promise<LedgerSkill[] | { error: string }>}
    */
   async function recallSkills(query = {}) {
     return retrieve(await readAll(KEYS.skill), query);
@@ -444,6 +491,7 @@ export function createLedger(options = {}) {
    * @param {{ kind?: string, at?: string, count?: number }} [meta]
    *   `count` is what the content HOLDS (lines, records, pieces) where
    *   the writer knows it; absent where it does not, rather than guessed.
+   * @returns {Promise<LedgerSlot | LedgerRejection>}
    */
   async function putSlot(name, content, meta = {}) {
     const text = typeof content === 'string' ? content : JSON.stringify(content ?? null);
@@ -462,22 +510,36 @@ export function createLedger(options = {}) {
     return slot;
   }
 
-  /** A slot's metadata — never its content. */
+  /**
+   * A slot's metadata — never its content.
+   * @param {string} name
+   * @returns {Promise<LedgerSlot | null>}
+   */
   async function getSlot(name) {
     return (await storage.get(`${KEYS.slot}${name}`)) ?? null;
   }
 
-  /** A slot's content, or undefined. The one call that returns the bytes. */
+  /**
+   * A slot's content, or undefined. The one call that returns the bytes.
+   * @param {string} name
+   * @returns {Promise<string | undefined>}
+   */
   async function readSlot(name) {
     return storage.get(`${KEYS.slotContent}${name}`);
   }
 
-  /** Every slot's metadata, newest first. */
+  /**
+   * Every slot's metadata, newest first.
+   * @returns {Promise<LedgerSlot[]>}
+   */
   async function listSlots() {
     return byRecency(await readAll(KEYS.slot));
   }
 
-  /** Remove a slot and its content. Answers whether one was there. */
+  /**
+   * Remove a slot and its content. Answers whether one was there.
+   * @param {string} name
+   */
   async function deleteSlot(name) {
     const key = `${KEYS.slot}${name}`;
     const existed = (await storage.get(key)) !== undefined;
@@ -510,6 +572,7 @@ export function createLedger(options = {}) {
    * created after the snapshot is gone afterwards, which is the only
    * reading of "rollback" that can be relied on.
    * @param {string} token
+   * @returns {Promise<true | { error: string }>}
    */
   async function rollback(token) {
     const entries = await storage.get(`${SNAP}${token}`);
