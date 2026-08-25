@@ -11,6 +11,7 @@
  */
 
 import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
 import * as assert from 'node:assert';
 
 import { from } from '@jarenjs/linq';
@@ -125,5 +126,58 @@ describe('the spatial family runs', () => {
     assert.deepStrictEqual(
       from(rows).where((r) => r.get('at').within(REGION)).select((r) => r.get('at').geohash(5)).toArray(),
       ['u173z']);
+  });
+});
+
+describe('the spatial surface is documented exactly once, in LINQ-FORMAT §4', () => {
+  // the same shape as the operator/§8 membership gate one package over:
+  // the methods the source spells and the row the format publishes must
+  // name the same set, so a sixth spatial method cannot land in one
+  // place — and every method maps to a §8.14 operator the query format
+  // publishes, so the surface cannot name an operator that does not exist
+  const source = readFileSync(new URL('../../packages/linq/src/expression.js', import.meta.url), 'utf8');
+  const format = readFileSync(new URL('../../packages/linq/docs/LINQ-FORMAT.md', import.meta.url), 'utf8');
+  const query = readFileSync(new URL('../../packages/json/docs/QUERY-FORMAT.md', import.meta.url), 'utf8');
+
+  const spatialOperators = new Set([...query.slice(query.indexOf('### 8.14'), query.indexOf('## 9'))
+    .matchAll(/^\| `(\$[a-z-]+)` \|/gm)].map((m) => m[1]));
+
+  /** Every METHODS member that emits an operator, from the source. */
+  const emitted = new Map([...source.matchAll(/\b(\w+): (?:unary|binary)\('(\$[a-z-]+)'\)/g)]
+    .map((m) => [m[1], m[2]]));
+  emitted.set('geohash', '$geohash'); // the optional-arity method is hand-written
+  const spatialMethods = [...emitted].filter(([, op]) => spatialOperators.has(op)).map(([name]) => name);
+
+  /** Every method the source hand-writes (`name(record, …)`), spatial or not. */
+  const handWritten = new Set([...source.matchAll(/^ {2}(\w+)\(record[,)]/gm)].map((m) => m[1]));
+
+  /** The method names §4's spatial row publishes — every backticked
+   * bare identifier that is a METHODS member (the row may name a
+   * non-spatial method as an analogy, `substring`, and that is fine). */
+  const row = format.split('\n').find((line) => line.startsWith('| spatial family (§8.14) |'));
+  const tokens = [...(row ?? '').matchAll(/`([^`]+)`/g)].map((m) => m[1])
+    .filter((token) => !token.includes('$') && !token.includes('.') && !token.includes('{'))
+    .flatMap((token) => token.split(/\s+/))
+    .map((token) => token.replace(/\(.*\)$/, ''))
+    .filter((token) => /^[a-zA-Z]+$/.test(token));
+  const documented = [...new Set(tokens)];
+
+  it('names the same methods in the source and in the format row', () => {
+    assert.ok(row !== undefined, 'LINQ-FORMAT §4 has the spatial row');
+    const unknown = documented.filter((name) => !emitted.has(name) && !handWritten.has(name));
+    assert.deepStrictEqual(unknown, [], 'the row names a method the source does not have');
+    const spatialDocumented = documented.filter((name) => spatialMethods.includes(name));
+    assert.deepStrictEqual(spatialDocumented.sort(), [...spatialMethods].sort(),
+      'the spatial methods the source spells and the ones §4 publishes differ');
+    assert.strictEqual(spatialMethods.length, spatialOperators.size,
+      'one method per §8.14 operator, and every operator has one');
+  });
+
+  it('every spatial method emits an operator §8.14 publishes', () => {
+    for (const name of spatialMethods) {
+      assert.ok(spatialOperators.has(/** @type {string} */ (emitted.get(name))), `${name} emits an unpublished operator`);
+    }
+    assert.deepStrictEqual([...spatialOperators].filter((op) => ![...emitted.values()].includes(op)), [],
+      'a §8.14 operator with no method on the fluent surface');
   });
 });

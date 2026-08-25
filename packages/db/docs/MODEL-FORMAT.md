@@ -686,12 +686,12 @@ pushes everything BUT the spatial conjunct):
 <!--bm:spatial.udfTable-->
 | shape | pushed (ms) | residual (ms) | verdict |
 |---|---|---|---|
-| solo `$within` over a full scan | 92 | 78 | ~even |
-| indexed `$eq` **and** `$within` (~5 % pass the index) | 5.6 | 53 | push **9.4×** |
-| `$within` with `LIMIT 10` | 1.9 | 76 | push **40.9×** |
+| solo `$within` over a full scan | 93 | 80 | ~even |
+| indexed `$eq` **and** `$within` (~5 % pass the index) | 6.1 | 55 | push **9.0×** |
+| `$within` with `LIMIT 10` | 1.9 | 77 | push **40.0×** |
 <!--/bm-->
 
-So the spatial hatch <!--bm:spatial.udfVerdict-->earns its row: 9.4× beside the selective conjunct and 40.9× under the LIMIT<!--/bm-->,
+So the spatial hatch <!--bm:spatial.udfVerdict-->earns its row: 9.0× beside the selective conjunct and 40.0× under the LIMIT<!--/bm-->,
 by the same rule as `$sqrt`: a sole `$within` over a full scan is a
 loss (the UDF re-parses every row in the callback, and the exact
 containment test is dearer than a square root), a `$within` beside

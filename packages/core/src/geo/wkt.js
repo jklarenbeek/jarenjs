@@ -26,7 +26,9 @@
 // point must match. Polygon rings must close and carry at least four
 // points, as the spec requires. No leading or trailing text is
 // tolerated: a format that trims would accept strings a consumer then
-// fails on.
+// fails on. A GEOMETRYCOLLECTION nests at most eight deep — the bound
+// the GeoJSON value gate applies — so hostile nesting is refused, never
+// recursed into.
 //
 // Parsing answers what the text says and judges nothing else: a
 // coordinate outside the WGS 84 bounds parses, and `isValidGeoJson` is
@@ -260,9 +262,31 @@ function scanPolygonBody(text, at, dim, out) {
   return scanNested(text, at, dim, 1, scanRing, out);
 }
 
+/**
+ * How deep a `GEOMETRYCOLLECTION` may nest. A nesting guard, not a spec
+ * rule, and the same bound `isValidGeoJson` applies to a GeoJSON
+ * `GeometryCollection`: unbounded recursion on hostile input is a
+ * different problem than an unusual document, and a WKT string nested
+ * deeper than the value gate admits could never become a valid value
+ * anyway. Past the bound the walk answers "not WKT" — the same answer
+ * both entry points give for any other malformed text — rather than
+ * overflowing the stack.
+ */
+const MAX_COLLECTION_DEPTH = 8;
+
+/** The collection nesting the walk is currently inside (one walk at a
+ * time; reset at the entry point, so an aborted walk cannot poison the
+ * next). */
+let collectionDepth = 0;
+
 /** A collection member is a whole tagged geometry, modifier and all. */
 function scanCollectionItem(text, at, dim, out) {
-  return scanGeometry(text, at, out);
+  if (collectionDepth >= MAX_COLLECTION_DEPTH)
+    return -1;
+  collectionDepth += 1;
+  const end = scanGeometry(text, at, out);
+  collectionDepth -= 1;
+  return end;
 }
 
 /**
@@ -349,6 +373,7 @@ function scanGeometry(text, at, out) {
 function scanWkt(text, out) {
   if (typeof text !== 'string' || text.length === 0 || isWhitespaceCode(text.charCodeAt(0)))
     return false;
+  collectionDepth = 0;
   return scanGeometry(text, 0, out) === text.length;
 }
 

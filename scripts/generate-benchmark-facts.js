@@ -210,6 +210,43 @@ function contractDispatchBand(rivalColumn, invert = false) {
  * a table cell keeps its bolding.
  * @type {Record<string, () => string>}
  */
+
+
+/** A geo row by name, or a refusal naming it — never a fabricated figure. */
+function geoRow(name) {
+  const row = data('geo').rows.find((r) => r.name === name);
+  if (row === undefined) throw new Error(`geo.json has no '${name}' row — regenerate it before quoting one`);
+  return row;
+}
+
+/** The rival's time over the kernel's for a named row (above 1 = a win). */
+const geoRatio = (name) => {
+  const row = geoRow(name);
+  return row.rival / row.ours;
+};
+
+/** A nanosecond figure as the geo benchmark prints it. */
+function nanos(x) {
+  if (x < 1000) return `${x.toFixed(1)} ns`;
+  if (x < 1e6) return `${(x / 1000).toFixed(2)} µs`;
+  return `${(x / 1e6).toFixed(2)} ms`;
+}
+
+/**
+ * The geo table, as Markdown, for the rows a predicate keeps: a rival
+ * row carries its ratio in bold above 1 and plain below; a row with no
+ * rival carries dashes. Returns `\n…\n` so its marker owns a line.
+ * @param {(row: any) => boolean} keep
+ */
+function geoTable(keep) {
+  const rows = data('geo').rows.filter(keep).map((row) => {
+    if (row.rival === null) return `| ${row.name} | ${nanos(row.ours)} | — | — |`;
+    const r = row.rival / row.ours;
+    const shown = `${ratio(r)}×`;
+    return `| ${row.name} | ${nanos(row.ours)} | ${nanos(row.rival)} (${row.rivalName}) | ${r >= 1 ? `**${shown}**` : shown} |`;
+  });
+  return ['', '| scenario | Jaren | rival | ratio |', '|---|---|---|---|', ...rows, ''].join('\n');
+}
 const FACTS = {
   // ——— when the quoted suites were actually measured. A README that
   // names a date is making a provenance claim; if the suites disagree
@@ -704,6 +741,25 @@ const FACTS = {
       + ` ${word} tag match and recency's ${pct(incumbent.recallAt10)}`;
   },
 
+  // -- geo: the kernel suite. Every row of the committed table, the
+  // WKT rows beside it, and the LOSSES as a derived sentence — so the
+  // prose that says which rows lose can never outlive the numbers.
+  'geo.node': () => data('geo').node,
+  'geo.table': () => geoTable((row) => !row.name.startsWith('wkt ')),
+  'geo.wktTable': () => geoTable((row) => row.name.startsWith('wkt ')),
+  'geo.losses': () => {
+    const losses = data('geo').rows.filter((row) => row.rival !== null && row.rival / row.ours < 1);
+    if (losses.length === 0) return 'no row loses to its rival';
+    const word = ['no', 'one', 'two', 'three', 'four', 'five', 'six'][losses.length] ?? String(losses.length);
+    const list = losses.map((row) => `${row.name} at ${ratio(row.rival / row.ours)}× (${row.rivalName})`);
+    return `${word} row${losses.length === 1 ? ' loses' : 's lose'} to a rival: ${list.join(', ')}`;
+  },
+  'geo.pip2000': () => `${ratio(geoRatio('point in polygon (2000-vertex)'))}×`,
+  'geo.bbox2000': () => `${ratio(geoRatio('bounding box (2000-vertex)'))}×`,
+  'geo.indexBuild': () => `${ratio(geoRatio('index build (100k boxes)'))}×`,
+  'geo.wktParsePoint': () => `${ratio(geoRatio('wkt parse (POINT)'))}×`,
+  'geo.wktValidatePoint': () => `${ratio(geoRatio('wkt validate (POINT)'))}×`,
+
   // -- spatial: the storage suite. Every figure is a named row of the
   // committed table or one of the ratios the tool itself derives, so a
   // verdict in prose ("the hatch does not pay") can never outlive the
@@ -789,6 +845,9 @@ const DOCS = [
   'packages/ai/README.md',
   'packages/db/README.md',
   'packages/db/docs/MODEL-FORMAT.md',
+  'packages/core/README.md',
+  'packages/core/ARCHITECTURE.md',
+  'packages/core/docs/GEO.md',
 ];
 
 /**

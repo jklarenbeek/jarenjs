@@ -120,14 +120,18 @@ export function rebase(node, binding) {
  * - everything else — one document and a query rooted at it. It is
  *   stored as the collection's single row and the query is re-anchored
  *   on the binding.
+ * The binding name is the document's to choose, so a runner may pass one
+ * the suite's examples never use: the answer must not depend on it.
  * @param {any} entry
+ * @param {string} [binding] - the collection binding a single-document
+ *   entry is re-anchored on (default `doc`)
  * @returns {{ documents: any[], query: any }}
  */
-export function asCollectionQuery(entry) {
+export function asCollectionQuery(entry, binding = 'doc') {
   if (entry.collection === true) return { documents: entry.data, query: entry.query };
   return {
     documents: [entry.data],
-    query: { $for: { doc: '$[*]' }, $return: rebase(entry.query, 'doc') },
+    query: { $for: { [binding]: '$[*]' }, $return: rebase(entry.query, binding) },
   };
 }
 

@@ -184,9 +184,10 @@ export function geohashCellSize(precision) {
  * nine-element array. Cells that would fall off the poles are omitted,
  * so the result may be shorter.
  *
- * This is what makes a prefix search safe near a boundary: two points
+ * This is the proximity probe, and a single cell is not one: two points
  * metres apart can sit in different cells, so a proximity query tests
- * the neighbourhood rather than the single cell.
+ * the neighbourhood rather than the single cell — a prefix buckets, it
+ * does not find neighbours.
  *
  * @param {string} hash
  * @returns {string[]}

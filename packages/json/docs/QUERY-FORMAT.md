@@ -1385,6 +1385,13 @@ value. This matters wherever such an expression sits in a position that expects
 one item: `[{"$bbox": expr}]` builds an empty array rather than a one-item one,
 and `{"m": {"$bbox": expr}}` omits the member entirely.
 
+**Traversal is not validation.** `$within`, `$area` and `$length` walk the
+rings they are given and treat a ring as closed whether or not its last
+position repeats its first — the reading every implementation makes — so a
+ring `isValidGeoJson` (or the meta-schema) refuses still measures. A document
+that needs the judgment composes it: `$valid` against the GeoJSON meta-schema,
+or the `geojson` format, before the measurement, not inside it.
+
 **Boxes do not cross the antimeridian.** RFC 7946 §3.1.9 tells producers to cut
 geometries at ±180° rather than let them span it, and this format follows that
 rather than re-joining what a producer split: `$bbox` of an uncut geometry whose

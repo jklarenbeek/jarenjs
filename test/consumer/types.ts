@@ -1154,9 +1154,15 @@ async function ledgerTypedBlock() {
     const newest: LedgerMemory | undefined = recalled[0];
     void newest?.at;
   }
-  else {
+  else if ('error' in recalled) {
     const why: string = recalled.error;
     void why;
+  }
+  else {
+    // the ranked shape a `near` recall answers: memories, scores, skipped
+    const scores: number[] = recalled.scores;
+    const skipped: number = recalled.skipped;
+    void scores; void skipped;
   }
 
   const one = await ledger.getMemory('memory-1');

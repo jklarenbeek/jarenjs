@@ -29,7 +29,7 @@
  * document. The positioning rivals are named in the notes — MongoDB's
  * `2dsphere` and DuckDB-wasm's `spatial` have real spatial indexes and
  * overlay operations this suite does not; neither runs one document
- * through two engines proven to agree, and neither checks ring closure
+ * through three executors proven to agree, and neither checks ring closure
  * in a schema. No fabricated head-to-head.
  *
  * The R*Tree row is a physical-mapping comparison, not a shipped path:
@@ -466,7 +466,7 @@ const notes = [
   + 'build without the module',
   'no head-to-head rival: nothing else in JavaScript stores GeoJSON in SQLite from a JSON query document. '
   + 'MongoDB (2dsphere) and DuckDB-wasm (spatial) have real spatial indexes and overlay operations this '
-  + 'suite does not; neither runs one document through two engines proven to agree',
+  + 'suite does not; neither runs one document through three executors proven to agree',
 ];
 console.log('');
 for (const note of notes) console.log(`  → ${note}`);

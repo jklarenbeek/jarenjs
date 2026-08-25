@@ -22,7 +22,10 @@ the *wrong sign* on near-collinear input, which makes containment
 contradict itself. `orient2dFast` is the naive form, exported for
 callers that provably do not care. Every winding and containment answer
 in this module rests on this sign; its cost is the deliberate
-point-in-polygon loss on the benchmark page.
+point-in-polygon loss on the benchmark page (<!--bm:geo.pip2000-->0.5×<!--/bm--> against
+Turf at 2000 vertices, kept on purpose). Every loss the kernel carries is
+published in [ARCHITECTURE](../ARCHITECTURE.md), derived from the committed
+measurement: <!--bm:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.9× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/bm-->.
 
 ## Distance — `distance.js`
 
@@ -78,6 +81,25 @@ silently (every comparison against `NaN` is false) and return a finite,
 plausible box that does not contain its input, and a candidate filter
 built on such a box loses matching entries with nothing to show for it.
 `null` is the answer every caller already handles.
+
+**Boxes do not cross the antimeridian.** RFC 7946 §3.1.9 tells producers
+to cut a geometry at ±180° rather than let it span the line, and the
+kernel follows that posture instead of re-joining what a producer split:
+`bboxOf` of an uncut geometry with positions either side of the line
+returns a box spanning the globe the *wrong* way (`[-179, 0, 179, 0]` for
+two points four degrees apart), and `circleBounds` answers a west below
+−180 rather than wrapping, which is how a caller detects the case. Cut
+the geometry as the RFC asks and every box, containment test and index
+probe is right; there is no flag, because a box that meant "the short way
+round" for some values and "the long way" for others would be worse than
+one rule.
+
+**Traversal is not validation.** `containsPosition`, `geometryArea` and
+the rest walk whatever rings they are given and treat a ring as closed
+whether or not its last position repeats its first — the same reading
+every implementation makes. A ring `isValidGeoJson` refuses (unclosed,
+too short) therefore still measures; judgment is one call away and is not
+duplicated inside every walk.
 
 ## GeoJSON traversal — `geojson.js`
 
@@ -158,11 +180,16 @@ spelling are all normalized.
 
 `geohashEncode(lon, lat, precision)`, `geohashDecode`, `geohashBounds`,
 `geohashCellSize`, `geohashNeighbours`. A geohash is a **string**, so it
-needs no new vocabulary anywhere: proximity is a prefix test, bucketing
-is grouping on a substring, and a sorted index over the hash is a
-spatial index. Cells are not equal-area and neighbours can straddle a
-cell edge — use `geohashNeighbours` for boundary-safe proximity, and
-never as a distance.
+needs no new vocabulary anywhere: bucketing is grouping on a substring,
+tiling is a prefix, and a sorted index over the hash is a spatial index.
+**A prefix is bucketing, not proximity.** Two points ten metres apart can
+differ in the *first* character of their cell, so a single-prefix "near
+here" misses a neighbour at every cell boundary; the proximity probe is
+`geohashNeighbours` — the cell and its eight neighbours, in reading order
+(north-west first, the cell itself in the middle, fewer past a pole) —
+followed by the exact distance on what survives. Cells are not equal-area
+(2.4× between the equatorial and polar bands), and a cell is never a
+distance.
 
 ## Drawing — `mercator.js` + `simplify.js`
 
@@ -178,10 +205,15 @@ degenerate.
 
 ## Not here
 
-Spatial *query operators* (`$distance`, `$within`, `$bbox-intersects`,
-`$centroid`, `$geohash`, index-screened spatial joins) live in the
-query engine of `@jarenjs/json` (QUERY-FORMAT §8.14); the GeoJSON
-meta-schema artifacts live in `@jarenjs/json/schemas`; the map chart
-and its bounded-memory streaming accumulator live in `@jarenjs/charts`.
-Overlay operations (union/intersection/buffer) are deliberately absent
-— see the ROADMAP.
+The thirteen spatial *query operators* — the eight measurements and
+predicates (`$bbox`, `$area`, `$length`, `$centroid`, `$distance`,
+`$within`, `$bbox-intersects`, `$geohash`) and the five conversions
+(`$geo-parse`, `$geo-text`, `$geohash-bounds`, `$geohash-neighbours`,
+`$geo-simplify`), plus index-screened spatial joins — live in the query
+engine of `@jarenjs/json` (QUERY-FORMAT §8.14), and `@jarenjs/linq`
+spells every one of them; the GeoJSON meta-schema artifacts live in
+`@jarenjs/json/schemas`; derived spatial index columns and the two-stage
+pushdown live in `@jarenjs/db`; the map chart and its bounded-memory
+streaming accumulator live in `@jarenjs/charts`. Overlay operations
+(union/intersection/difference/buffer) are deliberately absent — see the
+ROADMAP.

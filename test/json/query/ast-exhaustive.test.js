@@ -171,6 +171,27 @@ describe('gate 3 — the operator registry equals QUERY-FORMAT §8', () => {
     }
   });
 
+  it('every operator the grammar enumerates is a registry operator — no phantom', () => {
+    // the other direction: a name in a phrase enum that the registry
+    // does not have would decode (a constrained decoder is allowed to
+    // write it) and then fail JQ0002 at compile — an operator that
+    // exists in the grammar and nowhere else
+    const registry = new Set(Object.keys(OPERATORS));
+    for (const artifact of ['jaren-query.schema.json', 'jaren-jslt.schema.json']) {
+      const schema = JSON.parse(fs.readFileSync(`packages/json/schemas/${artifact}`, 'utf8'));
+      const phantoms = [];
+      (function walk(node) {
+        if (Array.isArray(node)) { node.forEach(walk); return; }
+        if (node === null || typeof node !== 'object') return;
+        for (const name of node.propertyNames?.enum ?? []) {
+          if (typeof name === 'string' && name.startsWith('$') && !registry.has(name)) phantoms.push(name);
+        }
+        for (const key of Object.keys(node)) if (key !== 'propertyNames') walk(node[key]);
+      })(schema);
+      assert.deepStrictEqual([...new Set(phantoms)], [], `${artifact} enumerates operators the registry lacks`);
+    }
+  });
+
   it('every document that states the count states the derived one', () => {
     const derived = Object.keys(OPERATORS).length;
     const stale = [];

@@ -115,7 +115,12 @@ Claimed, and each proven by a hostile-input test:
 - **Reference containment.** Under a profile, an undeclared external,
   host function, collation or collection is a compile error
   (`JD0011`) before anything executes, and a foreign document can
-  never cause host-side function registration.
+  never cause host-side function registration. The deterministic
+  functions a spatial index needs (`jaren_geohash`, `jaren_bbox_*`,
+  MODEL-FORMAT §3.1) are registered by the *model* the host opened,
+  never by a query: they are pure functions of one stored member,
+  read nothing else, and a query document cannot name one it did
+  not already have through the declared index.
 - **Bounded fetches.** Every non-aggregate fetch carries a mandatory
   `LIMIT`; crossing it is a coded refusal (`JD2007`), never a silent
   truncation. The engine's execution limits bound the JavaScript
@@ -146,6 +151,17 @@ A crash, a hang, an unbounded allocation, an escape from the coded
 error model, or a cross-tenant read that defeats a mandatory predicate
 while processing an untrusted query document is a vulnerability worth
 reporting.
+
+## A model-callable geo toolbox
+
+`@jarenjs/ai`'s `createGeoToolbox` hands a language model seven tools
+over `@jarenjs/core/geo`. Each is schema-guarded by the GeoJSON
+meta-schema before it runs, computes nothing beyond one kernel call
+over the arguments it was handed, performs no I/O and reaches no store
+— a malformed geometry is refused with the validator's errors, an
+overlay request is refused by name, and the tools can therefore be
+published to a browser agent over WebMCP without widening what a model
+can touch.
 
 ## Supply chain
 

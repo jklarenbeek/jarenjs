@@ -222,19 +222,19 @@ reason in `live.mode` — declared, never silent.
 **The numbers, the loss included.** `benchmark/spatial.js` stores <!--bm:spatial.corpus-->50,000 points<!--/bm-->
 over the Netherlands and probes one box at <!--bm:spatial.rows-->258 of 50,000 (0.5 %)<!--/bm--> selectivity,
 asserting every plan case of the committed spatial corpus and every timed shape against the JavaScript
-engine before a single timing is printed. The `$within` a consumer writes went from <!--bm:spatial.scan-->78 ms<!--/bm-->
-as a full scan to <!--bm:spatial.within-->2 ms<!--/bm--> over the `bbox` index (<!--bm:spatial.scanVsIndexed-->39.4<!--/bm-->×);
+engine before a single timing is printed. The `$within` a consumer writes went from <!--bm:spatial.scan-->80 ms<!--/bm-->
+as a full scan to <!--bm:spatial.within-->2.1 ms<!--/bm--> over the `bbox` index (<!--bm:spatial.scanVsIndexed-->38.9<!--/bm-->×);
 `$bbox-intersects` is <!--bm:spatial.bboxIntersects-->1.9 ms<!--/bm-->, a bounded `$distance` <!--bm:spatial.distance-->1.4 ms<!--/bm-->;
-one geohash cell answers in <!--bm:spatial.cellOne-->0.0067 ms for 0 row(s)<!--/bm--> and the honest nine-cell
+one geohash cell answers in <!--bm:spatial.cellOne-->0.007 ms for 0 row(s)<!--/bm--> and the honest nine-cell
 probe in <!--bm:spatial.cellNine-->0.022 ms for 2 row(s)<!--/bm-->. The row the store had to win is the same
-`$within` in the in-memory engine over the parsed array, no database at all: <!--bm:spatial.engine-->33 ms<!--/bm-->.
-The indexed store is now <!--bm:spatial.engineVsIndexed-->16.5× faster than<!--/bm--> it — but the un-indexed scan
+`$within` in the in-memory engine over the parsed array, no database at all: <!--bm:spatial.engine-->32 ms<!--/bm-->.
+The indexed store is now <!--bm:spatial.engineVsIndexed-->15.4× faster than<!--/bm--> it — but the un-indexed scan
 is not, and the comparison is not an even one either way: the engine starts from parsed objects where the
 store starts from bytes on a page and pays JSON materialisation for every row it returns. Both rows stay
 published. The deterministic-UDF hatch takes a literal `$within` on a collection with no derived index, and
 its profile is measured on the same rows in MODEL-FORMAT §8.2 (a loss as a sole predicate, a large win
 beside a selective conjunct or a `LIMIT`). A hand-built R\*Tree over the same rows probes
-at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.3× in the R*Tree's favour<!--/bm--> against the four-column
+at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.2× in the R*Tree's favour<!--/bm--> against the four-column
 B-tree the `bbox` index is today, because the B-tree seeks on longitude alone; it is a second table kept in
 sync transactionally and absent on any build without the module, and it is open work on the roadmap with
 that number beside it.

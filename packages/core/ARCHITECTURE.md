@@ -578,15 +578,17 @@ direction is *not* claimed, because WKT whitespace, the `M` measure and number
 spelling are normalized on the way through.
 
 Against [`wellknown`](https://www.npmjs.com/package/wellknown), the established
-WKT↔GeoJSON converter (`npm run benchmark:geo`, Node v24.19.0):
+WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--bm:geo.node-->v24.19.0<!--/bm-->):
 
-| scenario | Jaren | wellknown | ratio |
+<!--bm:geo.wktTable-->
+| scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| parse a `POINT` | 439 ns | 1.34 µs | **3.1×** |
-| parse a 2000-vertex `POLYGON` | 820 µs | 2.20 ms | **2.7×** |
-| write that polygon | 160 µs | 213 µs | **1.3×** |
-| validate a `POINT` | 241 ns | 1.29 µs | **5.4×** |
-| validate that polygon | 493 µs | 1.94 ms | **3.9×** |
+| wkt parse (POINT) | 431.1 ns | 1.31 µs (wellknown) | **3.1×** |
+| wkt parse (2000-vertex polygon) | 843.80 µs | 1.98 ms (wellknown) | **2.3×** |
+| wkt stringify (2000-vertex polygon) | 163.40 µs | 229.70 µs (wellknown) | **1.4×** |
+| wkt validate (POINT) | 242.7 ns | 1.28 µs (wellknown) | **5.3×** |
+| wkt validate (2000-vertex polygon) | 496.00 µs | 1.90 ms (wellknown) | **3.8×** |
+<!--/bm-->
 
 The last two rows are the ones the sink exists for: `wellknown` has no
 predicate, so validating means parsing and throwing the geometry away. And the
@@ -625,37 +627,48 @@ RFC 7946 removed coordinate-reference-system support and mandates WGS 84, so
 there is no SRID table and no reprojection: conformance removes the need rather
 than an omission hiding it.
 
-**Measured against the field** (`npm run benchmark:geo`, Node v22.22.2). Every
+**Measured against the field** (`npm run benchmark:geo`, Node <!--bm:geo.node-->v24.19.0<!--/bm-->). Every
 scenario asserts result equivalence before any timing, and the harness refuses
 to print a table if the engines disagree: distance, area, length and bounding
 box come out *bit-identical* to Turf, containment agrees on a 400-point sweep,
 and the index returns exactly Flatbush's answer on 200 queries. Ratios are the
-rival's time over this kernel's, so above 1 means Jaren is faster.
+rival's time over this kernel's, so above 1 means Jaren is faster; the rows
+below derive from the committed measurement and are refreshed with it.
 
+<!--bm:geo.table-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| distance, two positions | 26.2 ns | 128.5 ns (turf) | **4.9×** |
-| distance vs an ellipsoidal library | 52.3 ns | 648.4 ns (geolib) | **12.4×** |
-| line length, 500 positions | 20.5 µs | 63.6 µs (turf) | **3.1×** |
-| point in polygon, 12 vertices | 228 ns | 327 ns (turf) | **1.4×** |
-| bounding box, 2000 vertices | 15.3 µs | 18.1 µs (turf) | **1.2×** |
-| polygon area, 2000 vertices | 18.8 µs | 20.4 µs (turf) | **1.1×** |
-| centroid, 2000 vertices | 18.4 µs | 19.1 µs (turf) | 1.0× |
-| index build, 100k boxes | 12.2 ms | 12.4 ms (flatbush) | 1.0× |
-| index probe, 100k boxes | 529 ns | 529 ns (flatbush) | 1.0× |
-| point in polygon, 2000 vertices | 8.2 µs | 3.7 µs (turf) | **0.5×** |
+| distance (two positions) | 28.3 ns | 111.0 ns (turf) | **3.9×** |
+| distance (vs geolib, ellipsoidal) | 50.7 ns | 609.1 ns (geolib) | **12.0×** |
+| distance (equirectangular screen) | 26.4 ns | — | — |
+| point in polygon (12-vertex) | 72.9 ns | 226.4 ns (turf) | **3.1×** |
+| point in polygon (2000-vertex) | 8.23 µs | 3.71 µs (turf) | 0.5× |
+| polygon area (2000-vertex) | 17.65 µs | 18.45 µs (turf) | **1.0×** |
+| line length (500 positions) | 26.65 µs | 63.47 µs (turf) | **2.4×** |
+| bounding box (2000-vertex) | 21.08 µs | 18.65 µs (turf) | 0.9× |
+| centroid (2000-vertex) | 16.70 µs | 23.18 µs (turf) | **1.4×** |
+| index build (100k boxes) | 12.70 ms | 10.62 ms (flatbush) | 0.8× |
+| index probe (100k boxes) | 602.3 ns | 668.9 ns (flatbush) | **1.1×** |
+| linear scan (100k boxes, no index) | 141.50 µs | — | — |
+<!--/bm-->
 
-One row is a loss, and it is kept on purpose. **Point-in-polygon on a large
-ring runs at about half Turf's speed** because every edge that could matter
-goes through the exact orientation predicate, where Turf uses naive
+The losses are kept, and named by the same measurement: on the committed run <!--bm:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.9× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/bm-->.
+**Point-in-polygon on a large ring runs at about half Turf's speed**
+(<!--bm:geo.pip2000-->0.5×<!--/bm--> at 2000 vertices) because every edge that could
+matter goes through the exact orientation predicate, where Turf uses naive
 floating-point arithmetic. That is the trade this module exists to make — it
 is the difference between a containment test that is right on near-collinear
 input and one that is merely fast. Cheap straddle/span tests already skip the
 predicate on edges that cannot affect the answer, which took this from 0.2×
-to 0.5×; the rest is the predicate itself.
+to about 0.5×; the rest is the predicate itself, and the campaign that made
+geography reachable across the suite never traded it away. The bounding box
+of the same ring and the index build against Flatbush sit within a few tenths
+of level (<!--bm:geo.bbox2000-->0.9×<!--/bm--> and <!--bm:geo.indexBuild-->0.8×<!--/bm-->) and move
+between runs and Node versions; they are published as measured rather than
+rounded to a win.
 
-Two former losses closed, and both closures carry a lesson about profiling
-before fixing:
+Two former losses were closed by profiling before fixing, and both closures
+carry the lesson:
 
 - **Index build** was 2.6× behind Flatbush, and the assumed cause — the leaf
   sort permuting the four-wide bounds rows on every swap — turned out to be
@@ -665,7 +678,8 @@ before fixing:
   (identical values, verified exhaustively at the corners and over 200k
   pseudo-random points), the sort orders a `Uint32Array` permutation with an
   insertion-sort cutoff, and the bounds are written once, already in leaf
-  order. Build and probe are both level with Flatbush now.
+  order. Whether the row is level or a few tenths behind on a given run is
+  what the derived table above says.
 - **Centroid** walked the same `eachPosition` as `bboxOf` yet lost where
   `bboxOf` won. The difference was the callback body: accumulating doubles
   into *closure variables* writes a boxed heap number per `+=` — two per
@@ -679,7 +693,7 @@ import { orient2d, haversineDistance, ringWinding, geohashEncode } from '@jarenj
 orient2d(0, 0, 1, 0, 0, 1);                    // > 0 — counter-clockwise, exactly
 haversineDistance(4.9041, 52.3676, 2.3522, 48.8566);  // 429_862 m
 ringWinding([[0,0],[1,0],[1,1],[0,1],[0,0]]);  // 1 — RFC 7946 exterior ring
-geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string, so $starts-with is proximity
+geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string: a prefix buckets, geohashNeighbours is proximity
 ```
 
 ### 5c. Vector Module (`vector/`)

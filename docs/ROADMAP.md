@@ -828,50 +828,38 @@ thing to avoid.
 
 ## Geospatial (cross-package)
 
-A PostGIS-shaped capability, ordered so each phase is independently useful.
-The kernel (`@jarenjs/core/geo/*`), the GeoJSON meta-schema, the spatial query
-operators, the spatial-join index, the `geoFormats` group (`geohash`/`wkt`/
-`geojson`), the streaming map accumulator and the published benchmark suite
-are done; what they do is documented in `packages/core/ARCHITECTURE.md`,
-`packages/json/ARCHITECTURE.md`, QUERY-FORMAT.md §8.14 and the
-`@jarenjs/json`, `@jarenjs/formats` and `@jarenjs/charts` READMEs.
+Geography is a capability every surface of the suite can spell, and the shipped
+half is documented where a stranger looks rather than here: the kernel and its
+published losses in `packages/core/docs/GEO.md` and `packages/core/ARCHITECTURE.md`;
+the thirteen spatial operators, the conversion family, the proximity rule and
+the CSV recipe in QUERY-FORMAT §8.14, the `@jarenjs/json` README and
+`docs/HOWTO.md`; the fluent surface in LINQ-FORMAT §4; derived spatial index
+kinds, the two-stage plan with its truth table, the geofence and the storage
+numbers with their loss in the `@jarenjs/db` README, ARCHITECTURE, MODEL-FORMAT
+and LIVE-FORMAT; the spatial authoring profile and the geo toolbox in the
+`@jarenjs/ai` README; the `geojson` preview hint in the `@jarenjs/forms` README;
+and the one-document-three-executors claim in `docs/ARCHITECTURE.md`. What is
+still open is listed here, each with its reason.
 
-**Geography now enters and leaves as the text the rest of the world speaks,**
-and every surface that writes a query can spell it: the WKT round trip lives in
-`@jarenjs/core/geo` (`wktToGeoJson`/`geoJsonToWkt`, one grammar walk shared with
-the `wkt` format tester), §8.14 carries the conversion family (`$geo-parse`,
-`$geo-text`, `$geohash-bounds`, `$geohash-neighbours`, `$geo-simplify`) which
-JSLT and JTLT inherit, and `@jarenjs/linq` spells the whole family fluently. A
-CSV of coordinates needs no code at all — the recipe is in
-[HOWTO](./HOWTO.md#getting-geographic-data-in-and-out) — and the committed
-spatial corpus (`test/json/fixtures/spatial-corpus.json`) records what the
-JavaScript engine answers so a second executor can be held to it — and two
-are: SQLite through the Node driver (`test/db/spatial-oracle.test.js`) and
-SQLite compiled to wasm in a browser tab, where the Data studio runs the
-same entries in Chromium, Firefox and WebKit
-(`packages/website/e2e/spatial-agreement.spec.js`). One document, three
-executors, proven to agree; the browser leg proves execution, not
-durability.
-
-**Spatial storage is adoptable.** The model format declares derived spatial
-index kinds — `indexes[].derive` is a geohash cell or a bounding box as four
-columns (MODEL-FORMAT §2.1, §3.1) — the planner promotes a spatial predicate
-onto them and `explain().prefilters` names both stages, a live query with a
-spatial predicate is a geofence (LIVE-FORMAT §7), and `benchmark/spatial.js`
-publishes the numbers with the loss (`packages/db/README.md`, "Spatial
-storage"). What is still open below the overlay entry is listed here.
-
-**The representation is GeoJSON, and there is no geometry type.**
-[RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) is a closed JSON
-vocabulary that explicitly forbids extension — the same shape as the query
-format — so its objects already *are* JSON items: patchable, schema-checkable,
-addressable by pointer and path. A wrapper class would break all four, exactly
-as it does for dates. The RFC also **removed CRS support** and mandates WGS 84
-in lon/lat decimal degrees, which deletes PostGIS's heaviest component by
-conformance rather than by omission: no SRID table, no `proj4`, and no
-geometry/geography duality to model. Web Mercator is needed only for
-rendering, and is a projection *out*, not a CRS system.
-
+- [ ] **`$geo-parse` and the published proximity recipe raise where the rest
+  of §8.14 answers.** §8.14's nine-cell membership test is `$exists` over
+  `$index-of`, and `$index-of` refuses an empty search item (`JQ2001`), so a
+  row whose geometry has no bounded position — a missing coordinate, an empty
+  `FeatureCollection` — raises in the engine and under a pushdown-off run,
+  while the same query under the promotion never fetches that row and answers.
+  Whether the *language* should answer `false` there (a membership test over
+  nothing is not a match) is a query-format decision with a spec diff, not a
+  patch; until it is made, guard the probe with `$exists` on the position, as
+  the format's prose says.
+- [ ] **The spatial authoring profile has not met a live model.** Its three
+  refusals (a geohash prefix offered as proximity, planar arithmetic over a
+  coordinate member, a geographic ask with no spatial operator) are proven on
+  recorded fixtures and the repair round is shown to carry the code and the
+  fix; no key or local runtime was available when it was built. The first live
+  run belongs as a row beside the stylesheet author's measurements in the
+  `@jarenjs/ai` README. Its intent reader is an English word list — a question
+  that says "in the neighbourhood of" without a listed word is not read as
+  proximity, so a prefix document passes; a host can pass its own `gates`.
 - [ ] **A string at a derived index path cannot be stored.** A collection
   declaring `derive` on a member writes that member into the generated column
   through `json(jsonb_extract(doc, …))`, and `jsonb_extract` hands back the raw
@@ -893,7 +881,7 @@ rendering, and is a projection *out*, not a CRS system.
   four-column B-tree and only its leading column carries a bound from a
   box-overlap probe, so the seek narrows on longitude alone and the other
   three comparisons filter the rows it returns. Measured on the same 50 000
-  rows and probe box, a hand-built R\*Tree probes at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.3× in the R*Tree's favour<!--/bm-->
+  rows and probe box, a hand-built R\*Tree probes at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.2× in the R*Tree's favour<!--/bm-->
   (`benchmark/spatial.js`, the physical-question table), which is over the bar
   that makes the second mapping worth building. It is a different physical
   mapping for the same declaration, with three costs the generated columns do

@@ -368,3 +368,37 @@ describe('isValidGeoJson', () => {
       'a collection holds Features, not bare geometries');
   });
 });
+
+describe('WKT nesting is bounded, on both entry points alike', () => {
+  const nested = (n) => `${'GEOMETRYCOLLECTION ('.repeat(n)}POINT (1 2)${')'.repeat(n)}`;
+
+  it('accepts a collection nested to the same depth the GeoJSON value gate admits', () => {
+    for (const n of [1, 2, 8]) {
+      assert.strictEqual(isValidWkt(nested(n)), true, `${n} deep is WKT`);
+      const value = wktToGeoJson(nested(n));
+      assert.ok(value !== null, `${n} deep parses`);
+      assert.strictEqual(isValidGeoJson(value), true, `${n} deep is a valid value too`);
+    }
+  });
+
+  it('refuses past the bound rather than recursing — no RangeError at any depth', () => {
+    // seen red first: before the bound, n = 5000 threw RangeError from
+    // both entry points; a hostile string is "not WKT", like any other
+    // malformed text, and the two entry points still agree (D3)
+    for (const n of [9, 10, 64, 5000]) {
+      assert.strictEqual(isValidWkt(nested(n)), false, `${n} deep is refused`);
+      assert.strictEqual(wktToGeoJson(nested(n)), null, `${n} deep parses to nothing`);
+    }
+    // a collection of siblings is breadth, not depth, and stays fine
+    const wide = `GEOMETRYCOLLECTION (${Array.from({ length: 200 }, () => 'POINT (1 2)').join(', ')})`;
+    assert.strictEqual(isValidWkt(wide), true);
+    assert.strictEqual(wktToGeoJson(wide)?.geometries.length, 200);
+  });
+
+  it('resets the bound between walks: a refused string does not poison the next', () => {
+    assert.strictEqual(isValidWkt(nested(5000)), false);
+    assert.strictEqual(isValidWkt('POINT (1 2)'), true);
+    assert.deepStrictEqual(wktToGeoJson('GEOMETRYCOLLECTION (POINT (1 2))'),
+      { type: 'GeometryCollection', geometries: [{ type: 'Point', coordinates: [1, 2] }] });
+  });
+});

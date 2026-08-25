@@ -10,6 +10,14 @@
  * transform is a **stylesheet**, not code: getting a CSV into GeoJSON
  * needs no feature at all, which is the point worth proving rather
  * than asserting.
+ *
+ * The second half runs the same collection through the store: kept
+ * under derived spatial indexes, queried with a `$within` written
+ * through `@jarenjs/linq` that seeks the box index and refines exactly,
+ * answering what the in-memory chain answers, watched as a geofence,
+ * and handed back out as WKT from a stored row. The third executor —
+ * the same corpus in a browser tab — is `packages/website/e2e/
+ * spatial-agreement.spec.js`, which no Node test can host.
  */
 
 import { describe, it } from 'node:test';
@@ -23,6 +31,9 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { queryJson } from '@jarenjs/json/query';
 import { JarenValidator } from '@jarenjs/validate';
 import { isValidGeoJson } from '@jarenjs/core/geo';
+import { from } from '@jarenjs/linq';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CSV = fs.readFileSync(path.join(__dirname, 'fixtures', 'places.csv'), 'utf8');
@@ -164,5 +175,106 @@ describe('CSV to GeoJSON to a spatial query and back out as text', () => {
       'the meta-schema accepts what came back, so it can be stored as it is');
     assert.deepStrictEqual(reduced.features[0].properties, { name: 'the tour', legs: 4 },
       'the properties ride along — this is the value that went in, with fewer positions');
+  });
+});
+
+describe('… and through a store with derived spatial indexes, fluently, live, and back out', () => {
+  const MODEL = {
+    $model: '0.1',
+    collections: {
+      places: {
+        schema: {
+          type: 'object',
+          properties: {
+            type: { type: 'string' }, geometry: { type: 'object' }, properties: { type: 'object' },
+          },
+        },
+        // a live query tracks rows by their document key, so the
+        // collection is keyed by the feature's name rather than by rowid
+        key: '/properties/name',
+        indexes: [
+          { name: 'by_box', path: '$.geometry', derive: 'bbox' },
+          { name: 'by_cell', path: '$.geometry', derive: 'geohash', precision: 5 },
+        ],
+      },
+    },
+  };
+  const rows = parseCsv(CSV, { headers: true, typed: true });
+  const collection = compileJsltStylesheet(TO_GEOJSON)(rows);
+  /** The query, written once through the fluent surface, for any source. */
+  const inside = (source) => from(source)
+    .params({ region: REGION })
+    .where((f, q) => f.geometry.within(q.region))
+    .select((f) => f.properties.name);
+
+  const seeded = async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), capture: true });
+    const places = store.collection('places');
+    for (const feature of collection.features) await places.insert(feature);
+    return { store, places };
+  };
+
+  it('stores the features, and the linq $within seeks the derived box and refines exactly', async () => {
+    const { store, places } = await seeded();
+    try {
+      const document = inside(places).toDocument();
+      assert.deepStrictEqual(document, {
+        $for: { it: '$[*]' },
+        $where: { $within: ['$it.geometry', '$region'] },
+        $return: '$it.properties.name',
+      }, 'the chain is data: one query document, the region bound at call time');
+      const explained = await places.explain(document, { externals: { region: REGION } });
+      assert.deepStrictEqual(explained.prefilters.map((p) => [p.construct, p.exact]), [['$within', false]],
+        'the box is pushed as a pre-filter and containment refines in the engine');
+      assert.match(explained.scanNarrative, /SEARCH places USING INDEX places_by_box/,
+        'the database\'s own plan seeks the derived index');
+      const answer = await places.execute(document, { externals: { region: REGION } });
+      assert.deepStrictEqual(answer, ['Amsterdam', 'Utrecht', 'Rotterdam']);
+      assert.deepStrictEqual(answer, inside(collection.features).toArray(),
+        'the store answers what the in-memory chain answers');
+    }
+    finally {
+      await store.close();
+    }
+  });
+
+  it('watches the region as a geofence: a city inserted inside arrives, one outside does not', async () => {
+    const { store, places } = await seeded();
+    try {
+      const live = await places.live([inside(places).toDocument()], { externals: { region: REGION } });
+      const events = [];
+      live.subscribe((event) => events.push(event));
+      assert.deepStrictEqual(live.result.rows, ['Amsterdam', 'Utrecht', 'Rotterdam']);
+      assert.strictEqual(live.mode.strategy, 'rows', 'a refined spatial predicate is maintained per row');
+      await places.insert({
+        type: 'Feature', geometry: { type: 'Point', coordinates: [5.4697, 51.4416] },
+        properties: { name: 'Eindhoven', pop: 238326 },
+      });
+      await places.insert({
+        type: 'Feature', geometry: { type: 'Point', coordinates: [-0.1276, 51.5074] },
+        properties: { name: 'London', pop: 8799800 },
+      });
+      assert.strictEqual(events.length, 1, 'inside emits, outside is silent');
+      assert.deepStrictEqual(events[0].patch.map((op) => [op.op, op.value]), [['add', 'Eindhoven']]);
+      live.close();
+    }
+    finally {
+      await store.close();
+    }
+  });
+
+  it('hands a stored feature back out as the text a database reads', async () => {
+    const { store, places } = await seeded();
+    try {
+      const text = await places.execute({
+        $for: { it: '$[*]' },
+        $where: { $eq: ['$it.properties.name', 'Amsterdam'] },
+        $return: { '$geo-text': '$it.geometry' },
+      });
+      assert.strictEqual(text, 'POINT (4.9041 52.3676)');
+    }
+    finally {
+      await store.close();
+    }
   });
 });

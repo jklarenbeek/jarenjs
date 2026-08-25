@@ -105,6 +105,37 @@ describe('the spatial corpus through SQLite', () => {
   });
 });
 
+// The binding name is the document's to choose, and a hard-coded one
+// once survived every test because every test bound `it`: the same
+// corpus, re-anchored on a name no example uses, must answer the same.
+describe('the binding name is the document\'s to choose — the spatial corpus under a second name', () => {
+  const single = RUNNABLE.filter((entry) => entry.collection !== true);
+  for (const entry of single) {
+    it(`${entry.name} — bound as 'row'`, async () => {
+      const { documents, query } = asCollectionQuery(entry, 'row');
+      assert.notDeepStrictEqual(query, asCollectionQuery(entry).query, 'the rewrite must change the document');
+      assert.strictEqual(Object.keys(query.$for)[0], 'row');
+      const { store, collection } = await storeFor(documents, SPATIAL_INDEXES);
+      try {
+        const answer = await collection.execute(query);
+        if (entry.empty === true) {
+          assert.strictEqual(answer, undefined, `${EXECUTOR} (row) on ${entry.name}: recorded the empty sequence`);
+        }
+        else {
+          assert.deepStrictEqual(answer, entry.expected,
+            `${EXECUTOR} (row) disagreed on ${entry.name} — query ${JSON.stringify(query)}`);
+        }
+      }
+      finally {
+        await store.close();
+      }
+    });
+  }
+  it('ran every single-document entry under the second name', () => {
+    assert.ok(single.length >= 70, `only ${single.length} single-document entries`);
+  });
+});
+
 describe('the plan cases really are promoted (and still agree)', () => {
   /** @type {any} */
   let opened = null;
