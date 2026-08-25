@@ -500,6 +500,9 @@ function listSection(title, records, line) {
 async function retrieved(pending, what) {
   const records = await pending;
   if (Array.isArray(records)) return records;
+  // a ranked recall (`{ near }`) answers `{ memories | skills, scores,
+  // skipped }`; the records go into the prompt exactly as an array would
+  if (Array.isArray(records?.[what])) return records[what];
   throw new AiError('AI0001',
     `retrieval of ${what} failed: ${records?.error ?? 'the ledger returned no records'}`);
 }

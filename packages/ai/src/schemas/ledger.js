@@ -45,6 +45,42 @@ const AT = {
 const ID = { type: 'string', minLength: 1 };
 
 /**
+ * A stored embedding: a plain array of numbers, never a typed array. A
+ * `Float32Array` does not survive the storage boundary — JSON serializes
+ * it as a dense object — so the ledger's form is what JSON keeps. What
+ * the schema cannot say (every component finite, the length equal to the
+ * identity's `dims`) the ledger checks with `isVector` from
+ * `@jarenjs/core/vector` in the same gate.
+ */
+const EMBEDDING = { type: 'array', items: { type: 'number' }, minItems: 1 };
+
+/**
+ * A vector's identity: which model produced it, at what width. Vectors
+ * from two models are pairwise meaningless and compare into plausible
+ * garbage, so an embedding never travels without this and ranked recall
+ * refuses to mix two.
+ */
+const EMBEDDED_BY = {
+  type: 'object',
+  properties: {
+    model: { type: 'string', minLength: 1 },
+    dims: { type: 'integer', minimum: 1 },
+  },
+  required: ['model', 'dims'],
+  additionalProperties: false,
+};
+
+/**
+ * `embedding` and `embeddedBy` are both-or-neither, and nothing requires
+ * them: an un-embedded record is exactly as valid as it ever was. The
+ * schemas declare no `$schema`, so they compile under the validator's
+ * draft-07 default, where "if this member is present, that one is
+ * required" is spelled `dependencies` (the `dependentRequired` of
+ * 2019-09 and later says the same thing).
+ */
+const EMBEDDING_PAIR = { embedding: ['embeddedBy'], embeddedBy: ['embedding'] };
+
+/**
  * One active objective. Singular by construction: a second `setGoal`
  * supersedes this one and archives it, so "what am I doing" has exactly
  * one answer at any moment.
@@ -87,6 +123,11 @@ export const GOAL_SCHEMA = {
  * guesses is worse than an empty one. It is also what makes a
  * model-proposed refinement auditable — the reviewer of a patch can ask
  * "on what basis" and get an answer from the record itself.
+ *
+ * `embedding` + `embeddedBy` are optional and travel together: a memory
+ * that carries them can be recalled by meaning through the embedder
+ * seam; one that does not is recalled by tag and recency exactly as
+ * before, and ranked recall reports it as skipped rather than scoring it.
  */
 export const MEMORY_SCHEMA = {
   $id: 'https://jarenjs.github.io/schemas/ai/ledger-memory.json',
@@ -97,8 +138,13 @@ export const MEMORY_SCHEMA = {
     evidence: { type: 'string', minLength: 1 },
     tags: { type: 'array', items: { type: 'string', minLength: 1 } },
     at: AT,
+    // OPTIONAL, as a pair: the vector `recall({ near })` ranks by, and
+    // the identity that makes it comparable
+    embedding: EMBEDDING,
+    embeddedBy: EMBEDDED_BY,
   },
   required: ['id', 'text', 'evidence', 'tags', 'at'],
+  dependencies: EMBEDDING_PAIR,
   additionalProperties: false,
 };
 
@@ -117,8 +163,13 @@ export const SKILL_SCHEMA = {
     instructions: { type: 'string', minLength: 1 },
     tools: { type: 'array', items: { type: 'string', minLength: 1 } },
     at: AT,
+    // the same optional pair as a memory; the text a skill is embedded
+    // from is its name, when and instructions together
+    embedding: EMBEDDING,
+    embeddedBy: EMBEDDED_BY,
   },
   required: ['id', 'name', 'when', 'instructions', 'tools', 'at'],
+  dependencies: EMBEDDING_PAIR,
   additionalProperties: false,
 };
 
@@ -186,6 +237,15 @@ export const LEDGER_SCHEMAS = {
  */
 
 /**
+ * A vector's identity — see {@link EMBEDDED_BY}. What `recall({ near })`
+ * compares against the query embedder's `{ model, dims }` before any
+ * arithmetic happens.
+ * @typedef {object} LedgerEmbeddedBy
+ * @property {string} model
+ * @property {number} dims
+ */
+
+/**
  * A stored memory — see {@link MEMORY_SCHEMA}.
  * @typedef {object} LedgerMemory
  * @property {string} id
@@ -193,6 +253,8 @@ export const LEDGER_SCHEMAS = {
  * @property {string} evidence
  * @property {string[]} tags
  * @property {string} at RFC 3339
+ * @property {number[]} [embedding] the vector `recall({ near })` ranks by — plain numbers, never a typed array
+ * @property {LedgerEmbeddedBy} [embeddedBy] the vector's identity; present exactly when `embedding` is
  */
 
 /**
@@ -204,6 +266,8 @@ export const LEDGER_SCHEMAS = {
  * @property {string} instructions
  * @property {string[]} tools
  * @property {string} at RFC 3339
+ * @property {number[]} [embedding] the vector `recallSkills({ near })` ranks by
+ * @property {LedgerEmbeddedBy} [embeddedBy] the vector's identity; present exactly when `embedding` is
  */
 
 /**

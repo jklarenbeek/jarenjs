@@ -155,25 +155,28 @@ describe('ai ledger — writes are validated at the boundary', function () {
     // the write and the gate must be one question: a member the schema
     // does not know is rejected by both, or a caller that checked first
     // stores something other than what it checked
+    // (`embedding` was this test's unknown member until recall by meaning
+    // made it a known one; `score` is what a ranker would be tempted to
+    // store, and the schema does not know it)
     const ledger = bare();
     const input = {
-      id: 'm-embed', text: 'a fact', evidence: 'a source', tags: [],
-      at: '2026-08-12T00:00:00.000Z', embedding: [0.1, 0.2],
+      id: 'm-score', text: 'a fact', evidence: 'a source', tags: [],
+      at: '2026-08-12T00:00:00.000Z', score: 0.9,
     };
     const rejected = await ledger.addMemory(input);
     assert.match(rejected.error, /invalid input for memory/);
-    assert.ok(rejected.errors.some((e) => e.keyword === 'additionalProperties' && e.instancePath === '/embedding'),
+    assert.ok(rejected.errors.some((e) => e.keyword === 'additionalProperties' && e.instancePath === '/score'),
       `the rejection names the member: ${JSON.stringify(rejected.errors)}`);
     assert.deepStrictEqual(rejected, ledger.validate('memory', input),
       'the write answers exactly what the gate answers');
-    assert.strictEqual(await ledger.getMemory('m-embed'), null, 'and nothing was stored');
+    assert.strictEqual(await ledger.getMemory('m-score'), null, 'and nothing was stored');
 
     const skill = await ledger.addSkill({
-      id: 's-embed', name: 'n', when: 'w', instructions: 'i', embedding: [0.1],
+      id: 's-score', name: 'n', when: 'w', instructions: 'i', score: 0.9,
     });
     assert.match(skill.error, /invalid input for skill/);
     assert.ok(skill.errors.some((e) => e.keyword === 'additionalProperties'));
-    assert.strictEqual(await ledger.getSkill('s-embed'), null);
+    assert.strictEqual(await ledger.getSkill('s-score'), null);
   });
 
   it('there is exactly one rejection-shape implementation', function () {

@@ -17,7 +17,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { createAgent, createLedger, createMemoryStorage, AiError } from '@jarenjs/ai';
+import { createAgent, createLedger, createMemoryStorage, createHashEmbedder, AiError } from '@jarenjs/ai';
 
 /** A client that records every request and answers with fixed text. */
 function recordingClient(text = 'done') {
@@ -163,6 +163,24 @@ describe('ai — the persistent goal', function () {
     assert.match(prompt, /evidence: head -c 200 export\.csv/);
     assert.match(prompt, /reconcile — when a bank export and a ledger disagree/);
     assert.match(prompt, /tools: reconcile_run/);
+  });
+
+  it('composes a ranked retrieval exactly as it composes a listed one', async function () {
+    // `retrieval.memories: { near }` answers `{ memories, scores, skipped }`
+    // rather than an array; the prompt must carry the ranked records and
+    // nothing else changes
+    const embedder = createHashEmbedder({ dims: 16 });
+    const ledger = createLedger({ now: () => AT, embedder, embedOnWrite: true });
+    await ledger.addMemory({ text: 'The export uses CRLF line endings.', evidence: 'head -c 200 export.csv' });
+    await ledger.addMemory({ text: 'Quarterly revenue is reported by region.', evidence: 'finance/README' });
+    const client = recordingClient();
+    await createAgent({
+      client, system: 'Base.', ledger,
+      retrieval: { memories: { near: 'CRLF line endings in the export', limit: 1 } },
+    }).send([{ role: 'user', content: 'go' }]);
+    const prompt = client.requests[0].messages[0].content;
+    assert.match(prompt, /The export uses CRLF line endings\./, 'the nearest memory reached the prompt');
+    assert.doesNotMatch(prompt, /Quarterly revenue/, 'and only the nearest, under the limit');
   });
 
   it('refuses loudly when a retrieval predicate needs a seam nobody wired', async function () {

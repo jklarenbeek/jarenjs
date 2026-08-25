@@ -916,13 +916,13 @@
       "additionalProperties": false
     },
     "SuiteRetrieval": {
-      "description": "retrieval.json — the retrieval instrument: the run meta (the corpus seed and sizes, the question counts, the reserved live tier's skip reason and the synthetic-corpus note), the headline, one table per corpus size and one row per policy per size.",
+      "description": "retrieval.json — the retrieval instrument: the run meta (the corpus seed and sizes, the question counts, the reference embedder behind the ranked row, the live tier's status and the synthetic-corpus note), the headline, one table per corpus size and one row per policy per size.",
       "type": "object",
       "required": ["meta", "headline", "tables", "rows"],
       "properties": {
         "meta": {
           "type": "object",
-          "required": ["suite", "title", "description", "date", "node", "seed", "policySeed", "sizes", "ks", "topics", "facts", "questions", "untagged", "liveSkipped", "note"],
+          "required": ["suite", "title", "description", "date", "node", "seed", "policySeed", "sizes", "ks", "topics", "facts", "questions", "untagged", "ranked", "liveSkipped", "note"],
           "properties": {
             "suite": { "type": "string" },
             "title": { "type": "string" },
@@ -937,6 +937,25 @@
             "facts": { "type": "number" },
             "questions": { "type": "number" },
             "untagged": { "type": "number" },
+            "ranked": {
+              "description": "The identity of the deterministic reference embedder behind the near row — a mechanism score, never a model-quality claim.",
+              "type": "object",
+              "required": ["model", "dims"],
+              "properties": { "model": { "type": "string" }, "dims": { "type": "number" } },
+              "additionalProperties": false
+            },
+            "live": {
+              "description": "Present only when --live scored a near-live row: the provider, the embedding model, its width and the sizes it ran at. The tracked file never carries it.",
+              "type": "object",
+              "required": ["provider", "model", "dims", "sizes"],
+              "properties": {
+                "provider": { "type": "string" },
+                "model": { "type": "string" },
+                "dims": { "type": "number" },
+                "sizes": { "type": "array" }
+              },
+              "additionalProperties": false
+            },
             "liveSkipped": { "type": "string" },
             "note": { "type": "string" }
           },

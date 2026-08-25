@@ -148,6 +148,7 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.ok(Array.isArray(nodes) && nodes.length > 0);
     assert.match(text, /oracle \(gold first\)/, 'the oracle row renders — it is the scorer\'s proof');
     assert.match(text, /tag\+recency/, 'the incumbent renders');
+    assert.match(text, /near \(hash-trigram-64, ranked\)/, 'the ranked row renders beside it, whichever way it fell');
     assert.match(text, /random floor \(analytic\)/, 'the floor renders beside the seeded draw');
     // the page says what the numbers are and are not: a mechanism over a
     // synthetic corpus, never a claim about a model understanding language
@@ -156,14 +157,19 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.strictEqual(data.tables.length, data.meta.sizes.length, 'one table per corpus size');
     // and the published rows carry the contract every later measurement
     // states its delta against: the oracle is 1.0 at every size, and
-    // every policy is one of the four plus the analytic floor
+    // every policy is one of the five plus the analytic floor
     for (const size of data.meta.sizes) {
       const oracle = data.rows.find((r) => r.size === size && r.policy === 'oracle');
       assert.ok(oracle !== undefined);
       assert.deepStrictEqual([oracle.recallAt1, oracle.recallAt5, oracle.recallAt10, oracle.mrr], [1, 1, 1, 1]);
-      for (const key of ['random', 'recency', 'tag+recency', 'floor'])
+      for (const key of ['random', 'recency', 'tag+recency', 'near', 'floor'])
         assert.ok(data.rows.some((r) => r.size === size && r.policy === key), `${key} row at ${size}`);
     }
+    // the tracked file is generated without --live: the ranked row's
+    // identity is the deterministic reference embedder, and no model
+    assert.deepStrictEqual(data.meta.ranked, { model: 'hash-trigram-64', dims: 64 });
+    assert.strictEqual(data.meta.live, undefined, 'the tracked file never carries a live row');
+    assert.ok(!data.rows.some((r) => r.policy === 'near-live'));
   });
 
   it('derives the long-horizon suite, keeping both tasks and both shapes', function () {

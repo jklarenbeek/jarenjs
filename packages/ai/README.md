@@ -134,9 +134,15 @@ UI, and the live proof that a provider really serves `/embeddings`.
 **The seam.** Everything in this package that consumes embeddings is written against three
 members — `{ embed(texts, { signal }) → Promise<Float32Array[]>, model, dims }` — and anything
 that implements them plugs in: the wire client above, a local transformer runtime, a native
-embedding library. This package ships no model weights, no tokenizer and no download, and
-publishes no opinion on which embedding model is good; embedding *quality* belongs to the
-provider and the host.
+embedding library. The contract a host implementation keeps: `embed` returns a Promise and
+**rejects, never throws** (a synchronous throw escapes `.catch` and `Promise.all` alike — the
+consumers here call it inside their own `try` so a host that slips is still caught, but the
+contract is the rejection); one vector per input, in input order, all of one finite width;
+`model` a non-empty string; `dims` the width, or `undefined` until a first reply settles it.
+The ledger's `recall({ near })` and `embedMissing()` (§Compaction that moves) are the
+consumers. This package ships no model weights, no tokenizer and no download, and publishes
+no opinion on which embedding model is good; embedding *quality* belongs to the provider and
+the host.
 
 **The reference embedder is demo-grade, and says so.** `createHashEmbedder({ dims = 64 })`
 implements the seam with hashed character trigrams (FNV-1a into `dims` buckets, l2-normalized)
@@ -557,8 +563,8 @@ retrieval and who may write them:
 | kind | what it is | how it is retrieved | written by |
 |---|---|---|---|
 | `goal` | the one active objective and its append-only progress | always in the prompt | the host (`setGoal`), a refinement (progress only) |
-| `memory` | an evidenced fact worth carrying past this context | `recall({ tags, where, limit })` | the host, or a gated refinement |
-| `skill` | a reusable recipe: when it applies, what to do | `recallSkills(…)` | the host, or a gated refinement |
+| `memory` | an evidenced fact worth carrying past this context | `recall({ tags, where, near, limit })` | the host, or a gated refinement |
+| `skill` | a reusable recipe: when it applies, what to do | `recallSkills(…)` — the same query | the host, or a gated refinement |
 | `slot` | addressable content too big to carry; metadata is separate from the bytes | by name (`recall` the tool) | the harness — never proposed by a model |
 
 Retrieval is tag match plus recency by default. Inject `compileQuery`
@@ -566,6 +572,60 @@ Retrieval is tag match plus recency by default. Inject `compileQuery`
 query document — the same document `@jarenjs/db` could push down to SQL. Without that seam
 a `where` is **refused**, not ignored: a filter silently dropped answers the wrong question
 with a straight face.
+
+**Recall by meaning is the same shape of seam.** A memory or skill may carry an `embedding`
+(plain `number[]` — never a typed array, because the storage boundary is JSON) together with
+its identity, `embeddedBy: { model, dims }`; the two travel as a pair, the vector must be
+exactly `dims` finite numbers, and an un-embedded record is exactly as valid as before.
+Inject an embedder (§Embeddings) and `recall({ near })` ranks by cosine similarity through it:
+
+```js
+import { createLedger, createEmbeddingClient } from '@jarenjs/ai';
+
+const embedder = createEmbeddingClient({ provider: 'ollama', model: 'nomic-embed-text' });
+const ledger = createLedger({ storage, embedder });      // embedOnWrite stays off
+
+await ledger.addMemory({ text: 'The export uses CRLF line endings.', evidence: 'head export.csv' });
+await ledger.embedMissing();                            // → { embedded: 1, remaining: 0 }
+const { memories, scores, skipped } = await ledger.recall({
+  near: 'line endings in the export', tags: ['csv'], limit: 5, minScore: 0.3,
+});
+```
+
+- **Refused without the seam.** `recall({ near })` on a ledger with no embedder answers
+  `{ error: 'recall: near needs the embedder seam — …' }`, exactly as a `where` refuses without
+  `compileQuery`. An absent capability refuses; it never degrades to a different answer.
+- **Refused across identities.** Every candidate's `embeddedBy` is compared with the query
+  embedder's `{ model, dims }` before any arithmetic. Two models in the ledger, or a ledger
+  embedded by one model and queried through another, answer `{ error }` naming every identity
+  found — never the matching subset, because a silent subset is a silent wrong answer.
+- **Skipped, reported.** The candidates are the records that pass `tags`/`where` AND carry a
+  vector; the ones that pass and carry none are counted in `skipped`, never scored (a fabricated
+  score poisons a ranking) and never hidden (a silent drop poisons trust). The result is
+  `{ memories, scores, skipped }` — `scores[i]` is `memories[i]`'s cosine, descending; equal
+  scores fall back to recency, then id, so the order is deterministic; `minScore` filters the
+  ranked list and `limit` caps what survives. `recallSkills({ near })` answers `{ skills, scores,
+  skipped }` the same way, a skill's meaning being its name, when and instructions together.
+- **`embedMissing({ limit?, batch? })` is the explicit sweep** — every un-embedded memory and
+  skill, through `embed(texts[])` in batches, written inside the ledger's write chain, answering
+  `{ embedded, remaining }`. A second run embeds zero and makes no seam call. A failing batch
+  ends the run with the error surfaced once: what was embedded before it is written, the rest
+  stays un-embedded and is counted in `remaining` — never a throw that loses the batch. A ledger
+  that already holds vectors under another identity is refused up front rather than turned into
+  the mixture `recall` would then refuse.
+- **`embedOnWrite` is off by default**, because a write must not silently acquire a network
+  dependency. `createLedger({ embedder, embedOnWrite: true })` embeds a record that arrives
+  without a vector inside its own write; a seam failure then stores the record **un-embedded**
+  and reports it on the returned record as `embedError` (not part of the stored record) — one
+  bad network call never loses a memory, and `embedMissing()` closes the gap later.
+- **No arithmetic lives here.** The cosine is `@jarenjs/core/vector`'s; the ledger calls it and
+  computes nothing. Ranked recall is an exact sweep — one adapter scan plus one cosine per
+  embedded record — which is the right tool for a ledger of thousands and the wrong one for
+  millions; the instrument below says what it costs.
+- **Measured, whichever way it fell.** `benchmark/retrieval.js` scores the ranked path beside the
+  default over the same seeded corpus, through the deterministic reference embedder
+  (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+  A real model's number is the host's to measure through the same instrument's `--live` tier.
 
 Each dropped round is archived to a slot **before** the synopsis is written, and every
 synopsis line carries its address:
@@ -1025,10 +1085,15 @@ are collected here so nobody has to rediscover them the hard way.
 - **Heartbeats and scheduling are the host's.** Re-entering a session on a timer is a
   browser, worker or cron concern; the ledger plus `agent.resume()` is the primitive, and
   keeping the scheduler out is what lets the same agent run in a static page.
-- **Retrieval is tag-and-recency.** The ledger ranks nothing by meaning yet. The embeddings
-  wire and the kernels exist (§Embeddings), and the retrieval instrument in `benchmark/`
-  now scores what today's `recall()` puts in the prompt — but no ranker is wired into
-  `recall()` until that instrument says what one buys, published whichever way it falls.
+- **Retrieval is tag-and-recency by default; ranking is seam-gated opt-in.** The ledger
+  ranks by meaning only through an embedder the host injects, and `recall({ near })` refuses
+  without one — the same refusal culture as a `where` without `compileQuery`. No embedding
+  model, no tokenizer and no download ship here, so no default can rank, and this package
+  publishes no opinion on which model should. What it does publish is the instrument:
+  `benchmark/retrieval.js` scores the default and the ranked path over one seeded corpus,
+  through the deterministic reference embedder, whichever way it falls — <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+  That is a mechanism score (the reference embedder is lexical); a real model's number is the
+  host's to measure through the same instrument's `--live` tier, never this package's to claim.
 - **On the cheap tier, the transport is the fragile part, not the reasoning.** In the
   campaign's own live run the qwen tier answered every sub-call it was given and named the
   right pair; what failed was authoring calls dying on a 300-second deadline. The full

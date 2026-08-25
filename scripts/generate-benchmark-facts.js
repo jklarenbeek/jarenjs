@@ -682,6 +682,27 @@ const FACTS = {
       + ` ${pct(at(large, 'recency').recallAt10)}, a random draw ${pct(at(large, 'random').recallAt10)});`
       + ` at ${memories(small)} memories the same policy reaches ${pct(at(small, 'tag+recency').recallAt10)}`;
   },
+  'retrieval.ranked': () => {
+    // the ranked row beside the default, whichever way it fell — the
+    // comparison word is derived, never typed
+    const { meta, rows } = data('retrieval');
+    const large = meta.sizes[meta.sizes.length - 1];
+    const small = meta.sizes[0];
+    const at = (size, policy) => {
+      const row = rows.find((r) => r.size === size && r.policy === policy);
+      if (row === undefined) throw new Error(`retrieval.json has no ${policy} row at ${size} memories — regenerate it before quoting one`);
+      return row;
+    };
+    const pct = (x) => `${(100 * x).toFixed(1)}%`;
+    const memories = (n) => n.toLocaleString('en-US');
+    const near = at(large, 'near');
+    const incumbent = at(large, 'tag+recency');
+    const word = near.recallAt10 > incumbent.recallAt10 ? 'ahead of'
+      : near.recallAt10 < incumbent.recallAt10 ? 'behind' : 'level with';
+    return `${pct(near.recallAt10)} of questions at ${memories(large)} memories through the`
+      + ` ${meta.ranked.model} reference embedder (${pct(at(small, 'near').recallAt10)} at ${memories(small)}),`
+      + ` ${word} tag match and recency's ${pct(incumbent.recallAt10)}`;
+  },
 };
 
 //#region rewriting

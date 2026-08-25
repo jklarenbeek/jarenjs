@@ -30,7 +30,7 @@ number in a README performance table names the command that produced it.
 | [`flow-fsm.js`](./flow-fsm.js) | FSM compile/transition vs XState v5 + the serializability wedge | Benchmarking `@jarenjs/flow` machines |
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
 | [`long-horizon.js`](./long-horizon.js) | What survives `@jarenjs/ai`'s history compaction — needle + pairwise, ceiling and live model | Measuring agent context retention |
-| [`retrieval.js`](./retrieval.js) | Did the right memory reach the prompt — recall@k and MRR for `@jarenjs/ai`'s recall policies over a seeded corpus, against an oracle | Measuring ledger retrieval, before and after any ranker |
+| [`retrieval.js`](./retrieval.js) | Did the right memory reach the prompt — recall@k and MRR for `@jarenjs/ai`'s recall policies (tag+recency, and the seam-gated ranked path) over a seeded corpus, against an oracle | Measuring ledger retrieval, default and ranked, on one instrument |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
@@ -686,22 +686,36 @@ reason in its own metadata, rather than keeping numbers it did not measure.
 
 ## retrieval.js — did the right memory reach the prompt
 
-`@jarenjs/ai`'s `recall()` is tag match and recency, and there is deliberately
-no ranker because no measurement said one was needed. This is the measurement.
-Over a seeded ledger corpus with gold labels it scores, per policy, whether the
-right memory reached the prompt — recall@1/5/10 (a gold memory in the top k),
-MRR (the reciprocal rank of the best-ranked gold memory) and the latency of one
-recall call — for the policies that exist today, against an oracle ceiling. Four
-rows, at two corpus sizes:
+`@jarenjs/ai`'s `recall()` is tag match and recency by default, and ranks by
+meaning only through an injected embedder (`recall({ near })`, refused without
+the seam). This is the instrument both stand on — built before the ranker, so
+the ranker could be measured rather than assumed. Over a seeded ledger corpus
+with gold labels it scores, per policy, whether the right memory reached the
+prompt — recall@1/5/10 (a gold memory in the top k), MRR (the reciprocal rank of
+the best-ranked gold memory) and the latency of one recall call — against an
+oracle ceiling. Five rows, at two corpus sizes:
 
 - **oracle** — the gold ids first. The 1.000 row that proves the scorer, and the
   first thing the run asserts, before it prints anything;
 - **random** — a seeded draw, asserted to sit inside its analytic band (k/n,
   adjusted for questions with more than one gold memory);
 - **recency** — the newest k, which is what `recall()` answers with no tags;
-- **tag+recency** — the incumbent: the question's words that are corpus tags,
+- **tag+recency** — the default: the question's words that are corpus tags,
   fed to the real `ledger.recall({ tags, limit })` over a real ledger loaded
-  through `addMemory`. Nothing is simulated; the row scores the shipped code path.
+  through `addMemory`. Nothing is simulated; the row scores the shipped code path;
+- **near** — the ranked path: `ledger.recall({ near: question, limit })` over the
+  SAME ledger, swept through `embedMissing()` with the deterministic reference
+  embedder (`createHashEmbedder`, hashed character trigrams, 64 dims). The
+  embedder is **lexical, not semantic** — two texts score high when they share
+  letters — so this row is a *mechanism* score: the sweep, the identity check,
+  the cosine rank, the tie-break and the limit work end to end over the shipped
+  code path, and the same-words distractors are exactly what a lexical signal
+  cannot tell apart. It is published whichever way it falls against the default,
+  and it says nothing about what an embedding model would do.
+
+Every row runs over the swept ledger — the ledger a host that adopted the seam
+has — so the tag rows' latency includes carrying a 64-float vector per record
+through the in-memory adapter's JSON copy; the scores are unchanged by it.
 
 The corpus ([`fixtures/retrieval-corpus.json`](./fixtures/retrieval-corpus.json),
 written by `scripts/generate-retrieval-corpus.js`, seeded and byte-identical run
@@ -714,11 +728,11 @@ and some two or three, so recall@k is not trivially recall@1. The memory list is
 a prefix design: the first 1 000 records are the small corpus and all 10 000 the
 large one, so one question set scores both sizes.
 
-What it measured — and it is the number a ranker would have to beat — is
-that over <!--bm:retrieval.incumbent-->10,000 memories today's recall puts a gold memory in the top 10 for 1.3% of questions (recency alone 0.0%, a random draw 0.0%); at 1,000 memories the same policy reaches 17.5%<!--/bm-->.
+What it measured, for the default, is that over <!--bm:retrieval.incumbent-->10,000 memories today's recall puts a gold memory in the top 10 for 1.3% of questions (recency alone 0.0%, a random draw 0.0%); at 1,000 memories the same policy reaches 17.5%<!--/bm-->.
+The ranked path, through the reference embedder, reaches <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
 Read the rows as mechanism, not language: they say whether a POLICY can find the
 right record among distractors, and nothing about whether any model understands
-a question — no row involves one.
+a question — no deterministic row involves one.
 
 ```bash
 node benchmark/retrieval.js                         # both sizes, the table
@@ -727,13 +741,22 @@ node benchmark/retrieval.js --sizes 1000 --verbose  # one size, plus every quest
 node benchmark/retrieval.js --output json --filepath out.json
 ```
 
-`--live` is reserved, and its contract is fixed now so a ranked policy extends
-it rather than inventing a flag: when a policy exists that ranks by an
-embedding, `--live` scores it through the provider [`lib/env.js`](./lib/env.js)
-resolves, prints the model id beside its row and leaves the deterministic rows
-untouched. No such policy exists yet, so the flag is accepted, the run says it
-did nothing with it, and the deterministic table is the whole run — never a test
-dependency, and a missing key is never a failure.
+`--live` adds a second ranked row, **near-live**: the corpus is loaded into a
+second ledger (one ledger holds one vector identity — a mixture is refused),
+swept through `createEmbeddingClient` against the provider
+[`lib/env.js`](./lib/env.js) resolves and the `/embeddings` model in
+`JAREN_AI_EMBED_MODEL`, and every question is embedded once. The model id prints
+beside the row and lands in `meta.live`; the deterministic rows are exactly what
+they are without the flag. The spend guard `JAREN_AI_MAX_CALLS` is honoured up
+front — a size whose sweep plus questions would exceed it is skipped with that
+reason, never half-spent — and a missing key or model is a stated skip, never a
+failure. It is never a test dependency, and the tracked file is always generated
+without it: this suite publishes no model-quality number as its own.
+
+```bash
+JAREN_AI_PROVIDER=ollama JAREN_AI_EMBED_MODEL=nomic-embed-text \
+  node --env-file-if-exists=.env benchmark/retrieval.js --live --sizes 1000
+```
 
 The corpus and the scorer have their own tests in
 `test/ai/retrieval-corpus.test.js`: the generator's two-run byte-identity and

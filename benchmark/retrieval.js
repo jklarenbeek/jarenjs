@@ -3,9 +3,10 @@
 /**
  * Retrieval benchmark — did the right memory reach the prompt?
  *
- * `@jarenjs/ai`'s `recall()` is tag match and recency, and its README
- * says so: there is no ranker because no measurement says one is needed.
- * This is that measurement. Over a seeded ledger corpus with gold labels
+ * `@jarenjs/ai`'s `recall()` is tag match and recency by default, and
+ * ranks by meaning only through an injected embedder (`recall({ near })`,
+ * refused without the seam). This is the measurement both stand on.
+ * Over a seeded ledger corpus with gold labels
  * (`benchmark/fixtures/retrieval-corpus.json`, from
  * `scripts/generate-retrieval-corpus.js`) it scores, per policy, whether
  * the right memory reached the prompt:
@@ -15,14 +16,28 @@
  *   MRR      — the mean reciprocal rank of the best-ranked gold memory;
  *   latency  — the median and p95 of one retrieval call.
  *
- * Four rows, at two corpus sizes (1 000 and 10 000 memories, one question
+ * Five rows, at two corpus sizes (1 000 and 10 000 memories, one question
  * set): `oracle` (the gold ids first — the 1.000 row that proves the
  * scorer and catches a corpus whose gold ids do not exist), `random` (a
  * seeded draw — the floor, checked against its analytic value), `recency`
- * (the newest k) and `tag+recency` — the incumbent: the question's words
- * that are corpus tags, fed to the REAL `ledger.recall({ tags, limit })`
- * over a real ledger loaded through `addMemory`. Nothing is simulated;
- * the table scores the shipped code path.
+ * (the newest k), `tag+recency` — the default: the question's words that
+ * are corpus tags, fed to the REAL `ledger.recall({ tags, limit })` over a
+ * real ledger loaded through `addMemory` — and `near`: the ranked path,
+ * `ledger.recall({ near: question, limit })` over the SAME ledger swept
+ * through `embedMissing()` with the deterministic reference embedder
+ * (`createHashEmbedder`, hashed character trigrams, 64 dims). Nothing is
+ * simulated; every row scores the shipped code path.
+ *
+ * Read the `near` row for what it is. The reference embedder is LEXICAL
+ * — two texts score high when they share letters, not meaning — so its
+ * row says whether the ranked MECHANISM (sweep, identity check, cosine
+ * rank, tie-break, limit) finds the right record among distractors, and
+ * nothing about what an embedding model would do. Embedding quality
+ * belongs to a real model behind the same seam, which is what `--live`
+ * measures. Whichever way the deterministic row falls against
+ * `tag+recency`, it is published; on this corpus a lexical ranker is
+ * exactly the kind of signal the same-words distractors are built to
+ * defeat.
  *
  * The scorer is gated before any number prints: the oracle row must be
  * exactly 1.000 at every k, and the random row must sit inside its
@@ -42,20 +57,37 @@
  *   node benchmark/retrieval.js --output json --filepath out.json
  *   node --env-file-if-exists=.env benchmark/retrieval.js --live
  *
- * `--live` is RESERVED, and its contract is fixed now so a ranked policy
- * extends it rather than inventing a flag: when a policy exists that
- * ranks by an embedding, `--live` scores it through the provider that
- * `lib/env.js` resolves (`readAiEnv`), prints the model id beside its
- * row, and leaves the deterministic rows exactly as they are. No such
- * policy exists yet, so today the flag is accepted, the run says it did
- * nothing with it, and the deterministic table is the whole run. It is
- * never a test dependency, and a missing key is never a failure.
+ * `--live` scores a SECOND ranked row, `near-live`, through the provider
+ * `lib/env.js` resolves (`readAiEnv`) and the `/embeddings` model in
+ * `JAREN_AI_EMBED_MODEL`: the corpus is loaded into a second ledger
+ * (one ledger holds one vector identity — a mixture is refused), swept
+ * through `createEmbeddingClient` in batches of 128, and every question
+ * is embedded once. The model id prints beside the row and lands in
+ * `meta.live`; the deterministic rows are exactly what they are without
+ * the flag. The spend guard `JAREN_AI_MAX_CALLS` is honoured up front —
+ * a size that would need more embedding calls than the ceiling allows is
+ * skipped with that reason, not half-spent — and a missing key or model
+ * is a stated skip, never a failure. It is never a test dependency, and
+ * the tracked `retrieval.json` is always generated without it.
+ *
+ * Live smoke recipe (any OpenAI-compatible provider; ~30 calls at 1 000):
+ *
+ *   JAREN_AI_PROVIDER=ollama JAREN_AI_EMBED_MODEL=nomic-embed-text \
+ *     node --env-file-if-exists=.env benchmark/retrieval.js --live --sizes 1000
+ *
+ * or OpenRouter with `OPENROUTER_AI_KEY` set and
+ * `JAREN_AI_EMBED_MODEL=openai/text-embedding-3-small` (then
+ * `JAREN_AI_MAX_CALLS=400` covers 10 000 memories: 79 sweep batches plus
+ * 160 questions).
  */
 
 import { writeFileSync } from 'node:fs';
 
+import { createEmbeddingClient, probeEmbeddings } from '@jarenjs/ai';
+
+import { readAiEnv, describeAiEnv } from './lib/env.js';
 import { formatNs } from './lib/fmt.js';
-import { KS, POLICY_SEED, loadCorpus, runSize } from './lib/retrieval.js';
+import { KS, LIVE_BATCH, POLICY_SEED, loadCorpus, runSize } from './lib/retrieval.js';
 
 //#region flags
 
@@ -80,7 +112,7 @@ function parseArgs(argv) {
         console.log('Usage: node benchmark/retrieval.js [options]\n');
         console.log('  --sizes a,b         corpus sizes to score (default: every size the corpus carries)');
         console.log(`  --seed N            the random policy's seed (default ${POLICY_SEED})`);
-        console.log('  --live              reserved: scores a ranked policy through the live provider once one exists');
+        console.log('  --live              add the near-live row: rank through the live /embeddings provider (lib/env.js, JAREN_AI_EMBED_MODEL)');
         console.log('  --verbose, -v       print every question the incumbent missed at the largest k');
         console.log('  --output json --filepath PATH');
         process.exit(0);
@@ -109,7 +141,9 @@ const HEAD = ['policy', ...KS.map((k) => `recall@${k}`), 'MRR', 'median', 'p95']
 /** The console table for one size. */
 function printSize(result) {
   console.log(`\nretrieval — ${thousands(result.n)} memories, ${result.questions.length} questions`
-    + ` (${result.untagged} name no tag), one top-${Math.max(...KS)} call per question`);
+    + ` (${result.untagged} name no tag), one top-${Math.max(...KS)} call per question;`
+    + ` swept ${thousands(result.ranked.embedded)} memories through ${result.ranked.model} in ${ms(result.ranked.sweepMs)}`
+    + (result.live === null ? '' : ` and through ${result.live.model} (${result.live.dims} dims) in ${ms(result.live.sweepMs)}`));
   const width = 30;
   console.log(`  ${HEAD[0].padEnd(width)} ${HEAD.slice(1).map((h) => h.padStart(9)).join(' ')}`);
   for (const policy of result.policies) {
@@ -125,7 +159,9 @@ function tableFor(result) {
   const rows = result.policies.map((policy) => ({
     cells: [policy.label, ...KS.map((k) => fmt3(policy.recall[k])), fmt3(policy.mrr),
       ms(policy.latencyMs), ms(policy.latencyP95Ms)],
-    strong: policy.key === 'tag+recency',
+    // the two policies a consumer chooses between: the default, and
+    // the seam-gated ranked path
+    strong: policy.key === 'tag+recency' || policy.key === 'near',
   }));
   rows.push({ cells: ['random floor (analytic)', ...KS.map((k) => fmt3(result.floor[k])), '—', '—', '—'], strong: false });
   return {
@@ -135,8 +171,11 @@ function tableFor(result) {
     note: `recall@k is the fraction of questions with a gold memory in the top k; MRR is the mean`
       + ` reciprocal rank of the best-ranked gold memory; latency is one recall call over the real ledger.`
       + ` ${result.untagged} of the ${result.questions.length} questions never name a tag, and for those`
-      + ' tag+recency IS recency. The oracle row is the scorer\'s proof; the analytic floor is what a'
-      + ' uniform draw expects.',
+      + ' tag+recency IS recency. The near row ranks by cosine through the seam over the same ledger,'
+      + ` swept with the deterministic ${result.ranked.model} reference embedder (lexical, not semantic —`
+      + ' a mechanism score, not a model-quality claim).'
+      + (result.live === null ? '' : ` The near-live row embeds through ${result.live.model} (${result.live.dims} dims).`)
+      + ' The oracle row is the scorer\'s proof; the analytic floor is what a uniform draw expects.',
   };
 }
 
@@ -184,26 +223,64 @@ const NOTE = 'The corpus is synthetic: statements composed from twenty topic voc
   + ' distractors built to defeat one cheap signal each — the same tag with a different fact, and the'
   + ' same words with a different fact. These numbers measure whether a retrieval POLICY can find the'
   + ' right record among distractors, which is a mechanism; they say nothing about whether any model'
-  + ' understands language, and no row here involves one.';
+  + ' understands language. The near row ranks through the deterministic hashed-trigram reference'
+  + ' embedder, which is lexical, not semantic; only a near-live row (--live) involves a model, and its'
+  + ' quality is the provider\'s, not this suite\'s.';
+
+/**
+ * The live tier's embedder, or the reason there is none. Probes the
+ * wire once (one attempt, five seconds) so a wrong key, URL or model
+ * is one stated skip rather than a retried failure inside the sweep.
+ * @returns {Promise<{ embedder: any, provider: string, maxCalls: number, reason: null }
+ *   | { embedder: null, reason: string }>}
+ */
+async function liveEmbedder() {
+  const env = readAiEnv();
+  if (!env.live) return { embedder: null, reason: env.reason ?? 'no live configuration' };
+  if (env.embedModel === '') return { embedder: null, reason: 'no embedding model — set JAREN_AI_EMBED_MODEL in .env (see .env.example)' };
+  const options = { provider: env.provider, baseUrl: env.baseUrl, apiKey: env.apiKey, model: env.embedModel };
+  const probe = await probeEmbeddings(options);
+  if (!probe.ok) return { embedder: null, reason: `the /embeddings probe failed for ${env.provider} · ${env.embedModel}: ${probe.error}` };
+  console.log(`live tier: ${describeAiEnv(env)}; embeddings via ${env.embedModel} (${probe.dims} dims)`);
+  return { embedder: createEmbeddingClient({ ...options, dims: probe.dims }), provider: env.provider, maxCalls: env.maxCalls, reason: null };
+}
 
 async function main() {
   const corpus = loadCorpus();
   const sizes = flags.sizes ?? corpus.sizes;
 
-  // the reserved tier: the line always prints, so a run can never be
-  // mistaken for one that scored a ranked policy
-  const liveSkipped = flags.live
-    ? 'not applicable: no ranked policy exists yet — --live is reserved for scoring one through the'
-      + ' live embedding provider (lib/env.js) beside these deterministic rows'
-    : '--live not requested (and not applicable: no ranked policy exists yet)';
+  // the live tier: a line always prints, so a run can never be mistaken
+  // for one that scored a live model when it did not
+  const live = flags.live ? await liveEmbedder() : { embedder: null, reason: '--live not requested' };
+  /** @type {string[]} */
+  const liveNotes = [];
 
   // every size is scored and gated BEFORE anything prints: a scorer that
   // failed its own oracle would otherwise have already published a table
   const results = [];
   for (const size of sizes) {
-    const result = await runSize(corpus, size, { seed: flags.seed });
+    /** @type {{ embedder: any, label: string } | null} */
+    let liveAt = null;
+    if (live.embedder !== null) {
+      // the spend guard, honoured up front: a size whose sweep plus
+      // questions would exceed the ceiling is skipped whole, never half-spent
+      const calls = Math.ceil(size / LIVE_BATCH) + corpus.questions.length;
+      if (calls > live.maxCalls) {
+        liveNotes.push(`${thousands(size)} memories skipped: ${calls} embedding calls exceed JAREN_AI_MAX_CALLS=${live.maxCalls}`);
+      }
+      else liveAt = { embedder: live.embedder, label: `near-live (${live.embedder.model}, ${live.provider})` };
+    }
+    const result = await runSize(corpus, size, { seed: flags.seed, live: liveAt });
     results.push(result);
   }
+  const liveRan = results.filter((r) => r.live !== null);
+  const liveSkipped = live.embedder === null
+    ? live.reason
+    : liveRan.length === 0
+      ? liveNotes.join('; ')
+      : `not skipped — near-live scored through ${live.provider} · ${live.embedder.model} at`
+        + ` ${liveRan.map((r) => thousands(r.n)).join(' and ')} memories`
+        + (liveNotes.length === 0 ? '' : `; ${liveNotes.join('; ')}`);
 
   for (const result of results) {
     printSize(result);
@@ -212,7 +289,7 @@ async function main() {
   console.log(`\nscorer gate: oracle 1.000 at every k, random inside its analytic band, at every size`);
   console.log(`corpus seed ${corpus.seed}, policy seed ${flags.seed}; ${corpus.facts.length} facts over`
     + ` ${corpus.topics.length} topics, ${corpus.questions.length} questions`);
-  console.log(`live tier skipped: ${liveSkipped}`);
+  console.log(`live tier: ${liveSkipped}`);
   console.log(`\n# ${NOTE}`);
 
   if (flags.output === 'json' && flags.filepath !== null) {
@@ -221,8 +298,21 @@ async function main() {
     const at = (result, key) => result.policies.find((p) => p.key === key);
     const top = Math.max(...KS);
     const incumbent = at(largest, 'tag+recency');
+    const near = at(largest, 'near');
+    const nearSmall = at(smallest, 'near');
     const recency = at(largest, 'recency');
     const random = at(largest, 'random');
+    const liveMeta = liveRan.length === 0 ? {} : {
+      live: {
+        provider: live.provider,
+        model: /** @type {any} */ (live.embedder).model,
+        dims: liveRan[0].live.dims,
+        sizes: liveRan.map((r) => r.n),
+      },
+    };
+    // the comparison, derived — whichever way it fell
+    const ahead = near.recall[top] > incumbent.recall[top];
+    const tied = near.recall[top] === incumbent.recall[top];
     // this IS the published document — `benchmark/website-data.js` passes
     // it through untouched, so the file shape is defined here and nowhere
     // else
@@ -231,8 +321,9 @@ async function main() {
         suite: 'retrieval',
         title: 'Retrieval — did the right memory reach the prompt',
         description: 'Whether the ledger\'s recall puts the right memory in the prompt: recall@k, MRR'
-          + ' and latency for the policies that exist today — random, recency and tag match plus'
-          + ' recency — against an oracle ceiling, over a seeded synthetic corpus at two sizes.',
+          + ' and latency for random, recency, tag match plus recency (the default) and the'
+          + ' seam-gated ranked path (near, through the deterministic reference embedder) — against'
+          + ' an oracle ceiling, over a seeded synthetic corpus at two sizes.',
         date: new Date().toISOString(),
         node: process.version,
         seed: corpus.seed,
@@ -243,26 +334,35 @@ async function main() {
         facts: corpus.facts.length,
         questions: corpus.questions.length,
         untagged: largest.untagged,
+        ranked: { model: largest.ranked.model, dims: largest.ranked.dims },
+        ...liveMeta,
         liveSkipped,
         note: NOTE,
       },
       headline: {
-        title: 'Tag match and recency, scored — the number a ranker would have to beat',
-        text: `Over ${thousands(largest.n)} memories and ${corpus.questions.length} questions, today's recall`
-          + ` — tag match, then recency — puts a gold memory in the top ${top} for`
+        title: 'Tag match and recency, and the ranked path beside it — both scored, whichever way they fell',
+        text: `Over ${thousands(largest.n)} memories and ${corpus.questions.length} questions, the default`
+          + ` recall — tag match, then recency — puts a gold memory in the top ${top} for`
           + ` ${pct(incumbent.recall[top])} of questions and in first place for ${pct(incumbent.recall[1])}`
-          + ` (MRR ${fmt3(incumbent.mrr)}). Recency alone manages ${pct(recency.recall[top])} and a seeded`
-          + ` random draw ${pct(random.recall[top])}, against an analytic floor of`
-          + ` ${pct(largest.floor[top])}; the oracle row is 1.000 everywhere, which is what proves the`
-          + ` scorer. At ${thousands(smallest.n)} memories the same policy reaches`
-          + ` ${pct(at(smallest, 'tag+recency').recall[top])} — the drop to ${thousands(largest.n)} is`
-          + ' the size at which the question becomes hard, and the reason the number is published'
-          + ` at both. ${largest.untagged} of the ${corpus.questions.length} questions never name a`
-          + ' tag, and for those the incumbent IS recency. No ranker exists yet; when one does, its'
-          + ' row goes beside these, whichever way it falls. The corpus is synthetic — statements'
-          + ` composed from ${corpus.topics.length} topic vocabularies, with same-tag and same-words`
-          + ' distractors — so read every row as a mechanism: whether a policy can find the right'
-          + ' record among distractors, not whether a model understands language.',
+          + ` (MRR ${fmt3(incumbent.mrr)}). The ranked path — recall({ near }) through the seam, over the`
+          + ` same ledger swept with the deterministic ${largest.ranked.model} reference embedder — reaches`
+          + ` ${pct(near.recall[top])} in the top ${top} and ${pct(near.recall[1])} in first place`
+          + ` (MRR ${fmt3(near.mrr)}), ${tied ? 'level with' : ahead ? 'ahead of' : 'behind'} the default`
+          + ` at this size; at ${thousands(smallest.n)} memories the two read`
+          + ` ${pct(at(smallest, 'tag+recency').recall[top])} and ${pct(nearSmall.recall[top])}.`
+          + ' That reference embedder is lexical — hashed character trigrams, no model — so its row is a'
+          + ' mechanism score: the sweep, the identity check, the cosine rank and the tie-break work end to'
+          + ' end over the shipped code path, and the same-words distractors are exactly what a lexical'
+          + ' signal cannot tell apart. Embedding quality belongs to a real model behind the same seam,'
+          + ' which is what the --live tier measures and which is never published as this suite\'s own.'
+          + ` Recency alone manages ${pct(recency.recall[top])} and a seeded random draw`
+          + ` ${pct(random.recall[top])}, against an analytic floor of ${pct(largest.floor[top])}; the`
+          + ` oracle row is 1.000 everywhere, which is what proves the scorer. ${largest.untagged} of the`
+          + ` ${corpus.questions.length} questions never name a tag, and for those the default IS recency.`
+          + ` The corpus is synthetic — statements composed from ${corpus.topics.length} topic`
+          + ' vocabularies, with same-tag and same-words distractors — so read every row as a mechanism:'
+          + ' whether a policy can find the right record among distractors, not whether a model'
+          + ' understands language.',
       },
       tables: results.map(tableFor),
       rows: results.flatMap(rowsFor),

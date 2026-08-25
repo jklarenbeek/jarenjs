@@ -1195,21 +1195,26 @@ function buildHeadlines(generated, meta) {
     const n = sizes[sizes.length - 1];
     const at = (policy) => rows.find((r) => r.size === n && r.policy === policy);
     const incumbent = at('tag+recency');
+    const near = at('near');
     const recency = at('recency');
     const random = at('random');
     const oracle = at('oracle');
-    if (n !== undefined && incumbent !== undefined && recency !== undefined
+    if (n !== undefined && incumbent !== undefined && near !== undefined && recency !== undefined
       && random !== undefined && oracle !== undefined) {
       const pct = (x) => `${(x * 100).toFixed(1)}%`;
+      const word = near.recallAt10 > incumbent.recallAt10 ? 'ahead of'
+        : near.recallAt10 < incumbent.recallAt10 ? 'behind' : 'level with';
       add('retrieval', 'Retrieval', {
         ratio: null,
         rival: 'random and recency',
         conformance: `oracle ${pct(oracle.recallAt10)}`,
         note: `retrieval mechanics, not speed: over ${n.toLocaleString('en-US')} synthetic memories,`
-          + ` today's recall (tag match, then recency) puts a gold memory in the top 10 for`
-          + ` ${pct(incumbent.recallAt10)} of questions; recency alone ${pct(recency.recallAt10)}, a`
-          + ` random draw ${pct(random.recallAt10)}. No ranker exists yet — this is the number one`
-          + ' would have to beat; see the suite page',
+          + ` the default recall (tag match, then recency) puts a gold memory in the top 10 for`
+          + ` ${pct(incumbent.recallAt10)} of questions; the seam-gated ranked path (near, through the`
+          + ` deterministic ${generated.retrieval.meta?.ranked?.model ?? 'reference'} embedder — lexical, a`
+          + ` mechanism score) ${pct(near.recallAt10)}, ${word} it; recency alone ${pct(recency.recallAt10)},`
+          + ` a random draw ${pct(random.recallAt10)}. Embedding quality belongs to a real model behind`
+          + ' the same seam; see the suite page',
       });
     }
   }
@@ -1350,10 +1355,12 @@ function generateLongHorizon(tmp, options) {
 /**
  * The retrieval suite: whether `@jarenjs/ai`'s recall puts the right
  * memory in the prompt, scored over the committed synthetic corpus.
- * Deterministic and model-free — only the latency columns depend on the
- * machine — and it gates its own scorer (the oracle row must be 1.000)
- * before it writes anything. `--live` is not passed: the flag is
- * reserved for a ranked policy, and none exists.
+ * Deterministic and model-free — the ranked row embeds through the
+ * hashed-trigram reference embedder, and only the latency and sweep
+ * columns depend on the machine — and it gates its own scorer (the
+ * oracle row must be 1.000) before it writes anything. `--live` is not
+ * passed: the tracked file never carries a model's row; a host runs the
+ * live tier by hand and reads its own number.
  */
 function generateRetrieval(tmp) {
   const file = path.join(tmp, 'retrieval.json');

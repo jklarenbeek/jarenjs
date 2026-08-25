@@ -714,14 +714,24 @@ harder and more valuable half.
   artifact is three lines of script — what is missing is the measurement that says
   where each grammar's seam is, which is not guessable from the schema alone.
 
-- [ ] **Retrieval is tag match and recency.** `recall({ tags, limit })` orders by
-  recency and matches tags; with the `compileQuery` seam wired a caller may pass a
-  real query document, and without it a predicate is refused rather than ignored.
-  There is deliberately no embedding, no ranking and no relevance model — and no
-  measurement that says one is needed. The honest next step is an instrument
-  before an implementation: a retrieval benchmark that scores whether the right
-  memory reached the prompt, on a ledger big enough for the question to be hard.
-  Adding a ranker first would be optimising a number nobody has.
+- [ ] **Retrieval quality has an instrument and no real-language dataset.**
+  `recall({ tags, limit })` is the default; `recall({ near })` ranks by meaning
+  through an injected embedder and refuses without one, and
+  `benchmark/retrieval.js` scores both — recall@k and MRR over a seeded corpus,
+  the ranked row through the deterministic hashed-trigram reference embedder,
+  published whichever way it falls (<!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->).
+  What is open is what that instrument cannot say. The corpus is synthetic and the
+  reference embedder is lexical, so the numbers are mechanism scores: they prove
+  the sweep, the identity check and the ranking work over the shipped code path
+  and say nothing about whether the right memory is found by *meaning*. Measuring
+  QUALITY needs a real-language dataset with human-labelled relevance, embedded
+  through the `--live` tier by a model a host injects — and this suite publishes
+  no model's number as its own, so the dataset and the run are a host's to bring.
+  The other open edge is scale: ranked recall is an exact sweep over every
+  candidate in process (one adapter scan plus one cosine per embedded record),
+  which is the right tool up to some tens of thousands of memories and the wrong
+  one past it; an approximate index is a different design with its own
+  measurement, and the committed instrument is what would score it.
 
 - [ ] **The goal section has no ceiling.** Progress is appended and never
   rewritten, and every entry composes into the system prompt of every request —

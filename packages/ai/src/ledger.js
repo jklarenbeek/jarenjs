@@ -32,23 +32,77 @@
  *    accept later, because a bad one can be undone without a human
  *    reading the diff.
  *
+ * And one more, added when recall by meaning arrived:
+ *
+ *  - **Meaning is a seam, not a dependency.** A record may carry an
+ *    `embedding` with its identity (`embeddedBy: { model, dims }`);
+ *    `recall({ near })` ranks by cosine similarity through an injected
+ *    embedder — `createEmbeddingClient(...)`, `createHashEmbedder()`, or
+ *    any host `{ embed, model, dims }` — and without one it REFUSES,
+ *    naming the seam, exactly as a `where` predicate refuses without
+ *    `compileQuery`. It refuses a mixture of identities rather than
+ *    ranking the matching subset (a silent subset is a silent wrong
+ *    answer), it reports how many records it skipped for carrying no
+ *    vector rather than scoring them, and a write never acquires the
+ *    seam's network dependency unless `embedOnWrite` asks for it;
+ *    `embedMissing()` is the explicit sweep that closes the gap. Every
+ *    dot and cosine comes from `@jarenjs/core/vector`; none is computed
+ *    here.
+ *
  * Its consumers today: the agent's compaction archive, the environment's
  * slots, refinement's patchable state, and the website assistant's
  * durable memory — all on this one implementation.
  */
 
 import { JarenValidator } from '@jarenjs/validate';
+import { excerpt } from '@jarenjs/core/chunk';
+import { isVector, cosineSimilarity } from '@jarenjs/core/vector';
 
 import { checkOutcome, invalidInput } from './check.js';
+import { AiError } from './errors.js';
 import { createMemoryStorage } from './storage/memory.js';
 import { LEDGER_SCHEMAS } from './schemas/ledger.js';
-import { excerpt } from '@jarenjs/core/chunk';
 
 /** @typedef {import('./schemas/ledger.js').LedgerGoal} LedgerGoal */
 /** @typedef {import('./schemas/ledger.js').LedgerMemory} LedgerMemory */
 /** @typedef {import('./schemas/ledger.js').LedgerSkill} LedgerSkill */
 /** @typedef {import('./schemas/ledger.js').LedgerSlot} LedgerSlot */
 /** @typedef {import('./schemas/ledger.js').LedgerRejection} LedgerRejection */
+/** @typedef {import('./schemas/ledger.js').LedgerEmbeddedBy} LedgerEmbeddedBy */
+/** @typedef {import('./embed.js').Embedder} Embedder */
+
+/**
+ * What `recall({ near })` answers: the memories that carry a comparable
+ * vector, ranked by cosine similarity (descending; ties by recency, then
+ * id), one score per memory in the same order, and the count of records
+ * that passed the filter but carry no vector and were therefore skipped
+ * — reported, never scored.
+ * @typedef {object} LedgerRankedMemories
+ * @property {LedgerMemory[]} memories
+ * @property {number[]} scores
+ * @property {number} skipped
+ */
+
+/**
+ * What `recallSkills({ near })` answers — see {@link LedgerRankedMemories}.
+ * @typedef {object} LedgerRankedSkills
+ * @property {LedgerSkill[]} skills
+ * @property {number[]} scores
+ * @property {number} skipped
+ */
+
+/**
+ * The query both recalls take. `near` is the string to rank by meaning
+ * against, and needs the embedder seam; `minScore` filters the ranked
+ * result (cosine, in [-1, 1]); `tags` and `where` narrow the candidates
+ * first, exactly as they do without `near`.
+ * @typedef {object} LedgerQuery
+ * @property {string[]} [tags]
+ * @property {any} [where]
+ * @property {number} [limit]
+ * @property {string} [near]
+ * @property {number} [minScore]
+ */
 
 /** The key space. State and snapshots are separate prefixes on purpose:
  * a rollback wipes state and must not take the other snapshots with it. */
@@ -123,10 +177,47 @@ function defined(record) {
  * @param {any[]} records
  */
 function byRecency(records) {
-  return [...records].sort((a, b) => (a.at === b.at
-    ? String(a.id ?? a.name).localeCompare(String(b.id ?? b.name))
-    : String(b.at).localeCompare(String(a.at))));
+  return [...records].sort(recencyOrder);
 }
+
+/**
+ * The comparator behind {@link byRecency}: newer first, then id — the
+ * same rule ranked recall falls back to between two equal scores.
+ * @param {any} a
+ * @param {any} b
+ */
+function recencyOrder(a, b) {
+  return a.at === b.at
+    ? String(a.id ?? a.name).localeCompare(String(b.id ?? b.name))
+    : String(b.at).localeCompare(String(a.at));
+}
+
+/**
+ * The text a skill is embedded from: its name, when it applies and what
+ * to do, one per line — what "near" means for a skill. A memory is
+ * embedded from its `text` alone.
+ * @param {{ name: string, when: string, instructions: string }} skill
+ */
+const skillText = (skill) => `${skill.name}\n${skill.when}\n${skill.instructions}`;
+
+/**
+ * Whether two vector identities are the same model at the same width.
+ * @param {LedgerEmbeddedBy | undefined} a
+ * @param {LedgerEmbeddedBy} b
+ */
+const sameIdentity = (a, b) => a !== undefined && a.model === b.model && a.dims === b.dims;
+
+/**
+ * An identity as a refusal names it.
+ * @param {LedgerEmbeddedBy} identity
+ */
+const describeIdentity = (identity) => `${identity.model} (${identity.dims} dims)`;
+
+/** The seam refusal, shared by every entry point that needs the embedder. */
+const SEAM_REFUSAL = 'needs the embedder seam — inject createEmbeddingClient(...) or any { embed, model, dims }';
+
+/** How many texts one `embedMissing` batch hands the seam. */
+const EMBED_BATCH = 64;
 
 /**
  * Create a ledger.
@@ -136,6 +227,8 @@ function byRecency(records) {
  *     delete: (key: string) => Promise<void>,
  *     keys: (prefix?: string) => Promise<string[]> },
  *   compileQuery?: (document: any) => (data: any) => any,
+ *   embedder?: Embedder,
+ *   embedOnWrite?: boolean,
  *   validator?: any,
  *   now?: () => string }} [options]
  *   - `storage` defaults to an in-memory adapter, so a ledger works with
@@ -145,12 +238,34 @@ function byRecency(records) {
  *     real query document; without it, retrieval degrades to tag match
  *     and recency, and a caller-supplied predicate is refused rather
  *     than silently ignored.
+ *   - `embedder` is the meaning seam — `createEmbeddingClient(...)`,
+ *     `createHashEmbedder()`, or any host `{ embed, model, dims }` whose
+ *     `embed` returns a Promise and rejects rather than throws. With it,
+ *     `recall({ near })` ranks and `embedMissing()` sweeps; without it,
+ *     both refuse naming the seam. Every stored vector is compared
+ *     against the embedder's `{ model, dims }` before any arithmetic.
+ *   - `embedOnWrite` (default `false`) embeds a memory or skill that
+ *     arrives without a vector inside its own write. Off by default on
+ *     purpose: a write must not silently acquire a network dependency.
+ *     On, a seam failure stores the record un-embedded and reports it on
+ *     the returned record (`embedError`) — never a dropped write.
  *   - `now` returns an RFC 3339 timestamp (injected for deterministic
  *     tests, exactly as the rest of the suite injects its environment).
  */
 export function createLedger(options = {}) {
   const storage = options.storage ?? createMemoryStorage();
   const compileQuery = typeof options.compileQuery === 'function' ? options.compileQuery : null;
+  /** @type {Embedder | null} */
+  const embedder = options.embedder ?? null;
+  if (embedder !== null) {
+    if (typeof embedder !== 'object' || typeof embedder.embed !== 'function')
+      throw new AiError('AI0001', 'embedder: expected the seam — { embed(texts) → Promise<Float32Array[]>, model, dims }');
+    if (typeof embedder.model !== 'string' || embedder.model === '')
+      throw new AiError('AI0001', 'embedder: needs a model name — it is half of every vector\'s identity');
+  }
+  const embedOnWrite = options.embedOnWrite === true;
+  if (embedOnWrite && embedder === null)
+    throw new AiError('AI0001', `embedOnWrite ${SEAM_REFUSAL}`);
   const now = options.now ?? (() => new Date().toISOString());
   // `unknownFormats: 'ignore'` is the library default; it is passed
   // EXPLICITLY because this project's convention for a schema it ships is
@@ -216,7 +331,81 @@ export function createLedger(options = {}) {
    */
   function validate(kind, record) {
     const outcome = checkOutcome(checks[kind](record));
-    return outcome.valid ? null : invalidInput(kind, outcome, LEDGER_SCHEMAS[kind]);
+    if (!outcome.valid) return invalidInput(kind, outcome, LEDGER_SCHEMAS[kind]);
+    // the schema has said the pair is present together and shaped; what
+    // it cannot say is that the vector IS what its identity declares —
+    // `isVector` is the suite's one definition of that
+    if (record.embedding !== undefined && !isVector(record.embedding, record.embeddedBy.dims)) {
+      return invalidInput(kind, { errors: [{
+        instancePath: '/embedding',
+        keyword: 'embeddedBy',
+        message: `must be exactly ${record.embeddedBy.dims} finite numbers, as embeddedBy.dims declares`,
+      }] }, LEDGER_SCHEMAS[kind]);
+    }
+    return null;
+  }
+
+  /**
+   * Embed texts through the seam, holding a host embedder to the
+   * contract the shipped ones keep — one finite vector per input, all of
+   * one width — and answering `{ vectors, identity }` or `{ error }`,
+   * never a throw. The call sits inside the `try` so that a host `embed`
+   * that throws synchronously lands in the same catch as one that
+   * rejects. `identity.dims` is the embedder's settled width, or the
+   * width this reply settled it at.
+   * @param {string[]} texts
+   * @returns {Promise<{ vectors: Float32Array[], identity: LedgerEmbeddedBy, error?: undefined }
+   *   | { error: string, vectors?: undefined, identity?: undefined }>}
+   */
+  async function embedThrough(texts) {
+    if (embedder === null) return { error: SEAM_REFUSAL };
+    try {
+      const vectors = await embedder.embed(texts);
+      if (!Array.isArray(vectors) || vectors.length !== texts.length) {
+        return { error: `the embedder answered ${Array.isArray(vectors) ? vectors.length : 'no'}`
+          + ` vectors for ${texts.length} inputs` };
+      }
+      const dims = embedder.dims ?? vectors[0].length;
+      for (let i = 0; i < vectors.length; i++) {
+        if (!isVector(vectors[i], dims))
+          return { error: `the embedder answered something other than ${dims} finite numbers for input ${i}` };
+      }
+      return { vectors, identity: { model: embedder.model, dims } };
+    }
+    catch (err) {
+      return { error: /** @type {any} */ (err)?.message ?? String(err) };
+    }
+  }
+
+  /**
+   * The stored form of one seam vector on a record: plain numbers, with
+   * the identity beside them.
+   * @template {object} T
+   * @param {T} record
+   * @param {Float32Array} vector
+   * @param {LedgerEmbeddedBy} identity
+   * @returns {T & { embedding: number[], embeddedBy: LedgerEmbeddedBy }}
+   */
+  const withEmbedding = (record, vector, identity) =>
+    ({ ...record, embedding: Array.from(vector), embeddedBy: { ...identity } });
+
+  /**
+   * The `embedOnWrite` step: a record arriving without a vector is
+   * embedded inside its own write. A seam failure is reported on the
+   * RESULT, not the record — the record is stored un-embedded and the
+   * write succeeds, because one bad network call must not lose a memory;
+   * `embedMissing()` closes the gap later.
+   * @template {{ embedding?: number[] }} T
+   * @param {T} record
+   * @param {string} text
+   * @returns {Promise<{ record: T, embedError?: string }>}
+   */
+  async function embedOnWriteStep(record, text) {
+    if (!embedOnWrite || record.embedding !== undefined) return { record };
+    const answer = await embedThrough([text]);
+    if (answer.error !== undefined)
+      return { record, embedError: `the embedder seam failed — ${answer.error}; stored un-embedded` };
+    return { record: withEmbedding(record, answer.vectors[0], answer.identity) };
   }
 
   /** Read every value under a prefix, in key order. */
@@ -347,10 +536,16 @@ export function createLedger(options = {}) {
    * never silently dropped. A write that quietly stored less than it
    * was handed would let "it was accepted" and "it is there" diverge.
    * @param {{ id?: string, text: string, evidence: string,
-   *   tags?: string[], at?: string }} input
-   * @returns {Promise<LedgerMemory | LedgerRejection>} the record as
-   *   stored (defaults filled, undefined members stripped), or the
-   *   rejection saying why nothing was
+   *   tags?: string[], at?: string, embedding?: number[],
+   *   embeddedBy?: LedgerEmbeddedBy }} input
+   *   `embedding` + `embeddedBy` travel together (plain numbers, never a
+   *   typed array); the vector must be exactly `embeddedBy.dims` finite
+   *   numbers or the write is rejected
+   * @returns {Promise<(LedgerMemory & { embedError?: string }) | LedgerRejection>}
+   *   the record as stored (defaults filled, undefined members
+   *   stripped), or the rejection saying why nothing was. `embedError`
+   *   appears only under `embedOnWrite` when the seam failed: the record
+   *   is stored WITHOUT a vector and the member is not part of it
    */
   function addMemory(input) {
     return enqueue(async () => {
@@ -362,8 +557,9 @@ export function createLedger(options = {}) {
       });
       const rejected = validate('memory', memory);
       if (rejected !== null) return rejected;
-      await storage.set(`${KEYS.memory}${memory.id}`, memory);
-      return memory;
+      const { record, embedError } = await embedOnWriteStep(memory, memory.text);
+      await storage.set(`${KEYS.memory}${record.id}`, record);
+      return embedError === undefined ? record : { ...record, embedError };
     });
   }
 
@@ -401,8 +597,11 @@ export function createLedger(options = {}) {
    * Store a reusable recipe. Built and validated exactly as a memory is:
    * every input member, defaults filled, the whole record checked.
    * @param {{ id?: string, name: string, when: string,
-   *   instructions: string, tools?: string[], at?: string }} input
-   * @returns {Promise<LedgerSkill | LedgerRejection>}
+   *   instructions: string, tools?: string[], at?: string,
+   *   embedding?: number[], embeddedBy?: LedgerEmbeddedBy }} input
+   * @returns {Promise<(LedgerSkill & { embedError?: string }) | LedgerRejection>}
+   *   as `addMemory`; under `embedOnWrite` the skill is embedded from its
+   *   name, when and instructions
    */
   function addSkill(input) {
     return enqueue(async () => {
@@ -414,8 +613,9 @@ export function createLedger(options = {}) {
       });
       const rejected = validate('skill', skill);
       if (rejected !== null) return rejected;
-      await storage.set(`${KEYS.skill}${skill.id}`, skill);
-      return skill;
+      const { record, embedError } = await embedOnWriteStep(skill, skillText(skill));
+      await storage.set(`${KEYS.skill}${record.id}`, record);
+      return embedError === undefined ? record : { ...record, embedError };
     });
   }
 
@@ -514,7 +714,7 @@ export function createLedger(options = {}) {
    * Retrieve by relevance: tag match, then recency, plus any predicate
    * the seam can evaluate.
    * @param {any[]} records
-   * @param {{ tags?: string[], where?: any, limit?: number }} query
+   * @param {LedgerQuery} query
    */
   function retrieve(records, query = {}) {
     const filtered = filter(records, query.tags, query.where);
@@ -524,24 +724,182 @@ export function createLedger(options = {}) {
   }
 
   /**
-   * Memories relevant to a query, newest first.
-   * @param {{ tags?: string[], where?: any, limit?: number }} [query]
-   * @returns {Promise<LedgerMemory[] | { error: string }>} the `{ error }`
-   *   is a predicate problem (no seam, or one that does not compile) —
-   *   content, not a crash
+   * Retrieve by meaning: the records that pass the tag/where filter AND
+   * carry a vector, ranked by cosine similarity to the embedded query.
+   *
+   * The refusals come before the arithmetic, in this order: `near` must
+   * be a non-empty string; the seam must be wired (the `compileQuery`
+   * precedent — an absent capability refuses, it never degrades); the
+   * filter must compile; the seam must answer; and every candidate's
+   * identity must equal the query embedder's. A mixture — two models in
+   * the ledger, or a ledger embedded by one model and queried through
+   * another — is refused naming every identity found, because ranking
+   * the matching subset would be a silent wrong answer. Records without
+   * a vector are not scored (a fabricated score poisons a ranking) and
+   * not hidden (a silent drop poisons trust): they are counted in
+   * `skipped`.
+   *
+   * Ranking is `cosineSimilarity` from the kernels, descending; equal
+   * scores fall back to recency, then id, so the order is deterministic.
+   * `minScore` filters the ranked list; `limit` caps what survives.
+   * @param {any[]} records
+   * @param {LedgerQuery} query
+   * @param {'recall' | 'recallSkills'} name - the entry point, for the refusal text
+   * @param {'memories' | 'skills'} member - the result member the ranked records go under
+   * @returns {Promise<{ error: string } | { [member: string]: any, scores: number[], skipped: number }>}
    */
-  async function recall(query = {}) {
-    return retrieve(await readAll(KEYS.memory), query);
+  async function rankNear(records, query, name, member) {
+    const { near } = query;
+    if (typeof near !== 'string' || near === '')
+      return { error: `${name}: near must be a non-empty string — the text to rank by meaning against` };
+    if (embedder === null) return { error: `${name}: near ${SEAM_REFUSAL}` };
+    const filtered = filter(records, query.tags, query.where);
+    if (filtered.error !== undefined) return filtered;
+
+    const answer = await embedThrough([near]);
+    if (answer.error !== undefined) return { error: `${name}: the embedder seam failed — ${answer.error}` };
+    const probe = answer.vectors[0];
+    const identity = answer.identity;
+
+    // the identity check, before any math: every candidate's identity
+    // must be the query's, or nothing is ranked
+    /** @type {any[]} */
+    const candidates = [];
+    /** @type {Map<string, LedgerEmbeddedBy>} */
+    const found = new Map();
+    let skipped = 0;
+    for (const record of filtered.value) {
+      if (record.embedding === undefined) {
+        skipped += 1;
+        continue;
+      }
+      found.set(describeIdentity(record.embeddedBy), record.embeddedBy);
+      candidates.push(record);
+    }
+    const foreign = [...found.values()].filter((stored) => !sameIdentity(stored, identity));
+    if (foreign.length > 0) {
+      return { error: `${name}: near cannot rank across embedders — the ledger holds vectors from`
+        + ` ${[...found.keys()].join(', ')} and the query embedder is ${describeIdentity(identity)};`
+        + ' rank through the embedder that wrote them, or re-embed every record with one embedder' };
+    }
+
+    const ranked = candidates
+      .map((record) => ({ record, score: cosineSimilarity(probe, record.embedding) }))
+      .sort((a, b) => (b.score - a.score) || recencyOrder(a.record, b.record));
+    const kept = typeof query.minScore === 'number'
+      ? ranked.filter((entry) => entry.score >= /** @type {number} */ (query.minScore))
+      : ranked;
+    const capped = typeof query.limit === 'number' ? kept.slice(0, query.limit) : kept;
+    return {
+      [member]: capped.map((entry) => entry.record),
+      scores: capped.map((entry) => entry.score),
+      skipped,
+    };
   }
 
   /**
-   * Skills relevant to a query, newest first — what a host composes into
-   * a system prompt.
-   * @param {{ tags?: string[], where?: any, limit?: number }} [query]
-   * @returns {Promise<LedgerSkill[] | { error: string }>}
+   * Memories relevant to a query. Without `near`: tag match, then
+   * recency — an array, newest first. With `near`: ranked by meaning
+   * through the embedder seam — `{ memories, scores, skipped }` — or the
+   * refusal that says why not.
+   * @param {LedgerQuery} [query]
+   * @returns {Promise<LedgerMemory[] | LedgerRankedMemories | { error: string }>}
+   *   the `{ error }` is a query problem — no seam for a `where` or a
+   *   `near`, a predicate that does not compile, a seam that failed, or
+   *   a mixture of vector identities — content, not a crash
+   */
+  async function recall(query = {}) {
+    const records = await readAll(KEYS.memory);
+    return query.near === undefined
+      ? retrieve(records, query)
+      : /** @type {any} */ (rankNear(records, query, 'recall', 'memories'));
+  }
+
+  /**
+   * Skills relevant to a query — what a host composes into a system
+   * prompt. The same two paths as `recall`; a skill's meaning is its
+   * name, when and instructions together.
+   * @param {LedgerQuery} [query]
+   * @returns {Promise<LedgerSkill[] | LedgerRankedSkills | { error: string }>}
    */
   async function recallSkills(query = {}) {
-    return retrieve(await readAll(KEYS.skill), query);
+    const records = await readAll(KEYS.skill);
+    return query.near === undefined
+      ? retrieve(records, query)
+      : /** @type {any} */ (rankNear(records, query, 'recallSkills', 'skills'));
+  }
+
+  /**
+   * The explicit sweep: embed every memory and skill that carries no
+   * vector, through the seam, in batches, inside the write chain — so no
+   * other write moves a record under it. Memories first, then skills,
+   * each in key order; `limit` caps how many records this run embeds,
+   * `batch` how many texts one seam call carries.
+   *
+   * Honest about what it did not do. A second run over a swept ledger
+   * embeds zero and makes no seam call (the two-run check). A failing
+   * batch ends the run: the records embedded before it are written, the
+   * failed batch and everything after it stay un-embedded and are
+   * counted in `remaining`, and the error is surfaced once — never a
+   * throw that loses the batch, and never a per-record retry against a
+   * provider that just refused (the seam's own retry policy has already
+   * run). A ledger that already holds vectors under another identity is
+   * refused up front rather than turned into a mixture `recall({ near })`
+   * would then refuse.
+   * @param {{ limit?: number, batch?: number }} [options]
+   * @returns {Promise<{ embedded: number, remaining: number, error?: string }>}
+   */
+  function embedMissing(options = {}) {
+    return enqueue(async () => {
+      const batch = typeof options.batch === 'number' && options.batch > 0 ? Math.floor(options.batch) : EMBED_BATCH;
+      /** @type {Array<{ key: string, record: any, text: string }>} */
+      const pending = [];
+      /** @type {Map<string, LedgerEmbeddedBy>} */
+      const held = new Map();
+      for (const memory of await readAll(KEYS.memory)) {
+        if (memory.embedding === undefined) pending.push({ key: `${KEYS.memory}${memory.id}`, record: memory, text: memory.text });
+        else held.set(describeIdentity(memory.embeddedBy), memory.embeddedBy);
+      }
+      for (const skill of await readAll(KEYS.skill)) {
+        if (skill.embedding === undefined) pending.push({ key: `${KEYS.skill}${skill.id}`, record: skill, text: skillText(skill) });
+        else held.set(describeIdentity(skill.embeddedBy), skill.embeddedBy);
+      }
+      const total = pending.length;
+      if (embedder === null) return { embedded: 0, remaining: total, error: `embedMissing: ${SEAM_REFUSAL}` };
+
+      /** The mixture refusal, once the embedder's width is known. */
+      const mixture = (/** @type {LedgerEmbeddedBy} */ identity) => {
+        const foreign = [...held.keys()].filter((key) => !sameIdentity(held.get(key), identity));
+        return foreign.length === 0 ? null
+          : { embedded: 0, remaining: total, error: 'embedMissing: would mix vector identities — the ledger'
+            + ` already holds vectors from ${foreign.join(', ')} and the embedder is ${describeIdentity(identity)};`
+            + ' sweep with the embedder that wrote them, or re-add those records without a vector first' };
+      };
+      if (embedder.dims !== undefined) {
+        const refused = mixture({ model: embedder.model, dims: embedder.dims });
+        if (refused !== null) return refused;
+      }
+
+      const todo = typeof options.limit === 'number' ? pending.slice(0, Math.max(0, Math.floor(options.limit))) : pending;
+      let embedded = 0;
+      for (let i = 0; i < todo.length; i += batch) {
+        const slice = todo.slice(i, i + batch);
+        const answer = await embedThrough(slice.map((entry) => entry.text));
+        if (answer.error !== undefined)
+          return { embedded, remaining: total - embedded, error: `embedMissing: the embedder seam failed — ${answer.error}` };
+        if (i === 0) {
+          // a wire client settles its width on its first reply; the
+          // check that could not run up front runs here, before a write
+          const refused = mixture(answer.identity);
+          if (refused !== null) return refused;
+        }
+        for (let j = 0; j < slice.length; j++) {
+          await storage.set(slice[j].key, withEmbedding(slice[j].record, answer.vectors[j], answer.identity));
+          embedded += 1;
+        }
+      }
+      return { embedded, remaining: total - embedded };
+    });
   }
 
   //#endregion
@@ -667,7 +1025,7 @@ export function createLedger(options = {}) {
     setGoal, getGoal, listArchivedGoals, recordProgress, setGoalStatus,
     addMemory, getMemory, listMemories, deleteMemory,
     addSkill, getSkill, listSkills, deleteSkill,
-    recall, recallSkills,
+    recall, recallSkills, embedMissing,
     putSlot, getSlot, readSlot, listSlots, deleteSlot,
     snapshot, rollback,
   };

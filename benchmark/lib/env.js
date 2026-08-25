@@ -32,6 +32,7 @@ export const AI_ENV = {
   baseUrl: 'JAREN_AI_BASE_URL',
   model: 'JAREN_AI_MODEL',
   modelStrong: 'JAREN_AI_MODEL_STRONG',
+  embedModel: 'JAREN_AI_EMBED_MODEL',
   maxCalls: 'JAREN_AI_MAX_CALLS',
   maxConcurrency: 'JAREN_AI_MAX_CONCURRENCY',
   trials: 'JAREN_AI_TRIALS',
@@ -62,11 +63,14 @@ function positiveInt(raw, fallback) {
  * @param {Record<string, string | undefined>} [env] - defaults to `process.env`
  * @returns {{ live: boolean, reason: string | null, provider: string,
  *   baseUrl: string | undefined, apiKey: string, keySource: string | null,
- *   model: string, modelStrong: string, maxCalls: number,
+ *   model: string, modelStrong: string, embedModel: string, maxCalls: number,
  *   maxConcurrency: number, trials: number }}
  *   `live` is false when no call can be made; `reason` then says why, in
  *   words meant for a run log. `apiKey` is '' when absent and is never
  *   safe to print — `keySource` names the variable it came from instead.
+ *   `embedModel` is the `/embeddings` model a ranked retrieval tier
+ *   embeds through — '' when unset, which is that tier's own skip reason
+ *   (a chat model is not an embedding model, so nothing defaults it).
  */
 export function readAiEnv(env = process.env) {
   let apiKey = '';
@@ -102,6 +106,7 @@ export function readAiEnv(env = process.env) {
     keySource,
     model,
     modelStrong: (env[AI_ENV.modelStrong] ?? '').trim() || model,
+    embedModel: (env[AI_ENV.embedModel] ?? '').trim(),
     maxCalls: positiveInt(env[AI_ENV.maxCalls], GUARD_DEFAULTS.maxCalls),
     maxConcurrency: positiveInt(env[AI_ENV.maxConcurrency], GUARD_DEFAULTS.maxConcurrency),
     trials: positiveInt(env[AI_ENV.trials], GUARD_DEFAULTS.trials),

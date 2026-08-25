@@ -14,14 +14,20 @@
 // every smaller k — the policies order deterministically and `limit`
 // slices, so the top-1 is the head of the top-10.
 //
-// The ledger under `recency` and `tag+recency` is the REAL one:
+// The ledger under `recency`, `tag+recency` and `near` is the REAL one:
 // `createLedger()` over its in-memory adapter, loaded through `addMemory`,
-// answering through `recall`. That is the point of the instrument — it
-// scores the shipped code path, not a model of it.
+// swept through `embedMissing()`, answering through `recall`. That is the
+// point of the instrument — it scores the shipped code path, not a model
+// of it. The ranked row embeds through the deterministic reference
+// embedder (`createHashEmbedder`, hashed character trigrams — LEXICAL,
+// not semantic), so the row is reproducible on every host with no
+// network and says what the ranked MECHANISM does over this corpus, not
+// what an embedding model understands; a live embedder joins as a second
+// ranked row only when the runner asks for it.
 
 import { readFileSync } from 'node:fs';
 
-import { createLedger } from '@jarenjs/ai';
+import { createLedger, createHashEmbedder } from '@jarenjs/ai';
 
 import { mulberry32, tokens } from '../../scripts/generate-retrieval-corpus.js';
 import { quantile } from './horizon.js';
@@ -34,6 +40,13 @@ export const KS = [1, 5, 10];
 
 /** The seed the `random` policy draws from; published beside the table. */
 export const POLICY_SEED = 1;
+
+/** The width of the deterministic reference embedder behind the `near` row. */
+export const HASH_DIMS = 64;
+
+/** How many texts one `embedMissing` batch hands a live embedder — a wire
+ * request of this many inputs is well inside every provider's cap. */
+export const LIVE_BATCH = 128;
 
 /**
  * Read the committed corpus.
@@ -88,10 +101,14 @@ export function questionTags(text, tagSet) {
  * Every record carries its own id and `at`, so nothing is minted; the
  * batch is a `Promise.all`, which the ledger's write queue serializes.
  * A rejected write is a broken corpus and stops the run.
+ *
+ * An `embedder` is wired into the ledger (auto-embedding on write stays
+ * at its default, off); `sweepLedger` is the separate, explicit step.
  * @param {any[]} memories
+ * @param {{ embedder?: import('@jarenjs/ai').Embedder }} [options]
  */
-export async function loadLedger(memories) {
-  const ledger = createLedger({ now: () => '2025-12-31T23:59:59Z' });
+export async function loadLedger(memories, options = {}) {
+  const ledger = createLedger({ now: () => '2025-12-31T23:59:59Z', embedder: options.embedder });
   const results = await Promise.all(memories.map((m) => ledger.addMemory(m)));
   const rejected = results.find((r) => /** @type {any} */ (r).error !== undefined);
   if (rejected !== undefined)
@@ -100,14 +117,57 @@ export async function loadLedger(memories) {
 }
 
 /**
+ * Sweep a loaded ledger through `embedMissing()` — the explicit path a
+ * host runs once over an existing ledger — and answer the sweep's cost.
+ * A sweep that leaves anything un-embedded is a broken run and stops it:
+ * a ranked row over a partly-swept ledger would be scoring the sweep,
+ * not the policy.
+ * @param {any} ledger
+ * @param {number} count - how many records the sweep must embed
+ * @param {number} [batch] - texts per seam call (the ledger's default when absent)
+ * @returns {Promise<{ embedded: number, ms: number }>}
+ */
+export async function sweepLedger(ledger, count, batch) {
+  const start = process.hrtime.bigint();
+  const swept = await ledger.embedMissing({ batch });
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
+  if (swept.error !== undefined || swept.remaining !== 0 || swept.embedded !== count)
+    throw new Error(`the sweep embedded ${swept.embedded} of ${count} and left ${swept.remaining}: ${swept.error ?? 'no error given'}`);
+  return { embedded: swept.embedded, ms };
+}
+
+/**
+ * The ranked policy over a swept ledger: `recall({ near: question, limit })`
+ * through the ledger's embedder, ids in ranked order. A refusal or a
+ * skipped record here is a broken run, not a score — the corpus was
+ * swept whole, so the ledger must answer.
+ * @param {any} ledger
+ * @param {string} key
+ * @param {string} label
+ * @returns {{ key: string, label: string, run: (question: any, k: number) => Promise<string[]> }}
+ */
+export function rankedPolicy(ledger, key, label) {
+  return { key, label,
+    run: async (question, k) => {
+      const result = await ledger.recall({ near: question.text, limit: k });
+      if (result.error !== undefined) throw new Error(`${key}: ${result.error}`);
+      if (result.skipped !== 0) throw new Error(`${key}: ${result.skipped} memories carried no vector`);
+      return result.memories.map((/** @type {any} */ m) => m.id);
+    } };
+}
+
+/**
  * The policies scored, in table order. `oracle` is the 1.0 row that
  * proves the scorer and catches a corpus whose gold ids do not exist;
  * `random` is the floor; `recency` and `tag+recency` are what
- * `recall()` does today, the second being the incumbent.
- * @param {{ ledger: any, memories: any[], tags: Set<string>, seed?: number }} config
+ * `recall()` does by default, the second being the incumbent; `near`
+ * is the seam-gated ranked path over the same ledger, swept by the
+ * reference embedder — present only when the ledger was built with one.
+ * @param {{ ledger: any, memories: any[], tags: Set<string>, seed?: number,
+ *   embedder?: import('@jarenjs/ai').Embedder }} config
  * @returns {Array<{ key: string, label: string, run: (question: any, k: number) => Promise<string[]> }>}
  */
-export function makePolicies({ ledger, memories, tags, seed = POLICY_SEED }) {
+export function makePolicies({ ledger, memories, tags, seed = POLICY_SEED, embedder }) {
   const ids = memories.map((m) => m.id);
   const random = mulberry32(seed);
   const asIds = (records) => (Array.isArray(records) ? records.map((r) => r.id) : []);
@@ -134,6 +194,7 @@ export function makePolicies({ ledger, memories, tags, seed = POLICY_SEED }) {
         const found = questionTags(question.text, tags);
         return asIds(await ledger.recall(found.length === 0 ? { limit: k } : { tags: found, limit: k }));
       } },
+    ...(embedder === undefined ? [] : [rankedPolicy(ledger, 'near', `near (${embedder.model}, ranked)`)]),
   ];
 }
 
@@ -250,16 +311,32 @@ export function assertScorer(result, ks = KS) {
 }
 
 /**
- * Score every policy at one corpus size and gate the scorer.
+ * Score every policy at one corpus size and gate the scorer. The
+ * deterministic ledger is swept by the reference embedder, so the table
+ * carries the `near` row beside the incumbents on every host; a `live`
+ * embedder, when given, sweeps a SECOND ledger (one ledger, one
+ * identity — the ledger refuses a mixture) and adds a `near-live` row.
  * @param {any} corpus
  * @param {number} size
- * @param {{ seed?: number, ks?: number[] }} [options]
+ * @param {{ seed?: number, ks?: number[],
+ *   live?: { embedder: import('@jarenjs/ai').Embedder, label: string } | null }} [options]
  */
 export async function runSize(corpus, size, options = {}) {
   const ks = options.ks ?? KS;
   const at = corpusAt(corpus, size);
-  const ledger = await loadLedger(at.memories);
-  const policies = makePolicies({ ledger, memories: at.memories, tags: at.tags, seed: options.seed });
+  const embedder = createHashEmbedder({ dims: HASH_DIMS });
+  const ledger = await loadLedger(at.memories, { embedder });
+  const sweep = await sweepLedger(ledger, at.memories.length);
+  const policies = makePolicies({ ledger, memories: at.memories, tags: at.tags, seed: options.seed, embedder });
+  /** @type {{ model: string, dims: number, embedded: number, sweepMs: number } | null} */
+  let live = null;
+  if (options.live != null) {
+    const second = await loadLedger(at.memories, { embedder: options.live.embedder });
+    const secondSweep = await sweepLedger(second, at.memories.length, LIVE_BATCH);
+    policies.push(rankedPolicy(second, 'near-live', options.live.label));
+    live = { model: options.live.embedder.model, dims: /** @type {number} */ (options.live.embedder.dims),
+      embedded: secondSweep.embedded, sweepMs: secondSweep.ms };
+  }
   const scored = [];
   for (const policy of policies) {
     const score = await scorePolicy(policy, at.questions, ks);
@@ -273,6 +350,8 @@ export async function runSize(corpus, size, options = {}) {
     untagged,
     floor: Object.fromEntries(ks.map((k) => [k, randomFloor(at.questions, at.memories.length, k)])),
     policies: scored,
+    ranked: { model: embedder.model, dims: embedder.dims, embedded: sweep.embedded, sweepMs: sweep.ms },
+    live,
   };
   assertScorer(result, ks);
   return result;
