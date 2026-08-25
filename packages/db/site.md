@@ -38,7 +38,12 @@ a bounded `$distance` pushes the bounding box it provably implies and refines
 the exact predicate in the engine over the narrowed rows, with
 `explain().prefilters` reporting the construct, the columns it read, and whether
 it decided or merely narrowed. A proximity probe is nine cells, never one — two
-points ten metres apart can differ in the first character of their cell.
+points ten metres apart can differ in the first character of their cell. The
+same document registered as a live query is a geofence: maintained per row
+through the engine's exact predicate, it emits an add when a point enters the
+region, a remove when it leaves, and nothing while it moves within; the
+`spatial` benchmark suite publishes the numbers beside the row where the
+database has to beat not using the database at all.
 
 A store can also open with an operator registry — `openStore`(model, {
 operators: `createJsltRegistry()`.use(`mathPack`)… }) — and registered

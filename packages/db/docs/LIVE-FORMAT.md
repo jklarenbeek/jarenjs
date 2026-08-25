@@ -172,8 +172,27 @@ what the pushdown planner already means by it.
 | `orderBy` over extractable paths, optional `limit`, offset 0 | **maintained window**: a sorted structure; ties broken by the collection key, appended as the final sort term; an insert sorting beyond a full window is a no-op | the window rows and their sort keys |
 | whole-query `count` / `sum` / `avg` / `min` / `max` (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost | one contribution per matching row |
 | single-level `groupBy` with aggregate returns, in the canonical form below | **per-group deltas**: the accumulator machinery, one instance per group; groups appear in first-appearance order, exactly the engine's order | per-group, per-row contributions |
+| `where` whose spatial predicate is **refined** (the plan pushed a bounding-box or cell-range pre-filter and left the exact `$within`, bounded `$distance` or over-long cell prefix to the residual — `explain().prefilters` with `exact: false`), no order, no aggregate; optional per-row `select` | **incremental rows** — the geofence: the initial fetch narrows through the derived index, and every touched row is re-evaluated by the engine's EXACT predicate, so a point emits `add` when it enters the region, `remove` when it leaves, and nothing while it moves within (a whole-document return sees a `replace` carrying the new position) | the result rows |
+| `orderBy` beside a refined spatial predicate — over `$distance` (not a path) or over a member (the set residual drops the planner's order terms) | **re-run on invalidation**, the ordering named as the reason | the previous result, for diffing |
+| a whole-query aggregate or a `groupBy` whose `where` is a refined spatial predicate | **re-run on invalidation** — the accumulator needs a fully translated selection and a refinement is not one; the reason says so | the previous result, for diffing |
+| a spatial predicate the planner **refused** (no `derive` index on the member, an untyped member, an unbounded probe) | **re-run on invalidation**, the refusal named — it never translated, so nothing narrows the fetch | the previous result, for diffing |
 | joins, multi-entity roots, graph loads, every entity query | **re-run on invalidation — declared, not attempted** in this version | the previous result, for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
+
+**What the geofence costs, stated rather than discovered.** A refined
+spatial predicate is maintained *per row*, not incrementally: there is
+no live spatial index, and none is planned. Every insert or update the
+collection sees runs the exact predicate — `$within` against the
+region, a geodesic `$distance` — once for that row, inside capture
+delivery, on the store's own connection. Over a large region (a ring of
+thousands of vertices) at a high write rate that is real work on every
+write, and a consumer with such a region either simplifies it for the
+fence (`$geo-simplify`) or accepts the cost knowingly. The region is
+bound at registration like every external (§8): the initial fetch binds
+it through the same derived parameter slots the planner uses for a
+one-off query, so an external region narrows exactly as a literal one
+does, and a region with no bounding box diverts to a full initial read
+and is still correct.
 
 Re-run is a first-class, documented outcome, not a failure. What is
 forbidden is *silently* re-running while the reader believes the query

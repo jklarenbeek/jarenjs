@@ -1004,6 +1004,95 @@
       },
       "additionalProperties": false
     },
+    "SuiteSpatial": {
+      "description": "spatial.json — spatial storage in @jarenjs/db: one meta block (the corpus, the probe, the corpus gate, the derived figures and the notes that name the rivals), the equivalence checks, and the timing tables — one row per way the same predicate can run.",
+      "type": "object",
+      "required": ["meta", "checks", "tables"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["docs", "docBytes", "probe", "repetitions", "node", "engine", "rtree", "corpus", "figures", "notes", "equivalenceFailures"],
+          "properties": {
+            "docs": { "type": "number" },
+            "docBytes": { "type": "number" },
+            "probe": { "type": "array" },
+            "repetitions": { "type": "number" },
+            "node": { "type": "string" },
+            "engine": { "type": "string" },
+            "rtree": { "type": "boolean" },
+            "corpus": {
+              "type": "object",
+              "required": ["cases", "agreed"],
+              "properties": {
+                "cases": { "type": "number" },
+                "agreed": { "type": "number" }
+              },
+              "additionalProperties": false
+            },
+            "figures": {
+              "type": "object",
+              "required": ["scanVsIndexed", "engineVsIndexed", "udfSolo", "udfSelective", "udfLimit", "rtreeVsGenerated"],
+              "properties": {
+                "scanVsIndexed": { "type": "number" },
+                "engineVsIndexed": { "type": "number" },
+                "udfSolo": { "type": "number" },
+                "udfSelective": { "type": "number" },
+                "udfLimit": { "type": "number" },
+                "rtreeVsGenerated": { "type": "number" }
+              },
+              "additionalProperties": false
+            },
+            "notes": { "type": "array" },
+            "equivalenceFailures": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "agrees", "detail"],
+            "properties": {
+              "name": { "type": "string" },
+              "agrees": { "type": "boolean" },
+              "detail": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "columns", "rows"],
+            "properties": {
+              "title": { "type": "string" },
+              "columns": { "type": "array" },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["key", "name", "results", "rows", "mode", "udf", "prefilters", "narrative"],
+                  "properties": {
+                    "key": { "type": "string" },
+                    "name": { "type": "string" },
+                    "results": { "type": "array" },
+                    "rows": { "type": "number" },
+                    "mode": { "type": "string" },
+                    "udf": { "type": "boolean" },
+                    "prefilters": { "type": "array" },
+                    "narrative": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "SuiteToml": {
       "description": "toml.json — the JOSL reader and writer against the TOML field: the toml-test compliance blocks, the parse/stringify profile and the streaming record.",
       "type": "object",
@@ -1243,13 +1332,14 @@
           { "$ref": "#/$defs/SuiteMermaid" },
           { "$ref": "#/$defs/SuiteOrm" },
           { "$ref": "#/$defs/SuiteRetrieval" },
+          { "$ref": "#/$defs/SuiteSpatial" },
           { "$ref": "#/$defs/SuiteToml" },
           { "$ref": "#/$defs/SuiteValidate" },
           { "$ref": "#/$defs/SuiteView" }
         ]
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
-      "doc": "One benchmark suite's payload. The twenty-two suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
+      "doc": "One benchmark suite's payload. The twenty-three suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
     },
     "readme.fetch": {
       "kind": "read",

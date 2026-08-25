@@ -180,6 +180,55 @@ function memberDeps(root) {
 }
 
 /**
+ * The residual reasons a plan carries once every spatial REFINEMENT is
+ * taken out. A refinement is a pushed, non-exact pre-filter (`$within`,
+ * a bounded `$distance`, an over-long cell prefix): the fetch is still
+ * SQL-narrowed and the exact predicate stays in the residual, which is
+ * the per-row evaluation maintenance runs anyway. One reason is removed
+ * per non-exact pre-filter, matched by construct, so a spatial
+ * predicate the planner REFUSED (no derived index on the member) still
+ * counts as a reason and still re-runs.
+ * @param {any} planned
+ * @returns {{ construct: string, reason: string }[]}
+ */
+function unrefinedReasons(planned) {
+  const remaining = [...planned.reasons];
+  for (const prefilter of planned.prefilters) {
+    if (prefilter.exact) continue;
+    const index = remaining.findIndex((reason) => reason.construct === prefilter.construct);
+    if (index !== -1) remaining.splice(index, 1);
+  }
+  return remaining;
+}
+
+/**
+ * Whether a plan fell to the set residual ONLY because a spatial
+ * pre-filter refines in the engine (§7's spatial rows). `allowReturn`
+ * admits the per-row projection reason beside the refinement — the
+ * rows strategy re-evaluates the whole document per row, so a
+ * projected return is exact there and nowhere else.
+ * @param {any} planned
+ * @param {boolean} allowReturn
+ */
+function refinedOnly(planned, allowReturn) {
+  if (planned.mode !== 'set' || !planned.prefilters.some((prefilter) => !prefilter.exact)) {
+    return false;
+  }
+  const remaining = unrefinedReasons(planned)
+    .filter((reason) => !(allowReturn && reason.construct === '$return'));
+  return remaining.length === 0;
+}
+
+const SPATIAL_RERUN = {
+  aggregate: 'a spatial aggregate re-runs: the accumulator needs a fully translated '
+    + 'selection, and a refined spatial predicate leaves the exact test to the engine',
+  group: 'a spatial group re-runs: the group filter needs a fully translated selection, '
+    + 'and a refined spatial predicate leaves the exact test to the engine',
+  order: "'$orderby' — an ordering over a refined spatial selection re-runs "
+    + '(no window is maintained beside a pre-filter that only narrows)',
+};
+
+/**
  * Classify a collection query document against §7's table. Pure —
  * given the document and the collection's planner shape, returns the
  * strategy description, or a re-run description with the reason.
@@ -192,8 +241,10 @@ function memberDeps(root) {
  */
 export function classifyLiveQuery(document, queryShape, keyed) {
   const rerun = (reason) => ({ strategy: 'rerun', reason });
+  // the reason named is the first one that is NOT a spatial refinement:
+  // a refinement narrows and never forces a re-run by itself
   const plannerReason = (planned) => {
-    const forcing = planned.reasons[0]
+    const forcing = unrefinedReasons(planned)[0] ?? planned.reasons[0]
       ?? { construct: 'residual', reason: 'the document did not translate' };
     return `'${forcing.construct}' — ${forcing.reason}`;
   };
@@ -203,7 +254,7 @@ export function classifyLiveQuery(document, queryShape, keyed) {
     if (windowed) return rerun('a windowed aggregate maintains no accumulator');
     const planned = planQuery({ [aggregate.name]: inner }, queryShape, {});
     if (planned.mode !== 'native' || planned.plan.aggregate === null) {
-      return rerun(plannerReason(planned));
+      return rerun(refinedOnly(planned, false) ? SPATIAL_RERUN.aggregate : plannerReason(planned));
     }
     if (!keyed) return rerun('rows without a document key cannot be tracked');
     return {
@@ -220,7 +271,9 @@ export function classifyLiveQuery(document, queryShape, keyed) {
     const carrier = documentsSource(group.binding, group.where);
     const planned = planQuery(carrier, queryShape, {});
     if (planned.mode !== 'native') {
-      return rerun(`the group filter did not translate: ${plannerReason(planned)}`);
+      return rerun(refinedOnly(planned, false)
+        ? SPATIAL_RERUN.group
+        : `the group filter did not translate: ${plannerReason(planned)}`);
     }
     if (!keyed) return rerun('rows without a document key cannot be tracked');
     const rowDocument = {
@@ -240,7 +293,26 @@ export function classifyLiveQuery(document, queryShape, keyed) {
   }
 
   const planned = planQuery(inner, queryShape, {});
-  if (planned.mode === 'set') return rerun(plannerReason(planned));
+  if (planned.mode === 'set') {
+    // §7's spatial rows: the fetch is SQL-narrowed by the pushed box or
+    // cell range and the exact predicate is what per-row re-evaluation
+    // runs — so a `$where` that fell to the set residual ONLY for a
+    // refinement is maintained as rows. An ordering beside it is not
+    // (the set residual drops the planner's order terms), and neither
+    // is a window; both re-run, named.
+    if (!refinedOnly(planned, true)) return rerun(plannerReason(planned));
+    if (!keyed) return rerun('rows without a document key cannot be tracked');
+    // a translated ordering leaves no reason behind, but the set residual
+    // dropped its terms — the window is not maintainable here
+    if (isJsonObject(inner) && inner.$orderby !== undefined) return rerun(SPATIAL_RERUN.order);
+    if (windowed) return rerun('a limit without an order is not deterministic to maintain');
+    return {
+      strategy: 'rows',
+      inner,
+      projected: planned.reasons.some((reason) => reason.construct === '$return'),
+      deps: { whole: true, members: new Set() },
+    };
+  }
   if (!keyed) return rerun('rows without a document key cannot be tracked');
 
   if (planned.plan.order !== null) {

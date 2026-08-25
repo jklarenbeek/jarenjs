@@ -46,6 +46,7 @@ export const SUITES = [
   { key: 'geo', label: 'Geo' },
   { key: 'flow', label: 'Flow' },
   { key: 'db', label: 'Data' },
+  { key: 'spatial', label: 'Spatial' },
   { key: 'orm', label: 'ORM' },
   { key: 'live', label: 'Live' },
   { key: 'long-horizon', label: 'Long horizon' },
@@ -83,6 +84,7 @@ export function deriveSuite(state, suite) {
     case 'geo': return geoSuite(data);
     case 'flow': return flowSuite(data);
     case 'db': return dbSuite(data);
+    case 'spatial': return spatialSuite(data);
     case 'orm': return ormSuite(data);
     case 'live': return liveSuite(data);
     case 'long-horizon': return scoreTables(data);
@@ -513,6 +515,67 @@ function dbSuite(data) {
     `${engineLines}. Every engine is verified to answer the same result set before it is timed; jaren pays SQLite and JSON materialisation where the in-process rivals pay neither — the rows it loses are the price of durability, transactions and a planner, and they are shown.`));
   out.push(...genericTables(data,
     'Per-operation timings; lower is better. A dash is an engine dropped for a row because it disagreed on the result set rather than being timed doing less work.'));
+  return out;
+}
+
+/**
+ * The spatial-storage suite. No head-to-head rival exists and the page
+ * says so before any number; the row where the database has to beat
+ * NOT using the database is a card whichever way it fell; and every
+ * timing row carries the plan it ran as — the residual mode, the
+ * pre-filters, the database's own narrative — so a reader can see why
+ * a row costs what it costs rather than take the ratio on faith.
+ */
+function spatialSuite(data) {
+  const meta = data.meta ?? {};
+  const figures = meta.figures ?? {};
+  const checks = data.checks ?? [];
+  const agreed = checks.filter((c) => c.agrees).length;
+  const ratioOr = (x) => (Number.isFinite(x) ? formatRatio(x) : '—');
+  const out = [];
+  out.push(cards([
+    {
+      title: 'Correctness gate',
+      value: `${agreed} / ${checks.length}`,
+      note: `${meta.corpus?.agreed ?? 0} / ${meta.corpus?.cases ?? 0} spatial-corpus plan cases plus every timed shape against the engine, before any timing`,
+    },
+    {
+      title: 'Full scan → derived index',
+      value: ratioOr(figures.scanVsIndexed),
+      note: 'the $within a consumer writes, before and after derive: \'bbox\'',
+    },
+    {
+      title: 'Against no database at all',
+      value: ratioOr(figures.engineVsIndexed),
+      note: figures.engineVsIndexed >= 1
+        ? 'the indexed store beats the in-memory engine over the parsed array — the row it had to win'
+        : 'the in-memory engine over the parsed array still wins — the loss, published',
+    },
+    {
+      title: 'R*Tree vs generated box',
+      value: ratioOr(figures.rtreeVsGenerated),
+      note: '> 1 favours the R*Tree; below 1.5× a second table kept in sync is not worth its cost',
+    },
+  ]));
+  out.push(callout('No head-to-head rival — and what the named rivals have instead',
+    `${(meta.docs ?? 0).toLocaleString()} GeoJSON points stored in SQLite (${meta.engine ?? ''}), one probe box at ~0.5 % selectivity, ${meta.repetitions ?? 0} repetitions after a warm execute. Nothing else in JavaScript stores GeoJSON in SQLite from a JSON query document, so there is no rival to time and none is invented. MongoDB's 2dsphere and DuckDB-wasm's spatial extension have real spatial indexes and overlay operations this store does not have; neither runs one document through two independent engines proven to agree, neither validates ring closure in a schema, and DuckDB's query is SQL rather than a document. The in-memory engine row starts from parsed objects where the store starts from bytes on a page — that head start is why it is the row to beat.`));
+  for (const t of data.tables ?? []) {
+    out.push(table(t.title, ['Shape', 'ms/query', 'Rows', 'Plan', 'SQLite says'],
+      t.rows.map((r) => ({
+        cells: [
+          r.name,
+          formatNs(r.results[0]),
+          String(r.rows),
+          `${r.mode}${r.udf ? ' (udf)' : ''}${(r.prefilters ?? []).length > 0 ? ` · ${r.prefilters.join(', ')}` : ''}`,
+          r.narrative,
+        ],
+        strong: r.key === 'engine' || r.key === 'within-indexed',
+      })),
+      'Per-query timings; lower is better. "set" is the engine refining a SQL-narrowed candidate set; "native" decided in SQL; "raw" is a hand-built statement outside the store.'));
+  }
+  out.push(table('The gate — every check the timings ran behind', ['Check', 'Agrees', 'Detail'],
+    checks.map((c) => ({ cells: [c.name, c.agrees ? 'yes' : 'NO', c.detail], strong: !c.agrees })),
+    'A disagreement withholds the whole table at generation time and the tool exits non-zero.'));
   return out;
 }
 

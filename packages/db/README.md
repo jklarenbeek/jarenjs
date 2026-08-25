@@ -101,38 +101,9 @@ const adults = await users.execute({
   `$distance` push a bounding box the truth table proves they imply,
   and the exact predicate re-runs over the narrowed candidates —
   `explain().prefilters` says which, over what columns, and whether it
-  decided or merely narrowed.
-
-```js
-// the collection declares  indexes: [{ name: 'by_box', path: '$.at',
-//   derive: 'bbox' }]  and types that member  at: { type: ['array', 'object'] }
-// — a predicate is only PUSHED onto a member the schema types as geography
-const places = store.collection('places');
-const nearby = {
-  $for: { p: '$[*]' },
-  $where: { $within: ['$p.at', '$region'] },
-  $return: '$p',
-};
-await places.execute(nearby, { externals: { region } });
-
-const how = await places.explain(nearby, { externals: { region } });
-how.prefilters;
-// [{ construct: '$within',
-//    columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
-//    exact: false }]
-how.residual.reasons[0].reason;
-// 'a bounding-box pre-filter is pushed; exact containment refines in the engine'
-how.scanNarrative;
-// 'SEARCH places USING INDEX places_by_box (gx_at_bbox_w>? AND gx_at_bbox_w<?); …'
-```
-
-  The region arrives as a bound parameter: a GeoJSON object is not a
-  value any database can bind, so what binds is one edge of its box per
-  slot, computed at bind time from the same kernel the stored columns
-  came from. A circle that reaches a pole or crosses the antimeridian
-  pushes **nothing** — there is no single box to push — and the answer
-  is the same, reached by reading more rows. `explain()` is what makes
-  that checkable rather than quoted.
+  decided or merely narrowed. The worked example, the geofence and the
+  measured numbers are in [Spatial storage](#spatial-storage--the-model-the-plan-the-fence-the-numbers)
+  below.
 - **Migrations are documents.** `planMigration` diffs two models into
   rendered-DDL + JSLT-transform + assertion steps; a shadow database
   replays the whole chain before the real store is touched; a
@@ -150,6 +121,133 @@ how.scanNarrative;
   costs. The public API is asynchronous (the browser's OPFS story
   forces it) with a promise-free `store.sync` twin where the driver is
   synchronous.
+
+## Spatial storage — the model, the plan, the fence, the numbers
+
+A collection stores GeoJSON as it is — a position is an array, a
+geometry is an object, nothing is wrapped — and declares what to index
+over it:
+
+```js
+const store = await openStore({
+  $model: '0.1',
+  collections: {
+    places: {
+      schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          // typed as geography: a spatial predicate is only pushed onto a
+          // member the schema types as an array or an object and nothing else
+          at: { type: ['array', 'object'] },
+        },
+      },
+      key: '/id',
+      indexes: [
+        { name: 'by_box', path: '$.at', derive: 'bbox' },
+        { name: 'by_cell', path: '$.at', derive: 'geohash', precision: 6 },
+      ],
+    },
+  },
+}, { driver: nodeDriver() });
+```
+
+`derive: 'bbox'` materializes the member's bounding box as four
+columns and `derive: 'geohash'` its cell, both computed by
+`@jarenjs/core/geo` — generated columns over registered deterministic
+functions where the driver can index one, stored columns the store
+writes where it cannot (MODEL-FORMAT §§2.1, 3). The query a consumer
+writes then narrows in SQLite and refines in the engine, and
+`explain()` says so:
+
+```js
+const places = store.collection('places');
+const inside = {
+  $for: { p: '$[*]' },
+  $where: { $within: ['$p.at', '$region'] },
+  $return: '$p',
+};
+await places.execute(inside, { externals: { region } });
+
+const how = await places.explain(inside, { externals: { region } });
+how.prefilters;
+// [{ construct: '$within',
+//    columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
+//    exact: false }]
+how.residual.reasons[0].reason;
+// 'a bounding-box pre-filter is pushed; exact containment refines in the engine'
+how.scanNarrative;
+// 'SEARCH places USING INDEX places_by_box (gx_at_bbox_w>? AND gx_at_bbox_w<?); …'
+```
+
+The region arrives as a bound parameter: a GeoJSON object is not a
+value any database can bind, so what binds is one edge of its box per
+slot, computed at bind time from the same kernel the stored columns
+came from. `$bbox-intersects` and a geohash cell test are exact and
+need no refinement; `$within` and a bounded `$distance` push the box
+they provably imply and re-run the exact predicate over the narrowed
+candidates. A circle that reaches a pole or crosses the antimeridian
+pushes **nothing** — there is no single box to push — and the answer is
+the same, reached by reading more rows. A proximity probe is **nine
+cells** (`$geohash-neighbours`), never one prefix: two points ten
+metres apart can differ in the first character of their cell, so a
+single-cell range is bucketing, not proximity.
+
+**The geofence.** Register the same document as a live query and it is
+maintained as writes arrive — the initial fetch narrows through the
+index, and every touched row is re-evaluated by the engine's *exact*
+predicate:
+
+```js
+const fence = await places.live([{
+  $for: { p: '$[*]' },
+  $where: { $within: ['$p.at', '$region'] },
+  $return: '$p.id',
+}], { externals: { region } });
+fence.mode; // { strategy: 'rows', mode: 'incremental' }
+fence.subscribe(({ patch }) => {
+  // add    when a point enters the region
+  // remove when it leaves
+  // nothing while it moves within (a whole-document return sees a replace)
+});
+```
+
+That is per-row evaluation, not an incremental spatial index: every
+write runs `$within` against the region once, on the store's
+connection, and a large region at a high write rate pays for it on
+every write (LIVE-FORMAT §7 states the cost). An ordering by
+`$distance` or a spatial aggregate re-runs on invalidation with the
+reason in `live.mode` — declared, never silent.
+
+**The numbers, the loss included.** `benchmark/spatial.js` stores <!--bm:spatial.corpus-->50,000 points<!--/bm-->
+over the Netherlands and probes one box at <!--bm:spatial.rows-->258 of 50,000 (0.5 %)<!--/bm--> selectivity,
+asserting every plan case of the committed spatial corpus and every timed shape against the JavaScript
+engine before a single timing is printed. The `$within` a consumer writes went from <!--bm:spatial.scan-->78 ms<!--/bm-->
+as a full scan to <!--bm:spatial.within-->2 ms<!--/bm--> over the `bbox` index (<!--bm:spatial.scanVsIndexed-->39.4<!--/bm-->×);
+`$bbox-intersects` is <!--bm:spatial.bboxIntersects-->1.9 ms<!--/bm-->, a bounded `$distance` <!--bm:spatial.distance-->1.4 ms<!--/bm-->;
+one geohash cell answers in <!--bm:spatial.cellOne-->0.0067 ms for 0 row(s)<!--/bm--> and the honest nine-cell
+probe in <!--bm:spatial.cellNine-->0.022 ms for 2 row(s)<!--/bm-->. The row the store had to win is the same
+`$within` in the in-memory engine over the parsed array, no database at all: <!--bm:spatial.engine-->33 ms<!--/bm-->.
+The indexed store is now <!--bm:spatial.engineVsIndexed-->16.5× faster than<!--/bm--> it — but the un-indexed scan
+is not, and the comparison is not an even one either way: the engine starts from parsed objects where the
+store starts from bytes on a page and pays JSON materialisation for every row it returns. Both rows stay
+published. The deterministic-UDF hatch takes a literal `$within` on a collection with no derived index, and
+its profile is measured on the same rows in MODEL-FORMAT §8.2 (a loss as a sole predicate, a large win
+beside a selective conjunct or a `LIMIT`). A hand-built R\*Tree over the same rows probes
+at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.3× in the R*Tree's favour<!--/bm--> against the four-column
+B-tree the `bbox` index is today, because the B-tree seeks on longitude alone; it is a second table kept in
+sync transactionally and absent on any build without the module, and it is open work on the roadmap with
+that number beside it.
+
+**No head-to-head rival, and saying so.** Nothing else in JavaScript
+stores GeoJSON in SQLite from a JSON query document, so the suite
+invents none. The rivals to know about: MongoDB (`$geoWithin`, `$near`,
+a `2dsphere` index) has a GeoJSON-native query document and a real
+spatial index, and runs on a server; DuckDB-wasm with `spatial` runs in
+a tab with a real index and the overlay operations this store refuses
+to build, and its query is SQL. Neither runs one document through two
+independent engines proven to agree, and neither validates ring
+closure in a schema.
 
 ## What SQLite-only means, frankly
 
@@ -202,8 +300,9 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
 - **Live queries** (LIVE-FORMAT §§7–12): `collection.live(document)`
   maintains a result as writes arrive and emits patches — incremental
   for `where`/`select`/`orderBy`+`limit`/aggregates/single-level
-  `groupBy` (the normative maintenance table), re-run for everything
-  else, **declared, never silent** (`live.mode` names the reason).
+  `groupBy` and a spatial `where` over a derived index (the geofence;
+  the normative maintenance table), re-run for everything else,
+  **declared, never silent** (`live.mode` names the reason).
   Unaffected rows stay reference-identical; a seeded oracle holds the
   maintained result equal to a fresh re-query after every mutation.
 - **Durable runs and the job queue** (JOBS-FORMAT, FLOW-FORMAT §7.6):

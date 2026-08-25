@@ -23,6 +23,7 @@ number in a README performance table names the command that produced it.
 | [`contracts.js`](./contracts.js) | Contract validation vs Zod 4 / Zod 3 / zod&#47;mini / Ajv | Benchmarking the real adapter shape a service runs |
 | [`jsonquery.js`](./jsonquery.js) | Jaren JSON Query performance vs fontoxpath/jsonata | Benchmarking FLWOR joins, grouping, reshaping |
 | [`geo.js`](./geo.js) | Spatial kernel performance vs turf / geolib / flatbush | Benchmarking distance, area, containment and the bbox index |
+| [`spatial.js`](./spatial.js) | Spatial storage in `@jarenjs/db`: `$within` over 50 000 stored points every way it can run — scan, UDF, the two-stage plan, the exact promotions, the nine-cell probe, the in-memory engine, and a hand-built R\*Tree — gated on the committed spatial corpus; no head-to-head rival exists and the suite says so | Deciding whether a derived spatial index, the UDF hatch, or an R\*Tree earns its place |
 | [`jslt.js`](./jslt.js) | JSLT performance vs native JS/JSONata | Benchmarking identity sharing, recursive dispatch, modes |
 | [`csv.js`](./csv.js) | CSV conformance, self-healing and performance vs the sync npm parsers | Benchmarking the josl CSV reader/writer |
 | [`markdown.js`](./markdown.js) | CommonMark scorecard + performance vs marked/markdown-it/micromark | Benchmarking the Markdown engine |

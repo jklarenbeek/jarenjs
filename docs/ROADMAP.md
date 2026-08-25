@@ -847,14 +847,13 @@ CSV of coordinates needs no code at all — the recipe is in
 spatial corpus (`test/json/fixtures/spatial-corpus.json`) records what the
 JavaScript engine answers so a second executor can be held to it.
 
-What is still open below the overlay entry: **the spatial PLAN**. The model
-format now declares derived spatial index kinds — `indexes[].derive` is a
-geohash cell or a bounding box as four columns (MODEL-FORMAT §2.1, §3.1), and
-the planner promotes a spatial predicate onto them: `$bbox-intersects` and a
-geohash cell test decide in SQL, while `$within` and a bounded `$distance` push
-a bounding box proven to have no false negatives and refine the exact predicate
-in the engine (`packages/db/ARCHITECTURE.md`, "The implied conjunct").
-`explain().prefilters` names both stages.
+**Spatial storage is adoptable.** The model format declares derived spatial
+index kinds — `indexes[].derive` is a geohash cell or a bounding box as four
+columns (MODEL-FORMAT §2.1, §3.1) — the planner promotes a spatial predicate
+onto them and `explain().prefilters` names both stages, a live query with a
+spatial predicate is a geofence (LIVE-FORMAT §7), and `benchmark/spatial.js`
+publishes the numbers with the loss (`packages/db/README.md`, "Spatial
+storage"). What is still open below the overlay entry is listed here.
 
 **The representation is GeoJSON, and there is no geometry type.**
 [RFC 7946](https://datatracker.ietf.org/doc/html/rfc7946) is a closed JSON
@@ -884,12 +883,25 @@ rendering, and is a projection *out*, not a CRS system.
   that composes the bound value with the radius, and the derived slot kind is
   closed at one axis of one bound value. Such a query is correct and reads
   every row. `$within` and `$bbox-intersects` do bind an external region.
-- [ ] **A box-overlap probe is a one-sided range on every column.** A `bbox`
-  index is a four-column B-tree and only its leading column carries a bound
-  from a box-overlap probe, so the seek narrows on longitude alone and the
-  other three comparisons filter the rows it returns. An R\*Tree is the
-  physical mapping that indexes all four; whether it earns its place is a
-  measurement, not an assumption.
+- [ ] **An R\*Tree mapping for `derive: 'bbox'`.** A `bbox` index is a
+  four-column B-tree and only its leading column carries a bound from a
+  box-overlap probe, so the seek narrows on longitude alone and the other
+  three comparisons filter the rows it returns. Measured on the same 50 000
+  rows and probe box, a hand-built R\*Tree probes at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.3× in the R*Tree's favour<!--/bm-->
+  (`benchmark/spatial.js`, the physical-question table), which is over the bar
+  that makes the second mapping worth building. It is a different physical
+  mapping for the same declaration, with three costs the generated columns do
+  not have: a second table that must be kept in sync inside every write
+  transaction, a changed meaning for "the model verifies the shape" (a virtual
+  table beside the collection, not columns on it), and `capabilities.rtree`
+  being `false` on any build without the module — so the generated-column path
+  stays as the fallback and the declaration does not change.
+- [ ] **A live ordering by `$distance` re-runs.** The geofence maintains a
+  `$where` per row; an `$orderby` over `$distance` (or over a member beside a
+  refined predicate) and a spatial aggregate re-run on invalidation with the
+  reason in `live.mode`. Maintaining a distance-ordered window incrementally is
+  an incremental spatial index, which is a different campaign; the honest
+  re-run is the shipped answer until it is built.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and

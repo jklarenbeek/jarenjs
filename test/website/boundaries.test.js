@@ -140,6 +140,26 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /flatbush/, 'the index rival is named');
   });
 
+  it('derives the spatial suite: no invented rival, the no-database row, the plan behind every timing', function () {
+    const data = loadBench('spatial');
+    const state = { benchStatus: { spatial: 'loaded' }, bench: { spatial: data }, benchUi: {} };
+    const nodes = deriveSuite(state, 'spatial');
+    const text = JSON.stringify(nodes);
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    assert.match(text, /No head-to-head rival/, 'the absence of a rival is stated, not papered over');
+    assert.match(text, /MongoDB/, 'the positioning rival is named');
+    assert.match(text, /DuckDB/, 'and the other one');
+    assert.match(text, /no database/, 'the in-memory engine row renders — the row the store had to win');
+    assert.match(text, /R\*Tree/, 'the physical comparison renders');
+    assert.match(text, /nine geohash cells/, 'the proximity row is the nine-cell probe');
+    assert.match(text, /SEARCH .* USING INDEX/, 'the database\'s own narrative is on the page');
+    assert.strictEqual(data.meta.equivalenceFailures, 0, 'the tracked file was written by a run with no failures');
+    assert.ok(data.checks.every((c) => c.agrees), 'every published check agreed');
+    for (const key of ['within-scan', 'within-indexed', 'cell-nine', 'engine', 'rtree-raw', 'within-udf-limit']) {
+      assert.ok(data.tables.some((t) => t.rows.some((r) => r.key === key)), `the ${key} row is published`);
+    }
+  });
+
   it('derives the retrieval suite, with the oracle proof and the synthetic-corpus note in view', function () {
     const data = loadBench('retrieval');
     const state = { benchStatus: { retrieval: 'loaded' }, bench: { retrieval: data }, benchUi: {} };

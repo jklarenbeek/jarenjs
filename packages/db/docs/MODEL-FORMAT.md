@@ -672,6 +672,34 @@ to build one on — a crude guess would be dishonest. It pushes
 deterministically and this profile is published so the shape of the win
 is known; add a narrowing predicate or a `LIMIT` and the push pays.
 
+**The same profile for a spatial predicate.** A `$within` against a
+LITERAL region takes the hatch only on a collection that declares **no**
+derived spatial index on the member: where one is declared the
+promotion (§2.1, `explain().prefilters`) takes the conjunct first and
+the hatch is consulted only for a refused one, and an external region
+never qualifies — a deterministic function must not close over
+changing state. Measured on the same terms as the `$sqrt` rows
+(`benchmark/spatial.js`: 50 000 stored points, ~0.5 % selectivity,
+mean of 20 executions after a warm one; the residual comparator
+pushes everything BUT the spatial conjunct):
+
+<!--bm:spatial.udfTable-->
+| shape | pushed (ms) | residual (ms) | verdict |
+|---|---|---|---|
+| solo `$within` over a full scan | 92 | 78 | ~even |
+| indexed `$eq` **and** `$within` (~5 % pass the index) | 5.6 | 53 | push **9.4×** |
+| `$within` with `LIMIT 10` | 1.9 | 76 | push **40.9×** |
+<!--/bm-->
+
+So the spatial hatch <!--bm:spatial.udfVerdict-->earns its row: 9.4× beside the selective conjunct and 40.9× under the LIMIT<!--/bm-->,
+by the same rule as `$sqrt`: a sole `$within` over a full scan is a
+loss (the UDF re-parses every row in the callback, and the exact
+containment test is dearer than a square root), a `$within` beside
+something that narrows first is a large win. The solo shape is the one
+a derived index answers — declare `derive: 'bbox'` on the member and
+the same predicate becomes a box seek plus a refinement over the rows
+it returns, which is faster than either column above.
+
 **The honest ceiling.** A `pushable:false` operator (a whole-series
 `$npv`, an `$sma`) is never a UDF — it stays the residual, `explain()`
 lists no `udfs` for it. Aggregate-UDF pushdown (`db.aggregate` step/final

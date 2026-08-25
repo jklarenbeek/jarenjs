@@ -703,7 +703,76 @@ const FACTS = {
       + ` ${meta.ranked.model} reference embedder (${pct(at(small, 'near').recallAt10)} at ${memories(small)}),`
       + ` ${word} tag match and recency's ${pct(incumbent.recallAt10)}`;
   },
+
+  // -- spatial: the storage suite. Every figure is a named row of the
+  // committed table or one of the ratios the tool itself derives, so a
+  // verdict in prose ("the hatch does not pay") can never outlive the
+  // number it was drawn from.
+  'spatial.corpus': () => {
+    const { meta } = data('spatial');
+    return `${meta.docs.toLocaleString('en-US')} points`;
+  },
+  'spatial.rows': () => {
+    const { meta } = data('spatial');
+    const row = spatialRow('within-indexed');
+    return `${row.rows} of ${meta.docs.toLocaleString('en-US')} (${(100 * row.rows / meta.docs).toFixed(1)} %)`;
+  },
+  'spatial.within': () => `${ms(spatialMs('within-indexed'))} ms`,
+  'spatial.scan': () => `${ms(spatialMs('within-scan'))} ms`,
+  'spatial.engine': () => `${ms(spatialMs('engine'))} ms`,
+  'spatial.scanVsIndexed': () => ratio(data('spatial').meta.figures.scanVsIndexed),
+  'spatial.engineVsIndexed': () => {
+    const x = data('spatial').meta.figures.engineVsIndexed;
+    return x >= 1 ? `${ratio(x)}× faster than` : `${ratio(1 / x)}× slower than`;
+  },
+  'spatial.bboxIntersects': () => `${ms(spatialMs('bbox-intersects'))} ms`,
+  'spatial.distance': () => `${ms(spatialMs('distance'))} ms`,
+  'spatial.cellOne': () => `${ms(spatialMs('cell-one'))} ms for ${spatialRow('cell-one').rows} row(s)`,
+  'spatial.cellNine': () => `${ms(spatialMs('cell-nine'))} ms for ${spatialRow('cell-nine').rows} row(s)`,
+  'spatial.udfTable': () => {
+    // the three shapes MODEL-FORMAT's UDF profile publishes, for $within
+    const line = (label, pushed, residual, figure) =>
+      `| ${label} | ${ms(spatialMs(pushed))} | ${ms(spatialMs(residual))} | ${verdict(figure)} |`;
+    const table = [
+      '| shape | pushed (ms) | residual (ms) | verdict |',
+      '|---|---|---|---|',
+      line('solo `$within` over a full scan', 'within-udf', 'within-scan', 'udfSolo'),
+      line('indexed `$eq` **and** `$within` (~5 % pass the index)', 'within-udf-selective', 'within-residual-selective', 'udfSelective'),
+      line('`$within` with `LIMIT 10`', 'within-udf-limit', 'within-residual-limit', 'udfLimit'),
+    ].join('\n');
+    return `\n${table}\n`;
+  },
+  'spatial.udfVerdict': () => {
+    const { udfSelective, udfLimit } = data('spatial').meta.figures;
+    const wins = Math.max(udfSelective, udfLimit) >= 1.5;
+    return wins
+      ? `earns its row: ${ratio(udfSelective)}× beside the selective conjunct and ${ratio(udfLimit)}× under the LIMIT`
+      : `does not earn a row: ${ratio(udfSelective)}× beside the selective conjunct and ${ratio(udfLimit)}× under the LIMIT, both under the 1.5× bar`;
+  },
+  'spatial.rtree': () => {
+    const { rtreeVsGenerated } = data('spatial').meta.figures;
+    return `${ms(spatialMs('rtree-raw'))} ms against ${ms(spatialMs('generated-raw'))} ms — `
+      + (rtreeVsGenerated >= 1 ? `${ratio(rtreeVsGenerated)}× in the R*Tree's favour` : `${ratio(1 / rtreeVsGenerated)}× in the B-tree's favour`);
+  },
 };
+
+/** One named row of the spatial suite's tables, or a refusal. */
+function spatialRow(key) {
+  for (const table of data('spatial').tables) {
+    const row = table.rows.find((r) => r.key === key);
+    if (row !== undefined) return row;
+  }
+  throw new Error(`spatial.json has no '${key}' row — regenerate it before quoting one`);
+}
+/** That row's timing in milliseconds. */
+const spatialMs = (key) => spatialRow(key).results[0] / 1e6;
+/** A push-versus-residual ratio as the profile's verdict cell. */
+function verdict(figure) {
+  const x = data('spatial').meta.figures[figure];
+  if (x >= 1.5) return `push **${ratio(x)}×**`;
+  if (x <= 1 / 1.5) return `residual **${ratio(1 / x)}×**`;
+  return '~even';
+}
 
 //#region rewriting
 
@@ -718,6 +787,8 @@ const DOCS = [
   'packages/view/README.md',
   'packages/josl/README.md',
   'packages/ai/README.md',
+  'packages/db/README.md',
+  'packages/db/docs/MODEL-FORMAT.md',
 ];
 
 /**

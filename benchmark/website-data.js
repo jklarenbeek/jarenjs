@@ -27,6 +27,7 @@
  *   geo.json          geo.js            — spatial kernel vs turf/geolib/flatbush (equivalence-gated)
  *   flow.json         flow-fsm.js/-dag.js — FSM step + DAG run throughput vs XState
  *   db.json           db.js             — document store + pushdown vs PouchDB/RxDB/lowdb
+ *   spatial.json      spatial.js        — spatial storage: $within every way it runs, corpus-gated (no head-to-head rival)
  *   orm.json          orm.js            — entities + graph loads vs Prisma/Drizzle/Kysely (Node + Bun)
  *   live.json         live.js           — live queries/capture/jobs vs RxDB/TinyBase (incremental vs re-run)
  *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
@@ -107,7 +108,7 @@ function parseArgs(argv) {
       }
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, retrieval, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, long-horizon, retrieval, qt3');
         process.exit(0);
         break;
       default:
@@ -870,7 +871,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'contract', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'orm', 'live', 'long-horizon', 'retrieval',
+  'spatial', 'orm', 'live', 'long-horizon', 'retrieval',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -1147,6 +1148,23 @@ function buildHeadlines(generated, meta) {
       note: 'the same query document pushed to SQL versus forced to the residual — the measured value of the planner; PouchDB/RxDB/lowdb rows (including the ones jaren loses) are on the suite page',
     });
   }
+  if (generated.spatial !== undefined) {
+    // The rival here is NOT using the database: the same $within in
+    // the in-memory engine over the parsed array. It is the one row a
+    // spatial store has to win to earn its place, and it is published
+    // whichever way it falls.
+    const { meta } = generated.spatial;
+    const word = meta.figures.engineVsIndexed >= 1 ? 'faster' : 'slower';
+    add('spatial', 'Spatial', {
+      ratio: meta.figures.engineVsIndexed,
+      rival: 'the in-memory engine (no database)',
+      conformance: `corpus ${meta.corpus.agreed} / ${meta.corpus.cases}`,
+      note: `$within over ${meta.docs.toLocaleString('en-US')} stored points through a derive: 'bbox' index,`
+        + ` ${word} than the same predicate in the engine over the parsed array; ${meta.figures.scanVsIndexed}× the`
+        + ' full scan a consumer started from. No head-to-head rival exists (nothing else stores GeoJSON in'
+        + ' SQLite from a JSON query document); MongoDB and DuckDB-wasm are positioned on the suite page',
+    });
+  }
   if (generated.live !== undefined) {
     const topRatio = (generated.live.meta.incrementalRatios ?? [])
       .reduce((best, entry) => Math.max(best, entry.ratio), 0);
@@ -1375,6 +1393,40 @@ function generateRetrieval(tmp) {
 }
 
 /**
+ * The spatial-storage suite: `$within` over 50 000 stored points every
+ * way it can run, gated on the committed spatial corpus. The tool
+ * exits non-zero and writes nothing when an executor disagrees, so an
+ * omitted suite here is a withheld table, never a wrong one.
+ */
+function generateSpatial(tmp, options) {
+  const file = path.join(tmp, 'spatial.json');
+  try {
+    runTool([
+      'benchmark/spatial.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: spatial run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
+  const raw = readJson(file);
+  return {
+    meta: raw.meta,
+    checks: raw.checks,
+    tables: raw.tables.map((table) => ({
+      title: table.title,
+      columns: table.columns,
+      rows: table.rows.map((row) => ({
+        ...row,
+        results: row.results.map((ns) => (ns === null ? null : sig4(ns))),
+      })),
+    })),
+  };
+}
+
+/**
  * The phase-B ORM suite: entities, the one-statement graph load, the
  * unit of work and the typed surface against Prisma, Drizzle and
  * Kysely — on Node, and on Bun where a first-party route exists. The
@@ -1547,6 +1599,11 @@ async function main() {
     const db = generateDb(tmp, options);
     if (db !== null)
       generated.db = db;
+  }
+  if (!options.skip.has('spatial')) {
+    const spatial = generateSpatial(tmp, options);
+    if (spatial !== null)
+      generated.spatial = spatial;
   }
   if (!options.skip.has('orm')) {
     const orm = generateOrm(tmp, options);

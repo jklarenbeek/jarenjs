@@ -457,7 +457,13 @@ delete inside the visible slice answered without re-query), running
 over contributions when the extremum's holder leaves), per-group
 **deltas** (the accumulator machinery once per group), and **re-run**
 for everything else — declared, reported through `live.mode`, never
-silent. Invalidation matches a record by table plus pointer prefix,
+silent. A plan that fell to the set residual ONLY for a spatial
+refinement (a pushed box or cell range with the exact predicate left
+to the engine) is still the rows strategy — the geofence: the fetch is
+index-narrowed and per-row re-evaluation IS the exact test — while an
+ordering or an aggregate beside such a refinement re-runs, the
+refinement never being the reason named. Invalidation matches a record
+by table plus pointer prefix,
 over-approximating toward re-evaluation (a missed update would be a
 correctness bug; an extra one is only slower). Emissions preserve
 reference identity for untouched rows — the O(k) renderer's contract —
