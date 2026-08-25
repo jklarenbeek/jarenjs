@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-25T08:53:39+02:00",
-  "commit": "15557957dce05faf853a0440ff68a9ca27988450",
+  "generated": "2026-08-25T09:57:45+02:00",
+  "commit": "945d5a5b0dd83c080fe158183b1486cf4e7eec80",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -7446,7 +7446,46 @@
               },
               {
                 "type": "text",
-                "value": "points ten metres apart can differ in the first character of their cell."
+                "value": "points ten metres apart can differ in the first character of their cell. The"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "same document registered as a live query is a geofence: maintained per row"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "through the engine's exact predicate, it emits an add when a point enters the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "region, a remove when it leaves, and nothing while it moves within; the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "spatial"
+              },
+              {
+                "type": "text",
+                "value": " benchmark suite publishes the numbers beside the row where the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "database has to beat not using the database at all."
               }
             ]
           },
@@ -7925,7 +7964,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/db/site.md",
-          "hash": "kkihdk",
+          "hash": "1y2vknk",
           "frontmatterLang": "yaml"
         }
       },
