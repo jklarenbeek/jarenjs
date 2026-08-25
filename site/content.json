@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-25T09:57:45+02:00",
-  "commit": "945d5a5b0dd83c080fe158183b1486cf4e7eec80",
+  "generated": "2026-08-25T11:17:10+02:00",
+  "commit": "93cebbeab111f21d49ca9668bbd9d81183b69321",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -6379,7 +6379,83 @@
               },
               {
                 "type": "text",
-                "value": "a browser-hosted agent drives the identical schema-guarded surface. The"
+                "value": "a browser-hosted agent drives the identical schema-guarded surface. Geography"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "ships ready-made: "
+              },
+              {
+                "type": "inlineCode",
+                "value": "createGeoToolbox"
+              },
+              {
+                "type": "text",
+                "value": " is seven tools — distance, containment,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "bounding box, geohash cell, the nine-cell neighbourhood, WKT in and out — each"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "one call into "
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/core/geo"
+              },
+              {
+                "type": "text",
+                "value": " and each guarded by the GeoJSON meta-schema"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "by reference, with no overlay and a refusal that says so; and"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "createSpatialAuthor"
+              },
+              {
+                "type": "text",
+                "value": " is the stylesheet author with the query format’s spatial"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "section taught in the prompt and its three folklore mistakes refused at the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "gate (a geohash prefix offered as proximity, Pythagoras over degrees, a"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "geographic ask with no spatial operator), each with a pointer and the fix. The"
               },
               {
                 "type": "softBreak"
@@ -6589,7 +6665,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/ai/site.md",
-          "hash": "1cqbxvq",
+          "hash": "10j90gc",
           "frontmatterLang": "yaml"
         }
       },
@@ -7985,14 +8061,61 @@
               },
               {
                 "type": "text",
-                "value": " produced for it."
+                "value": " produced for it. Its Round trip card runs the whole"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "spatial loop in the tab — CSV rows become GeoJSON through a JSLT stylesheet,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "are judged by the GeoJSON meta-schema, stored in a throwaway collection with"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "derived spatial indexes, queried with a "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$within"
+              },
+              {
+                "type": "text",
+                "value": " written through"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/linq"
+              },
+              {
+                "type": "text",
+                "value": ", explained (the box the index seeks beside the exact"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "refinement) and drawn as a map."
               }
             ]
           }
         ],
         "meta": {
           "sourceUrl": "packages/db/site.md",
-          "hash": "168qq3y",
+          "hash": "xeldq0",
           "frontmatterLang": "yaml"
         }
       },
