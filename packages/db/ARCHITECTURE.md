@@ -503,4 +503,8 @@ the ENVIRONMENT — OPFS persistence across reloads, the owner topology
 (one context holds the sole connection, tabs are clients over a
 BroadcastChannel), and the second-writer refusal — across Chromium,
 Firefox and WebKit, with the memory fallback stated where OPFS is
-absent.
+absent — and the spatial corpus, run entry by entry through the data
+studio's throwaway-store operation, holds the wasm build to the
+JavaScript engine's recorded answers in every one of those engines,
+OPFS or not, because an entry seeds its own store and needs execution,
+not persistence.

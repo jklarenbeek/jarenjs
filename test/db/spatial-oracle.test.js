@@ -15,97 +15,43 @@
  * Both must equal the engine's recorded answer — the pre-filter
  * narrows, it never decides.
  *
- * Two shapes of entry:
- *
- * - `collection: true` — the data IS a list of documents and the query
- *   a FLWOR over them, so the rows are stored and the query runs as
- *   written. These are the plan-sensitive cases.
- * - everything else — one document and a query rooted at it. It is
- *   stored as the collection's single row and the query is re-anchored
- *   on the binding, because a collection query is rooted at the
- *   collection and a corpus query is rooted at the document.
+ * How an entry becomes documents, a query and a model for a store is
+ * `scripts/lib/spatial-corpus.js` — shared with the site build, which
+ * ships the same projection for the browser runner — so the two store
+ * executors are held to the corpus through ONE adaptation. Entries
+ * marked `executors: ["engine"]` are skipped by that marker, never by a
+ * failed attempt, and the count of entries actually run is asserted
+ * against the corpus at the end: a runner that quietly ran nothing
+ * passes every per-entry assertion, and that is the failure this guards.
  */
 
 import { describe, it, before, after } from 'node:test';
 import * as assert from 'node:assert';
-import { readFileSync } from 'node:fs';
 
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
 import { deepEquals } from './oracle/harness.js';
+import {
+  readSpatialCorpus, isRunnable, asCollectionQuery, spatialModel, SPATIAL_INDEXES,
+  SPATIAL_COLLECTION,
+} from '../../scripts/lib/spatial-corpus.js';
+
+/** The executor this file holds to the engine, as a divergence names it. */
+const EXECUTOR = 'sqlite-node';
 
 /** @type {Array<any>} */
-const CORPUS = JSON.parse(readFileSync(
-  new URL('../json/fixtures/spatial-corpus.json', import.meta.url), 'utf8'));
-
-/** The members the corpus carries geography in. */
-const GEO_MEMBERS = ['at', 'g', 'a', 'b', 'region', 'line', 'here', 'there'];
-
-/** The precision the corpus's plan cases index `at` at. */
-const CELL_PRECISION = 6;
-
-const SCHEMA = {
-  type: 'object',
-  properties: Object.fromEntries(
-    GEO_MEMBERS.map((member) => [member, { type: ['array', 'object'] }])),
-};
-
-/** Both derive kinds over `$.at`, plus a box over every other member. */
-const SPATIAL_INDEXES = [
-  { name: 'by_at_box', path: '$.at', derive: 'bbox' },
-  { name: 'by_at_cell', path: '$.at', derive: 'geohash', precision: CELL_PRECISION },
-  ...GEO_MEMBERS.filter((member) => member !== 'at').map((member) => ({
-    name: `by_${member}_box`, path: `$.${member}`, derive: 'bbox',
-  })),
-];
-
-/**
- * Re-anchor a document-rooted query on a collection binding: `$` and
- * `$.member` become `$<binding>` and `$<binding>.member`. Anything
- * else — an inner binding like `$c.at`, a literal string — is left
- * alone, because only a root-anchored path changes meaning when the
- * same query runs over a collection.
- * @param {any} node
- * @param {string} binding
- * @returns {any}
- */
-function rebase(node, binding) {
-  if (typeof node === 'string') {
-    if (node === '$') return `$${binding}`;
-    return node.startsWith('$.') ? `$${binding}${node.slice(1)}` : node;
-  }
-  if (Array.isArray(node)) return node.map((item) => rebase(item, binding));
-  if (node !== null && typeof node === 'object') {
-    return Object.fromEntries(
-      Object.entries(node).map(([key, value]) => [key, rebase(value, binding)]));
-  }
-  return node;
-}
-
-/** The documents and the query one entry runs as, against a store. */
-function asCollectionQuery(entry) {
-  if (entry.collection === true) return { documents: entry.data, query: entry.query };
-  return {
-    documents: [entry.data],
-    query: { $for: { doc: '$[*]' }, $return: rebase(entry.query, 'doc') },
-  };
-}
+const CORPUS = readSpatialCorpus();
 
 /** Open a store over one entry's documents. */
 async function storeFor(documents, indexes) {
-  const store = await openStore({
-    $model: '0.1',
-    collections: {
-      rows: { schema: SCHEMA, key: null, identity: 'integer', indexes },
-    },
-  }, { driver: nodeDriver() });
-  const collection = store.collection('rows');
+  const store = await openStore(spatialModel(indexes), { driver: nodeDriver() });
+  const collection = store.collection(SPATIAL_COLLECTION);
   for (const document of documents) await collection.insert(document);
   return { store, collection };
 }
 
-const RUNNABLE = CORPUS.filter((entry) => entry.executors === undefined);
+const RUNNABLE = CORPUS.filter(isRunnable);
 
 describe('the spatial corpus through SQLite', () => {
   it('has plan-sensitive entries to run, and marks them as collections', () => {
@@ -118,6 +64,9 @@ describe('the spatial corpus through SQLite', () => {
     assert.ok(RUNNABLE.length >= 80, `only ${RUNNABLE.length} runnable entries`);
   });
 
+  /** Entries actually executed, per mapping. */
+  const ran = { indexed: 0, unindexed: 0 };
+
   for (const mapping of /** @type {const} */ (['indexed', 'unindexed'])) {
     describe(`${mapping} — every entry answers what the engine answered`, () => {
       const indexes = mapping === 'indexed' ? SPATIAL_INDEXES : [];
@@ -127,13 +76,16 @@ describe('the spatial corpus through SQLite', () => {
           const { store, collection } = await storeFor(documents, indexes);
           try {
             const actual = await collection.execute(query);
+            ran[mapping] += 1;
+            const where = `${EXECUTOR} (${mapping}) disagreed on ${entry.name}`
+              + ` — query ${JSON.stringify(entry.query)}`;
             if (entry.empty === true) {
               assert.strictEqual(actual, undefined,
-                `recorded the empty sequence, answered ${JSON.stringify(actual)}`);
+                `${where}: recorded the empty sequence, answered ${JSON.stringify(actual)}`);
               return;
             }
             assert.ok(deepEquals(actual, entry.expected),
-              `recorded ${JSON.stringify(entry.expected)}, `
+              `${where}: recorded ${JSON.stringify(entry.expected)}, `
               + `answered ${JSON.stringify(actual)}`);
           }
           finally {
@@ -143,6 +95,14 @@ describe('the spatial corpus through SQLite', () => {
       }
     });
   }
+
+  it('ran every runnable entry under both mappings — the count, not the absence of failures', () => {
+    assert.ok(RUNNABLE.length > 0, 'nothing to run');
+    assert.deepStrictEqual(ran, { indexed: RUNNABLE.length, unindexed: RUNNABLE.length },
+      `${EXECUTOR} ran fewer entries than the corpus carries`);
+    assert.strictEqual(RUNNABLE.length + CORPUS.filter((entry) => !isRunnable(entry)).length,
+      CORPUS.length, 'every entry is either run or skipped by its marker');
+  });
 });
 
 describe('the plan cases really are promoted (and still agree)', () => {

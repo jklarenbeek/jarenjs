@@ -35,6 +35,12 @@
  *    holds; a client tab asking for it is refused rather than served, so
  *    the control that is honest in the owning tab cannot be destructive
  *    from another one.
+ *  - **The oracle's store is throwaway.** `data.oracle` opens a fresh
+ *    in-memory store on the model it is handed, answers one query over
+ *    the documents it is handed, and closes it — the store this context
+ *    holds, its registrations and its peers are untouched. That is what
+ *    lets the committed spatial corpus hold SQLite-in-wasm to the
+ *    JavaScript engine from any tab, including one with no OPFS at all.
  */
 
 import { openStore, migrate, planModelMigration } from '@jarenjs/db';
@@ -47,6 +53,9 @@ import { ContractFailure } from '@jarenjs/contract';
  * @property {() => Promise<any>} init - Decide the topology and prepare
  *   this context; resolves to the `data.init` answer.
  * @property {() => any} makeDriver - A fresh driver over a fresh handle.
+ * @property {() => any} makeScratchDriver - A driver over a throwaway
+ *   in-memory handle: the oracle's store, opened and closed per call,
+ *   never the database this context holds.
  * @property {() => string} path - The database path for this context.
  * @property {() => string} vfs - The VFS this context settled on.
  * @property {() => boolean} durable - Whether a migration can be applied
@@ -228,6 +237,33 @@ export function createDataHandlers(host) {
     };
   }
 
+  /**
+   * Run one query over a throwaway store: a fresh in-memory store on
+   * the given model, the documents inserted, the query executed, and
+   * the store closed whatever happened. Nothing here reads or writes
+   * the store this context holds, which is what lets a second executor
+   * be held to the engine's recorded answers from any tab — the corpus
+   * needs execution, not persistence.
+   *
+   * The empty sequence is `undefined`, which JSON cannot carry and
+   * `null` must not stand in for (null is an answer the engine can
+   * record). It crosses as a flag beside a null answer.
+   * @param {any} input
+   */
+  async function oracle(input) {
+    const scratch = await openStore(input.model,
+      { driver: host.makeScratchDriver(), path: ':memory:', operators: host.operators });
+    try {
+      const rows = scratch.collection(input.collection);
+      for (const document of input.documents) await rows.insert(document);
+      const answer = await rows.execute(input.query, { externals: input.externals ?? {} });
+      return { answer: answer === undefined ? null : answer, empty: answer === undefined };
+    }
+    finally {
+      await scratch.close();
+    }
+  }
+
   /** Every store rejection crosses as the declared `db` failure, so a
    * genuine host bug is the only thing that answers the binding's JC2070.
    * @param {(input: any) => any} fn */
@@ -254,6 +290,7 @@ export function createDataHandlers(host) {
       .execute(input.document, { externals: input.externals ?? {} }),
     'data.explain': (/** @type {any} */ input) => collection(input)
       .explain(input.document, { externals: input.externals ?? {} }),
+    'data.oracle': (/** @type {any} */ input) => oracle(input),
     'data.live': (/** @type {any} */ input) => live(input),
     'data.lives': () => ({ count: state.lives.size }),
     'data.migrate': (/** @type {any} */ input) => migrateTo(input),

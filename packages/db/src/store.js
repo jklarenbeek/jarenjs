@@ -846,54 +846,6 @@ export function openStore(model, options) {
        */
       let topLevelTransaction = (fn) => withScope(opened.transaction, fn);
 
-      const dialect = connection.dialect;
-      // The PHYSICAL MAPPING BRANCH for derived index columns. A driver
-      // that can index a registered deterministic function generates
-      // them; one that cannot has the store write them. It is a
-      // property of the driver that created the file, so a database
-      // built under one and opened under the other legitimately reports
-      // drift — that is a migration, not an open.
-      const derivedMapping = connection.capabilities.deterministicIndexableFunctions === true
-        ? 'virtual' : 'stored';
-      /** @type {Map<string, any>} */
-      const plans = new Map();
-      for (const [name, collection] of collections)
-        plans.set(name, planCollection(name, collection, dialect, { derived: derivedMapping }));
-      // a table whose column expression calls a function this connection
-      // has not registered cannot even be SELECTed (probed), so the
-      // registration precedes every statement over it
-      const needsDeriveFunctions = derivedMapping === 'virtual'
-        && [...plans.values()].some((plan) => plan.derived.length > 0);
-      /** @type {Map<string, any>} */
-      const entityPlans = new Map();
-      if (mapping !== null) {
-        for (const name of Object.keys(mapping.entities))
-          entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect));
-        for (const joinName of Object.keys(mapping.joinTables)) {
-          entityPlans.set(joinName,
-            planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
-        }
-      }
-
-      const pragmas = chain(
-        memory
-          ? null
-          : chain(connection.exec(dialect.pragma.busyTimeout(busyTimeout)),
-            // a journal-mode change writes; a read-only store keeps
-            // whatever mode the file already has
-            () => (readOnly ? null : connection.exec(dialect.pragma.journalMode(journalMode)))),
-        // referential integrity is real only when the pragma is ON —
-        // it defaults off, so set it AND verify it per connection
-        () => chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
-          chain(connection.prepare(dialect.introspect.foreignKeysOn()), (statement) =>
-            chain(statement.get([]), (row) => {
-              if (Number(row?.enabled) !== 1) {
-                throw new DbCompileError('JD0003',
-                  'this connection cannot enforce foreign keys (PRAGMA foreign_keys stayed off)');
-              }
-              return null;
-            }))));
-
       // ————— the rejection boundary around an ACQUIRED connection —————
       // Initialization continues for a long way past `driver.open`:
       // pragmas, shape verification, capture, jobs, readiness. Every one
@@ -927,6 +879,64 @@ export function openStore(model, options) {
           ? closing.then(() => Promise.reject(error), both)
           : Promise.reject(error);
       };
+      const dialect = connection.dialect;
+      // The PHYSICAL MAPPING BRANCH for derived index columns. A driver
+      // that can index a registered deterministic function generates
+      // them; one that cannot has the store write them. It is a
+      // property of the driver that created the file, so a database
+      // built under one and opened under the other legitimately reports
+      // drift — that is a migration, not an open.
+      const derivedMapping = connection.capabilities.deterministicIndexableFunctions === true
+        ? 'virtual' : 'stored';
+      /** @type {Map<string, any>} */
+      const plans = new Map();
+      /** @type {Map<string, any>} */
+      const entityPlans = new Map();
+      // Planning can REFUSE — a derived index over a member the schema
+      // does not type as geography is JD0004 here, not at normalization,
+      // because the physical mapping it plans is a property of the
+      // driver that opened the connection. It is inside the boundary
+      // for that reason: the refusal is raised after acquisition.
+      try {
+        for (const [name, collection] of collections)
+          plans.set(name, planCollection(name, collection, dialect, { derived: derivedMapping }));
+        if (mapping !== null) {
+          for (const name of Object.keys(mapping.entities))
+            entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect));
+          for (const joinName of Object.keys(mapping.joinTables)) {
+            entityPlans.set(joinName,
+              planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
+          }
+        }
+      }
+      catch (error) {
+        return failClosed(error);
+      }
+      // a table whose column expression calls a function this connection
+      // has not registered cannot even be SELECTed (probed), so the
+      // registration precedes every statement over it
+      const needsDeriveFunctions = derivedMapping === 'virtual'
+        && [...plans.values()].some((plan) => plan.derived.length > 0);
+
+      const pragmas = chain(
+        memory
+          ? null
+          : chain(connection.exec(dialect.pragma.busyTimeout(busyTimeout)),
+            // a journal-mode change writes; a read-only store keeps
+            // whatever mode the file already has
+            () => (readOnly ? null : connection.exec(dialect.pragma.journalMode(journalMode)))),
+        // referential integrity is real only when the pragma is ON —
+        // it defaults off, so set it AND verify it per connection
+        () => chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
+          chain(connection.prepare(dialect.introspect.foreignKeysOn()), (statement) =>
+            chain(statement.get([]), (row) => {
+              if (Number(row?.enabled) !== 1) {
+                throw new DbCompileError('JD0003',
+                  'this connection cannot enforce foreign keys (PRAGMA foreign_keys stayed off)');
+              }
+              return null;
+            }))));
+
       const opening = () => chain(pragmas, () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, readOnly), () =>

@@ -546,6 +546,11 @@ export const ACTIONS = {
   // one stored document removed, by the key its own model declares
   'data/delete': { effects: [{ run: 'data-delete', with: { key: '$payload' } }] },
   'data/migrate': { effects: [{ run: 'data-migrate' }] },
+  // the third runner of the spatial corpus, driven from the store pane;
+  // the report replaces the last one, and `running` is what shows while
+  // the entries are still crossing the worker
+  'data/oracle-run': { effects: [{ run: 'data-oracle' }] },
+  'data/oracle': { patch: [{ op: 'replace', path: '/data/oracle', value: '$payload' }] },
   'data/status': {
     patch: [
       { op: 'replace', path: '/data/topology', value: '$payload.topology' },

@@ -118,6 +118,7 @@ export function createSiteHandlers(env) {
     'site.content': (_input, ctx) => json(env.fetchSite, 'content', ctx),
     'site.cards': (_input, ctx) => json(env.fetchSite, 'cards', ctx),
     'site.build': (_input, ctx) => json(env.fetchSite, 'build', ctx),
+    'site.corpus': (_input, ctx) => json(env.fetchSite, 'corpus', ctx),
     'bench.meta': (_input, ctx) => json(env.fetchJson, 'meta', ctx),
     'bench.suite': (input, ctx) => json(env.fetchJson, input.suite, ctx),
     'readme.fetch': async (input, ctx) => {

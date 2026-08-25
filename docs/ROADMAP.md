@@ -845,7 +845,13 @@ JSLT and JTLT inherit, and `@jarenjs/linq` spells the whole family fluently. A
 CSV of coordinates needs no code at all — the recipe is in
 [HOWTO](./HOWTO.md#getting-geographic-data-in-and-out) — and the committed
 spatial corpus (`test/json/fixtures/spatial-corpus.json`) records what the
-JavaScript engine answers so a second executor can be held to it.
+JavaScript engine answers so a second executor can be held to it — and two
+are: SQLite through the Node driver (`test/db/spatial-oracle.test.js`) and
+SQLite compiled to wasm in a browser tab, where the Data studio runs the
+same entries in Chromium, Firefox and WebKit
+(`packages/website/e2e/spatial-agreement.spec.js`). One document, three
+executors, proven to agree; the browser leg proves execution, not
+durability.
 
 **Spatial storage is adoptable.** The model format declares derived spatial
 index kinds — `indexes[].derive` is a geohash cell or a bounding box as four

@@ -37,6 +37,13 @@
  * collected again, because two collectors over one source is how the
  * grid and the rail come to disagree about what a package calls itself.
  *
+ * The fourth artifact is the committed spatial corpus, projected for a
+ * store (`site/spatial-corpus.json`): the data studio runs every entry
+ * through SQLite-in-wasm in a real browser tab and holds it to the
+ * answer the JavaScript engine recorded. The fixture stays the one
+ * source — the projection is `scripts/lib/spatial-corpus.js`, shared
+ * with the Node runner — and a build fails if the fixture moves.
+ *
  * Nothing is written that the site could not read: the emit path proves
  * each artifact against the output schema of the operation the browser
  * reads it through — the same compiled document — and refuses rather
@@ -52,11 +59,13 @@ import { JarenValidator } from '@jarenjs/validate';
 
 import { headCommit } from './lib/git.js';
 import { assertSiteOutput } from './lib/site-contract.js';
+import { readSpatialCorpus, buildSpatialCorpus } from './lib/spatial-corpus.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const OUT = join(ROOT, 'packages/website/public/site/packages.json');
 const CONTENT_OUT = join(ROOT, 'packages/website/public/site/content.json');
 const CARDS_OUT = join(ROOT, 'packages/website/public/site/cards.json');
+const CORPUS_OUT = join(ROOT, 'packages/website/public/site/spatial-corpus.json');
 
 /** The document a workspace commits to own its presence on the site. */
 const SITE_DOC = 'site.md';
@@ -368,18 +377,35 @@ export function serializeSiteCards(cards) {
   return `${JSON.stringify(cards, null, 2)}\n`;
 }
 
+/**
+ * Serialize the spatial corpus artifact — the emit path, like the three
+ * beside it: the browser reads it through `site.corpus`, so it is proven
+ * against that operation's output before it exists on disk.
+ * @param {ReturnType<typeof buildSpatialCorpus>} corpus
+ * @returns {string}
+ * @throws {Error} when the projection does not match what `site.corpus` declares.
+ */
+export function serializeSpatialCorpus(corpus) {
+  assertSiteOutput('site.corpus', corpus, 'packages/website/public/site/spatial-corpus.json');
+  return `${JSON.stringify(corpus)}\n`;
+}
+
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   let census;
   let censusText;
   let content;
   let contentText;
   let cardsText;
+  let corpus;
+  let corpusText;
   try {
     census = buildSiteData();
     censusText = serializeSiteData(census);
     content = buildSiteContent();
     contentText = serializeSiteContent(content);
     cardsText = serializeSiteCards(buildSiteCards(content));
+    corpus = buildSpatialCorpus(readSpatialCorpus());
+    corpusText = serializeSpatialCorpus(corpus);
   }
   catch (error) {
     console.error(/** @type {Error} */ (error).message);
@@ -389,6 +415,7 @@ if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === imp
   writeFileSync(OUT, censusText);
   writeFileSync(CONTENT_OUT, contentText);
   writeFileSync(CARDS_OUT, cardsText);
+  writeFileSync(CORPUS_OUT, corpusText);
   const authored = content.packages.filter((entry) => !entry.derived).length;
   console.log(`site/packages.json: ${census.packages.length} published workspaces`
     + ` @ ${census.commit === null ? '(no git)' : census.commit.slice(0, 7)}`);
@@ -396,4 +423,6 @@ if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === imp
     + ` ${content.packages.length - authored} derived from their manifest`);
   console.log(`site/cards.json: the same ${content.packages.length} entries without their`
     + ` documentation bodies (${Math.round(cardsText.length / 1024)} kB of ${Math.round(contentText.length / 1024)} kB)`);
+  console.log(`site/spatial-corpus.json: ${corpus.entries.length} entries of ${corpus.source}`
+    + ` for the browser runner, ${corpus.skipped.length} engine-only left out by their marker`);
 }

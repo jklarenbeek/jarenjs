@@ -36,6 +36,7 @@ import {
   serializeSiteData, serializeSiteContent, serializeSiteCards,
   buildSiteData, buildSiteContent, buildSiteCards,
 } from '../../scripts/generate-site-data.js';
+import { readSpatialCorpus, buildSpatialCorpus } from '../../scripts/lib/spatial-corpus.js';
 import { serializeBuildInfo, buildInfo } from '../../scripts/generate-build-info.js';
 import { serializeMeta, serializeSuite } from '../../benchmark/website-data.js';
 import { suiteShapeName } from '../../scripts/lib/site-contract.js';
@@ -50,9 +51,9 @@ const read = (path) => JSON.parse(readFileSync(new URL(path, SITE), 'utf8'));
 
 const doc = read('src/contracts/site.contract.json');
 
-/** The seven operations, in the document's order. */
+/** The eight operations, in the document's order. */
 const IDS = [
-  'site.packages', 'site.content', 'site.cards', 'site.build',
+  'site.packages', 'site.content', 'site.cards', 'site.build', 'site.corpus',
   'bench.meta', 'bench.suite', 'readme.fetch',
 ];
 
@@ -77,6 +78,7 @@ const ARTIFACTS = {
   content: CONTENT,
   cards: buildSiteCards(CONTENT),
   build: buildInfo(),
+  corpus: buildSpatialCorpus(readSpatialCorpus()),
   meta: read('public/benchmarks/meta.json'),
 };
 
@@ -124,7 +126,7 @@ function openFixtureClient(overrides = {}) {
 }
 
 describe('the site contract document', function () {
-  it('compiles refusal-free, and declares exactly the seven site-owned reads', function () {
+  it('compiles refusal-free, and declares exactly the eight site-owned reads', function () {
     const contract = compileContract(doc);
     assert.strictEqual(contract.id, 'jaren-site');
     assert.strictEqual(doc.$contract, '0.1');
@@ -289,6 +291,21 @@ describe('the site client (the local binding)', function () {
     const result = unwrap(await client.client.invoke('readme.fetch', { path: 'packages/core/README.md' }));
     assert.deepStrictEqual(result,
       { ok: false, kind: 'failure', code: 'unavailable', reason: '404 Not Found' });
+  });
+
+  it('reads the spatial corpus the build ships, through the document the browser reads it through', async function () {
+    const fixture = openFixtureClient();
+    const result = await fixture.request('site.corpus');
+    assert.strictEqual(result.ok, true, JSON.stringify(result));
+    assert.deepStrictEqual(result.value, ARTIFACTS.corpus,
+      'the artifact the generator writes is the one the page gets, unchanged');
+    assert.ok(result.value.entries.length >= 80, `only ${result.value.entries.length} entries`);
+    assert.deepStrictEqual(fixture.calls, ['site:corpus']);
+    // and a host that cannot load site data answers the declared failure,
+    // naming the artifact — the studio's Store pane then says so
+    const bare = openSiteClient({});
+    assert.deepStrictEqual(await bare.request('site.corpus'),
+      { ok: false, kind: 'failure', code: 'unavailable', reason: 'This environment cannot load site data.' });
   });
 
   it('settles a MIS-SHAPED census as a contract refusal with a JC code, never as a value', async function () {

@@ -135,6 +135,33 @@
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
       "doc": "The store's explain record for a query document: the SQL pushed down, its parameters, the indexes chosen and the residual (null when fully pushed)."
     },
+    "data.oracle": {
+      "kind": "read",
+      "input": {
+        "type": "object",
+        "required": ["model", "collection", "documents", "query"],
+        "properties": {
+          "model": { "type": "object" },
+          "collection": { "$ref": "#/$defs/Collection" },
+          "documents": { "type": "array", "items": { "type": "object" } },
+          "query": true,
+          "externals": { "type": "object" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["answer", "empty"],
+        "properties": {
+          "answer": true,
+          "empty": {
+            "description": "The query answered the empty sequence, which JSON cannot spell and null must not stand in for — answer is null then, and means nothing.",
+            "type": "boolean"
+          }
+        }
+      },
+      "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
+      "doc": "Run one query over a THROWAWAY store: a fresh in-memory store on the model, the documents inserted, the query executed, the store closed — whatever happened. The store this context holds is untouched: no registration, no announcement, and it works with no store open at all. It is how a second executor is held to the spatial corpus from a real browser tab, in every engine: the corpus needs execution, not persistence, so a tab whose OPFS pool is absent answers it exactly as an owner does."
+    },
     "data.live": {
       "kind": "subscribe",
       "input": {

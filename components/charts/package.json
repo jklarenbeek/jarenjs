@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/charts",
   "private": false,
-  "version": "0.44.4",
+  "version": "0.45.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -70,7 +70,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.44.4",
-    "@jarenjs/view": "^0.44.4"
+    "@jarenjs/core": "^0.45.0",
+    "@jarenjs/view": "^0.45.0"
   }
 }

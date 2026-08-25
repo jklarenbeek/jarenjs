@@ -389,6 +389,29 @@ describe('a refused open never keeps the handle', () => {
     }
   });
 
+  it('a model refused while PLANNING closes the connection it acquired too', async () => {
+    // the physical mapping of a derived index is a property of the
+    // driver that opened the connection, so its JD0004 is raised after
+    // acquisition — and used to walk away from the handle. Every entry
+    // of the spatial corpus a browser tab runs through a throwaway store
+    // would have leaked one on a refusal.
+    const REFUSED = {
+      $model: '0.1',
+      collections: {
+        places: {
+          schema: { type: 'object', properties: { id: { type: 'string' } } },
+          key: '/id',
+          indexes: [{ name: 'by_box', path: '$.id', derive: 'bbox' }],
+        },
+      },
+    };
+    let closes = 0;
+    await assert.rejects(
+      () => openStore(REFUSED, { driver: countingDriver(() => { closes += 1; }), path: ':memory:' }),
+      (error) => /** @type {any} */ (error).code === 'JD0004');
+    assert.strictEqual(closes, 1, 'closed exactly once, not zero and not twice');
+  });
+
   it('a close that ALSO fails keeps the open failure primary', async () => {
     const { dbPath, cleanup } = tempDbPath();
     try {

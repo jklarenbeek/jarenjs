@@ -23,8 +23,12 @@ import { JarenValidator } from '@jarenjs/validate';
 
 import {
   buildSiteData, serializeSiteData, buildSiteContent, serializeSiteContent,
-  readSiteDocument, derivedCard,
+  readSiteDocument, derivedCard, serializeSpatialCorpus,
 } from '../../scripts/generate-site-data.js';
+import {
+  readSpatialCorpus, buildSpatialCorpus, asCollectionQuery, isRunnable, rebase,
+  SPATIAL_CORPUS_PATH, SPATIAL_INDEXES,
+} from '../../scripts/lib/spatial-corpus.js';
 import { DOCS_SECTIONS } from '../../packages/website/src/content/docs.js';
 import { buildInfo, serializeBuildInfo } from '../../scripts/generate-build-info.js';
 import { git, headCommit, isDirty } from '../../scripts/lib/git.js';
@@ -384,6 +388,80 @@ describe('the collected site content', function () {
       assert.deepStrictEqual(
         tarball.files.filter((/** @type {any} */ f) => f.path === 'site.md'), [],
         `${tarball.name} publishes no site.md — the manifest's files allow-list keeps it out`);
+    }
+  });
+});
+
+describe('the spatial corpus, as the site ships it for the browser runner', function () {
+  const fixture = readSpatialCorpus();
+  const corpus = buildSpatialCorpus(fixture);
+
+  it('carries every runnable entry of the fixture, in order, and names the rest as skipped', function () {
+    const runnable = fixture.filter(isRunnable);
+    assert.ok(runnable.length >= 80, `only ${runnable.length} runnable entries`);
+    assert.deepStrictEqual(corpus.entries.map((e) => e.name), runnable.map((e) => e.name));
+    assert.deepStrictEqual(corpus.skipped,
+      fixture.filter((e) => !isRunnable(e)).map((e) => e.name));
+    assert.ok(corpus.skipped.length > 0, 'the engine-only entries are named, not dropped silently');
+    assert.strictEqual(corpus.entries.length + corpus.skipped.length, fixture.length,
+      'every fixture entry is either shipped or named');
+    assert.strictEqual(corpus.source, SPATIAL_CORPUS_PATH);
+  });
+
+  it('projects each entry the way the Node runner runs it — one adaptation, two executors', function () {
+    for (const entry of fixture.filter(isRunnable)) {
+      const shipped = corpus.entries.find((e) => e.name === entry.name);
+      assert.deepStrictEqual({ documents: shipped.documents, query: shipped.query },
+        asCollectionQuery(entry), entry.name);
+      // exactly one answer shape, carried through
+      if (entry.empty === true) {
+        assert.strictEqual(shipped.empty, true, entry.name);
+        assert.ok(!('expected' in shipped), `${entry.name}: the empty sequence carries no value`);
+      }
+      else {
+        assert.deepStrictEqual(shipped.expected, entry.expected, entry.name);
+        assert.ok(!('empty' in shipped), entry.name);
+      }
+    }
+    // a single-document entry is re-anchored on the binding; a
+    // collection entry runs as written
+    assert.deepStrictEqual(rebase({ $within: ['$.at', '$.region'] }, 'doc'),
+      { $within: ['$doc.at', '$doc.region'] });
+    assert.deepStrictEqual(rebase(['$', '$c.at', 'literal'], 'doc'), ['$doc', '$c.at', 'literal']);
+    const plan = fixture.find((e) => e.collection === true);
+    assert.deepStrictEqual(asCollectionQuery(plan), { documents: plan.data, query: plan.query });
+  });
+
+  it('declares the two mappings a store runner answers under', function () {
+    assert.deepStrictEqual(Object.keys(corpus.mappings), ['indexed', 'unindexed']);
+    const indexed = corpus.mappings.indexed.collections[corpus.collection];
+    assert.deepStrictEqual(indexed.indexes, SPATIAL_INDEXES);
+    assert.ok(indexed.indexes.some((index) => index.derive === 'bbox')
+      && indexed.indexes.some((index) => index.derive === 'geohash'),
+    'both derive kinds are declared, so both promotions are held to the engine');
+    assert.deepStrictEqual(corpus.mappings.unindexed.collections[corpus.collection].indexes, []);
+    assert.deepStrictEqual(corpus.mappings.indexed.collections[corpus.collection].schema,
+      corpus.mappings.unindexed.collections[corpus.collection].schema,
+      'the mappings differ in their indexes and nothing else');
+  });
+
+  it('is one the site would accept, and byte-identical run over run', function () {
+    const text = serializeSpatialCorpus(corpus);
+    assert.deepStrictEqual(JSON.parse(text), corpus);
+    assert.strictEqual(text, serializeSpatialCorpus(buildSpatialCorpus(readSpatialCorpus())));
+    // and a projection that lost a member is refused before it is written
+    assert.throws(() => serializeSpatialCorpus(/** @type {any} */ (
+      { ...corpus, entries: [{ name: 'within/inside' }] })), /JC2010/);
+  });
+
+  it('refuses to build when the fixture is not where the site expects it', function () {
+    const root = mkdtempSync(join(tmpdir(), 'jaren-corpus-'));
+    try {
+      assert.throws(() => readSpatialCorpus(root), /ENOENT/,
+        'a moved fixture fails the build rather than shipping a stale copy');
+    }
+    finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

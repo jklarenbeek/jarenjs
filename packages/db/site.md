@@ -43,7 +43,11 @@ same document registered as a live query is a geofence: maintained per row
 through the engine's exact predicate, it emits an add when a point enters the
 region, a remove when it leaves, and nothing while it moves within; the
 `spatial` benchmark suite publishes the numbers beside the row where the
-database has to beat not using the database at all.
+database has to beat not using the database at all. One committed corpus holds
+three executors of the same spatial query document to the same answers — the
+JavaScript engine, SQLite through the Node driver, and SQLite compiled to wasm
+in a browser tab, where the Data studio runs it in Chromium, Firefox and WebKit;
+that leg proves execution, not durability.
 
 A store can also open with an operator registry — `openStore`(model, {
 operators: `createJsltRegistry()`.use(`mathPack`)… }) — and registered

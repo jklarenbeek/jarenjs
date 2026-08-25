@@ -239,14 +239,33 @@ B-tree the `bbox` index is today, because the B-tree seeks on longitude alone; i
 sync transactionally and absent on any build without the module, and it is open work on the roadmap with
 that number beside it.
 
+**One document, three executors, proven to agree.** The same spatial
+query document runs in three places — the JavaScript engine
+(`compileJsonQuery`), SQLite through the Node driver, and SQLite
+compiled to wasm in a real browser tab — and one committed corpus holds
+all three to the same answers. `test/json/fixtures/spatial-corpus.json`
+records what the engine answers for every case (generated, never
+hand-typed); `test/db/spatial-oracle.test.js` runs every entry through
+the Node driver, with the derived indexes and without; and
+`packages/website/e2e/spatial-agreement.spec.js` drives the data
+studio's Store pane to run the same entries through the wasm build in
+Chromium, Firefox and WebKit, asserting every answer against the
+fixture on disk and the number of entries run against the corpus. Each
+runner names the executor, the entry and the query when it disagrees.
+That is the whole claim — not faster than anyone, not PostGIS — and the
+browser leg's limit is stated with it: **it proves execution, not
+durability.** Where OPFS is unavailable the tab's store is in-memory,
+which is a property of the host, not of the suite.
+
 **No head-to-head rival, and saying so.** Nothing else in JavaScript
 stores GeoJSON in SQLite from a JSON query document, so the suite
 invents none. The rivals to know about: MongoDB (`$geoWithin`, `$near`,
 a `2dsphere` index) has a GeoJSON-native query document and a real
-spatial index, and runs on a server; DuckDB-wasm with `spatial` runs in
-a tab with a real index and the overlay operations this store refuses
-to build, and its query is SQL. Neither runs one document through two
-independent engines proven to agree, and neither validates ring
+spatial index, and runs on a server — no browser execution, and no
+second engine to agree with; DuckDB-wasm with `spatial` runs in a tab
+with a real index and the overlay operations this store refuses to
+build, and its query is SQL, not a document. Neither runs one document
+through three executors proven to agree, and neither validates ring
 closure in a schema.
 
 ## What SQLite-only means, frankly

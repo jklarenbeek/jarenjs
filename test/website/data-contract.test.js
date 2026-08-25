@@ -1,12 +1,13 @@
 //@ts-check
 /**
  * @file The data studio's operation contract compiles and declares what
- * the worker actually serves: the ten operations of the db-owner
+ * the worker actually serves: the eleven operations of the db-owner
  * protocol, each with the declared `db` failure carrying the store's
  * code and message, `data.live` a SUBSCRIBE operation whose snapshot is
  * LIVE's `{ rows }` result document (the emissions travel the stream
  * binding as push frames), and `data.lives` the registration-count
- * surface.
+ * surface, and `data.oracle` the throwaway-store read that holds a
+ * second executor to the spatial corpus from any tab.
  *
  * This file reads the DOCUMENT. That the worker serves exactly what it
  * declares is a different claim, and a frozen id list here could never
@@ -30,7 +31,8 @@ describe('the data studio contract document', () => {
     assert.strictEqual(contract.id, 'jaren-data-studio');
     assert.deepStrictEqual(contract.ids, [
       'data.init', 'data.open', 'data.insert', 'data.delete',
-      'data.rows', 'data.execute', 'data.explain', 'data.live', 'data.lives', 'data.migrate',
+      'data.rows', 'data.execute', 'data.explain', 'data.oracle', 'data.live', 'data.lives',
+      'data.migrate',
     ]);
     for (const id of contract.ids) {
       const op = contract.operations[id];
@@ -40,7 +42,7 @@ describe('the data studio contract document', () => {
     }
     // reads read, commands command, the live query subscribes
     assert.deepStrictEqual(contract.ids.filter((id) => contract.operations[id].kind === 'read'),
-      ['data.rows', 'data.execute', 'data.explain', 'data.lives']);
+      ['data.rows', 'data.execute', 'data.explain', 'data.oracle', 'data.lives']);
     assert.strictEqual(contract.operations['data.live'].kind, 'subscribe');
     // the db details shape is the wire error the worker maps: { code: string|null, message }
     const db = contract.operations['data.insert'].errors.db;
@@ -69,6 +71,17 @@ describe('the data studio contract document', () => {
     const lives = contract.operations['data.lives'];
     assert.strictEqual(lives.output.validate({ count: 2 }).valid, true);
     assert.strictEqual(lives.output.validate({ count: -1 }).valid, false);
+    // the oracle's answer carries the empty sequence as a FLAG: null is
+    // an answer the engine can record, so it cannot double as "no answer"
+    const oracle = contract.operations['data.oracle'];
+    assert.strictEqual(oracle.output.validate({ answer: null, empty: true }).valid, true);
+    assert.strictEqual(oracle.output.validate({ answer: [1, 2], empty: false }).valid, true);
+    assert.strictEqual(oracle.output.validate({ answer: null }).valid, false, 'the flag is required');
+    assert.strictEqual(oracle.input.validate({
+      model: {}, collection: 'rows', documents: [{}], query: { $for: { d: '$[*]' }, $return: '$d' },
+    }).valid, true);
+    assert.strictEqual(oracle.input.validate({ model: {}, collection: 'rows', query: true }).valid, false,
+      'the documents to seed are required — an unseeded oracle answers nothing about anything');
     const migrate = contract.operations['data.migrate'];
     assert.strictEqual(migrate.output.validate({ planned: ['CREATE INDEX …'], losses: [], applied: ['add-title-index'] }).valid, true);
     assert.strictEqual(migrate.output.validate({ planned: [], losses: [], applied: [], note: 'memory stores recreate instead of migrating' }).valid, true);

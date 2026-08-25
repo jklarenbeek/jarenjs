@@ -215,6 +215,10 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       // live in state, not only in the DOM.
       insertDraft: '',
       migration: null,         // the last planned/applied migration report
+      // the spatial corpus run through THIS tab's store as the third
+      // executor (data.oracle, one throwaway store per entry): null until
+      // asked, then { status: 'running' } and the report
+      oracle: null,
       booted: false,           // the boot effect fires exactly once
       error: null,
       // the phone layout: which single card shows (store | query | live).

@@ -16,6 +16,20 @@
       },
       "additionalProperties": false
     },
+    "SpatialCorpusEntry": {
+      "description": "One entry of the committed spatial corpus, as a store runs it: the documents to insert, the query to execute over them, and what the JavaScript engine recorded — a value, or the empty sequence, which JSON cannot spell and null must not stand in for.",
+      "type": "object",
+      "required": ["name", "documents", "query"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" },
+        "documents": { "type": "array", "items": { "type": "object" } },
+        "query": true,
+        "expected": true,
+        "empty": { "const": true }
+      },
+      "additionalProperties": false
+    },
     "CensusEntry": {
       "type": "object",
       "required": ["name", "dir", "version", "description"],
@@ -1283,6 +1297,40 @@
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
       "doc": "The build provenance the footer prints: which version, which revision and which toolchain produced the deployed bundle. Deliberately not measurement provenance — the gap between the two is what the site shows."
+    },
+    "site.corpus": {
+      "kind": "read",
+      "output": {
+        "type": "object",
+        "required": ["source", "collection", "mappings", "skipped", "entries"],
+        "properties": {
+          "source": {
+            "description": "The committed fixture this was projected from, repo-relative.",
+            "type": "string",
+            "minLength": 1
+          },
+          "collection": { "type": "string", "minLength": 1 },
+          "mappings": {
+            "description": "The model each store runner answers under: with the derived spatial indexes, and without.",
+            "type": "object",
+            "required": ["indexed", "unindexed"],
+            "properties": {
+              "indexed": { "type": "object" },
+              "unindexed": { "type": "object" }
+            },
+            "additionalProperties": false
+          },
+          "skipped": {
+            "description": "Entries a second executor is not asked to answer, left out by their marker and named so a runner that ran none of them ran none on purpose.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "entries": { "type": "array", "items": { "$ref": "#/$defs/SpatialCorpusEntry" } }
+        },
+        "additionalProperties": false
+      },
+      "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
+      "doc": "The committed spatial corpus, projected for a store: every entry the JavaScript engine recorded an answer for, as the documents to insert and the query to run over them, under a model with the derived spatial indexes and one without. The data studio posts each entry to its worker so that SQLite compiled to wasm — the third executor, beside the engine and the Node driver — is held to the same recorded answers in a real browser tab. Projected from the fixture by the build, never copied by hand."
     },
     "bench.meta": {
       "kind": "read",

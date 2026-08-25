@@ -188,8 +188,10 @@ export function createSiteApp(env) {
   /** @type {any} */
   let app = null;
   // the data studio's owner-worker runtime (its boot sub lives in the
-  // boundary, which is coverage-excluded as browser-only)
-  const dataRuntime = createDataRuntime({});
+  // boundary, which is coverage-excluded as browser-only). The spatial
+  // corpus it runs as the third executor is a site artifact, read
+  // through the same contract as every other one
+  const dataRuntime = createDataRuntime({ site });
 
   // the @jarenjs/calc live-rates layer: the impure half (fetch); the pure
   // conversion stays in @jarenjs/core/convert. The static fallback keeps

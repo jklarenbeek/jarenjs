@@ -25,6 +25,7 @@
  */
 
 import { pickAllowed } from '@jarenjs/core/array';
+import { equalsJson } from '@jarenjs/core/object';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
 import { compileContract } from '@jarenjs/contract';
@@ -170,11 +171,31 @@ const firstCollection = (model) => Object.keys(model?.collections ?? {})[0] ?? '
  */
 const keyPointerOf = (model, name) => model?.collections?.[name]?.key ?? '/id';
 
+/** The executor this tab is, as a disagreement names it. */
+const EXECUTOR = 'sqlite-wasm';
+
+/**
+ * Whether one oracle answer is the one the engine recorded: the empty
+ * sequence crosses as a flag (null is an answer), everything else as
+ * JSON, compared structurally.
+ * @param {any} entry - a corpus entry, as the site ships it
+ * @param {{ answer: any, empty: boolean }} outcome
+ */
+const agrees = (entry, outcome) => (entry.empty === true
+  ? outcome.empty === true
+  : outcome.empty === false && equalsJson(outcome.answer, entry.expected));
+
+/** What the engine recorded, spelled for a report line. */
+const recorded = (/** @type {any} */ entry) => (entry.empty === true
+  ? 'the empty sequence' : JSON.stringify(entry.expected));
+
 /**
  * The runtime: effects plus the exported view model.
- * @param {{ }} [_env]
+ * @param {{ site?: { request: (op: string, input?: any) => Promise<any> } }} [env] -
+ *   `site` is the site's data plane, through which the spatial-corpus
+ *   artifact is read (`site.corpus`).
  */
-export function createDataRuntime(_env = {}) {
+export function createDataRuntime(env = {}) {
   /** @type {ReturnType<typeof createTransport> | null} */
   let transport = null;
   /** @type {{ stop: () => void } | null} */
@@ -350,6 +371,69 @@ export function createDataRuntime(_env = {}) {
         }))
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
+    // the third runner of the spatial corpus: every entry the site ships
+    // (the committed fixture, projected for a store) runs through THIS
+    // tab's wasm build in a throwaway in-memory store — under the model
+    // with the derived indexes and the one without — and is compared
+    // with what the JavaScript engine recorded. The e2e spec reads every
+    // answer off the page and asserts it against the fixture on disk
+    // itself; this effect executes, compares for the reader, and counts.
+    // A store refusal on an entry is a DISAGREEMENT here, never a skip:
+    // the only entries not run are the ones the corpus marks.
+    'data-oracle': (_props, dispatch) => {
+      if (env.site === undefined || transport === null) {
+        dispatch('data/oracle', { status: 'error', message: 'the spatial corpus is not available here' });
+        return;
+      }
+      dispatch('data/oracle', { status: 'running' });
+      env.site.request('site.corpus')
+        .then(async (loaded) => {
+          if (!loaded.ok) throw new Error(loaded.reason);
+          const corpus = loaded.value;
+          const results = [];
+          const disagreements = [];
+          for (const [mapping, model] of Object.entries(corpus.mappings)) {
+            for (const entry of corpus.entries) {
+              const where = `${EXECUTOR} (${mapping}) disagreed on ${entry.name}`
+                + ` — query ${JSON.stringify(entry.query)}`;
+              let outcome;
+              try {
+                outcome = await /** @type {NonNullable<typeof transport>} */ (transport)
+                  .request('data.oracle', {
+                    model, collection: corpus.collection,
+                    documents: entry.documents, query: entry.query,
+                  });
+              }
+              catch (error) {
+                const message = String(/** @type {any} */ (error).message ?? error);
+                results.push({ mapping, name: entry.name, error: message, agreed: false });
+                disagreements.push(`${where}: refused — ${message}`);
+                continue;
+              }
+              const agreed = agrees(entry, outcome);
+              results.push({ mapping, name: entry.name, answer: outcome.answer, empty: outcome.empty, agreed });
+              if (!agreed) {
+                disagreements.push(`${where}: recorded ${recorded(entry)}, answered `
+                  + `${outcome.empty ? 'the empty sequence' : JSON.stringify(outcome.answer)}`);
+              }
+            }
+          }
+          dispatch('data/oracle', {
+            status: 'done',
+            executor: EXECUTOR,
+            source: corpus.source,
+            mappings: Object.keys(corpus.mappings),
+            entries: corpus.entries.length,
+            ran: results.length,
+            agreed: results.filter((result) => result.agreed).length,
+            skipped: corpus.skipped,
+            disagreements,
+            results,
+          });
+        })
+        .catch((error) => dispatch('data/oracle',
+          { status: 'error', message: String(error.message ?? error) }));
+    },
     'data-migrate': (_props, dispatch) => {
       // the worked migration: index the title member, shadow-verified.
       // The reopen it ends with drops every live registration, and the
@@ -414,6 +498,23 @@ function rowList(rows, pointer) {
 }
 
 /**
+ * The oracle's verdict, as one line: what ran, what agreed, what was
+ * left out by its marker — or why there is no verdict.
+ * @param {any} oracle
+ * @returns {string}
+ */
+export function oracleSummary(oracle) {
+  if (oracle === null || oracle === undefined) return '';
+  if (oracle.status === 'running') return 'running the spatial corpus through this tab\u2019s store\u2026';
+  if (oracle.status === 'error') return `the spatial corpus could not run here: ${oracle.message}`;
+  const verdict = oracle.agreed === oracle.ran
+    ? `${oracle.executor} agreed with the engine on every entry: ${oracle.agreed} / ${oracle.ran}`
+    : `${oracle.executor} DISAGREED with the engine on ${oracle.ran - oracle.agreed} of ${oracle.ran}`;
+  return `${verdict} (${oracle.entries} entries \u00d7 ${oracle.mappings.join(', ')});`
+    + ` ${oracle.skipped.length} engine-only entries left out by their marker`;
+}
+
+/**
  * The page's view model — the boundary-exports convention.
  * @param {any} state
  */
@@ -472,6 +573,23 @@ export function dataViewModel(state) {
     migrationSummary: data.migration === null ? ''
       : `applied: ${data.migration.applied.length}`
         + (data.migration.note ? ` — ${data.migration.note}` : ''),
+    // the spatial-corpus run: its verdict as one line, the disagreements
+    // as lines that name the executor, the entry and the query, and every
+    // answer as JSON for the reader (and the e2e spec) to check
+    oracle: data.oracle,
+    oracleDone: data.oracle?.status === 'done',
+    oracleDisagreed: (data.oracle?.disagreements?.length ?? 0) > 0,
+    oracleSummary: oracleSummary(data.oracle),
+    oracleDisagreements: (data.oracle?.disagreements ?? []).join('\n'),
+    oracleResultsJson: data.oracle?.status === 'done' ? JSON.stringify({
+      executor: data.oracle.executor,
+      vfs: data.vfs,
+      source: data.oracle.source,
+      ran: data.oracle.ran,
+      agreed: data.oracle.agreed,
+      skipped: data.oracle.skipped,
+      results: data.oracle.results,
+    }) : '',
     error: data.error,
     // the phone pane (Store · Query · Live)
     mobilePane: pickAllowed(data.mobilePane, DATA_PANES, 'query'),

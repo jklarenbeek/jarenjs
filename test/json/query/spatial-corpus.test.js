@@ -60,22 +60,28 @@ describe('the spatial corpus', () => {
 
   it('should still get the answer it recorded, for every entry', () => {
     const moved = [];
+    let ran = 0;
     for (const entry of CORPUS) {
       const actual = queryJson(entry.query, entry.data);
+      ran += 1;
       if (entry.empty === true) {
         if (actual !== undefined)
-          moved.push(`${entry.name}: recorded the empty sequence, answered ${JSON.stringify(actual)}`);
+          moved.push(`engine disagreed on ${entry.name} — query ${JSON.stringify(entry.query)}: recorded the empty sequence, answered ${JSON.stringify(actual)}`);
         continue;
       }
       try {
         assert.deepStrictEqual(actual, entry.expected);
       }
       catch {
-        moved.push(`${entry.name}: recorded ${JSON.stringify(entry.expected)}, answered ${JSON.stringify(actual)}`);
+        moved.push(`engine disagreed on ${entry.name} — query ${JSON.stringify(entry.query)}: recorded ${JSON.stringify(entry.expected)}, answered ${JSON.stringify(actual)}`);
       }
     }
     assert.deepStrictEqual(moved, [],
       'regenerate with scripts/generate-spatial-corpus.js --write and read the diff');
+    // the count, not the absence of failures: a runner that quietly ran
+    // nothing passes every per-entry check above
+    assert.ok(CORPUS.length > 0, 'nothing to run');
+    assert.strictEqual(ran, CORPUS.length, 'the engine ran fewer entries than the corpus carries');
   });
 
   it('should cover every operator of the spatial family', () => {

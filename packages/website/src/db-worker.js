@@ -197,6 +197,10 @@ const { handlers, clientHandlers } = createDataHandlers({
   makeDriver: () => wasmDriver(context.vfs === 'opfs-sahpool'
     ? sqlite3Handle(context.sqlite3, { DbClass: context.poolUtil.OpfsSAHPoolDb })
     : sqlite3Handle(context.sqlite3)),
+  // the oracle's throwaway store is always a plain in-memory database,
+  // whichever VFS this context settled on: the pool's class is for the
+  // one database it holds, and the corpus needs execution, not persistence
+  makeScratchDriver: () => wasmDriver(sqlite3Handle(context.sqlite3)),
   path: () => (context.vfs === 'opfs-sahpool' ? DB_NAME : ':memory:'),
   vfs: () => context.vfs,
   durable: () => context.vfs === 'opfs-sahpool',

@@ -138,6 +138,8 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /Result equivalence/, 'the equivalence gate renders as the headline');
     assert.match(text, /the deliberate loss/, 'the point-in-polygon loss is published, not hidden');
     assert.match(text, /flatbush/, 'the index rival is named');
+    assert.match(text, /three executors/, 'the agreement claim is stated beside the timings');
+    assert.match(text, /execution, not durability/, 'with the browser leg\'s limit');
   });
 
   it('derives the spatial suite: no invented rival, the no-database row, the plan behind every timing', function () {

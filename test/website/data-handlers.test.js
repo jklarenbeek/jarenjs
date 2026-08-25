@@ -15,7 +15,12 @@
  *  - a refused migration leaves the store on the model it still has;
  *  - every reopen is announced, because it dropped every tab's
  *    subscription;
- *  - a client tab cannot recreate the database the owner holds.
+ *  - a client tab cannot recreate the database the owner holds;
+ *  - the oracle answers over a THROWAWAY store — derived spatial indexes
+ *    included, the empty sequence flagged, a refusal crossing as the db
+ *    failure — and leaves the studio's store, its registrations and its
+ *    peers exactly as they were; and the shape it takes is the shape the
+ *    site builds the spatial corpus into, proven entry by entry.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -25,9 +30,11 @@ import { readFileSync } from 'node:fs';
 import { compileContract, isContractFailure } from '@jarenjs/contract';
 import { nodeDriver } from '@jarenjs/db/node';
 import { createJsltRegistry, mathPack } from '@jarenjs/json/jslt';
+import { equalsJson } from '@jarenjs/core/object';
 
 import { createDataHandlers, wireError } from '../../packages/website/src/db-handlers.js';
 import { tempDbPath } from '../db/helpers.js';
+import { readSpatialCorpus, buildSpatialCorpus } from '../../scripts/lib/spatial-corpus.js';
 
 const doc = JSON.parse(readFileSync(
   new URL('../../packages/website/src/contracts/data.contract.json', import.meta.url), 'utf8'));
@@ -60,13 +67,29 @@ function testHost() {
   const { dbPath, cleanup } = tempDbPath();
   const announced = [];
   let unlinked = 0;
+  /** The oracle's throwaway connections, counted at both ends. */
+  const scratch = { opened: 0, closed: 0 };
   return {
     announced,
     cleanup,
+    scratch,
     unlinks: () => unlinked,
     host: {
       init: () => Promise.resolve({ topology: 'owner', vfs: 'node', version: '3' }),
       makeDriver: () => nodeDriver(),
+      makeScratchDriver: () => {
+        const driver = nodeDriver();
+        return {
+          ...driver,
+          open: async (/** @type {string} */ path, /** @type {any} */ options) => {
+            assert.strictEqual(path, ':memory:', 'the oracle never opens a file');
+            const raw = await driver.open(path, options);
+            scratch.opened += 1;
+            // the connection is frozen; the count wraps it rather than patching it
+            return { ...raw, close: () => { scratch.closed += 1; return raw.close(); } };
+          },
+        };
+      },
       path: () => dbPath,
       vfs: () => 'node',
       durable: () => true,
@@ -217,6 +240,28 @@ describe('the studio over a real store', function () {
       { collection: 'notes', doc: { id: 'n1', title: 'first', points: 5 } });
   });
 
+  it('answers the oracle beside the open store without touching it', async function () {
+    const live = await table.handlers['data.live'](
+      { collection: 'notes', document: [{ $for: { it: '$[*]' }, $return: '$it' }] });
+    const events = [];
+    live.subscribe((/** @type {any} */ event) => events.push(event));
+    const announcedBefore = fixture.announced.length;
+    const rowsBefore = await table.handlers['data.rows']({ collection: 'notes' });
+    const answer = await table.handlers['data.oracle']({
+      model: MODEL, collection: 'notes',
+      documents: [{ id: 'x1', title: 'scratch', points: 99 }],
+      query: { $for: { it: '$[*]' }, $return: '$it.title' },
+    });
+    assert.deepStrictEqual(answer, { answer: 'scratch', empty: false });
+    assert.deepStrictEqual(await table.handlers['data.rows']({ collection: 'notes' }), rowsBefore,
+      'the throwaway document never reached the studio\'s collection');
+    assert.deepStrictEqual(await table.handlers['data.lives'](), { count: 1 },
+      'the registration the page holds is still held');
+    assert.deepStrictEqual(events, [], 'and it saw no write — nothing it subscribes to changed');
+    assert.strictEqual(fixture.announced.length, announcedBefore, 'no peer was told anything');
+    live.close();
+  });
+
   it('refuses a client tab the recreate that would unlink the owner\'s database', async function () {
     const unlinksBefore = fixture.unlinks();
     const refused = settled(await table.clientHandlers['data.open']({ model: MODEL, reset: true }));
@@ -301,6 +346,118 @@ describe('a migration the studio runs', function () {
       assert.strictEqual(outcome.ok, false);
       assert.strictEqual(outcome.error.details.code, 'JD2005');
       assert.match(outcome.error.details.message, /the store is not open/);
+    }
+    finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+describe('the oracle — a second executor held to the engine from any tab', function () {
+  const REGION = { type: 'Polygon', coordinates: [[[4, 52], [5, 52], [5, 53], [4, 53], [4, 52]]] };
+  const PLACES = {
+    $model: '0.1',
+    collections: {
+      places: {
+        schema: { type: 'object', properties: { id: { type: 'string' }, at: { type: ['array', 'object'] } } },
+        key: '/id',
+        indexes: [{ name: 'by_box', path: '$.at', derive: 'bbox' }],
+      },
+    },
+  };
+  const DOCS = [{ id: 'ams', at: [4.9041, 52.3676] }, { id: 'par', at: [2.3522, 48.8566] }];
+  const within = (/** @type {any} */ region) => ({
+    $for: { p: '$[*]' }, $where: { $within: ['$p.at', region] }, $return: '$p.id',
+  });
+
+  it('answers over a throwaway store on the model it is handed, with NO store open', async function () {
+    const fixture = testHost();
+    const table = createDataHandlers(fixture.host);
+    try {
+      const answer = await table.handlers['data.oracle'](
+        { model: PLACES, collection: 'places', documents: DOCS, query: within(REGION) });
+      assert.deepStrictEqual(answer, { answer: 'ams', empty: false },
+        'the derived box index is declared on the scratch model and the plan over it agrees');
+      assert.strictEqual(table.state.store, null, 'the studio still has no store — the oracle needed none');
+      assert.deepStrictEqual(fixture.scratch, { opened: 1, closed: 1 },
+        'the throwaway store is closed once the answer is in hand');
+      assert.deepStrictEqual(fixture.announced, [], 'no peer is told: nothing they subscribe to changed');
+    }
+    finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('crosses the empty sequence as a flag beside a null answer', async function () {
+    const fixture = testHost();
+    const table = createDataHandlers(fixture.host);
+    try {
+      const far = { type: 'Polygon', coordinates: [[[10, 40], [11, 40], [11, 41], [10, 41], [10, 40]]] };
+      assert.deepStrictEqual(
+        await table.handlers['data.oracle'](
+          { model: PLACES, collection: 'places', documents: DOCS, query: within(far) }),
+        { answer: null, empty: true });
+      assert.deepStrictEqual(fixture.scratch, { opened: 1, closed: 1 });
+    }
+    finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('crosses a refused model as the db failure, and still closes what it opened', async function () {
+    const fixture = testHost();
+    const table = createDataHandlers(fixture.host);
+    try {
+      const broken = JSON.parse(JSON.stringify(PLACES));
+      // a derived index over a member the schema does not type as geography
+      broken.collections.places.indexes = [{ name: 'by_id', path: '$.id', derive: 'bbox' }];
+      const outcome = settled(await table.handlers['data.oracle'](
+        { model: broken, collection: 'places', documents: DOCS, query: within(REGION) }));
+      assert.strictEqual(outcome.ok, false);
+      assert.strictEqual(outcome.error.code, 'db');
+      assert.match(outcome.error.details.code, /^JD/);
+      assert.strictEqual(fixture.scratch.opened, fixture.scratch.closed,
+        'a refusal leaks no connection');
+    }
+    finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('answers the corpus the site builds, entry by entry — the shape the browser posts', async function () {
+    // the spatial corpus, projected exactly as the build ships it to the
+    // data studio: the same request shape, the same comparator the page
+    // uses, so the browser leg cannot disagree with this one on wiring
+    const corpus = buildSpatialCorpus(readSpatialCorpus());
+    const fixture = testHost();
+    const table = createDataHandlers(fixture.host);
+    try {
+      const moved = [];
+      let ran = 0;
+      for (const [mapping, model] of Object.entries(corpus.mappings)) {
+        for (const entry of corpus.entries) {
+          const outcome = await table.handlers['data.oracle']({
+            model, collection: corpus.collection, documents: entry.documents, query: entry.query,
+          });
+          ran += 1;
+          const where = `sqlite-node via data.oracle (${mapping}) disagreed on ${entry.name}`
+            + ` — query ${JSON.stringify(entry.query)}`;
+          if (isContractFailure(outcome)) {
+            moved.push(`${where}: refused, ${outcome.details.message}`);
+          }
+          else if (entry.empty === true) {
+            if (outcome.empty !== true) moved.push(`${where}: recorded the empty sequence, answered ${JSON.stringify(outcome.answer)}`);
+          }
+          else if (outcome.empty === true || !equalsJson(outcome.answer, entry.expected)) {
+            moved.push(`${where}: recorded ${JSON.stringify(entry.expected)}, answered ${JSON.stringify(outcome.answer)}`);
+          }
+        }
+      }
+      assert.deepStrictEqual(moved, []);
+      assert.strictEqual(ran, corpus.entries.length * 2, 'every entry ran under both mappings');
+      assert.ok(corpus.entries.length >= 80, `only ${corpus.entries.length} entries`);
+      assert.deepStrictEqual(fixture.scratch, { opened: ran, closed: ran },
+        'one throwaway store per entry, every one closed');
     }
     finally {
       fixture.cleanup();
