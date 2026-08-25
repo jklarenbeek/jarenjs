@@ -22,10 +22,12 @@
  *
  * It is also this package's ONLY seam onto `@jarenjs/core/geo` (D1 —
  * one home for spatial arithmetic, grep-proven by test) and onto
- * `@jarenjs/core/vector` (the same rule, the vector campaign's D2):
- * the planner's probe geometry — the box of a literal or bound region,
- * the box of a bounded-distance circle, a cell's neighbourhood — is
- * computed by the helpers below rather than by an import of its own.
+ * `@jarenjs/core/vector` (the same rule, one home for vector
+ * arithmetic): the planner's probe geometry — the box of a literal or
+ * bound region, the box of a bounded-distance circle, a cell's
+ * neighbourhood — and the k-nearest plan's probe vector and column
+ * score are computed by the helpers below rather than by an import of
+ * their own.
  *
  * The switches over the kind are EXHAUSTIVE: a kind with no rule
  * throws, here and in the dialect, so that adding a kind without
@@ -45,7 +47,9 @@
 import {
   bboxOf, centroidOf, circleBounds, geohashEncode, geohashNeighbours,
 } from '@jarenjs/core/geo';
-import { isVector, l2Normalize, packVector } from '@jarenjs/core/vector';
+import {
+  isVector, l2Normalize, packVector, unpackVector, dotProduct,
+} from '@jarenjs/core/vector';
 
 import { chain } from './driver.js';
 
@@ -385,4 +389,35 @@ export function cellNeighbourhood(cell) {
 export function derivedSlotValue(derived, value) {
   const box = bboxOf(value);
   return box === null ? null : box[BBOX_AT[derived.axis]];
+}
+
+/**
+ * The probe a k-nearest plan scores the column against: a literal or
+ * bound vector, l2-normalized once, so that its dot product with the
+ * column's normalized form IS the cosine of the raw vectors. `null`
+ * when the value is not a vector of exactly `dims` finite numbers —
+ * the binder's signal to divert the call to the residual, where the
+ * engine answers what it answers everywhere for such a probe (empty
+ * keys for another width, its own refusal for a non-array).
+ * @param {unknown} value
+ * @param {number} dims - the column's declared width
+ * @returns {Float32Array | null}
+ */
+export function probeVector(value, dims) {
+  return isVector(value, dims) ? l2Normalize(value) : null;
+}
+
+/**
+ * One row's column score against a prepared probe: the packed column
+ * unpacked at the declared width and dotted with the probe. `null` for
+ * a row whose column holds no vector — SQL `NULL`, or bytes of another
+ * length — because such a row is unrankable and 0 is a real score.
+ * @param {unknown} bytes - the column value as the driver returns it
+ * @param {number} dims
+ * @param {Float32Array} probe - from {@link probeVector}
+ * @returns {number | null}
+ */
+export function columnScore(bytes, dims, probe) {
+  const vector = unpackVector(/** @type {any} */ (bytes), dims);
+  return vector === null ? null : dotProduct(vector, probe);
 }

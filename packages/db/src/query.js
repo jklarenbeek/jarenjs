@@ -18,6 +18,17 @@
  * residual over the full collection instead of the native statement —
  * SQLite cannot bind a boolean, a `null` needs Jaren's semantics, and
  * a missing external must raise the ENGINE's error, not a driver's.
+ * Two externals never bind at all and divert by their own rule: a
+ * region reaching the statement through derived slots diverts when it
+ * has no box, and a k-nearest probe — which the plan scores in the
+ * engine, never in SQL — diverts when it is not a vector of the
+ * column's width, so the engine answers what it answers everywhere.
+ *
+ * The k-nearest mode (`plan.rank`) is a set residual whose candidates
+ * an ordering chose: the statement fetches (identity, column) under
+ * the pushed WHERE, the engine scores and cuts (`knn.js`), the
+ * winners' documents are fetched by identity through the dialect, and
+ * the whole document runs over them.
  */
 
 import { createSemanticCache } from '@jarenjs/core/cache';
@@ -31,7 +42,8 @@ import {
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters } from './emit.js';
 import { selectPlan } from './algebra.js';
 import { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
-import { derivedSlotValue, probeBox } from './derive.js';
+import { derivedSlotValue, probeBox, probeVector, columnScore } from './derive.js';
+import { cutCandidates, identityBatches } from './knn.js';
 import { deterministicFragment, registerFragment } from './udf.js';
 import {
   normalizeProfile, translateProfilePredicate,
@@ -84,20 +96,25 @@ function slotValue(slot, externals) {
  * How one external reaches the statement. An external reached ONLY
  * through derived slots is bindable when its bound value HAS a box —
  * the object itself never had to be bindable. One reached directly
- * must be a string or a finite number, as before; and an external in
- * the document that reaches no slot at all still forces the diversion,
+ * must be a string or a finite number, as before; a k-nearest PROBE
+ * reaches no slot (it is scored in the engine) and is bindable when
+ * its value is a vector of the column's width; and an external in the
+ * document that reaches nothing at all still forces the diversion,
  * because the residual needs the engine's own semantics for it.
  * @param {import('./emit.js').ParamSlot[]} slots
- * @returns {Map<string, 'plain' | 'derived'>}
+ * @param {import('./algebra.js').PlanRank | null} rank
+ * @returns {Map<string, 'plain' | 'derived' | 'probe'>}
  */
-function externalSlotKinds(slots) {
-  /** @type {Map<string, 'plain' | 'derived'>} */
+function externalSlotKinds(slots, rank) {
+  /** @type {Map<string, 'plain' | 'derived' | 'probe'>} */
   const kinds = new Map();
   for (const slot of slots) {
     if ('external' in slot) kinds.set(slot.external, 'plain');
     else if ('derived' in slot && !kinds.has(slot.derived.external))
       kinds.set(slot.derived.external, 'derived');
   }
+  if (rank !== null && 'ext' in rank.probe && !kinds.has(rank.probe.ext))
+    kinds.set(rank.probe.ext, 'probe');
   return kinds;
 }
 
@@ -136,6 +153,12 @@ export function createQueryEngine(context) {
     keyColumn: physicalPlan.keyColumn,
     docColumn: physicalPlan.docColumn,
   };
+  /** The k-nearest counters `stats()` reports: how many rows the
+   * fetch scored and how many candidates the cut kept, so a
+   * duplicate-heavy collection is visible rather than merely slow. */
+  const knnStats = { queries: 0, rows: 0, candidates: 0, fullFetches: 0 };
+  /** The by-identities fetch statements, one per batch size. */
+  const identityFetch = new Map();
 
   /** The `compileJsonQuery` options for an inline residual: the
    * profile's engine limits plus the store's registered operators. */
@@ -258,7 +281,11 @@ export function createQueryEngine(context) {
       sql: emitted.sql,
       slots: emitted.slots,
       externalNames,
-      externalSlotKinds: externalSlotKinds(emitted.slots),
+      externalSlotKinds: externalSlotKinds(emitted.slots, plan.rank),
+      // a literal probe is normalized once, here; an external one per
+      // call, from the bound value
+      probe: plan.rank !== null && 'lit' in plan.rank.probe
+        ? probeVector(plan.rank.probe.lit, plan.rank.dims) : null,
       dependencies: planned.analysis.dependencies,
       limits: planned.analysis.limits,
       residualLimits: limits,
@@ -355,11 +382,88 @@ export function createQueryEngine(context) {
 
   /** Must this call divert to the residual? */
   const mustDivert = (entry, externals) =>
-    entry.externalNames.some((name) => (entry.externalSlotKinds.get(name) === 'derived'
-      ? probeBox(externals[name]) === null
-      : !bindable(externals[name])));
+    entry.externalNames.some((name) => {
+      const kind = entry.externalSlotKinds.get(name);
+      if (kind === 'derived') return probeBox(externals[name]) === null;
+      if (kind === 'probe') return probeVector(externals[name], entry.plan.rank.dims) === null;
+      return !bindable(externals[name]);
+    });
 
   const rowsToDocs = (rows) => rows.map((row) => JSON.parse(row.doc));
+
+  /**
+   * The documents of the given row identities, in identity order,
+   * through the dialect's by-identities statement — batched, and each
+   * batch padded to a prepared size (`identityBatches`).
+   * @param {any[]} identities
+   * @returns {any} value-or-promise of the documents
+   */
+  const fetchByIdentities = (identities) => {
+    const batches = identityBatches(identities);
+    /** @type {any[]} */
+    const docs = [];
+    const next = (i) => {
+      if (i >= batches.length) return docs;
+      const batch = batches[i];
+      let statement = identityFetch.get(batch.size);
+      if (statement === undefined) {
+        statement = connection.prepare(dialect.dml.selectByIdentities(physical, batch.size));
+        identityFetch.set(batch.size, statement);
+      }
+      return chain(statement, (prepared) => chain(prepared.all(batch.params), (rows) => {
+        for (const row of rows) docs.push(JSON.parse(row.doc));
+        return next(i + 1);
+      }));
+    };
+    return next(0);
+  };
+
+  /**
+   * The k-nearest candidates: every fetched row's column scored
+   * against the probe, the cut applied at `offset + limit` with the
+   * plan's margin, and the winners' documents fetched by identity.
+   * The engine then decides over them (the set residual).
+   * @param {any} entry
+   * @param {any} externals
+   * @returns {any} value-or-promise of the candidate documents
+   */
+  const knnCandidates = (entry, externals) => {
+    const rank = entry.plan.rank;
+    const probe = entry.probe ?? probeVector(externals[rank.probe.ext], rank.dims);
+    return chain(statementOf(entry), (statement) =>
+      chain(statement.all(bindParams(entry, externals)), (rows) => {
+        checkRowBound(entry, rows);
+        const scored = rows.map((row) =>
+          ({ identity: row.rid, score: columnScore(row.vec, rank.dims, probe) }));
+        const cut = cutCandidates(scored, rank.offset + rank.limit, rank.margin);
+        knnStats.queries++;
+        knnStats.rows += rows.length;
+        knnStats.candidates += cut.identities.length;
+        if (cut.full) knnStats.fullFetches++;
+        return fetchByIdentities(cut.identities);
+      }));
+  };
+
+  /**
+   * The documents a residual runs over: the whole collection when the
+   * call diverts (still wearing the profile's mandatory predicate and
+   * row bound), the narrowed fetch in set mode, the cut in knn mode.
+   * @param {any} entry
+   * @param {any} externals
+   * @param {boolean} diverted
+   * @returns {any} value-or-promise of the documents
+   */
+  const candidatesOf = (entry, externals, diverted) => {
+    if (diverted) {
+      return chain(fullScanOf(entry), (statement) =>
+        chain(statement.all(fullScanParams(entry)), (rows) =>
+          rowsToDocs(checkRowBound(entry, rows))));
+    }
+    if (entry.planned.mode === 'knn') return knnCandidates(entry, externals);
+    return chain(statementOf(entry), (statement) =>
+      chain(statement.all(bindParams(entry, externals)), (rows) =>
+        rowsToDocs(checkRowBound(entry, rows))));
+  };
 
   const aggregateResult = (entry, row) => {
     const fn = entry.plan.aggregate.fn;
@@ -395,17 +499,14 @@ export function createQueryEngine(context) {
     const entry = entryFor(document, strict, profile, pushdown);
 
     return chain(guardScan(entry), () => {
-      if (mustDivert(entry, externals)) {
-        return chain(fullScanOf(entry), (statement) =>
-          chain(statement.all(fullScanParams(entry)), (rows) =>
-            setResidualOf(entry, document)(rowsToDocs(checkRowBound(entry, rows)), externals)));
-      }
-      if (entry.planned.mode === 'set') {
-        // the narrowed statement fetches candidates; the full document
-        // then re-applies its own predicates (idempotent narrowing)
-        return chain(statementOf(entry), (statement) =>
-          chain(statement.all(bindParams(entry, externals)), (rows) =>
-            setResidualOf(entry, document)(rowsToDocs(checkRowBound(entry, rows)), externals)));
+      const diverted = mustDivert(entry, externals);
+      if (diverted || entry.planned.mode === 'set' || entry.planned.mode === 'knn') {
+        // the candidates — the whole collection, the narrowed fetch, or
+        // the k-nearest cut — and the full document over them, which
+        // re-applies its own predicates and ordering (idempotent
+        // narrowing: the fetch decided nothing)
+        return chain(candidatesOf(entry, externals, diverted), (docs) =>
+          setResidualOf(entry, document)(docs, externals));
       }
       if (entry.planned.mode === 'row') {
         return chain(statementOf(entry), (statement) =>
@@ -454,19 +555,16 @@ export function createQueryEngine(context) {
       if (done) return Promise.resolve({ done: true, value: undefined });
       if (bufferedAt < buffered.length) return Promise.resolve(nextFromBuffer());
 
-      if (entry.planned.mode === 'set' || mustDivert(entry, externals)) {
+      if (entry.planned.mode === 'set' || entry.planned.mode === 'knn'
+        || mustDivert(entry, externals)) {
         // the barrier: materialize candidates, pack the result items
         if (materialized === null) {
           const diverted = mustDivert(entry, externals);
-          materialized = Promise.resolve(chain(guardScan(entry), () => chain(
-            diverted ? fullScanOf(entry) : statementOf(entry),
-            (statement) => chain(
-              statement.all(diverted ? fullScanParams(entry) : bindParams(entry, externals)),
-              (rows) => {
-                buffered = packedResidualOf(entry, document)(
-                  rowsToDocs(checkRowBound(entry, rows)), externals);
-                bufferedAt = 0;
-              }))));
+          materialized = Promise.resolve(chain(guardScan(entry), () =>
+            chain(candidatesOf(entry, externals, diverted), (docs) => {
+              buffered = packedResidualOf(entry, document)(docs, externals);
+              bufferedAt = 0;
+            })));
         }
         return materialized.then(() => {
           if (bufferedAt < buffered.length) return nextFromBuffer();
@@ -580,8 +678,10 @@ export function createQueryEngine(context) {
       return bindable(value) ? value : null;
     });
 
+    const rank = entry.plan.rank;
     return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
       chain(statement.all(eqpParams), (rows) => ({
+        mode: entry.planned.mode,
         externals: [...entry.externalNames],
         operators: [...entry.dependencies.operators],
         functions: [...entry.dependencies.functions],
@@ -592,10 +692,22 @@ export function createQueryEngine(context) {
         indexes,
         prefilters: entry.planned.prefilters.map((prefilter) => ({ ...prefilter,
           columns: [...prefilter.columns] })),
+        // the k-nearest stage, when the plan has one: what the fetch
+        // reads, the window the cut serves, the margin it keeps, and
+        // who decides the order — always the engine
+        rank: rank === null ? null : {
+          column: rank.column,
+          dims: rank.dims,
+          probe: 'lit' in rank.probe ? { literal: [...rank.probe.lit] } : { external: rank.probe.ext },
+          limit: rank.limit,
+          offset: rank.offset,
+          margin: rank.margin,
+          decides: 'engine',
+        },
         residual: entry.planned.mode === 'native'
           ? null
           : { mode: entry.planned.mode, reasons: entry.planned.reasons },
-        barriers: entry.planned.mode === 'set'
+        barriers: entry.planned.mode === 'set' || entry.planned.mode === 'knn'
           ? entry.planned.reasons.map((r) => ({ operator: r.construct, reason: r.reason }))
           : [],
         udfs: [...entry.planned.udfs],
@@ -603,7 +715,7 @@ export function createQueryEngine(context) {
       })));
   };
 
-  return { execute, query, explain, shape };
+  return { execute, query, explain, shape, stats: () => ({ knn: { ...knnStats } }) };
 }
 
 // ————— The entity query surface (the second document kind) —————
@@ -707,15 +819,15 @@ export function createEntityQueryEngine(context) {
       }
       return runResidual(entry, document, externals);
     }
-    // bind-time diversion, exactly phase A's: a missing external must
-    // raise the ENGINE's error, a boolean or null cannot bind natively
-    for (const slot of entry.slots) {
-      if ('external' in slot && !bindable(externals[slot.external]))
-        return runResidual(entry, document, externals);
-    }
+    // bind-time diversion, exactly the collection engine's: every slot
+    // binds through `slotValue` — a derived slot included — and a value
+    // the database cannot take (a missing external, a boolean, a null,
+    // a region with no box) sends the call to the residual, where the
+    // ENGINE raises its own error or answers with its own semantics
+    const params = entry.slots.map((slot) => slotValue(slot, externals));
+    if (params.some((value) => !bindable(value)))
+      return runResidual(entry, document, externals);
     if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
-    const params = entry.slots.map((slot) =>
-      ('literal' in slot ? slot.literal : externals[slot.external]));
     return chain(entry.statement, (statement) => {
       if (entry.planned.plan.aggregate === 'count')
         return chain(statement.get(params), (row) => row?.value ?? 0);

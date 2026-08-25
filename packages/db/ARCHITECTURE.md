@@ -153,6 +153,14 @@ member the schema types as an array or an object. Those are exact; the
 spatial predicates that only NARROW are rows in the residual table, and
 the implied-conjunct table below carries every proof.
 
+Plus one ORDERING a **`derive: 'vector'`** column makes cheap without
+making it native: the k-nearest composition — `$orderby` on a
+`$similarity` key, descending, `$empty: 'least'`, under a `$subsequence`
+window with a finite limit — over the member the column stores. It is
+never pushed as an `ORDER BY`: the column CUTS the candidate set and the
+engine DECIDES the order ("The k-nearest plan" below), which is a fourth
+mode, `knn`, beside native, row and set.
+
 ### The deliberate-residual table
 
 | construct | reason |
@@ -170,6 +178,9 @@ the implied-conjunct table below carries every proof.
 | a geohash prefix LONGER than the column's precision | a cell-range pre-filter over the derived column's precision is pushed; the longer prefix refines in the engine |
 | a spatial predicate over a member with no matching derived index, or one the schema does not type as an array or an object | nothing is proven; the whole predicate runs in the engine (the deterministic-function hatch may still take it) |
 | an unbounded `$distance` (`>= r`), a circle reaching a pole or crossing the antimeridian, a probe with no bounding box | no conservative box exists — pushing nothing is correct, pushing a wrong box is not |
+| the k-nearest ordering over a `derive: 'vector'` column | the column cuts the candidates; the engine orders them (mode `knn`, "The k-nearest plan" below) — engine work, so `strict: true` refuses it |
+| `$similarity` anywhere else — a threshold in `$where`, a score in `$return`, a second ordering key | no native spelling; runs in the residual over whatever the rest of the document pushed |
+| the k-nearest shape with no finite window, ascending, `$empty: 'greatest'`, a probe that is neither a literal vector nor an external, a literal probe of another width, or a selection not pushed whole (a residual conjunct, an implied one, a `$let` before the where) | nothing is proven; the whole document runs in the engine, and `explain()` names which precondition failed — a k-nearest query never falls to the full scan silently |
 
 ### The type truth table
 
@@ -313,6 +324,86 @@ item). This is the same class as the string-operator and aggregate
 preconditions above, and the same answer: keep `compileSchema` injected
 if that distinction matters to you.
 
+### The k-nearest plan (vector)
+
+A `derive: 'vector'` column (MODEL-FORMAT §2.1) holds each row's member
+as a packed, l2-normalized binary32 vector. Nothing in SQL ranks over
+it — measured, every `ORDER BY`-over-a-function spelling loses to
+fetching the column and ranking in the engine, and none of them runs
+where no function can be registered — so the k-nearest composition is
+planned as **a cut the engine finishes**, the implied-conjunct pattern
+applied to an ordering instead of a predicate:
+
+| stage | what | where |
+|---|---|---|
+| narrow | the pushed `$where` conjuncts, exactly as in every other mode | SQL |
+| fetch | `(row identity, packed column)` for every narrowed row — no `ORDER BY`, no `LIMIT`, no similarity call; the probe never binds into the statement | SQL |
+| score | every column unpacked and dotted with the l2-normalized probe (the cosine of the raw vectors, up to binary32 rounding); a `NULL` column scores nothing | engine (`@jarenjs/core/vector`, through `derive.js`) |
+| cut | with `m = offset + limit`: every scored row whose score is within `margin` (`1e-6`) of the m-th best is a candidate; when fewer than `m` rows scored, EVERY row is | engine (`knn.js`) |
+| fetch | the candidates' documents, by identity, in identity order, through the dialect's by-identities statement (batched under every build's parameter cap) | SQL |
+| decide | the ORIGINAL document — its whole `$orderby` (the `$similarity` key over the raw member, every secondary key, `$empty`), its window, its `$return` — as the set residual over exactly those documents | engine |
+
+**Why the cut is exact.** The column's score and the engine's key are
+not the same number: one is a dot product over binary32-normalized
+forms, the other the cosine of the raw doubles, and they differ by up
+to ~1e-8 (measured over the corpus and over thousands of random 768-d
+pairs). A plan that CUT by the column's score alone could therefore
+pick a different m-th row than the engine whenever two true cosines lie
+within that distance. With a margin of at least twice the divergence
+the engine's top `m` is a subset of the candidates: if a row the engine
+ranks inside the window were cut, some candidate the engine ranks
+outside it would have to score higher by the column and lower by the
+engine, which two scores within half the margin of each other cannot
+do. `1e-6` is a hundred times the bound; in practice it admits only true
+ties, and the residual re-ranks a handful of documents — microseconds.
+
+**What the engine's decision buys.** Ties break by the document's OWN
+secondary keys, never by row identity, which the engine executor cannot
+see (row identity serves the fetch, never the order — a stable sort
+over the candidates in identity order sees what it would have seen over
+the whole collection). Offsets, nested windows and every secondary key
+compose for free. And the unrankable tail is right by construction:
+`$empty: 'least'` places a row whose key is empty LAST, so a window
+wider than the scored rows must produce those rows in the engine's own
+secondary order — which is exactly why the cut takes every row when
+fewer than `m` scored (the collection is then no larger than the window)
+rather than dropping what the column cannot rank.
+
+**What can raise, and where** — the spatial ERRORS rule, restated for
+the probe path. §8.15 raises `JQ2001` for a member that is not an array
+(a string, an object, a typed array held as an object); the column is
+`NULL` for such a member (MODEL-FORMAT §3.2), so below the scored cut
+the row is never fetched and never raises, and past it (the full fetch)
+the engine raises as it would have. An ABSENT member is not that case:
+its key is the empty sequence before the operand is checked, the column
+is `NULL`, and both executors place the row in the tail. A store that
+wants the engine's refusal for every row keeps `compileSchema` injected
+— the vector column only exists over a member the schema types `array`
+and nothing else, which is what makes the two agree on every row it
+does fetch.
+
+**The probe.** A literal vector must be the column's width at plan time
+(another width is not recognized, and the reason says both widths). An
+external probe is checked at call time by the binder's own rule: a
+bound value that is not a vector of the column's width — another width,
+a non-finite component, not an array at all — DIVERTS the call to the
+full-collection residual, where the engine answers what it answers
+everywhere (empty keys, so the secondary keys order every row; or its
+own `JQ2001` for a non-array). The plan never raises on the engine's
+behalf.
+
+**Preconditions, each named in `explain()`.** The selection must be
+pushed whole — every `$where` conjunct exact, nothing before it — because
+a conjunct left to the residual could drop a candidate the cut counted,
+and an implied conjunct narrows to a superset the residual then shrinks;
+either could leave the window short. The ordering's first key must be
+the `$similarity`, descending, under `$empty: 'least'`; the window must
+have a finite limit (an unbounded ranking is a full sort, and the engine
+does it over the whole collection, said so). Further keys are the
+engine's business. With `strict: true` the shape is `JD0010` naming the
+rank: the order is engine work, the same honesty as a spatial
+refinement.
+
 ### The two residual modes
 
 - **Row residual** — only the projection is untranslated: predicates,
@@ -329,12 +420,19 @@ if that distinction matters to you.
   does not), and the WHOLE original compiled document runs over the
   materialized candidate array. Re-applying pushed conjuncts is
   idempotent, so pushdown is pure narrowing. Reported as a barrier.
+- **Set residual over a cut** (`knn`) — the same whole-document
+  re-run, over a candidate set an ORDERING chose rather than a
+  predicate (the k-nearest plan above). A barrier too, and
+  `stats().knn` counts the rows scored and the candidates kept per
+  query, so a collection of many exact duplicates is visible rather
+  than merely slow.
 
 ### `explain()`
 
 Extends `compileJsonQuery(...).explain()`'s shape — `{ externals,
-operators, functions, collations, limits }` — with `{ sql, params,
-indexes, prefilters, residual, barriers, scanNarrative }`. `params`
+operators, functions, collations, limits }` — with `{ mode, sql, params,
+indexes, prefilters, rank, residual, barriers, scanNarrative }`. `mode`
+is `'native' | 'row' | 'set' | 'knn'`. `params`
 lists the bound slots in order (external names, literal markers, and
 derived slots naming the external and box axis they compute — values
 are ALWAYS bound, never interpolated). `indexes` names the declared
@@ -350,9 +448,12 @@ realization of a `bbox` column set actually ran, which is not always
 what the model declared — a build without the R\*Tree module falls back
 and this is where it says so (MODEL-FORMAT §4). Under `'rtree'` the
 `columns` member names the virtual table's own columns and `indexes`
-names the virtual table. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
+names the virtual table. `rank` is `null` or the k-nearest stage —
+`{ column, dims, probe, limit, offset, margin, decides: 'engine' }` —
+what the fetch reads, the window the cut serves, the margin it keeps,
+and who decides the order (always the engine). `estimatedRows` is ABSENT on SQLite drivers — the capability slot
 is empty and no number is fabricated. `residual` is `null` or
-`{ mode: 'row' | 'set', reasons: [{ construct, reason }] }` with
+`{ mode: 'row' | 'set' | 'knn', reasons: [{ construct, reason }] }` with
 reasons drawn from the deliberate-residual table. With
 `strict: true`, any residual is instead the compile error `JD0010`
 naming the forcing construct.

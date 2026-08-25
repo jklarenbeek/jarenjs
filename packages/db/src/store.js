@@ -606,7 +606,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   };
 
   const core = {
-    stats: () => ({ ...stats }),
+    stats: () => ({ ...stats, ...engine.stats() }),
     model: collection,
     queryShape: engine.shape,
     // the D2 provider: value-or-promise, deliberately NOT lifted — a

@@ -216,6 +216,7 @@ export function fullDoubleDialect(createDialect) {
     strContains: (value, p) => `CT(${value}, ${p})`,
     orderNulls: (nullsFirst) => (nullsFirst ? ' EMPTIES HIGH' : ' EMPTIES LOW'),
     rowIdentity: () => '[rid]',
+    identityIn: (identity, params) => `${identity} AMONG (${params.join(', ')})`,
     rtree: { module: 'BOXTREE', columns: ['rid', 'x0', 'x1', 'y0', 'y1'] },
     explainQuery: (sql) => `PLANFOR ${sql}`,
     excludedRef: (column) => `NEW.${column}`,

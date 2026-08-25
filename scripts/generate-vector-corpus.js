@@ -103,6 +103,26 @@ const OTHER = vector();
 const NARROW = [Math.fround(0.5), Math.fround(-0.25)];
 
 /**
+ * The binary32 one step away from `x`, away from zero: the smallest
+ * change a packed column can hold.
+ * @param {number} x
+ * @returns {number}
+ */
+function nextBinary32(x) {
+  const view = new DataView(new ArrayBuffer(4));
+  view.setFloat32(0, x);
+  view.setUint32(0, view.getUint32(0) + 1);
+  return view.getFloat32(0);
+}
+
+/**
+ * `NEAR` with its last component moved by one binary32 ulp: a pair
+ * whose true cosines to the query differ by far less than 1e-7 — the
+ * near-tie a plan that cuts by a rounded score must not decide alone.
+ */
+const NEAR_ULP = [...NEAR.slice(0, -1), nextBinary32(NEAR[NEAR.length - 1])];
+
+/**
  * The ranked collection: five rows a plan can get wrong. `tie-a` and
  * `tie-b` carry the SAME vector, so only an explicit tie-break decides
  * their order; `no-vector` has no member at all and `wrong-width` has
@@ -119,6 +139,19 @@ const ROWS = [
 ];
 
 //#endregion
+
+/**
+ * The near-tie rows: the query's own direction on top, then the two
+ * near-identical vectors, then the rest — so a window of two cuts
+ * exactly between the near-tie, and the recorded answer is whichever
+ * of the two the exact cosine puts first.
+ */
+const NEAR_TIE_ROWS = [
+  { id: 'near-a', embedding: NEAR },
+  { id: 'scaled', embedding: SCALED },
+  { id: 'near-b', embedding: NEAR_ULP },
+  { id: 'other', embedding: OTHER },
+];
 
 //#region the query shapes
 
@@ -245,6 +278,30 @@ const ENTRIES = [
       ],
       $return: '$r.id' },
     note: 'higher-is-better means ascending is the least similar first, and least-empty then puts the unscorable rows FIRST' },
+  { name: 'knn/offset-window', collection: true, data: ROWS,
+    query: { $subsequence: [rankedIds, 2, 2] },
+    note: 'a window that starts past the top: the offset composes with the limit, and the rows before it are skipped, not returned' },
+  { name: 'knn/near-tie-at-the-boundary', collection: true, data: NEAR_TIE_ROWS,
+    query: topK(2),
+    note: 'two vectors one binary32 ulp apart sit either side of the cut; their true cosines differ by less than 1e-7 and the exact one decides, so an executor that ranks by a rounded score alone can pick the wrong second row' },
+  { name: 'knn/external-probe-of-another-width', collection: true, data: ROWS,
+    query: { $subsequence: [{
+      $for: { r: '$[*]' },
+      $orderby: [
+        { $key: { $similarity: ['$r.embedding', '$narrow'] }, $dir: 'desc', $empty: 'least' },
+        '$r.id',
+      ],
+      $return: '$r.id' }, 0, 3] },
+    note: 'a probe of another width scores nothing of that width — except the one row whose vector is that narrow, which ranks first while every other key is empty and the identity order decides the rest' },
+  { name: 'knn/external-probe-not-a-vector', collection: true, data: ROWS,
+    query: { $subsequence: [{
+      $for: { r: '$[*]' },
+      $orderby: [
+        { $key: { $similarity: ['$r.embedding', '$word'] }, $dir: 'desc', $empty: 'least' },
+        '$r.id',
+      ],
+      $return: '$r.id' }, 0, 3] },
+    note: 'a probe that is not an array is the type-level refusal, from every executor' },
   { name: 'knn/filtered-then-ranked', collection: true, data: ROWS,
     query: { $subsequence: [{
       $for: { r: '$[*]' },
@@ -257,8 +314,30 @@ const ENTRIES = [
     note: 'a narrowing predicate and a ranking in one phrase — the shape a store has to answer with a filter and a rank, not one or the other' },
 ];
 
-/** @param {number} seedIgnored */
+/**
+ * The cosine of two vectors as the engine computes it, for the
+ * construction check below.
+ * @param {number[]} a @param {number[]} b
+ */
+function cosine(a, b) {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
 export function generateVectorCorpus() {
+  // the near-tie is constructed, and checked: the two cosines must
+  // differ, and by less than 1e-7, or the entry does not test what it
+  // says it tests
+  const gap = Math.abs(cosine(NEAR, QUERY) - cosine(NEAR_ULP, QUERY));
+  if (!(gap > 0 && gap < 1e-7))
+    throw new Error(`the near-tie is not a near-tie: the cosines differ by ${gap}`);
   const seen = new Set();
   return ENTRIES.map((entry) => {
     if (seen.has(entry.name))
@@ -270,7 +349,7 @@ export function generateVectorCorpus() {
       out.collection = true;
     let answer;
     try {
-      answer = queryJson(entry.query, entry.data, { query: QUERY });
+      answer = queryJson(entry.query, entry.data, EXTERNALS);
     }
     catch (e) {
       out.error = /** @type {any} */ (e).code;
@@ -285,10 +364,11 @@ export function generateVectorCorpus() {
 }
 
 /**
- * The externals every entry is run with — one query vector, the same one
- * a second executor must bind.
+ * The externals every entry is run with: the query vector every ranking
+ * case is asked about, a probe of another width, and one that is not a
+ * vector at all — the same three a second executor must bind.
  */
-export const EXTERNALS = { query: QUERY };
+export const EXTERNALS = { query: QUERY, narrow: NARROW, word: 'not a vector' };
 
 /** @param {any[]} corpus */
 export function serializeCorpus(corpus) {

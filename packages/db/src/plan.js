@@ -11,7 +11,7 @@
  *
  * The outcome of planning one document:
  *
- *   { plan, mode: 'native' | 'row' | 'set', reasons, rowReturn,
+ *   { plan, mode: 'native' | 'row' | 'set' | 'knn', reasons, rowReturn,
  *     prefilters }
  *
  * - `native` — everything translated; the plan alone answers.
@@ -22,6 +22,11 @@
  *   wrapper built anywhere else would have to guess it.
  * - `set`    — the pushed conjuncts narrow candidates; the WHOLE
  *   compiled document runs over the materialized candidates.
+ * - `knn`    — the pushed conjuncts narrow, the vector column CUTS the
+ *   candidates of a k-nearest window (`plan.rank`), and the whole
+ *   compiled document runs over the cut — a set residual whose
+ *   candidate set an ordering, not a predicate, chose (see "The
+ *   k-nearest promotion" below).
  *
  * `reasons` names every construct that forced work off the database,
  * with reason text drawn from the deliberate-residual table.
@@ -42,8 +47,9 @@ import { typeOfPath, isNumericType } from './types.js';
 import { schemaNodeAt } from './ddl.js';
 import {
   BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
-  probeBox, probePosition, probeCircleBox, cellNeighbourhood,
+  probeBox, probePosition, probeCircleBox, cellNeighbourhood, probeVector,
 } from './derive.js';
+import { KNN_MARGIN } from './knn.js';
 
 /** Comparison operator names → plan ops. */
 const COMPARISONS = new Map([
@@ -461,13 +467,33 @@ function boxConjunct(columns, virtual, probe) {
 }
 
 function derivedColumnsOf(shape, canonical, derive, precision) {
+  // `precision` is the identity's third component: a geohash column's
+  // precision, a vector column's `dims`
   const stem = shape.columnByCanonical?.get(`${canonical}|${derive}|${precision ?? ''}`);
   if (stem === undefined) return null;
-  if (derive === 'geohash') return stem;
+  if (derive === 'geohash' || derive === 'vector') return stem;
   /** @type {any} */
   const columns = {};
   for (const component of BBOX_COMPONENTS) columns[`${component}`] = `${stem}_${component}`;
   return columns;
+}
+
+/**
+ * The vector columns declared over one canonical path, by width. The
+ * identity key is `<canonical>|vector|<dims>`, so one path may carry
+ * one column per declared width and a probe chooses by its own.
+ * @param {any} shape
+ * @param {string} canonical
+ * @returns {{ column: string, dims: number }[]}
+ */
+function vectorColumnsOf(shape, canonical) {
+  const prefix = `${canonical}|vector|`;
+  const found = [];
+  for (const [key, column] of shape.columnByCanonical ?? []) {
+    if (key.startsWith(prefix))
+      found.push({ column, dims: Number(key.slice(prefix.length)) });
+  }
+  return found;
 }
 
 /**
@@ -709,6 +735,128 @@ function planCellNeighbourhood(node, itSlot, shape) {
       exact: true });
 }
 
+// ————— The k-nearest promotion: an ORDERING the column pre-filters —————
+//
+// `$orderby` on a `$similarity` key, descending, `$empty: 'least'`,
+// under a `$subsequence` window with a finite limit, over a member a
+// `derive: 'vector'` column stores: the one ordering the planner
+// promotes. Not to SQL — no ORDER BY is emitted, no per-row similarity
+// call, no LIMIT: every SQL spelling of the rank measured slower than
+// fetching the packed column and ranking in the engine, and none of
+// them runs where no function can be registered — but to a CUT. The
+// statement projects (identity, column) under the pushed WHERE; the
+// engine scores every row's column against the probe; the rows whose
+// score is within `KNN_MARGIN` of the `offset + limit`-th best are the
+// candidates. Then the ENGINE decides: the original document — its
+// whole `$orderby` (the similarity key over the raw member, every
+// secondary key, `$empty`), its window, its `$return` — runs as the set
+// residual over exactly those documents.
+//
+// What makes that exact is the implied-conjunct argument, applied to an
+// ordering. The column's score (a dot product over binary32-normalized
+// forms) and the engine's key (the cosine of the raw doubles) differ by
+// at most ~1e-8, measured; with a margin two orders of magnitude wider
+// the engine's top `offset + limit` is a SUBSET of the candidates — a
+// row the engine ranks inside the window that the column left out would
+// need two true cosines to differ by more than the column can mis-order
+// them. Ties at the boundary are included by construction, and the
+// engine breaks them by the document's own secondary keys, which is why
+// no row-identity tie rule exists here: row identity serves the fetch,
+// never the order.
+//
+// Two shapes reach the window's tail that no cut can order: fewer than
+// `offset + limit` rows scored — a small collection, or NULL columns
+// (absent, wrong-width, non-finite members) — so the window reaches the
+// unrankable rows, which `$empty: 'least'` places LAST in the engine's
+// own secondary order. The candidate set is then every row, and the
+// collection is no larger than the window.
+//
+// Preconditions, each a named refusal. The selection must be pushed
+// WHOLE — every `$where` conjunct exact, nothing before it — because a
+// conjunct left to the residual could drop a candidate the cut counted,
+// and an implied one narrows to a superset the residual then shrinks;
+// either could leave the window short. The probe must be a literal
+// vector of the column's width, or an external: what an external
+// carries is the binder's to check at call time, and a bound value that
+// is not a vector of that width DIVERTS the call to the residual, where
+// the engine answers what it answers everywhere (empty keys for another
+// width, its own refusal of a non-array) — never a plan-side error the
+// engine would not raise.
+
+const KNN_REASONS = {
+  rank: 'k-nearest rank is engine work: the vector column cuts the candidates and the engine orders them',
+  direction: 'k-nearest is promoted only descending (higher similarity first)',
+  empties: "k-nearest is promoted only under $empty: 'least' (unrankable rows last, where the cut can reach them)",
+  collation: 'a collation on a similarity key is refused, not approximated',
+  subject: 'the similarity key must compare a singular member path on the binding with a probe',
+  probe: 'the probe must be a literal vector (an array of finite numbers) or an external',
+  selection: 'k-nearest ranks over the column only when the selection is pushed whole (every $where conjunct exact, no $let or $as before it)',
+  window: 'k-nearest needs a window with a finite limit; an unbounded ranking is a full sort in the engine',
+  /** @param {string} path @param {number | null} dims */
+  noColumn: (path, dims) =>
+    `no vector column over ${path}${dims === null ? '' : ` at width ${dims}`}`,
+  /** @param {string} path @param {number} want @param {number[]} have */
+  dims: (path, want, have) =>
+    `the literal probe has ${want} components but the vector column over ${path} is declared at ${have.join(', ')}`,
+  /** @param {string} path */
+  widths: (path) =>
+    `several vector widths are declared over ${path}; an external probe cannot choose one at plan time`,
+};
+
+/**
+ * Recognize the k-nearest ordering, or say why not. `null` when the
+ * first key is not a `$similarity` at all — an ordinary ordering the
+ * caller plans as before. Further key specs are the engine's business
+ * (they order the candidates), so nothing here reads them.
+ * @param {any} orderby - the flwor's orderby node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @param {boolean} selectionPushed - the WHERE pushed whole and exact,
+ *   with nothing before it
+ * @returns {{ rank: { column: string, dims: number,
+ *   probe: { lit: number[] } | { ext: string } } }
+ *   | { refusal: { construct: string, reason: string } } | null}
+ */
+function planKnnOrder(orderby, itSlot, shape, selectionPushed) {
+  const first = orderby.specs[0];
+  const key = first.key;
+  if (key.kind !== 'op' || key.name !== '$similarity') return null;
+  const refuse = (reason) => ({ refusal: refusal('$similarity', reason) });
+  if (first.desc !== true) return refuse(KNN_REASONS.direction);
+  if (first.emptyGreatest === true) return refuse(KNN_REASONS.empties);
+  if (first.collation !== null || first.collationName !== null)
+    return refuse(KNN_REASONS.collation);
+  // the subject may be either operand; the other is the probe
+  let subjectAt = 0;
+  if (memberPath(key.args[0], itSlot) === null && memberPath(key.args[1], itSlot) !== null)
+    subjectAt = 1;
+  const subject = memberPath(key.args[subjectAt], itSlot);
+  if (subject === null) return refuse(KNN_REASONS.subject);
+  const path = `$${subject.canonical}`;
+  const probeNode = key.args[subjectAt === 0 ? 1 : 0];
+  const declared = vectorColumnsOf(shape, subject.canonical);
+
+  if (probeNode.kind === 'var' && probeNode.external === true) {
+    if (declared.length === 0) return refuse(KNN_REASONS.noColumn(path, null));
+    if (declared.length > 1) return refuse(KNN_REASONS.widths(path));
+    if (!selectionPushed) return refuse(KNN_REASONS.selection);
+    return { rank: { column: declared[0].column, dims: declared[0].dims,
+      probe: { ext: probeNode.name } } };
+  }
+  const constant = constantOf(probeNode);
+  if (constant === null || !Array.isArray(constant.value)) return refuse(KNN_REASONS.probe);
+  const dims = constant.value.length;
+  if (probeVector(constant.value, dims) === null) return refuse(KNN_REASONS.probe);
+  const column = derivedColumnsOf(shape, subject.canonical, 'vector', dims);
+  if (column === null) {
+    return refuse(declared.length === 0
+      ? KNN_REASONS.noColumn(path, dims)
+      : KNN_REASONS.dims(path, dims, declared.map((entry) => entry.dims)));
+  }
+  if (!selectionPushed) return refuse(KNN_REASONS.selection);
+  return { rank: { column: /** @type {string} */ (column), dims, probe: { lit: constant.value } } };
+}
+
 /**
  * Dispatch the spatial shapes. Answers `null` when the node is not one
  * of them, so the caller falls through to the rest of the grammar.
@@ -877,7 +1025,10 @@ function planPredicate(node, itSlot, shape) {
  *   reasons: { construct: string, reason: string }[],
  *   whereFullyPushed: boolean, orderPushed: boolean,
  *   projectionNative: boolean, itSlot: number, itName: string | null,
- *   udfs: string[], prefilters: any[] }}
+ *   udfs: string[], prefilters: any[],
+ *   knn: { column: string, dims: number, probe: any } | null }}
+ *   `knn` is the recognized k-nearest ordering, pending the window
+ *   the caller peels; its ordering is then never pushed
  */
 function planFlwor(node, shape, rawFlwor, udfHook) {
   const reasons = [];
@@ -897,7 +1048,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     reasons.push(refusal('$for',
       'only a single plain binding over the whole collection is translated'));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, itSlot: -1, itName: null, udfs: [], prefilters: [] };
+      projectionNative: false, itSlot: -1, itName: null, udfs: [], prefilters: [], knn: null };
   }
   const itSlot = binding.slot;
   // the document's own name for the collection binding. The residual and
@@ -959,9 +1110,19 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     }
   }
 
-  // ORDER BY: all terms or none — a partially pushed ordering is wrong
+  // ORDER BY: all terms or none — a partially pushed ordering is wrong.
+  // A k-nearest ordering is the third outcome: not pushed, but
+  // recognized for the column to pre-filter (the reason is the
+  // caller's to name once the window is known)
   let orderPushed = false;
-  if (node.orderby !== null) {
+  let knn = null;
+  const ranked = node.orderby === null ? null
+    : planKnnOrder(node.orderby, itSlot, shape, whereFullyPushed && structureClean);
+  if (ranked !== null) {
+    if ('rank' in ranked) knn = ranked.rank;
+    else reasons.push(ranked.refusal);
+  }
+  else if (node.orderby !== null) {
     const terms = [];
     let refused = null;
     for (const spec of node.orderby.specs) {
@@ -1007,7 +1168,33 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     itName,
     udfs,
     prefilters,
+    knn,
   };
+}
+
+/**
+ * Compose peeled `$subsequence` windows into one: the innermost applies
+ * first, so offsets add and each outer limit is cut to what the inner
+ * one left. `null` when nothing was peeled.
+ * @param {{ offset: number, limit: number | null }[]} windows -
+ *   outermost first, as peeled
+ * @returns {{ offset: number, limit: number | null } | null}
+ */
+function composeWindows(windows) {
+  if (windows.length === 0) return null;
+  let offset = 0;
+  let limit = null;
+  for (let i = windows.length - 1; i >= 0; i--) {
+    const w = windows[i];
+    offset += w.offset;
+    if (w.limit !== null) {
+      limit = limit === null ? w.limit : Math.min(Math.max(limit - w.offset, 0), w.limit);
+    }
+    else if (limit !== null) {
+      limit = Math.max(limit - w.offset, 0);
+    }
+  }
+  return { offset, limit };
 }
 
 /**
@@ -1019,7 +1206,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
  * @returns {{
  *   analysis: any,
  *   plan: import('./algebra.js').Plan | null,
- *   mode: 'native' | 'row' | 'set',
+ *   mode: 'native' | 'row' | 'set' | 'knn',
  *   reasons: { construct: string, reason: string }[],
  *   rowReturn: any,
  *   udfs: string[],
@@ -1081,6 +1268,22 @@ function planCollectionCore(document, shape, options = undefined) {
   const { plan } = flwor;
   const fullyPushed = flwor.whereFullyPushed && flwor.orderPushed;
 
+  if (flwor.knn !== null) {
+    // the k-nearest mode: the recognized ordering under a window with
+    // a finite limit, composed exactly as pushed windows are. The plan
+    // keeps no order and no window — both are the engine's over the
+    // cut — and the reason strict mode names is the rank itself
+    const window = aggregate === null ? composeWindows(windows) : null;
+    if (window !== null && window.limit !== null) {
+      plan.rank = { ...flwor.knn, offset: window.offset, limit: window.limit,
+        margin: KNN_MARGIN };
+      return { analysis, plan, mode: 'knn',
+        reasons: [refusal('$orderby', KNN_REASONS.rank), ...flwor.reasons],
+        rowReturn: null, udfs: flwor.udfs, prefilters: flwor.prefilters };
+    }
+    flwor.reasons.unshift(refusal('$subsequence', KNN_REASONS.window));
+  }
+
   if (aggregate !== null) {
     // aggregates need the WHOLE selection native (their input is the
     // full sequence, not a narrowed candidate set)
@@ -1119,22 +1322,7 @@ function planCollectionCore(document, shape, options = undefined) {
   }
 
   // windows push only onto a fully pushed selection
-  if (windows.length > 0 && fullyPushed) {
-    // innermost window applies first; compose offsets/limits
-    let offset = 0;
-    let limit = null;
-    for (let i = windows.length - 1; i >= 0; i--) {
-      const w = windows[i];
-      offset += w.offset;
-      if (w.limit !== null) {
-        limit = limit === null ? w.limit : Math.min(Math.max(limit - w.offset, 0), w.limit);
-      }
-      else if (limit !== null) {
-        limit = Math.max(limit - w.offset, 0);
-      }
-    }
-    plan.window = { offset, limit };
-  }
+  if (windows.length > 0 && fullyPushed) plan.window = composeWindows(windows);
 
   if (fullyPushed && flwor.projectionNative && (windows.length === 0 || plan.window !== null)) {
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
@@ -1182,7 +1370,7 @@ function planCollectionCore(document, shape, options = undefined) {
  * @returns {{
  *   analysis: any,
  *   plan: import('./algebra.js').Plan | null,
- *   mode: 'native' | 'row' | 'set',
+ *   mode: 'native' | 'row' | 'set' | 'knn',
  *   reasons: { construct: string, reason: string }[],
  *   rowReturn: any,
  *   udfs: string[],

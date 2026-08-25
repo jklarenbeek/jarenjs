@@ -273,15 +273,22 @@ export function emitPlan(plan, dialect, physical) {
     }
   };
 
-  const selection = plan.aggregate === null
-    ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
-    : plan.aggregate.fn === 'count'
-      ? `COUNT(*) AS ${q('value')}`
-      : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
+  const selection = plan.rank !== null
+    // the k-nearest fetch: the row identity and the packed column
+    // under the pushed WHERE, and nothing that orders or limits — the
+    // engine scores, cuts and ranks (measured: every SQL spelling of
+    // the rank loses to fetching the column and ranking in the engine,
+    // and none of them runs where no function can be registered)
+    ? `${dialect.rowIdentity()} AS ${q('rid')}, ${q(plan.rank.column)} AS ${q('vec')}`
+    : plan.aggregate === null
+      ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
+      : plan.aggregate.fn === 'count'
+        ? `COUNT(*) AS ${q('value')}`
+        : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
 
   let sql = `SELECT ${selection} FROM ${q(physical.table)}`;
   if (plan.filter !== null) sql += ` WHERE ${emitPred(plan.filter)}`;
-  if (plan.aggregate === null) {
+  if (plan.aggregate === null && plan.rank === null) {
     const terms = (plan.order ?? []).map((term) => {
       // Jaren's default sorts an empty key least: NULLS FIRST when
       // ascending, NULLS LAST when descending — and mirrored for

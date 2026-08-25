@@ -310,7 +310,7 @@ describe('the synchronous fast path', () => {
     assert.deepStrictEqual(users.get('u1'), { id: 'u1', email: 'a@b.c', age: 1 });
     users.put({ id: 'u1', email: 'a@b.c', age: 2 });
     assert.strictEqual(users.patch('u1', [{ op: 'replace', path: '/age', value: 3 }]).age, 3);
-    assert.deepStrictEqual(users.stats(), { patchTranslated: 1, patchFallback: 0 });
+    assert.deepStrictEqual(users.stats(), { patchTranslated: 1, patchFallback: 0, knn: { queries: 0, rows: 0, candidates: 0, fullFetches: 0 } });
     // the query surface, promise-free: the D2 provider and explain
     const hit = users.execute(
       { $for: { it: '$[*]' }, $where: { $eq: ['$it.id', 'u1'] }, $return: '$it.age' });

@@ -110,6 +110,10 @@ describe('SQLite dialect goldens', () => {
       'SELECT json("doc") AS "doc" FROM "users" WHERE "key" = ?');
     assert.strictEqual(sqliteDialect.dml.del(SHAPE),
       'DELETE FROM "users" WHERE "key" = ?');
+    // the by-identities fetch of a k-nearest plan's candidates: a
+    // membership test over the row identity, in identity order
+    assert.strictEqual(sqliteDialect.dml.selectByIdentities(SHAPE, 3),
+      'SELECT json("doc") AS "doc" FROM "users" WHERE "rowid" IN (?, ?, ?) ORDER BY "rowid"');
     assert.strictEqual(
       sqliteDialect.dml.updateDoc(SHAPE, 'jsonb_set("doc", \'$."age"\', jsonb(?))', 2),
       'UPDATE "users" SET "doc" = jsonb_set("doc", \'$."age"\', jsonb(?)) WHERE "key" = ?');

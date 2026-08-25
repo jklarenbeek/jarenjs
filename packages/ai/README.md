@@ -702,7 +702,10 @@ const { memories, scores, skipped } = await ledger.recall({
 - **No arithmetic lives here.** The cosine is `@jarenjs/core/vector`'s; the ledger calls it and
   computes nothing. Ranked recall is an exact sweep — one adapter scan plus one cosine per
   embedded record — which is the right tool for a ledger of thousands and the wrong one for
-  millions; the instrument below says what it costs.
+  millions; the instrument below says what it costs. The same question over a `@jarenjs/db`
+  collection is the query language's own k-nearest composition (QUERY-FORMAT §8.15) — and
+  over a `derive: 'vector'` column the store plans it as a cut the engine finishes, with
+  `explain()` naming the mode (its ARCHITECTURE, "The k-nearest plan").
 - **Measured, whichever way it fell.** `benchmark/retrieval.js` scores the ranked path beside the
   default over the same seeded corpus, through the deterministic reference embedder
   (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.

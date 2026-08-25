@@ -10,8 +10,10 @@
  *
  * One plan shape covers this version: a guarded selection over ONE
  * collection with optional ordering, window, aggregate and a
- * whole-document projection. Constructs beyond it are residuals by
- * design (see ARCHITECTURE.md's deliberate-residual table).
+ * whole-document projection — or, instead of an ordering and a window,
+ * a k-nearest RANK the engine finishes over the rows the plan fetches.
+ * Constructs beyond it are residuals by design (see ARCHITECTURE.md's
+ * deliberate-residual table).
  */
 
 /** The plan format version, carried on every plan. */
@@ -55,6 +57,20 @@ export const PLAN_VERSION = 2;
  *
  * @typedef {{ ref: PlanRef, desc: boolean, emptyGreatest: boolean }} PlanOrderTerm
  *
+ * @typedef {{ column: string, dims: number,
+ *   probe: { lit: number[] } | { ext: string },
+ *   offset: number, limit: number, margin: number }} PlanRank
+ *   The k-nearest stage: the packed vector column the ranking reads,
+ *   its declared width, the probe (a plan-time literal vector, or the
+ *   external that carries one at call time), the window the ENGINE
+ *   will apply, and the inclusive score margin of the candidate cut.
+ *   The column cuts — every row whose column score is within `margin`
+ *   of the `offset + limit`-th best is a candidate — and the engine
+ *   decides: the original document, its whole ordering and window
+ *   included, runs over the candidates' documents. A plan carrying a
+ *   rank carries no order and no window of its own: nothing in SQL
+ *   orders or limits the fetch.
+ *
  * @typedef {{
  *   planVersion: number,
  *   alg: 'select',
@@ -62,6 +78,7 @@ export const PLAN_VERSION = 2;
  *   filter: PlanPredicate | null,
  *   order: PlanOrderTerm[] | null,
  *   window: { offset: number, limit: number | null } | null,
+ *   rank: PlanRank | null,
  *   aggregate: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null } | null,
  *   project: 'document',
@@ -81,6 +98,7 @@ export function selectPlan(collection) {
     filter: null,
     order: null,
     window: null,
+    rank: null,
     aggregate: null,
     project: 'document',
   };

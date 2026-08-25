@@ -462,14 +462,24 @@ exactly `dims` finite numbers:**
 | an array of `dims` finite numbers | the packed, l2-normalized form |
 
 The document itself stores in every row of that table; the write is
-never refused on the column's account (§2.1). The consequence is the
-same as the spatial one: **a row whose vector column is `NULL` is
-invisible to a plan that ranks over the column** — unrankable, not
-wrong. Here it is not even a divergence in the error path: `$similarity`
-over such a member answers the empty sequence (QUERY-FORMAT §8.15)
-rather than raising, so the column and the engine agree the row is
-unranked. What the column cannot do is refuse a wrong-width vector at
-the write — that is the schema's job, and §2.1 shows the declaration.
+never refused on the column's account (§2.1). The consequence for the
+k-nearest plan (ARCHITECTURE.md, "The k-nearest plan") is stated here:
+**a row whose vector column is `NULL` scores nothing, so it is never
+among the rows the column's cut keeps** — unrankable, not wrong. That
+agrees with the engine on every row of the table above but one:
+`$similarity` over an absent, wrong-width or non-finite member answers
+the empty sequence (QUERY-FORMAT §8.15), and under `$empty: 'least'`
+such a row sorts LAST, where only a window wider than the scored rows
+reaches it — and there the plan fetches every row and the engine orders
+the tail itself. The one row that differs is the non-array member (a
+string, an object): §8.15 raises `JQ2001` for it where the column holds
+`NULL`, so a window that never reaches the tail never raises for it and
+one that does raises as the engine would. That is why rule 9 (§2.1)
+makes the column exist only over a member the schema types `array` and
+nothing else; a store that wants the refusal for every row keeps
+`compileSchema` injected. What the column cannot do is refuse a
+wrong-width vector at the write — that is the schema's job, and §2.1
+shows the declaration.
 
 ## 4. The driver contract and the synchronous fast path
 

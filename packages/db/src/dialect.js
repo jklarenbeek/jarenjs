@@ -59,6 +59,7 @@
  *   strContains: (valueSql: string, patternSql: string) => string,
  *   orderNulls: (nullsFirst: boolean) => string,
  *   rowIdentity: () => string,
+ *   identityIn: (identitySql: string, paramSqls: string[]) => string,
  *   rtree?: { module: string, columns: readonly string[] },
  *   explainQuery: (sql: string) => string,
  *   excludedRef: (columnSql: string) => string,
@@ -387,6 +388,25 @@ export function createDialect(spec) {
     /** @param {{ table: string, keyColumn: string }} s */
     del({ table, keyColumn }) {
       return `DELETE FROM ${q(table)} WHERE ${q(keyColumn)} = ${p(1, 'key')}`;
+    },
+    /**
+     * The documents of a list of row identities, in identity order —
+     * the fetch of a k-nearest plan's candidates after the engine's
+     * cut. `count` placeholders; a caller with fewer identities binds
+     * `null` for the rest, which the membership test matches to no row.
+     * Identity order is the collection's own order, so the engine's
+     * stable sort over the fetched documents sees what it would have
+     * seen over the whole collection.
+     * @param {{ table: string, docColumn: string }} s
+     * @param {number} count
+     * @returns {string}
+     */
+    selectByIdentities({ table, docColumn }, count) {
+      const rid = spec.rowIdentity();
+      const placeholders = [];
+      for (let i = 1; i <= count; i++) placeholders.push(p(i, 'rid'));
+      return `SELECT ${spec.jsonText(q(docColumn))} AS ${q('doc')} FROM ${q(table)} `
+        + `WHERE ${spec.identityIn(rid, placeholders)} ORDER BY ${rid}`;
     },
     /**
      * Rewrite the document column through a JSON-set expression chain

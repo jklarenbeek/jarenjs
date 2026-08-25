@@ -46,7 +46,8 @@ const segmentsOf = (path) => path.split('/').slice(1).map(decodeJSONPointerSegme
  * @param {any} document
  */
 function unwrapDocument(document) {
-  let doc = Array.isArray(document) && document.length === 1 ? document[0] : document;
+  const whole = Array.isArray(document) && document.length === 1 ? document[0] : document;
+  let doc = whole;
   let offset = 0;
   let limit = null;
   let windowed = false;
@@ -74,7 +75,7 @@ function unwrapDocument(document) {
       }
     }
   }
-  return { inner: doc, windowed, offset, limit, aggregate };
+  return { inner: doc, whole, windowed, offset, limit, aggregate };
 }
 
 /** The single for-binding name of a canonical flwor, or null. */
@@ -248,7 +249,7 @@ export function classifyLiveQuery(document, queryShape, keyed) {
       ?? { construct: 'residual', reason: 'the document did not translate' };
     return `'${forcing.construct}' — ${forcing.reason}`;
   };
-  const { inner, windowed, offset, limit, aggregate } = unwrapDocument(document);
+  const { inner, whole, windowed, offset, limit, aggregate } = unwrapDocument(document);
 
   if (aggregate !== null) {
     if (windowed) return rerun('a windowed aggregate maintains no accumulator');
@@ -291,6 +292,13 @@ export function classifyLiveQuery(document, queryShape, keyed) {
       deps: memberDeps(analyzeQuery([rowDocument]).root),
     };
   }
+
+  // a k-nearest window is planned WITH its window (the cut needs the
+  // limit), so the whole document is asked before the inner one: the
+  // column cuts the candidates and the engine orders them, and no
+  // maintained window has that shape — a ranking re-runs, named
+  if (windowed && planQuery(whole, queryShape, {}).mode === 'knn')
+    return rerun('a k-nearest ranking re-runs (the vector column cuts the candidates and the engine orders them)');
 
   const planned = planQuery(inner, queryShape, {});
   if (planned.mode === 'set') {

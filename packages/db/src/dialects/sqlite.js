@@ -153,6 +153,11 @@ export const sqliteDialect = createDialect({
   strContains: (valueSql, patternSql) => `instr(${valueSql}, ${patternSql}) > 0`,
   orderNulls: (nullsFirst) => (nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
   rowIdentity: () => '"rowid"',
+  // membership of the row identity in a bound list — the fetch of a
+  // k-nearest plan's candidates. `IN` over the rowid is a primary-key
+  // lookup per value; a NULL in the list matches no row, which is what
+  // lets a caller pad a batch
+  identityIn: (identitySql, paramSqls) => `${identitySql} IN (${paramSqls.join(', ')})`,
   // the R*Tree module and the shape this store gives it: the row id
   // and the four box edges in (minx, maxx, miny, maxy) order, which is
   // the (w, e, s, n) a bbox index covers its columns in. The three

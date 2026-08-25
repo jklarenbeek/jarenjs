@@ -33,8 +33,9 @@ export {
   DERIVE_KINDS, DERIVE_MAPPING, PHYSICAL_KINDS, BBOX_COMPONENTS, BBOX_INDEX_ORDER,
   PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
   deriveGeohash, deriveBboxEdge, deriveVector, derivedValue, derivedMappingFor, memberAt,
-  storedMemberForm, registerDeriveFunctions,
+  storedMemberForm, registerDeriveFunctions, probeVector, columnScore,
 } from './derive.js';
+export { KNN_MARGIN, IDENTITY_CHUNK, cutCandidates, identityBatches } from './knn.js';
 export {
   createQueryEngine, createQueryState, createEntityQueryEngine,
   createLoadEngine, INCLUDE_DEPTH_DEFAULT,
