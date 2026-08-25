@@ -87,6 +87,69 @@ provider's `/models` listing with exactly the auth a chat call would use and nev
 `{ ok: true, models }` or `{ ok: false, status?, error }` — the contract a settings UI
 wants for a "Test connection" button and a model picker.
 
+## Embeddings
+
+The same providers serve the OpenAI-compatible `/embeddings` wire beside `/chat/completions`
+— OpenRouter at `/api/v1/embeddings`, Ollama and LM Studio at `/v1/embeddings` — and
+`createEmbeddingClient` speaks it from the same resolved base, with the same key, headers,
+`fetch` injection and retry policy as the chat client:
+
+```js
+import { createEmbeddingClient, probeEmbeddings } from '@jarenjs/ai';
+import { cosineSimilarity } from '@jarenjs/core/vector';
+
+const embedder = createEmbeddingClient({
+  provider: 'ollama',                // the chat client's providers, keys and base URLs
+  model: 'nomic-embed-text',         // required — it is half of every vector's identity
+});
+
+const [a, b] = await embedder.embed(['a cat on a mat', 'quarterly revenue']);
+cosineSimilarity(a, b);              // Float32Arrays in; higher is better
+embedder.dims;                       // the width, settled by the first reply (or pass `dims`)
+```
+
+**The reply is verified, not trusted.** An `/embeddings` reply carries
+`data: [{ index, embedding }]`, and providers do answer a batch out of order. The client
+reassembles the items by `index` into input order and refuses the reply — `AI0003`, naming
+the input — unless exactly one non-empty vector of finite numbers, of the expected width,
+arrived per input. An embedding attached to the wrong text is worse than an error, and this
+is the one place in the suite that rule is enforced.
+
+**A vector never travels without its identity.** Vectors from two models are pairwise
+meaningless and compare into plausible garbage, so the client carries `model` and `dims`:
+`dims` is either configured up front or fixed by the first reply, and every later reply is
+held to it — a model that changed width under the same name is refused, never mixed.
+
+**Retries and timeouts follow `complete()`.** Transient failures (network, 408, 429, 5xx, a
+malformed 200) back off with the same `retry` option and the same `Retry-After` cap; an abort
+ends everything at once. There is no default timeout, as `complete()` has none — a batch of
+long texts on a local runtime legitimately takes a while; `timeoutMs` bounds each attempt when
+you want one, and a timed-out attempt retries like a network failure.
+
+**Probe before relying on it.** `probeEmbeddings({ provider, baseUrl, apiKey, model })` embeds
+one word in one attempt (5 000 ms, as `probeProvider`) and never throws:
+`{ ok: true, model, dims }` or `{ ok: false, status?, error }` — the contract for a settings
+UI, and the live proof that a provider really serves `/embeddings`.
+
+**The seam.** Everything in this package that consumes embeddings is written against three
+members — `{ embed(texts, { signal }) → Promise<Float32Array[]>, model, dims }` — and anything
+that implements them plugs in: the wire client above, a local transformer runtime, a native
+embedding library. This package ships no model weights, no tokenizer and no download, and
+publishes no opinion on which embedding model is good; embedding *quality* belongs to the
+provider and the host.
+
+**The reference embedder is demo-grade, and says so.** `createHashEmbedder({ dims = 64 })`
+implements the seam with hashed character trigrams (FNV-1a into `dims` buckets, l2-normalized)
+— deterministic, dependency-free, network-free, identity `hash-trigram-<dims>`. It is
+**lexical, not semantic**: two texts score high when they share letters, not when they mean the
+same thing. It exists so that tests and offline demos exercise retrieval *mechanics* without a
+network; it is not a substitute for a model.
+
+The arithmetic — dot, cosine and Euclidean similarity (higher-is-better, a malformed pair
+scores 0 and never throws), l2 normalization, the packed little-endian Float32 form and the
+`isVector` shape guard — lives in [`@jarenjs/core/vector`](../core/README.md#vectors), the
+suite's one home for it.
+
 ## Structured output
 
 ```js
@@ -962,8 +1025,10 @@ are collected here so nobody has to rediscover them the hard way.
 - **Heartbeats and scheduling are the host's.** Re-entering a session on a timer is a
   browser, worker or cron concern; the ledger plus `agent.resume()` is the primitive, and
   keeping the scheduler out is what lets the same agent run in a static page.
-- **Retrieval is tag-and-recency.** No embeddings, no ranker — and no measurement saying one
-  is needed. The honest next step is an instrument before an implementation.
+- **Retrieval is tag-and-recency.** The ledger ranks nothing by meaning yet. The embeddings
+  wire and the kernels exist (§Embeddings), and the retrieval instrument in `benchmark/`
+  now scores what today's `recall()` puts in the prompt — but no ranker is wired into
+  `recall()` until that instrument says what one buys, published whichever way it falls.
 - **On the cheap tier, the transport is the fragile part, not the reasoning.** In the
   campaign's own live run the qwen tier answered every sub-call it was given and named the
   right pair; what failed was authoring calls dying on a 300-second deadline. The full

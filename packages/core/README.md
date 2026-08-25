@@ -1,6 +1,6 @@
 # @jarenjs/core
 
-The zero-dependency foundation of [Jaren](https://github.com/jklarenbeek/jarenjs). Everything the rest of the suite is built on lives here — type guards, Unicode-aware string handling, a large text-validation toolbox, number range helpers, fixed-point and vector math, the calendar kernel, the spatial kernel, the message-catalog compiler, unit/currency conversion and a finance library.
+The zero-dependency foundation of [Jaren](https://github.com/jklarenbeek/jarenjs). Everything the rest of the suite is built on lives here — type guards, Unicode-aware string handling, a large text-validation toolbox, number range helpers, fixed-point and vector math, the calendar kernel, the spatial kernel, the vector kernel, the message-catalog compiler, unit/currency conversion and a finance library.
 
 None of it depends on JSON Schema: every module can be used standalone in any JavaScript project.
 
@@ -23,6 +23,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/bigint` | bigint helpers (`BigInt_min`, `BigInt_MinMax`, ...) |
 | `@jarenjs/core/dates` | RFC 3339 / ISO 8601 validation, plus the calendar kernel: integer date arithmetic, compiled formatting, durations |
 | `@jarenjs/core/geo` | the spatial kernel over GeoJSON: robust orientation, great-circle measurement, rings, bounding boxes, geohash, GeoJSON/WKT validity, a packed-Hilbert box index, Web Mercator and Douglas-Peucker simplification |
+| `@jarenjs/core/vector` | the vector kernel over plain arrays: dot, cosine and Euclidean similarity (higher-is-better; a malformed pair scores 0), l2 normalization, the packed little-endian Float32 form and the one shape guard (`isVector`) |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the linear `remap` and unit-interval `clamp01` |
 | `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
@@ -99,6 +100,28 @@ Four design decisions carry the module:
 - **WKT is one grammar walk with two entry points.** `isValidWkt` and `wktToGeoJson` run the *same* scan, parameterized by a sink that is absent for the predicate and present for the parser — so the `wkt` format tester (which runs per value in the validator and per keystroke in the form layer) allocates nothing, and the two cannot drift apart. A committed corpus asserts `isValidWkt(s) === (wktToGeoJson(s) !== null)` for all 181 entries, malformed half included. `geoJsonToWkt` writes the string back, and `wktToGeoJson(geoJsonToWkt(g))` returns `g`; the text direction is *not* claimed, because whitespace, the `M` measure and number spelling are normalized. Against [`wellknown`](https://www.npmjs.com/package/wellknown) the parse is 3.1× faster on a `POINT` and the yes-or-no answer 5.4× — and wellknown *validates less* while being slower, which is the honest framing; the table and every language difference are in [ARCHITECTURE](./ARCHITECTURE.md).
 
 The spatial query operators (`$distance`, `$within`, `$geohash`, spatial joins over the box index) live in the query engine in [`@jarenjs/json`](../json); the streaming map chart that draws a FeatureCollection with bounded memory lives in [`@jarenjs/charts`](../../components/charts). The full module reference is [docs/GEO.md](./docs/GEO.md).
+
+## Vectors
+
+`@jarenjs/core/vector` is the suite's one home for n-dimensional vector arithmetic — the kernels an embedding is compared, normalized and stored with. As with GeoJSON positions, there is no vector type: a vector is a plain array of finite numbers, `number[]` straight out of JSON or a `Float32Array` straight out of a packed column, so it survives a ledger record, a document store and a wire reply unchanged.
+
+```javascript
+import { cosineSimilarity, l2Normalize, packVector, unpackVector, isVector } from '@jarenjs/core/vector';
+
+cosineSimilarity([1, 0], [1, 1]);              // 0.7071… — higher is better, in [-1, 1]
+cosineSimilarity([1, 0], [1, 0, 0]);           // 0 — a malformed pair scores 0, never throws
+const bytes = packVector(l2Normalize([3, 4])); // Uint8Array of 8 bytes: little-endian binary32
+unpackVector(bytes, 2);                        // Float32Array [0.6, 0.8]
+isVector([0.1, NaN]);                          // false — the shape guard every consumer shares
+```
+
+Three rules, kept by every function so that no caller has to check them again:
+
+- **Higher is better, in every metric.** Cosine answers in [-1, 1], the dot product is unbounded, Euclidean similarity is `1 / (1 + distance)` in (0, 1] — so one descending sort ranks any of them, and nobody remembers which way a metric sorts.
+- **A malformed comparison scores 0 and never throws.** Mismatched lengths, an empty vector, a null or a non-finite component answer 0: one bad vector among ten thousand loses the comparison, it does not kill the sweep, and it never poisons a ranking with `NaN`.
+- **Refuse, never fix.** `packVector` and `l2Normalize` answer `null` for anything `isVector` refuses, the way a bounding box refuses a position it cannot bound; nothing truncates, pads or zero-fills a vector into the shape it was supposed to have.
+
+The packed form is `4·d` bytes of little-endian binary32 — the value a database column stores; components round to `Math.fround` and come back exactly. Unpacking aligned bytes on a little-endian host is a *view*, not a copy, which is what a sweep over ten thousand fetched rows is paid for by; misaligned bytes (a pooled `Buffer`, an odd offset into a record) and big-endian hosts take the copy path to the same values. The client that produces embeddings — and a deterministic reference embedder for tests — lives in [`@jarenjs/ai`](../ai/README.md#embeddings).
 
 ## Messages
 

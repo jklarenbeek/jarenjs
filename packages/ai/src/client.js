@@ -13,6 +13,9 @@
 
 import { AiError } from './errors.js';
 import { resolveEndpoint } from './providers.js';
+import {
+  normalizeRetry, withRetry, isTransientFailure, httpFailure, transportFailure,
+} from './retry.js';
 import { createSseDecoder } from './sse.js';
 
 /**
@@ -152,92 +155,6 @@ function completionFromText(text) {
 }
 
 /**
- * @param {any} response
- * @returns {Promise<string>} a short excerpt of the error body
- */
-async function readErrorExcerpt(response) {
-  try {
-    const text = await response.text();
-    return text.length > 300 ? `${text.slice(0, 300)}…` : text;
-  }
-  catch {
-    return '';
-  }
-}
-
-//#region retry policy
-
-/** Statuses worth a retry: timeout, rate limit, server-side failure. */
-function isRetryableStatus(status) {
-  return status === 0 || status === 408 || status === 429 || status >= 500;
-}
-
-/**
- * Parse a `Retry-After` header (delta-seconds or HTTP-date) into ms.
- * @param {any} response
- * @returns {number | undefined}
- */
-function retryAfterMs(response) {
-  const raw = response?.headers?.get?.('retry-after');
-  if (raw == null || raw === '') return undefined;
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-  const date = Date.parse(raw);
-  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
-  return undefined;
-}
-
-/**
- * Abortable delay. Rejects with the abort reason so an abort during
- * backoff surfaces exactly like an abort during the request.
- * @param {number} ms
- * @param {AbortSignal} [signal]
- * @returns {Promise<void>}
- */
-function defaultSleep(ms, signal) {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(abortError(signal));
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener?.('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort() {
-      clearTimeout(timer);
-      reject(abortError(signal));
-    }
-    signal?.addEventListener?.('abort', onAbort, { once: true });
-  });
-}
-
-/** The abort reason, or a platform-shaped AbortError. */
-function abortError(signal) {
-  if (signal?.reason !== undefined) return signal.reason;
-  const err = new Error('The operation was aborted.');
-  err.name = 'AbortError';
-  return err;
-}
-
-/**
- * @param {{ attempts?: number, baseMs?: number, maxMs?: number,
- *   random?: () => number,
- *   sleep?: (ms: number, signal?: AbortSignal) => Promise<void> } | undefined} retry
- */
-function normalizeRetry(retry) {
-  return {
-    attempts: Math.max(1, retry?.attempts ?? 3),
-    baseMs: retry?.baseMs ?? 500,
-    maxMs: retry?.maxMs ?? 8000,
-    random: retry?.random ?? Math.random,
-    sleep: retry?.sleep ?? defaultSleep,
-  };
-}
-
-//#endregion
-
-/**
  * @typedef {Object} ChatRequest
  * @property {any[]} messages - OpenAI wire-shape messages
  * @property {any[]} [tools] - OpenAI function-tool definitions
@@ -273,9 +190,7 @@ function normalizeRetry(retry) {
  *   fetch?: typeof fetch, maxTokens?: number,
  *   reasoning?: { effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high',
  *     enabled?: boolean, exclude?: boolean, max_tokens?: number },
- *   retry?: { attempts?: number, baseMs?: number, maxMs?: number,
- *     random?: () => number,
- *     sleep?: (ms: number, signal?: AbortSignal) => Promise<void> } }} [options]
+ *   retry?: import('./retry.js').RetryOptions }} [options]
  *   - `reasoning` is the default thinking control for every request (see
  *     `ChatRequest.reasoning`); a per-request value overrides it.
  *   - `retry.attempts` is the TOTAL number of tries (default 3; 1
@@ -348,17 +263,9 @@ export function createChatClient(options = {}) {
       });
     }
     catch (err) {
-      if (/** @type {any} */ (err)?.name === 'AbortError') throw err;
-      throw new AiError('AI0002',
-        `network error calling ${endpoint.url}: ${/** @type {any} */ (err)?.message ?? err}`,
-        { status: 0, cause: err });
+      throw transportFailure(err, endpoint.url);
     }
-    if (response.ok !== true) {
-      const excerpt = await readErrorExcerpt(response);
-      throw new AiError('AI0002',
-        `HTTP ${response.status} from ${endpoint.url}${excerpt === '' ? '' : `: ${excerpt}`}`,
-        { status: response.status, retryAfterMs: retryAfterMs(response) });
-    }
+    if (response.ok !== true) throw await httpFailure(response, endpoint.url);
     if (!stream) return fromCompletion(await response.json());
 
     const decoder = createSseDecoder();
@@ -433,39 +340,16 @@ export function createChatClient(options = {}) {
     if (model === '' || model == null)
       throw new AiError('AI0001', 'no model configured — set one in the client options or the request');
 
-    // the retry loop: transient transport failures (network, 408, 429,
-    // 5xx) back off and try again — but never after the caller has
-    // observed streamed output, and never past an abort
+    // transient transport failures (network, 408, 429, 5xx) and a
+    // malformed 200 — no choices, a bad chunk — back off and try again
+    // through the shared policy; the one judgment that is this wire's
+    // own is the `!state.delivered` guard, which keeps a retry from ever
+    // re-sending after the caller has observed streamed output
     const state = { delivered: false };
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return await attemptOnce(request, state);
-      }
-      catch (err) {
-        const failure = /** @type {any} */ (err);
-        // AI0002 with a transient status (network/408/429/5xx) retries;
-        // so does AI0003 — a 200 that carried no choices, or a malformed
-        // chunk, is a transient provider hiccup (common on busy cheap
-        // models), safe to retry precisely because it means nothing was
-        // delivered. The `!state.delivered` guard keeps both from ever
-        // re-sending after the caller has observed streamed output.
-        const retryable = failure instanceof AiError
-          && (failure.code === 'AI0003'
-            || (failure.code === 'AI0002' && isRetryableStatus(failure.status ?? -1)))
-          && !state.delivered
-          && attempt < retry.attempts;
-        if (!retryable) {
-          if (failure instanceof AiError && (failure.code === 'AI0002' || failure.code === 'AI0003'))
-            failure.attempts = attempt;
-          throw err;
-        }
-        const backoff = Math.min(retry.maxMs, retry.baseMs * 2 ** (attempt - 1));
-        const delay = failure.retryAfterMs !== undefined
-          ? Math.min(retry.maxMs, failure.retryAfterMs)
-          : backoff * (0.5 + 0.5 * retry.random());
-        await retry.sleep(delay, signal);
-      }
-    }
+    return withRetry(retry, () => attemptOnce(request, state), {
+      signal,
+      retryable: (failure) => isTransientFailure(failure) && !state.delivered,
+    });
   }
 
   return { endpoint, complete };

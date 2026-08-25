@@ -63,6 +63,25 @@ describe('ai — the dependency contract (D3)', function () {
     }
   });
 
+  it('the embeddings client and the shared retry policy import nothing outside those two', function () {
+    // the pointed case again: every vector kernel the embedder needs
+    // lives in `@jarenjs/core/vector` and its reference hash in
+    // `@jarenjs/core/string` — a second dot product or a second FNV-1a
+    // here is exactly what the one-implementation rule forbids, and a
+    // heavier embedding runtime is a host injection through the seam
+    for (const file of ['embed.js', 'retry.js']) {
+      const source = readFileSync(
+        new URL(`../../packages/ai/src/${file}`, import.meta.url), 'utf8');
+      for (const match of source.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gms)) {
+        const specifier = match[1];
+        if (specifier.startsWith('.')) continue;
+        const pkg = specifier.split('/').slice(0, 2).join('/');
+        assert.ok(['@jarenjs/core', '@jarenjs/validate'].includes(pkg),
+          `${file} imports '${specifier}' — inject it instead`);
+      }
+    }
+  });
+
   it('the ledger, refinement and their schemas import nothing outside those two', function () {
     // the manifest is a claim; the source is the fact. A relative import
     // is this package's own code, a bare specifier is a dependency.

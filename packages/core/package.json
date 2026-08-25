@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.44.1",
+  "version": "0.44.2",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -79,6 +79,10 @@
     "./geo/*": {
       "types": "./dist/types/geo/*.d.ts",
       "default": "./src/geo/*.js"
+    },
+    "./vector": {
+      "types": "./dist/types/vector/index.d.ts",
+      "default": "./src/vector/index.js"
     },
     "./function": {
       "types": "./dist/types/function.d.ts",

@@ -126,6 +126,10 @@ flowchart TB
             GeoMerc["mercator.js + simplify.js<br/>Projection out, simplification"]
         end
 
+        subgraph VectorModule["Vectors"]
+            VectorIndex["vector/index.js<br/>Similarity kernels, normalization, packed form"]
+        end
+
         subgraph MathModules["Mathematics"]
             MathIndex["math/index.js"]
             Int32Math["int32.js<br/>Fixed-point math"]
@@ -205,6 +209,7 @@ flowchart TB
     style MathModules fill:#ffccbc
     style DateModule fill:#fff9c4
     style GeoModule fill:#b2dfdb
+    style VectorModule fill:#b2dfdb
 ```
 
 ---
@@ -676,6 +681,31 @@ haversineDistance(4.9041, 52.3676, 2.3522, 48.8566);  // 429_862 m
 ringWinding([[0,0],[1,0],[1,1],[0,1],[0,0]]);  // 1 — RFC 7946 exterior ring
 geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string, so $starts-with is proximity
 ```
+
+### 5c. Vector Module (`vector/`)
+
+The suite's one home for n-dimensional vector arithmetic — what an embedding
+is compared, normalized and stored with. As with geo, **there is no vector
+type**: a vector is a plain array of finite numbers (`number[]` out of JSON, a
+`Float32Array` out of a packed column), so it survives every JSON boundary
+it travels through. One file, seven functions, three rules every consumer
+relies on: similarity is *higher-is-better* in every metric; a malformed
+comparison (mismatched lengths, empty, null, non-finite) *scores 0 and never
+throws*; and the constructors (`packVector`, `l2Normalize`) *refuse with
+null* rather than truncate, pad or zero-fill.
+
+| Function | Owns |
+|---|---|
+| `isVector(v, dims?)` | the one shape guard — array or float typed array, all finite, optionally an exact width |
+| `dotProduct`, `cosineSimilarity`, `euclideanSimilarity` | the similarity kernels; cosine is the one the suite ranks by |
+| `l2Normalize` | the unit vector, as a new `Float32Array` — the stored form, so cosine, dot and Euclidean agree in rank |
+| `packVector`, `unpackVector` | the little-endian binary32 column form; an aligned unpack is a view, a misaligned one a copy |
+
+The comparison kernels do not re-check components — that is the gate's job,
+once, at the boundary — and they keep their loops tight for the sweep that is
+their reason to exist; they guarantee a finite answer. The fixed-arity vector
+classes in `math/` (`Vec2f64`, `Vec3f64`) are 2D/3D geometry with a
+different convention and a different job, and they stay where they are.
 
 ### 6. Text Module (`text/`)
 
