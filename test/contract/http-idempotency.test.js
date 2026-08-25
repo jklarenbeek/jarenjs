@@ -19,7 +19,7 @@ import { compileContract } from '@jarenjs/contract';
 import { serveHttp } from '@jarenjs/contract/http';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { canonicalSha256 } from '@jarenjs/json/canonical';
-import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
+import { load, shopHandlers, req, jsonReq, json, parkedHandler } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
 const SAVE = { revision: 1, product: { id: 1, name: 'x', price: 1 } };
@@ -72,15 +72,15 @@ describe('idempotency — the binding over the memory ledger', () => {
   });
 
   it('a concurrent second request while the first is in flight → 409 in-progress with retry-after; afterwards it replays', async () => {
-    let release = () => {};
-    const gate = new Promise((resolve) => { release = () => resolve(undefined); });
-    const { server } = serve({ 'product.save': async () => { await gate; return { id: 1, name: 'x', price: 1 }; } });
+    const parked = parkedHandler({ id: 1, name: 'x', price: 1 });
+    const { server } = serve({ 'product.save': parked.handler });
     const first = server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));
+    await parked.running; // the first request holds the key before the second asks
     const second = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));
     assert.strictEqual(second.status, 409);
     assert.strictEqual(json(second).retryable, true);
     assert.strictEqual(second.headers['retry-after'], '1');
-    release();
+    parked.release();
     const done = await first;
     assert.strictEqual(done.status, 200);
     const third = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));

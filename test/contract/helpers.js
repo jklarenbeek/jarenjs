@@ -140,4 +140,33 @@ export function json(response) {
   return response.body === null ? null : JSON.parse(typeof response.body === 'string' ? response.body : new TextDecoder().decode(response.body));
 }
 
+/**
+ * A handler parked mid-run, for the in-flight idempotency tests: it
+ * reports that it is RUNNING, then waits to be released. `running`
+ * settles only once the binding has claimed the key and invoked the
+ * handler — the one moment a second request provably meets the key in
+ * progress. The claim sits behind an asynchronous digest
+ * (`canonicalSha256`), and two concurrent digests settle in either order
+ * under load, so a test that merely dispatches the first request and then
+ * the second is a race: when the second claims first, the test awaits a
+ * response that waits on the gate the test releases afterwards.
+ * @param {unknown} result - what the handler returns once released
+ * @returns {{ handler: () => Promise<unknown>, running: Promise<void>, release: () => void }}
+ */
+export function parkedHandler(result) {
+  /** @type {() => void} */
+  let started = () => {};
+  /** @type {() => void} */
+  let release = () => {};
+  /** @type {Promise<void>} */
+  const running = new Promise((resolve) => { started = () => resolve(undefined); });
+  /** @type {Promise<void>} */
+  const gate = new Promise((resolve) => { release = () => resolve(undefined); });
+  return {
+    handler: async () => { started(); await gate; return result; },
+    running,
+    release,
+  };
+}
+
 //#endregion

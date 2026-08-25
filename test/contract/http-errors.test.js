@@ -21,7 +21,7 @@ import { CLIENT_ERRORS } from '@jarenjs/contract/client';
 import { PORT_LOCAL_ERRORS } from '@jarenjs/contract/port';
 import { STREAM_ERRORS } from '@jarenjs/contract/stream';
 import { nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar } from '@jarenjs/locales';
-import { load, shopHandlers, req, jsonReq, json } from './helpers.js';
+import { load, shopHandlers, req, jsonReq, json, parkedHandler } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
 const FORMAT_DOC = new URL('../../packages/contract/docs/CONTRACT-FORMAT.md', import.meta.url);
@@ -139,14 +139,14 @@ describe('the wire-error taxonomy — one test per row', () => {
   });
 
   it('JC2009 409 idempotency conflict: in-progress (retryable, retry-after) and mismatch (details kind)', async () => {
-    let release = () => {};
-    const gate = new Promise((resolve) => { release = () => resolve(undefined); });
-    const server = serve({ 'product.save': async () => { await gate; return { id: 1, name: 'x', price: 1 }; } });
+    const parked = parkedHandler({ id: 1, name: 'x', price: 1 });
+    const server = serve({ 'product.save': parked.handler });
     const first = server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'same' }));
+    await parked.running; // the first request holds the key before the second asks
     const second = await server.dispatch(jsonReq('PUT', '/api/products/1/master', SAVE, { 'idempotency-key': 'same' }));
     wireError(second, 'JC2009', 409, true);
     assert.strictEqual(second.headers['retry-after'], '1');
-    release();
+    parked.release();
     assert.strictEqual((await first).status, 200);
     const mismatch = await server.dispatch(jsonReq('PUT', '/api/products/1/master', { ...SAVE, revision: 2 }, { 'idempotency-key': 'same' }));
     const body = wireError(mismatch, 'JC2009', 409, false);
