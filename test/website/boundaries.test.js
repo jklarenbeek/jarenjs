@@ -140,6 +140,32 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /flatbush/, 'the index rival is named');
   });
 
+  it('derives the retrieval suite, with the oracle proof and the synthetic-corpus note in view', function () {
+    const data = loadBench('retrieval');
+    const state = { benchStatus: { retrieval: 'loaded' }, bench: { retrieval: data }, benchUi: {} };
+    const nodes = deriveSuite(state, 'retrieval');
+    const text = JSON.stringify(nodes);
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    assert.match(text, /oracle \(gold first\)/, 'the oracle row renders — it is the scorer\'s proof');
+    assert.match(text, /tag\+recency/, 'the incumbent renders');
+    assert.match(text, /random floor \(analytic\)/, 'the floor renders beside the seeded draw');
+    // the page says what the numbers are and are not: a mechanism over a
+    // synthetic corpus, never a claim about a model understanding language
+    assert.match(text, /synthetic/, 'the headline says the corpus is synthetic');
+    assert.match(text, /not whether a model understands language/);
+    assert.strictEqual(data.tables.length, data.meta.sizes.length, 'one table per corpus size');
+    // and the published rows carry the contract every later measurement
+    // states its delta against: the oracle is 1.0 at every size, and
+    // every policy is one of the four plus the analytic floor
+    for (const size of data.meta.sizes) {
+      const oracle = data.rows.find((r) => r.size === size && r.policy === 'oracle');
+      assert.ok(oracle !== undefined);
+      assert.deepStrictEqual([oracle.recallAt1, oracle.recallAt5, oracle.recallAt10, oracle.mrr], [1, 1, 1, 1]);
+      for (const key of ['random', 'recency', 'tag+recency', 'floor'])
+        assert.ok(data.rows.some((r) => r.size === size && r.policy === key), `${key} row at ${size}`);
+    }
+  });
+
   it('derives the long-horizon suite, keeping both tasks and both shapes', function () {
     const data = loadBench('long-horizon');
     const state = { benchStatus: { 'long-horizon': 'loaded' }, bench: { 'long-horizon': data }, benchUi: {} };

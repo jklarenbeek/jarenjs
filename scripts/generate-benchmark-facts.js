@@ -657,6 +657,31 @@ const FACTS = {
     return ['', '| engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |',
       '| --- | --- | --- | --- | --- |', ...rows, ''].join('\n');
   },
+
+  // -- retrieval: the instrument's own shape, then the number a ranker
+  // would have to beat. Every figure names its corpus size and policy —
+  // the suite is a grid, and a number without both coordinates is
+  // whichever row sorted first.
+  'retrieval.corpus': () => {
+    const meta = data('retrieval').meta;
+    return `${meta.facts} facts over ${meta.topics} topic vocabularies, ${meta.questions} questions`;
+  },
+  'retrieval.incumbent': () => {
+    const { meta, rows } = data('retrieval');
+    const large = meta.sizes[meta.sizes.length - 1];
+    const small = meta.sizes[0];
+    const at = (size, policy) => {
+      const row = rows.find((r) => r.size === size && r.policy === policy);
+      if (row === undefined) throw new Error(`retrieval.json has no ${policy} row at ${size} memories — regenerate it before quoting one`);
+      return row;
+    };
+    const pct = (x) => `${(100 * x).toFixed(1)}%`;
+    const memories = (n) => n.toLocaleString('en-US');
+    return `${memories(large)} memories today's recall puts a gold memory in the top 10 for`
+      + ` ${pct(at(large, 'tag+recency').recallAt10)} of questions (recency alone`
+      + ` ${pct(at(large, 'recency').recallAt10)}, a random draw ${pct(at(large, 'random').recallAt10)});`
+      + ` at ${memories(small)} memories the same policy reaches ${pct(at(small, 'tag+recency').recallAt10)}`;
+  },
 };
 
 //#region rewriting
@@ -664,6 +689,7 @@ const FACTS = {
 const DOCS = [
   'README.md',
   'docs/ROADMAP.md',
+  'benchmark/README.md',
   'packages/contract/README.md',
   'components/md/README.md',
   'components/mermaid/README.md',

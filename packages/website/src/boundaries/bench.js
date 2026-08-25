@@ -49,6 +49,7 @@ export const SUITES = [
   { key: 'orm', label: 'ORM' },
   { key: 'live', label: 'Live' },
   { key: 'long-horizon', label: 'Long horizon' },
+  { key: 'retrieval', label: 'Retrieval' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -85,6 +86,7 @@ export function deriveSuite(state, suite) {
     case 'orm': return ormSuite(data);
     case 'live': return liveSuite(data);
     case 'long-horizon': return scoreTables(data);
+    case 'retrieval': return scoreTables(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }

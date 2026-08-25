@@ -59,7 +59,7 @@ export function siteContract() {
  * `bench.suite` answers exactly one of them, so a generator writing a
  * suite file can be held to ITS shape rather than to the whole union —
  * which is the difference between a refusal that names the member at
- * fault and one that lists twenty-one ways the payload is not something
+ * fault and one that lists twenty-two ways the payload is not something
  * else. The name is derived from the suite key, and the website test
  * suite pairs the two sets so neither can grow a member alone.
  * @param {string} suite - a suite key, e.g. `'long-horizon'`.

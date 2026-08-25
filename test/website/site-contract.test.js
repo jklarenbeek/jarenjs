@@ -500,7 +500,7 @@ describe('the generators write nothing the site could not read', function () {
       assert.strictEqual(serializeSuite(key, payload), JSON.stringify(payload),
         `the committed ${key}.json passes the shape the site reads it through`);
     }
-    // the refusal names the ONE shape at fault, not twenty-one ways the
+    // the refusal names the ONE shape at fault, not twenty-two ways the
     // payload is not something else
     assert.throws(() => serializeSuite('charts', { ...read('public/benchmarks/charts.json'), extra: 1 }),
       (/** @type {Error} */ error) => {

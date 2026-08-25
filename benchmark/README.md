@@ -30,6 +30,7 @@ number in a README performance table names the command that produced it.
 | [`flow-fsm.js`](./flow-fsm.js) | FSM compile/transition vs XState v5 + the serializability wedge | Benchmarking `@jarenjs/flow` machines |
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
 | [`long-horizon.js`](./long-horizon.js) | What survives `@jarenjs/ai`'s history compaction — needle + pairwise, ceiling and live model | Measuring agent context retention |
+| [`retrieval.js`](./retrieval.js) | Did the right memory reach the prompt — recall@k and MRR for `@jarenjs/ai`'s recall policies over a seeded corpus, against an oracle | Measuring ledger retrieval, before and after any ranker |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
@@ -682,6 +683,66 @@ The generated file is `packages/website/public/benchmarks/long-horizon.json`
 (`npm run benchmark:generate` writes it, and the Benchmarks page renders it).
 A keyless regeneration republishes it with empty `actual` columns and the skip
 reason in its own metadata, rather than keeping numbers it did not measure.
+
+## retrieval.js — did the right memory reach the prompt
+
+`@jarenjs/ai`'s `recall()` is tag match and recency, and there is deliberately
+no ranker because no measurement said one was needed. This is the measurement.
+Over a seeded ledger corpus with gold labels it scores, per policy, whether the
+right memory reached the prompt — recall@1/5/10 (a gold memory in the top k),
+MRR (the reciprocal rank of the best-ranked gold memory) and the latency of one
+recall call — for the policies that exist today, against an oracle ceiling. Four
+rows, at two corpus sizes:
+
+- **oracle** — the gold ids first. The 1.000 row that proves the scorer, and the
+  first thing the run asserts, before it prints anything;
+- **random** — a seeded draw, asserted to sit inside its analytic band (k/n,
+  adjusted for questions with more than one gold memory);
+- **recency** — the newest k, which is what `recall()` answers with no tags;
+- **tag+recency** — the incumbent: the question's words that are corpus tags,
+  fed to the real `ledger.recall({ tags, limit })` over a real ledger loaded
+  through `addMemory`. Nothing is simulated; the row scores the shipped code path.
+
+The corpus ([`fixtures/retrieval-corpus.json`](./fixtures/retrieval-corpus.json),
+written by `scripts/generate-retrieval-corpus.js`, seeded and byte-identical run
+to run — a test proves it) is **synthetic**: <!--bm:retrieval.corpus-->240 facts over 20 topic vocabularies, 160 questions<!--/bm-->,
+one gold memory per fact, and distractors built to defeat one cheap signal each —
+the same tag with a different fact, and the same words with a different fact.
+A quarter of the questions never name their topic, which is the honest failure
+mode of any policy that starts from a tag; some questions have one gold memory
+and some two or three, so recall@k is not trivially recall@1. The memory list is
+a prefix design: the first 1 000 records are the small corpus and all 10 000 the
+large one, so one question set scores both sizes.
+
+What it measured — and it is the number a ranker would have to beat — is
+that over <!--bm:retrieval.incumbent-->10,000 memories today's recall puts a gold memory in the top 10 for 1.3% of questions (recency alone 0.0%, a random draw 0.0%); at 1,000 memories the same policy reaches 17.5%<!--/bm-->.
+Read the rows as mechanism, not language: they say whether a POLICY can find the
+right record among distractors, and nothing about whether any model understands
+a question — no row involves one.
+
+```bash
+node benchmark/retrieval.js                         # both sizes, the table
+npm run benchmark:retrieval                         # the same
+node benchmark/retrieval.js --sizes 1000 --verbose  # one size, plus every question the incumbent missed
+node benchmark/retrieval.js --output json --filepath out.json
+```
+
+`--live` is reserved, and its contract is fixed now so a ranked policy extends
+it rather than inventing a flag: when a policy exists that ranks by an
+embedding, `--live` scores it through the provider [`lib/env.js`](./lib/env.js)
+resolves, prints the model id beside its row and leaves the deterministic rows
+untouched. No such policy exists yet, so the flag is accepted, the run says it
+did nothing with it, and the deterministic table is the whole run — never a test
+dependency, and a missing key is never a failure.
+
+The corpus and the scorer have their own tests in
+`test/ai/retrieval-corpus.test.js`: the generator's two-run byte-identity and
+its agreement with the committed fixture, the corpus invariants (every gold id
+exists inside the smallest prefix; every fact is asked exactly once), the oracle
+and random gates, and a kill-check that the gate refuses a broken oracle.
+
+The generated file is `packages/website/public/benchmarks/retrieval.json`
+(`npm run benchmark:generate` writes it, and the Benchmarks page renders it).
 
 ## qt3-runner.js — the W3C QT3 scorecard
 

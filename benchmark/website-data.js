@@ -30,7 +30,8 @@
  *   orm.json          orm.js            — entities + graph loads vs Prisma/Drizzle/Kysely (Node + Bun)
  *   live.json         live.js           — live queries/capture/jobs vs RxDB/TinyBase (incremental vs re-run)
  *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
- *   meta.json                           — run metadata, conformance summary, QT3 scorecard
+ *   retrieval.json    retrieval.js      — did the right memory reach the prompt: recall@k + MRR per policy, oracle-gated
+ *   meta.json                          — run metadata, conformance summary, QT3 scorecard
  *
  * meta.json is the one file here whose shape the website declares: it is
  * written through `serializeMeta`, which proves the assembled record
@@ -106,7 +107,7 @@ function parseArgs(argv) {
       }
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, orm, live, long-horizon, retrieval, qt3');
         process.exit(0);
         break;
       default:
@@ -869,7 +870,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'contract', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'orm', 'live', 'long-horizon',
+  'orm', 'live', 'long-horizon', 'retrieval',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -1183,6 +1184,35 @@ function buildHeadlines(generated, meta) {
       });
     }
   }
+  if (generated.retrieval !== undefined) {
+    // This suite measures RETRIEVAL, not speed: whether the ledger's
+    // recall put the right memory in the prompt. No rival engine is
+    // timed, so no ratio — and it sits on the overview for the same
+    // reason long-horizon does: a summary that skipped a published
+    // suite would be a count that cannot be checked.
+    const rows = generated.retrieval.rows ?? [];
+    const sizes = generated.retrieval.meta?.sizes ?? [];
+    const n = sizes[sizes.length - 1];
+    const at = (policy) => rows.find((r) => r.size === n && r.policy === policy);
+    const incumbent = at('tag+recency');
+    const recency = at('recency');
+    const random = at('random');
+    const oracle = at('oracle');
+    if (n !== undefined && incumbent !== undefined && recency !== undefined
+      && random !== undefined && oracle !== undefined) {
+      const pct = (x) => `${(x * 100).toFixed(1)}%`;
+      add('retrieval', 'Retrieval', {
+        ratio: null,
+        rival: 'random and recency',
+        conformance: `oracle ${pct(oracle.recallAt10)}`,
+        note: `retrieval mechanics, not speed: over ${n.toLocaleString('en-US')} synthetic memories,`
+          + ` today's recall (tag match, then recency) puts a gold memory in the top 10 for`
+          + ` ${pct(incumbent.recallAt10)} of questions; recency alone ${pct(recency.recallAt10)}, a`
+          + ` random draw ${pct(random.recallAt10)}. No ranker exists yet — this is the number one`
+          + ' would have to beat; see the suite page',
+      });
+    }
+  }
   return out;
 }
 
@@ -1314,6 +1344,26 @@ function generateLongHorizon(tmp, options) {
   }
   // the entry point already emits the published document — passing it
   // through keeps one definition of the file's shape
+  return readJson(file);
+}
+
+/**
+ * The retrieval suite: whether `@jarenjs/ai`'s recall puts the right
+ * memory in the prompt, scored over the committed synthetic corpus.
+ * Deterministic and model-free — only the latency columns depend on the
+ * machine — and it gates its own scorer (the oracle row must be 1.000)
+ * before it writes anything. `--live` is not passed: the flag is
+ * reserved for a ranked policy, and none exists.
+ */
+function generateRetrieval(tmp) {
+  const file = path.join(tmp, 'retrieval.json');
+  try {
+    runTool(['benchmark/retrieval.js', '--output', 'json', '--filepath', file]);
+  }
+  catch (e) {
+    console.warn(`  warning: retrieval run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
   return readJson(file);
 }
 
@@ -1505,6 +1555,11 @@ async function main() {
     const horizon = generateLongHorizon(tmp, options);
     if (horizon !== null)
       generated['long-horizon'] = horizon;
+  }
+  if (!options.skip.has('retrieval')) {
+    const retrieval = generateRetrieval(tmp);
+    if (retrieval !== null)
+      generated.retrieval = retrieval;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

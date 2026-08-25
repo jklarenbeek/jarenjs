@@ -915,6 +915,76 @@
       },
       "additionalProperties": false
     },
+    "SuiteRetrieval": {
+      "description": "retrieval.json — the retrieval instrument: the run meta (the corpus seed and sizes, the question counts, the reserved live tier's skip reason and the synthetic-corpus note), the headline, one table per corpus size and one row per policy per size.",
+      "type": "object",
+      "required": ["meta", "headline", "tables", "rows"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["suite", "title", "description", "date", "node", "seed", "policySeed", "sizes", "ks", "topics", "facts", "questions", "untagged", "liveSkipped", "note"],
+          "properties": {
+            "suite": { "type": "string" },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "date": { "type": "string" },
+            "node": { "type": "string" },
+            "seed": { "type": "number" },
+            "policySeed": { "type": "number" },
+            "sizes": { "type": "array" },
+            "ks": { "type": "array" },
+            "topics": { "type": "number" },
+            "facts": { "type": "number" },
+            "questions": { "type": "number" },
+            "untagged": { "type": "number" },
+            "liveSkipped": { "type": "string" },
+            "note": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "headline": {
+          "type": "object",
+          "required": ["title", "text"],
+          "properties": { "title": { "type": "string" }, "text": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "head", "rows", "note"],
+            "properties": {
+              "title": { "type": "string" },
+              "head": { "type": "array" },
+              "rows": { "type": "array" },
+              "note": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["size", "policy", "label", "questions", "recallAt1", "recallAt5", "recallAt10", "mrr", "latencyMs", "latencyP95Ms"],
+            "properties": {
+              "size": { "type": "number" },
+              "policy": { "type": "string" },
+              "label": { "type": "string" },
+              "questions": { "type": "number" },
+              "recallAt1": { "type": "number" },
+              "recallAt5": { "type": "number" },
+              "recallAt10": { "type": "number" },
+              "mrr": { "type": ["null", "number"] },
+              "latencyMs": { "type": ["null", "number"] },
+              "latencyP95Ms": { "type": ["null", "number"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "SuiteToml": {
       "description": "toml.json — the JOSL reader and writer against the TOML field: the toml-test compliance blocks, the parse/stringify profile and the streaming record.",
       "type": "object",
@@ -1153,13 +1223,14 @@
           { "$ref": "#/$defs/SuiteMarkdown" },
           { "$ref": "#/$defs/SuiteMermaid" },
           { "$ref": "#/$defs/SuiteOrm" },
+          { "$ref": "#/$defs/SuiteRetrieval" },
           { "$ref": "#/$defs/SuiteToml" },
           { "$ref": "#/$defs/SuiteValidate" },
           { "$ref": "#/$defs/SuiteView" }
         ]
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
-      "doc": "One benchmark suite's payload. The twenty-one suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
+      "doc": "One benchmark suite's payload. The twenty-two suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
     },
     "readme.fetch": {
       "kind": "read",

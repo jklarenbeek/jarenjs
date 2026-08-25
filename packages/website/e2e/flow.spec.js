@@ -9,6 +9,18 @@
  */
 import { test, expect } from '@playwright/test';
 
+// This spec drives the studio, not the site's choreography (motion.spec.js
+// owns that, in both directions). Under `no-preference` a freshly routed
+// seed card is still rising on its staggered reveal and the page glides
+// on `scroll-behavior: smooth` when the harness scrolls it into view — in
+// Firefox the card then moves between mousedown and mouseup, the two land
+// on different elements, and no click ever reaches the Load button. The
+// harness needs `emulateMedia` for this; `test.use({ reducedMotion })`
+// does not reach the page here.
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 test('build a machine by clicking, name the event, run it live', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
